@@ -88,7 +88,7 @@ NixCacheError: struct {
         "repair the cache metadata or network response, then retry the admission"
     }
 
-    // Rust `Display` renders `what()`.
+    // The display form renders `what()`.
     message: fn(self) -> String Never! { self.what() }
 }
 
@@ -99,10 +99,9 @@ store_nix_io_error: fn(kind: NixCacheErrorKind, error: IOError) -> NixCacheError
 }
 
 // Store-area failures raised inside admission are atomic-admission failures,
-// exactly as Rust's `io_error(NixCacheErrorKind::Admission, error)`. StoreError
-// has no declared route here: it already carries IOError, so a second edge
-// would give IOError two routes (E2419); Store calls wrap their failure with
-// this at the call site.
+// exactly. StoreError has no declared route here: it already carries IOError,
+// so a second edge would give IOError two routes (E2419); Store calls wrap
+// their failure with this at the call site.
 store_nix_store_error: fn(error: StoreError) -> NixCacheError Never! {
     NixCacheError.new(NixCacheErrorKind.Admission, error.message())
 }
@@ -121,8 +120,8 @@ CacheInfo: struct {
 
 // One configured binary cache: its endpoint and the keys it must be signed
 // by. The endpoint must be HTTPS or loopback HTTP, but Core's HTTP client has
-// no destination-address policy, so the Rust pin of each host's checked
-// addresses (its DNS-rebinding defense) is not enforced here.
+// no destination-address policy, so pinning each host's checked addresses
+// (a DNS-rebinding defense) is not enforced here.
 NixCacheEndpoint: struct {
     endpoint: String,
     trusted_keys: [NixPublicKey],

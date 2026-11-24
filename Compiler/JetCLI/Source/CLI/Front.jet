@@ -4,11 +4,10 @@
 // `check [<file>|<dir>]`, `build <file>`, `run [<file>|<dir>]`, `test <file>`,
 // `new <name>`, `doc <file>`, `fmt`, and `emit --ast|--ir <file>`; a bare or
 // directory target resolves the project entry, Entry.jet), and the inspect
-// group (Inspect.jet). Every report is the Rust host's exact bytes and exit
-// status for the same argv, except `jet emit`, which is Jet-only: its
-// `--ast`/`--ir` tiers, `--fn`, and the E2102 reports for a target with no mode
-// flag or with two. A command whose Jet port has not landed yet is refused with
-// E2104 instead of guessing its behavior.
+// group (Inspect.jet). `jet emit` has `--ast`/`--ir` tiers, `--fn`, and the
+// E2102 reports for a target with no mode flag or with two. A command whose
+// Jet port has not landed yet is refused with E2104 instead of guessing its
+// behavior.
 use {
     cli_files: core.files
     cli_sys: core.sys
@@ -355,13 +354,13 @@ JetCLIFmtRequest: struct {
     explicit_failures: Bool,
     simplify: Bool,
     color: Bool,
-    // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
+    // `--json`: the status envelopes (`--check` clean/dirty/diff, preflight errors).
     json: Bool{false},
 }
 
 // The `jet test` options the Jet host carries out. `capture` is `failed`,
-// `all`, or `none`; `status` is the stderr status text the Rust host writes
-// before the compile.
+// `all`, or `none`; `status` is the stderr status text written before the
+// compile.
 JetCLITestOptions: struct {
     build: BuildOptions,
     capture: String,
@@ -584,9 +583,8 @@ jet_cli_report_done: fn(notice: String, code: String, what: String, why: String,
     JetCLIPlan.Done{output: jet_cli_report_output(notice, code, what, why, fix, color, exit_code)}
 }
 
-// A failure the Rust host printed as one plain stderr line: `text` stays those
-// bytes, and a `--json` run prints `code`'s typed report with `what` and `fix`
-// instead.
+// A failure printed as one plain stderr line: `text` stays those bytes, and a
+// `--json` run prints `code`'s typed report with `what` and `fix` instead.
 jet_cli_plain_failure: fn(text: String, code: String, what: String, fix: String, exit_code: Int) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: "", stderr: text, exit_code: exit_code, failure: Val(JetDriverFailure{reports: [Diagnostic]{diagnostic_from_registry(code, None, what, jet_cli_why(code), fix)}, notice: ""})}
 }
@@ -626,8 +624,8 @@ jet_cli_tail: fn(items: [String], start: Int) -> [String] Never! {
     tail
 }
 
-// The Rust original moves the first command word to `raw[0]`, keeping the order
-// of every other word.
+// Move the first command word to `raw[0]`, keeping the order of every other
+// word.
 jet_cli_command_first: fn(items: [String], command: String) -> [String] Never! {
     at := 0
     loop (index, item) in items {
@@ -672,7 +670,7 @@ jet_cli_is_diagnostic_code: fn(value: String) -> Bool Never! {
     true
 }
 
-// Rust `{:?}` of a plain request value.
+// The `Debug` form of a plain request value.
 jet_cli_debug_quote: fn(value: String) -> String Never! {
     "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }
@@ -854,7 +852,7 @@ jet_cli_misplaced_flag: fn(flag: String, command: String, takers: [String], colo
     jet_cli_fail("E2104", "`{flag}` is only valid with {listed}", jet_cli_why("E2104"), "drop `{flag}` from `jet {command}`, or run `jet {takers[0]} {flag}`", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// The directory part of `path`, as Rust `Path.parent` reads it.
+// The directory part of `path`.
 jet_cli_parent: fn(path: String) -> String? Never! {
     if path == "/" -> return None
     parts: path.split("/").to_list()
@@ -3330,7 +3328,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: ^WorkspaceDeclarationCache) -[FS
                 "grammars" -> return jet_cli_devtools_grammars(quiet, color)
                 "new-example" -> return jet_cli_devtools_new_example(jet_cli_tail(argv, 2), color)
                 "new-ui" | "reduce" | "ice-report" | "embed" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
-                // Rust ignores extra words after `check-fixture-paths`.
+                // Extra words after `check-fixture-paths` are ignored.
                 "check-fixture-paths" -> return JetCLIPlan.Maintenance{action: tool, args: [String]{}, color: color, json: json}
                 // Bare `jet self devtools` names its tools.
                 "" -> return jet_cli_done("", jet_cli_command_help("devtools"), JET_DRIVER_EXIT_USAGE)

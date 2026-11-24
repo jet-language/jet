@@ -63,15 +63,15 @@ sema_call_collections_fixed_join: fn(operation: SemaCollectionOperation, receive
 // type, so leading-dot variants and anonymous records (`rows.push(.Ready)`,
 // `map.add(key, {x: 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with
 // `id: Int` on a `[U64:V]`) checks on its own and then widens into the slot after inference.
-sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, borrows_string_view: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, borrows_string_view: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
     reported: diagnostics.len()
-    previous_lending: context.lambda_lending_views
-    previous_borrow: context.borrow_ctx
-    previous_view_read: context.allow_string_view_read
-    context.lambda_lending_views = lending
+    previous_lending: check.context.lambda_lending_views
+    previous_borrow: check.context.borrow_ctx
+    previous_view_read: check.context.allow_string_view_read
+    check.context.lambda_lending_views = lending
     if borrows_string_view {
-        context.borrow_ctx = true
-        context.allow_string_view_read = true
+        check.context.borrow_ctx = true
+        check.context.allow_string_view_read = true
     }
     // A callback slot whose result type is still open (`fn(T)` with no return)
     // accepts any function value; the method's own shape rules decide its use
@@ -80,7 +80,7 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
     // the slot. A failure-open slot (Scopes.jet callback_failure_open, set by
     // the caller for this one argument) is open to a function value the same
     // way.
-    failure_open: context.callback_failure_open
+    failure_open: check.context.callback_failure_open
     open_slot := false
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
         is_lambda := if argument.expr == {
@@ -92,17 +92,17 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
     self_typed: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required, environment, program, scopes)
     view_str_arg: borrows_string_view && sema_stmt_string_view_type(sema_stmt_return_known_type(argument.expr, environment, scopes) ?? Type.Int)
     checked := if {
-        open_slot || self_typed || view_str_arg -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
-        callback -> sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
+        open_slot || self_typed || view_str_arg -> sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
+        callback -> sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, scopes, check, diagnostics)
         // An open callback result is adopted here and checked below.
-        else -> sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
+        else -> sema_check_expression(argument.expr, Val(required), environment, program, scopes, check, diagnostics)
     }
-    context.lambda_lending_views = previous_lending
-    context.borrow_ctx = previous_borrow
-    context.allow_string_view_read = previous_view_read
-    context.callback_failure_open = false
+    check.context.lambda_lending_views = previous_lending
+    check.context.borrow_ctx = previous_borrow
+    check.context.allow_string_view_read = previous_view_read
+    check.context.callback_failure_open = false
     if !callback && !open_slot && !self_typed && !view_str_arg {
-        sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, scopes, state, tail_store, context, diagnostics)
+        sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, scopes, check, diagnostics)
     }
     value := checked ?? return None
     if view_str_arg && sema_stmt_string_view_type(value.ty) {
@@ -241,7 +241,7 @@ sema_call_collections_literal_remove_mode: fn(method: String, args: [CallArg]) -
     }
 }
 
-sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() == 0 && (method == "len" || method == "is_empty") {
         unwrapped_fast: sema_expr_unwrap_tag(receiver_value.ty)
         is_direct_collection: if unwrapped_fast == {
@@ -253,14 +253,14 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             callee_name: if is_len -> "collection.len" else -> "collection.is_empty"
             consumer_name: if is_len -> "`.len()`" else -> "`.is_empty()`"
             empty_args := [CallArg]{}
-            ownership := sema_ownership_check_two_phase_method_call(state, callee_name, consumer_name, receiver, AccessConvention.Read, false, [SemaCallParam]{}, empty_args, scopes, span, expr_span(receiver), diagnostics)
+            ownership := sema_ownership_check_two_phase_method_call(check.state, callee_name, consumer_name, receiver, AccessConvention.Read, false, [SemaCallParam]{}, empty_args, scopes, span, expr_span(receiver), diagnostics)
             if !ownership.accepted || !ownership.complete {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             result_type: if is_len -> Type.Int else -> Type.Bool
             builtin_op: if is_len -> TBuiltinOp.LenList else -> TBuiltinOp.IsEmpty
             value: sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: builtin_op, args: [TExpr]{}}, span)
-            checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
+            checked := sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: checked}
         }
     }
@@ -272,7 +272,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     if sema_expr_unwrap_tag(receiver_value.ty) == .FixedList(_, _) && (method == "push" || method == "pop" || method == "insert" || method == "remove" || method == "clear") {
         diagnostics.push(sema_error("E0964", span, "`{method}` changes a list's length, but this is a fixed-size {sema_type_show(receiver_value.ty)}", "the length of `[T#N]` is fixed at compile time and cannot change", "bind a growable list with `:=` (e.g. `r := [...]`) if you need to change its length"))
         loop argument in updated_args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -280,20 +280,20 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     if method != "len" && method != "is_empty" && method != "push" && sema_columnar_list_element(environment, program, receiver_value.ty) == .Val(element) {
         diagnostics.push(sema_error("E1108", span, "`.{method}()` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(receiver_value.ty))}` yet", "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration", "drop `#Layout(columnar)` from `{element}` to use `.{method}()`, or rewrite the loop with indexing"))
         loop argument in updated_args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if contract.receiver_access == AccessConvention.Write && sema_expr_place_root_ident(receiver) == .Val(root) && context.iter_borrowed.contains(root) {
+    if contract.receiver_access == AccessConvention.Write && sema_expr_place_root_ident(receiver) == .Val(root) && check.context.iter_borrowed.contains(root) {
         diagnostics.push(sema_collection_changed_in_loop(root, "`{root}.{method}()`", expr_span(receiver)))
     }
     labels_valid := sema_value_method_check_labels(method, updated_args, diagnostics)
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
         loop argument in updated_args {
-            _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            _ := sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics)
         }
         diagnostics.push(sema_call_builtin_method_arity(receiver_value.ty, method, updated_args.len(), span) ?? sema_call_collections_arity_error(method, contract, updated_args.len(), span))
-        _ := sema_ownership_check_method_receiver(state, receiver, contract.receiver_access, method, scopes, span, diagnostics)
+        _ := sema_ownership_check_method_receiver(check.state, receiver, contract.receiver_access, method, scopes, span, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     copies_receiver := if contract.row.op == {
@@ -301,10 +301,10 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         .Builtin(_) | .Closure(_) | .SetClosure(_) | .SetMinimum | .IterToSet | .SetBits | .ListShuffle | .SeqMap | .SeqFilter | .SeqEach | .SeqFold | .SetMap | .SetFilter | .SetEach | .SortBy | .SortByDesc | .Sum | .Product | .Min | .Max | .Average | .Indexed | .Unzip | .Split | .SplitWrite | .Partition | .ListRemove | .PriorityQueueRemove | .MapMerge | .MapTopN | .MapToList | .ListMinMax | .ListMinMaxBy -> false
     }
     if copies_receiver {
-        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+        if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, program, context, diagnostics, false, false)
+        copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, program, check.context, diagnostics, false, false)
         return SemaMethodSpecialCheck{handled: true, value: copied}
     }
 
@@ -340,13 +340,13 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             updated_args[index].convention = AccessConvention.Move
         }
         value: if {
-            seed_argument -> sema_check_expression(updated_args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            seed_argument -> sema_check_expression(updated_args[index].expr, None, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             else -> {
                 // `filter` projects a fallible predicate's failure onto its
                 // `[T] E!` result (sema_collection_filtered).
-                context.callback_failure_open = callback && (contract.row.result == CollectionResult.Filtered || contract.row.result == CollectionResult.ListFiltered)
+                check.context.callback_failure_open = callback && (contract.row.result == CollectionResult.Filtered || contract.row.result == CollectionResult.ListFiltered)
                 borrows_string_view: !callback && !collection_row_takes_argument(contract.row, index) && sema_expr_unwrap_tag(required) == Type.String
-                sema_call_collections_check_argument(updated_args[index], method, index, required, callback, method == "edit_disjoint" && index == 1, borrows_string_view, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_call_collections_check_argument(updated_args[index], method, index, required, callback, method == "edit_disjoint" && index == 1, borrows_string_view, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         if seed_argument {
@@ -358,9 +358,9 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             // Like a direct `f(item)`: the unresolved edge also reaches the
             // owner from inside a callback.
             if index == 0 && sema_call_collections_callback_takes_default_route(receiver_value.ty, method, value) {
-                context.failure_direct_source = true
-                context.task_body_propagates = true
-                context.failure_edges.push("")
+                check.context.failure_direct_source = true
+                check.context.task_body_propagates = true
+                check.context.failure_edges.push("")
             }
             callback_mutable = if value.kind == {
                 .Lambda(lambda) -> lambda.capture_facts.needs_fn_mut
@@ -386,7 +386,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         unmarked_take: takes_argument && updated_args[index].convention == AccessConvention.Read
         noted_take := false
         if takes_argument && updated_args[index].convention == AccessConvention.Read && updated_args[index].expr == .Ident(_, _, _) && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(updated_args[index], scopes) {
-            if sema_ownership_note_implicit_take(state, updated_args[index].expr, value.ty, required, environment, program, context.generic_params, scopes) != None {
+            if sema_ownership_note_implicit_take(check.state, updated_args[index].expr, value.ty, required, environment, program, check.context.generic_params, scopes) != None {
                 noted_take = true
             } else { updated_args[index].convention = AccessConvention.Move }
         }
@@ -402,16 +402,16 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         // A resource has one cleanup owner, so a take that would copy it out
         // of a place read in place (E0211) or out of a borrowed parameter
         // (E0201 naming `^^`) is refused for that, never with a `.copy()` fix.
-        if unmarked_take && (!sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(updated_args[index].expr, "`.{method}()`", environment, program, scopes, context, diagnostics)) {
+        if unmarked_take && (!sema_copy_site_refuse_resource_copy(value, environment, program, scopes, check.context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(updated_args[index].expr, "`.{method}()`", environment, program, scopes, check.context, diagnostics)) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        if taken_place && ((!walk_reports && sema_ownership_reject_read_param_move(state, updated_args[index].expr, scopes, diagnostics)) || sema_ownership_reject_place_alias_move(state, updated_args[index].expr, scopes, "`.{method}()`", diagnostics) || sema_copy_site_refuse_lent_resource_move(state, updated_args[index].expr, value, environment, program, scopes, context, diagnostics)) {
+        if taken_place && ((!walk_reports && sema_ownership_reject_read_param_move(check.state, updated_args[index].expr, scopes, diagnostics)) || sema_ownership_reject_place_alias_move(check.state, updated_args[index].expr, scopes, "`.{method}()`", diagnostics) || sema_copy_site_refuse_lent_resource_move(check.state, updated_args[index].expr, value, environment, program, scopes, check.context, diagnostics)) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        if taken_place && sema_ownership_binding_for_expr(state, updated_args[index].expr, scopes) == .Val(root) {
+        if taken_place && sema_ownership_binding_for_expr(check.state, updated_args[index].expr, scopes) == .Val(root) {
             taken_place = !sema_ownership_binding_is_borrowed_param(root)
         }
-        stored: sema_call_marked_move_value(state, taken_place, updated_args[index].expr, value, scopes, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        stored: sema_call_marked_move_value(check.state, taken_place, updated_args[index].expr, value, scopes, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(stored)
     }
 
@@ -434,7 +434,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     line: if contract.row.op == CollectionOp.ListRemove || contract.row.op == CollectionOp.PriorityQueueRemove -> sema_source_line_at(environment.source_segments, span) ?? 0 else -> 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
     result_type: sema_call_collections_fixed_join(operation, receiver_value.ty, typed) ?? listed_type
-    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call_as(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics)
+    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(check.state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call_as(check.state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics)
     if !ownership.accepted || !ownership.complete {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -446,30 +446,30 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     // clone refuses it.
     if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.stores {
         loop index in 0..<updated_args.len() {
-            if index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, state, context, diagnostics, false) {
+            if index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, check.state, check.context, diagnostics, false) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             taken_name: collection_row_takes_argument(contract.row, index) && updated_args[index].expr == .Ident(_, _, _)
-            if !taken_name && !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, state, context, diagnostics) {
+            if !taken_name && !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, check.state, check.context, diagnostics) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
     }
     if contract.row.access == CollectionAccess.Write {
-        if !sema_effect_record_mem_intrinsic(environment, program, scopes, context, "collection.{method}", span, diagnostics) {
+        if !sema_effect_record_mem_intrinsic(environment, program, scopes, check.context, "collection.{method}", span, diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     } else {
         skip_fact := false
         if operation == .Builtin(builtin) -> skip_fact = !sema_effect_builtin_may_have_effect(builtin) && !sema_call_collections_runs_on_iter(builtin)
         if !skip_fact {
-            if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "collection.{method}", span, [EffectRowEntry]{}, diagnostics) {
+            if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "collection.{method}", span, [EffectRowEntry]{}, diagnostics) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
     }
     if method == "split_write" || method == "get_disjoint_write" {
-        sema_call_collections_record_disjoint_views(receiver, method, updated_args, span, scopes, state, context)
+        sema_call_collections_record_disjoint_views(receiver, method, updated_args, span, scopes, check.state, check.context)
     }
 
     // A literal selector is fixed in the removal mode, so the route takes the item alone.
@@ -533,12 +533,12 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             path: "std.collections.HashSet"
-            reference := TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, "", path, "bits"), name: "bits", mangled: false, trait_owner: None, operator_identity: None}
+            reference := TMethodRef{symbol: sema_symbol_id(program, check.context, SymbolKind.Function, "", path, "bits"), name: "bits", mangled: false, trait_owner: None, operator_identity: None}
             argument := TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             sema_tree_node(result_type, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: false, path: path, generics: [TPreludeArg]{TPreludeArg.Jet{ty: element}}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
         }
     }
-    checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
+    checked := sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 

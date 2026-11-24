@@ -33,7 +33,7 @@ PublicationVersionConstraint: struct {
 PublicationSolverCandidate: struct {
     version: PublicationSemVer,
     dependencies: [PublicationVersionConstraint],
-    // Set-valued Rust fields use unique lists, comparing canonical precedence.
+    // Set-valued fields use unique lists, comparing canonical precedence.
     rejected: [String:[PublicationSemVer]],
     preferred: [String:[PublicationVersionReq]],
     strict: [String],
@@ -47,8 +47,8 @@ PublicationSolverState: struct {
     strict: [String],
 }
 
-// Rust Result<T, Diagnostic> uses Jet's one fallible return mechanism; the
-// wrapper preserves the complete canonical Diagnostic unchanged.
+// Jet's one fallible return mechanism; the wrapper preserves the complete
+// canonical Diagnostic unchanged.
 #Error
 PublicationDiagnosticError: struct {
     diagnostic: Diagnostic,
@@ -62,7 +62,7 @@ publication_satisfies_all: fn(version: PublicationSemVer, constraints: [Publicat
 }
 
 // select_highest_compatible / select_compatible (:45-116). The winner is
-// tracked by index (Rust returns a borrow) and copied once when returned.
+// tracked by index and copied once when returned.
 publication_select_highest_compatible: fn(package: String, constraints: [PublicationVersionConstraint], available: [PublicationSemVer]) -> PublicationSemVer PublicationDiagnosticError! {
     winner := Int?{None}
     loop index in 0..<available.len() {
@@ -132,8 +132,8 @@ publication_candidate_order: fn(left: PublicationSolverCandidate, right: Publica
     lp: publication_candidate_preferred(left.version, preferred)
     rp: publication_candidate_preferred(right.version, preferred)
     if lp != rp -> return if lp -> Ordering.Less else -> Ordering.Greater
-    // Exact strings include build metadata; SemVer precedence does not. Like
-    // Rust, render them only for an applicable lock and the final tie-break.
+    // Exact strings include build metadata; SemVer precedence does not.
+    // Render them only for an applicable lock and the final tie-break.
     if preserve_lock {
         if locked == .Val(pin) {
             ll: pin == publication_semver_display(left.version)
@@ -170,9 +170,9 @@ publication_solve_registry_state: fn(state: PublicationSolverState, candidates: 
     requirements: state.constraints.get(package) ?? [PublicationVersionConstraint]{}
     rejected: state.rejected.get(package) ?? [PublicationSemVer]{}
     preferred: state.preferred.get(package) ?? [PublicationVersionReq]{}
-    // Rust's typed strict rule (`!strict || requirements match`) rechecks the
+    // The typed strict rule (`!strict || requirements match`) rechecks the
     // exact requirement set already admitted below, so it never changes
-    // admission; `strict` stays in the carried state for parity only.
+    // admission; `strict` stays in the carried state only.
     // Viable candidates are indices into `live`: no deep candidate copies.
     viable := [Int]{}
     live: candidates.get(package) ?? [PublicationSolverCandidate]{}
@@ -353,8 +353,8 @@ publication_all_constraints_diagnostic: fn(package: String, requirements: [Publi
     diagnostic
 }
 
-// check_conflicts (:449-501), including Main-authorized Rust tandem: an empty
-// whole-set intersection cannot silently pass just because pairs have witnesses.
+// check_conflicts (:449-501): an empty whole-set intersection cannot silently
+// pass just because pairs have witnesses.
 publication_check_conflicts: fn(constraints: [PublicationVersionConstraint], available: [String:[PublicationSemVer]]) -> [Diagnostic] Never! {
     grouped := [String:[PublicationVersionConstraint]]{}
     loop constraint in constraints {
@@ -414,7 +414,7 @@ publication_check_conflicts: fn(constraints: [PublicationVersionConstraint], ava
             if diagnostics.len() == before {
                 bounds: PublicationReleaseBounds{lower: publication_ver(0, 0, 0), upper: publication_ver(PUBLICATION_U64_MAX, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX)}
                 // No disjoint pair exists here, so the pair reason would be false:
-                // reuse the existing Rust whole-set reason.
+                // reuse the existing whole-set reason.
                 if !publication_constraints_have_release(requirements, 0, bounds) {
                     diagnostics.push(publication_all_constraints_diagnostic(package, requirements, "no published candidate satisfies every requirement"))
                 }

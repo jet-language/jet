@@ -17,7 +17,7 @@
 // 1 rendered diagnostic) site56 (a task stop's report context, or 0); -1
 // denotes absent optional comptime metadata.
 
-// #4890: role facts belong to the real current control, never Rust TLS.
+// #4890: role facts belong to the real current control, never thread-local storage.
 SCHEDULER_SCOPE_ROOT: I64{1}
 
 SCHEDULER_SCOPE_TASK: I64{2}
@@ -761,7 +761,7 @@ scheduler_cleanup_mask: fn(status: I64) -> I64 {
 }
 
 // Shield defers cancellation/deadline/interrupt-class stops, never a panic
-// or runtime fault: Rust unwinds those through the shield.
+// or runtime fault: those unwind through the shield.
 scheduler_delivered_status_unmasked: fn() -> I64 {
     status: scheduler_control_status(scheduler_control_current())
     if scheduler_shielded() && !(status >= I64{3} && status <= I64{5}) -> I64{0} else -> status
@@ -1599,14 +1599,13 @@ scheduler_get: fn() -> I64 {
     root
 }
 
-// Queues a job (scheduler_run_job) for a carrier (scheduler_work_taker): on
-// the ring of the carrier the calling fiber runs on when it can
+// Queues a job (scheduler_run_job) for a carrier (scheduler_work_taker): on the
+// ring of the carrier the calling fiber runs on when it can
 // (scheduler_ring_push), else on the run queue. A ring's job takes the root
 // lock only to reach an idle carrier, start one or arm the monitor
-// (scheduler_ring_unwatched). It is counted in queued before any carrier
-// can take it (scheduler_job_taken).
-// Unsigned pool sizes above i64.MAX are attempted just as Rust does, failing
-// at thread_spawn.
+// (scheduler_ring_unwatched). It is counted in queued before any carrier can
+// take it (scheduler_job_taken). Unsigned pool sizes above i64.MAX are
+// attempted.
 scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})
@@ -2839,7 +2838,7 @@ scheduler_owner_deadline_queue: fn() -> I64 {
 }
 
 scheduler_fatal: fn(message: I64) {
-    // The Rust original uses E3001 with an empty owner, not <core.prelude>.
+    // E3001 with an empty owner, not <core.prelude>.
     bytes: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
     trap_stop(I64{1}, bytes, length, I64{0}, I64{0})
@@ -2930,9 +2929,9 @@ scheduler_fatal_stop: fn(message: I64, length: I64, form: I64) {
 }
 
 // `code` is the registered stop row the root report would carry (0 E3001, 1 E3010, 2 E3011;
-// trap_header's numbering). jet_runtime_stop records the raw stop on
-// every active expectation frame before it unwinds, so the native catch probe sees the same
-// first stop as the Rust reference. The published record stays the raw message (form 0).
+// trap_header's numbering). jet_runtime_stop records the raw stop on every active
+// expectation frame before it unwinds, so the native catch probe sees the same first stop.
+// The published record stays the raw message (form 0).
 rt_task_panic_publish: fn(message: I64, length: I64, code: I64) -> Bool {
     test_scope_record_coded_stop(code, message, length)
     rt_task_panic_publish_recorded(message, length)

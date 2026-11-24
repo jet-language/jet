@@ -487,9 +487,8 @@ parser_finish_fact_struct: fn(state: ^JetParserState, value: ^StructDef) {
     value.fact = Val(declaration)
 }
 
-// Rust `derive_body_items`: the body is a template, so nested `#loop`
-// statements are template loops and a body-level `#if` selects the
-// items of one branch.
+// The body is a template, so nested `#loop` statements are template loops and a
+// body-level `#if` selects the items of one branch.
 parser_marker_body: fn(state: ^JetParserState) -> [DeriveBodyItem] {
     parser_expect(state, TOKEN_LBRACE, "`{{` before a marker body")
     state.derive_template_depth += 1
@@ -560,8 +559,8 @@ parser_parse_template_loop: fn(state: ^JetParserState) -> ItemTemplateLoop {
     parser_expect(state, TOKEN_KW_LOOP, "after `#` in a declaration loop")
     variable: parser_expect_name(state, "for a declaration loop binding")
     parser_expect(state, TOKEN_KW_IN, "between a declaration loop binding and source")
-    // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.reflect().fields {` opens
-    // the loop body instead of a struct literal.
+    // `expr_no_struct_lit`, so `T.reflect().fields {` opens the loop body instead of
+    // a struct literal.
     source: parser_parse_expression_no_struct_lit(state, 0)
     body: parser_marker_body(state)
     end: parser_lookahead(state, -1).span
@@ -589,8 +588,8 @@ parser_marker_template_if: fn(state: ^JetParserState) -> DeriveBodyItem {
     DeriveBodyItem.If{cond: condition.expr, cond_span: condition.span, then_body: then_body.move(), else_body: else_body.move(), span: parser_cover(start.span, parser_lookahead(state, -1).span)}
 }
 
-// One `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every
-// entry is read like a bare marker, and a list of one is E0999.
+// One `#[A, B(…)]` list. Every entry is read like a bare marker, and a list
+// of one is E0999.
 parser_parse_marker_group_list: fn(state: ^JetParserState) -> ParsedMarkerGroup {
     parser_parse_marker_group_entries(state, false)
 }
@@ -630,9 +629,9 @@ parser_parse_marker_group_entries: fn(state: ^JetParserState, declaration: Bool)
     if declaration && markers.len() < 2 {
         parser_add_error_code(state, "E0999", span, "a named marker group needs at least two members", "a group names a marker stack, not a marker alias or an empty rule", "write the marker directly at its use site, or give the group at least two members")
     } else if markers.len() == 1 { parser_report_singleton_marker_group(state, span, markers[0]) }
-    // Rust `parse_marker_bracket_group`: a group on its own line still
-    // attaches to the declaration below. A `group:` setting ends like the
-    // other settings, at its comma or its line end.
+    // A group on its own line still attaches to the declaration below. A
+    // `group:` setting ends like the other settings, at its comma or its line
+    // end.
     if !declaration -> parser_skip_semicolons(state)
     ParsedMarkerGroup{markers: markers, span: span}
 }
@@ -647,12 +646,12 @@ parser_check_signed_marker: fn(state: ^JetParserState, bang_start: Int, name: To
     parser_add_fatal_code(state, "E0931", Span{start: bang_start, end: name.span.end}, "`!{marker_name}` is not a signed auto-derive trait", "`!` rejects compiler generation only for structurally auto-derived traits", "remove `!` from `#{marker_name}`, or use it with an auto-derived trait")
 }
 
-// Rust `marker_call_arg`: a marker argument is an ordinary (optionally
-// labeled) call argument or an effect row `-[Effects]>`, which keeps its own
-// carrier until sema checks the rule's effect slot. `#State`'s `A -> B` is two
-// arguments: B carries STATE_ARROW_LABEL, which no written label can spell.
-// `#run { value }` is the argument `value` whose answer is required while
-// building; its position joins `required`.
+// A marker argument is an ordinary (optionally labeled) call argument or an
+// effect row `-[Effects]>`, which keeps its own carrier until sema checks the
+// rule's effect slot. `#State`'s `A -> B` is two arguments: B carries
+// STATE_ARROW_LABEL, which no written label can spell. `#run { value }` is the
+// argument `value` whose answer is required while building; its position joins
+// `required`.
 parser_parse_marker_args: fn(state: ^JetParserState, marker_name: String) -> ParsedMarkerArgs {
     parser_expect(state, TOKEN_LPAREN, "`(` before marker arguments")
     args := [MarkerCallArg]{}
@@ -779,9 +778,9 @@ parser_report_singleton_marker_group: fn(state: ^JetParserState, span: Span, mar
     state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
 }
 
-// (Rust `parse_attached_marker_sequence`): two or more
-// distinct rules on one target are one ordered `#[A, B]` list. `chunks`
-// counts the bare markers and lists written; `span` covers all of them.
+// Two or more distinct rules on one target are one ordered `#[A, B]` list.
+// `chunks` counts the bare markers and lists written; `span` covers all of
+// them.
 parser_report_adjacent_markers: fn(state: ^JetParserState, markers: [Marker], chunks: Int, bracket_chunks: Int, span: Span, noun: String) {
     if (chunks == 1 && bracket_chunks == 1) || parser_aborting(state) {
         return

@@ -46,10 +46,7 @@ qualified_core_written: fn(imports: ^^String, target: String, names: [String]) -
     if main_parsed.diagnostics.len() != 0 || imports_parsed.diagnostics.len() != 0 || target_parsed.diagnostics.len() != 0 {
         panic("fixture did not parse")
     }
-    edges := [SemaRegistrationImportEdge]{}
-    loop declaration in imports_parsed.program.imports.move() {
-        edges.push(SemaRegistrationImportEdge{source_module_identity: main_id, target_module_identity: target_id, target_package_identity: "core", foreign_binding: None, declaration: declaration})
-    }
+    edges: loop declaration in imports_parsed.program.imports.move() -> SemaRegistrationImportEdge{source_module_identity: main_id, target_module_identity: target_id, target_package_identity: "core", foreign_binding: None, declaration: declaration}
     main_segment: SemaSourceSegment{generated: Span{start: 0, end: imports.len()}, source_file: "user/main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     target_segment: SemaSourceSegment{generated: Span{start: 0, end: 0}, source_file: "<corelib>/{target}.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     main_input: SemaRegistrationModuleInput{package_identity: QUALIFIED_CORE_PACKAGE, module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "user/main.jet", source_segments: [SemaSourceSegment]{main_segment}, source_origin: SemaSourceOrigin.Snapshot, program: main_parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: imports.move()}
@@ -63,10 +60,7 @@ qualified_core_written: fn(imports: ^^String, target: String, names: [String]) -
         return "incomplete graph: {reports.join("; ")}"
     }
     caller: sema_registration_module_index(graph, main_id) ?? panic("the fixture's module has no row")
-    rows := [String]{}
-    loop name in names {
-        rows.push(if sema_type_written_name_unknown(graph, caller, name, [String]{}) -> "{name} unknown" else -> "{name} known")
-    }
+    rows: loop name in names -> if sema_type_written_name_unknown(graph, caller, name, [String]{}) -> "{name} unknown" else -> "{name} known"
     rows.join("; ")
 }
 

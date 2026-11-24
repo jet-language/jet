@@ -1656,7 +1656,7 @@ sema_registration_signature_metadata: fn(signature: Type) -> FunctionCallMetadat
 sema_registration_function_parameters: fn(func: Func, signature: Type) -> [SemaRegistrationParameter] Never! {
     parameters := [SemaRegistrationParameter]{}
     if func.params.len() == 0 -> return parameters
-    parameters.try_reserve(func.params.len()) ?? panic("reserve failed")
+    parameters.try_reserve(func.params.len()) ?? ()
     has_defaults := false
     loop parameter in func.params {
         if parameter.default != None {
@@ -3049,10 +3049,7 @@ sema_registration_compiler_owned_enum_variants: fn(name: String) -> [Variant]? {
     span: Span{start: 0, end: 0}
     names: sema_compiler_enum_variants(name) ?? sema_fact_enum_variants(name) ?? return None
     if names.len() == 0 -> return None
-    variants := [Variant]{}
-    loop variant_name in names {
-        variants.push(Variant{name: variant_name, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
-    }
+    variants: loop variant_name in names -> Variant{name: variant_name, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}}
     Val(variants)
 }
 
@@ -6927,10 +6924,7 @@ sema_source_words: fn(bytes: [U8], start: Int, end: Int, seen: ^NameTable, words
 // The byte test is sema_source_word_byte written inline: this loop reads
 // every byte of every namespace member.
 sema_word_byte_table: fn() -> [Bool] Never! {
-    table := [Bool]{}
-    loop n in 0..<256 {
-        table.push(n >= 128 || n == 95 || (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122))
-    }
+    table: loop n in 0..<256 -> n >= 128 || n == 95 || (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
     table
 }
 
@@ -7097,10 +7091,7 @@ sema_registration_bind_namespace_module: fn(graph: SemaRegistrationGraph, own_sy
 }
 
 sema_registration_bind_namespace_range: fn(graph: SemaRegistrationGraph, own_symbols: [Int], templated: Bool, from: Int, to: Int) -> [[SemaRegistrationRowRef]] {
-    out := [[SemaRegistrationRowRef]]{}
-    loop module_index in from..<to {
-        out.push(sema_registration_bind_namespace_module(graph, own_symbols, templated, module_index))
-    }
+    out: loop module_index in from..<to -> sema_registration_bind_namespace_module(graph, own_symbols, templated, module_index)
     out
 }
 

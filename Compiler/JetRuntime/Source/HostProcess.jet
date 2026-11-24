@@ -79,7 +79,7 @@ host_i32: fn(value: I64) -> I64 {
 
 // std.thread.available_parallelism: the runtime's one probe
 // (HostParallelism.jet: cgroup quota, affinity, online fallback) shared with
-// the scheduler pool. Rust's Err is None; Some carries the exact-Int word.
+// the scheduler pool. No answer is None; Some carries the exact-Int word.
 #Export(c) jet_sys_cpu_count_raw: fn(some: I64) -> I64 {
     count: scheduler_available_parallelism(I64{0})
     if (jet_rt_session_propagate() != I64{0} || count <= I64{0}) { return I64{0} }

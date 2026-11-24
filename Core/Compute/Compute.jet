@@ -311,14 +311,14 @@ matmul: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     Ok(out)
 }
 
-// The f32 tile (core-library.md:4289-4292): a blocked matmul in f32
-// arithmetic on the CPU oracle. Each output is the dot product of an `a` row
-// and a packed `b` column, reduced the way the host's SIMD dispatch executes
-// it (Rust jet_compute_f32_dot): `lanes` running sums, combined in lane
-// order, then the scalar tail, so the receipt and the bits agree on every
-// host. Inputs round to F32 and a non-finite partial sum is
-// ComputeError.Arithmetic. The result is a fresh CPU tensor under the F32
-// profile; an F32 CPU tensor's placement reports this tile's dispatch.
+// The f32 tile (core-library.md:4289-4292): a blocked matmul in f32 arithmetic
+// on the CPU oracle. Each output is the dot product of an `a` row and a packed
+// `b` column, reduced the way the host's SIMD dispatch executes it: `lanes`
+// running sums, combined in lane order, then the scalar tail, so the receipt
+// and the bits agree on every host. Inputs round to F32 and a non-finite
+// partial sum is ComputeError.Arithmetic. The result is a fresh CPU tensor
+// under the F32 profile; an F32 CPU tensor's placement reports this tile's
+// dispatch.
 TILE: 8
 
 matmul_f32_tile: fn(a: Tensor, b: Tensor) -> Tensor ComputeError! {
@@ -386,9 +386,8 @@ dot_f32: fn(left: [Float], l: Int, right: [Float], r: Int, count: Int, lanes: In
     sum
 }
 
-// The f32 lanes the host executes (core-library.md:4289-4291): 8 is avx2, 4
-// is sse2 and 1 the scalar loop, decided by the runtime from cpuid as Rust
-// std_detect decides it.
+// The f32 lanes the host executes (core-library.md:4289-4291): 8 is avx2, 4 is
+// sse2 and 1 the scalar loop, decided by the runtime from cpuid.
 simd_lanes: fn() -> Int Never! { rt.simd_lanes() }
 
 simd_name: fn(lanes: Int) -> String Never! {

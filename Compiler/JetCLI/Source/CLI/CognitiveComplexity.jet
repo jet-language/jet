@@ -11,7 +11,7 @@ JetCLIComplexityReport: struct {
 jet_cli_complexity_reports: fn(program: Program) -> [JetCLIComplexityReport] Never! {
     reports := [JetCLIComplexityReport]{}
     jet_cli_complexity_items(program.tables, program.items, reports)
-    // Descending score, then source position, then name: Rust's stable order.
+    // Descending score, then source position, then name: a stable order.
     reports.sort_by(fn(left: JetCLIComplexityReport, right: JetCLIComplexityReport) { (right.score <=> left.score).then(left.span.start <=> right.span.start).then(left.name <=> right.name) })
     reports
 }

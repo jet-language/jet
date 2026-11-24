@@ -51,7 +51,7 @@ encode_cps_prefix: fn(cps: [Int], length: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-// Rust `nfc` / `canonical_decompose`; compatibility uses the same jet_unicode
+// Canonical decomposition; compatibility uses the same jet_unicode
 // decomposition index, including tagged rows. `compat` selects NFK*, `recompose`
 // selects *C.
 normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
@@ -136,10 +136,10 @@ decompose_cp: fn(out: ^[Int], cp: Int, compat: Bool, index: View<U8>, pool: View
     out.push(cp)
 }
 
-// Rust `ccc`: binary search the generated nonzero ranges.
+// Binary search the generated nonzero ranges.
 normal_ccc: fn(table: View<U8>, cp: Int) -> Int Never! { normal_assets.range_tag(table, cp, 0) }
 
-// Rust `nfc` canonical ordering. Stable counting sort of each nonstarter run gives
+// Canonical ordering. Stable counting sort of each nonstarter run gives
 // linear time even for hostile descending CCC sequences. Sorted runs (the usual
 // case) need no scratch allocation.
 canon_order: fn(cps: ^[Int], ccc: View<U8>) Never! {
@@ -186,7 +186,7 @@ canon_order: fn(cps: ^[Int], ccc: View<U8>) Never! {
     }
 }
 
-// Rust `nfc` composition/blocking. Compact in place: a successful composition
+// Canonical composition/blocking. Compact in place: a successful composition
 // does not change last_class.
 compose: fn(cps: ^[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
     length := 0
@@ -209,7 +209,7 @@ compose: fn(cps: ^[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
     encode_cps_prefix(cps, length)
 }
 
-// Rust `compose`; excluded compositions are absent from the generated pairs,
+// Pair composition; excluded compositions are absent from the generated pairs,
 // including singleton and nonstarter exclusions.
 compose_pair: fn(pairs: View<U8>, a: Int, b: Int) -> Int? {
     if hangul_compose(a, b) == .Val(cp) -> return Val(cp)

@@ -81,10 +81,7 @@ ir_zip: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, a
     left_type := field_types[0].copy()
     left_fill := if fills.len() > 0 -> fills[0] else -> -1
     loop index in 1..<input_count {
-        row_fields := [TypeTupleField]{}
-        loop column in 0..<(index + 1) {
-            row_fields.push(TypeTupleField{name: fields[column], ty: field_types[column].copy()})
-        }
+        row_fields: loop column in 0..<(index + 1) -> TypeTupleField{name: fields[column], ty: field_types[column].copy()}
         row_type: Type.Tuple{fields: row_fields}
         right_type: field_types[index].copy()
         // The row so far and this column's value make the next row.

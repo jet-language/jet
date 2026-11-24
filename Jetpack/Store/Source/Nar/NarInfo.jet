@@ -1,7 +1,6 @@
-// Narinfo formats (Rust `jetpack::Store::Nar`): Jet's HMAC-signed local
-// narinfo, and standard Nix narinfo whose ed25519 signature covers only
-// Nix's canonical fingerprint, verified under Core's strict accept rule
-// . Digest texts accept `sha256:<hex>`,
+// Narinfo formats: Jet's HMAC-signed local narinfo, and standard Nix narinfo
+// whose ed25519 signature covers only Nix's canonical fingerprint, verified
+// under Core's strict accept rule. Digest texts accept `sha256:<hex>`,
 // `sha256:<nix32>`, and SRI `sha256-<base64>`.
 use {
     crypto: core.crypto
@@ -395,7 +394,7 @@ store_nar_is_any_hex: fn(text: String) -> Bool Never! {
     true
 }
 
-// Rust `str::split_whitespace` over ASCII whitespace.
+// Split on ASCII whitespace.
 store_nar_split_whitespace: fn(value: String) -> [String] Never! {
     out := [String]{}
     loop part in value.replace("\t", " ").replace("\n", " ").split(" ") {

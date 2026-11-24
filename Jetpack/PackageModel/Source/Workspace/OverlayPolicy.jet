@@ -481,14 +481,14 @@ pkg_overlay_env_text: fn(env: [OverrideEnv]) -> String Never! {
     parts.join("+")
 }
 
-// A string list in Rust `Debug` form: `["a", "b"]`.
+// A string list in derived `Debug` form: `["a", "b"]`.
 pkg_overlay_debug_list: fn(values: [String]) -> String Never! {
     parts := [String]{}
     loop value in values -> parts.push(pkg_overlay_debug_text(value))
     "[{parts.join(", ")}]"
 }
 
-// A string-keyed priority map in Rust `Debug` form, keys in order:
+// A string-keyed priority map in derived `Debug` form, keys in order:
 // `{"env.CC": 0, "version": 10}`.
 pkg_overlay_debug_priorities: fn(priorities: [String:Int]) -> String Never! {
     keys := priorities.keys().to_list()
@@ -498,7 +498,7 @@ pkg_overlay_debug_priorities: fn(priorities: [String:Int]) -> String Never! {
     "{{{parts.join(", ")}}}"
 }
 
-// A string in Rust `Debug` form: quoted, with `\0 \t \n \r \" \\` escaped
+// A string in derived `Debug` form: quoted, with `\0 \t \n \r \" \\` escaped
 // and other ASCII controls written as `\u{…}`.
 pkg_overlay_debug_text: fn(value: String) -> String Never! {
     out := [U8]{U8{34}}

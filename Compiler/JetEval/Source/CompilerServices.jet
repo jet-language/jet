@@ -349,10 +349,7 @@ jet_eval_compiler_services_record_value: fn(record: DiagnosticRecord) -> TCompti
 // The diagnostics of a result, each with its row of `origins`
 // (sema_diagnostic_checked_origins, sema_diagnostic_loaded_origins).
 jet_eval_compiler_services_diagnostic_values: fn(diagnostics: [Diagnostic], origins: [SemaDiagnosticOrigin]) -> TComptimeValue Never! {
-    values := [TComptimeValue]{}
-    loop diagnostic in diagnostics {
-        values.push(jet_eval_compiler_services_record_value(jet_eval_compiler_services_record(diagnostic, origins)))
-    }
+    values: loop diagnostic in diagnostics -> jet_eval_compiler_services_record_value(jet_eval_compiler_services_record(diagnostic, origins))
     TComptimeValue.List{values: values}
 }
 
@@ -750,10 +747,7 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
 // evidence and is never verified. The span indexes the file it was written
 // in (jet_eval_compiler_services_segment_span).
 jet_eval_compiler_services_foreign_info: fn(function: SemaCheckedForeignFunction, providers: [SemaCheckedForeignProvider], segments: [SemaSourceSegment], file: String) -> TComptimeValue {
-    params := [TComptimeValue]{}
-    loop parameter in function.params {
-        params.push(jet_eval_compiler_services_string(type_name(parameter.ty)))
-    }
+    params: loop parameter in function.params -> jet_eval_compiler_services_string(type_name(parameter.ty))
     returns := String?{None}
     if function.return_type == .Val(ty) -> returns = Val(type_name(ty))
     library := ""
@@ -1284,7 +1278,7 @@ JetCompilerServicesSourceMap: struct {
     generated_lines: [JetCompilerServicesGeneratedLine],
 }
 
-// Rust `str.trim_start` over ASCII whitespace.
+// Trim leading ASCII whitespace.
 jet_eval_compiler_services_trim_start: fn(line: String) -> String Never! {
     bytes: line.bytes()
     start := 0
@@ -1296,7 +1290,7 @@ jet_eval_compiler_services_trim_start: fn(line: String) -> String Never! {
     line.slice(start..<line.len())
 }
 
-// A Rust `usize` parse: ASCII digits after an optional `+`.
+// A `usize` parse: ASCII digits after an optional `+`.
 jet_eval_compiler_services_count: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     start := 0

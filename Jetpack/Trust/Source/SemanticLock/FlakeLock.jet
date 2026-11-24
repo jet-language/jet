@@ -1,16 +1,14 @@
 // The native `flake.lock` graph: JSON read through the Core JSON codec
 // (`core.encoding.json`), node references and follow paths, root input
 // identity checks, and the JSON the semantic lock records for lock nodes,
-// registries, and flake-parts compositions.
-//
-// Where the Rust reference embeds a `jet_foundation::JSON` error, these
-// messages embed the Core JSON error reason instead.
+// registries, and flake-parts compositions. JSON failures embed the Core
+// JSON error reason.
 use {
     jet_pkg_model.[pkg_bytes_text]
     json: core.encoding.json
 }
 
-// The Rust `Dyn` accessor failures the reference embeds in its errors.
+// The `Dyn` accessor failures embedded in errors.
 TRUST_JSON_NOT_OBJECT: "expected a Dyn object"
 
 TRUST_JSON_NOT_ARRAY: "expected a Dyn array"
@@ -61,7 +59,6 @@ FlakeFollowStep: struct {
     input: String,
 }
 
-// Rust `JSON::parse`.
 trust_json_parse: fn(text: String) -> TrustJSONDocument Never! {
     if json.parse(text) == {
         .Ok(tree) -> TrustJSONDocument.Parsed(tree)
@@ -69,8 +66,8 @@ trust_json_parse: fn(text: String) -> TrustJSONDocument Never! {
     }
 }
 
-// Rust `JSON::parse_lenient`: drop the known Nix provider noise lines
-// before parsing; a failure lists the dropped lines after the error.
+// Drop the known Nix provider noise lines before parsing; a failure lists the
+// dropped lines after the error.
 trust_json_parse_lenient: fn(input: String) -> TrustJSONDocument Never! {
     raw: input.bytes()
     kept := [U8]{}
@@ -177,7 +174,7 @@ trust_json_bool: fn(value: Dyn) -> Bool? Never! {
     }
 }
 
-// Rust `json_string_field`: the string at `key`, if it is one.
+// The string at `key`, if it is one.
 trust_json_string_field: fn(object: [String:Dyn], key: String) -> String? Never! {
     value: object.get(key) ?? return None
     trust_json_string(value)
@@ -190,13 +187,13 @@ trust_json_object_field: fn(value: Dyn, key: String) -> [String:Dyn]? Never! {
     trust_json_object(field)
 }
 
-// Rust `canonical_json`: compact JSON, object keys in document order.
+// Compact JSON, object keys in document order.
 trust_json_canonical: fn(value: Dyn) -> String TrustError! {
     text: json.to_string(value) ?? return Err(TrustError.InvalidAssignment(err.reason))
     Ok(text)
 }
 
-// Rust `canonical_object`: the field's JSON, or `{}` when absent.
+// The field's JSON, or `{}` when absent.
 trust_json_canonical_field: fn(object: [String:Dyn], key: String) -> String TrustError! {
     value: object.get(key) ?? return Ok("{{}}")
     trust_json_canonical(value)
@@ -233,7 +230,7 @@ trust_flake_find_node: fn(nodes: [FlakeLockNode], name: String) -> FlakeLockNode
     None
 }
 
-// Nodes in Rust's derived order; names are unique by the time they sort.
+// Nodes in derived order; names are unique by the time they sort.
 trust_flake_sorted_lock_nodes: fn(nodes: [FlakeLockNode]) -> [FlakeLockNode] Never! {
     sorted := nodes
     sorted.sort_by(fn(node) { node.locked })
@@ -264,7 +261,7 @@ trust_sorted_keys: fn(object: [String:Dyn]) -> [String] Never! {
     keys
 }
 
-// Rust `lock_node_name`: the node a `flake.lock` input reference names.
+// The node a `flake.lock` input reference names.
 trust_flake_lock_node_name: fn(reference: Dyn?, nodes: [String:Dyn], start_node: String) -> String? TrustError! {
     value: reference ?? return Ok(None)
     trust_flake_resolve_reference(value, nodes, [FlakeFollowStep]{}, start_node)
@@ -313,8 +310,8 @@ trust_flake_resolve_follow_path: fn(segments: [Dyn], nodes: [String:Dyn], path: 
     Ok(Val(current))
 }
 
-// Rust `flake_lock_node_values`: each node as `{"inputs": {...}}` with its
-// edge targets parsed, the map a follow path walks.
+// Each node as `{"inputs": {...}}` with its edge targets parsed, the map a
+// follow path walks.
 trust_flake_lock_node_values: fn(nodes: [FlakeLockNode]) -> [String:Dyn] TrustError! {
     values := [String:Dyn]{}
     loop node in nodes {
@@ -330,8 +327,7 @@ trust_flake_lock_node_values: fn(nodes: [FlakeLockNode]) -> [String:Dyn] TrustEr
     Ok(values)
 }
 
-// Rust `indirect_registry_alias`: the registry alias an `original` object
-// names when its type is `indirect`.
+// The registry alias an `original` object names when its type is `indirect`.
 trust_flake_indirect_alias: fn(original: String) -> String? TrustError! {
     tree: trust_json_parse_or_io(original, "flake.lock original metadata is invalid")
     object: trust_json_object(tree) ?? return Err(TrustError.IO("flake.lock original metadata is invalid: {TRUST_JSON_NOT_OBJECT}"))
@@ -350,8 +346,8 @@ trust_flake_node_object: fn(text: String, node_name: String) -> [String:Dyn] Tru
     trust_json_object(tree) ?? return Err(TrustError.IO("flake.lock node `{node_name}` is invalid: {TRUST_JSON_NOT_OBJECT}"))
 }
 
-// Rust `validate_root_input_identity`: the lock node a root input maps to
-// must be the source its flake.nix URL (or follows edge) names.
+// The lock node a root input maps to must be the source its flake.nix URL (or
+// follows edge) names.
 trust_flake_check_root_input: fn(input: FlakeInput, node_name: String, node: FlakeLockNode, root_inputs: [String:Dyn], nodes: [String:Dyn], validate_revision: Bool) TrustError! {
     original: trust_flake_node_object(node.original, node_name)
     locked: trust_flake_node_object(node.locked, node_name)
@@ -399,9 +395,9 @@ trust_flake_url_matches: fn(url: String, original: [String:Dyn]) -> Bool Never! 
     recorded.before == source.before && trust_flake_query_fields(recorded.after) == trust_flake_query_fields(source.after)
 }
 
-// Rust `source_query_matches`: every URL query field agrees with the node's
-// `original` (then `locked`) metadata; `rev` is checked against `locked`
-// only when revisions are validated.
+// Every URL query field agrees with the node's `original` (then `locked`)
+// metadata; `rev` is checked against `locked` only when revisions are
+// validated.
 trust_flake_query_matches: fn(query: [FlakeQueryField], original: [String:Dyn], locked: [String:Dyn], validate_revision: Bool) -> Bool Never! {
     loop field in query {
         if field.key == "rev" && !validate_revision -> next
@@ -419,7 +415,6 @@ trust_flake_metadata_string: fn(original: [String:Dyn], locked: [String:Dyn], ke
     }
 }
 
-// Rust `source_revision_matches`.
 trust_flake_revision_matches: fn(revision: String?, input: FlakeInput, locked: [String:Dyn], validate_revision: Bool) -> Bool Never! {
     if !validate_revision -> return true
     locked_revision: trust_json_string_field(locked, "rev")
@@ -432,8 +427,8 @@ trust_flake_revision_matches: fn(revision: String?, input: FlakeInput, locked: [
     input.revision == "" || trust_text_is(locked_revision, input.revision)
 }
 
-// Rust `validate_semantic_root_inputs`: the root node recorded in a semantic
-// lock must still map every declared input to its source.
+// The root node recorded in a semantic lock must still map every declared input
+// to its source.
 trust_flake_check_semantic_root_inputs: fn(graph: FlakeGraph) TrustError! {
     root: trust_flake_find_node(graph.lock_nodes, "root") ?? return
     nodes: trust_flake_lock_node_values(graph.lock_nodes)
@@ -497,7 +492,7 @@ trust_flake_read_lock_node: fn(name: String, value: Dyn) -> FlakeLockNode TrustE
     Ok(FlakeLockNode{name: name, original: original, locked: locked, inputs: inputs})
 }
 
-// Rust `flake_lock_node_json`: keys in serde_json's sorted order.
+// Keys in serde_json's sorted order.
 trust_flake_lock_node_tree: fn(node: FlakeLockNode) -> Dyn Never! {
     edges := [Dyn]{}
     loop edge in node.inputs {
@@ -510,7 +505,7 @@ trust_flake_lock_node_json: fn(node: FlakeLockNode) -> String Never! {
     trust_json_canonical(trust_flake_lock_node_tree(node)) ?? panic("typed flake lock node must be JSON-encodable")
 }
 
-// Rust `flake_registry_json`: keys in serde_json's sorted order.
+// Keys in serde_json's sorted order.
 trust_flake_registry_tree: fn(entry: FlakeRegistryEntry) -> Dyn Never! {
     Dyn.Object(["alias": Dyn.Text(entry.alias.copy()), "locked": trust_json_value(entry.locked), "node": Dyn.Text(entry.node.copy()), "original": trust_json_value(entry.original)])
 }
@@ -519,7 +514,6 @@ trust_flake_registry_json: fn(entry: FlakeRegistryEntry) -> String Never! {
     trust_json_canonical(trust_flake_registry_tree(entry)) ?? panic("typed flake registry entry must be JSON-encodable")
 }
 
-// Rust `composition_json`.
 trust_flake_composition_tree: fn(composition: FlakeComposition) -> Dyn Never! {
     trust_json_object_tree(
         [TrustJSONField]{
@@ -537,7 +531,7 @@ trust_flake_composition_json: fn(composition: FlakeComposition) -> String Never!
     trust_json_canonical(trust_flake_composition_tree(composition)) ?? panic("typed flake composition must be JSON-encodable")
 }
 
-// Rust `parse_flake_lock_node`: a `flake-lock-node:` record's exact JSON.
+// A `flake-lock-node:` record's exact JSON.
 trust_flake_parse_lock_node: fn(raw: String) -> FlakeLockNode TrustError! {
     object: trust_json_parse_record(raw)
     declared: object.get("inputs") ?? return Err(TrustError.InvalidAssignment("missing lock node inputs"))
@@ -569,7 +563,7 @@ trust_flake_parse_lock_node: fn(raw: String) -> FlakeLockNode TrustError! {
     Ok(FlakeLockNode{name: name, original: original_json, locked: locked_json, inputs: trust_flake_sorted_edges(inputs)})
 }
 
-// Rust `parse_flake_registry`: a `flake-registry:` record's exact JSON.
+// A `flake-registry:` record's exact JSON.
 trust_flake_parse_registry: fn(raw: String) -> FlakeRegistryEntry TrustError! {
     object: trust_json_parse_record(raw)
     original: object.get("original") ?? return Err(TrustError.InvalidAssignment("missing registry original"))
@@ -592,7 +586,7 @@ trust_flake_parse_registry: fn(raw: String) -> FlakeRegistryEntry TrustError! {
     Ok(FlakeRegistryEntry{alias: alias, node: node, original: original_json, locked: locked_json})
 }
 
-// Rust `parse_composition_record`: a `flake-composition:` record's JSON.
+// A `flake-composition:` record's JSON.
 trust_flake_parse_composition: fn(raw: String) -> FlakeComposition TrustError! {
     object: trust_json_parse_record(raw)
     framework_value: object.get("framework") ?? return Err(TrustError.InvalidAssignment("missing composition framework"))

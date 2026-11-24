@@ -31,11 +31,11 @@ BORDER_SGR: "90"
 
 BOLD_SGR: "1"
 
-// Rust `Severity::Lint` in the Compiler `Diagnostic.severity` encoding.
+// The lint severity in the Compiler `Diagnostic.severity` encoding.
 TERMINAL_LINT_SEVERITY: 2
 
 // Byte counts below this redraw a live progress line only on a structural
-// change (Rust `BYTE_REDRAW_THRESHOLD`).
+// change.
 TERMINAL_BYTE_REDRAW_THRESHOLD: 1000000
 
 // The largest Int; a byte counter that would pass it has overflowed.
@@ -178,8 +178,8 @@ DiagnosticCollector: struct {
     }
 }
 
-// One invocation's diagnostic recorder (Rust `begin_invocation`). Themes built
-// with `with_invocation` record into it; closing it flushes every card once.
+// One invocation's diagnostic recorder. Themes built with `with_invocation`
+// record into it; closing it flushes every card once.
 DiagnosticInvocation: struct {
     collector: Shared<DiagnosticCollector>,
 
@@ -295,7 +295,7 @@ priv terminal_write_stderr: fn(text: String) -[IO, Time.Wait]> Never! {
 // The indent under the gutter that detail and ledger rows share.
 terminal_pad: fn() -> String Never! { " ".repeat(JETPACK_PROMPT_LABEL.len() + 4) }
 
-// Rust `{text:<width$}`: pad with spaces to `width` scalars.
+// Pad with spaces to `width` scalars.
 terminal_pad_end: fn(text: String, width: Int) -> String Never! {
     scalars := 0
     loop _ in text.chars() -> scalars += 1
@@ -401,7 +401,7 @@ terminal_fit_live_line: fn(input: String, columns: Int) -> String Never! {
     terminal_fit_line(input, if available > 1 -> available else -> 1)
 }
 
-// `q` rounded half to even, the way Rust formats an exact decimal value.
+// `q` rounded half to even, as an exact decimal value is formatted.
 terminal_round_half_even: fn(numerator: Int, denominator: Int) -> Int Never! {
     quotient: numerator /% denominator
     twice_remainder: (numerator % denominator) * 2

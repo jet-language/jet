@@ -1,7 +1,7 @@
-// Canonical producer records (Rust `jetpack::Store::Producer`): the
-// immutable provider/action/source replay record committed beside every
-// Hangar package, its action identity, the post-publication lock-digest
-// refresh, and adapter build-hook producer validation.
+// Canonical producer records: the immutable provider/action/source replay
+// record committed beside every Hangar package, its action identity, the
+// post-publication lock-digest refresh, and adapter build-hook producer
+// validation.
 
 STORE_PRODUCER_RECORD_HEADER: "jet-producer-record-v1"
 
@@ -128,13 +128,13 @@ ProducerRecord: struct {
     }
 }
 
-// Rust `take`: a named required field of a decoded producer record.
+// A named required field of a decoded producer record.
 store_producer_take: fn(fields: [String:String], key: String) -> String StoreError! {
     value: fields.get(key) ?? return Err(StoreError.Other("producer record misses `{key}`"))
     Ok(value)
 }
 
-// Rust `unhex` with the producer record's error texts.
+// Hex decoding with the producer record's error texts.
 store_producer_unhex: fn(value: String) -> String StoreError! {
     if store_unhex_text(value) == {
         .Text(text) -> Ok(text)

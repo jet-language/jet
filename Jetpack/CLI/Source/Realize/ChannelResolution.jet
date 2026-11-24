@@ -263,7 +263,6 @@ cli_resolve_channel_with_git: fn(source: ChannelSource) -[Env, Exec, Time.Wait]>
     }
 }
 
-// Rust `split_whitespace().next()`.
 cli_first_word: fn(text: String) -> String? Never! {
     loop word in trust_text_words(text) -> return Val(word)
     None
@@ -317,7 +316,7 @@ cli_newest_tag: fn(lines: [String], mask: String?) -> String? Never! {
     best
 }
 
-// Lexicographic `[u64]` order, the Rust slice comparison.
+// Lexicographic `[u64]` order.
 cli_version_greater: fn(left: [Int], right: [Int]) -> Bool Never! {
     shared_len: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<shared_len {

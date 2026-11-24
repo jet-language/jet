@@ -1,7 +1,6 @@
 // Source-backed payload construction and lexical diagnostics. `Scan.jet` owns
 // token boundaries; this layer interns each token's exact spelling and decoded
-// value and turns literal bytes into parser-ready literal facts without
-// consulting the Rust lexer.
+// value and turns literal bytes into parser-ready literal facts.
 use {
     jet_foundation.[
         BLOCK_COMMENT_CLOSE,
@@ -146,8 +145,8 @@ strip_underscores: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-// Rust `lex_digits`: a decimal or unit-number spelling drops its `_`
-// separators and writes its exponent marker as `e`.
+// A decimal or unit-number spelling drops its `_` separators and writes its
+// exponent marker as `e`.
 decimal_number_spelling: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
@@ -314,11 +313,11 @@ fact_text: fn(source: [U8], facts: [Int], index: Int) -> String Never! {
 }
 
 // Whether the quoted text at fact `index` can be a typed head's body: it
-// follows a `{` after a name whose first character is an ASCII capital (as
-// Rust's lexer reads it; non-ASCII capitals do not count), after `.`, or after
-// `[U8]` or `[U8#N]`. Such text gets its typed-head reading beside the plain
-// one; whether a head takes it is the parser's call, since the same
-// `String {` opens a function body after a return type.
+// follows a `{` after a name whose first character is an ASCII capital
+// (non-ASCII capitals do not count), after `.`, or after `[U8]` or `[U8#N]`.
+// Such text gets its typed-head reading beside the plain one; whether a head
+// takes it is the parser's call, since the same `String {` opens a function
+// body after a return type.
 string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> {raw_head: Bool, byte_head: Bool} Never! {
     open: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != TOKEN_LBRACE -> return {byte_head: false, raw_head: false}
@@ -361,7 +360,7 @@ group_has_ffi_marker: fn(source: [U8], facts: [Int], hash_index: Int, limit: Int
     segment_head := true
     loop cursor < limit {
         kind: kind_at(facts, cursor)
-        // Rust's prelude scan drops comments before reading marker names.
+        // The prelude scan drops comments before reading marker names.
         if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
             cursor += 1
             next
@@ -428,8 +427,7 @@ has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Neve
     }
     loop cursor >= 0 {
         kind: kind_at(facts, cursor)
-        // Comments and `;` between markers and `fn` are skipped, as in Rust's
-        // prelude filter.
+        // Comments and `;` between markers and `fn` are skipped.
         is_skipped: if kind == {
             TOKEN_SEMI -> true
             TOKEN_LINE_COMMENT -> true
@@ -493,10 +491,7 @@ shifted_diagnostic: fn(diagnostic: ^Diagnostic, offset: Int) Never! {
         .None -> None
     }
     if ^diagnostic.edit == .Val(edit) -> edit.span = shifted_span(edit.span, offset)
-    shifted_labels := [DiagnosticLabel]{}
-    loop label in diagnostic.labels {
-        shifted_labels.push(DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message})
-    }
+    shifted_labels: loop label in diagnostic.labels -> DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message}
     diagnostic.labels = shifted_labels
 }
 
@@ -896,7 +891,7 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             next
         }
         // A `\$` template payload (`\${…}`) is downstream text, copied byte
-        // for byte as Rust's lexer keeps it.
+        // for byte.
         if value == 123 && literal.len() >= 2 && (Int{literal[literal.len() - 2]}) == 92 && (Int{literal[literal.len() - 1]}) == 36 {
             literal.push(U8{123})
             decoded.push(U8{123})
@@ -1296,10 +1291,10 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
                 }
                 return
             }
-            // As in Rust's lexer, an unclosed string still reports what its
-            // body teaches (escapes, lone braces, holes) up to the line end;
-            // an unclosed `{` hole is then its one error, else the quote is.
-            // Text a typed head may take reports as that head's body.
+            // An unclosed string still reports what its body teaches
+            // (escapes, lone braces, holes) up to the line end; an unclosed
+            // `{` hole is then its one error, else the quote is. Text a typed
+            // head may take reports as that head's body.
             modes: string_head_modes(source, facts, index)
             scanned: scan_plain_string_end(source, cursor, modes.raw_head)
             stop: if scanned < 0 -> -scanned - 1 else -> scanned

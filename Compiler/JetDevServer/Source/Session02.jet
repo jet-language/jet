@@ -536,10 +536,7 @@ session_recording_json_for_state: fn(session_id: String, state: ResidentRecordin
     loop event in state.recording.events -> events.push(session_recording_event_json(event))
     names := state.checkpoints.keys().to_list()
     names.sort()
-    checkpoints := [String]{}
-    loop name in names {
-        checkpoints.push(session_recording_checkpoint_json(name, state.checkpoints[name]))
-    }
+    checkpoints: loop name in names -> session_recording_checkpoint_json(name, state.checkpoints[name])
     current_event: if projection.event == .Val(event) -> session_recording_event_json(event) else -> "null"
     truncation: state.recording.truncation()
     divergence_json: if divergence == .Val(found) -> session_recording_divergence_json(found) else -> "null"

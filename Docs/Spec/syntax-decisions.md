@@ -1811,7 +1811,7 @@ its dependency graph drops that answer. Both forms are unsettable: the field
 is absent from a `Type{ … }` literal's required/allowed field list (E0339 if
 provided), and no write reaches it (E0339, D-FIELD-READONLY1 below). A
 cycle among computed-field formulas, including self-reference, is E0338.
-Codegen: not a Rust struct member — a synthesized inherent getter method
+Codegen: not a stored field — a synthesized inherent getter method
 instead; every read routes to a call of it. `#Patchable` (D-PATCH1) excludes a
 computed field from `T.Patch` and from `apply`/`diff`/`merge`. `#Codable` encode
 calls the getter (the field appears in the wire output); decode never reads
@@ -2510,8 +2510,7 @@ journey form is contextual `?(text)`, which adds a lazy context frame.
 `[?Success] [!ErrorUnion]`; a missing error contract is the beginner route and
 means the implicit default `Err` error. A unit-fallible declaration writes its
 explicit contract alone (`save: fn(path: String) !IOError`), and value-returning
-signatures use `load: fn() Config !E` or `load: fn() ?Config !E`. Lowers to Rust
-`Result` (not surface syntax).
+signatures use `load: fn() Config !E` or `load: fn() ?Config !E`.
 
 **S80 — Default error value** *(D-ERR2, D-S80-RUN1 and D-FAIL-ERROR1=A,
 amended by D-FAIL-EXIT1, 2026-08-06, card #1528)*: `Err` is both the default
@@ -4060,7 +4059,6 @@ and D-EFFECT-PKGLEAF1=A replaced them with package effect types that name a
 remains an inferred reachability fact and can be prohibited with
 `-[!Time.Wait]>`, but never needs a positive callable bound or authority
 grant. `Time` and its other leaves retain their ordinary positive bounds.
-This applies to Rust bootstrap and native Jet effect-bound checks alike.
 
 **D-AUTH-AMBIENT3=A — A written allow list adds to the beginner floor**
 *(ratified 2026-10-24, card c09xsceu; superseded by D-AUTH-DEFAULT1=A)*: the
@@ -4310,9 +4308,7 @@ run: fn() {
 evaluation cannot complete. A bare mark opens the execution block (`@ { … }`,
 the Jai `#run` analog) and precedes the compile-time verbs `@if` and
 `@loop`. Sema treats the mark as part of the identifier, so a plain name and
-a marked name can never denote the same binding, and codegen keeps them apart:
-a marked name spells `__jet_ct_<name>` in generated Rust where a plain name
-spells `__jet_<name>`.
+a marked name can never denote the same binding.
 
 The `@if` branch is the earlier D-WHEN1 surface owned by S57. D-STRUCT-ONCE1=A
 reverses the intervening same-day ruling that erased `@if` in favor of plain
@@ -4713,7 +4709,7 @@ control-flow boundary. `.Relaxed` relaxes typed per-operation obligations but
 never the required reason. `.PerSite` is also available: each gate selects
 `obligations: .Track` or `.Skip`, and organization policy may reject `.Skip`.
 Every mode still requires a lexical `#Unsafe` block or function for every
-low-level operation; none permits generated Rust `unsafe` outside I1's audited
+low-level operation; none permits an unsafe operation outside I1's audited
 regions. `jet inspect gates --kind unsafe` reports the effective mode, its policy source,
 each gate, and tracked operation state.
 
@@ -5161,7 +5157,7 @@ Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
 Target variants select via the existing `#if #build.target.os ==` /
-`#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
+`#Target` machinery. The back end checks
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
 functions on top — beginners meet only the named functions.
@@ -5589,7 +5585,7 @@ surface is a first-class `Encode`/`Decode` protocol — a type implements
   its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable` derives become
 ordinary derives that contribute the same checked Jet items and enter sema
-(R11, D-META-CODE1) — no compiler-synthesized Rust, no R11 carve-out.
+(R11, D-META-CODE1) — no compiler-synthesized code, no R11 carve-out.
 Ratifying this also fixes cross-module `decode<T>` (derive output
 previously referenced entry-file-local paths).
 
@@ -6286,7 +6282,7 @@ still gates mutation, `^` transfers a root, and `~` deep-copies. An unproved
 escape into ownership-only code is rejected. `jet gc report` lists each
 allocation ownership could not prove, with source, reason, and a concrete path
 back to owned values or `Pool<T>`/`Id<T>`; removing the opt-in is the supported
-end state. The collector is D-DEP-GC1=A's pure-Rust, std-only mark-sweep engine;
+end state. The collector is D-DEP-GC1=A's dependency-free mark-sweep engine;
 it is an internal substrate, not a second source mechanism. Option C's explicit
 `core.gc` / `Gc<T>` handle surface is retired; scoped automatic promotion is
 the one GC path (I8). Nested stores and later mutations update deterministic
@@ -6323,7 +6319,7 @@ pure std runtime (E2910–E2913). D-DATARACE1=C: reactive boxes use lock-ordered
 `Send`. Expert pins `#Local` / `#Shared` are registered (MARKER_LOCAL /
 MARKER_SHARED): `#Local` rejects task/channel/parallel crossings (E1102);
 `#Shared` and automatic boundary crossings list synchronized-form upgrades
-in generated Rust (`/* jet-reactive-upgrade: … */`) and `jet report`. Events and hooks are compiler-known Core values
+in `jet report`. Events and hooks are compiler-known Core values
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
 `EventPolicy`, and `EventTrace`. Render backends implement measure/layout/paint
 (`JetBackend`; `NullBackend`/`TuiBackend` shipped). The typed dot-construction
@@ -6975,7 +6971,7 @@ product lens or a feature/functionality split.
 **D-AOT-CRANELIFT1=B** *(ratified 2026-07-16, card #666; retired by
 D-EXEC2=A)*: the Cranelift debug-AOT backend and its card #3953 dev-image
 runner are removed with the JIT. Every native `jet build`, including the
-default, `fast`, and `debug` profiles, emits Rust and builds with rustc/LLVM.
+default, `fast`, and `debug` profiles, builds through Jet's own back end.
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#Codable(published)` types
 snapshot field layout; a breaking change without a migration is E0910.
@@ -7590,12 +7586,9 @@ coverage reporting. CI uses the live Tower path. A green change therefore means
 the whole executable spec passed; nightly evidence covers slower platform and
 measurement work rather than repairing a knowingly partial merge gate.
 
-**D-CI2=A — Warning-free compiler gate with expiring exceptions**: CI denies
-Rust warnings, checks rustfmt, and runs the curated correctness/suspicious
-clippy set without imposing style lints that conflict with house conventions.
-Intentional lint exceptions use `#[expect(..., reason = "#card: ...")]`; the
-card reference explains unfinished work and the expectation fails when its lint
-stops firing. Unexplained dead code is not protected by convention or guesswork.
+**D-CI2=A — Warning-free compiler gate with expiring exceptions**: its
+rustfmt and clippy gates left with the Rust implementation. Unexplained dead
+code is not protected by convention or guesswork.
 
 The required test gate also leaves candidate-bound `jet.ci-evidence.v1`
 receipts. Each receipt records candidate, runner, source/workflow and toolchain
@@ -7617,8 +7610,7 @@ swap in place, layout changes trigger a clean announced restart.
 
 **D-DBG2/3 — Debugger**: `jet debug` shows only Jet frames by default
 (`--raw-frames` expert opt-in); `(jet)` prompt, `step/next/continue/finish`
-(+`s/n/c/f`), `<- here` caret, `locals:` dump (E2203/E2204). **D-OBS2**: the
-Jet→Rust line table is a sidecar `<file>.jetmap` JSON (versioned, std-only).
+(+`s/n/c/f`), `<- here` caret, `locals:` dump (E2203/E2204).
 
 **D-DBG-DAP1=A — Full local daily-driver DAP profile**: editors start
 `jet debug --dap <file.jet>` over stdio. DAP framing uses strict byte-counted
@@ -7641,7 +7633,7 @@ target; disconnect defaults to terminating launched targets and continuing
 attached targets. Restart rebuilds through the same pipeline and preserves
 source breakpoints while invalidating every object reference.
 
-The default projection never exposes generated Rust names, paths, helper
+The default projection never exposes backend symbol names, paths, helper
 threads, backend values, secrets, or raw backend text, and no addresses but
 each Jet frame's `instructionPointerReference`. Explicit
 `showRawFrames` appends clearly marked raw frames/scopes without changing
@@ -7752,12 +7744,9 @@ compatible spine connection through one canonical insertion transaction.
 Stale or rejected source keeps the preview recoverable and never writes a
 semantically different Jet construct.
 
-**D-VERIFY-SCHED1=C / D-VERIFY-CACHE1=C / D-VERIFY-TIER1=C**: `Tools/Agent/verify-full.sh`
-is a repo scheduler, not plain `cargo test`: it emits timings, uses bounded
-parallelism/serial groups, uses `cargo-nextest` when available with a cargo
-fallback, and targets a 1-3 minute default full suite. Generated-Rust test
-artifacts may share a repo-local cache keyed by rustc version, generated source,
-flags, and linked inputs. Slow/real tiers are separate but binding for claims
+**D-VERIFY-SCHED1=C / D-VERIFY-CACHE1=C / D-VERIFY-TIER1=C**: `Tools/Agent/VerifyFull.jet`
+is a repo scheduler: it emits timings, uses bounded parallelism/serial groups,
+and targets a 1-3 minute default full suite. Slow/real tiers are separate but binding for claims
 that require them; no card may close a real-VM or replacement claim on default
 full verification alone.
 
@@ -8319,7 +8308,7 @@ the exact base-command argument surface and driver path; `attach/view/compare/
 export` complete the family. `.jettrace` embeds schema/toolchain/source/source-map
 identity and capture policy. Compare enforces hardware/toolchain baseline
 identity. pprof/OTel/Chrome and profile maps are projections only; generated
-Rust frames stay hidden unless explicitly requested.
+code frames stay hidden unless explicitly requested.
 
 **D-NOTEBOOK-SURFACE1=D — one first-party client plus enforcing Jupyter
 adapter**: `jet notebook PATH` is loopback-only with fragment bearer token;
@@ -8847,7 +8836,7 @@ select a target.
 
 ### Marker and effect declarations
 
-The marker vocabulary is written as ordinary Jet source, not as a Rust table.
+The marker vocabulary is written as ordinary Jet source.
 
 - `Compiler/Prelude/Markers.jet` holds one marker struct per rule, in the
   D-DECL-TYPES1=A form: the struct's fields are the arguments the use site
@@ -8858,18 +8847,14 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
   an enum whose cases are the root's closed leaves, each with an in-body
   `impl Effect { … }` block whose `irreversible: fn(self) -> Bool` gives the
   per-case rollback fact.
-- The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
-  hold the vocabulary; both are read from those two files.
 - D-VARIADIC1: a marker that takes a list of arguments writes it the same way a
   function does — `abilities: ...Ability`. This is the only new spelling
   the card adds, and it reuses the ratified rest-parameter form.
-- D-MARK-VOCAB1: `Policy::MarkerVocabulary` is the one vocabulary value. It
-  holds the registry rows plus the package markers a build can
-  see, and it answers both "may this name be written?" and "did you mean?". The
-  separate `known_derive_names` set is deleted.
-- `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads
-  both files and must agree with the registry on every row, and no Rust file may
-  build a marker row or keep a copy of the effect roots.
+- D-MARK-VOCAB1: one vocabulary value holds the registry rows plus the package
+  markers a build can see, and it answers both "may this name be written?" and
+  "did you mean?". The separate `known_derive_names` set is deleted.
+- The registry is read from those two files alone: no other source may build a
+  marker row or keep a copy of the effect roots.
 - D-MARKER-REFLECT1: a marker the compiler acts on (a parser projection such
   as `#Unsafe` or `#MustUse`, a checker hook such as `#Memo`, the guest edge
   `#Import(c)`/`#Export(c)`) is keyed by its Prelude declaration in one table,
@@ -10647,7 +10632,7 @@ passed under, the fault anchor, and the expectation.
   operation without changing its semantics; forward replay remains the
   fallback when reverse stepping is unavailable.
 - **D-OPENTABLE1=D —** Tables with a Jet twin are generated from it with a
-  drift guard; tables without a twin keep one Rust home under a guard against
+  drift guard; tables without a twin keep one home under a guard against
   duplicate copies. The guarded surfaces include effect roots and leaves,
   marker sites, fact reads, encoding formats, taint sinks, transaction
   irreversibility, the Core dispatcher, ambient routes, the export classifier,

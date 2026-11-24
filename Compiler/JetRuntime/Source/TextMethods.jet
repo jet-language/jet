@@ -1,8 +1,6 @@
 // Native String/core.text method routes: over the E4 text carrier. Text
 // arguments are borrowed; every Text result is a fresh owner. Case/property
-// decisions use the pinned Unicode 17 range tables (UnicodeTables.jet,
-// UnicodeText<n>.jet and the frozen CompilerNeededText Alphabetic/Numeric
-// tables that match Rust char).
+// decisions use the pinned Unicode 17 range tables.
 
 // JetInt.to_i64(): an exact Int carrier word fits a native i64.
 text_route_fits: fn(value: I64) -> Bool {
@@ -12,7 +10,7 @@ text_route_fits: fn(value: I64) -> Bool {
 
 text_route_native: fn(value: I64) -> I64 { if int_inline(value) -> value else -> int_word(value) }
 
-// The Rust kernels' `panic!` reasons cross the guard as an ordinary panic.
+// The kernels' panic reasons cross the guard as an ordinary panic.
 text_route_panic: fn(message: I64) {
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
 }
@@ -232,7 +230,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
 }
 
 // ---- classification -------------------------------------------------------
-// Rust char predicates: is_alphanumeric = Alphabetic or General_Category N*;
+// Char predicates: is_alphanumeric = Alphabetic or General_Category N*;
 // is_control = General_Category Cc.
 text_char_alnum: fn(cp: I64) -> Bool { compiler_text_alphabetic(cp) || compiler_text_numeric(cp) }
 
@@ -279,7 +277,7 @@ text_route_all: fn(value: I64, kind: I64, empty: Bool) -> Bool {
     true
 }
 
-// jet_text_istitle over Rust char Uppercase/Lowercase/Alphabetic.
+// jet_text_istitle over char Uppercase/Lowercase/Alphabetic.
 #Export(c) jet_text_istitle: fn(value: I64) -> Bool {
     data: rt_text_data(value)
     length: rt_text_len(value)

@@ -632,10 +632,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     organization_source: if root_policy == .Val(policy) -> policy.organization_source.copy() else -> ""
     // The root package's `authority.deny` row, and the organization's, bind
     // the root package's own modules.
-    denial_modules := [Bool]{}
-    loop graph_module in final_graph.modules {
-        denial_modules.push(graph_module.package_identity == final_graph.package_identity)
-    }
+    denial_modules: loop graph_module in final_graph.modules -> graph_module.package_identity == final_graph.package_identity
     // Each graph module's package row in `stage.package_policies` (-1 for
     // Core and a module no package owns), whose expert effects the module's
     // functions may use.

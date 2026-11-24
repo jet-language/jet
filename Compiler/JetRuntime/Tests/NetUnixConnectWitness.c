@@ -1,4 +1,4 @@
-// Link against the composed native runtime; no Rust socket or Box layouts.
+// Link against the composed native runtime.
 // This fixture exercises the deadline route's worker result and FD ownership.
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>

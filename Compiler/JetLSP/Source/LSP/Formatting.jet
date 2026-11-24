@@ -11,10 +11,7 @@ use {
 }
 
 lsp_text_edits_json: fn(src: String, edits: [TextEdit]) -> String Never! {
-    rows := [String]{}
-    loop edit in edits {
-        rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
-    }
+    rows: loop edit in edits -> "{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}"
     "[{rows.join(",")}]"
 }
 

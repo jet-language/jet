@@ -72,7 +72,7 @@ OverlayStage: struct {
 
     new: fn() -> OverlayStage Never! { OverlayStage{entries: [String:OverlayStagedFile]{}} }
 
-    // Keys in path order (Rust `BTreeMap` order).
+    // Keys in path order.
     sorted_keys: fn(self) -> [String] Never! {
         keys := [String]{}
         loop entry in self.entries -> keys.push(entry.key)
@@ -436,7 +436,7 @@ env_overlay_parse_hunk_side: fn(raw: String, prefix: String) -> {start: Int, cou
     Ok({start: start, count: count})
 }
 
-// Rust `str::parse::<usize>`: an optional `+`, then decimal digits.
+// An optional `+`, then decimal digits.
 env_overlay_parse_count: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None

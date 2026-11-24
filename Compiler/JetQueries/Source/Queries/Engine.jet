@@ -7,10 +7,10 @@
 // "checked.lsp" is a query identity with the same "checked" result tag.
 use query_text: core.text
 
-// Rust FileKey/Subject/InputKey/QueryKey: file and named subjects are distinct
-// even when their spelling is identical. Composite keys use built-in maps.
-// #4397: the frozen Rust emission omitted required Ord/Eq derives for these
-// key-eligible structs. Keep canonical structural keys; fix the compiler seam.
+// File and named subjects are distinct even when their spelling is identical.
+// Composite keys use built-in maps.
+// #4397: required Ord/Eq derives for these key-eligible structs were omitted.
+// Keep canonical structural keys; fix the compiler seam.
 FileKey: struct {
     path: String,
 
@@ -47,7 +47,7 @@ QueryKey: struct {
     }
 }
 
-// Rust InputCell/DepKey/Dep/MemoEntry and the dependency stack helper family.
+// Input cells, dependency keys, memo entries and the dependency stack helpers.
 QueryInputCell: struct {
     revision: Int,
     text: String,
@@ -77,7 +77,7 @@ QueryComputeFrame: struct {
     deps: [QueryDepKey],
 }
 
-// Rust QueryStats: cumulative work and currently retained memory/history.
+// Cumulative work and currently retained memory/history.
 QueryStats: struct {
     hits: Int,
     recomputes: Int,
@@ -100,7 +100,6 @@ QueryEngine: struct<T> {
     hits: Int,
     recomputes: Int,
 
-    // Rust QueryEngine.new/default.
     new: fn() -> QueryEngine<T> Never! {
         QueryEngine<T>{
             revision: 0,
@@ -114,7 +113,7 @@ QueryEngine: struct<T> {
         }
     }
 
-    // Rust set_input: identical text neither advances revision nor prunes.
+    // Identical text neither advances revision nor prunes.
     set_input: fn(^self, key: InputKey, text: String) -> Bool Never! {
         if self.inputs.get(key) == .Val(cell) {
             if cell.text == text -> return false
@@ -125,8 +124,8 @@ QueryEngine: struct<T> {
         true
     }
 
-    // Rust remove_input: purge invalid counters and same-subject history even
-    // when invalidate_kind previously removed its memo.
+    // Purge invalid counters and same-subject history even when invalidate_kind
+    // previously removed its memo.
     remove_input: fn(^self, key: InputKey) -> Bool Never! {
         if !self.inputs.has_key(key) -> return false
         _: self.inputs.remove(key)
@@ -140,7 +139,7 @@ QueryEngine: struct<T> {
         true
     }
 
-    // Rust input_text/record_dep: missing inputs are dependencies too.
+    // Missing inputs are dependencies too.
     input_text: fn(^self, key: InputKey) -> String? Never! {
         self.record_dep(QueryDepKey{is_input: true, kind: "", subject: key.subject})
         if self.inputs.get(key) == {
@@ -149,7 +148,7 @@ QueryEngine: struct<T> {
         }
     }
 
-    // Rust query's demand/hit/compute-entry half. Jet function values have read
+    // The query's demand/hit/compute-entry half. Jet function values have read
     // arguments only, so the mutable computation is a direct caller operation:
     // match Val(hit), or compute on None and balance it with finish_query.
     // expected_result_kind is a carrier/type discriminator, NOT query identity.
@@ -168,8 +167,8 @@ QueryEngine: struct<T> {
         None
     }
 
-    // Rust query's completion half / finish_deps. Only finish the innermost
-    // demand; caller-owned handle copying is the equivalent of Rust Arc clone.
+    // The query's completion half. Only finish the innermost demand; the
+    // caller owns handle copying.
     finish_query: fn(^self, key: QueryKey, result_kind: String, value: ^^T) -> T Never! {
         frame: (self.dep_stack.pop()) ?? panic("query computation has no frame")
         assert(frame.key == key && frame.result_kind == result_kind)
@@ -198,7 +197,6 @@ QueryEngine: struct<T> {
         value
     }
 
-    // Rust recompute_count/stats.
     recompute_count: fn(self, key: QueryKey) -> Int Never! { self.recompute_by_key.get(key) ?? 0 }
 
     stats: fn(self) -> QueryStats Never! {
@@ -214,7 +212,7 @@ QueryEngine: struct<T> {
         }
     }
 
-    // Rust invalidate_kind does NOT eagerly prune dependent memos/counters.
+    // Invalidating a kind does NOT eagerly prune dependent memos/counters.
     invalidate_kind: fn(^self, kind: String) Never! {
         dead := [QueryKey]{}
         loop (key, _) in self.memo {
@@ -223,7 +221,7 @@ QueryEngine: struct<T> {
         loop key in dead -> self.remove_memo(key)
     }
 
-    // Rust invalidate: prune dependents only when the memo existed.
+    // Prune dependents only when the memo existed.
     invalidate: fn(^self, key: QueryKey) Never! {
         if !self.memo.has_key(key) {
             return
@@ -244,8 +242,8 @@ QueryEngine: struct<T> {
         self.dep_stack[self.dep_stack.len() - 1].deps.push(key.copy())
     }
 
-    // Rust memo_entry_valid/memo_key_valid: generations are per-key recompute
-    // counts, and revisiting a key returns true (not a new cycle error).
+    // Generations are per-key recompute counts, and revisiting a key returns
+    // true (not a new cycle error).
     memo_entry_valid: fn(self, entry: QueryMemoEntry, visiting: ^[QueryKey:Bool]) -> Bool Never! {
         loop dep in entry.deps {
             if dep == {
@@ -274,8 +272,8 @@ QueryEngine: struct<T> {
         valid
     }
 
-    // Rust prune_invalid_memos: discover all dead keys against the same graph
-    // before removing any entries; normal edits keep cumulative key counters.
+    // Discover all dead keys against the same graph before removing any
+    // entries; normal edits keep cumulative key counters.
     prune_invalid_memos: fn(^self, purge_counters: Bool) Never! {
         dead := [QueryKey]{}
         loop (key, _) in self.memo {

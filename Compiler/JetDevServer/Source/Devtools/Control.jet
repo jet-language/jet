@@ -541,10 +541,7 @@ JetDevtoolsCommandEnvelope: struct {
 
     serialize: fn(self) -> String Err! {
         self.validate()
-        commands := [String]{}
-        loop command in self.command_list {
-            commands.push("{{\"kind\":{foundation_json_quote(command.kind())},\"payload\":{command.render_json()}}}")
-        }
+        commands: loop command in self.command_list -> "{{\"kind\":{foundation_json_quote(command.kind())},\"payload\":{command.render_json()}}}"
         out: "{{\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(self.session_id)},\"started_at_ms\":{self.started_at_ms},\"direction\":\"host_to_runtime\",\"commands\":[{commands.join(",")}]}}"
         if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
             return Err("jet.devtools.v1 command envelope exceeds the Prelude byte limit")

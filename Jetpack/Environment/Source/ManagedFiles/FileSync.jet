@@ -208,7 +208,7 @@ env_files_file_digest: fn(path: String) -[FS]> String EnvironmentError! {
     Ok(pkg_sha256_hex(bytes))
 }
 
-// Rust `Path::canonicalize().ok()`: an unresolvable path is None.
+// An unresolvable path is None.
 env_files_canonical_or_none: fn(path: String) -[FS, Env]> String? Never! {
     resolved: files.canonicalize(path) ?? return None
     Val(resolved)
@@ -547,7 +547,6 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
     Ok(state)
 }
 
-// Rust `str::parse::<u32>`.
 env_files_parse_u32: fn(text: String) -> Int? Never! {
     value: Int.parse(text) ?? return None
     if value < 0 || value > 4294967295 -> return None

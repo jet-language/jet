@@ -54,8 +54,7 @@ diagnostic_codepoint_at: fn(bytes: [U8], index: Int, width: Int) -> Int Never! {
     foundation_utf8_codepoint(first, second, third, fourth, width)
 }
 
-// Rust `char.is_control` (general category Cc) plus the Unicode line and
-// paragraph separators.
+// A Cc control character, plus the Unicode line and paragraph separators.
 diagnostic_is_terminal_control: fn(codepoint: Int) -> Bool Never! {
     codepoint < 32 || (codepoint >= 127 && codepoint <= 159) || codepoint == 8232 || codepoint == 8233
 }
@@ -213,7 +212,7 @@ diagnostic_source_position: fn(sources: ^DiagnosticSourceTexts, origin: Diagnost
     sources.keys.len() - 1
 }
 
-// The text of the line holding `offset`, as Rust `str.lines` yields it.
+// The text of the line holding `offset`.
 diagnostic_line_text_at: fn(bytes: [U8], offset: Int) -> String Never! {
     start: diagnostic_line_start(bytes, diagnostic_clamp_offset(bytes, offset))
     end := start
@@ -240,7 +239,7 @@ diagnostic_is_char_boundary: fn(bytes: [U8], index: Int) -> Bool Never! {
     !diagnostic_is_continuation(Int{bytes[index]})
 }
 
-// Rust `src.get(start..end)` up to its first newline; an invalid range is "".
+// The `start..end` bytes of `src` up to their first newline; an invalid range is "".
 diagnostic_snippet_first_line: fn(bytes: [U8], span: Span) -> String Never! {
     end: if span.end > bytes.len() -> bytes.len() else -> span.end
     if span.start > end || !diagnostic_is_char_boundary(bytes, span.start) || !diagnostic_is_char_boundary(bytes, end) {

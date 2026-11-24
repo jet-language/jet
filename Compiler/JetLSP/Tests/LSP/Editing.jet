@@ -18,10 +18,7 @@ b */
 
 #Test("folds are brace blocks, block comments, and comment and use runs") {
     folds: lsp_compute_folding_ranges(LSP_TEST_FOLDS, lsp_lex_source(LSP_TEST_FOLDS))
-    rows := [String]{}
-    loop fold in folds {
-        rows.push("{fold.kind} {fold.start_line}:{fold.start_character}-{fold.end_line}:{fold.end_character}")
-    }
+    rows: loop fold in folds -> "{fold.kind} {fold.start_line}:{fold.start_character}-{fold.end_line}:{fold.end_character}"
     assert_eq(rows, [String]{"comment 0:0-1:6", "imports 2:0-3:12", "region 4:8-6:0", "comment 7:0-8:4"})
 }
 

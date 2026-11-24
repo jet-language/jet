@@ -428,14 +428,8 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "Octave matrix function")} from `{path}` → {out}\n")
         }
         "cpp" -> {
-            include_dirs := [String]{}
-            loop directory in request.include_dirs {
-                include_dirs.push(jet_cli_foreign_native_path(directory))
-            }
-            library_dirs := [String]{}
-            loop directory in request.library_dirs {
-                library_dirs.push(jet_cli_foreign_native_path(directory))
-            }
+            include_dirs: loop directory in request.include_dirs -> jet_cli_foreign_native_path(directory)
+            library_dirs: loop directory in request.library_dirs -> jet_cli_foreign_native_path(directory)
             options: CppBindOptions{
                 lib: lib,
                 target: request.target ?? "",

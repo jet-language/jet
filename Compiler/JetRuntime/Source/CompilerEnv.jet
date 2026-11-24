@@ -1,5 +1,5 @@
-// The Rust originals are the frozen policy: flatten name,value in stored order,
-// preserve OS encoded bytes, never sort or decode Unicode.
+// The frozen policy: flatten name,value in stored order, preserve OS encoded
+// bytes, never sort or decode Unicode.
 // Lower/Routes.jet:706-749 requires compact nested [U8]: every header is
 // [len,cap,data], inner stride 1 and outer stride 24. Each result owns
 // independent buffers (including when the logical table changes).
@@ -50,8 +50,8 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
     }
 }
 
-// This pack's OS seed is Linux x86-64. Rust's non-Windows byte-vector branch
-// compares unsigned encoded bytes, case-sensitively, including invalid UTF-8.
+// This pack's OS seed is Linux x86-64. Its byte-vector comparison compares
+// unsigned encoded bytes, case-sensitively, including invalid UTF-8.
 // Do NOT use String comparison/normalization or ASCII folding here. Windows
 // instead uses WTF-8 -> UTF-16 + CompareStringOrdinal(ignore_case=1), with an
 // ordinal UTF-16 fallback on failure/oversize; that is not this Unix OS seed.

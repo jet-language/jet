@@ -324,11 +324,10 @@ scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never
     -(source.len() + 1)
 }
 
-// The index after one `{…}` inside a plain string, as Rust's string lexer
-// reads it: an interpolation skips nested quoted text, raw backtick fences and
-// nested braces; a `\$` `{…}` template payload only balances braces. An
-// interpolation left open at the line end returns that line end, so the
-// string scan reports it unclosed there.
+// The index after one `{…}` inside a plain string: an interpolation skips
+// nested quoted text, raw backtick fences and nested braces; a `\$` `{…}`
+// template payload only balances braces. An interpolation left open at the line
+// end returns that line end, so the string scan reports it unclosed there.
 scan_plain_interpolation_end: fn(source: [U8], open: Int) -> Int Never! {
     j := open + 1
     depth := 1

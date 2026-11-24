@@ -252,9 +252,8 @@ jet_cli_receipt_claim_of: fn(verb: String, identity: [U8], inputs: [JetDriverRun
     JetDriverRunReceiptClaim{verb: verb, key: receipt_crypto.sha256(framed).hex(), inputs: unique}
 }
 
-// Rust `receipt_secret_values`: the non-empty values of secret-named
-// environment variables and argv options, longest first, so redaction never
-// leaves the tail of a longer secret behind.
+// The non-empty values of secret-named environment variables and argv options,
+// longest first, so redaction never leaves the tail of a longer secret behind.
 jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
     values := [String]{}
     names: cli_sys.vars() ?? [String]{}

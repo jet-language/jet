@@ -237,10 +237,7 @@ ir_opt_entry_site: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String]
 // call's result and the drops after the call; Else the call through `last`.
 ir_opt_entry_splice: fn(f: ^IRFunction, caller: IRFunction, guard: IRFunction, at: Int, last: Int) Never! {
     line: caller.code_line[at]
-    map := [Int]{}
-    loop slot in 0..<guard.slot_type.len() {
-        map.push(if slot < guard.param_count -> caller.args[caller.b[at] + slot] else -> ir_slot(f, guard.slot_type[slot], IRSlotKind.Temp, -1, 0))
-    }
+    map: loop slot in 0..<guard.slot_type.len() -> if slot < guard.param_count -> caller.args[caller.b[at] + slot] else -> ir_slot(f, guard.slot_type[slot], IRSlotKind.Temp, -1, 0)
     // The head's slots are some of the guarded function's own.
     f.frame_bound = ir_frame_bound_add(f.frame_bound, guard.frame_bound)
     returning: guard.op.len() - 2

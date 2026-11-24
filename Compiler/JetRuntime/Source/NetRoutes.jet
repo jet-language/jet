@@ -1,8 +1,6 @@
 // Native providers for Core.net's private TCP leaves. Stream64/Listener8 own
 // FD72, Socket56 is borrowed, and error results own the canonical NetError
-// carrier. The Rust original is the semantic source; no Rust Box/std socket
-// layout is read here. Nonblocking syscalls use HostSockets and the shared
-// native poller.
+// carrier. Nonblocking syscalls use HostSockets and the shared native poller.
 
 // musl's inet_pton over the NUL-terminated `text`: 1 when it is the family's
 // strict form (AF_INET 2: the dotted quad, no leading zeros; AF_INET6 10: the
@@ -661,7 +659,7 @@ net_route_socket_address: fn(holder: I64, listener: Bool, peer: Bool, output: I6
     thread_zero(scratch, I64{32})
     address: jet_rt_alloc(I64{56}, I64{8})
     state: if listener -> jet_socket_listener_fd_raw(holder) else -> jet_socket_stream_fd_raw(holder)
-    // Logical close keeps the descriptor alive. Rust's address getters still
+    // Logical close keeps the descriptor alive. The address getters still
     // query that descriptor, unlike read/write/option operations.
     fd_lock(state)
     facts: jet_rt_alloc(I64{128}, I64{8})

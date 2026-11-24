@@ -1,10 +1,9 @@
-// The Hangar engine's domain error carrier, ported from the `std::io::Error`
-// values the Rust Hangar engine returns. Each Rust `ErrorKind` that callers
-// branch on keeps its own variant; the message text is the Rust message
-// byte for byte. `Io` carries a Core boundary failure unchanged, so a
-// `NotFound` from the filesystem stays distinguishable from a Hangar fact.
-// Native CacheLease consumer APIs retain IOError! directly as Rust io::Result;
-// Hangar callers lift those failures through the canonical IO conversion.
+// The Hangar engine's domain error carrier. Each error kind that callers
+// branch on keeps its own variant, with its exact message text. `Io` carries a
+// Core boundary failure unchanged, so a `NotFound` from the filesystem stays
+// distinguishable from a Hangar fact. Native CacheLease consumer APIs return
+// IOError! directly; Hangar callers lift those failures through the canonical
+// IO conversion.
 
 #Error
 StoreError: enum {
@@ -19,8 +18,8 @@ StoreError: enum {
     LifecycleConflict(expected: String?, current: String?),
     Other(String),
 
-    // Rust `Lifecycle::CasConflict` (io kind AlreadyExists), recognized by
-    // external-root callers the way Rust downcasts it.
+    // A lifecycle compare-and-swap conflict (io kind AlreadyExists), which
+    // external-root callers recognize.
 
     message: fn(self) -> String Never! {
         if self == {
@@ -37,7 +36,6 @@ StoreError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::NotFound`.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
             .NotFound(_) -> true
@@ -49,7 +47,6 @@ StoreError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::AlreadyExists`.
     is_already_exists: fn(self) -> Bool Never! {
         if self == {
             .AlreadyExists(_) -> true
@@ -62,8 +59,7 @@ StoreError: enum {
         }
     }
 
-    // Rust `io::Error::new(error.kind(), text)`: keep the kind, replace the
-    // message.
+    // Keep the kind, replace the message.
     with_message: fn(self, text: String) -> StoreError Never! {
         if self == {
             .NotFound(_) -> StoreError.NotFound(text)
@@ -88,8 +84,8 @@ StoreError: enum {
 
 impl IOError -> StoreError { StoreError.IO(self) }
 
-// Rust `jet_pkg_model::Store::list_checked` returns `io::Error`; its
-// InvalidData facts keep their kind.
+// The checked store listing's I/O error; its InvalidData facts keep their
+// kind.
 impl HangarReadError -> StoreError {
     if self == {
         .IO(error) -> StoreError.IO(error)
@@ -97,8 +93,8 @@ impl HangarReadError -> StoreError {
     }
 }
 
-// Rust maps envelope hashing failures with `io::Error::other`.
+// An envelope hashing failure, as an other-kind I/O error.
 impl EnvelopeError -> StoreError { StoreError.Other(self.message()) }
 
-// Rust maps producer-plan failures with `io::Error::other`.
+// A producer-plan failure, as an other-kind I/O error.
 impl ProviderPlanFactsError -> StoreError { StoreError.Other(self.message()) }

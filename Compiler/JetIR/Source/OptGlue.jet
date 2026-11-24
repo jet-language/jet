@@ -41,10 +41,7 @@ ir_opt_glue_calls: fn(f: ^IRFunction, glue: [Int], light: [Bool]) Never! {
 // Per type row, whether its glue (`glue`, ir_opt_glue_table, in
 // `functions`) is light (ir_opt_glue_is_light).
 ir_opt_glue_light: fn(m: IRModule, functions: [IRFunction], glue: [Int]) -> [Bool] Never! {
-    light := [Bool]{}
-    loop id in glue {
-        light.push(id >= 0 && id < functions.len() && ir_opt_glue_is_light(m, functions[id]))
-    }
+    light: loop id in glue -> id >= 0 && id < functions.len() && ir_opt_glue_is_light(m, functions[id])
     light
 }
 

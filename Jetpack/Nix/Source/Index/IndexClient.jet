@@ -120,8 +120,7 @@ NixIndexClient: struct {
         Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline: offline, clock: NixIndexClock.System, transport: transport})
     }
 
-    // A signed client over an explicit transport and clock (the Rust test
-    // seam `for_test`).
+    // A signed client over an explicit transport and clock.
     with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
         parsed: nix_index_parse_endpoint(endpoint)
         key: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
@@ -507,7 +506,7 @@ NixIndexCachedManifest: struct {
 
 // The native transport: never following redirects and never changing the
 // configured scheme. Core's HTTP client has no destination-address policy,
-// so the Rust public-address and loopback-only pins are not enforced here.
+// so no public-address or loopback-only pin is enforced here.
 nix_index_native_transport: fn(endpoint: String) -> NixIndexTransport NixIndexError! {
     configured: nix_index_parse_network_url(endpoint)
     scheme: configured.scheme
@@ -601,7 +600,7 @@ nix_index_parse_index_port: fn(text: String) -> Int NixIndexError! {
     Ok(port)
 }
 
-// Rust `str::parse::<u64>`: ASCII digits with an optional leading `+`.
+// ASCII digits with an optional leading `+`.
 nix_index_parse_decimal: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+").bytes()
     if digits.len() == 0 -> return None

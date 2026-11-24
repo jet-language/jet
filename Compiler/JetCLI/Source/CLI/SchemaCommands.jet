@@ -58,7 +58,7 @@ jet_cli_schema_squash_host: fn(root: String, request: JetDriverCompileRequest?, 
     loop source_module in loaded.modules {
         loop item in source_module.program.items {
             if item == .Struct(definition) {
-                // Rust squash uses the legacy single-marker flag, not the
+                // Squash uses the legacy single-marker flag, not the
                 // full-build grouped-marker registry's broader predicate.
                 if !definition.is_published_schema -> next
                 snapshot := snapshot_from_struct(definition, version)
@@ -68,8 +68,8 @@ jet_cli_schema_squash_host: fn(root: String, request: JetDriverCompileRequest?, 
                         count += 1
                         out = "{out}  re-baselined `{definition.name}` to version {version} (squashed before {before})\n"
                     }
-                    // Rust deliberately does not turn individual failed
-                    // saves into reports; count only successfully saved rows.
+                    // Individual failed saves deliberately do not become
+                    // reports; count only successfully saved rows.
                     .Err(_) -> {}
                 }
             }

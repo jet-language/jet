@@ -3034,8 +3034,8 @@ sema_effect_module_calls: fn(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls
     calls := SemaEffectModuleCalls{caller_names: name_column_table(facts.len() /% 4), caller_slots: name_column(), caller_ends: [Int]{}, positions: [Int]{}, has_clock_intrinsic: false}
     slots := [Int]{}
     if facts.len() > 0 {
-        slots.try_reserve(facts.len()) ?? panic("reserve failed")
-        calls.positions.try_reserve(facts.len()) ?? panic("reserve failed")
+        slots.try_reserve(facts.len()) ?? ()
+        calls.positions.try_reserve(facts.len()) ?? ()
     }
     loop (position, fact) in facts {
         if !calls.has_clock_intrinsic && fact.callee == None && fact.detail == .Val(detail) && detail.intrinsic_api == .Val(api) && api.starts_with("Clock.") {
@@ -4788,8 +4788,8 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
     in_queue := [Bool]{}
     queue := [Int]{}
     if nodes.len() > 0 {
-        bits.try_reserve(nodes.len()) ?? panic("reserve failed")
-        in_queue.try_reserve(nodes.len()) ?? panic("reserve failed")
+        bits.try_reserve(nodes.len()) ?? ()
+        in_queue.try_reserve(nodes.len()) ?? ()
     }
     loop (index, node) in nodes {
         mask := 0
@@ -4870,7 +4870,7 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
     ordered_masks := loop entry in ordered -> entry.mask
     ordered_names := loop entry in ordered -> entry.name
     solved := [[String]]{}
-    if nodes.len() > 0 -> solved.try_reserve(nodes.len()) ?? panic("reserve failed")
+    if nodes.len() > 0 -> solved.try_reserve(nodes.len()) ?? ()
     by_mask := [Int:Int]{}
     unique_rows := [[String]]{}
     loop mask in bits {
@@ -6749,7 +6749,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, source_indices[module_index], symbols, tables)
     }
     dyn_impl_lists := [[String]]{}
-    if tables.dyn_lists.len() > 0 -> dyn_impl_lists.try_reserve(tables.dyn_lists.len()) ?? panic("reserve failed")
+    if tables.dyn_lists.len() > 0 -> dyn_impl_lists.try_reserve(tables.dyn_lists.len()) ?? ()
     loop list in tables.dyn_lists {
         dyn_impl_lists.push(sema_effect_set_of(list))
     }
@@ -7572,7 +7572,7 @@ sema_effect_collect_one: fn(nodes: ^[SemaEffectNode], node_index: Int, function:
 sema_effect_modules_have_unsafe: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], calls: SemaEffectCallIndex) -> [Bool] Never! {
     has_unsafe_keys: calls.unsafe_name_texts.len() > 0
     out := [Bool]{}
-    if inputs.len() > 0 -> out.try_reserve(inputs.len()) ?? panic("reserve failed")
+    if inputs.len() > 0 -> out.try_reserve(inputs.len()) ?? ()
     loop module_row in inputs {
         found := false
         loop site in modules[module_row.module_index].call_facts {

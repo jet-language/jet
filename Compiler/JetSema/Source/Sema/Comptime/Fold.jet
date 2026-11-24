@@ -514,10 +514,7 @@ sema_comptime_fold_key_text: fn(key: TComptimeKey) -> String Never! {
 
 // The field part of a tuple or struct key's text.
 sema_comptime_fold_key_fields: fn(fields: [TComptimeKeyField]) -> String Never! {
-    parts := [String]{}
-    loop field in fields {
-        parts.push("{field.name.bytes().len()}:{field.name}{sema_comptime_fold_key_text(field.key)}")
-    }
+    parts: loop field in fields -> "{field.name.bytes().len()}:{field.name}{sema_comptime_fold_key_text(field.key)}"
     "{fields.len()}({parts.join("")})"
 }
 

@@ -1053,10 +1053,7 @@ sema_derive_field_payload_owner: fn(expansion: SemaDeriveExpansion, binding: Str
 sema_derive_expand_pattern: fn(expansion: ^SemaDeriveExpansion, pattern: Pattern, subject: Expr?) -> Pattern Never! {
     if pattern == {
         .Or(alternatives, span) -> {
-            expanded := [Pattern]{}
-            loop alternative in alternatives {
-                expanded.push(sema_derive_expand_pattern(expansion, alternative, None))
-            }
+            expanded: loop alternative in alternatives -> sema_derive_expand_pattern(expansion, alternative, None)
             Pattern.Or{alternatives: expanded, span: span}
         }
         .StrMatch(parts, span) -> Pattern.StrMatch{parts: sema_derive_expand_str_match_parts(expansion, parts), span: span}
@@ -1160,18 +1157,12 @@ sema_derive_expand_call_args: fn(expansion: ^SemaDeriveExpansion, args: [CallArg
 }
 
 sema_derive_expand_fields: fn(expansion: ^SemaDeriveExpansion, fields: [ExprField]) -> [ExprField] Never! {
-    expanded := [ExprField]{}
-    loop field in fields {
-        expanded.push(ExprField{name: field.name, name_span: field.name_span, value: sema_derive_expand_expr(expansion, field.value)})
-    }
+    expanded: loop field in fields -> ExprField{name: field.name, name_span: field.name_span, value: sema_derive_expand_expr(expansion, field.value)}
     expanded
 }
 
 sema_derive_expand_pairs: fn(expansion: ^SemaDeriveExpansion, entries: [ExprPair]) -> [ExprPair] Never! {
-    expanded := [ExprPair]{}
-    loop entry in entries {
-        expanded.push(ExprPair{key: sema_derive_expand_expr(expansion, entry.key), value: sema_derive_expand_expr(expansion, entry.value)})
-    }
+    expanded: loop entry in entries -> ExprPair{key: sema_derive_expand_expr(expansion, entry.key), value: sema_derive_expand_expr(expansion, entry.value)}
     expanded
 }
 
@@ -1323,10 +1314,7 @@ sema_derive_expand_expr_node: fn(expansion: ^SemaDeriveExpansion, expression: Ex
         }
         .If(cond, then_body, then_value, else_body, else_value, span, node) -> return Expr.If{cond: sema_derive_expand_expr(expansion, cond), then_body: sema_derive_expand_stmts(expansion, then_body), then_value: sema_derive_expand_expr(expansion, then_value), else_body: sema_derive_expand_stmts(expansion, else_body), else_value: sema_derive_expand_expr(expansion, else_value), span: span, id: node}
         .TupleLit(fields, span, ty, node) -> {
-            expanded := [TupleField]{}
-            loop field in fields {
-                expanded.push(TupleField{name: field.name, value: sema_derive_expand_expr(expansion, field.value)})
-            }
+            expanded: loop field in fields -> TupleField{name: field.name, value: sema_derive_expand_expr(expansion, field.value)}
             return Expr.TupleLit{fields: expanded, span: span, ty: ty, id: node}
         }
         .Lambda(lambda, node) -> return Expr.Lambda{lambda: sema_derive_expand_lambda(expansion, lambda), id: node}
@@ -1346,10 +1334,7 @@ sema_derive_expand_expr_node: fn(expansion: ^SemaDeriveExpansion, expression: Ex
         .Paren(value, span, node) -> return Expr.Paren{value: sema_derive_expand_expr(expansion, value), span: span, id: node}
         .Pipe(head, steps, span, node) -> {
             expanded_head: sema_derive_expand_expr(expansion, head)
-            expanded := [PipeStep]{}
-            loop step in steps {
-                expanded.push(PipeStep{name: step.name, value: sema_derive_expand_expr(expansion, step.value), reads: step.reads, span: step.span})
-            }
+            expanded: loop step in steps -> PipeStep{name: step.name, value: sema_derive_expand_expr(expansion, step.value), reads: step.reads, span: step.span}
             return Expr.Pipe{head: expanded_head, steps: expanded, span: span, id: node}
         }
         .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .TypeValue(_, _, _) -> {}
@@ -1658,10 +1643,7 @@ sema_derive_expand_stmt: fn(expansion: ^SemaDeriveExpansion, stmt: Stmt) -> Stmt
         .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: cond.copy(), cond_span: cond_span, then_body: sema_derive_expand_stmts(expansion, then_body), else_body: sema_derive_expand_optional_body(expansion, else_body), span: span, selected_then: selected_then.copy()}
         .ComptimeBlock(body, is_template_loop, span) -> Stmt.ComptimeBlock{body: sema_derive_expand_stmts(expansion, body), is_template_loop: is_template_loop, span: span}
         .ContextBlock(fields, body, span) -> {
-            expanded := [ContextField]{}
-            loop field in fields {
-                expanded.push(ContextField{name: field.name, value: sema_derive_expand_expr(expansion, field.value), span: field.span})
-            }
+            expanded: loop field in fields -> ContextField{name: field.name, value: sema_derive_expand_expr(expansion, field.value), span: field.span}
             Stmt.ContextBlock{fields: expanded, body: sema_derive_expand_stmts(expansion, body), span: span}
         }
         .Live(body, span) -> Stmt.Live{body: sema_derive_expand_stmts(expansion, body), span: span}
@@ -1857,10 +1839,7 @@ sema_derive_expand_item: fn(expansion: ^SemaDeriveExpansion, item: Item) -> Item
                     .Unit -> VariantPayload.Unit
                     .Single(ty, span) -> VariantPayload.Single{ty: sema_derive_expand_type(expansion, ty), span: span}
                     .Named(fields) -> {
-                        expanded_fields := [VariantField]{}
-                        loop field in fields {
-                            expanded_fields.push(VariantField{name: sema_derive_expand_name(expansion, field.name, field.name_span), name_span: field.name_span, ty: sema_derive_expand_type(expansion, field.ty), ty_span: field.ty_span})
-                        }
+                        expanded_fields: loop field in fields -> VariantField{name: sema_derive_expand_name(expansion, field.name, field.name_span), name_span: field.name_span, ty: sema_derive_expand_type(expansion, field.ty), ty_span: field.ty_span}
                         VariantPayload.Named{fields: expanded_fields}
                     }
                 }
@@ -2400,10 +2379,7 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
             .Unit -> CtValue.Enum{type_name: "CasePayload", variant: "Unit", args: [CtEnumArg]{}}
             .Single(payload_type, _) -> CtValue.Enum{type_name: "CasePayload", variant: "Single", args: [CtEnumArg]{CtEnumArg{label: None, value: sema_derive_type_id(sema_derive_type_text(payload_type))}}}
             .Named(named) -> {
-                fields := [CtValue]{}
-                loop field in named {
-                    fields.push(sema_derive_field_info(field.name, field.ty, definition.is_pub, None))
-                }
+                fields: loop field in named -> sema_derive_field_info(field.name, field.ty, definition.is_pub, None)
                 CtValue.Enum{type_name: "CasePayload", variant: "Named", args: [CtEnumArg]{CtEnumArg{label: None, value: CtValue.List{values: fields}}}}
             }
         }
@@ -2450,31 +2426,19 @@ sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: 
         .Map(key, key_span, value) -> Type.Map{key: sema_derive_replace_provider_type(key, type_param, owner_type), key_span: key_span.copy(), value: sema_derive_replace_provider_type(value, type_param, owner_type)}
         .Result(ok, err) -> Type.Result{ok: sema_derive_replace_provider_type(ok, type_param, owner_type), err: sema_derive_replace_provider_type(err, type_param, owner_type)}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            replaced := [Type]{}
-            loop param in params {
-                replaced.push(sema_derive_replace_provider_type(param, type_param, owner_type))
-            }
+            replaced: loop param in params -> sema_derive_replace_provider_type(param, type_param, owner_type)
             Type.Fn{params: replaced, ret: ret.map(fn(value) { sema_derive_replace_provider_type(value, type_param, owner_type) }), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
-            replaced := [Type]{}
-            loop arg in args {
-                replaced.push(sema_derive_replace_provider_type(arg, type_param, owner_type))
-            }
+            replaced: loop arg in args -> sema_derive_replace_provider_type(arg, type_param, owner_type)
             Type.Apply{name: name, args: replaced}
         }
         .Union(members) -> {
-            replaced := [Type]{}
-            loop member in members {
-                replaced.push(sema_derive_replace_provider_type(member, type_param, owner_type))
-            }
+            replaced: loop member in members -> sema_derive_replace_provider_type(member, type_param, owner_type)
             Type.Union{members: replaced}
         }
         .Tuple(fields) -> {
-            replaced := [TypeTupleField]{}
-            loop field in fields {
-                replaced.push(TypeTupleField{name: field.name, ty: sema_derive_replace_provider_type(field.ty, type_param, owner_type)})
-            }
+            replaced: loop field in fields -> TypeTupleField{name: field.name, ty: sema_derive_replace_provider_type(field.ty, type_param, owner_type)}
             Type.Tuple{fields: replaced}
         }
         // copy: other type kinds are unchanged, but `ty` stays in the provider signature (the

@@ -739,10 +739,9 @@ collection_row_takes_argument: fn(row: CollectionOperationRow, index: Int) -> Bo
     }
 }
 
-// E0106: the reserved built-in type vocabulary, frozen at the Rust-removal
-// cutover from the bootstrap's Collections.RESERVED_TYPES; this table is its
-// only home. Source-owned Core declarations are admitted by registration, not
-// by weakening this predicate for users or for unrelated Core modules.
+// E0106: the reserved built-in type vocabulary; this table is its only home.
+// Source-owned Core declarations are admitted by registration, not by
+// weakening this predicate for users or for unrelated Core modules.
 SEMA_RESERVED_TYPES: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Solver", "Unit"}
 
 sema_reserved_type_name: fn(name: String) -> Bool Never! { SEMA_RESERVED_TYPES.contains(name) }
@@ -1030,10 +1029,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
         .Counts -> Val(Type.Map{key: element, key_span: None, value: Type.Int})
         .Unzipped -> if element == {
             .Tuple(fields) -> {
-                output := [TypeTupleField]{}
-                loop field in fields {
-                    output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
-                }
+                output: loop field in fields -> TypeTupleField{name: field.name, ty: Type.List{element: field.ty}}
                 Val(Type.Tuple{fields: output})
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None

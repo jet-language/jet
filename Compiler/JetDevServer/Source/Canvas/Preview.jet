@@ -804,10 +804,7 @@ CanvasPreviewSession: struct<T> {
     to_json: fn(self) -> String {
         snapshots := [String]{}
         loop snapshot in self.snapshots() -> snapshots.push(snapshot.to_json())
-        selected := [String]{}
-        loop name in sorted_keys(self.registry.selected) {
-            selected.push("\"{foundation_json_escape(name)}\"")
-        }
+        selected: loop name in sorted_keys(self.registry.selected) -> "\"{foundation_json_escape(name)}\""
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"session_id\":\"{foundation_json_escape(self.id)}\",\"closed\":{self.closed},\"selected\":[{selected.join(",")}],\"resident_bytes\":{self.resident_bytes},\"sequence\":{self.sequence},\"previews\":[{snapshots.join(",")}]}}"
     }
 
@@ -944,10 +941,7 @@ CanvasPreviewRegistry: struct {
             viewport: descriptor.viewport
             descriptors.push("{{\"name\":\"{foundation_json_escape(descriptor.name)}\",\"kind\":\"{descriptor.kind.as_str()}\",\"callback\":\"{foundation_json_escape(descriptor.callback.id)}\",\"source\":{descriptor.source.to_json()},\"viewport\":{{\"device\":\"{canvas_preview_device_text(viewport.device)}\",\"width\":{viewport.width},\"height\":{viewport.height},\"scale\":{viewport.scale}}},\"selected\":{self.selected.has_key(descriptor.name)}}}")
         }
-        selected := [String]{}
-        loop name in sorted_keys(self.selected) {
-            selected.push("\"{foundation_json_escape(name)}\"")
-        }
+        selected: loop name in sorted_keys(self.selected) -> "\"{foundation_json_escape(name)}\""
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"selected\":[{selected.join(",")}],\"contexts\":{self.contexts.len()},\"descriptors\":[{descriptors.join(",")}]}}"
     }
 }

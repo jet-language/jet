@@ -1,20 +1,19 @@
 // Pure binder metadata, JavaScript inference, and Python conversion. All source searches
 // use byte offsets; no filesystem or source execution.
 
-// Rust `collect_foreign_body` result; named row avoids Rust-emit tuple JetShow #4357.
+// A collected foreign body; a named row, not a tuple (#4357).
 JetCLIImportCollectedBody: struct {
     body: [JetCLIImportBodyLine],
     end: Int,
 }
 
-// Rust `JavaScriptDocs` (1681-1686). Map ordering is immaterial: only keyed lookup.
+// JavaScript doc types. Map ordering is immaterial: only keyed lookup.
 JetCLIImportJavaScriptDocs: struct {
     params: [String:String],
     result: String?,
     error: String?,
 }
 
-// Rust `foreign_binder_root` (1529-1536).
 jet_cli_import_foreign_binder_root: fn(language: String) -> String Never! {
     if language == {
         "csharp" -> "cs"
@@ -23,7 +22,6 @@ jet_cli_import_foreign_binder_root: fn(language: String) -> String Never! {
     }
 }
 
-// Rust `collect_foreign_body` (1537-1569).
 jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetCLIImportCollectedBody JetCLIImportTextError! {
     if open_line < 0 || open_line >= lines.len() {
         return Err(jet_cli_import_text_error("function body is missing"))
@@ -47,7 +45,6 @@ jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetC
     Err(jet_cli_import_text_error("function body has unmatched braces"))
 }
 
-// Rust `foreign_ignored_line` (1639-1650).
 jet_cli_import_foreign_ignored_line: fn(language: String, line: String) -> Bool Never! {
     if line == "{{" || line == "}}" || line == ");" || line == ")" -> return true
     if language == {
@@ -58,7 +55,6 @@ jet_cli_import_foreign_ignored_line: fn(language: String, line: String) -> Bool 
     }
 }
 
-// Rust `foreign_import_line` (1652-1660).
 jet_cli_import_foreign_import_line: fn(language: String, line: String) -> Bool Never! {
     if language == {
         "java" -> line.starts_with("import ")
@@ -69,7 +65,6 @@ jet_cli_import_foreign_import_line: fn(language: String, line: String) -> Bool N
     }
 }
 
-// Rust `foreign_supported_import` (1662-1668).
 jet_cli_import_foreign_supported_import: fn(language: String, line: String) -> Bool Never! {
     if language == {
         "csharp" -> line == "using System;"
@@ -78,7 +73,6 @@ jet_cli_import_foreign_supported_import: fn(language: String, line: String) -> B
     }
 }
 
-// Rust `foreign_structural_line` (1670-1680).
 jet_cli_import_foreign_structural_line: fn(line: String) -> Bool Never! {
     trimmed: jet_cli_import_trim_edge_bytes(line, U8{123}, U8{125})
     structural: [String]{"package", "namespace", "class", "interface", "struct", "enum", "record"}
@@ -97,7 +91,7 @@ jet_cli_import_trim_edge_bytes: fn(raw: String, first: U8, second: U8) -> String
     jet_cli_import_byte_slice(bytes, start, end)
 }
 
-// Rust `javascript_doc_types` (1688-1740). Scan comment block forward after locating it.
+// JavaScript doc types. Scan comment block forward after locating it.
 jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImportJavaScriptDocs Never! {
     cursor := at
     loop cursor > 0 {
@@ -141,7 +135,6 @@ jet_cli_import_javascript_doc_types: fn(lines: [String], at: Int) -> JetCLIImpor
     docs
 }
 
-// Rust `parse_javascript_param_doc` (1742-1748).
 jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> {ty: String, name: String}? Never! {
     text: raw.trim().copy()
     if !text.starts_with("{{") -> return None
@@ -154,7 +147,6 @@ jet_cli_import_parse_javascript_param_doc: fn(raw: String) -> {ty: String, name:
     Val({ty: ty, name: name})
 }
 
-// Rust `map_javascript_doc_type` (1750-1761).
 jet_cli_import_map_javascript_doc_type: fn(raw: String) -> String JetCLIImportTextError! {
     ty: raw.trim().copy()
     if ty == {
@@ -167,7 +159,7 @@ jet_cli_import_map_javascript_doc_type: fn(raw: String) -> String JetCLIImportTe
     }
 }
 
-// Rust `infer_javascript_types` (1763-1812). Mutate in declaration order, including before errors.
+// Infer JavaScript types. Mutate in declaration order, including before errors.
 jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs: JetCLIImportJavaScriptDocs) JetCLIImportTextError! {
     if docs.error == .Val(error) -> return Err(jet_cli_import_text_error(error.copy()))
     body_bytes := [U8]{}
@@ -221,7 +213,6 @@ jet_cli_import_infer_javascript_types: fn(function: ^JetCLIImportFunction, docs:
     }
 }
 
-// Rust `infer_javascript_parameter_type` (1814-1832).
 jet_cli_import_infer_javascript_parameter_type: fn(body: String, name: String) -> String? Never! {
     pieces: body.split("+").to_list()
     // Same any(other != piece && quote(other)) contract, linear rather than nested split.
@@ -248,7 +239,7 @@ jet_cli_import_infer_javascript_parameter_type: fn(body: String, name: String) -
     None
 }
 
-// Rust `contains_identifier` (1834-1837), ASCII tokens only.
+// Whether `text` contains the identifier, ASCII tokens only.
 jet_cli_import_contains_identifier: fn(text: String, wanted: String) -> Bool Never! {
     bytes: text.bytes()
     wanted_bytes: wanted.bytes()
@@ -264,7 +255,6 @@ jet_cli_import_contains_identifier: fn(text: String, wanted: String) -> Bool Nev
     false
 }
 
-// Rust `infer_javascript_value_type` (1839-1913).
 jet_cli_import_infer_javascript_value_type: fn(raw: String, known: [String:String]) -> String? Never! {
     expression: (jet_cli_import_trim_suffix(raw.trim().copy(), ";").trim().copy()).replace("!==", "!=").replace("===", "==")
     if known.get(expression) == .Val(ty) -> return Val(ty.copy())
@@ -327,12 +317,11 @@ jet_cli_import_infer_javascript_value_type: fn(raw: String, known: [String:Strin
     None
 }
 
-// Rust `contains_quote` (1915-1917).
 jet_cli_import_contains_quote: fn(value: String) -> Bool Never! {
     value.contains("\"") || value.contains("'")
 }
 
-// Rust `enterprise_unit_name` (1919-1960). Path text follows POSIX Path.file_stem.
+// The enterprise unit name. Path text follows the POSIX file stem.
 jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: String) -> String? Never! {
     if language == "ts" || language == "js" {
         // Path components ignore repeated separators and terminal '.', but '..' has no stem.
@@ -381,12 +370,10 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
     None
 }
 
-// Rust `header` (1961-1963).
 jet_cli_import_header: fn(language: String) -> String Never! {
     "// Generated by jet import {language}. Editable Jet source.\n"
 }
 
-// Rust `binder_header` (1964-1968).
 jet_cli_import_binder_header: fn(language: String) -> String Never! {
     "// Prepared by jet import {language}. Binder-only/manual migration; semantic source conversion is unavailable.\n"
 }
@@ -408,7 +395,6 @@ jet_cli_import_first_ascii_identifier_part: fn(raw: String) -> String Never! {
     jet_cli_import_byte_slice(bytes, 0, end)
 }
 
-// Rust `pascal_library_name` (1970-1987).
 jet_cli_import_pascal_library_name: fn(raw: String) -> String? Never! {
     loop raw_line in raw.lines() {
         line: raw_line.trim_start().copy()
@@ -422,7 +408,6 @@ jet_cli_import_pascal_library_name: fn(raw: String) -> String? Never! {
     None
 }
 
-// Rust `ada_package_name` (1989-2010).
 jet_cli_import_ada_package_name: fn(raw: String) -> String? Never! {
     loop raw_line in raw.lines() {
         line: raw_line.trim_start().copy()
@@ -438,7 +423,7 @@ jet_cli_import_ada_package_name: fn(raw: String) -> String? Never! {
     None
 }
 
-// Rust `parse_header` (2011-2047); signature returned as shared Function with empty body.
+// Parse a header; the signature is returned as a shared Function with an empty body.
 jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImportTextError! {
     if !line.starts_with("def ") || !line.ends_with(":") {
         return Err(jet_cli_import_text_error("expected def name(args) -> Type:"))
@@ -472,7 +457,6 @@ jet_cli_import_parse_header: fn(line: String) -> JetCLIImportFunction JetCLIImpo
     Ok(JetCLIImportFunction{name: name, params: params, result: result, body: []})
 }
 
-// Rust `map_type` (2049-2058).
 jet_cli_import_map_type: fn(ty: String) -> String JetCLIImportTextError! {
     if ty == {
         "int" -> Ok("Int")
@@ -484,7 +468,6 @@ jet_cli_import_map_type: fn(ty: String) -> String JetCLIImportTextError! {
     }
 }
 
-// Rust `translate_body` (2079-2161).
 jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] JetCLIImportBodyError! {
     if function.body.is_empty() {
         return Err(JetCLIImportBodyError{line: 1, message: "function body is empty"})
@@ -502,7 +485,7 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
         }
         if width == base -> previous = row.line
     }
-    // #4366: membership map avoids Set.add's missing Bool result in Rust emit.
+    // #4366: a membership map, since Set.add has no Bool result.
     bindings := [String:Bool]{}
     output := [String]{}
     loop row in function.body {
@@ -544,7 +527,7 @@ jet_cli_import_translate_body: fn(function: JetCLIImportFunction) -> [String] Je
     Ok(output)
 }
 
-// Rust `render_function` (2333-2356). One output buffer, no repeated whole-output copies.
+// Render one function. One output buffer, no repeated whole-output copies.
 jet_cli_import_render_function: fn(marker: String, function: JetCLIImportFunction, body: [String]) -> String Never! {
     output := [U8]{}
     loop byte in "{marker}{jet_cli_import_canonical_identifier(function.name)}: fn(".bytes() {
@@ -574,7 +557,7 @@ jet_cli_import_render_function: fn(marker: String, function: JetCLIImportFunctio
     String.from_bytes(output) ?? panic("rendered function UTF-8")
 }
 
-// Rust `shorten` (3466-3472), 48 Unicode scalars, never bytes.
+// Shorten to 48 Unicode scalars, never bytes.
 jet_cli_import_shorten: fn(value: String) -> String Never! {
     if value.len() <= 48 -> return value.copy()
     "{value.slice(0, 48)}..."

@@ -331,7 +331,7 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     Ok(RegistryResponse{status: status, headers: headers, stderr: stderr})
 }
 
-// Rust `child.kill(); child.wait()` after an abandoned exchange.
+// Kill and reap the child after an abandoned exchange.
 image_abandon_registry_child: fn(child: ^ProcessChild) -[Exec, Time.Wait]> {
     image_kill_quiet(child)
     _: child.wait() ?? return
@@ -381,7 +381,7 @@ image_resolve_registry_location: fn(origin: String, location: String) -> String 
 
 image_bounded_text: fn(text: String) -> String Never! { image_bounded_bytes_text(text.bytes()) }
 
-// Rust `bounded_text`: at most 4096 bytes, lossily decoded and trimmed.
+// At most 4096 bytes, lossily decoded and trimmed.
 image_bounded_bytes_text: fn(bytes: [U8]) -> String Never! {
     end: if bytes.len() < IMAGE_MAX_REGISTRY_DETAIL_BYTES -> bytes.len() else -> IMAGE_MAX_REGISTRY_DETAIL_BYTES
     String.from_bytes_lossy(bytes[0..<end]).trim()

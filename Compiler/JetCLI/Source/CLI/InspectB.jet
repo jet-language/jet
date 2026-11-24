@@ -160,7 +160,7 @@ JET_CLI_RESERVED_SIGILS: [JetCLIReservedEntry]{
     {spelling: "...", kind: "sigil", note: "spread elements"},
 }
 
-// Rust `{:<width}`: `value` padded with spaces to `width` characters.
+// `value` padded with spaces to `width` characters.
 jet_cli_inspect_pad: fn(value: String, width: Int) -> String Never! {
     out := value
     count := 0
@@ -269,7 +269,6 @@ jet_cli_digest_list: fn(values: [String]) -> String Never! {
     rows.join("\n")
 }
 
-// Rust `split_whitespace().join(" ")`.
 jet_cli_digest_one_line: fn(value: String) -> String Never! {
     words := [String]{}
     bytes: value.bytes()
@@ -435,7 +434,7 @@ jet_cli_llm_digest: fn() -> String Never! {
     "{jet_cli_inspect_trim_end(out)}\n"
 }
 
-// Rust `str.trim_end` over ASCII whitespace.
+// `text` without trailing ASCII whitespace.
 jet_cli_inspect_trim_end: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := bytes.len()
@@ -447,7 +446,7 @@ jet_cli_inspect_trim_end: fn(text: String) -> String Never! {
     jet_cli_inspect_slice(text, 0, end)
 }
 
-// Rust `str` ordering: bytewise lexicographic.
+// Bytewise lexicographic.
 jet_cli_inspect_less: fn(left: String, right: String) -> Bool Never! {
     a: left.bytes()
     b: right.bytes()
@@ -739,8 +738,8 @@ jet_cli_external_run: fn(bin: String, args: [String]) -[Exec, Time.Wait]> JetDri
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
 
-// Rust `io.Error` Display text of a host I/O failure: the runtime records
-// it as the context's `cause` (CoreLib `IOContext`).
+// The display text of a host I/O failure: the runtime records it as the
+// context's `cause` (CoreLib `IOContext`).
 jet_cli_io_error_text: fn(failure: IOError) -> String Never! {
     cause: if failure == {
         .InvalidInput(context) -> context.cause
@@ -761,9 +760,9 @@ jet_cli_io_error_text: fn(failure: IOError) -> String Never! {
 
 // ---------------------------------------------------------------------------
 // Command fronts whose semantic back end has no Jet port yet. Each validates
-// its input exactly as the Rust host does (same reports, streams, and exit
-// statuses), then refuses with E2104 at the first step that needs the
-// missing subsystem, never guessing its result.
+// its input (same reports, streams, and exit statuses), then refuses with E2104
+// at the first step that needs the missing subsystem, never guessing its
+// result.
 
 // The first word that is not a flag.
 jet_cli_inspect_first_positional: fn(args: [String]) -> String? Never! {

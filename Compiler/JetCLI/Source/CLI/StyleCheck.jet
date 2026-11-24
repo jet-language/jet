@@ -155,10 +155,7 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
 
 // Every non-blank line of `text` one level (4 spaces) deeper.
 jet_cli_style_indent: fn(text: String) -> String Never! {
-    shifted := [String]{}
-    loop line in text.split("\n").to_list() {
-        shifted.push(if line.trim() == "" -> "" else -> "    {line}")
-    }
+    shifted: loop line in text.split("\n").to_list() -> if line.trim() == "" -> "" else -> "    {line}"
     shifted.join("\n")
 }
 

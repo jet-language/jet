@@ -14,7 +14,7 @@ use {
 
 JET_CLI_IMPORT_TODO_CODE: "JT0101"
 
-// Rust `Todo.diagnostic`: the registry row with its holes filled.
+// The registry row with its holes filled.
 jet_cli_import_todo_diagnostic: fn(todo: JetCLIImportTodo) -> Diagnostic Never! {
     row: diagnostic_registry_row(JET_CLI_IMPORT_TODO_CODE) ?? panic("JT0101 is not registered")
     what: row.what.replace("{{construct}}", todo.what).replace("{{source}}", todo.source)
@@ -32,7 +32,6 @@ jet_cli_import_output: fn(stdout: String, stderr: String, exit_code: Int) -> Jet
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
 }
 
-// Rust `usage_error`.
 jet_cli_import_usage_error: fn(refusal: JetCLIImportUsageError, json: Bool) -> JetDriverVerbOutput Never! {
     why: "source import arguments stay explicit"
     if json {
@@ -41,7 +40,6 @@ jet_cli_import_usage_error: fn(refusal: JetCLIImportUsageError, json: Bool) -> J
     jet_cli_import_output("", jet_cli_report(refusal.code, refusal.what, why, refusal.fix, false), JET_DRIVER_EXIT_USAGE)
 }
 
-// Rust `operation_error` (JT0198).
 jet_cli_import_operation_error: fn(what: String, why: String, json: Bool) -> JetDriverVerbOutput Never! {
     row: diagnostic_registry_row("JT0198") ?? panic("JT0198 is not registered")
     diagnostic: diagnostic_from_registry("JT0198", None, row.what.replace("{{operation}}", what), row.why.replace("{{reason}}", why), row.fix)
@@ -51,7 +49,6 @@ jet_cli_import_operation_error: fn(what: String, why: String, json: Bool) -> Jet
     jet_cli_import_output("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
 }
 
-// Rust `migration_source_conversion` / `migration_mode`.
 jet_cli_import_migration_source_conversion: fn(boundary: ForeignBoundaryContract) -> String Never! {
     if boundary.source_import -> "narrow-checked-subset" else -> "unavailable"
 }
@@ -64,7 +61,6 @@ jet_cli_import_migration_mode: fn(boundary: ForeignBoundaryContract) -> String N
     }
 }
 
-// Rust `migration_projection_value`.
 jet_cli_import_migration_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
         [JetCLIStatusField]{
@@ -76,13 +72,13 @@ jet_cli_import_migration_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue 
     )
 }
 
-// Rust `boundary_projection_value`: the canonical provenance rows.
+// The canonical provenance rows.
 jet_cli_import_boundary_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
     rows: loop field in plan.boundary.provenance_fields() -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(field.name)), jet_cli_status_field("value", jet_cli_status_text(field.value))})
     jet_cli_status_array(rows)
 }
 
-// Rust `report_value`; `report` is the same ordered value as one JSON line.
+// `report` is the ordered report value as one JSON line.
 jet_cli_import_report_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Never! {
     omissions := [JetCLIStatusValue]{}
     loop todo in plan.todos {
@@ -135,7 +131,7 @@ jet_cli_import_report: fn(plan: JetCLIImportPlan) -> String Never! {
     "{jet_cli_status_json(jet_cli_import_report_value(plan))}\n"
 }
 
-// Rust `attach_import_evidence`: the boundary carries its derivation and record.
+// The boundary carries its derivation and record.
 jet_cli_import_attach_evidence: fn(plan: ^JetCLIImportPlan) JetCLIImportPlanError! {
     if plan.evidence.derivations.records.len() == 0 {
         return Err(jet_cli_import_plan_error("source import evidence has no derivation"))
@@ -152,9 +148,8 @@ jet_cli_import_attach_evidence: fn(plan: ^JetCLIImportPlan) JetCLIImportPlanErro
     plan.boundary = boundary.move()
 }
 
-// Rust `persist_evidence_report_for_inputs`: the encoded report under
-// `.jet/evidence/<sha256>.json` of the selected project root, indexed as
-// protected evidence for the source digest.
+// The encoded report under `.jet/evidence/<sha256>.json` of the selected
+// project root, indexed as protected evidence for the source digest.
 jet_cli_import_persist_evidence: fn(report: EvidenceReport, target_inputs_sha256: String) -[FS, Env, Time]> JetCLIReadError! {
     report_id: report.identity.report_id
     if report_id == "" || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." {
@@ -177,8 +172,8 @@ JetCLIImportWrite: struct {
     contents: String,
 }
 
-// One generated file (or the report) against the editable target and the
-// stored baseline (Rust `apply_plan`'s write/conflict table).
+// One generated file (or the report) against the editable target and the stored
+// baseline.
 jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: String, contents: String, writes: ^[JetCLIImportWrite], conflicts: ^[String]) -[FS.Read]> Never! {
     existing: jet_cli_import_existing(target)
     prior: jet_cli_import_existing(baseline)
@@ -201,7 +196,6 @@ jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: Strin
     }
 }
 
-// Rust `apply_plan`.
 jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
     current := plan
     if mode != JetCLIImportMode.DryRun {
@@ -259,7 +253,7 @@ jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: B
     jet_cli_import_output(out, "", JET_DRIVER_EXIT_OK)
 }
 
-// Rust `run`: `raw` starts at the `import` word.
+// `raw` starts at the `import` word.
 jet_cli_import_run: fn(raw: [String], json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
     args: jet_cli_import_parse_args(raw) ?? return jet_cli_import_usage_error(err, json)
     language: jet_cli_import_canonical_language(args.language)

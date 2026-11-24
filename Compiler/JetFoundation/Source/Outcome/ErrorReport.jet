@@ -6,10 +6,10 @@ use {
     core.encoding.[EncodingError, EncodingErrorKind, EncodingLimits]
 }
 
-// The Rust strict reader's container depth: the 65th nested container is refused.
+// The strict reader's container depth: the 65th nested container is refused.
 JET_ERROR_REPORT_JSON_DEPTH: 64
 
-// The Rust original reports wire failures as the Rust error string.
+// Wire failures are reported as their error string.
 #Error
 JetErrorReportError: struct {
     message: String,
@@ -47,10 +47,7 @@ JetErrorDetails: struct {
     source_span: JetErrorSpan?{None},
 
     to_json: fn(self) -> String Never! {
-        fields := [String]{}
-        loop field in self.fields {
-            fields.push("{foundation_json_quote(field.name)}:{field.value}")
-        }
+        fields: loop field in self.fields -> "{foundation_json_quote(field.name)}:{field.value}"
         span: if self.source_span == {
             .Val(value) -> "{{\"start\":{value.start},\"end\":{value.end}}}"
             .None -> "null"
@@ -109,19 +106,16 @@ JetErrorReport: struct {
             fields.push("\"source_journey\":[{frames.join(",")}]")
         }
         if self.conversion_history.len() > 0 {
-            conversions := [String]{}
-            loop conversion in self.conversion_history {
-                conversions.push("{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}")
-            }
+            conversions: loop conversion in self.conversion_history -> "{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}"
             fields.push("\"conversion_history\":[{conversions.join(",")}]")
         }
         if self.details == .Val(details) -> fields.push("\"details\":{details.to_json()}")
         "{{{fields.join(",")}}}"
     }
 
-    // JetErrorReport.from_json: the Rust strict reader (duplicate keys
-    // refused, 64 containers, no byte ceiling, its refusal messages), then the
-    // typed decode, then the canonical round trip.
+    // JetErrorReport.from_json: the strict reader (duplicate keys refused, 64
+    // containers, no byte ceiling, its refusal messages), then the typed
+    // decode, then the canonical round trip.
     from_json: fn(text: String) -> JetErrorReport JetErrorReportError! {
         limits := EncodingLimits.safe()
         limits.max_depth = JET_ERROR_REPORT_JSON_DEPTH
@@ -140,8 +134,8 @@ JetErrorReport: struct {
     }
 }
 
-// Core's refusal in the Rust strict reader's words: a value missing at its
-// position (also at the end of input) is "expected a JSON value", and the 65th
+// Core's refusal in the strict reader's words: a value missing at its position
+// (also at the end of input) is "expected a JSON value", and the 65th
 // container is "nested too deeply".
 jet_error_report_json_reason: fn(error: EncodingError) -> String Never! {
     if error.kind == EncodingErrorKind.Truncated || error.reason.starts_with("expected a JSON value") {
@@ -198,7 +192,7 @@ jet_error_json_optional_array: fn(fields: [{key: String, value: Dyn}], name: Str
 
 jet_error_json_u32: fn(value: Dyn, name: String) -> Int JetErrorReportError! {
     number: foundation_json_integer(value) ?? return Err(jet_error_report_error("error report {name} is not an integer"))
-    // Rust's JSON Int is i64; wider tokens are not an integer.
+    // A JSON Int is 64-bit; wider tokens are not an integer.
     if number < -9223372036854775808 || number > 9223372036854775807 {
         return Err(jet_error_report_error("error report {name} is not an integer"))
     }
@@ -225,16 +219,13 @@ jet_error_conversion_from_json: fn(value: Dyn) -> JetErrorConversion JetErrorRep
 
 jet_error_details_from_json: fn(value: Dyn) -> JetErrorDetails JetErrorReportError! {
     fields: jet_error_json_object(value, "details")
-    field_values := [JetErrorField]{}
-    loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") {
-        field_values.push(JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)})
-    }
+    field_values: loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") -> JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)}
     span_value: jet_error_json_field(fields, "source_span")
     source_span: if span_value == {
         .Null -> None
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
             span: jet_error_json_object(span_value, "source span")
-            // The Rust original writes every usize but reads back only a u32.
+            // Every word-sized count is written, but only a u32 reads back.
             Val(JetErrorSpan{start: jet_error_json_u32(jet_error_json_field(span, "start"), "span start"), end: jet_error_json_u32(jet_error_json_field(span, "end"), "span end")})
         }
     }
@@ -262,22 +253,13 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(jet_error_report_error("error report cause is not null, an object, or an array"))
     }
     typed_identity: jet_error_json_optional_text(fields, "typed_identity")
-    context := [JetErrorContextFrame]{}
-    loop context_value in jet_error_json_optional_array(fields, "context_frames") {
-        context.push(jet_error_context_from_json(context_value))
-    }
+    context: loop context_value in jet_error_json_optional_array(fields, "context_frames") -> jet_error_context_from_json(context_value)
     origin: if jet_error_json_lookup(fields, "origin") == {
         .Val(origin_value) -> Val(jet_error_journey_from_json(origin_value))
         .None -> None
     }
-    journey := [JetErrorJourneyFrame]{}
-    loop journey_value in jet_error_json_optional_array(fields, "source_journey") {
-        journey.push(jet_error_journey_from_json(journey_value))
-    }
-    conversions := [JetErrorConversion]{}
-    loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") {
-        conversions.push(jet_error_conversion_from_json(conversion_value))
-    }
+    journey: loop journey_value in jet_error_json_optional_array(fields, "source_journey") -> jet_error_journey_from_json(journey_value)
+    conversions: loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") -> jet_error_conversion_from_json(conversion_value)
     details: if jet_error_json_lookup(fields, "details") == {
         .Val(details_value) -> Val(jet_error_details_from_json(details_value))
         .None -> None
@@ -286,9 +268,9 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
 }
 
 // `jet_error_json_encode_value`: protocol quoting (every Unicode control
-// escaped) and Rust f64 Display, in the object's own field order. A number
-// lexeme with a fraction or exponent is the Float the Rust reader read, so
-// `1.0` re-encodes as `1`; an integer lexeme stays exact.
+// escaped) and the wire Float form, in the object's own field order. A number
+// lexeme with a fraction or exponent is a Float, so `1.0` re-encodes as `1`;
+// an integer lexeme stays exact.
 jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"
@@ -312,10 +294,7 @@ jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
             "[{encoded.join(",")}]"
         }
         .Object(fields) -> {
-            encoded := [String]{}
-            loop entry in fields {
-                encoded.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
-            }
+            encoded: loop entry in fields -> "{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}"
             "{{{encoded.join(",")}}}"
         }
     }

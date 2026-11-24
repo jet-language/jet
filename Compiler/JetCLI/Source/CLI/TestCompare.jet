@@ -132,7 +132,7 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
 }
 
 // `canonical_dyn` keeps object insertion order. Keep the public Number/DateTime
-// carriers in the Rust canonical observation.
+// carriers in the canonical observation.
 jet_cli_comparison_canonical_data: fn(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"
@@ -231,10 +231,7 @@ jet_cli_comparison_parse: fn(input: String, relation_override: String?) -> JetCL
     cases: if cases_value == .Array(items) -> items else -> {
         return Err(jet_cli_comparison_error("record `cases` must be an array"))
     }
-    samples := [ComparisonSample]{}
-    loop (index, value) in cases {
-        samples.push(jet_cli_comparison_sample(value, index, seed, source, tool, target, relation))
-    }
+    samples: loop (index, value) in cases -> jet_cli_comparison_sample(value, index, seed, source, tool, target, relation)
     record := testing_compare_samples_with_discarded(relation, samples, discarded)
     if jet_cli_comparison_terminal(jet_cli_comparison_text(root, "status")) == .Val(status) {
         record.status = status
@@ -292,7 +289,7 @@ jet_cli_comparison_error_output: fn(message: String, json: Bool) -> JetDriverVer
 }
 
 // The host consumes a successful run for receipt/evidence recording, then
-// calls the renderer. On invalid input it returns the exact Rust output.
+// calls the renderer. On invalid input it returns the exact refusal output.
 JetCLIComparisonRead: enum {
     Ready(run: JetCLIComparisonRun),
     Failed(output: JetDriverVerbOutput),

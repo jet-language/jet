@@ -199,10 +199,7 @@ archive: fn(names: [String]) -> [String] {
 }
 
 lsp_test_labels: fn(result: Dyn) -> [String] Never! {
-    labels := [String]{}
-    loop item in lsp_test_rows(lsp_test_field(result, "items")) {
-        labels.push("{lsp_test_text(item, "label")}={lsp_test_int(item, "kind")}")
-    }
+    labels: loop item in lsp_test_rows(lsp_test_field(result, "items")) -> "{lsp_test_text(item, "label")}={lsp_test_int(item, "kind")}"
     labels
 }
 
@@ -344,17 +341,11 @@ Pixel: struct {
 }
 `,
     )
-    titles := [String]{}
-    loop action in lsp_test_action_rows(server, clean, 1) {
-        titles.push(lsp_test_text(action, "title"))
-    }
+    titles: loop action in lsp_test_action_rows(server, clean, 1) -> lsp_test_text(action, "title")
     assert_eq(titles, [String]{"Write the markers inside the declaration's body"})
     // A range that runs past the document's end covers the rest of it.
     past: "{{{lsp_test_text_document(clean)},\"range\":{{\"start\":{{\"line\":1,\"character\":0}},\"end\":{{\"line\":40,\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"
-    clamped := [String]{}
-    loop action in lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", past)) {
-        clamped.push(lsp_test_text(action, "title"))
-    }
+    clamped: loop action in lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", past)) -> lsp_test_text(action, "title")
     assert_eq(clamped, [String]{"Write the markers inside the declaration's body"})
 }
 

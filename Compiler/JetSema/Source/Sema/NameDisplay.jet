@@ -356,10 +356,7 @@ sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: ^[D
             diagnostics[index].call_chain = chain
         }
         if diagnostics[index].labels.len() == 0 -> next
-        labels := [DiagnosticLabel]{}
-        loop label in diagnostics[index].labels {
-            labels.push(DiagnosticLabel{span: label.span, message: sema_name_display_text(label.message, paths)})
-        }
+        labels: loop label in diagnostics[index].labels -> DiagnosticLabel{span: label.span, message: sema_name_display_text(label.message, paths)}
         diagnostics[index].labels = labels
     }
 }

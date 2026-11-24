@@ -1,9 +1,9 @@
-// Pretty-printer for Jet source: a 1:1 port of the Rust formatter driver. One
-// true style: 4-space indent, same-line `{`, spaces around binary operators,
+// Pretty-printer for Jet source: the formatter driver. One true style:
+// 4-space indent, same-line `{`, spaces around binary operators,
 // line-boundary statement terminators. Comments are preserved from the source
-// and re-attached by span. Rust `impl Fmt` methods are free `jfmt_<name>(f:
+// and re-attached by span. Formatter methods are free `jfmt_<name>(f:
 // &JetFmt, …)` functions; Expressions.jet, Statements.jet and Items.jet hold
-// the other Rust modules.
+// the other parts.
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
@@ -75,10 +75,10 @@ JFMT_INDENT: 4
 // The width floor (gate d) for keeping a body on one line.
 JFMT_MAX_WIDTH: 100
 
-// Rust `usize.MAX`: no trailing-comment limit.
+// No trailing-comment limit.
 JFMT_NO_LIMIT: 9223372036854775807
 
-// Rust `Prec`, ordered loosest to tightest.
+// Operator precedence, ordered loosest to tightest.
 JFMT_PREC_OR_FALLBACK: 0
 
 JFMT_PREC_RANGE: 1
@@ -107,7 +107,6 @@ JFMT_PREC_POSTFIX: 13
 
 JFMT_PREC_PRIMARY: 14
 
-// Rust `SourceDelimiter`.
 JFMT_DELIM_PAREN: 0
 
 JFMT_DELIM_BRACKET: 1
@@ -124,7 +123,7 @@ JetFmtComment: struct {
 JetFmt: struct {
     src: String,
     src_bytes: [U8],
-    // Byte offsets of every `\n` in `src`, for Rust `line_of`.
+    // Byte offsets of every `\n` in `src`, for line lookups.
     newlines: [Int],
     source_toks: [Token],
     comments: [JetFmtComment],
@@ -191,19 +190,19 @@ JetFmt: struct {
     stmt_head_at: Int{-1},
 }
 
-// Rust `Option<(Span, usize)>` from `source_list_span_after`.
+// An optional (span, index) from `source_list_span_after`.
 JetFmtSourceList: struct {
     span: Span,
     close_start: Int,
 }
 
-// Rust `Option<(usize, usize)>` from `single_stmt_braces`/`value_block_braces`.
+// An optional (start, end) from `single_stmt_braces`/`value_block_braces`.
 JetFmtBraces: struct {
     open: Int,
     close: Int,
 }
 
-// The saved writer state every Rust rollback restores.
+// The saved writer state every rollback restores.
 JetFmtMark: struct {
     out_len: Int,
     col: Int,
@@ -212,7 +211,7 @@ JetFmtMark: struct {
     comment_i: Int,
 }
 
-// Rust `Result<String, Vec<Diagnostic>>` from `format_source_with_options`.
+// The formatted text or its diagnostics, from `format_source_with_options`.
 // `structure_change` says why a formatted text was refused because it would
 // not mean what the source means (Structure.jet); that is a formatter defect,
 // never a problem in the source, so it carries no diagnostic.
@@ -249,8 +248,8 @@ jfmt_prec_add_rhs: fn(prec: Int) -> Int Never! {
     }
 }
 
-// Rust `BinOp.spell`. Power has no infix spelling: it is the `pow` method
-// (jfmt_bin_op_method).
+// A binary operator's spelling. Power has no infix spelling: it is the `pow`
+// method (jfmt_bin_op_method).
 jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+"
@@ -315,13 +314,11 @@ jfmt_compound_spell: fn(op: BinOp) -> String Never! {
 
 // ---- byte/text helpers ----
 
-// Rust `self.src.get(start..end)`: the source text of a byte span, clamped
-// into the source.
+// The source text of a byte span, clamped into the source.
 jfmt_src_text: fn(f: JetFmt, start: Int, end: Int) -> String Never! {
     foundation_byte_text(f.src_bytes, start, end)
 }
 
-// Rust `src.get(start..end).is_some()`.
 jfmt_src_valid: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     start >= 0 && start <= end && end <= f.src_bytes.len()
 }
@@ -335,7 +332,7 @@ jfmt_bytes_starts_at: fn(bytes: [U8], at: Int, needle: String) -> Bool Never! {
     true
 }
 
-// Rust `bytes[..end].rfind(needle)`: the last start offset, -1 when absent.
+// The last start offset, -1 when absent.
 jfmt_bytes_rfind: fn(bytes: [U8], end: Int, needle: String) -> Int Never! {
     width: needle.bytes().len()
     limit: if end > bytes.len() -> bytes.len() else -> end
@@ -347,7 +344,7 @@ jfmt_bytes_rfind: fn(bytes: [U8], end: Int, needle: String) -> Int Never! {
     -1
 }
 
-// Rust `bytes[start..].find(needle)` as an absolute offset, -1 when absent.
+// The first `needle` at or after `start`, as an absolute offset, -1 when absent.
 jfmt_bytes_find: fn(bytes: [U8], start: Int, needle: String) -> Int Never! {
     width: needle.bytes().len()
     at := if start < 0 -> 0 else -> start
@@ -366,14 +363,14 @@ jfmt_bytes_have_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     false
 }
 
-// Rust `char.is_whitespace` over a source range. Non-ASCII whitespace
-// (NBSP, U+2028, …) is checked by its UTF-8 lead bytes.
+// Unicode whitespace over a source range. Non-ASCII whitespace (NBSP,
+// U+2028, …) is checked by its UTF-8 lead bytes.
 jfmt_src_all_whitespace: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     text: jfmt_src_text(f, start, end)
     text.trim().len() == 0
 }
 
-// The number of chars in `text` (Rust `s.chars().count()`).
+// The number of chars in `text`.
 jfmt_char_count: fn(text: String) -> Int Never! {
     count := 0
     loop byte in text.bytes() {
@@ -389,7 +386,7 @@ jfmt_internal_name: fn(suffix: String) -> String Never! {
     String.from_bytes(bytes) ?? suffix
 }
 
-// Rust `line_of`: the zero-based line holding byte `pos`.
+// The zero-based line holding byte `pos`.
 jfmt_line_of: fn(f: JetFmt, pos: Int) -> Int Never! {
     low := 0
     high := f.newlines.len()
@@ -400,7 +397,6 @@ jfmt_line_of: fn(f: JetFmt, pos: Int) -> Int Never! {
     low
 }
 
-// Rust `partition_point(|token| token.span.start < start)`.
 jfmt_first_token_at: fn(f: JetFmt, start: Int) -> Int Never! {
     low := 0
     high := f.source_toks.len()
@@ -696,7 +692,7 @@ jfmt_digit_value: fn(byte: U8) -> Int Never! {
     }
 }
 
-// Rust `i64.from_str_radix` / `str.parse<i64>` on `digits[start..]`.
+// Radix or decimal i64 parsing of `digits[start..]`.
 jfmt_parse_radix: fn(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> Int? Never! {
     index := start
     negative := false
@@ -759,7 +755,7 @@ jfmt_float_literal_spelling: fn(value: Float, raw: String?) -> String Never! {
     jfmt_fmt_float(value)
 }
 
-// Rust `fmt_float`: `{:.1}` for a finite integral value, else `{}`.
+// `{:.1}` for a finite integral value, else `{}`.
 jfmt_fmt_float: fn(value: Float) -> String Never! {
     text: "{value}"
     if value == value && value - value == 0.0 && !text.contains(".") && !text.contains("e") && !text.contains("E") {
@@ -936,7 +932,6 @@ jfmt_rollback: fn(f: ^JetFmt, mark: JetFmtMark) Never! {
     f.comment_i = mark.comment_i
 }
 
-// Rust `self.out[out_len..].contains('\n')`.
 jfmt_out_since_has_newline: fn(f: JetFmt, out_len: Int) -> Bool Never! {
     jfmt_bytes_have_newline(f.out, out_len, f.out.len())
 }
@@ -1451,7 +1446,7 @@ jfmt_source_span_multiline: fn(f: JetFmt, span: Span) -> Bool Never! {
     (jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_have_newline(f.src_bytes, span.start, span.end)) || jfmt_span_has_comment(f, span.start, span.end)
 }
 
-// Rust `fmt_comma_items`, split at its closure boundaries: begin, then per
+// Comma-separated items, split at their closure boundaries: begin, then per
 // item before/render/after, then end. A multiline list puts each item on its
 // own line one level in, and its closer back at the list's own indent.
 jfmt_comma_begin: fn(f: ^JetFmt, count: Int, source: JetFmtSourceList?) -> Bool Never! {
@@ -2352,7 +2347,7 @@ jfmt_word_byte: fn(f: JetFmt, at: Int) -[]> Bool Never! {
 jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
     source: src.bytes()
     ordered := edits
-    // Rust sorts by descending start; apply from the end of the source.
+    // Sort by descending start; apply from the end of the source.
     ordered = loop fresh_item in ordered -> fresh_item
     ordered.sort_by(fn(left: TextEdit, right: TextEdit) { right.span.start <=> left.span.start })
     replaced_start := JFMT_NO_LIMIT
@@ -2389,7 +2384,7 @@ jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
     Val(String.from_bytes(out) ?? src)
 }
 
-// ---- parse acceptance (Rust parse_for_check_with_source / parse_for_fmt) ----
+// ---- parse acceptance ----
 
 // The parse diagnostics a format repairs are the registry rows that state
 // `fmt_applies_fix`: each one's canonical rewrite is an edit the spec says
@@ -2400,8 +2395,7 @@ jfmt_is_teaching_parse_diag: fn(code: String) -> Bool Never! {
     row.fmt_applies_fix
 }
 
-// Rust `parse_for_check_with_source` succeeds: every diagnostic is a lint, a
-// teaching diagnostic, or E0081.
+// Every diagnostic is a lint, a teaching diagnostic, or E0081.
 jfmt_check_parse_accepts: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_LINT || jfmt_is_teaching_parse_diag(diagnostic.code) || diagnostic.code == "E0081" {
@@ -2412,8 +2406,7 @@ jfmt_check_parse_accepts: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     true
 }
 
-// Rust `parse_for_fmt` succeeds: no errors, or every error is a teaching
-// diagnostic.
+// No errors, or every error is a teaching diagnostic.
 jfmt_fmt_parse_accepts: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
@@ -2595,7 +2588,7 @@ jfmt_fmt_launch_line: fn(f: ^JetFmt) Never! {
     if next_start > end && jfmt_source_has_blank_line(bytes, end, next_start) -> jfmt_newline(f)
 }
 
-// Rust `format_program_with_tokens`; comments come from the source tokens.
+// Format a program with its tokens; comments come from the source tokens.
 jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> String {
     f := jfmt_new(prog, src, source_toks, simplify)
     jfmt_format_program_with(f, prog)
@@ -2885,8 +2878,8 @@ jet_format_redundant_grouping: fn(src: String) -> [Span]? {
 
 jfmt_lines: fn(text: String) -> [String] Never! {
     lines := text.split("\n").to_list()
-    // Rust `str.lines`: no final empty line after a trailing newline, and a
-    // trailing `\r` is part of the line break.
+    // No final empty line after a trailing newline, and a trailing `\r` is part
+    // of the line break.
     if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
     loop index in 0..<lines.len() {
         bytes: lines[index].bytes()

@@ -1,8 +1,8 @@
-// The Image area's one error carrier. Rust `io::Error` values keep their kind:
-// file-system failures travel as `Io`, the builder's `invalid(...)` refusals
-// are `InvalidData`, a base that is not an OCI layout is `InvalidInput`, and a
+// The Image area's one error carrier. IO errors keep their kind: file-system
+// failures travel as `Io`, the builder's `invalid(...)` refusals are
+// `InvalidData`, a base that is not an OCI layout is `InvalidInput`, and a
 // destination holding different bytes is `AlreadyExists`. JSON failures keep
-// the parser's reason (Rust `io::Error::other(error)`).
+// the parser's reason.
 
 #Error
 ImageError: enum {
@@ -22,7 +22,6 @@ ImageError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::NotFound`.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> if error == {
@@ -38,5 +37,5 @@ impl IOError -> ImageError { ImageError.IO(self) }
 
 impl EncodingError -> ImageError { ImageError.Other(self.reason) }
 
-// Rust `invalid(message)`: an `InvalidData` refusal with final text.
+// An `InvalidData` refusal with final text.
 image_invalid: fn(message: String) -> ImageError Never! { ImageError.InvalidData(message) }

@@ -1,8 +1,7 @@
 // The producer journeys (the checked API that `jet registry publish` freezes,
 // diffed here) run against jet_cli_publish_public_api in
 // Compiler/JetCLI/Tests/PublicApiPorts.jet.
-// Obsolete Rust lowercase diagnostic goldens are read-only tandem markers;
-// these byte regressions exercise the canonical registry's sentence casing.
+// These byte regressions exercise the canonical registry's sentence casing.
 use {
     jet_foundation.[Diagnostic, DiagnosticMoment, PublicAPIItem]
     jet_pkg_model.[pkg_capability_snapshot_parse]
@@ -257,8 +256,8 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
     assert(publication_e2601("", .Same, change, 0).why.contains("^.0"))
     assert(publication_e2601("release", .Same, change, 0).why.contains("^release.0"))
     assert(publication_e2601(".1.0", .Same, change, 0).why.contains("^.0"))
-    // Rust split('.').next() is a text prefix; a byte find must never feed a
-    // character slice, so non-ASCII text before the first dot stays exact.
+    // The text before the first dot is a text prefix; a byte find must never
+    // feed a character slice, so non-ASCII text before the first dot stays exact.
     assert(publication_e2601("é1.0", .Same, change, 0).why.contains("Callers pinned to ^é1.0 would"))
     assert(publication_e2601("é", .Same, change, 0).why.contains("Callers pinned to ^é.0 would"))
 }

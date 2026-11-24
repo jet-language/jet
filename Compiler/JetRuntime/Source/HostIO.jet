@@ -10,8 +10,8 @@
     active == I64{0} && allocated == retired
 }
 
-// Reviewed L7b C carriers. All offsets are defined here, not Rust struct
-// layout. IOError tags are the CoreEnumPayloadRows declaration-order ordinals.
+// Reviewed L7b C carriers. All offsets are defined here. IOError tags are the
+// CoreEnumPayloadRows declaration-order ordinals.
 // IOError: [kind, operation, resource-text?, has-os-code, os-code, cause-text?,
 // limit]. Text children use the one E4 carrier and are independently owned.
 #Export(c) jet_rt_handle_drop_io_error: fn(value: I64) {
@@ -220,7 +220,7 @@ host_error_with_context: fn(context: I64, kind: I64) -> I64 {
     value
 }
 
-// The Rust original interprets the entire presence word, not a C Bool byte.
+// The entire presence word is interpreted, not a C Bool byte.
 host_context_equal: fn(left: I64, right: I64) -> Bool {
     if (rt_text_word(left) != rt_text_word(right)) { return false }
     left_present: rt_text_word(wrapping(left + I64{16})) != I64{0}

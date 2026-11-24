@@ -1,9 +1,8 @@
 // `jet inspect provenance [<dependency>]`: the lock-backed dependency
-// provenance records of the project, read from `.jet/lock` (jet-pkg-model
-// `load`/`parse` and `LockedPackage.provenance_report`). A lock shape this
+// provenance records of the project, read from `.jet/lock`. A lock shape this
 // port does not read (workspace, browser, build-contribution, and Nix closure
 // records, a root authority row, a foreign source) is refused with E2104, never
-// guessed; a lock Rust cannot parse is no lockfile, as in `Lock.load`.
+// guessed; a lock that does not parse is no lockfile.
 use {
     cli_files: core.files
     jet_driver.[
@@ -92,7 +91,6 @@ jet_cli_lock_partial: fn() -> JetCLILockPartial Never! {
     JetCLILockPartial{name: None, version: None, source_raw: None, locked_raw: None, content_hash: None, envelope: false, envelope_provenance: "", effects: [String]{}, effect_grants: [String]{}, required_effects: [String]{}, granted_effects: [String]{}, denied_effects: [String]{}, effect_authority: None, transparency: None, publisher: None, build: None}
 }
 
-// Rust `str.trim_matches('"')`.
 jet_cli_lock_trim_quotes: fn(value: String) -> String Never! {
     bytes: value.bytes()
     start := 0
@@ -172,7 +170,7 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
 
 // `kv_field`: the value of `key = …` among the comma-separated parts of an
 // inline table. The first part that starts with `key` but has no `=` ends the
-// search with None, as the Rust `?` does.
+// search with None.
 jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     parts := [String]{}
     start := 0
@@ -214,7 +212,7 @@ jet_cli_lock_inline: fn(raw: String) -> String Never! {
 
 // `parse_source`, keeping only what the provenance report reads. A Nix source
 // cannot finish without the closure record this port refuses, so it is the
-// parse error Rust reports for a Nix package without one.
+// parse error for a Nix package without one.
 jet_cli_lock_source: fn(raw: String) -> JetCLILockSource Never! {
     inline: jet_cli_lock_inline(raw)
     if jet_cli_lock_kv_field(inline, "root") != None {
@@ -292,7 +290,6 @@ jet_cli_lock_canonical: fn(values: [String]) -> [String] Never! {
     out
 }
 
-// Rust `str.parse<u32>`.
 jet_cli_lock_u32: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     start := 0

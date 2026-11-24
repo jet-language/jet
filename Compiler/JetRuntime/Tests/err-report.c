@@ -1,5 +1,5 @@
 // Link only against the native Jet runtime + canonical ProgramAllocator facts.
-// No Rust boxes, synthetic allocator or three-field IR Err substitute.
+// No boxes, synthetic allocator or three-field IR Err substitute.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

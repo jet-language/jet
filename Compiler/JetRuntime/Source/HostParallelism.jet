@@ -2,13 +2,13 @@
 // The scheduler pool, core.sys.cpu_count and the parallel kernels
 // all call that single probe, so the scheduler and jet_sys_cpu_count_raw
 // share this one too.
-// Result: the positive count, or 0 for Rust's Err (each caller owns its
+// Result: the positive count, or 0 for no answer (each caller owns its
 // fallback). Paths are root-prefixed only so fixtures can supply a fake
 // procfs/sysfs; production passes the empty root.
 // Scope bounds, not semantic changes: cpu.max / cfs values are parsed as I64
 // (kernel quota <= 2^44 us, period <= 1 s); paths above 16 KiB fail to open
 // as ENAMETOOLONG would; kernel procfs text is ASCII, so a non-ASCII
-// controller list is treated as Rust's from_utf8 failure.
+// controller list is treated as a UTF-8 failure.
 CPU_UNLIMITED: I64{9223372036854775807}
 
 CPU_PATH_CAPACITY: I64{16384}
@@ -503,7 +503,7 @@ cpu_affinity_count: fn() -> I64 {
 
 // glibc sysconf(_SC_NPROCESSORS_ONLN) = get_nprocs: the online CPU list
 // "a-b,c,...". [glibc's later /proc/stat fallback is not mirrored: sysfs is
-// always mounted where the affinity call can fail.] 0 is Rust's Err.
+// always mounted where the affinity call can fail.] 0 is no answer.
 cpu_online_count: fn(ctx: I64) -> I64 {
     cpu_path_set_text(ctx, rt_static_text("/sys/devices/system/cpu/online"))
     if !cpu_read(ctx) -> return I64{0}
@@ -549,8 +549,7 @@ cpu_available_parallelism: fn(root: I64, root_len: I64) -> I64 {
 }
 
 // core.compute's f32 SIMD dispatch (core-library.md:4289-4291): the vector
-// width the host executes, decided as Rust std_detect's
-// is_x86_feature_detected decides it (std_detect's x86 detection). 8 is AVX2:
+// width the host executes. 8 is AVX2:
 // CPUID.7.0:EBX bit 5 with XSAVE and OSXSAVE (CPUID.1:ECX bits 26 and 27)
 // and the OS saving XMM and YMM state (XCR0 bits 1 and 2). 4 is SSE2
 // (CPUID.1:EDX bit 26). 1 is the scalar loop. The answer is fixed for the

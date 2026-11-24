@@ -13,8 +13,8 @@
     jet_int_owned_from_i64(if (cap > I64{0}) -> cap else -> rt_text_len(value))
 }
 
-// `s.compare(other)` (Rust `str.cmp`): -1, 0 or 1 by lexicographic UTF-8
-// byte order, read in place; a proper prefix orders first.
+// `s.compare(other)`: -1, 0 or 1 by lexicographic UTF-8 byte order, read in
+// place; a proper prefix orders first.
 #Export(c) jet_text_compare: fn(left: I64, right: I64) -> I64 {
     jet_int_owned_from_i64(jet_rt_string_compare(left, right))
 }
@@ -87,8 +87,8 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
 }
 
 #Export(c) jet_string_lines: fn(value: I64, output: I64) -> I64 {
-    // Rust str.lines: LF terminates, one preceding CR is removed; a trailing
-    // LF has no extra empty line. A bare final CR is ordinary text.
+    // LF terminates, one preceding CR is removed; a trailing LF has no extra
+    // empty line. A bare final CR is ordinary text.
     bytes: rt_text_data(value)
     length: rt_text_len(value)
     count := I64{0}
@@ -124,10 +124,10 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     count
 }
 
-// jet_string_words: Rust str.split_whitespace, the fields between runs of
-// Unicode White_Space. No field is empty, so blank text has none. An ASCII
-// byte is tested in place (space and bytes 9 through 13 are its White_Space);
-// only a multi-byte scalar is decoded and looked up.
+// jet_string_words: the fields between runs of Unicode White_Space. No field
+// is empty, so blank text has none. An ASCII byte is tested in place (space
+// and bytes 9 through 13 are its White_Space); only a multi-byte scalar is
+// decoded and looked up.
 #Export(c) jet_string_words: fn(value: I64, output: I64) -> I64 {
     bytes: rt_text_data(value)
     length: rt_text_len(value)

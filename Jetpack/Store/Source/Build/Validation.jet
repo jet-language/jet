@@ -5,8 +5,8 @@ use {
     cli_paths: core.files.path
 }
 
-// Rust `resolve_under`: `rel` joined under `base`; `.` components are
-// dropped and `..`, a root, or a prefix refuses the path.
+// `rel` joined under `base`; `.` components are dropped and `..`, a root, or a
+// prefix refuses the path.
 build_resolve_under: fn(base: String, rel: String) -> String BuildIOError! {
     if rel.starts_with("/") {
         return Err(BuildIOError.new(.InvalidInput, "build output path escapes base directory"))
@@ -172,9 +172,9 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
     }
 }
 
-// Rust `validate_action_output_owners`: one owner per declared output, and
-// none inside a folder an action reads whole (the folder's read-only mount
-// would hide it, and its reader has no order after its maker).
+// One owner per declared output, and none inside a folder an action reads whole
+// (the folder's read-only mount would hide it, and its reader has no order
+// after its maker).
 build_validate_action_output_owners: fn(actions: [HermeticBuildAction]) HermeticBuildError! {
     owners := [String:String]{}
     loop action in actions {

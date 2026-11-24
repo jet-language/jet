@@ -2,7 +2,7 @@
 // saved PID alone can later name a stranger's program, so every liveness
 // claim and every signal first checks the saved start identity. Core has no
 // process start identity or lookup (CORE-GAPS 9a/9b), so on Linux both are
-// read from /proc here, with Rust's exact token; other hosts fail closed.
+// read from /proc here; other hosts fail closed.
 // Core starts every child in its own process group so
 // the direct `run:` command leads its group and a stop reaches its helpers.
 use {
@@ -37,7 +37,7 @@ StopAction: enum {
     }
 }
 
-// How a supervisor host places services (Rust `cfg(test)` vs production).
+// How a supervisor host places services.
 ServiceHost: enum {
     Platform,
     InProcess,
@@ -81,8 +81,7 @@ services_read_proc_stat: fn(pid: Int) -[FS]> ServicesProcStat? ServicesError! {
     Ok(Val(ServicesProcStat{state: words[0].copy(), start: "linux-proc-start:{words[19]}"}))
 }
 
-// The platform-tagged start token of `pid` (Rust `process_start_identity`),
-// or None when no such process.
+// The platform-tagged start token of `pid`, or None when no such process.
 services_process_start_identity: fn(pid: Int) -[FS, Env]> String? ServicesError! {
     if !sys.is_linux() {
         return Err(ServicesError.new("service process identity is unavailable on this platform"))
@@ -202,7 +201,7 @@ services_run_authority_stop_action: fn(state: ServiceProcessState, action: StopA
             // re-checked right before the signal: a live process with another
             // start identity owns the PID now and is never signaled. A group
             // whose leader already exited is still signaled. The window
-            // between this check and `kill` is the PID-reuse window Rust had.
+            // between this check and `kill` is the remaining PID-reuse window.
             found: services_read_proc_stat(state.pid)
             if found == .Val(record) {
                 if record.start != state.start_identity {
@@ -323,7 +322,7 @@ services_kill_authority_now: fn(authority: ServiceAuthority) -[Env, Exec, Time.W
     }
 }
 
-// Rust `{:?}` of an `Option<String>`.
+// The `{:?}` spelling of an optional string.
 services_debug_option: fn(value: String?) -> String Never! {
     text: value ?? return "None"
     // Text is always encodable: no Float or map-key exclusion can apply here.

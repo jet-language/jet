@@ -66,12 +66,11 @@ rows: fn(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: 
     parse_rows_with(text, delimiter_bytes, header, skip_blank)
 }
 
-/// Header-named typed rows. A data record must have exactly the header's
-/// cell count; a short or long record is a `row N` failure, and failures from
-/// every data record are accumulated in row order.
-/// Cells decode inside the runtime's text-cell scope (Rust
-/// `jet_decode_text_cells`): a Text cell parses as an Int, Float or Bool
-/// target, and the previous scope is restored before returning.
+/// Header-named typed rows. A data record must have exactly the header's cell
+/// count; a short or long record is a `row N` failure, and failures from every
+/// data record are accumulated in row order. Cells decode inside the runtime's
+/// text-cell scope: a Text cell parses as an Int, Float or Bool target, and the
+/// previous scope is restored before returning.
 // Each record streams into its row through the scanner's `__DecodeSource`:
 // no record tree is built, and its cells are read from the input's bytes.
 decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {

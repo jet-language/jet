@@ -1,8 +1,8 @@
 // Compiler-facing `jet` verbs of the self-hosted driver. Each verb returns the
-// exact bytes and exit status the Rust CLI produces for the same input
-// (`report_problems_with_summary`, `emit_check_outcome`, `run_explain`), so
-// both front doors print one meaning (I9). Writing the bytes and exiting stay
-// with the host that owns the process.
+// exact bytes and exit status for its input (`report_problems_with_summary`,
+// `emit_check_outcome`, `run_explain`), so every front door prints one
+// meaning (I9). Writing the bytes and exiting stay with the host that owns
+// the process.
 use jet_foundation.[
     Diagnostic,
     DiagnosticOrigin,
@@ -90,10 +90,10 @@ jet_driver_shift_span: fn(span: Span, shift: Int) -> Span Never! {
 }
 
 // `path` is the diagnostic's display path (`jet_driver_display_path`); a disk
-// origin keeps its canonical path beside the display, as the Rust driver's
-// origins do. A file of the entry root displays root-relative; a file of
-// another root (a dependency package's error, reported inline before its
-// E0626) keeps the entry-relative display path, so it names that package.
+// origin keeps its canonical path beside the display. A file of the entry root
+// displays root-relative; a file of another root (a dependency package's error,
+// reported inline before its E0626) keeps the entry-relative display path, so
+// it names that package.
 jet_driver_present_origin: fn(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> DiagnosticOrigin? Never! {
     loop file in generated {
         if file.path == path {
@@ -120,7 +120,7 @@ jet_driver_present_origin: fn(path: String, snapshot: JetDriverAuthorizedSourceS
 // One presented origin per display path for a whole result: every diagnostic
 // of a file carries that file's exact bytes, so the file is hashed once, not
 // once per diagnostic (the compiler unit is one 12.8 MB file with thousands of
-// lints). The Rust driver shares one origin per module the same way.
+// lints).
 jet_driver_present_origin_once: fn(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: ^[String:DiagnosticOrigin]) -> DiagnosticOrigin? Never! {
     if origins.get(path) == .Val(origin) -> return Val(origin)
     origin: jet_driver_present_origin(path, snapshot, generated) ?? return None

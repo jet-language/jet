@@ -327,7 +327,6 @@ store_explain_optional_int: fn(value: Int?) -> Dyn Never! {
     }
 }
 
-// Rust `Option::map(to_string).unwrap_or("-")`.
 store_explain_optional_int_text: fn(value: Int?) -> String Never! {
     if value == {
         .Val(number) -> "{number}"
@@ -366,7 +365,7 @@ ExplainRebuild: struct {
     }
 }
 
-// A text map as an object in key order (Rust `BTreeMap`).
+// A text map as an object in key order.
 store_explain_sorted_text_map: fn(map: [String:String]) -> Dyn Never! {
     object := [String:Dyn]{}
     keys: store_sorted_keys(map)
@@ -888,7 +887,7 @@ store_explain_locked_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainRep
     Val(unique[0])
 }
 
-// Facts sorted by digest with equal digests collapsed (Rust sort + dedup).
+// Facts sorted by digest with equal digests collapsed.
 store_explain_unique_facts: fn(facts: [ProviderFacts]) -> [ProviderFacts] Never! {
     sorted := [ProviderFacts]{}
     loop item in facts {

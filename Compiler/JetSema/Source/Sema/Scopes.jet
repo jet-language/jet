@@ -909,6 +909,9 @@ SemaCheckContext: struct {
     // the compiler records it builds each heard call from
     // (SEMA_CALL_RULE_RECORDS), which no program writes.
     compiler_records: Bool{false},
+    // Each static route a body registers, `binding|method|pattern`, to the
+    // span that registered it first.
+    http_routes: SemaHTTPRouteIndex{SemaHTTPRouteIndex{}},
     // The tables the body's heard calls add rows to (sema_rule_table).
     rule_tables: SemaRuleTables{SemaRuleTables{}},
     hardware_use: TargetHardwareUse,
@@ -1143,6 +1146,15 @@ SemaCheckContext: struct {
     // delta-local ids are not merged back, so only shared/well-known TypeIDs
     // escape onto TExprs.
     is_snapshot: Bool{false},
+}
+
+// The parts one body check owns: its entry makes them and they end with it.
+// Checker functions borrow the record whole, or lend single parts
+// (`check.state`) to a helper that takes only those.
+SemaBodyCheck: struct {
+    state: SemaOwnershipState,
+    tail_store: SemaStatementTailStore,
+    context: SemaCheckContext,
 }
 
 // A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
@@ -1798,6 +1810,46 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
     }
 }
 
+sema_body_check_init: fn() -> SemaBodyCheck Never! {
+    SemaBodyCheck{state: sema_ownership_state_init(), tail_store: sema_statement_tail_store_init(), context: sema_check_context_init()}
+}
+
+// A check on another ownership state (a snapshot, a lambda's, a default's
+// owner scope) swaps it into the record and back after: the first call puts
+// `state` in the record's place and the record's own state in `state`, and a
+// second call undoes it. Nothing is copied.
+sema_body_check_swap_state: fn(check: ^SemaBodyCheck, state: ^SemaOwnershipState) Never! {
+    held: check.state
+    check.state = state
+    state = held
+}
+
+// sema_body_check_swap_state for the check context.
+sema_body_check_swap_context: fn(check: ^SemaBodyCheck, context: ^SemaCheckContext) Never! {
+    held: check.context
+    check.context = context
+    context = held
+}
+
+// Both swaps: a check on another state and context.
+sema_body_check_swap: fn(check: ^SemaBodyCheck, state: ^SemaOwnershipState, context: ^SemaCheckContext) Never! {
+    sema_body_check_swap_state(check, state)
+    sema_body_check_swap_context(check, context)
+}
+
+SemaHTTPRouteIndex: struct {
+    names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
+    spans: [Span?]{[Span?]{}},
+}
+
+sema_check_context_http_route_record: fn(context: ^SemaCheckContext, key: String, span: Span) -> Span? Never! {
+    id: name_index(name_intern(context.http_routes.names, key))
+    loop context.http_routes.spans.len() <= id -> context.http_routes.spans.push(None)
+    if context.http_routes.spans[id] == .Val(existing) -> return Val(existing)
+    context.http_routes.spans[id] = Val(span)
+    None
+}
+
 sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Never! {
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
@@ -1814,6 +1866,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         lambda_statement_tails: source.lambda_statement_tails.copy(),
         call_facts: source.call_facts.copy(),
         module_writes: source.module_writes.copy(),
+        http_routes: if source.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> source.http_routes.copy(),
         rule_tables: if source.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> source.rule_tables.copy(),
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: source.call_return_views.copy(),
@@ -1963,6 +2016,7 @@ SemaCheckContextSaved: struct {
     lambda_lending_views: Bool,
     lending_view_parameter_keys: [String],
     lambda_statement_tails: [SemaStatementTailFrame],
+    http_routes: SemaHTTPRouteIndex,
     rule_tables: SemaRuleTables,
     hardware_use: TargetHardwareUse,
     return_view_receiver_key: String,
@@ -2058,6 +2112,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             lambda_lending_views: context.lambda_lending_views,
             lending_view_parameter_keys: if context.lending_view_parameter_keys.len() == 0 -> [String]{} else -> context.lending_view_parameter_keys.copy(),
             lambda_statement_tails: if context.lambda_statement_tails.len() == 0 -> [SemaStatementTailFrame]{} else -> context.lambda_statement_tails.copy(),
+            http_routes: if context.http_routes.spans.len() == 0 -> SemaHTTPRouteIndex{} else -> context.http_routes.copy(),
             rule_tables: if context.rule_tables.calls_at.len() == 0 -> SemaRuleTables{} else -> context.rule_tables.copy(),
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             return_view_receiver_key: context.return_view_receiver_key,
@@ -2183,6 +2238,7 @@ sema_check_context_rollback: fn(context: ^SemaCheckContext, mark: ^^SemaCheckCon
     context.lending_view_parameter_keys = saved.lending_view_parameter_keys.move()
     context.lambda_statement_tails = saved.lambda_statement_tails.move()
     context.hardware_use = saved.hardware_use.move()
+    context.http_routes = saved.http_routes.move()
     context.rule_tables = saved.rule_tables.move()
     context.return_view_receiver_key = saved.return_view_receiver_key.move()
     context.return_view_parameter_keys = saved.return_view_parameter_keys.move()
@@ -2280,10 +2336,7 @@ sema_check_context_return_expr_ids: fn(copied: SemaCheckContext, target: ^SemaCh
 // with the id count: the facts of an erased `#Off(.Release)` body stay inside it,
 // while its checked statements stay in the tree and keep their ids.
 sema_check_context_rollback_keep_expr_ids: fn(context: ^SemaCheckContext, mark: ^^SemaCheckContextMark) Never! {
-    kept := [Int]{}
-    loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() {
-        kept.push(context.filed_expr_ids[index])
-    }
+    kept: loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() -> context.filed_expr_ids[index]
     next_expr_id: context.next_expr_id
     sema_check_context_rollback(context, mark.move())
     loop id in kept {
@@ -3350,8 +3403,8 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}
     if count > 0 {
-        bindings.try_reserve(count) ?? panic("reserve failed")
-        light.try_reserve(count) ?? panic("reserve failed")
+        bindings.try_reserve(count) ?? ()
+        light.try_reserve(count) ?? ()
     }
     loop i in 0..<count {
         function_type: source.bindings[i].symbol.ty == .Val(.Fn(_, _, _, _, _, _))

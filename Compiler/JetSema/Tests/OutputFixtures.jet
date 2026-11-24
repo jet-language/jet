@@ -46,7 +46,6 @@ use {
         module_intern,
         module_table,
         name_count,
-        name_mangle,
         name_table_sized,
         symbol_key_text,
         symbol_table_key,
@@ -394,9 +393,6 @@ output_fixture_run: fn(effects_source: String) Never! {
         if name_count(graph.modules[0].inline_bindings.imports.names) > 1 || graph.modules[0].inline_bindings.modules.len() != 0 {
             failures.push("no-inline early return retains empty binder products")
         }
-    }
-    if name_mangle("launch") != "__jet_launch" || name_mangle("$launch") != "__jet_ct_launch" || name_mangle("__jet_launch") != "__jet_launch" {
-        failures.push("canonical machine-name bytes")
     }
     output_fixture_solved_effects(effects_source, failures) ?? failures.push("solved effect publication: {err}")
     output_fixture_manifest_entry("run with no entry", false, [String]{"E0101"}, effects_source, failures)

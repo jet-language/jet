@@ -215,8 +215,8 @@ store_list_cache_bindings: fn(roots: HangarRoots) -> [CacheBinding] StoreError! 
     Ok(bindings)
 }
 
-// The stem of a `<stem>.<extension>` file name (Rust `Path::extension` and
-// `Path::file_stem`: a leading dot does not start an extension).
+// The stem of a `<stem>.<extension>` file name (A leading dot does not start an
+// extension).
 store_cache_extension_stem: fn(name: String, extension: String) -> String? Never! {
     raw: name.bytes()
     dot := -1
@@ -422,8 +422,7 @@ store_cache_line: fn(output: ^String, name: String, value: String) StoreError! {
     output = "{output}{name}={value}\n"
 }
 
-// Rust `str::lines`: split on LF, drop one trailing CR per line, and no
-// final empty line.
+// Split on LF, drop one trailing CR per line, and no final empty line.
 store_cache_lines: fn(text: String) -> [String] Never! {
     parts: text.split("\n").to_list()
     count: if text.ends_with("\n") -> parts.len() - 1 else -> parts.len()
@@ -438,8 +437,8 @@ store_cache_lines: fn(text: String) -> [String] Never! {
 
 store_cache_now_seconds: fn() -> Int Never! { store_archive_now_secs() }
 
-// Make every directory in a tree writable (Rust `set_readonly(false)`: all
-// write bits) so a sealed tree can be removed. A missing path is fine.
+// Make every directory in a tree writable (all write bits) so a sealed tree can
+// be removed. A missing path is fine.
 store_make_tree_writable_for_removal: fn(path: String) StoreError! {
     metadata: store_archive_lstat_ok(path) ?? return
     if metadata.is_dir {

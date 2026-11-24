@@ -387,10 +387,7 @@ jet_cli_fix_markers: fn(before: String, inside: Bool) -> JetCLIFixApply {
     count := 0
     round := 0
     loop round < 16 {
-        fixes := [JetCLIFix]{}
-        loop edit in parser_marker_placement_edits(source.bytes(), inside) {
-            fixes.push(JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
-        }
+        fixes: loop edit in parser_marker_placement_edits(source.bytes(), inside) -> JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving}
         if fixes.len() == 0 -> break
         applied: jet_cli_fix_apply_non_overlapping(source, [JetCLIFixFile]{}, fixes, jet_cli_fix_all(fixes))
         if applied.source == source -> break

@@ -78,9 +78,8 @@ CanvasHostState: struct {
     receipts: [CanvasHostReceipt],
 }
 
-// What a Canvas listener path names. Every path a Canvas listener serves
-// under its session is a route (the Rust host's canvas_api_path); Unknown
-// paths are refused like a bad secret.
+// What a Canvas listener path names. Every path a Canvas listener serves under
+// its session is a route; Unknown paths are refused like a bad secret.
 CanvasHostRoute: enum {
     Page(base: String),
     PanelPage,
@@ -319,11 +318,10 @@ canvas_host_bootstrap_path: fn(path: String, query: String) -> Bool Never! {
     rest == "" || rest == "/" || rest == "/app.js"
 }
 
-// The session check (the Rust host's canvas_request_authorized): GET or
-// POST with an exact body framing, a Canvas path, this listener's own Host,
-// its Origin (or none on a bootstrap page), and the session secret as a
-// Bearer token and/or one `session` query value, each compared in constant
-// time.
+// The session check: GET or POST with an exact body framing, a Canvas path,
+// this listener's own Host, its Origin (or none on a bootstrap page), and the
+// session secret as a Bearer token and/or one `session` query value, each
+// compared in constant time.
 canvas_host_authorized: fn(state: Shared<CanvasHostState>, request: HTTPRequest, route: CanvasHostRoute, path: String, query: String) -> Bool {
     method: request.method
     if method != "GET" && method != "POST" -> return false
@@ -559,8 +557,8 @@ canvas_host_json_value: fn(text: String) -> String Never! {
     json_str(text)
 }
 
-// The session document (the Rust ResidentDevSession json). This host runs no
-// program, debugger or test, so those parts stay idle and empty.
+// The session document. This host runs no program, debugger or test, so those
+// parts stay idle and empty.
 canvas_host_session_json: fn(state: Shared<CanvasHostState>) -> String {
     permit: state.guard_read()
     canvas_host_session_json_of(permit.value)
@@ -574,7 +572,7 @@ canvas_host_session_json_of: fn(s: CanvasHostState) -> String {
     "{{\"id\":{canvas_host_json_value(s.id)},\"protocol\":null,\"session_id\":null,\"source_id\":null,\"build_id\":null,\"revision\":null,\"world_id\":null,\"values\":[],\"entry\":{canvas_host_json_value(s.entry)},\"project_context\":{{\"source_id\":{canvas_host_json_value(s.source_id)}}},\"source_revision\":{canvas_host_json_value(s.source_revision)},\"accepted_revision\":{canvas_host_json_value(s.accepted_revision)},\"last_good_revision\":{canvas_host_json_value(s.accepted_revision)},\"last_good_program\":null,\"state\":{canvas_host_json_value(s.state)},\"diagnostic_code\":{canvas_host_json_value(s.diagnostic_code)},\"diagnostic\":{canvas_host_json_value(s.diagnostic)},\"diagnostic_revision\":{canvas_host_json_value(s.diagnostic_revision)},\"last_good_views\":{{\"graph\":{graph_view},\"debugger\":{empty_view},\"runtime\":{empty_view}}},\"clients\":{s.clients.len()},\"run\":{{\"output\":null,\"target\":null}},\"debugger\":{{\"state\":\"idle\",\"session_id\":null,\"source_id\":null,\"revision\":null,\"tier\":null}},\"tests\":{{\"state\":\"idle\"}},\"history\":{{\"count\":{s.receipts.len()},\"receipts\":[{receipts.join(",")}]}},\"listeners\":{listener},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":null}}}}"
 }
 
-// The dev status the page's header polls (the Rust DevStatus json).
+// The dev status the page's header polls.
 canvas_host_status_json: fn(state: Shared<CanvasHostState>) -> String {
     permit: state.guard_read()
     canvas_host_status_json_of(permit.value)

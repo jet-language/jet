@@ -1,6 +1,6 @@
-// core.encoding / core.data raw leaves. Rust providers: (text into bytes),
-// (the hostile streaming law seam, active only when JET_ENC_HOSTILE_IO is
-// set; FileReader.read_into and FileWriter.write_bytes meet it), (host path
+// core.encoding / core.data raw leaves. (text into bytes), (the hostile
+// streaming law seam, active only when JET_ENC_HOSTILE_IO is set;
+// FileReader.read_into and FileWriter.write_bytes meet it), (host path
 // metadata). Codec policy is Jet.
 
 // text.into_bytes() as a fresh [U8]; the moved-in String is dropped once
@@ -11,8 +11,7 @@
     result
 }
 
-// format!("{:?}", io.Error.from_raw_os_error(code).kind()) on Linux (the
-// Rust 1.97 sys.decode_error_kind table).
+// format!("{:?}", io.Error.from_raw_os_error(code).kind()) on Linux.
 rt_io_error_kind_name: fn(code: I64) -> I64 {
     if {
         (code == I64{1} || code == I64{13}) -> rt_static_text("PermissionDenied")

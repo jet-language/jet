@@ -1,8 +1,8 @@
-// The Environment area's one error carrier. Rust `io::Error` values keep
-// their kind: file-system failures travel as `Io`, and the protocol-level
-// `ErrorKind::InvalidData` / `InvalidInput` / `Unsupported` refusals carry
-// their final text. Overlay failures keep the jet-pkg-model `OverlayError`
-// payload so `jet overlay` diagnostics render the same bytes.
+// The Environment area's one error carrier. IO errors keep their kind:
+// file-system failures travel as `Io`, and the protocol-level InvalidData /
+// InvalidInput / Unsupported refusals carry their final text. Overlay
+// failures keep the jet-pkg-model `OverlayError` payload so `jet overlay`
+// diagnostics render the same bytes.
 use {
     jet_env_model.[ManagedFile]
     jet_pkg_model.[OverlayError, PackageGateError]
@@ -40,7 +40,7 @@ EnvironmentError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
+    // Whether the error is NotFound, across both carriers.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> if error == {

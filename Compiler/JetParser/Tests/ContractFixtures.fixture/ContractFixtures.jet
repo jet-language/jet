@@ -110,8 +110,8 @@ pc_module_markers: fn() {
     pc_require(reserved.diagnostics.len() == 1 && reserved.diagnostics[0].code == "E3206", "an authored `__bindgen__` path is E3206")
 }
 
-// Rust `trait_method_sig`: an effect arrow with no result ends a trait slot
-// (no body); an impl method in that shape still has no body (E0081).
+// An effect arrow with no result ends a trait slot (no body); an impl method in
+// that shape still has no body (E0081).
 pc_trait_effect_slots: fn() {
     slots: parse_source("Sink: trait {{\n    begin: fn(self, name: String) -[FS]> Never!,\n    end: fn(self) -[FS]> Never!,\n    functions: fn(self) -[]> Bool Never!,\n}}\n".bytes())
     pc_require(slots.diagnostics.len() == 0, "effect-arrow trait slots have no body")
@@ -416,8 +416,8 @@ pc_named_struct_pattern_rhs: fn() {
     init: pc_named_struct_pattern_rhs_init("run: fn() {{ result: point == Point{{x, y: 0}} }}", "Point{{x, y: 0}}")
     shaped: if init == .PatternTest(_, pattern, _, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 2 && (if head == .Val(_) -> true else -> false) else -> false) else -> false
     pc_require(shaped, "a named struct pattern still binds and compares fields")
-    // #4785 (Rust `try_pattern_rhs`): record-shaped braces after `==` are an
-    // anonymous struct pattern in an `if` condition and in a value alike.
+    // #4785: record-shaped braces after `==` are an anonymous struct pattern in
+    // an `if` condition and in a value alike.
     single_arm: parse_source("run: fn() {{\n if row == {{kind: x}} -> print(x)\n}}\n".bytes())
     pc_require(single_arm.diagnostics.len() == 0, "single-arm `if row == {{kind: x}} -> …` parses as a pattern test")
     record: pc_named_struct_pattern_rhs_init("run: fn() {{ result: row == {{kind: x}} }}", "{{kind: x}}")

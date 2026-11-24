@@ -81,7 +81,7 @@ provider_conan_document: fn(document: String) -> ProviderFactReport Never! {
 
 impl MetadataFacts {
     // Name, version, license, dependencies, scripts, and bins from a
-    // package.json (Rust `normalize_npm`).
+    // package.json.
     from_npm: fn(package_json: String) -> MetadataFacts Never! {
         object: provider_graph_json_root(package_json) ?? [String:Dyn]{}
         facts := MetadataFacts.empty(ProviderFamily.Npm, pkg_json_text(object.get("name") ?? Dyn.Null) ?? "")
@@ -281,7 +281,7 @@ provider_typed_projection_value: fn(value: String) -> ProviderFactValue Never! {
 }
 
 impl ProofStatus {
-    // The Rust `{:?}` spelling carried in replacement facts.
+    // The `{:?}` spelling carried in replacement facts.
     debug_name: fn(self) -> String Never! {
         if self == {
             .Missing -> "Missing"

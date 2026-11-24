@@ -146,8 +146,7 @@ store_test_nul_join: fn(left: String, right: String) -> String Never! {
     store_test_drop_roots(roots)
 }
 
-// Re-register one entry under the Hangar lock (Rust `with_lock` +
-// `register_entry_unlocked`).
+// Re-register one entry under the Hangar lock.
 store_test_register_locked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     store_register_entry_unlocked(verification, roots, entry) ?? panic("register")

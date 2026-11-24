@@ -525,10 +525,7 @@ ir_c_callback_adapter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, t
     a := ir_builder_new(ir_hashed_function("{b.f.name}.c_callback@{span.start}", ir_closure_key(b, "c_callback"), "{b.f.symbol}__c_callback_", b.f.source_file, b.line))
     a.line = b.line
     // A function's parameters are its first slots.
-    received := [Int]{}
-    loop (index, param_row) in rows {
-        received.push(ir_new_slot(a, param_row, IRSlotKind.Param, ir_intern_name(m, "_{index}")))
-    }
+    received: loop (index, param_row) in rows -> ir_new_slot(a, param_row, IRSlotKind.Param, ir_intern_name(m, "_{index}"))
     arguments := [Int]{}
     if boxed {
         box: ir_temp(m, a, pointer_row)

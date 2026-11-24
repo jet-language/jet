@@ -35,7 +35,7 @@ trust_semantic_lock_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Neve
     issues
 }
 
-// Rust `revalidate`: the lock may be written, or `Rejected` with every issue.
+// The lock may be written, or `Rejected` with every issue.
 trust_revalidate_semantic_lock: fn(lock: SemanticLockFile) TrustError! {
     issues: trust_semantic_lock_issues(lock)
     if issues.len() > 0 -> return Err(TrustError.Rejected(issues))

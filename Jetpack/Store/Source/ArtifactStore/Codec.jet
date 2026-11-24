@@ -1,11 +1,10 @@
-// Byte envelopes and filesystem primitives of the artifact store (Rust
-// `jet_store` encode/decode, `read_file`, `atomic_write` and the sync
-// helpers). A durable store write goes through a temporary file, an fsync, a
-// rename, and a directory sync. Lock and lease files, recency touches, cache
-// entries and the layout directories skip the syncs: a crash loses only what a
-// later run recreates or recomputes, and on a busy disk one sync can wait for
-// every dirty page of the filesystem. Every read verifies that the file it
-// opened is still the file at the path.
+// Byte envelopes and filesystem primitives of the artifact store. A durable
+// store write goes through a temporary file, an fsync, a rename, and a
+// directory sync. Lock and lease files, recency touches, cache entries and the
+// layout directories skip the syncs: a crash loses only what a later run
+// recreates or recomputes, and on a busy disk one sync can wait for every dirty
+// page of the filesystem. Every read verifies that the file it opened is still
+// the file at the path.
 use {
     jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text]
     files: core.files
@@ -14,7 +13,7 @@ use {
     process: core.process
 }
 
-// Why an action or artifact envelope was refused (the Rust `String` error).
+// Why an action or artifact envelope was refused.
 #Error
 ArtifactEnvelopeError: struct {
     reason: String,
@@ -361,8 +360,8 @@ store_artifact_filesystem_stats: fn(path: String) -[Exec, Time]> ArtifactDiskSta
     Val(ArtifactDiskStats{total_bytes: total * 1024, available_bytes: available * 1024})
 }
 
-// A non-negative decimal count (`u64::from_str`), or None. Like Rust, a count
-// above the u64 ceiling is refused, not accepted as a wider Jet Int.
+// A non-negative decimal count, or None. A count above the u64 ceiling is
+// refused, not accepted as a wider Jet Int.
 store_artifact_parse_count: fn(text: String) -> Int? Never! {
     if text == "" || !store_artifact_all_digits(text) -> return None
     count: Int.parse(text) ?? return None

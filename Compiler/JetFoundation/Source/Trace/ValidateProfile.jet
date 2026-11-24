@@ -105,8 +105,8 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
         return Err(jettrace_error("truncated profile must retain bounded rows"))
     }
     identities: jettrace_array(source_identity, "content.source_identity")
-    // Source identities have been validated already. Index path+digest once;
-    // unlike Rust's any() scan this stays linear in rows plus source identities.
+    // Source identities have been validated already. Index path+digest once,
+    // so this stays linear in rows plus source identities.
     identity_index := [String:[String:Bool]]{}
     loop identity in identities {
         identity_fields: jettrace_object_keys(identity, "content.source_identity", [String]{"path", "sha256", "symbols"})

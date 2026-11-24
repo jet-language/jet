@@ -18,7 +18,7 @@ PARALLEL_WORKER_BYTES: I64{144}
 PARALLEL_EVERY_WORKER: U64{1073741824}
 
 parallel_limit: fn(limit: I64, cap: I64) -> I64 {
-    // Rust's Option<i64> -> usize accepts zero, rejects negative/too-wide.
+    // An optional i64 count accepts zero, rejects negative/too-wide.
     if int_negative(limit) || !int_fits(limit, U64{9223372036854775807}) -> return cap
     count: int_word(limit)
     if (count == I64{0}) -> I64{1} else if count < cap -> count else -> cap

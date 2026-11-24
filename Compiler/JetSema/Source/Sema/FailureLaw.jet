@@ -324,10 +324,10 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
 
 // A catch-all arm's body, checked in the arm's open scope behind the `Err`
 // binding it starts with (SemaCatchAllErr).
-sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
-    bound := sema_check_statements(caught.bind, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+    bound := sema_check_statements(caught.bind, return_type, environment, program, scopes, check, diagnostics, loop_depth)
     if !bound.complete -> return bound
-    rest: sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    rest: sema_check_statements(body, return_type, environment, program, scopes, check, diagnostics, loop_depth)
     loop statement in rest.value -> bound.value.push(statement)
     bound.complete = rest.complete
     bound
@@ -1159,10 +1159,7 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             if checked.incomplete_reasons.len() == 0 {
                 // A check that records no reason stopped on a report; name the
                 // reports it made so the stop is never silent.
-                reported := [String]{}
-                loop index in before..<diagnostics.len() {
-                    reported.push("{diagnostics[index].code} {diagnostics[index].what}")
-                }
+                reported: loop index in before..<diagnostics.len() -> "{diagnostics[index].code} {diagnostics[index].what}"
                 if reported.len() == 0 -> reasons.push("{label}: body checking is incomplete") else {
                     reasons.push("{label}: body checking stopped on {reported.join("; ")}")
                 }
@@ -1756,7 +1753,7 @@ SemaDropStatement: struct {
     value: TStmt?,
 }
 
-sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDropStatement {
+sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDropStatement {
     if expr == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method != "drop" -> return SemaDropStatement{handled: false, value: None}
@@ -1764,7 +1761,7 @@ sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program:
             if reason == .Val(problem) {
                 diagnostics.push(sema_error("E0407", method_span, problem.what, problem.why, problem.fix))
             }
-            checked: sema_check_expression_carrier(receiver, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDropStatement{handled: true, value: None}
+            checked: sema_check_expression_carrier(receiver, None, environment, program, scopes, check, diagnostics) ?? return SemaDropStatement{handled: true, value: None}
             // (L1101): `.drop()` on a task discards the handle
             // without joining it; `.detach()` is the fire-and-forget word.
             if sema_single_use_is_task(checked.ty) {

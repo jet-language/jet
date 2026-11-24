@@ -41,8 +41,8 @@ TrustedClock: enum {
     }
 }
 
-// Rust `os_random_bytes`: key material only from the OS CSPRNG, never from
-// predictable process, path, or clock data.
+// Key material only from the OS CSPRNG, never from predictable process, path,
+// or clock data.
 trust_os_random_bytes: fn(count: Int) -[Rand]> [U8] TrustRootError! {
     if random.bytes(count) == {
         .Ok(bytes) -> Ok(bytes)
@@ -368,7 +368,7 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
     Ok(Val(lines))
 }
 
-// Sorted unique lines, each newline-terminated (Rust `BTreeSet` join).
+// Sorted unique lines, each newline-terminated.
 trust_state_body: fn(lines: [String]) -> String Never! {
     sorted := lines
     sorted.sort()
@@ -478,7 +478,7 @@ trust_atomic_write: fn(path: String, body: [U8]) -[FS]> TrustRootError! {
     files.write_atomic(path, body)
 }
 
-// Rust `str::lines`: split at `\n`, dropping a `\r` before it.
+// Split at `\n`, dropping a `\r` before it.
 trust_root_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     pieces: text.split("\n").to_list()

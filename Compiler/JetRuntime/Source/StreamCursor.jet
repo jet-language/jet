@@ -3,9 +3,8 @@
 // an E4 header. Empty data=1, cap=0. Constructors borrow input (Reader accepts
 // checked element stride1/8). All advances prove pos <= len before writing.
 // Clones own independent bytes; drop releases (cap,1) only when nonempty, then
-// the (32,8) carrier. This replaces Rust Box<JetCursor/JetReader> in native
-// packs, never mixes it. Packed input (stride 1) is copied
-// with one bulk move; word-stride input narrows one element per byte.
+// the (32,8) carrier. Packed input (stride 1) is copied with one bulk move;
+// word-stride input narrows one element per byte.
 stream_new: fn(data: I64, len: I64, stride: I64, position: I64) -> I64 {
     handle: jet_rt_alloc(I64{32}, I64{8})
     target: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})

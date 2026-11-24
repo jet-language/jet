@@ -1,9 +1,9 @@
 // Deterministic package bundle plans, artifacts, receipts, and the target
 // layout renderers, ported from jet_pkg_model::Bundler. Every JSON document is
-// Foundation A-canonical JSON (arbitrary integers, Rust key order) plus one LF,
-// exactly the reference's `CanonicalJson::bytes` protocol, not RFC8785 JCS.
-// BLOCKED #4262 integration: shared Encoding/CanonicalJson.jet must land in
-// main Compiler/ after stage 2; Bootstrap never references a worktree path.
+// Foundation A-canonical JSON plus one LF, exactly the reference's
+// `CanonicalJson::bytes` protocol, not RFC8785 JCS. BLOCKED #4262 integration:
+// shared Encoding/CanonicalJson.jet must land in main Compiler/ after stage 2;
+// Bootstrap never references a worktree path.
 use {
     jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_bytes, canonical_json_object]
     hex: core.encoding.hex
@@ -781,12 +781,12 @@ BundleReceipt: struct {
     json: fn(self) -> String Never! { pkg_bundle_canonical_text(self.to_json_tree()) }
 }
 
-// The checked plan for `spec` (Rust `package_bundle_plan`).
+// The checked plan for `spec`.
 pkg_package_bundle_plan: fn(spec: BundleSpec) -> BundlePlan BundleError! {
     BundlePlan.from_spec(spec)
 }
 
-// The logical artifact of `spec` (Rust `emit_package_bundle`).
+// The logical artifact of `spec`.
 pkg_emit_package_bundle: fn(spec: BundleSpec) -> BundleArtifact BundleError! {
     Ok(BundlePlan.from_spec(spec).emit())
 }
@@ -809,8 +809,8 @@ pkg_bundle_hook_inputs_key: fn(inputs: [SigningHookInput]) -> String Never! {
     parts.join([pkg_bundle_nul(), pkg_bundle_nul()].join(""))
 }
 
-// Rust Bundler::integer: Int's canonical decimal text is kept exactly; the
-// CanonicalJSON carrier cannot represent a Float.
+// Int's canonical decimal text is kept exactly; the CanonicalJSON carrier
+// cannot represent a Float.
 pkg_bundle_integer: fn(value: Int) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }
 
 pkg_bundle_canonical_text: fn(value: CanonicalJSON) -> String Never! {

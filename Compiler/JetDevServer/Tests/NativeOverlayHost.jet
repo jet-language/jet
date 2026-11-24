@@ -62,10 +62,7 @@ overlay_test_rejection: fn(host: ^NativeOverlayHost, event: NativeOverlayEvent) 
 
 #Test("merged_projection_stays_bounded") {
     host := NativeOverlayHost.new()
-    nodes := [NativeOverlayNode]{}
-    loop index in 0..<MAX_OVERLAY_NODES {
-        nodes.push(NativeOverlayNode.text("node-{index}", "node"))
-    }
+    nodes: loop index in 0..<MAX_OVERLAY_NODES -> NativeOverlayNode.text("node-{index}", "node")
     host.ingest(overlay_test_event("revision", 1, 1, [NativeOverlayPanelFact]{NativeOverlayPanelFact.new("first", "first", 1, "ready", nodes)})) ?? panic("full panel")
     message: overlay_test_rejection(host, overlay_test_event("revision", 2, 2, [NativeOverlayPanelFact]{overlay_test_panel("second", 1)}))
     assert(message.contains("node budget"))

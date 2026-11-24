@@ -11,9 +11,9 @@ MalformedObject: struct {
     reason: String,
 }
 
-// Rust `malformed_object_reason`: the reason tag, or None for a healthy
-// record. Only a proven missing output is classified; permission and other
-// I/O failures while probing the output stay fail-closed.
+// The reason tag, or None for a healthy record. Only a proven missing output is
+// classified; permission and other I/O failures while probing the output stay
+// fail-closed.
 store_malformed_object_reason: fn(path: String) -[FS, Env]> String? StoreError! {
     metadata_path: files.join(path, "meta.json")
     found: store_node_stat(metadata_path)
@@ -38,7 +38,7 @@ store_malformed_object_reason: fn(path: String) -[FS, Env]> String? StoreError! 
     Ok(None)
 }
 
-// Rust `malformed_objects`: every malformed package record, in id order.
+// Every malformed package record, in id order.
 store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreError! {
     malformed := [MalformedObject]{}
     entries: store_object_dirs(hangar)
@@ -50,9 +50,8 @@ store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreE
     Ok(malformed)
 }
 
-// Rust `quarantine_malformed_objects`: rename each malformed record into the
-// Hangar quarantine; the number moved. Permissions opened for the renames
-// are restored on every exit.
+// Rename each malformed record into the Hangar quarantine; the number moved.
+// Permissions opened for the renames are restored on every exit.
 store_quarantine_malformed_objects: fn(verification: ^StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
     if objects.len() == 0 -> return Ok(0)
     permissions := MovePathPermissions.default()

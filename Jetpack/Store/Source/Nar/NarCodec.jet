@@ -1,8 +1,8 @@
-// Canonical NAR codec (Rust `jetpack::Store::Nar`): deterministic encode,
-// bounded decode, and bounded streaming decode. NAR is the portable wire
-// representation used by Nix-compatible binary caches. The codec rejects
-// traversal and duplicate names and stages substitutions before
-// publication. Callers decide which store identity produced an object.
+// Canonical NAR codec: deterministic encode, bounded decode, and bounded
+// streaming decode. NAR is the portable wire representation used by
+// Nix-compatible binary caches. The codec rejects traversal and duplicate names
+// and stages substitutions before publication. Callers decide which store
+// identity produced an object.
 //
 // Jet paths are text: a NAR name or link target that is not UTF-8 is
 // reported as not representable on this host.
@@ -350,7 +350,7 @@ NarReader: struct {
     }
 }
 
-// Rust `[u8]` ordering: whether `left` sorts strictly before `right`.
+// Whether `left` sorts strictly before `right`.
 store_nar_bytes_less: fn(left: [U8], right: [U8]) -> Bool Never! {
     shorter: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<shorter {

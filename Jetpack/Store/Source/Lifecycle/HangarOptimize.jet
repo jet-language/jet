@@ -7,8 +7,8 @@ use {
     sys: core.sys
 }
 
-// Rust `optimize_hangar_plan`: duplicate non-empty files across legacy
-// package directories that `optimize_package_tree_hardlinks` would share.
+// Duplicate non-empty files across legacy package directories that
+// `optimize_package_tree_hardlinks` would share.
 store_optimize_hangar_plan: fn(hangar: String) -[FS]> CleanReport StoreError! {
     seen := [String:String]{}
     report := CleanReport.empty()
@@ -30,9 +30,9 @@ store_optimize_hangar_plan: fn(hangar: String) -[FS]> CleanReport StoreError! {
     Ok(report)
 }
 
-// Rust `optimize_objects_cas_pool_plan`: the read-only counterpart of
-// `optimize_objects_cas_pool`, honest for Store-v2 objects even when there
-// are no legacy package directories. A pooled file must match exactly.
+// The read-only counterpart of `optimize_objects_cas_pool`, honest for Store-v2
+// objects even when there are no legacy package directories. A pooled file must
+// match exactly.
 store_optimize_objects_cas_pool_plan: fn(roots: HangarRoots) -[FS, Env]> CleanReport StoreError! {
     objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     found: store_node_stat(objects)
@@ -101,7 +101,6 @@ store_optimize_object_dirs: fn(objects: String) -[FS]> [String] StoreError! {
     Ok(object_dirs)
 }
 
-// Rust `optimize_hangar`.
 store_optimize_hangar: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     report := store_optimize_package_tree_hardlinks(roots.hangar_dir())
     cas: store_optimize_objects_cas_pool(verification, roots)
@@ -110,8 +109,8 @@ store_optimize_hangar: fn(verification: ^StoreVerification, roots: HangarRoots) 
     Ok(report)
 }
 
-// Rust `optimize_package_tree_hardlinks`: legacy package-directory hardlink
-// dedupe (pre-`objects/` layout). A failed replacement is skipped.
+// Legacy package-directory hardlink dedupe (pre-`objects/` layout). A failed
+// replacement is skipped.
 store_optimize_package_tree_hardlinks: fn(hangar: String) -[FS, Env]> CleanReport StoreError! {
     seen := [String:String]{}
     report := CleanReport.empty()
@@ -141,11 +140,11 @@ store_optimize_package_tree_hardlinks: fn(hangar: String) -[FS, Env]> CleanRepor
     Ok(report)
 }
 
-// Rust `optimize_objects_cas_pool`: share Store-v2 object files through the
-// machine CAS pool under the shared-CAS lock, then sync the object pool.
-// Sharing swaps files for byte-equal pool links, which changes the inode
-// and mtime tuples a seal records, so an object whose seal held before the
-// swap is resealed after it; an unsealed object stays unsealed.
+// Share Store-v2 object files through the machine CAS pool under the shared-CAS
+// lock, then sync the object pool. Sharing swaps files for byte-equal pool
+// links, which changes the inode and mtime tuples a seal records, so an object
+// whose seal held before the swap is resealed after it; an unsealed object
+// stays unsealed.
 store_optimize_objects_cas_pool: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar: roots.hangar_dir()
     objects: files.join(hangar, STORE_OBJECTS_DIR)
@@ -167,29 +166,27 @@ store_optimize_objects_cas_pool: fn(verification: ^StoreVerification, roots: Han
     Ok(report)
 }
 
-// Rust `permission_identity`: the permission bits on Unix; on Windows only
-// the readonly flag.
+// The permission bits on Unix; on Windows only the readonly flag.
 store_optimize_permission_identity: fn(metadata: Stat) -[Env]> Int Never! {
     if sys.is_windows() -> return if metadata.readonly -> 1 else -> 0
     (metadata.mode) & 0o7777
 }
 
-// Rust `same_file_inode`: both paths name one file (following links). Always
-// false where Core cannot read an identity.
+// Both paths name one file (following links). Always false where Core cannot
+// read an identity.
 store_optimize_same_file: fn(left: String, right: String) -[FS, Env]> Bool Never! {
     files.samefile(left, right) ?? false
 }
 
-// Rust `optimize_cas_pool`: the CAS-pool optimizer under the Hangar lock
-// (also run by `clean`).
+// The CAS-pool optimizer under the Hangar lock (also run by `clean`).
 store_optimize_cas_pool: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_optimize_objects_cas_pool(verification, roots)
 }
 
-// Rust `hardlink_replace`: replace `file` with a hardlink to `first`. Unix
-// links a temporary name and renames it over `file`; Windows moves `file`
-// aside first and restores it when linking fails.
+// Replace `file` with a hardlink to `first`. Unix links a temporary name and
+// renames it over `file`; Windows moves `file` aside first and restores it when
+// linking fails.
 store_hardlink_replace: fn(first: String, file: String) -[FS, Env]> StoreError! {
     if first == file {
         return
@@ -219,16 +216,16 @@ store_hardlink_replace: fn(first: String, file: String) -[FS, Env]> StoreError! 
     }
 }
 
-// Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
-// with the CAS-peer hardlink law (Hangar-internal peers are accepted).
+// Re-hash a Hangar object under the Hangar lock with the CAS-peer hardlink law
+// (Hangar-internal peers are accepted).
 store_verify_hangar_object: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     _hangar_lock: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_verify_hangar_object_unlocked(verification, roots, entry)
 }
 
-// Rust `verify_hangar_object_unlocked`: the closure graph must agree with the
-// record's primary, action key, references and output map; every named
-// output must re-hash to its recorded digest; every reference must exist.
+// The closure graph must agree with the record's primary, action key,
+// references and output map; every named output must re-hash to its recorded
+// digest; every reference must exist.
 store_verify_hangar_object_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env, Time]> IngestError! {
     hangar: roots.hangar_dir()
     allow: entry.platform_artifact_kind != ""

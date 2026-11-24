@@ -57,8 +57,7 @@ CoreTypedCallSignature: struct {
     result_rule: CoreCallResultRule,
     // A labeled tuple return's labels, or a Result return's labeled tuple
     // error's labels, in the native kernel's declared slot order (the order
-    // `return_type` writes them in); empty for every other return. Rust
-    // `core_call_native_return`.
+    // `return_type` writes them in); empty for every other return.
     native_return_labels: [String],
 }
 
@@ -667,10 +666,10 @@ core_sig_regex: fn(module_name: String, member: String) -> CoreTypedCallSignatur
     Val(core_sig(module_name, member, parameters, result))
 }
 
-// Rust `infer_core_call` `core.crypto.vault` typed-provider arm: one sealed
-// vault key type `T` (SigningKey or X25519SecretKey; a generic body defers
-// the bound to monomorphization) shapes every typed operation. Wrapped-key
-// operations fail with KeyWrapError, the rest with VaultError.
+// The `core.crypto.vault` typed-provider arm: one sealed vault key type `T`
+// (SigningKey or X25519SecretKey; a generic body defers the bound to
+// monomorphization) shapes every typed operation. Wrapped-key operations fail
+// with KeyWrapError, the rest with VaultError.
 core_sig_vault: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     if module_name != "core.crypto.vault" -> return None
     read: AccessConvention.Read
@@ -825,10 +824,10 @@ core_call_typed_signature: fn(module_name: String, member: String, actual_arity:
     )
 }
 
-// Rust `core_call_native_return` for a labeled tuple: the labels in the
-// kernel's declared slot order, so a native route maps each checked tuple
-// member to the kernel slot of the same label. Empty when the fixed
-// signature has no labeled tuple return.
+// The native return of a labeled tuple: the labels in the kernel's declared
+// slot order, so a native route maps each checked tuple member to the kernel
+// slot of the same label. Empty when the fixed signature has no labeled tuple
+// return.
 core_call_native_return_labels: fn(module_name: String, member: String) -> [String] Never! {
     request: CoreCallSignatureRequest{module_name: module_name, member: member, actual_arity: 0, actual_accesses: [AccessConvention]{}, type_args: [Type]{}}
     signature: core_sig_fixed(request) ?? return [String]{}

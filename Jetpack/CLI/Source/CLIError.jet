@@ -1,10 +1,9 @@
 // The CLI area's one error carrier for command failures that travel before a
-// command renders its diagnostic. Rust `io::Error` values keep their kind:
-// file-system failures travel as `Io`, and the `ErrorKind::InvalidData` /
-// `PermissionDenied` / `Other` refusals carry their final text.
-// `ProviderFacts` is the E1335 package-generation refusal (Rust spelled it as
-// an `"Jet.EnvironmentIntegrationConflict: "` message prefix) and `ManagedTool` the E1340 managed-tool
-// write refusal (Rust matched the "managed tool `" message text).
+// command renders its diagnostic. IO errors keep their kind: file-system
+// failures travel as `Io`, and the InvalidData / PermissionDenied / Other
+// refusals carry their final text. `ProviderFacts` is the E1335
+// package-generation refusal and `ManagedTool` the E1340 managed-tool write
+// refusal.
 
 #Error
 CLIError: enum {
@@ -22,8 +21,7 @@ CLIError: enum {
     Reported(Int),
 
     // An authority, workspace, or lock refusal as its registered diagnostic.
-    // The failure was already rendered; the command exits with this code
-    // (Rust `Result<_, i32>` helpers).
+    // The failure was already rendered; the command exits with this code.
 
     message: fn(self) -> String Never! {
         if self == {
@@ -42,7 +40,7 @@ CLIError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::NotFound` across the carriers.
+    // Whether the error is NotFound, across the carriers.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> cli_io_error_is_not_found(error)
@@ -53,7 +51,6 @@ CLIError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::PermissionDenied`.
     is_permission_denied: fn(self) -> Bool Never! {
         if self == {
             .IO(error) -> cli_io_error_is_permission_denied(error)

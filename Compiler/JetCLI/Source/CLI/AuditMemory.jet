@@ -164,8 +164,8 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
         tree: jet_cli_status_tree_parse(text) ?? return Err(jet_cli_read_error("memory ledger row {line} is malformed"))
         rows.push(jet_cli_memory_parse_row(jet_cli_status_from_tree(tree), line))
     }
-    // Stable merge sort by the same tuple as Rust; avoid quadratic insertion
-    // when the bounded ledger contains its full 65,536 rows.
+    // Stable merge sort by the same tuple; avoid quadratic insertion when the
+    // bounded ledger contains its full 65,536 rows.
     width := 1
     loop width < rows.len() {
         merged := [JetCLIMemoryRow]{}

@@ -343,9 +343,8 @@ Dimension: struct {
     axes: [DimensionAxis],
 }
 
-// Axes stay sorted by base identity with zero exponents removed (Rust
-// BTreeMap), so equality is stable; an exponent outside i32 makes the
-// combination unrepresentable.
+// Axes stay sorted by base identity with zero exponents removed, so equality is
+// stable; an exponent outside i32 makes the combination unrepresentable.
 dimension_base: fn(identity: String) -> Dimension Never! {
     Dimension{axes: [DimensionAxis]{DimensionAxis{name: identity, exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}}
 }
@@ -1576,12 +1575,11 @@ type_structural_args: fn(ty: Type) -> [Type]? Never! {
     None
 }
 
-// (Rust `AST.union_member_tag`): a union member's own tag. Rust spells a
-// declared member by its own name, so every nominal reads without its
-// module qualifier (`module.LocalDate` is `LocalDate`); a compound spelling
-// is sanitized into an identifier (`[String]` is `M__String_`). A named case
-// is tagged by its name. Two members may share it; the tag an arm names is
-// type_union_member_tag_in.
+// A union member's own tag. A declared member is spelled by its own name, so
+// every nominal reads without its module qualifier (`module.LocalDate` is
+// `LocalDate`); a compound spelling is sanitized into an identifier
+// (`[String]` is `M__String_`). A named case is tagged by its name. Two members
+// may share it; the tag an arm names is type_union_member_tag_in.
 type_union_member_tag: fn(ty: Type) -> String Never! {
     if ty == .Case(name, _) -> return name.copy()
     type_union_member_tag_name(type_name(type_unqualified_nominals(ty)))
@@ -1631,14 +1629,13 @@ type_union_member_payload: fn(ty: Type) -> Type Never! {
     ty.copy()
 }
 
-// Puts a union's members in the canonical order every union carries (Rust
-// `canonicalize_union`): the parser writes each union so, and a union a
-// binding rebuilds is put back in it (jet_sema sema_failure_union_canonical),
-// so two spellings of one union are one Type. Members sort by their spelling
-// read without module qualifiers, the full spelling breaking ties: resolving
-// a member to its declaration key (`net.NetError` to
-// `<corelib>/core.net.NetError`) never reorders the union. Each member's key
-// is built once per sort, not once per comparison.
+// Puts a union's members in the canonical order every union carries: the parser
+// writes each union so, and a union a binding rebuilds is put back in it
+// (jet_sema sema_failure_union_canonical), so two spellings of one union are
+// one Type. Members sort by their spelling read without module qualifiers, the
+// full spelling breaking ties: resolving a member to its declaration key
+// (`net.NetError` to `<corelib>/core.net.NetError`) never reorders the union.
+// Each member's key is built once per sort, not once per comparison.
 type_union_sort: fn(members: ^[Type]) -[]> {
     if members.len() < 2 {
         return
@@ -1691,7 +1688,7 @@ type_union_unqualified: fn(name: String) -[]> String {
     unaliased
 }
 
-// Rust `union_member_tag`'s sanitizer over one written spelling.
+// The union member tag sanitizer over one written spelling.
 type_union_member_tag_name: fn(raw: String) -> String Never! {
     safe := true
     loop byte in raw.bytes() {
@@ -2055,10 +2052,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
             Type.Apply{name: name, args: normalized_args}
         }
         .Tuple(fields) -> {
-            normalized_fields := [TypeTupleField]{}
-            loop field in fields {
-                normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
-            }
+            normalized_fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)}
             Type.Tuple{fields: normalized_fields}
         }
         // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
@@ -2067,10 +2061,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         // copy: `marker`, `inner` and `marker` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker`, `inner` and `marker`
         .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_fn_returns(inner)}
         .Union(members) -> {
-            normalized_members := [Type]{}
-            loop member in members {
-                normalized_members.push(type_with_effective_fn_returns(member))
-            }
+            normalized_members: loop member in members -> type_with_effective_fn_returns(member)
             Type.Union{members: normalized_members}
         }
         .Case(name, payload) -> Type.Case{name: name, payload: type_with_effective_fn_returns(payload)}
@@ -2092,10 +2083,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
 type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
     if ty == {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            normalized_params := [Type]{}
-            loop param in params {
-                normalized_params.push(type_with_effective_parameter_fn_return(param))
-            }
+            normalized_params: loop param in params -> type_with_effective_parameter_fn_return(param)
             normalized_ret := ret.map(fn(value) { effective_callable_return(value) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }

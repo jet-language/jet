@@ -905,7 +905,7 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
                 }
             }
         }
-        // Rust drains the displaced trivia even when no item follows.
+        // The displaced trivia drains even when no item follows.
         groups[directive].tokens = rest
         if target >= 0 {
             loop token in groups[target].tokens -> displaced.push(token)
@@ -1243,7 +1243,7 @@ fl_string_parts_equal: fn(left: [FmtPart], right: [FmtPart]) -> Bool {
         b: right[index]
         if a.kind != b.kind -> return false
         if a.kind == STRING_PART_TEXT && a.text != b.text -> return false
-        // Rust compared no byte parts; equal bytes are the same string.
+        // Equal bytes are the same string; no byte parts are compared.
         if a.kind == STRING_PART_BYTE && a.byte != b.byte -> return false
         if a.kind == STRING_PART_INTERPOLATION && fl_ordered_token_diff("<string interpolation>", fl_without_terminators(a.tokens), fl_without_terminators(b.tokens)) != "" {
             return false

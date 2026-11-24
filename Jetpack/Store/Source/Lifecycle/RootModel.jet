@@ -314,7 +314,7 @@ RootUpdate: struct {
     priv at: LifecycleTimestamp,
 }
 
-// Rust `validate_identity`: 1..=512 bytes and no ASCII control byte.
+// 1..=512 bytes and no ASCII control byte.
 store_lifecycle_validate_identity: fn(label: String, value: String) StoreError! {
     raw: value.bytes()
     if raw.len() == 0 || raw.len() > STORE_LIFECYCLE_MAX_IDENTITY_BYTES {
@@ -328,7 +328,7 @@ store_lifecycle_validate_identity: fn(label: String, value: String) StoreError! 
     }
 }
 
-// Rust `validate_target`: `sha256-` then 64 lowercase hexadecimal digits.
+// `sha256-` then 64 lowercase hexadecimal digits.
 store_lifecycle_validate_target: fn(target: String) StoreError! {
     if !target.starts_with("sha256-") {
         return Err(StoreError.InvalidData("lifecycle target must be a sha256 digest"))
@@ -349,8 +349,7 @@ store_lifecycle_is_lower_hex: fn(value: String, length: Int) -> Bool Never! {
     true
 }
 
-// Rust `str::parse::<u64>`: an optional `+`, then one or more ASCII digits,
-// within the Int range.
+// An optional `+`, then one or more ASCII digits, within the Int range.
 store_lifecycle_parse_u64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     start: if raw.len() > 0 && (Int{raw[0]}) == 43 -> 1 else -> 0
@@ -404,7 +403,7 @@ store_lifecycle_sorted_ids: fn(state: [String:LifecycleRoot]) -> [String] Never!
     ids
 }
 
-// Unix seconds now (Rust `unix_now`).
+// Unix seconds now.
 store_lifecycle_unix_now: fn() -[Time]> LifecycleTimestamp Never! {
     LifecycleTimestamp.from_unix_seconds(time.unix_ns() /% 1000000000)
 }

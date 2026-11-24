@@ -128,7 +128,7 @@ AuthorityError: enum {
         }
     }
 
-    // The Rust `Display` text.
+    // The `Display` text.
     message: fn(self) -> String Never! {
         if self == {
             .Missing(path, _) -> "authority path `{path}` is missing"
@@ -236,7 +236,7 @@ pkg_authority_error_diagnostic: fn(code: String, what: String, why: String, fix:
     diagnostic_from_registry(code, None, what, why, fix)
 }
 
-// Rust `FromUtf8Error` Display: where the first invalid sequence starts.
+// Where the first invalid sequence starts.
 pkg_authority_utf8_error: fn(bytes: [U8]) -> String Never! {
     valid := 0
     loop valid < bytes.len() {
@@ -339,7 +339,7 @@ pkg_authority_map_io: fn(path: String, error: IOError, directory: Bool) -[Env]> 
     AuthorityError.IO{path: path, operation: operation, detail: "{error}"}
 }
 
-// `root.join(relative)`: an empty relative keeps Rust's trailing separator.
+// `root.join(relative)`: an empty relative keeps the trailing separator.
 pkg_authority_join: fn(root: String, relative: String) -> String Never! {
     if relative == "" {
         if root.ends_with("/") -> return root.copy()

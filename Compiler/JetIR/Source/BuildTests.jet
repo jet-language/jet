@@ -688,15 +688,9 @@ ir_test_check: fn(m: ^IRModule, p: IRProgram, check: IROutputCheck, function: In
 
 // The harness entry `main` (see the head of this file).
 ir_test_main: fn(m: ^IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: ^[IRBuildFailure]) -> Int Never! {
-    units := [Int]{}
-    loop (index, test) in harness.tests {
-        units.push(ir_test_unit(m, p, test, bodies[index], failures))
-    }
+    units: loop (index, test) in harness.tests -> ir_test_unit(m, p, test, bodies[index], failures)
     release_id: ir_test_release(m, p, failures)
-    check_helpers := [Int]{}
-    loop (index, check) in harness.checks {
-        check_helpers.push(ir_test_check(m, p, check, check_ids[index], failures))
-    }
+    check_helpers: loop (index, check) in harness.checks -> ir_test_check(m, p, check, check_ids[index], failures)
     id: ir_test_function(m, "main", -1, "main")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)

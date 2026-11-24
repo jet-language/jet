@@ -473,9 +473,7 @@ Expected files are read-only in ordinary runs.
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
-200ms. No running test measures it yet: the Rust-era
-`DevLatencyTests.jet` transliteration never compiled and was removed with the
-other Rust-era JetLSP tests (#6650). This is the user latency contract, not a
+200ms. No running test measures it yet (#6650). This is the user latency contract, not a
 claim that every machine has one fixed runtime.
 
 Layout infeasibility is deliberately different. `tests/layout.rs` records that
@@ -550,21 +548,11 @@ owners in deferred Err arms before the new taking dispatch.
 When lowering such a value-if, the Err literal's absent success slot takes the
 live sibling's checked carrier type, not the enclosing function's return type.
 
-Hosted Rust emission binds caller-owned return storage before compacting local
-names. A return place is not an ordinary owned local that declaration folding
-may initialize with an internal reuse marker. Its preserved declaration and
-writes pass through the existing return-slot binder, which clears and refills
-the caller's buffer without an undeclared `__jet_return_reuse` reference.
-The compiler SHA256 hex-builder regression executes populated, empty and
-populated-again refills through the generated return-slot entry points.
-
-Hosted Rust derives follow the actual native carrier's capabilities: owned
-FileReader and FileWriter streams provide neither Rust Clone nor Debug, even
+FileReader and FileWriter streams are neither Clone nor Debug, even
 when their opaque checked type has no generic arguments. Enclosing records
 must not gain those structural derives from an empty argument list. Checked
 source value hooks, such as Clock's semantic fork and Debug, remain available.
-Retained native config and Encode helpers use the canonical Dyn carrier; the
-retired DataTree Rust type is not restored as an alias.
+Retained native config and Encode helpers use the canonical Dyn carrier.
 
 Source-hook capability queries snapshot only the type identity, key and span
 before a write-access call on the owning emission context. The hook lookup does

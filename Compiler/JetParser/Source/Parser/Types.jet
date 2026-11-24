@@ -884,10 +884,7 @@ parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: S
             parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
-    owners := [String]{}
-    loop index in 0..<names.len() {
-        owners.push(if names[index] == "" -> "_{index}" else -> names[index])
-    }
+    owners: loop index in 0..<names.len() -> if names[index] == "" -> "_{index}" else -> names[index]
     return_view: parser_parse_opt_declared_view_from(state, owners)
     // An effect row comes right after the parameters; one after the result
     // is not a function type, so it gets the generic parse error.
@@ -976,8 +973,8 @@ parser_parse_type_argument: fn(state: ^JetParserState, depth: Int) -> Type {
 
 parser_parse_measure: fn(state: ^JetParserState, kind: String, depth: Int) -> Measure {
     token: parser_current(state)
-    // Rust `parse_declared_measure`: a fixed-list length is a whole,
-    // non-negative number; either report is the item's `Err`.
+    // A fixed-list length is a whole, non-negative number; either report is the
+    // item's `Err`.
     if kind == "length" && token.kind == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_INT {
         parser_bump(state)
         number: parser_bump(state)

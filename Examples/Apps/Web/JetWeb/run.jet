@@ -156,9 +156,8 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     typed_form.set(.id, "{ship_data.id}") ?? panic("typed id value")
     typed_form.set(.carrier, ship_data.carrier) ?? panic("typed carrier value")
     typed_form.set(.tracking, ship_data.tracking) ?? panic("typed tracking value")
-    typed_form_markup: typed_form
-        .validate(.carrier, on: .Blur, with: check_carrier)
-        .render()
+    typed_chain: typed_form.validate(.carrier, on: .Blur, with: check_carrier) ?? panic("carrier validator")
+    typed_form_markup: typed_chain.render()
 
     // query.load seeds the cache with route data and reuses its loader for
     // refreshes. Marking it stale exposes stale → fetching → fresh to the panel.

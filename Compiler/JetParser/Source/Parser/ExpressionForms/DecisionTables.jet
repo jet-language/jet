@@ -1,9 +1,8 @@
 // Value-producing decision tables and expression closures.
 //
-// The canonical Rust parser lowers these forms to the existing Expr.If,
-// Expr.PatternTest, Expr.Binary, and Expr.Lambda carriers.  Keeping the
-// lowering here preserves one AST surface while allowing the shared
-// expression dispatcher to remain small.
+// These forms lower to the existing Expr.If, Expr.PatternTest, Expr.Binary,
+// and Expr.Lambda carriers. Keeping the lowering here preserves one AST
+// surface while allowing the shared expression dispatcher to remain small.
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
@@ -246,8 +245,7 @@ parser_expression_form_dispatch_op: fn(kind: Int) -> BinOp? {
 }
 
 // `if subject == {field: …} -> …`: a record pattern right after `==` is one
-// pattern test (Rust try_pattern_rhs), not a dispatch body, whose first arm
-// never starts `name:`.
+// pattern test, not a dispatch body, whose first arm never starts `name:`.
 parser_expression_form_record_test_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_EQ_EQ && parser_kind_at(state, 1) == TOKEN_LBRACE && parser_kind_at(state, 2) == TOKEN_IDENT && parser_kind_at(state, 3) == TOKEN_COLON
 }
@@ -456,9 +454,9 @@ parser_expression_form_value_block: fn(state: ^JetParserState, depth: Int) -> Pa
             statements.push(parser_parse_statement(state))
             next
         }
-        // As in Rust's value blocks: a line that reaches the closing `}` is
-        // tried as the branch value and kept when it parses cleanly; any
-        // other line, or a failed try, is an ordinary statement.
+        // As in value blocks: a line that reaches the closing `}` is tried as
+        // the branch value and kept when it parses cleanly; any other line,
+        // or a failed try, is an ordinary statement.
         before: state.position
         if !parser_if_table_has_statement_arm(state) && parser_value_tail_ahead(state) {
             saved_position: state.position
@@ -575,8 +573,8 @@ parser_expression_form_parse_guard_table: fn(state: ^JetParserState, start: Span
         branch: parser_expression_form_selected_value(state, depth + 1)
         arms.push(ParserExpressionFormArm{cond: condition.move(), body: branch.body, value: branch.value})
         parser_table_arm_separator(state)
-        // A fatal arm error ends the table, as Rust's `?` does; malformed
-        // input that consumed nothing must not retry forever either.
+        // A fatal arm error ends the table; malformed input that consumed
+        // nothing must not retry forever either.
         if parser_aborting(state) -> break
         if state.position == arm_position -> parser_bump(state)
     }
@@ -1059,9 +1057,9 @@ parser_expression_form_parse_if: fn(state: ^JetParserState, depth: Int, lint_sty
         }
     }
     parser_expect_unified_arrow(state, "after the condition of a value-producing `if`")
-    // As Rust's `?`: once the arrow is missing (a classic `if c {` statement
-    // read as a value), the value form ends here. A speculative parse that
-    // is about to be rewound then never reads the statement's body.
+    // Once the arrow is missing (a classic `if c {` statement read as a
+    // value), the value form ends here. A speculative parse that is about to
+    // be rewound then never reads the statement's body.
     if parser_aborting(state) {
         return ParsedExpr{expr: condition.expr, span: parser_cover(start.span, condition.span)}
     }

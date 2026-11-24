@@ -211,8 +211,7 @@ services_replace_through: fn(temporary: String, path: String, contents: [U8]) -[
     files.rename(temporary, path)
 }
 
-// Remove a state file; a missing file is fine and other failures are ignored
-// (Rust `let _ = fs::remove_file(..)`).
+// Remove a state file; a missing file is fine and other failures are ignored.
 services_remove_quiet: fn(path: String) -[FS]> {
     files.remove(path).drop("state cleanup is best-effort")
 }
@@ -248,7 +247,7 @@ services_read_text_bounded: fn(path: String, limit: Int) -[FS]> String IOError! 
     String.from_bytes(bytes) ?? return Err(services_state_error(path, "service state is not UTF-8"))
 }
 
-// Rust `str::lines`: split at LF and drop one trailing CR per line.
+// Split at LF and drop one trailing CR per line.
 services_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     if text == "" -> return lines
@@ -356,7 +355,7 @@ services_write_lifecycle: fn(dir: String, facts: LifecycleFacts) -[FS, Env]> IOE
     services_write_atomic(services_lifecycle_path(dir), encoded.bytes())
 }
 
-// Best-effort lifecycle publication (Rust `let _ = write_lifecycle(..)`).
+// Best-effort lifecycle publication.
 services_write_lifecycle_quiet: fn(dir: String, facts: LifecycleFacts) -[FS, Env]> {
     services_write_lifecycle(dir, facts).drop("lifecycle evidence is best-effort here")
 }

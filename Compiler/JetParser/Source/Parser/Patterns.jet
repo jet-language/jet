@@ -138,10 +138,10 @@ parser_pattern_byte_text: fn(value: Int) -> String Never! {
     String.from_bytes([U8]{U8{high}, U8{low}}) ?? ""
 }
 
-// Rust `parse_str_match_hole`: a name, then an optional `:Type`. Tokens
-// after that are not an error here (the `==` gate and the typed
-// `take_pattern` gate reject them first); they only widen the hole span.
-// A hole that does not parse is fatal, as Rust returns it as `Err`.
+// A string match hole: a name, then an optional `:Type`. Tokens after that
+// are not an error here (the `==` gate and the typed `take_pattern` gate
+// reject them first); they only widen the hole span. A hole that does not
+// parse is fatal for the statement.
 parser_take_pattern_text_hole: fn(state: ^JetParserState, part: StringPart) -> StrMatchPart {
     nested := JetParserState{
         tokens: part.tokens,
@@ -277,9 +277,8 @@ parser_take_pattern_binary_bits: fn(state: ^JetParserState, spec: String, span: 
     BinSpec.Bits{width: width, endian: endian}
 }
 
-// Rust `parse_bin_match_hole`: a hole without a name or colon is dropped
-// (E1007 at the whole literal or the name); a bad or trailing spec keeps
-// the hole with the fallback `U8` reading.
+// A hole without a name or colon is dropped (E1007 at the whole literal or the
+// name); a bad or trailing spec keeps the hole with the fallback `U8` reading.
 parser_take_pattern_binary_hole: fn(state: ^JetParserState, part: StringPart, literal_span: Span) -> BinMatchPart? {
     nested := JetParserState{
         tokens: part.tokens,
@@ -350,9 +349,9 @@ parser_take_pattern_binary_parts: fn(state: ^JetParserState, parts: [StringPart]
     match_parts
 }
 
-// Rust `parse_take_pattern_literal`: a typed `[U8]{"…"}` / `String{"…"}`
-// first; typed text holes must be bare names, optionally typed (fatal
-// E0003 at the hole's first token), while a bare string takes any hole.
+// A typed `[U8]{"…"}` / `String{"…"}` first; typed text holes must be bare
+// names, optionally typed (fatal E0003 at the hole's first token), while a bare
+// string takes any hole.
 parser_parse_take_pattern_literal: fn(state: ^JetParserState, depth: Int) -> ParsedExpr {
     typed: parser_try_take_pattern_body(state, depth + 1)
     if typed == .Val(body) {
@@ -398,8 +397,8 @@ parser_comparison_pattern_rhs_ahead: fn(state: ^JetParserState, value: Bool) -> 
     parser_pattern_rhs_ahead(state, value)
 }
 
-// Rust `try_pattern_rhs`: the heads that start a pattern after `==` or as a
-// bare arm head. Anything else is an ordinary value.
+// The heads that start a pattern after `==` or as a bare arm head. Anything
+// else is an ordinary value.
 parser_pattern_rhs_ahead: fn(state: ^JetParserState, value: Bool) -> Bool Never! {
     token: parser_current(state)
     if token.kind == {
@@ -432,7 +431,7 @@ parser_module_arm_ahead: fn(state: ^JetParserState) -> Bool Never! {
     offset > 1 && parser_kind_at(state, offset) == TOKEN_IDENT && parser_pascal_name(parser_value_at(state, offset))
 }
 
-// Rust `named_struct_pattern_ahead` `Point{…}` starts a
+// `Point{…}` starts a
 // named struct pattern only when the head is a non-constant type name and
 // its brace body reads as pattern entries: `..`, `field:`, `field,`, or a
 // lone `field}` followed by what ends the pattern. Typed literals such as
@@ -485,9 +484,9 @@ parser_qualified_case_pattern_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_kind_at(state, open + 1) == TOKEN_IDENT && parser_kind_at(state, open + 2) == TOKEN_RBRACE && parser_kind_at(state, open + 3) == TOKEN_PIPE
 }
 
-// Rust `try_typed_pattern_str_body`: `[U8]{"…"}`, `[U8#N]{"…"}` or
-// `String{"…"}` (the retired `.{` spelling too). A `String` head is a
-// pattern only when its string has holes that all read as bare names.
+// `[U8]{"…"}`, `[U8#N]{"…"}` or `String{"…"}` (the retired `.{` spelling
+// too). A `String` head is a pattern only when its string has holes that all
+// read as bare names.
 parser_typed_pattern_ahead: fn(state: ^JetParserState) -> Bool Never! {
     token: parser_current(state)
     text: token.kind == TOKEN_IDENT && parser_value(state, token) == "String"
@@ -516,8 +515,7 @@ parser_typed_pattern_ahead: fn(state: ^JetParserState) -> Bool Never! {
     literal.kind == TOKEN_RAW_STRING && !text
 }
 
-// Rust `try_str_match_pattern`: a string with holes, each a bare name
-// optionally followed by `:Type`.
+// A string with holes, each a bare name optionally followed by `:Type`.
 parser_string_pattern_ahead: fn(state: JetParserState, token: Token) -> Bool Never! {
     if parser_interpolations(state, token) == 0 -> return false
     loop part in parser_string_parts(state, token) {
@@ -596,8 +594,7 @@ parser_parse_pattern_atom: fn(state: ^JetParserState, depth: Int, allow_named: B
             path_span = name.span
         }
         start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF -> {
-            // `Val(x)` is the present-value literal, not a bare variant (Rust
-            // `try_pattern_rhs` takes it before the E0367 check).
+            // `Val(x)` is the present-value literal, not a bare variant.
             if start.kind == TOKEN_IDENT && parser_value(state, start) != "Val" && parser_bare_variant_head(state) {
                 payload: if parser_kind_at(state, 1) == TOKEN_LPAREN -> "(…)" else -> ""
                 parser_report_bare_variant(state, start, payload)
@@ -688,9 +685,9 @@ parser_report_bare_variant: fn(state: ^JetParserState, token: Token, payload: St
     parser_add_error_code(state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call", "write `.{name}{payload}`")
 }
 
-// Rust `pattern_item`: one payload slot, list item or map value. A bare
-// lowercase name binds, `_` skips, `lo..hi` tests a range, a nested shape
-// tests inside, and any other expression is a value compared with `==`.
+// One payload slot, list item or map value. A bare lowercase name binds, `_`
+// skips, `lo..hi` tests a range, a nested shape tests inside, and any other
+// expression is a value compared with `==`.
 parser_parse_pattern_slot: fn(state: ^JetParserState, depth: Int) -> PatSlot {
     start: parser_current(state)
     // S31: a leading-dot pattern nests inside the payload slot.
@@ -848,8 +845,8 @@ parser_parse_struct_pattern: fn(state: ^JetParserState, type_span: Span, depth: 
     ParsedPattern{pattern: Pattern.Struct{fields: fields.move(), rest: rest.move(), span: span, type_name: type_name}, span: span}
 }
 
-// Rust `nested_pattern_ahead(false)`: a struct field holds a nested pattern
-// rather than a compared value. A bare unit case `.Red` stays a value.
+// A struct field holds a nested pattern rather than a compared value. A bare
+// unit case `.Red` stays a value.
 parser_struct_field_nested_pattern_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) == {
         TOKEN_DOT -> {
@@ -865,8 +862,7 @@ parser_struct_field_nested_pattern_ahead: fn(state: ^JetParserState) -> Bool Nev
     }
 }
 
-// Rust `nested_pattern`: the nested pattern
-// `parser_struct_field_nested_pattern_ahead` found.
+// The nested pattern `parser_struct_field_nested_pattern_ahead` found.
 parser_parse_struct_field_nested_pattern: fn(state: ^JetParserState, depth: Int) -> ParsedPattern {
     start: parser_current(state)
     if start.kind == {
@@ -906,10 +902,9 @@ parser_bracket_pattern_ahead: fn(state: ^JetParserState) -> Bool Never! {
             return shaped && after != TOKEN_LBRACE && after != TOKEN_HASH
         }
         if token.kind == TOKEN_DOT_DOT || token.kind == TOKEN_QUESTION -> shaped = true
-        // Rust `pattern_item`: only a bare lowercase slot name directly
-        // closed by `,` `)` `]` `}` binds (never a call argument), and only a
-        // slot-leading `.Variant` nests; `[n - 1]`, `[f(x)]` and `[a.b]` stay
-        // list values.
+        // Only a bare lowercase slot name directly closed by `,` `)` `]` `}`
+        // binds (never a call argument), and only a slot-leading `.Variant`
+        // nests; `[n - 1]`, `[f(x)]` and `[a.b]` stay list values.
         if token.kind == TOKEN_IDENT && parens == 0 && !parser_pascal_name(parser_value(state, token)) && !parser_constant_name(parser_value(state, token)) && parser_slot_start(parser_kind_at(state, offset - 1)) && parser_bind_slot_end(parser_kind_at(state, offset + 1)) {
             shaped = true
         }
@@ -993,7 +988,7 @@ parser_parse_bracket_pattern: fn(state: ^JetParserState, depth: Int) -> ParsedPa
             }
             parser_skip_named_pattern_line_breaks(state)
             if parser_current_kind(state) != TOKEN_RBRACKET {
-                // Rust `rest_not_last` is the statement's `Err`.
+                // A rest pattern that is not last is fatal for the statement.
                 form: if is_map -> "map" else -> "list"
                 parser_add_fatal_code(state, "E0003", rest_span, "`..` must be the last entry of a {form} pattern", "`..` stands for everything the pattern does not list, so nothing can follow it", "move `..` to the end of the pattern")
             }

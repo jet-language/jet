@@ -753,7 +753,7 @@ cli_read_dotenv: fn(bytes: [U8]) -> [String:String] CLIError! {
     values := [String:String]{}
     lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
-        // Rust `str::lines` drops a trailing `\r`; `trim` removes it too.
+        // Line splitting drops a trailing `\r`; `trim` removes it too.
         line: lines[index].trim()
         if line == "" || line.starts_with("#") -> next
         pair: line.split_once("=") ?? return Err(CLIError.InvalidData("line {index + 1} has no '='"))

@@ -943,10 +943,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], st
         body.push(sema_serde_items_binding(name, Val(Type.Bool), Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, true, span))
     }
     if required_names.len() > 0 {
-        presence := [Stmt]{}
-        loop (index, name) in required_names {
-            presence.push(sema_serde_items_if(Expr.Binary{op: BinOp.Eq, left: sema_serde_items_field_read("jet_serde_presence_pair", "key", span), right: sema_serde_items_string(required_keys[index], span), span: span, id: AST_NODE_GENERATED}, [Stmt]{sema_serde_items_assign_local(name, Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, span)}, span))
-        }
+        presence: loop (index, name) in required_names -> sema_serde_items_if(Expr.Binary{op: BinOp.Eq, left: sema_serde_items_field_read("jet_serde_presence_pair", "key", span), right: sema_serde_items_string(required_keys[index], span), span: span, id: AST_NODE_GENERATED}, [Stmt]{sema_serde_items_assign_local(name, Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, span)}, span)
         body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "Object", [String]{"jet_serde_presence_entries"}, [Stmt]{sema_serde_items_for_each("jet_serde_presence_pair", sema_serde_items_ident("jet_serde_presence_entries", span), presence, span)}, Val([Stmt]{}), span))
     }
     field_values := [ExprField]{}
@@ -1709,10 +1706,7 @@ sema_serde_items_enum_decode_value: fn(variant: Variant, source: Expr, prefix: S
         error_name: "jet_serde_enum_{stem}_errors_{index}"
         body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident(result, span), span), "Err", [String]{error_name.copy()}, [Stmt]{sema_serde_items_push_all(errors_name, error_name, span)}, Val([Stmt]{}), span))
     }
-    args := [EnumLitArg]{}
-    loop field in fields {
-        args.push(EnumLitArg.Named{label: field.name, expr: sema_serde_items_ident("jet_serde_enum_{stem}_value_{field.name}", span)})
-    }
+    args: loop field in fields -> EnumLitArg.Named{label: field.name, expr: sema_serde_items_ident("jet_serde_enum_{stem}_value_{field.name}", span)}
     success := [Stmt]{sema_serde_items_return(Expr.Ok{value: Expr.EnumLit{type_name: type_name, variant: variant.name, variant_span: None, args: args, leading_dot: false, span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, span)}
     position := results.len() - 1
     loop position >= 0 {

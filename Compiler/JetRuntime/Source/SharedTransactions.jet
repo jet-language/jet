@@ -19,8 +19,8 @@ stm_key := I64{0}
     root: jet_rt_alloc(I64{32}, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { stm_root = root }
     thread_zero(stm_root, I64{32})
-    // Scoped transaction owners, not TLS, own the states. Like Rust's weak
-    // stack, forgetting a transaction does not manufacture a rollback.
+    // Scoped transaction owners, not TLS, own the states. Forgetting a
+    // transaction does not manufacture a rollback.
     #Unsafe("runtime-init runs before any other thread exists") {
         stm_key = jet_rt_tls_key_new(I64{0})
     }
@@ -172,7 +172,7 @@ stm_clone: fn(source: I64, meta: I64) -> I64 {
     }
     sync_store(wrapping(part + I64{24}), I64{1})
     _ := coll_call3(invoke, env, staged, out)
-    // Rust installs its commit hook only after the synchronous body returns.
+    // The commit hook is installed only after the synchronous body returns.
     if jet_rt_session_propagate() == (I64{0}) -> sync_store(wrapping(part + I64{32}), I64{1})
 }
 
@@ -269,9 +269,9 @@ stm_merge: fn(parent: I64, first: I64) {
                     prepared = false
                 }
                 else -> {
-                    // The Rust original clones the working value in the commit
-                    // hook. Preserve observable clone-count parity; prepare all
-                    // copies before any participant publishes.
+                    // The commit hook clones the working value. Preserve the
+                    // observable clone count; prepare all copies before any
+                    // participant publishes.
                     value: stm_clone(sync_load(wrapping(part + I64{16})), sync_load(wrapping(part + I64{64})))
                     if {
                         value == (I64{0}) -> prepared = false

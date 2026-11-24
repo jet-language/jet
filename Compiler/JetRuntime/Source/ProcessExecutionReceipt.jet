@@ -1,5 +1,5 @@
 // Receipt facts are constructed from the exact borrowed plain spec, including
-// environment-secret redaction and Rust's framed input/policy digest material.
+// environment-secret redaction and the framed input/policy digest material.
 process_execution_sort_unique: fn(list: I64) {
     data: fd_word(list, I64{16})
     i := I64{1}
@@ -249,7 +249,7 @@ process_execution_secrets: fn(spec: I64) -> I64 {
         jet_rt_string_drop(name)
         at += I64{1}
     }
-    // Stable descending length mirrors Rust sort_by_key(Reverse(length)).
+    // Stable descending length order.
     data: fd_word(secrets, I64{16})
     at = I64{1}
     loop at < fd_word(secrets, I64{0}) {
@@ -421,8 +421,8 @@ process_receipt_usage: fn(receipt: I64, peak_kib: I64, user_ns: I64, system_ns: 
     fd_put(receipt, I64{160}, jet_int_owned_from_i64(system_ns))
 }
 
-// String.from_utf8 is strict in both Rust collection lanes. The scanner's
-// negative width is Utf8Error.error_len; a truncated valid prefix has None.
+// UTF-8 decoding is strict in both collection lanes. The scanner's negative
+// width is the invalid sequence length; a truncated valid prefix has None.
 // Only a text capture is decoded strictly: a streamed output's bytes were
 // already handed to its reader as bytes, so its receipt text is lossy
 // (process_execution_receipt_text) and wait does not fail on them.

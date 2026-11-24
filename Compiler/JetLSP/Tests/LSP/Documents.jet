@@ -175,9 +175,6 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
     // The workspace report names each open document with its version.
     lsp_test_open(server, "file:///w/other.jet", LSP_TEST_BROKEN)
     previous: "{{\"previousResultIds\":[{{\"uri\":\"{uri}\",\"value\":\"{fixed_id}\"}}]}}"
-    reports := [String]{}
-    loop report in lsp_test_rows(lsp_test_field(lsp_test_result(server, "workspace/diagnostic", previous), "items")) {
-        reports.push("{lsp_test_text(report, "uri")} v{lsp_test_int(report, "version")} {lsp_test_text(report, "kind")}")
-    }
+    reports: loop report in lsp_test_rows(lsp_test_field(lsp_test_result(server, "workspace/diagnostic", previous), "items")) -> "{lsp_test_text(report, "uri")} v{lsp_test_int(report, "version")} {lsp_test_text(report, "kind")}"
     assert_eq(reports, [String]{"file:///w/broken.jet v2 unchanged", "file:///w/other.jet v1 full"})
 }

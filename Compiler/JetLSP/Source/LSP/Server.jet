@@ -73,10 +73,7 @@ LSPServer: struct {
     }
 
     overlays: fn(self) -> [JetDriverSourceDocument] Never! {
-        overlays := [JetDriverSourceDocument]{}
-        loop (_, open) in self.diagnostic_state.docs {
-            overlays.push(JetDriverSourceDocument{path: open.path.copy(), source: open.text.copy()})
-        }
+        overlays: loop (_, open) in self.diagnostic_state.docs -> JetDriverSourceDocument{path: open.path.copy(), source: open.text.copy()}
         overlays
     }
 

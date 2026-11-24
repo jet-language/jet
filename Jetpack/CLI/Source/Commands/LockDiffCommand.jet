@@ -1,7 +1,7 @@
-// `jetpack lock diff [--against <rev>]` (Rust jetpack::CLI::lock): compare
-// the working unified lock with the lock at a git revision and render the
-// changelog-shaped package, channel, size, and trust deltas. Mutating
-// commands print the same diff through `CliLockDiffGuard`.
+// `jetpack lock diff [--against <rev>]`: compare the working unified lock with
+// the lock at a git revision and render the changelog-shaped package, channel,
+// size, and trust deltas. Mutating commands print the same diff through
+// `CliLockDiffGuard`.
 use {
     files: core.files
     process: core.process
@@ -25,14 +25,13 @@ cli_sizes_from_bytes: fn(download: Int?, disk: Int?) -> DiffSizes Never! {
 
 // Print one diff when a command mutates the unified lock. Closing the guard
 // renders the diff on every exit path, so a partial lock update is still
-// visible (Rust `LockDiffGuard` Drop).
+// visible.
 CLILockDiffGuard: struct {
     theme: Theme,
     root: String,
     before: LockFile?,
     sizes: DiffSizes,
-    // An inactive guard stands in where no lock can change (Rust's absent
-    // `Option<LockDiffGuard>`); it renders nothing.
+    // An inactive guard stands in where no lock can change; it renders nothing.
     active: Bool,
 
     new: fn(theme: Theme, root: String) -[FS]> CLILockDiffGuard Never! {

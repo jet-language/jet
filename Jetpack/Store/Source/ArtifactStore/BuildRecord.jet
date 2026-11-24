@@ -1,6 +1,5 @@
-// Immutable per-build node evidence for `explain-build` (Rust
-// `jet_store::BuildRecord`). The CAS payload is JSON so tools can inspect it
-// without a second codec.
+// Immutable per-build node evidence for `explain-build`. The CAS payload is
+// JSON so tools can inspect it without a second codec.
 use {
     jet_foundation.[
         RecordField,
@@ -37,13 +36,13 @@ BuildRecord: struct {
         BuildRecord{schema: STORE_BUILD_RECORD_SCHEMA, program: program, nodes: nodes}
     }
 
-    // Rust BuildRecord::to_json: compact JSON with the fields in this fixed
-    // order; generic object/JCS ordering is not this wire.
+    // Compact JSON with the fields in this fixed order; generic object/JCS
+    // ordering is not this wire.
     to_json: fn(self) -> String Never! {
         nodes := [Dyn]{}
         loop node in self.nodes {
-            // A negative or non-finite duration is written as the integer `0`
-            // (the Rust wire), not as the Float `0.0`.
+            // A negative or non-finite duration is written as the integer `0`,
+            // not as the Float `0.0`.
             finite: node.duration_ms - node.duration_ms == 0.0
             duration: if finite && node.duration_ms >= 0.0 -> Dyn.Float(node.duration_ms) else -> Dyn.Int(0)
             nodes.push(
@@ -104,7 +103,7 @@ BuildRecord: struct {
     }
 }
 
-// Why a build record payload was refused (the Rust `String` error).
+// Why a build record payload was refused.
 #Error
 BuildRecordError: struct {
     reason: String,
@@ -142,13 +141,13 @@ store_build_record_text: fn(value: Dyn) -> String? Never! {
     }
 }
 
-// A JSON number as a Float (Rust `Int as f64` or `Float`), or None.
+// A JSON number as a Float, or None.
 store_build_record_number: fn(value: Dyn) -> Float? Never! {
     number: value.decode<Float>() ?? return None
     Val(number)
 }
 
-// Rust project_state::last_run wire; malformed or missing workspace state is
+// The project state's last-run wire; malformed or missing workspace state is
 // a miss, never a fabricated node execution. I/O is relative to held roots.
 STORE_LAST_RUN_SCHEMA: "jet.last-run/v1"
 

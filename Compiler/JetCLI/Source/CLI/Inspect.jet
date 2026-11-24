@@ -633,7 +633,7 @@ jet_cli_coverage_facts: fn() -> JetCLICoverageFacts Never! {
     JetCLICoverageFacts.Facts{facts: ordered}
 }
 
-// A Rust `usize` count: ASCII digits after an optional `+`.
+// A count: ASCII digits after an optional `+`.
 jet_cli_inspect_count: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     start := 0
@@ -698,7 +698,7 @@ jet_cli_coverage_non_decreasing: fn(plane: String, previous: JetCLICoverageBasel
     None
 }
 
-// `a - b`, floored at zero (Rust `saturating_sub`).
+// `a - b`, floored at zero.
 jet_cli_inspect_saturating_sub: fn(a: Int, b: Int) -> Int Never! {
     if b > a -> return 0
     a - b
@@ -866,10 +866,10 @@ jet_cli_inspect_reads_bytes: fn(file: String) -[FS]> Bool Never! {
 }
 
 // `run_compiler_api`: an unknown operation and an unreadable input are
-// versioned error documents (Rust `io.Error` wording); lex and parse project
-// the Jet lexer and parser over the inline-package-masked source, source-map
-// reads the `// jet:` markers of generated Rust, and check projects the checked
-// file (InspectCompiler.jet, `checked_value`).
+// versioned error documents; lex and parse project the Jet lexer and parser
+// over the inline-package-masked source, source-map reads the `// jet:`
+// markers of generated code, and check projects the checked file
+// (InspectCompiler.jet, `checked_value`).
 jet_cli_inspect_compiler: fn(args: [String], color: Bool) -[FS, Env, Exec, IO, FFI.C, FFI.Asm, Net, Time]> JetCLIPlan Never! {
     operation: if args.len() > 1 -> args[1] else -> ""
     file: if args.len() > 2 -> args[2] else -> ""
@@ -1498,8 +1498,8 @@ jet_cli_inspect_operator_impls: fn(program: Program) -> [JetCLIOperatorImpl] Nev
     impls
 }
 
-// The checked program's own modules (the Rust bundle's user modules): every
-// source of a package root, or the entry file alone.
+// The checked program's own modules: every source of a package root, or the
+// entry file alone.
 jet_cli_inspect_programs: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Program] Never! {
     programs := [Program]{}
     loop root in snapshot.roots {
@@ -1606,7 +1606,7 @@ jet_cli_replay_fail: fn(job: JetCLIInspectJob, code: String, what: String, why: 
 }
 
 // `validate_replay_path`: a forward-slash path of non-empty, safe components
-// ending in `.jetproof-replay` (Rust `Path.components` drops an interior `.`).
+// ending in `.jetproof-replay`.
 jet_cli_replay_path_problem: fn(path: String) -> String? Never! {
     if path == "" -> return Val("replay artifact path is empty")
     loop byte in path.bytes() {
@@ -1645,7 +1645,7 @@ jet_cli_replay_name_problem: fn(name: String) -> String? Never! {
     Val("replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`")
 }
 
-// Rust `Path.starts_with(".jet")`: the first component is `.jet`.
+// The first component is `.jet`.
 jet_cli_replay_in_project_cache: fn(path: String) -> Bool Never! {
     path == ".jet" || path.starts_with(".jet/")
 }

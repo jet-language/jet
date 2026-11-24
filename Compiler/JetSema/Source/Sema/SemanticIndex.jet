@@ -501,10 +501,7 @@ sema_compiler_index_view_provenance_value: fn(value: ViewProvenance, output_path
 
 sema_compiler_index_view_provenance_values: fn(map: ViewProvenanceMap?) -> TComptimeValue Never! {
     if map == .Val(value) {
-        values := [TComptimeValue]{}
-        loop entry in value.entries {
-            values.push(sema_compiler_index_view_provenance_value(entry.value, entry.slot))
-        }
+        values: loop entry in value.entries -> sema_compiler_index_view_provenance_value(entry.value, entry.slot)
         return TComptimeValue.List{values: values}
     }
     TComptimeValue.List{values: [TComptimeValue]{}}
@@ -706,10 +703,7 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
     registered_module: registration.modules[caller]
     target_row: if output.module_id >= 0 && output.module_id < registration.modules.len() -> output.module_id else -> caller
     target_module: registration.modules[target_row]
-    params := [TComptimeValue]{}
-    loop parameter in output.params {
-        params.push(sema_comptime_reflection_type_id(registration, target_row, parameter.ty))
-    }
+    params: loop parameter in output.params -> sema_comptime_reflection_type_id(registration, target_row, parameter.ty)
     effects := output.effects
     TComptimeValue.Struct{
         type_name: "CompilerOutput",
@@ -916,10 +910,7 @@ sema_compiler_index_fact_registry: fn(registration: SemaRegistrationGraph) -> TC
         }
         rows[j] = value
     }
-    values := [TComptimeValue]{}
-    loop row in rows {
-        values.push(sema_compiler_index_fact_declaration(row.kind, row.name, row.members, row.deny, row.from))
-    }
+    values: loop row in rows -> sema_compiler_index_fact_declaration(row.kind, row.name, row.members, row.deny, row.from)
     TComptimeValue.List{values: values}
 }
 

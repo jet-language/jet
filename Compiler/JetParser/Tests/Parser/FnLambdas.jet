@@ -9,10 +9,7 @@ fn_lambda_test_stored: fn(source: String) -> Lambda {
 }
 
 fn_lambda_test_param_names: fn(lambda: Lambda) -> String {
-    names := [String]{}
-    loop param in lambda.params {
-        names.push(if param.ty == None -> param.name else -> "{param.name}: _")
-    }
+    names: loop param in lambda.params -> if param.ty == None -> param.name else -> "{param.name}: _"
     names.join(", ")
 }
 

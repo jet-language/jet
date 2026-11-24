@@ -1229,9 +1229,8 @@ priv build_chunked: fn(rows: [[U8]]) -> Bool Never! {
     false
 }
 
-// u64 parsing as Rust's FromStr/from_str_radix: one leading '+', stopping at
-// the first invalid digit or overflow. High/low 32-bit limbs keep the u64
-// overflow check exact.
+// u64 parsing: one leading '+', stopping at the first invalid digit or
+// overflow. High/low 32-bit limbs keep the u64 overflow check exact.
 priv build_parse_u64: fn(raw: [U8], start: Int, end: Int, radix: Int) -> BuildNumber Never! {
     from := start
     if end - start > 1 && raw[start] == (U8{43}) -> from += 1

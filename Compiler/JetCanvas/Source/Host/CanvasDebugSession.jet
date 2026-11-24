@@ -1271,10 +1271,7 @@ canvas_debug_listed_json: fn(row: NativeListedRow, pc: Int) -> String Never! {
 // the values `as` a number type, and where it stopped short.
 canvas_debug_read_json: fn(session: ^CanvasDebugSession, read: CanvasDebugRead, pc: Int) -> String NativeDebugError! {
     if read.kind == "disassembly" {
-        rows := [String]{}
-        loop row in native_listing_window(session.live, native_memory_address(read.from) ?? 0, read.skip, read.count) {
-            rows.push(canvas_debug_listed_json(row, pc))
-        }
+        rows: loop row in native_listing_window(session.live, native_memory_address(read.from) ?? 0, read.skip, read.count) -> canvas_debug_listed_json(row, pc)
         return Ok("{{\"kind\":\"disassembly\",\"from\":{foundation_json_quote(read.from)},\"skip\":{read.skip},\"rows\":[{rows.join(",")}]}}")
     }
     count: if read.count == -1 -> "" else -> " {read.count}"

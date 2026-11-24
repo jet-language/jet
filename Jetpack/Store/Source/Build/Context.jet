@@ -1,10 +1,9 @@
 // The build session that declares the graph (see Model.jet for its surface).
 use random: core.crypto.random
 
-// Rust `NEXT_CONTEXT` hands every context a process-unique id so a handle
-// from another context is refused. The Jetpack unit has no process-global
-// counter; a 48-bit operating-system random id gives every context the same
-// distinct identity.
+// Every context gets a process-unique id so a handle from another context is
+// refused. The Jetpack unit has no process-global counter; a 48-bit
+// operating-system random id gives every context a distinct identity.
 build_next_context_id: fn() -[Rand]> Int Never! {
     bytes: random.bytes(6) ?? panic("operating-system randomness is unavailable for a build context id: {err}")
     id := 0

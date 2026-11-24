@@ -32,7 +32,7 @@ jetos_resolved_option_value: fn(system: SystemPlan, key: String) -> String? Neve
     Val(resolved.value)
 }
 
-// Rust :80-117: metadata is first-writer, shared by ALL same-key contenders.
+// Metadata is first-writer, shared by ALL same-key contenders.
 // This is not a per-contender tier parser: equal priorities pick the last writer.
 jetos_resolved_option: fn(system: SystemPlan, key: String) -> JetOSResolvedOption? Never! {
     tier: if jetos_raw_option_value(system, "{key}.tier") == {
@@ -66,8 +66,8 @@ jetos_tier_priority: fn(tier: String) -> Int Never! {
     }
 }
 
-// Rust str::parse::<i64> accepts a sign and ASCII digits only, without trimming.
-// Core performs conversion; the lexical and range gates preserve Rust's limits.
+// An i64 is a sign and ASCII digits only, without trimming. Core performs
+// conversion; the lexical and range gates preserve these limits.
 jetos_parse_i64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return None
@@ -230,8 +230,8 @@ jetos_render_user_profile_json_parts: fn(user: String, home: String, shell: Stri
     )
 }
 
-// Rust :338-367: quotes toggle literally (even escaped quotes); brackets are
-// stripped only as a matching outer pair. Commas inside quotes stay in one item.
+// Quotes toggle literally (even escaped quotes); brackets are stripped only
+// as a matching outer pair. Commas inside quotes stay in one item.
 jetos_parse_list_items: fn(value: String) -> [String] Never! {
     trimmed := value.trim()  // #4303: temporary owned String allocation; revert with view emitter fix.
     inner: if trimmed.starts_with("[") && trimmed.ends_with("]") && trimmed.len() >= 2 -> trimmed.removeprefix("[").removesuffix("]") else -> value
@@ -254,7 +254,7 @@ jetos_parse_list_items: fn(value: String) -> [String] Never! {
     items
 }
 
-// This Rust projection strips ONLY the exact packages. prefix; it does not
+// This projection strips ONLY the exact packages. prefix; it does not
 // classify or resolve a package reference or consult a source table.
 jetos_package_path_or_literal: fn(value: String) -> String Never! {
     if value.starts_with("packages.") {
@@ -315,7 +315,7 @@ jetos_safe_identifier: fn(value: String) -> String Never! {
 
 jetos_clean_bool_json: fn(value: String) -> String Never! {
     cleaned: jetos_clean_symbol(value)
-    // Rust eq_ignore_ascii_case, not Unicode case folding.
+    // ASCII case-insensitive equality, not Unicode case folding.
     if cleaned.len() != 4 -> return "false"
     raw: cleaned.bytes()
     if raw.len() != 4 -> return "false"

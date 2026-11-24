@@ -1,4 +1,4 @@
-// Link with the complete Jet runtime object and -pthread. No Rust provider.
+// Link with the complete Jet runtime object and -pthread.
 #include <assert.h>
 #include <pthread.h>
 #include <stdint.h>

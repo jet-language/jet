@@ -55,10 +55,7 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
         signature := core_sig(module_name, member, parameters, return_type)
         signature.native_return_labels = core_sig_row_tuple_labels(fields[3])
         if fields.len() == 5 {
-            type_parameters := [CoreCallTypeParameter]{}
-            loop name in fields[4].split("|") {
-                type_parameters.push(core_sig_type_parameter(name, CoreCallTypeConstraint.Any))
-            }
+            type_parameters: loop name in fields[4].split("|") -> core_sig_type_parameter(name, CoreCallTypeConstraint.Any)
             signature.type_parameters = type_parameters
         }
         return Val(signature)
@@ -228,8 +225,8 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         "callback" -> return CoreSigRowType{ty: core_host_callback_type(), next: end}
         else -> {}
     }
-    // `u16` and the source spelling `U16` both name the fixed-width integer
-    // (Rust `IntN`); a `Named{U16}` matches no checked integer value.
+    // `u16` and the source spelling `U16` both name the fixed-width integer; a
+    // `Named{U16}` matches no checked integer value.
     if (first == 105 || first == 117 || first == 73 || first == 85) && end > start + 1 {
         bits := 0
         digits := true

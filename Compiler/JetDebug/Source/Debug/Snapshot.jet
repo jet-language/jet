@@ -7,20 +7,20 @@ use {
     jet_foundation.[Type, ast_expr, foundation_named_type, sha256_hex, Record, Variant]
 }
 
-// Rust ValueSnapshot: one value captured at a real paused source statement.
+// One value captured at a real paused source statement.
 ValueSnapshot: struct {
     name: String,
     type_name: String,
     value: String,
 }
 
-// Rust FrameSnapshot: one Jet frame captured at a real paused statement.
+// One Jet frame captured at a real paused statement.
 FrameSnapshot: struct {
     function: String,
     line: Int,
 }
 
-// Rust DebugSnapshot plus pause_id/frame_id/identity_digest. Identities hash
+// A debug snapshot plus pause_id/frame_id/identity_digest. Identities hash
 // the exact `function:line|frame:line...|name:type=value...` material and keep
 // the first 24 SHA-256 hex characters.
 DebugSnapshot: struct {
@@ -55,8 +55,8 @@ DebugSnapshot: struct {
     }
 }
 
-// Rust's shared `function:line` + `|function:line` stack prefix, collected as
-// pieces and joined once like Rust's single push_str buffer.
+// The shared `function:line` + `|function:line` stack prefix, collected as
+// pieces and joined once.
 debug_snapshot_frame_key: fn(snapshot: DebugSnapshot) -> [String] Never! {
     key := [String]{snapshot.function, ":", "{snapshot.line}"}
     loop frame in snapshot.call_stack {
@@ -68,7 +68,7 @@ debug_snapshot_frame_key: fn(snapshot: DebugSnapshot) -> [String] Never! {
     key
 }
 
-// Rust DebugAggregateKind: aggregate shape retained by the safe evaluator.
+// Aggregate shape retained by the safe evaluator.
 DebugAggregateKind: enum {
     Record,
     List,
@@ -78,9 +78,9 @@ DebugAggregateKind: enum {
     Variant,
 }
 
-// Rust DebugValue: a value after the backend removed unsafe runtime layout.
-// FloatBits is the exact IEEE-754 u64 bit pattern; Bytes are length+SHA-256;
-// aggregates publish shape and length only.
+// A value after the backend removed unsafe runtime layout. FloatBits is the
+// exact IEEE-754 u64 bit pattern; Bytes are length+SHA-256; aggregates publish
+// shape and length only.
 DebugValue: enum {
     Unit,
     Bool(value: Bool),
@@ -91,7 +91,7 @@ DebugValue: enum {
     Aggregate(kind: DebugAggregateKind, length: Int),
 }
 
-// Rust DebugEvaluationUsage: bounded accounting for one safe evaluation.
+// Bounded accounting for one safe evaluation.
 DebugEvaluationUsage: struct {
     depth: Int,
     nodes: Int,
@@ -99,7 +99,7 @@ DebugEvaluationUsage: struct {
     steps: Int,
 }
 
-// Rust DebugEvaluation: a read-only Jet local path resolved from a real pause.
+// A read-only Jet local path resolved from a real pause.
 DebugEvaluation: struct {
     expression: String,
     name: String,
@@ -108,7 +108,7 @@ DebugEvaluation: struct {
     usage: DebugEvaluationUsage,
 }
 
-// Rust evaluate_snapshot's `Err(String)`.
+// An evaluation failure's message.
 #Error
 DebugEvaluationError: struct {
     message: String,
@@ -118,9 +118,8 @@ debug_evaluation_error: fn(message: String) -> DebugEvaluationError Never! {
     DebugEvaluationError{message: message}
 }
 
-// Rust evaluate_snapshot: resolve one bounded read-only Jet local path,
-// read by the compiler's parser. Only a readable root is published; nested
-// places wait for child facts.
+// Resolve one bounded read-only Jet local path, read by the compiler's parser.
+// Only a readable root is published; nested places wait for child facts.
 evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvaluation DebugEvaluationError! {
     trimmed: expression.trim()
     refused: "only bounded read-only Jet local paths can be evaluated"
@@ -153,12 +152,12 @@ evaluate_snapshot: fn(snapshot: DebugSnapshot, expression: String) -> DebugEvalu
     Err(debug_evaluation_error("no readable local named `{root}` at this stop"))
 }
 
-// Rust render_snapshot_locals: stable name-ordered `name = value` dump.
+// Stable name-ordered `name = value` dump.
 debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
     if values.len() == 0 -> return "{NATIVE_DEBUG_LOCALS_LABEL}  (none)"
     order := [Int]{}
     loop index in 0..<values.len() -> order.push(index)
-    // Rust's stable sort_by on name: equal names keep their published order.
+    // Equal names keep their published order.
     order.sort_by(fn(left: Int, right: Int) {
         if values[left].name != values[right].name -> values[left].name <=> values[right].name else -> left <=> right
     })
@@ -168,7 +167,7 @@ debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
     "{NATIVE_DEBUG_LOCALS_LABEL}  {body}"
 }
 
-// Rust debug_value: typed safe projection of one published local value.
+// Typed safe projection of one published local value.
 debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
     raw: value.value.trim()
     if raw == "<optimized out>" || raw == NATIVE_DEBUG_UNAVAILABLE || raw == NATIVE_DEBUG_NOT_KEPT {
@@ -185,7 +184,7 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
             unavailable: "local `{value.name}` has an unavailable Int value"
             if Int.parse(raw) == {
                 .Ok(number) -> {
-                    // Rust parses into i64; Core Int is exact, so bound it here.
+                    // Values are 64-bit; Core Int is exact, so bound it here.
                     if number < -9223372036854775808 || number > 9223372036854775807 {
                         return Err(debug_evaluation_error(unavailable))
                     }
@@ -210,7 +209,7 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
             }
         }
         .Unit -> {
-            // Rust guard: a Unit type with any other text falls through to shapes.
+            // A Unit type with any other text falls through to shapes.
             if raw == "" || raw == "()" -> return Ok(DebugValue.Unit)
         }
         .Text -> { return Ok(DebugValue.Text{text: debug_unquote_text(raw)}) }
@@ -257,13 +256,14 @@ debug_scalar_class: fn(type_name: String) -> DebugScalarClass Never! {
     }
 }
 
-// Rust `starts_with(open) && ends_with(close)` for distinct ASCII delimiters.
+// Whether `text` starts with `open` and ends with `close`, for distinct ASCII
+// delimiters.
 debug_delimited: fn(bytes: [U8], open: Int, close: Int) -> Bool Never! {
     bytes.len() > 0 && Int{bytes[0]} == open && Int{bytes[bytes.len() - 1]} == close
 }
 
-// Rust aggregate_length: strip one matching `[]`, `{}` or `()` pair (the whole
-// raw text when the opener has no closer), trim, then count depth-zero commas.
+// Strip one matching `[]`, `{}` or `()` pair (the whole raw text when the
+// opener has no closer), trim, then count depth-zero commas.
 debug_aggregate_length: fn(raw: String) -> Int Never! {
     bytes: raw.bytes()
     start := 0
@@ -290,7 +290,7 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
         code: Int{byte}
         if {
             code == 91 || code == 123 || code == 40 -> {
-                // Rust u32 saturating_add.
+                // A saturating 32-bit add.
                 if depth < 4294967295 -> depth += 1
             }
             code == 93 || code == 125 || code == 41 -> {
@@ -303,9 +303,9 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
     count
 }
 
-// Rust unquote_debug_text: strip one `"…"` pair and decode \n \r \t \\ \";
-// any other escaped scalar is kept without its backslash, and a dangling
-// final backslash is preserved. Unquoted text is returned unchanged.
+// Strip one `"…"` pair and decode \n \r \t \\ \"; any other escaped scalar is
+// kept without its backslash, and a dangling final backslash is preserved.
+// Unquoted text is returned unchanged.
 debug_unquote_text: fn(raw: String) -> String Never! {
     bytes: raw.bytes()
     if bytes.len() < 2 || (Int{bytes[0]}) != 34 || (Int{bytes[bytes.len() - 1]}) != 34 {

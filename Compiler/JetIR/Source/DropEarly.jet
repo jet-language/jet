@@ -331,10 +331,10 @@ ir_drop_build_code: fn(f: IRFunction, plan: IRDropPlan) -> IROptCode Never! {
     n: f.op.len()
     // Per instruction the moved Drops before it, chained.
     head := [Int]{}
-    head.try_reserve(n) ?? panic("reserve failed")
+    head.try_reserve(n) ?? ()
     loop _ in 0..<n -> head.push(-1)
     chain := [Int]{}
-    chain.try_reserve(plan.to.len()) ?? panic("reserve failed")
+    chain.try_reserve(plan.to.len()) ?? ()
     loop k in 0..<plan.to.len() {
         chain.push(head[plan.to[k]])
         head[plan.to[k]] = k
@@ -444,10 +444,10 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
     }
     if !has_string_drop -> return
     if s.stop.len() < n {
-        s.stop.try_reserve(n) ?? panic("reserve failed")
-        s.blocked.try_reserve(n) ?? panic("reserve failed")
-        s.kill.try_reserve(n) ?? panic("reserve failed")
-        s.head.try_reserve(n) ?? panic("reserve failed")
+        s.stop.try_reserve(n) ?? ()
+        s.blocked.try_reserve(n) ?? ()
+        s.kill.try_reserve(n) ?? ()
+        s.head.try_reserve(n) ?? ()
         loop s.stop.len() < n {
             s.stop.push(-1)
             s.blocked.push(false)
@@ -456,9 +456,9 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
         }
     }
     if s.eligible.len() < count {
-        s.eligible.try_reserve(count) ?? panic("reserve failed")
-        s.dropped.try_reserve(count) ?? panic("reserve failed")
-        s.last_ref.try_reserve(count) ?? panic("reserve failed")
+        s.eligible.try_reserve(count) ?? ()
+        s.dropped.try_reserve(count) ?? ()
+        s.last_ref.try_reserve(count) ?? ()
         loop s.eligible.len() < count {
             s.eligible.push(false)
             s.dropped.push(false)

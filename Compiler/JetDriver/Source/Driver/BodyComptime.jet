@@ -208,6 +208,8 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: ^[Diagnostic], incoming: [D
         }
         if row == 0 -> break
         row -= 1
+        // Unreachable: `row` counts down from `earlier.len()` and this pop runs
+        // once per step, so it pops exactly the rows `earlier` holds.
         merged.push(earlier.pop() ?? panic("a diagnostic row failed to pop"))
     }
     merged.reverse()
@@ -273,10 +275,7 @@ jet_driver_pending_comptime_body_rows: fn(
 
 // The body sources at `rows` of `modules` (jet_driver_pending_comptime_body_rows).
 jet_driver_comptime_body_sources_at: fn(modules: [SemaGraphModuleResult], rows: [JetDriverBodySourceRow]) -> [SemaComptimeBodySource] Never! {
-    sources := [SemaComptimeBodySource]{}
-    loop at in rows {
-        sources.push(modules[at.owner].comptime_body_sources[at.row].copy())
-    }
+    sources: loop at in rows -> modules[at.owner].comptime_body_sources[at.row].copy()
     sources
 }
 

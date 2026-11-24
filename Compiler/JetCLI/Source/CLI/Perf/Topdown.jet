@@ -218,10 +218,7 @@ jet_cli_perf_topdown_formulas: fn(table: Int) -> CanonicalJSON Never! {
         JET_CLI_PERF_TOPDOWN_GRACEMONT -> [String]{"topdown_be_bound.all / slots", "topdown_bad_speculation.all / slots", "topdown_bad_speculation.mispredict / slots", "topdown_be_bound.alloc_restrictions / slots", "frontend_bound - frontend_latency", "topdown_fe_bound.all / slots", "topdown_fe_bound.frontend_latency / slots", "uops_retired.ms / slots", "retiring - heavy_operations", "bad_speculation - branch_mispredicts", "backend_bound - core_bound", "topdown_retiring.all / slots", "{width} * cpu_clk_unhalted.core_p", ""}
         else -> [String]{"de_no_dispatch_per_slot.backend_stalls / slots", "(de_src_op_disp.all - ex_ret_ops) / slots", "bad_speculation * ex_ret_brn_misp / (ex_ret_brn_misp + resyncs_or_nc_redirects)", "backend_bound - memory_bound", "frontend_bound - frontend_latency", "de_no_dispatch_per_slot.no_ops_from_frontend / slots", "{width} * de_no_dispatch_per_slot.no_ops_from_frontend:cmask={width} / slots", "ex_ret_ucode_ops / slots", "retiring - heavy_operations", "bad_speculation - branch_mispredicts", "backend_bound * ex_no_retire.load_not_complete / ex_no_retire.not_complete", "ex_ret_ops / slots", "{width} * ls_not_halted_cyc", "de_no_dispatch_per_slot.smt_contention / slots"}
     }
-    fields := [CanonicalJSONField]{}
-    loop (index, text) in texts.move() {
-        fields.push(CanonicalJSONField{key: jet_cli_perf_topdown_formula_key(index), value: if text == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(text)})
-    }
+    fields: loop (index, text) in texts.move() -> CanonicalJSONField{key: jet_cli_perf_topdown_formula_key(index), value: if text == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(text)}
     CanonicalJSON.Object(fields)
 }
 

@@ -160,8 +160,8 @@ cli_trust_root_write_immutable: fn(path: String, body: [U8]) -[FS]> CLIToolError
     }
 }
 
-// The publication README. The prose is byte-identical to the Rust reference,
-// whose line continuations join some words without a space.
+// The publication README. The prose is byte-stable; its line continuations
+// join some words without a space.
 cli_trust_root_readme: fn(keys: [PublicTrustKey]) -> String Never! {
     out := "# Jet public trust root\n\nThis directory contains publication-safe trust metadata. It contains publickeys only. `TrustKey` HMAC secrets and signing keys stay in the offlinepublisher or host trust stores and must never be copied here.\n\nThe stable index public-key document is published at\n`https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`. Review its one-line\nvalue, then install it as `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`.\nThe signed index URL is configured separately in\n`<JETPACK_ROOT>/config/nix-index-v1.endpoint`; a host-returned key is never\ntrusted automatically.\n\n## Files\n\n- `trust-manifest.json` records the domain, root pin, role, algorithm, key id,and exact client trust-file path.\n"
     loop key in keys {

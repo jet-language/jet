@@ -17,10 +17,7 @@ use {
         request := seams_request(idiom.witness, JetDriverCompileMode.Program)
         request.core_sources = idiom_core_rows()
         result: jet_driver_compile(request)
-        problems := [String]{}
-        loop diagnostic in result.diagnostics {
-            problems.push("{diagnostic.code}: {diagnostic.what}")
-        }
+        problems: loop diagnostic in result.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
         assert(!jet_driver_has_errors(result.diagnostics), "the witness for `{idiom.foreign}` on {idiom.receiver} does not check: {problems.join("; ")}")
     }
 }

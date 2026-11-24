@@ -1,4 +1,4 @@
-// Real Jet providers only. No Rust layout reads.
+// Real Jet providers only.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,11 +1,10 @@
 // The Recipe area's error carriers and the build-recipe diagnostics
-// (E1236/E1237/E1238/E1275), ported from jetpack::Recipe.
+// (E1236/E1237/E1238/E1275).
 //
-// `RecipeDiagnostic` is the Rust `Diagnostic` a recipe run reports: code plus
-// what/why/fix text, exactly as `Diagnostic::error(code, what, why, fix, None)`
-// builds it. `RecipeError` is the area's one lower-level carrier: Rust
-// `io::Error` values keep their kind (`Io` for Core failures, the named kinds
-// for Jetpack's own refusals with their final text), and toolchain-update
+// `RecipeDiagnostic` is the diagnostic a recipe run reports: code plus
+// what/why/fix text. `RecipeError` is the area's one lower-level carrier: IO
+// errors keep their kind (`Io` for Core failures, the named kinds for
+// Jetpack's own refusals with their final text), and toolchain-update
 // failures carry their detail as `Update`.
 
 #Error
@@ -191,7 +190,7 @@ RecipeError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
+    // Whether the error is NotFound, across both carriers.
     is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(inner) -> if inner == {
@@ -203,7 +202,7 @@ RecipeError: enum {
         }
     }
 
-    // Rust `error.kind() == ErrorKind::AlreadyExists` across both carriers.
+    // Whether the error is AlreadyExists, across both carriers.
     is_already_exists: fn(self) -> Bool Never! {
         if self == {
             .IO(inner) -> if inner == {

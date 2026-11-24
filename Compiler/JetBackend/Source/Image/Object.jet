@@ -757,10 +757,7 @@ x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], dat
     targets: [[Int]]{[Int]{2}, [Int]{}, [Int]{1, 4}, [Int]{}, [Int]{0}}
     data := [X64Data]{}
     loop row in 0..<targets.len() {
-        relocs := [X64DataReloc]{}
-        loop target in targets[row] {
-            relocs.push(X64DataReloc{offset: 0, target: X64DataID{value: target}, addend: 0})
-        }
+        relocs: loop target in targets[row] -> X64DataReloc{offset: 0, target: X64DataID{value: target}, addend: 0}
         data.push(X64Data{id: X64DataID{value: row}, bytes: [U8]{0}, align: 8, relocs: relocs})
     }
     placed := [Bool]{false, false, false, false, false}
@@ -786,10 +783,7 @@ x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], dat
     reads: [[Int]]{[Int]{3, 2}, [Int]{0, 4}}
     functions := [X64CompiledFunction]{}
     loop (index, rows) in reads {
-        relocs := [X64Reloc]{}
-        loop (at, row) in rows {
-            relocs.push(x64_reloc_data(4 * at, row))
-        }
+        relocs: loop (at, row) in rows -> x64_reloc_data(4 * at, row)
         functions.push(X64CompiledFunction{id: X64FunctionID{value: index}, name: "f{index}", code: [U8]{}, relocs: relocs, align: 16})
     }
     placed := [Bool]{false, false, false, false, false, false}

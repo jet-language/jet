@@ -1,6 +1,6 @@
 // Gitignore matcher for filesystem walks: an immutable root-to-directory rule
 // stack; a directory's rules follow inherited ones and the last matching rule
-// wins. Matching is per Unicode scalar, exactly as the Rust `chars()` DP
+// wins. Matching is per Unicode scalar
 // (glob_component_matches/bracket_match/glob_path_matches). Rule32: refs @0,
 // owned base E4 @8 (trimmed of '/'), owned pattern E4 @16, flags @24 (1
 // negated, 2 directory_only, 4 anchored, 8 has_separator). Matcher24: refs @0,
@@ -212,8 +212,8 @@ ignore_bracket: fn(pattern: I64, count: I64, start: I64, text: I64) -> I64 {
     (index + I64{1}) * I64{2} + (if result -> I64{1} else -> I64{0})
 }
 
-// glob_component_matches over scalars: memo[p][t] filled from the end, the
-// same pure recurrence as the Rust memoized `visit`.
+// glob_component_matches over scalars: memo[p][t] filled from the end, the same
+// pure recurrence.
 ignore_component_matches: fn(pattern_data: I64, pattern_length: I64, text_data: I64, text_length: I64) -> Bool {
     pattern_words: ignore_scalars(pattern_data, pattern_length)
     text_words: ignore_scalars(text_data, text_length)

@@ -95,10 +95,7 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
 jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     permit: plan.storage.guard_read()
     graph: build_session_project(permit.value)
-    targets := [String]{}
-    loop target in graph.targets {
-        targets.push("{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)}}}")
-    }
+    targets: loop target in graph.targets -> "{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)}}}"
     actions := [String]{}
     loop action in graph.actions {
         real: permit.value.actions[action.id]
@@ -123,9 +120,9 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
             "pkg_config" -> "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}"
             "header" -> "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}"
             "compile_check" -> "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}"
-            else -> {
-                panic("invalid checked probe kind")
-            }
+            // Unreachable: build_session_add_probe, the one writer of a
+            // session's probes, refuses every other kind before it records.
+            else -> panic("invalid checked probe kind")
         }
         reproducibility: if probe.reproducibility == "ambient" -> {
             "Ambient"
@@ -137,7 +134,7 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     generated: loop generated_row in permit.value.generated -> jet_driver_build_generated_json(generated_row)
     schedule: loop node in build_session_schedule(permit.value) -> jet_driver_build_schedule_json(permit.value, node)
     default: if plan.default >= 0 -> { "{plan.default}" } else -> { "null" }
-    // Rust BuildGraph.affected_files() is the static file universe here,
+    // The build graph's affected files are the static file universe here,
     // not receipt_diff's rebuild-impact closure. Reuse the canonical rows.
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"schedule\":[{schedule.join(",")}]}}"
 }

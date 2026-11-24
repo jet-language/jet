@@ -71,7 +71,7 @@ jettrace_unsigned: fn(value: CanonicalJSON, label: String) -> U64 JetTraceError!
     raw: text.bytes()
     if raw.len() == 0 -> return Err(jettrace_error("{label} is not an unsigned integer"))
     at := 0
-    // Rust u64.from_str accepts a leading plus, although canonical JSON does not.
+    // A leading plus is accepted here, although canonical JSON does not take it.
     if raw[0] == (U8{43}) -> at = 1
     if at == raw.len() -> return Err(jettrace_error("{label} is not an unsigned integer"))
     result := U64{0}
@@ -364,7 +364,7 @@ jettrace_validate_allocations: fn(value: CanonicalJSON) JetTraceError! {
     return
 }
 
-// Rust char.is_control: Unicode Cc, including C1 (not just ASCII).
+// Unicode Cc, including C1 (not just ASCII).
 jettrace_has_control: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     loop index in 0..<bytes.len() {

@@ -862,7 +862,7 @@ decode_store: fn(raw: [U8]) -> [AuthRecord]? {
     Val(out)
 }
 
-/// Rust `char::is_control` over UTF-8: C0, DEL and the C1 block U+0080..U+009F.
+/// Unicode control characters over UTF-8: C0, DEL and the C1 block U+0080..U+009F.
 has_unicode_control: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     loop i in 0..<raw.len() {
@@ -983,7 +983,7 @@ oauth_verify: fn(nonce: String, assertion: String, now_ms: Int, config: OAuthCon
     if !ct_text(claim_nonce, nonce) -> return Err("OAuth assertion nonce is invalid")
     if (claims.iss ?? "") != config.issuer -> return Err("OAuth assertion issuer is invalid")
     if (claims.aud ?? "") != config.audience -> return Err("OAuth assertion audience is invalid")
-    // Rust integer division truncates toward zero.
+    // Integer division truncates toward zero.
     now_s: if now_ms >= 0 -> now_ms /% 1000 else -> 0 - ((0 - now_ms) /% 1000)
     exp: claims.exp ?? return Err("OAuth assertion expiry is missing")
     if exp <= now_s -> return Err("OAuth assertion is expired")
@@ -1270,7 +1270,7 @@ json_i64: fn(text: String) -> Int? {
     checked_i64(value)
 }
 
-/// Split on `.` exactly like Rust `str::split`: empty parts are kept.
+/// Split on `.` exactly: empty parts are kept.
 split_dot: fn(text: String) -> [String] Never! {
     out := [String]{}
     raw: text.bytes()

@@ -357,10 +357,7 @@ SemaSingleUseDrain: struct {
 // order) `path` moves. A branch's path is read in place, so the check below
 // never copies a path to list it.
 sema_single_use_path_moves: fn(before: SemaOwnershipState, path: SemaOwnershipPath) -> [Bool] Never! {
-    moves := [Bool]{}
-    loop row in sema_ownership_single_use_rows(before) {
-        moves.push(sema_single_use_moved_in(path.moved, before.declarations[row]))
-    }
+    moves: loop row in sema_ownership_single_use_rows(before) -> sema_single_use_moved_in(path.moved, before.declarations[row])
     moves
 }
 
@@ -391,21 +388,21 @@ sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], dia
 // Discarding a `#SingleUse` value this way is legal only in an audited
 // `#Unsafe("reason")` region or function (E0143). The value is consumed even
 // on the E0143 path, so no E0140 cascades at scope end.
-sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
         diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
         loop argument_index in 0..<call.args.len() {
-            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, scopes, check, diagnostics)
         }
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     argument: call.args[0]
-    value: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_check_expression(argument.expr, None, environment, program, scopes, check, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if argument.expr == .Ident(name, span, _) {
-        if context.unsafe_depth == 0 && sema_single_use_argument(state, argument.expr, scopes) != None {
+        if check.context.unsafe_depth == 0 && sema_single_use_argument(check.state, argument.expr, scopes) != None {
             diagnostics.push(sema_single_use_diag_unaudited(name, span))
         }
-        if !sema_ownership_mark_move(state, argument.expr, scopes, "`consume`", diagnostics) {
+        if !sema_ownership_mark_move(check.state, argument.expr, scopes, "`consume`", diagnostics) {
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
     }

@@ -84,8 +84,8 @@ jet_driver_load_schema_snapshots: fn(root: String) -[Env, FS]> [String:SchemaSna
 load_all_snapshots: fn(root: String) -[Env, FS]> [SchemaSnapshot] {
     snapshots: jet_driver_load_schema_snapshots(root)
     result := [SchemaSnapshot]{}
-    // Stable insertion order mirrors Rust's sort_by(type_name). Directory
-    // order is irrelevant unless two snapshots advertise the same type name.
+    // Stable insertion order sorted by type name. Directory order is
+    // irrelevant unless two snapshots advertise the same type name.
     keys := [String]{}
     loop (key, _) in snapshots -> keys.push(key)
     keys.sort()
@@ -119,7 +119,7 @@ jet_driver_schema_pending_breaks: fn(modules: [[Item]], snapshots: [String:Schem
         if diagnostics.len() == 0 -> next
         loop item in items {
             if item == .Struct(definition) {
-                // Rust status attributes the legacy single marker flag only.
+                // Status attributes the legacy single marker flag only.
                 if !definition.is_published_schema -> next
                 matched := false
                 loop diagnostic in diagnostics {

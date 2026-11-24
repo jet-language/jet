@@ -42,7 +42,7 @@ jet_cli_gate_append_build_facts: fn(ledger: ^GateLedger, facts: [EffectiveFact])
 // `append_package_writers`: the entry package's `authority:` block and
 // `build.allow`, then its lock's authority (else each locked package's effect
 // grants), workspace build grants and forced overrides, as external rows. Rows
-// are pushed in the Rust BTreeMap order (sorted keys).
+// are pushed in sorted key order.
 jet_cli_gate_append_package_writers: fn(ledger: ^GateLedger, snapshot: JetDriverAuthorizedSourceSnapshot) {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
@@ -90,7 +90,7 @@ jet_cli_gate_append_package_writers: fn(ledger: ^GateLedger, snapshot: JetDriver
 
 // `append_authority_entries` over one `authority:` block written at `source`.
 // Its own bound is `authority.allow`/`authority.deny` (#5070), the rest keep
-// their Rust subjects.
+// their own subjects.
 jet_cli_gate_append_authority: fn(ledger: ^GateLedger, authority: PackageAuthority, source: String) {
     held: "{source} authority"
     granted: "{source} authority.grants"

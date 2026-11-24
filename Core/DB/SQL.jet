@@ -14,12 +14,12 @@ package: {
 // (ordinals, LIMIT, ORDER exclusion); never substitute host pointer width.
 // #4500 gates retaining payload/list loans and allocation-free scalar lowering.
 // #4494/#4409 are not used: this kernel has no OS, pointer or IO operations.
-// #4499 is not used: Rust itself groups on escaped String keys; these are not
-// an encoding of composite user map keys to evade that gate. #4318/#4392 still
+// #4499 is not used: grouping is on escaped String keys; these are not an
+// encoding of composite user map keys to evade that gate. #4318/#4392 still
 // gate allocation-free String bytes and retained views. SUM reuses the
-// canonical JetFixedWide carrier for Rust's private i128 sum; native
-// I128/checked-add is not in this worktree's fixed numeric registry. No Rust
-// wrapper/provider or native DB route is implemented by this module.
+// canonical JetFixedWide carrier for its i128 sum; native I128/checked-add is
+// not in this worktree's fixed numeric registry. No native DB route is
+// implemented by this module.
 use {
     sql_text: core.text.runtime.kernel_unicode_string
     sql_assets: core.text.runtime.unicode_assets
@@ -30,7 +30,6 @@ use {
     internal.[sql_error, push_token, ascii_alpha, keyword, clause_keyword, token_at, token_is, parse_alias, parse_select_item, projection_shape_error, decimal_magnitude, parse_usize, parse_i64, parse_float, group_field, query_shape_error, float_compare, sql_number, sql_escape, sql_group_key, sum_add, sum_i64, count_increment, count_cast, sql_project_group, source_indices_compare, reverse_order, validate_sql_query_schema, sql_compare, sql_compare_values, aggregate_name, has_aggregate, value_number]
 }
 
-// Rust JetSqlAggregate:8–28.
 #Equatable
 JetSQLAggregate: enum {
     Count,
@@ -40,14 +39,13 @@ JetSQLAggregate: enum {
     Max,
 }
 
-// Rust JetSqlSelectItem:30–74. Public projection carrier for SQL consumers.
+// Public projection carrier for SQL consumers.
 #Equatable
 JetSQLSelectItem: enum {
     Wildcard,
     Field(field: String, alias: String?),
     Aggregate(function: JetSQLAggregate, field: String?, alias: String?),
 
-    // Rust output_name:45–58.
     output_name: fn(self) -> String Never! {
         if self == {
             .Wildcard -> "*"
@@ -60,7 +58,7 @@ JetSQLSelectItem: enum {
         }
     }
 
-    // Rust field:60–69. Return an owned field name, not an escaping read window.
+    // Return an owned field name, not an escaping read window.
     field: fn(self) -> String? Never! {
         if self == {
             .Field(field, _) -> Val(field.copy())
@@ -84,7 +82,7 @@ JetSQLSelectItem: enum {
     assert(JetSQLSelectItem.Wildcard.field() == None)
 }
 
-// Rust sql_tokens:186–263. Byte cursor advances only by the canonical decoder.
+// Byte cursor advances only by the canonical decoder.
 sql_tokens: fn(sql: String) -> [String] Err! {
     raw: sql_text.utf8_bytes(sql)
     whitespace: sql_whitespace.UNICODE_WHITE_SPACE
@@ -162,7 +160,7 @@ sql_tokens: fn(sql: String) -> [String] Err! {
     tokens
 }
 
-// Rust unquote:265–276. Only matching ASCII quotes; doubled delimiter collapses.
+// Only matching ASCII quotes; doubled delimiter collapses.
 unquote: fn(value: String) -> String Never! {
     raw: sql_text.utf8_bytes(value)
     if raw.len() < 2 -> return value.copy()
@@ -180,7 +178,7 @@ unquote: fn(value: String) -> String Never! {
     String.from_bytes(out) ?? panic("SQL unquote builder produced invalid UTF-8")
 }
 
-// Rust identifier:278–295. Quoting exempts ONLY the first scalar restriction.
+// Quoting exempts ONLY the first scalar restriction.
 identifier: fn(value: String?, role: String) -> String Err! {
     given: value ?? return Err(sql_error("SQL {role} is missing"))
     raw := sql_text.trim(given)  // #4303: trimmed view flows to String calls.
@@ -205,7 +203,6 @@ identifier: fn(value: String?, role: String) -> String Err! {
     name
 }
 
-// Rust JetSqlGroupKey:76–80, JetSqlQuery:82–90.
 #Equatable
 JetSQLGroupKey: enum {
     Field(String),
@@ -222,7 +219,7 @@ JetSQLQuery: struct {
     limit: U64?,
 }
 
-// Rust parse_sql_query:526–699. One final terminator is removed, not all.
+// One final terminator is removed, not all.
 parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
     trimmed := sql_text.trim(sql)  // #4303
     tokens := sql_tokens(trimmed) ?? return Err(err)
@@ -237,7 +234,7 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
         cursor = parsed.cursor
         if !token_is(tokens, cursor, ",") -> break
         cursor += 1
-        // Rust's trailing-comma test is deliberately case-sensitive.
+        // The trailing-comma test is deliberately case-sensitive.
         if token_is(tokens, cursor, "from") -> return Err("SQL SELECT has a trailing comma")
     }
     from: token_at(tokens, cursor) ?? return Err("SQL query needs `FROM source` after its projection")
@@ -334,8 +331,8 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
     query
 }
 
-// Rust JetSqlValue:108–168. Public SQL scalar carrier, distinct from
-// Core Dyn/DBValue; adapters marshal only at entry.
+// Public SQL scalar carrier, distinct from Core Dyn/DBValue; adapters marshal
+// only at entry.
 #Equatable
 JetSQLValue: enum {
     Null,
@@ -391,8 +388,8 @@ priv __validate_query_fields: fn(query: JetSQLQuery, fields: [String], label: St
     validate_sql_query_schema(query, fn(field: String) { names.has(field) }, label)
 }
 
-// Rust sql_aggregate_value:794–889. Numeric nonfinite inputs are skipped even
-// for MIN/MAX; COUNT(column) counts every present non-Null value instead.
+// Numeric nonfinite inputs are skipped even for MIN/MAX; COUNT(column) counts
+// every present non-Null value instead.
 sql_aggregate_value: fn<E>(group: [U64], function: JetSQLAggregate, field: String?, cell: fn(U64, String) -> JetSQLValue? E!) -> JetSQLValue E! {
     if function == .Count && field == None {
         return .Int(count_cast(checked(U64{group.len()}) ?? panic("SQL group length")))
@@ -454,8 +451,8 @@ sql_aggregate_value: fn<E>(group: [U64], function: JetSQLAggregate, field: Strin
     }
 }
 
-// Rust sql_output_value:943–954: a parsed but invalid ordinal does NOT fall
-// back to searching a column named with the numeric token.
+// A parsed but invalid ordinal does NOT fall back to searching a column named
+// with the numeric token.
 sql_output_value: fn(row: JetSQLResultRow, field: String) -> JetSQLValue? Never! {
     if parse_usize(field) == .Val(ordinal) {
         if ordinal == (U64{0}) || ordinal > (checked(U64{row.fields.len()}) ?? panic("SQL output length")) {
@@ -469,8 +466,8 @@ sql_output_value: fn(row: JetSQLResultRow, field: String) -> JetSQLValue? Never!
     None
 }
 
-// Rust execute_sql_rows:959–1041. String map lookup + one sorted key pass
-// reproduces BTreeMap lexical iteration in O(n log n), not a linear key table.
+// String map lookup + one sorted key pass gives lexical key iteration in
+// O(n log n), not a linear key table.
 execute_sql_rows: fn<E>(fields: [String], row_count: U64, query: JetSQLQuery, cell: fn(U64, String) -> JetSQLValue? E!) -> [JetSQLResultRow] (E | Err)! {
     selected := [U64]{}
     index := U64{0}
@@ -530,7 +527,7 @@ execute_sql_rows: fn<E>(fields: [String], row_count: U64, query: JetSQLQuery, ce
         }
         projected.push(internal.SQLOrderedRow{row: row, order: order})
     }
-    // Rust performs this pass AFTER every row and ORDER fallback is evaluated.
+    // This pass runs AFTER every row and ORDER fallback is evaluated.
     loop entry in projected {
         loop field in entry.row.fields {
             if field.value == .Float(number) && !sql_math.is_finite(number) {
@@ -608,8 +605,8 @@ priv internal: module {
         }
     }
 
-    // Rust sql_query_fields:469–496. ORDER outputs and valid usize tokens are
-    // excluded, including zero; callback order and repeated visits stay unchanged.
+    // ORDER outputs and valid usize tokens are excluded, including zero;
+    // callback order and repeated visits stay unchanged.
     sql_query_fields: fn(query: JetSQLQuery, visit: fn(String)) Never! {
         loop item in query.projection {
             if item == {
@@ -634,8 +631,8 @@ priv internal: module {
         }
     }
 
-    // Rust validate_sql_query_schema:503–520. Continue traversing after the first
-    // miss, but short-circuit further membership callbacks exactly as Rust does.
+    // Continue traversing after the first miss, but short-circuit further
+    // membership callbacks.
     validate_sql_query_schema: fn(query: JetSQLQuery, has_field: fn(String) -> Bool, label: String) Err! {
         missing := String?{None}
         sql_query_fields(query, fn(field: String) {
@@ -674,10 +671,10 @@ priv internal: module {
         }
     }
 
-    // Rust sql_error:176–178 is identity; each caller uses the canonical Err rail.
+    // Identity; each caller uses the canonical Err rail.
     sql_error: fn(message: ^^String) -> String Never! { message }
 
-    // Rust push_token:180–184. One scalar-builder buffer; no scalar list/parser.
+    // One scalar-builder buffer; no scalar list/parser.
     push_token: fn(tokens: ^[String], token: [U8]) -> [U8] Never! {
         if token.len() > 0 {
             tokens.push(String.from_bytes(token) ?? panic("SQL token builder produced invalid UTF-8"))
@@ -700,7 +697,6 @@ priv internal: module {
         true
     }
 
-    // Rust clause_keyword:297–304.
     clause_keyword: fn(token: String) -> Bool Never! {
         keyword(token, "from") || keyword(token, "where") || keyword(token, "group") || keyword(token, "order") || keyword(token, "limit") || token == ";"
     }
@@ -715,7 +711,7 @@ priv internal: module {
         false
     }
 
-    // Rust parse_alias:306–325. The next cursor is a scalar tuple, not an owner.
+    // The next cursor is a scalar tuple, not an owner.
     parse_alias: fn(tokens: [String], cursor: Int) -> {alias: String?, cursor: Int} Err! {
         if token_at(tokens, cursor) == .Val(token) {
             if keyword(token, "as") {
@@ -730,7 +726,7 @@ priv internal: module {
         {alias: None, cursor: cursor}
     }
 
-    // Rust parse_select_item:327–384. No GROUP/ORDER/LIMIT or width assumptions.
+    // No GROUP/ORDER/LIMIT or width assumptions.
     parse_select_item: fn(tokens: [String], cursor: Int) -> {item: JetSQLSelectItem, cursor: Int} Err! {
         first: token_at(tokens, cursor) ?? return Err(sql_error("SQL SELECT needs a projection"))
         at := cursor + 1
@@ -778,8 +774,8 @@ priv internal: module {
         {item: JetSQLSelectItem.Aggregate{function: function, field: field, alias: alias.alias}, cursor: alias.cursor}
     }
 
-    // Rust query_shape_error:410–435. Kept as its independently tested prefix;
-    // full query validation below always invokes it before checking GROUP BY.
+    // Kept as its independently tested prefix; full query validation below
+    // always invokes it before checking GROUP BY.
     projection_shape_error: fn(projection: [JetSQLSelectItem], grouped: Bool) -> String? {
         if projection.len() == 0 -> return Val("SQL SELECT needs at least one projection")
         wildcard := false
@@ -799,7 +795,6 @@ priv internal: module {
         None
     }
 
-    // Rust str::parse::<usize/i64> law at :132,491,615,648,682,738,944.
     // One strict decimal byte scan: no exact Int, whitespace, prefixes or separators.
     // The checked bound is tested BEFORE multiplication; arbitrarily long leading
     // zeroes remain valid, and overflow fails without changing error precedence.
@@ -853,7 +848,6 @@ priv internal: module {
         Val(value)
     }
 
-    // Rust group_field:387–408.
     group_field: fn(query: JetSQLQuery, key: JetSQLGroupKey) -> String Err! {
         if key == {
             .Field(field) -> { field.copy() }
@@ -871,8 +865,8 @@ priv internal: module {
         }
     }
 
-    // Rust query_shape_error:410–465. Separate scalar key sets preserve derived
-    // enum equality without an encoded composite key or Rust's quadratic prefix scan.
+    // Separate scalar key sets preserve derived enum equality without an
+    // encoded composite key or a quadratic prefix scan.
     query_shape_error: fn(query: JetSQLQuery) -> String? Never! {
         prefix: projection_shape_error(query.projection, query.group_by.len() != 0)
         if prefix != None -> return prefix
@@ -907,7 +901,7 @@ priv internal: module {
         None
     }
 
-    // Rust :701–752. NaN partial_cmp is Equal here, NOT Float's total sort policy.
+    // NaN compares Equal here, NOT Float's total sort policy.
     float_compare: fn(left: Float, right: Float) -> Ordering Never! {
         if left < right -> return Ordering.Less
         if left > right -> return Ordering.Greater
@@ -930,8 +924,8 @@ priv internal: module {
         String.from_bytes(out) ?? panic("SQL escaping preserves UTF-8")
     }
 
-    // Rust sql_group_key:777–792. Caller supplies a singleton slice without
-    // allocating Rust's temporary one-element Vec for each row.
+    // Caller supplies a singleton slice without allocating a temporary
+    // one-element list for each row.
     sql_group_key: fn<E>(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue? E!) -> String (E | Err)! {
         field: group_field(query, key) ?? return Err(err)
         value := JetSQLValue.Null
@@ -942,7 +936,7 @@ priv internal: module {
         "{field}={value_key(value)}"
     }
 
-    // Rust i128::saturating_add at :829, using the canonical two-word carrier.
+    // Saturating i128 addition, using the canonical two-word carrier.
     // Only I64 additions occur; sign extension plus low-word carry changes high
     // by at most one. Every primitive operation is bounded or explicitly wrapping.
     sum_add: fn(sum: sql_fixed.JetFixedWide, value: I64) -> sql_fixed.JetFixedWide Never! {
@@ -983,8 +977,8 @@ priv internal: module {
         (I64{-9223372036854775807} - I64{1}) + (checked(I64{length - U64{9223372036854775808}}) ?? panic("SQL row count low word"))
     }
 
-    // Rust sql_project_group:891–941. Transfer the consumed grouping positions
-    // into the result rather than cloning the otherwise dead Rust group Vec.
+    // Transfer the consumed grouping positions into the result rather than
+    // cloning the otherwise dead group list.
     sql_project_group: fn<E>(fields: [String], query: JetSQLQuery, group: ^^[U64], cell: fn(U64, String) -> JetSQLValue? E!) -> JetSQLResultRow E! {
         projected := [{field: String, value: JetSQLValue}]{}
         loop item in query.projection {

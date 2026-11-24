@@ -511,13 +511,12 @@ parser_trait_method_with_cap: fn(method: TraitMethodSig, cap: ModuleCap) -> Trai
     updated
 }
 
-// (Rust `Parser.apply_module_visibility`): every declaration
-// inside a `priv module` takes the module's privacy unless its own `priv` is
-// narrower. A `priv module` is usable only by its enclosing
+// Every declaration inside a `priv module` takes the module's privacy unless
+// its own `priv` is narrower. A `priv module` is usable only by its enclosing
 // module, a `priv(package) module` by its package; every other declaration is
 // public. Fields keep their own `priv`; a nested module keeps its own flags
-// while its body takes the narrower privacy. A public module leaves its body
-// as parsed (its nested modules were narrowed when built).
+// while its body takes the narrower privacy. A public module leaves its body as
+// parsed (its nested modules were narrowed when built).
 parser_module_body_visibility: fn(body: ^^[Item], is_pub: Bool, is_package_pub: Bool) -> [Item] Never! {
     if is_pub && !is_package_pub -> return body.move()
     narrowed := [Item]{}

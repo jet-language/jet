@@ -926,7 +926,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     zone_frame: ir_interned_name(m, "jet_perf_frame") ?? -1
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.select", "", -1, -1)
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     total := 0
     loop f in m.functions {
         weight: 1 + f.op.len()
@@ -981,7 +981,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     inputs: Shared{IRX64Inputs{programs: [IRModule]{m.move()}, fast: fast.move(), names: names, order: order, next: 0, seats: seats.move(), poll: poll, trap: trap, turn: turn, zone_plot: zone_plot, zone_frame: zone_frame}}
     outputs := [IRX64FunctionResult?]{}
     stops := [String]{}
-    outputs.try_reserve(count) ?? panic("reserve failed")
+    outputs.try_reserve(count) ?? ()
     loop _ in 0..<count -> outputs.push(None)
     tables_box := [IRX64Tables]{}
     task.group ir_x64_select_and_tables {
@@ -1001,9 +1001,9 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     tables := tables_box.pop() ?? panic("the x64 tables task lost its tables")
     if shells.fast.use_indexed_rt -> tables.runtime_symbols = shells.fast.runtime_symbols.move()
     has_stops: stops.len() == count
-    functions.try_reserve(count) ?? panic("reserve failed")
-    debug.try_reserve(count) ?? panic("reserve failed")
-    variables.try_reserve(count) ?? panic("reserve failed")
+    functions.try_reserve(count) ?? ()
+    debug.try_reserve(count) ?? ()
+    variables.try_reserve(count) ?? ()
     // Reverse once so popping yields rows 0..<count in forward order, avoiding
     // temporary 60k-row staging arrays and extra reversals.
     outputs.reverse()
@@ -1058,7 +1058,7 @@ ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
     heavy := [Int]{}
     med := [Int]{}
     small := [Int]{}
-    small.try_reserve(count) ?? panic("reserve failed")
+    small.try_reserve(count) ?? ()
     loop row in 0..<count {
         w: weights[row]
         if w >= 512 -> heavy.push(row) else if w >= 64 -> med.push(row) else -> small.push(row)
@@ -1067,7 +1067,7 @@ ir_x64_fast_order: fn(weights: [Int]) -> [Int] Never! {
         heavy.sort_by(fn(left: Int, right: Int) { weights[right] <=> weights[left] })
     }
     order := [Int]{}
-    order.try_reserve(count) ?? panic("reserve failed")
+    order.try_reserve(count) ?? ()
     loop row in heavy -> order.push(row)
     loop row in med -> order.push(row)
     loop row in small -> order.push(row)
@@ -1309,7 +1309,7 @@ ir_x64_fast_intern_rt: fn(table: ^IRX64TextRows, symbols: ^[String], name: Strin
 ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule Never! {
     rt_table := IRX64TextRows{}
     rt_syms := [String]{}
-    rt_syms.try_reserve(128) ?? panic("reserve failed")
+    rt_syms.try_reserve(128) ?? ()
     // Fixed slots 0..41 matching O0_RT_* compile-time constants.
     _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_add")
     _ := ir_x64_fast_intern_rt(rt_table, rt_syms, "jet_int_sub")
@@ -1371,21 +1371,21 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
     type_drop_fn := [Int]{}
     type_drop_rt_id := [Int]{}
     type_is_alloc_row := [Bool]{}
-    type_class.try_reserve(tcount) ?? panic("reserve failed")
-    type_kind.try_reserve(tcount) ?? panic("reserve failed")
-    type_size.try_reserve(tcount) ?? panic("reserve failed")
-    type_align.try_reserve(tcount) ?? panic("reserve failed")
-    type_bits.try_reserve(tcount) ?? panic("reserve failed")
-    type_signed.try_reserve(tcount) ?? panic("reserve failed")
-    type_is_str_drop.try_reserve(tcount) ?? panic("reserve failed")
-    type_has_drop.try_reserve(tcount) ?? panic("reserve failed")
-    type_drop_is_int.try_reserve(tcount) ?? panic("reserve failed")
-    type_drop_is_str_rt.try_reserve(tcount) ?? panic("reserve failed")
-    type_copy_clones.try_reserve(tcount) ?? panic("reserve failed")
-    type_clone_is_int.try_reserve(tcount) ?? panic("reserve failed")
-    type_drop_fn.try_reserve(tcount) ?? panic("reserve failed")
-    type_drop_rt_id.try_reserve(tcount) ?? panic("reserve failed")
-    type_is_alloc_row.try_reserve(tcount) ?? panic("reserve failed")
+    type_class.try_reserve(tcount) ?? ()
+    type_kind.try_reserve(tcount) ?? ()
+    type_size.try_reserve(tcount) ?? ()
+    type_align.try_reserve(tcount) ?? ()
+    type_bits.try_reserve(tcount) ?? ()
+    type_signed.try_reserve(tcount) ?? ()
+    type_is_str_drop.try_reserve(tcount) ?? ()
+    type_has_drop.try_reserve(tcount) ?? ()
+    type_drop_is_int.try_reserve(tcount) ?? ()
+    type_drop_is_str_rt.try_reserve(tcount) ?? ()
+    type_copy_clones.try_reserve(tcount) ?? ()
+    type_clone_is_int.try_reserve(tcount) ?? ()
+    type_drop_fn.try_reserve(tcount) ?? ()
+    type_drop_rt_id.try_reserve(tcount) ?? ()
+    type_is_alloc_row.try_reserve(tcount) ?? ()
     loop (row, ty) in m.types {
         k: if ty.kind == {
             .Unit -> O0_KIND_UNIT
@@ -1438,9 +1438,9 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
     name_rt_tag := [U8]{}
     name_rt_sym_id := [Int]{}
     name_is_alloc := [Bool]{}
-    name_rt_tag.try_reserve(ncount) ?? panic("reserve failed")
-    name_rt_sym_id.try_reserve(ncount) ?? panic("reserve failed")
-    name_is_alloc.try_reserve(ncount) ?? panic("reserve failed")
+    name_rt_tag.try_reserve(ncount) ?? ()
+    name_rt_sym_id.try_reserve(ncount) ?? ()
+    name_is_alloc.try_reserve(ncount) ?? ()
     loop name in m.names {
         tag: if name == {
             "jet_rt_block_unique" -> O0_RTTAG_BLOCK_UNIQUE
@@ -1484,9 +1484,9 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
     fn_is_unique := [Bool]{}
     fn_has_asm := [Bool]{}
     fn_is_stop := [Bool]{}
-    fn_is_unique.try_reserve(fcount) ?? panic("reserve failed")
-    fn_has_asm.try_reserve(fcount) ?? panic("reserve failed")
-    fn_is_stop.try_reserve(fcount) ?? panic("reserve failed")
+    fn_is_unique.try_reserve(fcount) ?? ()
+    fn_has_asm.try_reserve(fcount) ?? ()
+    fn_is_stop.try_reserve(fcount) ?? ()
     loop f in m.functions {
         fn_is_unique.push(f.key.starts_with("#unique<"))
         fn_has_asm.push(f.asm != None)
@@ -1495,7 +1495,7 @@ ir_x64_fast_module_new: fn(m: IRModule, use_indexed_rt: Bool) -> IRX64FastModule
 
     dcount: m.data.len()
     data_core_cell_rt_id := [Int]{}
-    data_core_cell_rt_id.try_reserve(dcount) ?? panic("reserve failed")
+    data_core_cell_rt_id.try_reserve(dcount) ?? ()
     loop _ in 0..<dcount -> data_core_cell_rt_id.push(-1)
     loop (drow, symbol) in m.core_cells {
         if drow >= 0 && drow < dcount {
@@ -1642,7 +1642,7 @@ ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
     order_len: reads.value.order.len()
     selected := [IRX64Selected]{}
     est: order_len.div_euclid(reads.value.seats.len() + 1) + 16
-    selected.try_reserve(est) ?? panic("reserve failed")
+    selected.try_reserve(est) ?? ()
     poll: reads.value.poll
     trap: reads.value.trap
     turn: reads.value.turn
@@ -1675,7 +1675,7 @@ ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure,
     if row >= 0 {
         total: reads.value.programs[0].functions.len()
         if stops.len() < total {
-            stops.try_reserve(total) ?? panic("reserve failed")
+            stops.try_reserve(total) ?? ()
             loop stops.len() < total -> stops.push("")
         }
         stops[row] = compiler_threads_failure_text(failure)
@@ -1850,8 +1850,8 @@ ir_x64_main_rows_collect: fn(owned: ^IRX64Result, functions: ^[X64CompiledFuncti
     }
     main: x64_object_main(X64FunctionID{value: entry}, owned.program.owned_main, owned.program.owned_attach, owned.program.owned_observe)
     need: owned.functions.len() + 1
-    debug.try_reserve(need) ?? panic("reserve failed")
-    functions.try_reserve(need) ?? panic("reserve failed")
+    debug.try_reserve(need) ?? ()
+    functions.try_reserve(need) ?? ()
     debug.push(x64_object_main_debug(main))
     debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
     functions.push(main.move())
@@ -1918,14 +1918,14 @@ ir_x64_reached_only: fn(functions: ^[X64CompiledFunction], debug: ^[X64FunctionD
     span: max_id + 2
     id_first := [Int]{}
     reached := [Bool]{}
-    id_first.try_reserve(span) ?? panic("reserve failed")
-    reached.try_reserve(span) ?? panic("reserve failed")
+    id_first.try_reserve(span) ?? ()
+    reached.try_reserve(span) ?? ()
     loop _ in 0..<span {
         id_first.push(-1)
         reached.push(false)
     }
     id_next := [Int]{}
-    id_next.try_reserve(functions.len()) ?? panic("reserve failed")
+    id_next.try_reserve(functions.len()) ?? ()
     loop _ in 0..<functions.len() -> id_next.push(-1)
     loop (index, function) in functions {
         at: function.id.value + 1
@@ -2041,7 +2041,7 @@ ir_x64_release_runs: fn(released: Shared<IRX64Released>, runs: Int) -> Int Never
         chunks := [[IRFunction]]{}
         loop all.len() > 0 {
             run := [IRFunction]{}
-            run.try_reserve(share) ?? panic("reserve failed")
+            run.try_reserve(share) ?? ()
             loop run.len() < share && all.len() > 0 {
                 row := all.pop() ?? break
                 run.push(row)
@@ -2223,7 +2223,7 @@ ir_x64_hash_start: fn(symbol: String) -> Int Never! {
 // section 0 and `.symtab_shndx`.
 ir_x64_library_globals: fn(program: IRModule, functions: ^[X64CompiledFunction], debug: ^[X64FunctionDebug], exports: [IRLibraryExport]) -> [X64RuntimeExport] Never! {
     globals := [X64RuntimeExport]{}
-    globals.try_reserve(exports.len() + 1) ?? panic("reserve failed")
+    globals.try_reserve(exports.len() + 1) ?? ()
     loop row in exports {
         globals.push(X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()})
     }
@@ -2278,7 +2278,7 @@ ir_x64_object_module: fn(owned: ^IRX64Result) -> X64ObjectModule Never! {
     variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
     variables.reverse()
     sources := [X64FunctionSource]{}
-    sources.try_reserve(owned.program.functions.len()) ?? panic("reserve failed")
+    sources.try_reserve(owned.program.functions.len()) ?? ()
     last_file := ""
     last_file_row := -1
     loop f in owned.program.functions {

@@ -8,7 +8,7 @@ SENSITIVE_CAPTURE_CONSENT_PHRASE: "capture sensitive"
 
 NO_CAPTURE_FLAG: "--no-capture"
 
-// Rust CaptureMode and its constructors/string/display projection.
+// CaptureMode and its constructors/string/display projection.
 CaptureMode: enum {
     Development,
     Release,
@@ -33,7 +33,7 @@ CaptureMode: enum {
     }
 }
 
-// Rust CaptureSource: only Clock is safe without sensitive consent.
+// Only Clock is safe without sensitive consent.
 CaptureSource: enum {
     Clock,
     Randomness,
@@ -68,7 +68,7 @@ CaptureSource: enum {
     }
 }
 
-// Rust CaptureLocation and CaptureSourceFact: source-relative status reasons.
+// Source-relative status reasons.
 CaptureLocation: struct {
     source_id: String,
     line: U32,
@@ -117,7 +117,7 @@ CaptureSourceFact: struct {
     }
 }
 
-// Rust CaptureKind; distinct from the trace-format capture policy.
+// CaptureKind; distinct from the trace-format capture policy.
 CaptureKind: enum {
     SafeClock,
     Sensitive,
@@ -136,7 +136,7 @@ CaptureKind: enum {
     }
 }
 
-// Rust PackageCaptureSetting/Policy. Release eligibility belongs to C3.
+// PackageCaptureSetting/Policy. Release eligibility belongs to C3.
 PackageCaptureSetting: enum {
     Default,
     On,
@@ -184,7 +184,7 @@ PackageCapturePolicy: struct {
     }
 }
 
-// Rust NoCaptureOverrideFact: one invocation's typed CLI fact, never global.
+// One invocation's typed CLI fact, never global.
 NoCaptureOverrideFact: struct {
     active: Bool,
 
@@ -199,7 +199,7 @@ NoCaptureOverrideFact: struct {
     flag: fn(self) -> String Never! { NO_CAPTURE_FLAG }
 }
 
-// Rust CaptureBudget: bytes of evictable artifacts, not saved bytes/index size.
+// Bytes of evictable artifacts, not saved bytes/index size.
 CaptureBudget: struct {
     max_bytes: U64,
 
@@ -218,7 +218,7 @@ CaptureBudget: struct {
     }
 
     // #4433: native compiler loses method type parameters; keep the public
-    // Rust seams intact. Free planner proof does not certify these methods.
+    // seams intact. Free planner proof does not certify these methods.
     plan_eviction: fn<I: RecordIndexRetention>(self, records: [I], incoming: I) -> CaptureEvictionPlan CaptureBudgetError! {
         plan_eviction<I>(self, records, incoming)
     }
@@ -228,7 +228,7 @@ CaptureBudget: struct {
     }
 }
 
-// Rust CaptureBudgetError and exact Display strings; failed plans are atomic.
+// CaptureBudgetError and exact Display strings; failed plans are atomic.
 #Error
 CaptureBudgetError: enum {
     ZeroByteLimit,
@@ -254,7 +254,7 @@ CaptureBudgetError: enum {
     }
 }
 
-// Rust RecordIndexRetention. The canonical RecordIndex adapter owns disposable
+// RecordIndexRetention. The canonical RecordIndex adapter owns disposable
 // policy; saved rows MUST return false from evictable, even when overriding it.
 // Generic callers dispatch statically; no trait-object boxing or copied rows.
 // #4446: night12 rejects returning the scalar self.id as View<String> (E0113);
@@ -270,7 +270,7 @@ RecordIndexRetention: trait {
     }
 }
 
-// Rust CaptureEviction/Plan and fits: facts only, never index mutation.
+// Facts only, never index mutation.
 CaptureEviction: struct {
     artifact_id: String,
     recorded_sequence: U64,
@@ -285,8 +285,8 @@ CaptureEvictionPlan: struct {
     fits: fn(self) -> Bool Never! { self.retained_bytes <= self.budget.max_bytes }
 }
 
-// Rust plan_eviction/plan_current_eviction/plan_eviction_inner. Candidate order
-// stores indices rather than copying record payloads. Incoming is not a candidate.
+// The eviction planners. Candidate order stores indices rather than copying
+// record payloads. Incoming is not a candidate.
 plan_eviction: fn<I: RecordIndexRetention>(budget: CaptureBudget, records: [I], incoming: I) -> CaptureEvictionPlan CaptureBudgetError! {
     // Wrapping read incoming in Val currently materializes I. A borrowed scalar
     // option needs the same missing canonical representation (#4446); do not
@@ -356,7 +356,7 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
     Ok(CaptureEvictionPlan{budget, evicted: evicted.move(), retained_bytes})
 }
 
-// Rust u64.checked_add: no wrapping intermediate.
+// No wrapping intermediate.
 capture_checked_add: fn(left: U64, right: U64) -> U64? Never! {
     if right > (U64{18446744073709551615}) - left -> return None
     Val(left + right)

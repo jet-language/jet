@@ -761,10 +761,7 @@ sema_taint_core_fact: fn(module_identity: ModuleID) -> Bool Never! {
 }
 
 sema_taint_add_callable: fn(catalog: ^SemaTaintCatalog, module_identity: ModuleID, owner: String, function: Func) Never! {
-    params := [SemaTaintTagList]{}
-    loop parameter_index in 0..<function.params.len() {
-        params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
-    }
+    params: loop parameter_index in 0..<function.params.len() -> SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)}
     success: sema_taint_success_type(function.return_type)
     return_tags := [String]{}
     if success == {
@@ -782,10 +779,7 @@ sema_taint_add_callable: fn(catalog: ^SemaTaintCatalog, module_identity: ModuleI
 }
 
 sema_taint_add_extern_callable: fn(catalog: ^SemaTaintCatalog, module_identity: ModuleID, function: ExternFn) Never! {
-    params := [SemaTaintTagList]{}
-    loop parameter_index in 0..<function.params.len() {
-        params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
-    }
+    params: loop parameter_index in 0..<function.params.len() -> SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)}
     success: sema_taint_success_type(function.return_type)
     returns := [String]{SEMA_TAINT_ORIGIN_FFI}
     if success == .Val(ty) -> returns = sema_taint_type_tags(ty)

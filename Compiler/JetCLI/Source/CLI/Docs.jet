@@ -129,7 +129,6 @@ jet_cli_doc_is_space: fn(byte: U8) -> Bool Never! {
     code == 32 || (code >= 9 && code <= 13)
 }
 
-// Rust `split_whitespace().join(" ")`.
 jet_cli_doc_collapse_whitespace: fn(text: String) -> String Never! {
     bytes: text.bytes()
     words := [String]{}
@@ -266,8 +265,8 @@ jet_cli_doc_leading_summary: fn(source: String) -> String Never! {
     summary
 }
 
-// The Rust `stable_module_path` is the display path the driver carries; a
-// Windows separator is printed as `/`.
+// The stable module path is the display path the driver carries; a Windows
+// separator is printed as `/`.
 jet_cli_doc_stable_path: fn(path: String) -> String Never! { path.replace("\\", "/") }
 
 // `module_name`: the alias, else the file stem.
@@ -707,7 +706,7 @@ jet_cli_doc_compare_int: fn(left: Int, right: Int) -> Int Never! {
     }
 }
 
-// Rust `Option<String>` order: `None` first.
+// `None` first.
 jet_cli_doc_compare_optional: fn(left: String?, right: String?) -> Int Never! {
     if left == .Val(left_text) {
         if right == .Val(right_text) -> return jet_cli_doc_compare_text(left_text, right_text)
@@ -748,7 +747,7 @@ jet_cli_doc_test_order: fn(left: JetCLIDocTest, right: JetCLIDocTest) -> Int Nev
     jet_cli_doc_compare_int(left.line, right.line)
 }
 
-// Stable insertion sorts (Rust `sort_by` is stable).
+// Stable insertion sorts.
 jet_cli_doc_sort_modules: fn(values: ^[JetCLIDocModule]) Never! {
     loop index in 1..<values.len() {
         value: values[index]

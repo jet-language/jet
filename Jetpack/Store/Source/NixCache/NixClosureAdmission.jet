@@ -157,7 +157,7 @@ NixAdmission: struct {
 
             store_nix_progress_phase(progress, "Downloading")
             // Successful fetches are merged in path order before the first
-            // failure is returned, as Rust sorts joined worker results.
+            // failure is returned.
             objects := [String:FetchedObject]{}
             first_error := NixCacheError?{None}
             loop store_path in pending {
@@ -219,8 +219,8 @@ NixAdmission: struct {
         Ok(AdmittedNixClosure{outputs: selected, objects: objects, closure_receipt_sha256: closure_receipt})
     }
 
-    // The planned signed narinfo when this closure was planned (Rust
-    // `planned_infos`), else a fresh signed lookup; then fetch.
+    // The planned signed narinfo when this closure was planned, else a fresh
+    // signed lookup; then fetch.
     fetch_pending: fn(self, endpoint: NixCacheEndpoint, planned: [String:FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
         info: if planned.get(store_path) == {
             .Val(known) -> known.copy()
@@ -291,9 +291,9 @@ NixAdmission: struct {
         )
     }
 
-    // Rust runs the locked publication under the Hangar lock and reports any
-    // of its failures as an atomic-admission failure with the same detail.
-    // A hangar-locked admission publishes under its caller's hold.
+    // The locked publication runs under the Hangar lock, and any of its
+    // failures is an atomic-admission failure with the same detail. A
+    // hangar-locked admission publishes under its caller's hold.
     publish: fn(^self, fetched: ^[String:FetchedObject], requests: [String:NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[IO, FS, Env, Time, Time.Wait]> String NixCacheError! {
         if self.hangar_locked {
             receipt: self.publish_locked(fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
@@ -411,8 +411,8 @@ NixAdmission: struct {
         Ok(closure_receipt.digest)
     }
 
-    // Remove the private stage unless the closure was committed. Rust runs
-    // this on `Drop`; Jet callers run it on every exit that did not commit.
+    // Remove the private stage unless the closure was committed. Callers run
+    // it on every exit that did not commit.
     rollback: fn(^self) -[FS]> Never! {
         if self.committed {
             return
@@ -590,7 +590,7 @@ store_nix_push_bytes: fn(output: ^[U8], value: [U8]) Never! {
     loop byte in value -> output.push(byte)
 }
 
-// Big-endian u64, as Rust `u64::to_be_bytes`.
+// Big-endian u64.
 store_nix_push_u64: fn(output: ^[U8], value: Int) Never! {
     loop index in 0..<8 {
         shift: (7 - index) * 8
@@ -664,8 +664,8 @@ store_nix_admission_stage_pid: fn(name: String) -> Int? Never! {
     Val(pid)
 }
 
-// Rust unsigned `parse`: an optional `+`, then at least one ASCII digit.
-// The significant digits, without the sign and leading zeros ("0" for zero).
+// An optional `+`, then at least one ASCII digit. The significant digits,
+// without the sign and leading zeros ("0" for zero).
 store_nix_decimal_digits: fn(text: String) -> String Never! {
     digits := text.removeprefix("+")
     loop digits.bytes().len() > 1 && digits.starts_with("0") -> digits = digits.removeprefix("0")

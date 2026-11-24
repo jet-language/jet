@@ -373,11 +373,11 @@ store_probe_output_readable: fn(path: String) -[FS]> StoreError! {
 }
 
 // Directories made writable for a quarantine move, restored afterwards.
-// Rust restores on `Drop`; Jet callers call `restore()` on every exit.
+// Callers call `restore()` on every exit.
 MovePathPermissions: struct {
     priv original: [MovedPathMode],
 
-    // Rust `Default`: nothing made writable yet.
+    // Nothing made writable yet.
     default: fn() -> MovePathPermissions Never! { MovePathPermissions{original: [MovedPathMode]{}} }
 
     make_writable: fn(^self, path: String, root: String) -[FS]> StoreError! {
@@ -546,7 +546,7 @@ store_quarantine_suffix: fn() -[Env, Time]> String Never! {
     "{sys.pid()}-{if nanos < 0 -> 0 else -> nanos}-{sequence}"
 }
 
-// Rust Ingest::now_secs: a wall-clock stamp, zero before the Unix epoch.
+// A wall-clock stamp, zero before the Unix epoch.
 store_now_secs: fn() -[Time]> Int Never! {
     nanos: time.unix_ns()
     if nanos < 0 -> 0 else -> nanos /% 1000000000
@@ -626,8 +626,7 @@ IngestError: enum {
 
 impl IOError -> IngestError { IngestError.IO("{self}") }
 
-// Rust Hangar helpers return `io::Result`, and ingest lifts each one through
-// `From<io::Error> for IngestError` as `IngestError::IO(err.to_string())`.
+// Ingest lifts each Hangar failure into `IngestError.IO` with its message.
 // StoreError has no automatic IngestError edge (IOError already reaches both
 // carriers), so every ingest boundary names this one explicit uplift.
 store_ingest_store_error: fn(error: StoreError) -> IngestError Never! {
@@ -672,8 +671,7 @@ store_ingest_tree: fn(verification: ^StoreVerification, roots: HangarRoots, requ
     store_ingest_tree_observed(verification, roots, request, None)
 }
 
-// `store_ingest_tree` with a hook run after each copied child source path
-// (Rust's test-only `with_after_child_copy_hook`, made an explicit argument).
+// `store_ingest_tree` with a hook run after each copied child source path.
 store_ingest_tree_observed: fn(verification: ^StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_ingest_tree_unlocked(verification, roots, request, after_child_copy)
@@ -821,7 +819,7 @@ store_ingest_stage_and_commit: fn(verification: ^StoreVerification, roots: Hanga
     Ok(IngestedObject{entry: entries[0], deduplicated: deduplicated})
 }
 
-// Classify an output-hash failure of a staged tree (Rust matches the text).
+// Classify an output-hash failure of a staged tree.
 store_ingest_hash_error: fn(destination: String, message: String) -> IngestError Never! {
     if {
         message.contains("case-fold") || message.contains("reserved") || message.contains("trailing") || message.contains("store path rejected") -> IngestError.PathLaw(PathLawError{code: "archive", path: destination, detail: message})

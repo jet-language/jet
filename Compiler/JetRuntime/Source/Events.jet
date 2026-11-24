@@ -1,5 +1,5 @@
-// Synchronous typed events. One meaning with the Rust reference types
-// JetEventPolicy, JetEventTrace, JetSubscription, JetEventScope, JetEvent. A
+// Synchronous typed events: event policies, traces, subscriptions, scopes and
+// events. A
 // dispatch runs its handlers on the emitting thread, but a carrier is not
 // confined to one: a declared point (`gate: event.decision_point<...>()`)
 // is one process cell every task reads, so tasks on different carriers
@@ -12,17 +12,16 @@
 //
 // EventCore80: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
 //   id56 source64 lock72
-//   An Event handle is its core (Rust: Rc<RefCell<Vec<JetListener>>>); a
-//   subscription's cleanup holds a weak count (Rust: Rc.downgrade), and the
-//   strong handles together hold one more, so the last weak release frees
-//   the core. source is the observations' static source text ("Event",
-//   "DecisionHook"), 0 for a Hook, which records none; id is the identity
-//   they name it by (ObserveLive.jet observe_event_id). lock guards
+//   An Event handle is its core; a subscription's cleanup holds a weak
+//   count, and the strong handles together hold one more, so the last weak
+//   release frees the core. source is the observations' static source text
+//   ("Event", "DecisionHook"), 0 for a Hook, which records none; id is the
+//   identity they name it by (ObserveLive.jet observe_event_id). lock guards
 //   next_id and the listener list.
 // Listener64: refs0 id8 priority16 once24 sub32 env40 invoke48 release56
-//   One count for the core's list, one per dispatch snapshot holding it
-//   (Rust: the entry clones its handler Rc), so a handler that unsubscribes
-//   itself or another listener mid-dispatch keeps the running closure alive.
+//   One count for the core's list, one per dispatch snapshot holding it, so
+//   a handler that unsubscribes itself or another listener mid-dispatch
+//   keeps the running closure alive.
 //   invoke(env, payload_slot, scratch) is the lowering's typed adapter; the
 //   payload slot is lent for the call. release(env) frees the closure once.
 // Subscription40: refs0 active8 core16 (weak, 0 none) id24 note32
@@ -30,13 +29,12 @@
 //   publishes live snapshots (event_note_new), else 0.
 // EventNote64: source0 event8 owner16 subscription24 priority32 counts40
 //   capacity48 overflow56: the fields every record naming the subscription
-//   carries (Rust jet_event_observe's arguments). A sync carrier's counts,
-//   capacity and overflow are 0, 0 and "None"; an AsyncEvent's -1, its
-//   capacity and its overflow.
+//   carries. A sync carrier's counts, capacity and overflow are 0, 0 and
+//   "None"; an AsyncEvent's -1, its capacity and its overflow.
 // EventScope72: refs0 canceled8 subs{len16 cap24 data32}
 //   hard{len40 cap48 data56}: the AsyncEvent cores whose hard cancel the
-//   scope's cancel runs (Rust track_hard_cancel), one count each. id64 is
-//   the owner identity its subscriptions' observations name.
+//   scope's cancel runs, one count each. id64 is the owner identity its
+//   subscriptions' observations name.
 // EventTrace24: delivered0 queued8 dropped16
 
 event_word: fn(address: I64) -> I64 { trap_word(address) }

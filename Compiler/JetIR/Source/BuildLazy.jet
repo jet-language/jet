@@ -381,10 +381,7 @@ ir_lazy_callback_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, l
         returned = fn_ret
     } else { return ir_fail(a, span, "lazy callback through {ir_type_name(ty)}") }
     env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
-    inputs := [Int]{}
-    loop index in 0..<params.len() {
-        inputs.push(ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "_{index}")))
-    }
+    inputs: loop index in 0..<params.len() -> ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "_{index}"))
     out: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "out"))
     args := [Int]{}
     loop (index, param) in params {

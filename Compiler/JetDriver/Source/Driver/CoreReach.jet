@@ -498,9 +498,12 @@ JET_DRIVER_MEMBER_ROUTES: [String]{
 // their registry members, which the compiler calls by a name it spells as a
 // string literal right after the module's name, each as `module.name`:
 // `sema_call_core_source("core.ui", "button", …)` for `ui.button(display)`
-// through a UI handle. Such a call needs no spelling in the program, so each
-// is a route (jet_driver_core_routes). The CoreReach tests hold this list to
-// exactly the names the compiler's sources spell that way.
+// through a UI handle; and those carrying a jet_builtins role whose body calls
+// them by their qualified name (`core.mem.mapped(address, bytes)` in
+// `#Builtin.Role(.InlineMapped)` mapped), which lowering the role reaches.
+// Such a call needs no spelling in the program, so each is a route
+// (jet_driver_core_routes). The CoreReach tests hold this list to exactly
+// those names.
 JET_DRIVER_SOURCE_ROUTES: [String]{
     "core.compute.matmul",
     "core.mem.alloc_raw",
@@ -1773,10 +1776,7 @@ jet_driver_reach_parse_parts: fn(parts: ^[[JetDriverReachSource]]) -> [[JetDrive
 // One thread: the parses of the sources `sources`, in order, each
 // source's bytes gone once it has parsed.
 jet_driver_reach_parse_part: fn(sources: ^^[JetDriverReachSource]) -> [JetDriverReachParse] {
-    parsed := [JetDriverReachParse]{}
-    loop source in sources.move() {
-        parsed.push(jet_driver_reach_parse_source(source.bytes, source.hold, compiler_threads_single()))
-    }
+    parsed: loop source in sources.move() -> jet_driver_reach_parse_source(source.bytes, source.hold, compiler_threads_single())
     parsed
 }
 

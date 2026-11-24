@@ -66,10 +66,7 @@ debug_event_test_padded: fn(total_bytes: Int) -> String Never! {
 
 #Test("event_observations_render_ordered_lines_up_to_the_record_bound") {
     assert_eq(debug_event_test_render(debug_event_test_snapshot("")), "")
-    rows := [String]{}
-    loop index in 1..<257 {
-        rows.push(debug_event_test_with("sequence", "\"sequence\":{index * 3}"))
-    }
+    rows: loop index in 1..<257 -> debug_event_test_with("sequence", "\"sequence\":{index * 3}")
     rendered: debug_event_test_render(debug_event_test_snapshot(rows.join(",")))
     lines: rendered.split("\n").to_list()
     assert_eq(lines.len(), 256)

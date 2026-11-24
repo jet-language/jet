@@ -1,7 +1,6 @@
-// `jet env info`, ported from jetpack::CLI::run_enter_dev: disclose the
-// selected preset and the typed environment facts without realizing
-// packages or executing lifecycle commands. `--json` renders one object
-// through Core JSON in the Rust key order.
+// `jet env info`: disclose the selected preset and the typed environment
+// facts without realizing packages or executing lifecycle commands. `--json`
+// renders one object through Core JSON in a fixed key order.
 use json: core.encoding.json
 
 cli_json_texts: fn(values: [String]) -> Dyn Never! {
@@ -21,7 +20,7 @@ cli_json_render: fn(value: Dyn) -> String Never! {
     json.to_string(value) ?? panic("compact JSON rendering of a Dyn is total")
 }
 
-// A map's keys in the Rust `BTreeMap` order.
+// A map's keys in sorted order.
 cli_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
@@ -294,7 +293,7 @@ cli_cmd_env_info: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CL
     EXIT_OK
 }
 
-// The `env info --json` object, in the Rust key order.
+// The `env info --json` object, in its fixed key order.
 cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String], applied_presets: [String], packages: [String], checks: [String], jobs: [String], variable_sources: [String:[String]], variable_names: [String], catalog: LanguagePackCatalog) -> String Never! {
     facts: plan.environment
     lifecycle: facts.lifecycle

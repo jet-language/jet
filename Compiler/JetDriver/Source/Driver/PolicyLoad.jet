@@ -73,8 +73,8 @@ jet_driver_load_policy: fn(program: ^Program, package_policy: [PolicyDeclaration
             diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
             return false
         }
-        // Match Rust's target-specific chains: include every declaration at
-        // that exact function/block target, not a CLI reconstruction by line.
+        // Target-specific chains: include every declaration at that exact
+        // function/block target, not a CLI reconstruction by line.
         loop declaration in program.policy_declarations {
             if jet_driver_policy_outer(declaration.scope) || declaration.key != rule.key -> next
             target: declaration.target ?? next

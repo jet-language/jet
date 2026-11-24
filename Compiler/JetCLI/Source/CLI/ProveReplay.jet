@@ -715,10 +715,7 @@ jet_cli_replay_net_frames: fn(payloads: ^[[U8]], kinds: ^[Int], read: JetCLIRepl
     kinds.push(JET_CLI_REPLAY_KIND_NET_REQUEST)
     id: jet_cli_replay_integer_field("request_id", request_id)
     if hop.stage >= 1 {
-        addresses := [CanonicalJSON]{}
-        loop address in hop.addresses {
-            addresses.push(CanonicalJSON.String(jet_cli_replay_ip_text(address)))
-        }
+        addresses: loop address in hop.addresses -> CanonicalJSON.String(jet_cli_replay_ip_text(address))
         payloads.push(
             canonical_json_bytes(
                 CanonicalJSON.Object(
@@ -732,10 +729,7 @@ jet_cli_replay_net_frames: fn(payloads: ^[[U8]], kinds: ^[Int], read: JetCLIRepl
         kinds.push(JET_CLI_REPLAY_KIND_NET_DNS)
     }
     if hop.answered {
-        headers := [CanonicalJSON]{}
-        loop (at, name) in hop.reply_names {
-            headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])}))
-        }
+        headers: loop (at, name) in hop.reply_names -> CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])})
         payloads.push(
             canonical_json_bytes(
                 CanonicalJSON.Object(
@@ -1063,14 +1057,14 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     Ok(indexed)
 }
 
-// `jet test --record=NAME` (Rust `begin_named_capture`): the safe, Time-only
-// capture of one run, published at `.jet/replays/NAME.jetproof-replay` and
-// indexed there as a protected replay. The run's programs read the recorded
-// clock through JET_CLI_REPLAY_TIME_ENV; nothing else is recorded, so no
-// sensitive-data preflight applies. The identity names the selected
-// `profile`, and its semantic hash binds the target's MIR identity to that
-// profile and to the `--set` writers the program compiled under, so a run
-// under other settings is a different recording.
+// `jet test --record=NAME`: the safe, Time-only capture of one run, published
+// at `.jet/replays/NAME.jetproof-replay` and indexed there as a protected
+// replay. The run's programs read the recorded clock through
+// JET_CLI_REPLAY_TIME_ENV; nothing else is recorded, so no sensitive-data
+// preflight applies. The identity names the selected `profile`, and its
+// semantic hash binds the target's MIR identity to that profile and to the
+// `--set` writers the program compiled under, so a run under other settings is
+// a different recording.
 JetCLIReplayRecord: struct {
     identity: JetCLIProveIdentity,
     name: String,
@@ -1145,12 +1139,11 @@ jet_cli_replay_record_path: fn(name: String) -> String Never! {
     ".jet/replays/{name}.jetproof-replay"
 }
 
-// Writes a recording once its run ended with `status`, with the RunSync
-// frames of `sync`, the run's sync-order log (empty for a `jet test`
-// recording), and the RunArgs frame of `args`, the program arguments it
-// ran with, then indexes it (Rust `finish_named_capture`,
-// `index_named_capture`); returns its path.
-// An index that can't take the row is E2105, as every record index update's is.
+// Writes a recording once its run ended with `status`, with the RunSync frames
+// of `sync`, the run's sync-order log (empty for a `jet test` recording), and
+// the RunArgs frame of `args`, the program arguments it ran with, then indexes
+// it; returns its path. An index that can't take the row is E2105, as every
+// record index update's is.
 jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int, sync: [U8], args: [String]) -> String JetCLIProveRefusal! {
     root: record.identity.authority_root
     salt: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))

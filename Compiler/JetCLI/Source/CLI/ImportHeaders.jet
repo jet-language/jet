@@ -1,5 +1,5 @@
-// Pure source importer declarations and scalar signatures. Rust `Function` (415-421).
-// Names remain foreign here; rendering canonicalizes them.
+// Pure source importer declarations and scalar signatures. Names remain
+// foreign here; rendering canonicalizes them.
 JetCLIImportFunction: struct {
     name: String,
     params: [{name: String, ty: String}],
@@ -7,14 +7,14 @@ JetCLIImportFunction: struct {
     body: [JetCLIImportBodyLine],
 }
 
-// One Rust Function.body (usize, String) row, with source-owned line attribution.
-// #4357 family: tuple lacks JetShow in Rust emit.
+// One function body row, with source-owned line attribution; a named row, not
+// a tuple (#4357).
 JetCLIImportBodyLine: struct {
     line: Int,
     text: String,
 }
 
-// Rust `Todo` fields (32-40); IM01 owns diagnostic projection.
+// A todo row; IM01 owns diagnostic projection.
 JetCLIImportTodo: struct {
     what: String,
     why: String,
@@ -24,7 +24,6 @@ JetCLIImportTodo: struct {
     status: String,
 }
 
-// Rust `ForeignHeader` (832-835).
 JetCLIImportForeignHeader: struct {
     function: JetCLIImportFunction,
     expression_body: String?,
@@ -39,7 +38,6 @@ jet_cli_import_text_error: fn(message: String) -> JetCLIImportTextError Never! {
     JetCLIImportTextError{message: message}
 }
 
-// Rust `foreign_comment_line`.
 jet_cli_import_foreign_comment_line: fn(line: String) -> Bool Never! {
     if line.starts_with("//") || line.starts_with("*") || line.starts_with("<!--") || line.starts_with("*/") {
         return true
@@ -52,7 +50,6 @@ jet_cli_import_foreign_comment_line: fn(line: String) -> Bool Never! {
     true
 }
 
-// Rust `foreign_function_candidate`.
 jet_cli_import_foreign_function_candidate: fn(language: String, line: String) -> Bool Never! {
     if language == "java" || language == "csharp" {
         if !line.contains("(") -> return false
@@ -68,7 +65,7 @@ jet_cli_import_foreign_function_candidate: fn(language: String, line: String) ->
     language == "go" && line.starts_with("func ")
 }
 
-// Rust `parse_foreign_header`. All offsets from searches are bytes, not String indices.
+// Parse a foreign header. All offsets from searches are bytes, not String indices.
 jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCLIImportForeignHeader JetCLIImportTextError! {
     bytes: line.bytes()
     open: jet_cli_import_find_bytes(bytes, "(", false) ?? return Err(jet_cli_import_text_error("function declaration has no parameter list"))
@@ -106,7 +103,7 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
         if suffix.starts_with("throws ") || suffix.contains(" where ") {
             return Err(jet_cli_import_text_error("method modifiers or exception contracts need an explicit migration adapter"))
         }
-        // Rust saturating_sub(2) selects token zero even for a one-token prefix.
+        // A saturating minus 2 selects token zero even for a one-token prefix.
         result_text = tokens[if tokens.len() >= 2 -> tokens.len() - 2 else -> 0].copy()
         require_static = true
     } else {
@@ -216,7 +213,6 @@ jet_cli_import_parse_foreign_header: fn(language: String, line: String) -> JetCL
     Ok(JetCLIImportForeignHeader{function: JetCLIImportFunction{name: name, params: params, result: result, body: []}, expression_body: expression_body})
 }
 
-// Rust `parse_foreign_params`.
 jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name: String, ty: String}] JetCLIImportTextError! {
     if raw.trim().is_empty() -> return Ok([])
     if language == "go" -> return Ok(jet_cli_import_parse_go_params(raw))
@@ -262,11 +258,11 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [{name
     Ok(output)
 }
 
-// Rust `parse_go_params`: grouped names drain once, duplicate lookup is hash-backed.
+// Grouped names drain once, duplicate lookup is hash-backed.
 jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] JetCLIImportTextError! {
     pending := [String]{}
     params := [{name: String, ty: String}]{}
-    // #4366: Set.add Bool result missing in Rust emit. Membership only, never iterated.
+    // #4366: Set.add has no Bool result. Membership only, never iterated.
     names := [String:Bool]{}
     loop part in jet_cli_import_split_commas(raw) {
         tokens: jet_cli_import_words(part)
@@ -294,7 +290,7 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [{name: String, ty: String}] 
     Ok(params)
 }
 
-// Rust `map_foreign_type`; qualification stripping applies in every language.
+// Map a foreign type; qualification stripping applies in every language.
 jet_cli_import_map_foreign_type: fn(language: String, raw: String) -> String JetCLIImportTextError! {
     ty := jet_cli_import_trim_suffix(raw.trim().copy(), ";")
     if ty.starts_with("java.lang.") {

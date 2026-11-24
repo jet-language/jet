@@ -48,7 +48,7 @@ STORE_BROKER_ADMIN_SOCKET: "/run/jet/shared-store.sock"
 // The credential a private (rootless) broker owner presents.
 STORE_BROKER_PRIVATE_OWNER: "private-owner"
 
-// Rust `invalid`: every broker refusal is InvalidData with this exact text.
+// Every broker refusal is InvalidData with this exact text.
 store_broker_invalid: fn(message: String) -> StoreError Never! { StoreError.InvalidData(message) }
 
 // A Core network failure as a Store failure, keeping the provider's text.
@@ -56,8 +56,7 @@ store_broker_net_error: fn(error: NetError) -> StoreError Never! {
     StoreError.Other(net.error_message(error))
 }
 
-// Rust `str::parse::<u64>` / `<usize>`: optional `+`, then only ASCII digits,
-// within the Int range.
+// Optional `+`, then only ASCII digits, within the Int range.
 store_broker_parse_unsigned: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     start: if raw.len() > 0 && (Int{raw[0]}) == 43 -> 1 else -> 0
@@ -70,7 +69,7 @@ store_broker_parse_unsigned: fn(text: String) -> Int? Never! {
     Val(parsed)
 }
 
-// Rust `decode_hex`: even length, ASCII hex digits of either case.
+// Even length, ASCII hex digits of either case.
 store_broker_decode_hex: fn(value: String) -> [U8] StoreError! {
     raw: value.bytes()
     if raw.len() % 2 != 0 {
@@ -199,7 +198,7 @@ BrokerWireReader: struct {
         }
     }
 
-    // Rust `read_exact`: exactly `count` bytes or UnexpectedEof.
+    // Exactly `count` bytes or UnexpectedEof.
     read_exact: fn(^self, count: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < count {
@@ -227,7 +226,7 @@ BrokerWireReader: struct {
         Ok(header)
     }
 
-    // Rust `take(limit).read_to_end`: at most `limit` bytes, to end of input.
+    // At most `limit` bytes, to end of input.
     read_bounded: fn(^self, limit: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < limit {
@@ -243,7 +242,7 @@ store_broker_append: fn(out: ^[U8], bytes: [U8]) Never! {
     loop byte in bytes -> out.push(byte)
 }
 
-// Rust `write_request`: a provenance-bound write of one unsigned archive.
+// A provenance-bound write of one unsigned archive.
 store_broker_encode_write_request: fn(binding: ProvenanceBinding, credential: String, archive: [U8]) -> [U8] StoreError! {
     if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES {
         return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
@@ -260,7 +259,6 @@ store_broker_encode_write_request: fn(binding: ProvenanceBinding, credential: St
     Ok(out)
 }
 
-// Rust `write_read_request`.
 store_broker_encode_read_request: fn(reference: String) -> [U8] StoreError! {
     if !store_broker_valid_reference(reference) {
         return Err(store_broker_invalid("shared-store reference is invalid"))
@@ -289,7 +287,6 @@ store_broker_header_fields: fn(header: [U8], label: String, magic: String, allow
     Ok(fields)
 }
 
-// Rust `read_request_header`.
 store_broker_read_request_header: fn(reader: ^BrokerWireReader) -> BrokerHeader StoreError! {
     header: reader.read_header("shared-store request")
     fields: store_broker_header_fields(header, "shared-store request", STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
@@ -337,7 +334,6 @@ store_broker_write_field: fn(fields: [String:String], key: String) -> String Sto
     store_broker_decode_text_field(value, key)
 }
 
-// Rust `read_request` (the test-facing whole request).
 store_broker_read_request: fn(reader: ^BrokerWireReader) -> BrokerRequest StoreError! {
     if store_broker_read_request_header(reader) == {
         .Write(header) -> {
@@ -348,12 +344,10 @@ store_broker_read_request: fn(reader: ^BrokerWireReader) -> BrokerRequest StoreE
     }
 }
 
-// Rust `write_response`.
 store_broker_encode_response: fn(status: String) -> [U8] Never! {
     "{STORE_BROKER_RESPONSE_MAGIC}\nstatus={status}\n\n".bytes()
 }
 
-// Rust `write_archive_response`.
 store_broker_encode_archive_response: fn(archive: [U8]) -> [U8] StoreError! {
     if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES {
         return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
@@ -363,8 +357,7 @@ store_broker_encode_archive_response: fn(archive: [U8]) -> [U8] StoreError! {
     Ok(out)
 }
 
-// Rust `read_response`: a status-only response to a write. `ok` is true,
-// `missing` false.
+// A status-only response to a write. `ok` is true, `missing` false.
 store_broker_read_response: fn(reader: ^BrokerWireReader) -> Bool StoreError! {
     bytes: reader.read_bounded(STORE_BROKER_MAX_HEADER_BYTES + 1)
     if bytes.len() > STORE_BROKER_MAX_HEADER_BYTES {
@@ -393,7 +386,7 @@ store_broker_read_response: fn(reader: ^BrokerWireReader) -> Bool StoreError! {
     }
 }
 
-// Rust `read_archive_response`: the archive of a read, or None for missing.
+// The archive of a read, or None for missing.
 store_broker_read_archive_response: fn(reader: ^BrokerWireReader) -> [U8]? StoreError! {
     header: reader.read_header("shared-store response")
     fields: store_broker_header_fields(header, "shared-store response", STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
@@ -491,7 +484,6 @@ BrokerAllowlist: struct {
     allowed: [String],
 }
 
-// Rust `parse_writer_grant`.
 store_broker_parse_writer_grant: fn(text: String) -> WriterGrant StoreError! {
     lines: store_text_lines(text)
     if lines.len() == 0 || lines[0] != STORE_BROKER_GRANT_MAGIC {
@@ -542,7 +534,7 @@ store_broker_parse_writer_grant: fn(text: String) -> WriterGrant StoreError! {
     Ok(grant)
 }
 
-// Rust `authorize_grant` at time `now` (Unix seconds).
+// Authorize a grant at time `now` (Unix seconds).
 store_broker_authorize_grant: fn(grant: WriterGrant, write: Bool, binding: ProvenanceBinding, credential: String, now: Int) StoreError! {
     if !grant.read -> return Err(store_broker_invalid("shared-store peer has no read authority"))
     if !write {
@@ -572,7 +564,7 @@ store_broker_authorize_grant: fn(grant: WriterGrant, write: Bool, binding: Prove
     }
 }
 
-// Rust `now_secs`: Unix seconds, saturating at zero before the epoch.
+// Unix seconds, saturating at zero before the epoch.
 store_broker_now_secs: fn() -[Time]> Int Never! {
     seconds: time.unix_ns() /% 1000000000
     if seconds < 0 -> return 0

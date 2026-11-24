@@ -288,19 +288,19 @@ ir_opt_int_facts: fn(m: IRModule, f: ^IRFunction, s: ^IRSsa) -> Int Never! {
     count: s.val_slot.len()
     if count == 0 || count > IR_RANGE_VALUES -> return 0
     r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, inline: [Bool]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}, lengths: [Bool]{}}
-    r.ranged.try_reserve(count) ?? panic("reserve failed")
-    r.exact.try_reserve(count) ?? panic("reserve failed")
-    r.unsigned.try_reserve(count) ?? panic("reserve failed")
-    r.narrow.try_reserve(count) ?? panic("reserve failed")
-    r.cap_lo.try_reserve(count) ?? panic("reserve failed")
-    r.cap_hi.try_reserve(count) ?? panic("reserve failed")
-    r.known.try_reserve(count) ?? panic("reserve failed")
-    r.lo.try_reserve(count) ?? panic("reserve failed")
-    r.hi.try_reserve(count) ?? panic("reserve failed")
-    r.inline.try_reserve(count) ?? panic("reserve failed")
-    r.home.try_reserve(count) ?? panic("reserve failed")
-    r.tested.try_reserve(count) ?? panic("reserve failed")
-    r.lengths.try_reserve(count) ?? panic("reserve failed")
+    r.ranged.try_reserve(count) ?? ()
+    r.exact.try_reserve(count) ?? ()
+    r.unsigned.try_reserve(count) ?? ()
+    r.narrow.try_reserve(count) ?? ()
+    r.cap_lo.try_reserve(count) ?? ()
+    r.cap_hi.try_reserve(count) ?? ()
+    r.known.try_reserve(count) ?? ()
+    r.lo.try_reserve(count) ?? ()
+    r.hi.try_reserve(count) ?? ()
+    r.inline.try_reserve(count) ?? ()
+    r.home.try_reserve(count) ?? ()
+    r.tested.try_reserve(count) ?? ()
+    r.lengths.try_reserve(count) ?? ()
     char_len_id: ir_interned_name(m, "jet_char_len") ?? -2
     string_bytes_id: ir_interned_name(m, "jet_string_bytes") ?? -2
     any := false
@@ -352,9 +352,9 @@ ir_opt_int_facts: fn(m: IRModule, f: ^IRFunction, s: ^IRSsa) -> Int Never! {
     }
     if !any -> return 0
     block_count: s.preds.len()
-    r.cond.try_reserve(block_count) ?? panic("reserve failed")
-    r.holds.try_reserve(block_count) ?? panic("reserve failed")
-    r.up.try_reserve(block_count) ?? panic("reserve failed")
+    r.cond.try_reserve(block_count) ?? ()
+    r.holds.try_reserve(block_count) ?? ()
+    r.up.try_reserve(block_count) ?? ()
     loop _ in 0..<block_count {
         r.cond.push(-1)
         r.holds.push(false)
@@ -369,12 +369,12 @@ ir_opt_int_facts: fn(m: IRModule, f: ^IRFunction, s: ^IRSsa) -> Int Never! {
     // round.
     readers: ir_range_readers(f, s, r, count)
     stale := [Bool]{}
-    stale.try_reserve(count) ?? panic("reserve failed")
+    stale.try_reserve(count) ?? ()
     found := IRRangeFound{known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, inline: [Bool]{}}
-    found.known.try_reserve(count) ?? panic("reserve failed")
-    found.lo.try_reserve(count) ?? panic("reserve failed")
-    found.hi.try_reserve(count) ?? panic("reserve failed")
-    found.inline.try_reserve(count) ?? panic("reserve failed")
+    found.known.try_reserve(count) ?? ()
+    found.lo.try_reserve(count) ?? ()
+    found.hi.try_reserve(count) ?? ()
+    found.inline.try_reserve(count) ?? ()
     loop _ in 0..<count {
         stale.push(true)
         found.known.push(false)

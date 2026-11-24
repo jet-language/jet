@@ -107,7 +107,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
 }
 
 // #4306/#4456: Core Dyn.Object currently lowers its ordered wire object
-// through a key-sorted map; preserve Rust's exact order, never bless sorting.
+// through a key-sorted map; preserve the exact written order, never bless sorting.
 #Test("error report object wire order matches Rust") {
     tree: Dyn.Object([String:Dyn]{"z": Dyn.Array([Dyn]{Dyn.Null, Dyn.Bool(true), Dyn.Int(9223372036854775808)}), "a": Dyn.Float(1.25)})
     assert_eq(jet_error_json_encode_value(tree), "{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}")

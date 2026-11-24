@@ -763,83 +763,21 @@ HTTPRouter: struct {
 }
 
 // The rule of a route table checked while building: each method call on a
-// marked value is heard. A registration whose method and path are known
-// then has a row, its method and the shape of its path, so two
-// registrations of one table with one row are two routes that both match
-// the same requests (E2804), reported at the later one beside the earlier;
-// a convention file's page is reported where the call it meets registers.
-// A custom route whose path is known then must name its method with a value
-// known then too (E2808), unless the table takes `runtime_methods`, as an
-// App, which checks a method known only when the program runs as it
-// registers.
-StaticRoutes: struct {
-    runtime_methods: Bool{false},
-
+// marked value is heard, and a custom route whose path is known then must
+// name its method with a value known then too (E2808). Only an App takes a
+// method known when the program runs.
+priv StaticRoutes: struct {
     impl Marker {
         sites: [.Type],
 
-        row: fn(self, call: CompilerCall) -> String? {
-            route: static_route(call) ?? return None
-            shape: routes.__route_pattern_shape(route.pattern) ?? return None
-            Val("{route.method} {shape}")
-        }
-
-        check: fn(self, call: CompilerCall, first: CompilerCall?) {
-            if !self.runtime_methods && call.name.text == "custom" && call.args.len() == 3 {
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "custom" && call.args.len() == 3 {
                 if call.args[1].value != None && call.args[0].value == None {
                     reject(RouteMethodNotStatic{}, at: call.args[0])
                 }
             }
-            if first == .Val(earlier) && static_route(call) == .Val(route) {
-                if earlier.source == .Val(file) && call.source == None && static_route(earlier) == .Val(page) {
-                    reject(RouteClash{method: page.method, pattern: page.pattern, source: file}, at: earlier.name, also: call.name, label: "the other registration, by `builder`")
-                }
-                label: if route_chained(call, earlier) -> "the other registration, by `{earlier.source ?? "builder"}`" else -> "first registered here"
-                reject(RouteClash{method: route.method, pattern: route.pattern, source: call.source ?? ""}, at: call.name, also: earlier.name, label: label)
-            }
         }
     }
-}
-
-// A route a registering call adds whose method and path the build knows.
-priv StaticRoute: struct {
-    method: String,
-    pattern: String,
-}
-
-// The route `call` registers when the build knows its method and path: a
-// verb names its method, `custom` takes it before the path, and a page,
-// route or layout answers GET.
-priv static_route: fn(call: CompilerCall) -> StaticRoute? {
-    name: call.name.text
-    if name == "custom" {
-        method: static_route_text(call, 0) ?? return None
-        return Val(StaticRoute{method: method, pattern: static_route_text(call, 1) ?? return None})
-    }
-    verbs: [String]{"get", "head", "post", "put", "patch", "delete", "options", "trace", "connect"}
-    method: if {
-        verbs.contains(name) -> name.upper()
-        name == "route" || name == "page" || name == "layout" -> "GET"
-        else -> return None
-    }
-    Val(StaticRoute{method: method, pattern: static_route_text(call, 0) ?? return None})
-}
-
-// The text the build knows argument `at` of `call` to be.
-priv static_route_text: fn(call: CompilerCall, at: Int) -> String? {
-    if at < call.args.len() && call.args[at].value == .Val(.Text(text)) -> return Val(text)
-    None
-}
-
-// Whether `call` registers on the chain `earlier` registered on: its
-// receiver holds the earlier call, or both stand for the convention files of
-// one `.routes(from:)`.
-priv route_chained: fn(call: CompilerCall, earlier: CompilerCall) -> Bool {
-    if call.source != None && earlier.source != None && call.name.span.start == earlier.name.span.start && call.name.span.file == earlier.name.span.file {
-        return true
-    }
-    receiver: call.receiver ?? return false
-    receiver.span.file == earlier.name.span.file && receiver.span.start <= earlier.name.span.start && earlier.name.span.end <= receiver.span.end
 }
 
 // E2808: a router's custom route names its method with a value only the run
@@ -855,30 +793,6 @@ priv RouteMethodNotStatic: struct {
         }
 
         fix: fn(self) -> String { "use a literal or compile-time String constant, or register the route on a `web.app()`" }
-    }
-}
-
-// E2804: two routes of one table answer the same method and path shape;
-// `source` names the convention file the reported one comes from, if any.
-priv RouteClash: struct {
-    method: String,
-    pattern: String,
-    source: String,
-
-    impl Diagnostic {
-        code: "E2804",
-
-        what: fn(self) -> String {
-            if self.source == "" -> "Two routes both match `{self.method} {self.pattern}`." else -> "Two routes both match `{self.method} {self.pattern}`; this one comes from `{self.source}`."
-        }
-
-        why: fn(self) -> String {
-            "Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added."
-        }
-
-        fix: fn(self) -> String {
-            "Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix)."
-        }
     }
 }
 

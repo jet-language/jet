@@ -56,8 +56,8 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     _ := scheduler_native_publish(published)
 }
 
-// Rust: extern "C" jet_rt_comptime_begin(fuel: u64,max_depth: u64)->bool.
-// Raw I64 parameters retain all 64 unsigned bits and the same C registers.
+// Extern "C" jet_rt_comptime_begin(fuel: u64,max_depth: u64)->bool. Raw I64
+// parameters retain all 64 unsigned bits and the same C registers.
 #Export(c) jet_rt_comptime_begin: fn(fuel: I64, max_depth: I64) -> Bool {
     sync_mutex_lock(comptime_root)
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
@@ -78,8 +78,8 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     true
 }
 
-// Rust: extern "C" jet_rt_comptime_work(units: u64). A zero charge does not
-// exhaust zero fuel (checked_sub(0) succeeds), even after another stop.
+// Extern "C" jet_rt_comptime_work(units: u64). A zero charge does not exhaust
+// zero fuel (checked_sub(0) succeeds), even after another stop.
 #Export(c) jet_rt_comptime_work: fn(units: I64) {
     sync_mutex_lock(comptime_root)
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
@@ -91,13 +91,13 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     sync_mutex_unlock(comptime_root)
 }
 
-// Rust: extern "C" jet_rt_comptime_step(owner: u64,start: u64,end: u64).
+// Extern "C" jet_rt_comptime_step(owner: u64,start: u64,end: u64).
 #Export(c) jet_rt_comptime_step: fn(owner: I64, start: I64, end: I64) {
     comptime_site(owner, start, end)
     jet_rt_comptime_work(I64{1})
 }
 
-// Rust: extern "C" jet_rt_comptime_enter(owner: u64,start: u64,end: u64).
+// Extern "C" jet_rt_comptime_enter(owner: u64,start: u64,end: u64).
 #Export(c) jet_rt_comptime_enter: fn(owner: I64, start: I64, end: I64) {
     sync_mutex_lock(comptime_root)
     if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
@@ -115,15 +115,15 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
     sync_mutex_unlock(comptime_root)
 }
 
-// Rust: extern "C" jet_rt_comptime_leave(). It decrements even when inactive.
+// Extern "C" jet_rt_comptime_leave(). It decrements even when inactive.
 #Export(c) jet_rt_comptime_leave: fn() {
     address: wrapping(thread_base() + I64{256})
     depth: sync_load(address)
     if (depth != I64{0}) { sync_store(address, wrapping(depth - I64{1})) }
 }
 
-// Rust: extern "C" jet_rt_comptime_end(). Reset the calling frame and restore
-// its previous task scope; only the request scope's control is destroyed.
+// Extern "C" jet_rt_comptime_end(). Reset the calling frame and restore its
+// previous task scope; only the request scope's control is destroyed.
 #Export(c) jet_rt_comptime_end: fn() {
     sync_mutex_lock(comptime_root)
     sync_store(wrapping(comptime_root + I64{8}), I64{0})
@@ -134,7 +134,7 @@ comptime_publish_locked: fn(kind: I64, status: I64) {
         scheduler_control_leave(wrapping(base + I64{288}))
         scheduler_control_drop(control)
     }
-    // Rust retains the first record until next begin so the host may report it.
+    // Retain the first record until the next begin so the host may report it.
     sync_mutex_unlock(comptime_root)
 }
 
@@ -360,12 +360,11 @@ comptime_stop_frame_write: fn(status: I64, owner: I64, start: I64, end: I64) -> 
     header: wrapping(scratch + I64{160})
     digits: world_decimal(header, at)
     trap_put(wrapping(header + digits), I64{10})
-    // The Rust original flushes program stdout before the private channel
-    // frame. This is the same active stdout flush used by every native process
-    // stop.
+    // Program stdout is flushed before the private channel frame. This is the
+    // same active stdout flush used by every native process stop.
     jet_rt_stdout_flush()
     // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
-    // failed duplicate is ignored just like protocol_channel's Option in Rust.
+    // a failed duplicate is ignored (the protocol channel is optional).
     fd: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
     if (fd >= I64{0}) {
         comptime_channel_write(fd, header, digits + I64{1})

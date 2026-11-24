@@ -337,8 +337,8 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     }
 }
 
-// JetFileReader's sole descriptor owner is the shared FD72 carrier. No Rust
-// BufReader or second descriptor registry survives the nonblocking open.
+// JetFileReader's sole descriptor owner is the shared FD72 carrier. No second
+// buffered reader or descriptor registry survives the nonblocking open.
 #Export(c) jet_std_files_open_reader_nonblocking: fn(path: I64, output: I64, error: I64) -> I64 {
     if compiler_fs_fault(path, error) -> return I64{0}
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}

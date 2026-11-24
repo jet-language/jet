@@ -134,12 +134,11 @@ parser_statement_is_keyword: fn(state: ^JetParserState) -> Bool Never! {
     false
 }
 
-// Can the line at the cursor be a value block's tail? An expression never
-// spans a `;` outside its groups, so only a line that runs to the closing
-// `}` (or to one `;` right before it) can end there. A `;` before `else`
-// may still continue an `if` value, so the scan reads on past it. Value
-// blocks parse every other line straight as a statement, as Rust's failed
-// tail speculation does, without parsing it twice.
+// Can the line at the cursor be a value block's tail? An expression never spans
+// a `;` outside its groups, so only a line that runs to the closing `}` (or to
+// one `;` right before it) can end there. A `;` before `else` may still
+// continue an `if` value, so the scan reads on past it. Value blocks parse
+// every other line straight as a statement, without parsing it twice.
 parser_value_tail_ahead: fn(state: JetParserState) -> Bool Never! {
     depth := 0
     index := state.position
@@ -320,10 +319,9 @@ parser_parse_block: fn(state: ^JetParserState) -> ParsedBlock {
     parser_parse_body_block(state, false)
 }
 
-// Rust `callable_tail_block_depth` (#18): the last line of a callable body
-// may be a bare value. `value_tail` marks the body of a callable with a
-// declared result its final line is in value position,
-// where a finite source loop with `->` keeps its collecting meaning
+// The last line of a callable body may be a bare value. `value_tail` marks the
+// body of a callable with a declared result its final line is in value
+// position, where a finite source loop with `->` keeps its collecting meaning
 parser_parse_callable_body: fn(state: ^JetParserState, value_tail: Bool) -> ParsedBlock {
     saved_tail_depth: state.callable_tail_depth
     saved_tail_value: state.callable_tail_value
@@ -335,7 +333,7 @@ parser_parse_callable_body: fn(state: ^JetParserState, value_tail: Bool) -> Pars
     block
 }
 
-// Rust `block_stmts`: every braced statement list is one block level deeper.
+// Every braced statement list is one block level deeper.
 parser_parse_body_block: fn(state: ^JetParserState, value_tail: Bool) -> ParsedBlock {
     state.block_depth += 1
     block: parser_parse_body_lines(state, value_tail)
@@ -433,9 +431,9 @@ parser_parse_tail_if: fn(state: ^JetParserState) -> Stmt {
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     statement: parser_parse_statement(state)
     if !at_tail || !parser_error_since(state, saved_diagnostics) -> return statement
-    // Both readings fail: keep the value form when the statement reading
-    // only adds errors, so one bad arm head (E0366) does not cascade into
-    // value arms read as statements (Rust reports the arm error alone).
+    // Both readings fail: keep the value form when the statement reading only
+    // adds errors, so one bad arm head (E0366) does not cascade into value arms
+    // read as statements.
     if state.diagnostics.len() - saved_diagnostics <= value_errors -> return statement
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     reparsed: parser_parse_expression(state, 1, 0)
@@ -457,7 +455,7 @@ parser_expression_is_collecting_loop: fn(expr: Expr) -> Bool Never! {
 // prepared binding inside the first one without bound.
 parser_parse_value_block: fn(state: ^JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
     if !prepared_value -> return parser_parse_value_lines(state, depth, false)
-    // Rust reads a prepared value's lines as a callable body (#18).
+    // A prepared value's lines are read as a callable body (#18).
     saved_tail_depth: state.callable_tail_depth
     saved_tail_value: state.callable_tail_value
     state.block_depth += 1
@@ -509,7 +507,7 @@ parser_parse_value_lines: fn(state: ^JetParserState, depth: Int, prepared_value:
                 statements.push(parser_parse_statement(state))
             }
             else -> {
-                // As in Rust's value blocks: speculate on a tail value (a zero-width
+                // As in value blocks: speculate on a tail value (a zero-width
                 // line terminator may sit before `}`), else reparse as a statement.
                 saved_position: state.position
                 saved_diagnostics: state.diagnostics.len()
@@ -637,7 +635,7 @@ parser_scope_member_ahead: fn(state: ^JetParserState) -> Bool Never! {
     }
 }
 
-// Rust `stmt` `task.group g { … }`, or with arguments,
+// `task.group g { … }`, or with arguments,
 // `task.group g(limit: n, stack: bytes) { … }`, opens a structured task scope.
 parser_task_group_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_value_at(state, 0) != "task" || parser_kind_at(state, 1) != TOKEN_DOT -> return false
@@ -713,9 +711,9 @@ parser_parse_scope_member: fn(state: ^JetParserState) -> Stmt {
     Stmt.ScopeMember{name: parser_value(state, name), name_span: name.span, args: args, args_span: args_span, body: body.statements, dsl: false, dot_span: dot.span, span: parser_cover(dot.span, body.span)}
 }
 
-// Rust `stmt`: `next` is the loop-control word only before a line end, `}`,
-// the `,` that ends a compact table arm, or a `(name)` target; anywhere else
-// it is an ordinary name (`next := 0`).
+// `next` is the loop-control word only before a line end, `}`, the `,` that
+// ends a compact table arm, or a `(name)` target; anywhere else it is an
+// ordinary name (`next := 0`).
 parser_next_statement_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if state.words.id_next < 0 -> return false
     token: parser_current(state)
@@ -978,8 +976,8 @@ parser_parse_subjectless_arm_head: fn(state: ^JetParserState) -> Expr {
     parser_parse_expression_no_struct_lit(state, 1).expr
 }
 
-// Rust `Syntax.INTERNAL_SELECT_AFTER_FIELD`: a NUL-led member name no source
-// tuple can spell, so the `after` readiness head cannot collide with a user's.
+// A NUL-led member name no source tuple can spell, so the `after` readiness
+// head cannot collide with a user's.
 parser_select_after_field: fn() -> String Never! {
     nul: String.from_bytes([U8]{U8{0}}) ?? ""
     "{nul}jet.select.after"
@@ -1170,8 +1168,8 @@ parser_parse_if_arm_head: fn(state: ^JetParserState, subject: Expr, pattern_subj
         saved_blocks: state.block_spans.len()
         saved_else_arms: state.else_arms.len()
         pattern: parser_parse_pattern(state, 1, true)
-        // Rust `try_pattern_rhs(true)?`: a fatal error inside the pattern
-        // ends the arm; only a complete pattern without `->` is reread.
+        // A fatal error inside the pattern ends the arm; only a complete
+        // pattern without `->` is reread.
         if state.abort_mark > saved_diagnostics {
             return parser_expression_form_pattern_condition(state, pattern_subject, pattern, op)
         }
@@ -1364,10 +1362,9 @@ parser_parse_labeled_loop: fn(state: ^JetParserState) -> Stmt {
     parser_parse_loop_after_keyword(state, name.span, Val(label))
 }
 
-// Rust `named_loop_is_value`: `name: loop …` binds a loop value when an
-// item arrow follows the header outside any group, or when a payload `break`
-// leaves this loop (labeled, or bare and not under a nested loop); otherwise
-// `name:` labels a statement loop.
+// `name: loop …` binds a loop value when an item arrow follows the header
+// outside any group, or when a payload `break` leaves this loop (labeled, or
+// bare and not under a nested loop); otherwise `name:` labels a statement loop.
 parser_named_loop_is_value: fn(state: ^JetParserState) -> Bool Never! {
     label: parser_current(state).decoded
     braces := 0
@@ -1569,9 +1566,8 @@ parser_parse_prep_loop: fn(state: ^JetParserState) -> Stmt {
     Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
 }
 
-// S74 (Rust `looks_like_sigil_binding` destructuring arms): a
-// `[ … ]`, `{ … }` or `Type{ … }` target whose matching close is followed by
-// `:` or `:=`. Bounded by the bracket depth.
+// S74: a `[ … ]`, `{ … }` or `Type{ … }` target whose matching close is
+// followed by `:` or `:=`. Bounded by the bracket depth.
 parser_pattern_binding_ahead: fn(state: ^JetParserState) -> Bool Never! {
     offset := 0
     if parser_current_kind(state) == TOKEN_IDENT {
@@ -1626,9 +1622,8 @@ parser_loop_pattern_head_end: fn(state: JetParserState, index: Int) -> Int Never
     -1
 }
 
-// S74 (Rust `sigil_binding` + `try_bind_pattern`): a destructuring binding
-// `[a, b]: list`, `{a, b}: record`, `{ a: x, b: y }: record` or
-// `Type{x, y: local, ..}: value`.
+// S74: a destructuring binding `[a, b]: list`, `{a, b}: record`,
+// `{ a: x, b: y }: record` or `Type{x, y: local, ..}: value`.
 parser_parse_pattern_binding_statement: fn(state: ^JetParserState) -> Stmt {
     pattern: parser_parse_bind_pattern(state)
     sigil: parser_bump(state)
@@ -1768,17 +1763,14 @@ parser_parse_binding_statement: fn(state: ^JetParserState) -> Stmt {
         }
     }
     value: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 0, true, false) else -> parser_parse_expression(state, 1, 0)
-    // `name: Layout{ … }` (Rust layout_ctor_binding): a typed-literal
-    // constraint body is the layout statement over its elements.
+    // `name: Layout{ … }`: a typed-literal constraint body is the layout
+    // statement over its elements.
     if parser_layout_elements(value.expr) == .Val(elements) {
         binding_name: parser_value(state, name)
         if mutable {
             parser_add_error_code(state, "E0003", name.span, "a `Layout{{ … }}` binding is immutable", "`Layout` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding", "write `{binding_name}: Layout{{ … }}`")
         }
-        body := [Stmt]{}
-        loop element in elements {
-            body.push(Stmt.Expr{expr: parser_desugar_layout_expr(state, binding_name, element)})
-        }
+        body: loop element in elements -> Stmt.Expr{expr: parser_desugar_layout_expr(state, binding_name, element)}
         parser_finish_statement(state)
         return Stmt.Layout{name: binding_name, name_span: name.span, body: body, span: parser_cover(name.span, value.span)}
     }
@@ -1815,8 +1807,8 @@ parser_layout_elements: fn(expr: Expr) -> [Expr]? Never! {
     None
 }
 
-// Rust layout_anchor_method: the accessor of a horizontal (`left`, `right`,
-// `width`) or vertical (`top`, `bottom`, `height`) anchor.
+// The accessor of a horizontal (`left`, `right`, `width`) or vertical (`top`,
+// `bottom`, `height`) anchor.
 parser_layout_anchor_method: fn(field: String) -> String? Never! {
     if field == "left" || field == "right" || field == "width" -> return Val("h")
     if field == "top" || field == "bottom" || field == "height" -> return Val("v")
@@ -1837,11 +1829,11 @@ parser_desugar_layout_args: fn(state: ^JetParserState, layout_name: String, args
     out
 }
 
-// Rust desugar_layout_anchors: a structural parse-time rewrite. Inside
-// `name: Layout{ … }`, a bare `box.anchor` read becomes
-// `name.h("box", "anchor")` / `name.v("box", "anchor")`, and `self.anchor`
-// names the container box after the binding; any other field access is left
-// to sema. The formatter's jfmt_resugar_layout_expr is its inverse.
+// A structural parse-time rewrite. Inside `name: Layout{ … }`, a bare
+// `box.anchor` read becomes `name.h("box", "anchor")` /
+// `name.v("box", "anchor")`, and `self.anchor` names the container box after
+// the binding; any other field access is left to sema. The formatter's
+// jfmt_resugar_layout_expr is its inverse.
 parser_desugar_layout_expr: fn(state: ^JetParserState, layout_name: String, e: Expr) -> Expr Never! {
     if e == .Field(base, field, field_span, _) {
         if base == .Ident(box_name, ident_span, _) {
@@ -1916,8 +1908,8 @@ parser_defer_close_call: fn(expression: Expr) -> Bool Never! {
     false
 }
 
-// Rust `KW_ASSERT`: `assert a, b` records unsafe-evidence names as the
-// internal assertion call that sema removes before IR lowering.
+// `assert a, b` records unsafe-evidence names as the internal assertion call
+// that sema removes before IR lowering.
 parser_parse_assert_names: fn(state: ^JetParserState) -> Stmt {
     start: parser_bump(state)
     args := [CallArg]{}
@@ -1932,9 +1924,9 @@ parser_parse_assert_names: fn(state: ^JetParserState) -> Stmt {
     Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_unsafe_assert", name_span: start.span, type_args: [Type]{}, args: args}, id: parser_node_id(state)}}
 }
 
-// Rust `stmt`, its name/`self` arm and its general expression arm (#18): a
-// line must do something. A computed value is allowed only as the bare last
-// line of a callable body; any other unused value is fatal E0003.
+// A statement's name/`self` arm and its general expression arm (#18): a line
+// must do something. A computed value is allowed only as the bare last line
+// of a callable body; any other unused value is fatal E0003.
 parser_parse_assignment_or_expression: fn(state: ^JetParserState) -> Stmt {
     start: parser_current(state)
     if start.kind == TOKEN_KW_IN {
@@ -2051,7 +2043,7 @@ parser_report_unknown_word: fn(state: ^JetParserState, top_level: Bool) {
     parser_add_error(state, token.span, what, why, "start the line with one of these forms")
 }
 
-// Rust `starts_expr`: the tokens that can open an expression line.
+// The tokens that can open an expression line.
 parser_starts_expression: fn(kind: Int) -> Bool Never! {
     if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR {
         return true
@@ -2067,7 +2059,7 @@ parser_starts_expression: fn(kind: Int) -> Bool Never! {
 
 // A line that starts with a name or `self` works when it calls, names a
 // field place, propagates or falls back (`?`, `??`) or names a compile-time
-// value. `x?.m()` is Rust's `CallValue` on an `OptField`. Inside a template
+// value. `x?.m()` is a `CallValue` on an `OptField`. Inside a template
 // or `#code` block, a `#{f.body}` line pastes a function's body.
 parser_named_line_does_work: fn(state: ^JetParserState, expr: Expr) -> Bool Never! {
     works: if expr == {
@@ -2104,9 +2096,8 @@ parser_at_body_close: fn(state: ^JetParserState) -> Bool Never! {
     parser_kind_at(state, offset) == TOKEN_RBRACE
 }
 
-// Rust `try_refutable_test_binding` a pattern test with
-// a diverging fallback that captures names is a statement binding; the
-// tested subject is the binding's value.
+// A pattern test with a diverging fallback that captures names is a
+// statement binding; the tested subject is the binding's value.
 parser_refutable_test_binding: fn(expr: Expr) -> Binding? {
     if expr == .OrFallback(value, fallback, _, span, _) {
         if value == .PatternTest(subject, pattern, pattern_span, _) {
@@ -2366,17 +2357,14 @@ parser_parse_marked_statement: fn(state: ^JetParserState) -> Stmt {
     body: parser_parse_body_block(state, value_tail)
     state.callable_tail_depth = saved_tail_depth
     span: parser_cover(hash.span, body.span)
-    // Rust `bind_rule_fact(…, RuleSite.Block)`: a marked block is a Block-site
-    // application, so the vocabulary, site, repeatability and argument checks
-    // see it like any other applied rule. A bare `#Transact { … }` binds no
-    // handle and records no application (Rust `at_transact_stmt`, @
-    // 6083377777).
+    // A marked block is a Block-site application, so the vocabulary, site,
+    // repeatability and argument checks see it like any other applied rule. A
+    // bare `#Transact { … }` binds no handle and records no application.
     if marker.name != MARKER_TRANSACT || args.len() > 0 {
         // copy: the application row and the statement built below each keep the marker.
         application := marker.copy()
-        // Rust `#FX(name: Effects…)`: `name:` binds the scoped Authority handle,
-        // not a rule parameter, so the application row carries the effects
-        // unlabeled.
+        // `name:` binds the scoped Authority handle, not a rule parameter, so the
+        // application row carries the effects unlabeled.
         if marker.name == MARKER_FX {
             application.arg_labels = (loop _ in marker.arg_labels -> CallLabel?{None})
         }
@@ -2433,7 +2421,7 @@ parser_parse_marked_statement: fn(state: ^JetParserState) -> Stmt {
             }
             Stmt.Transact{name: transaction_name, name_span: transaction_span, body: body.statements, implicit: false, span: span}
         }
-        // Rust `at_context_stmt`, `at_live_stmt`, `at_nondeterministic_stmt`.
+        // Context, live and nondeterministic statements.
         // A `#Deadline(limit)` block is the context block whose one field is
         // `deadline`; `#Context` binds no `deadline` label (the marker
         // binding, E0930) and no `#ContextKey` takes it.
@@ -2457,12 +2445,12 @@ parser_parse_marked_statement: fn(state: ^JetParserState) -> Stmt {
     }
 }
 
-// Rust `at_context_stmt`: each argument sets one context field. A labeled
-// argument names its field; an unlabeled one binds the next of the marker's
-// `params` (`Context(allocator, logger)` or `Deadline(limit)`,
-// PreludeMarkers.jet), and one past them is the marker's E0930 shape refusal.
-// A `single` name is every field's, whatever its label: the marker binding
-// refuses a wrong label (E0930).
+// Each argument sets one context field. A labeled argument names its field; an
+// unlabeled one binds the next of the marker's `params`
+// (`Context(allocator, logger)` or `Deadline(limit)`, PreludeMarkers.jet), and
+// one past them is the marker's E0930 shape refusal. A `single` name is every
+// field's, whatever its label: the marker binding refuses a wrong label
+// (E0930).
 parser_context_fields: fn(state: ^JetParserState, marker: Marker, args: [CallArg], params: [String], single: String?) -> [ContextField] {
     fields := [ContextField]{}
     loop (index, arg) in args {

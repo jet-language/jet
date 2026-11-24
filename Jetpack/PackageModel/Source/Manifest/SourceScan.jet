@@ -331,10 +331,9 @@ pkg_is_build_entry: fn(function: Func) -> Bool Never! {
     function.name == BUILD_ENTRY_FN && function.params.len() == 1 && function.params[0].ty == Type.Named{name: TYPE_BUILD_CONTEXT}
 }
 
-// Narrow structural `build` candidates to the compiler-owned build-entry
-// shape; None when the source does not lex (the Driver reports it). The
-// check-mode parse keeps its recovered program even with parser diagnostics
-// (Rust `parse_for_check_with_source`).
+// Narrow structural `build` candidates to the compiler-owned build-entry shape;
+// None when the source does not lex (the Driver reports it). The check-mode
+// parse keeps its recovered program even with parser diagnostics.
 pkg_real_build_entry_lines: fn(source: String, candidates: [Int]) -> [Int]? Never! {
     masked: pkg_mask_inline_package_source(source) ?? return None
     text: masked.source

@@ -85,16 +85,16 @@ ir_key_index_keys: fn(keys: [String], rows: [Int]) -> [String] Never! {
     loop row in rows -> keys[row].copy()  // copy: the index owns its keys; `keys` stays the caller's
 }
 
-// The runtime handle type a Jet type generated Rust holds natively crosses the
-// boundary as, keyed by the Jet name the checker spells it with: a table name
-// (`LocalDate`), or a declaration's key (`<corelib>/core.net.TCPStream`)
-// whose own Jet shape generated Rust replaces. A declaration, Core's or a
-// package's alike, is carried only through a row under its own key. It is
-// dropped by `jet_rt_handle_drop_<runtime>`; copied by
-// `jet_rt_handle_clone_<runtime>` when `clone`; rendered by
-// `jet_rt_handle_display_<runtime>` / `jet_rt_handle_show_<runtime>` /
-// `jet_rt_handle_debug_<runtime>` when `display` / `show` / `debug`; compared
-// by `jet_rt_handle_eq_<runtime>` when `eq`.
+// The runtime handle type a Jet type crosses the boundary as, keyed by the Jet
+// name the checker spells it with: a table name (`LocalDate`), or a
+// declaration's key (`<corelib>/core.net.TCPStream`) whose own Jet shape the
+// handle replaces. A declaration, Core's or a package's alike, is carried only
+// through a row under its own key. It is dropped by
+// `jet_rt_handle_drop_<runtime>`; copied by `jet_rt_handle_clone_<runtime>`
+// when `clone`; rendered by `jet_rt_handle_display_<runtime>` /
+// `jet_rt_handle_show_<runtime>` / `jet_rt_handle_debug_<runtime>` when
+// `display` / `show` / `debug`; compared by `jet_rt_handle_eq_<runtime>` when
+// `eq`.
 IRRuntimeHandle: struct {
     jet_name: String,
     runtime: String,

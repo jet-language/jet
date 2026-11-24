@@ -2,8 +2,8 @@
 // A transaction or snapshot is a UTF-8 body followed by
 // `checksum\t<sha256 of the body>\n`. Identity fields are lowercase hex of
 // their UTF-8 bytes so tabs and newlines can never split a record; absent
-// optional fields are `-`. Parse failures are InvalidData with the Rust
-// reference's reason text, which the journal wraps with the member path.
+// optional fields are `-`. Parse failures are InvalidData with a reason text,
+// which the journal wraps with the member path.
 
 STORE_LIFECYCLE_JOURNAL_VERSION: "jet-lifecycle-journal-v1"
 
@@ -13,7 +13,6 @@ STORE_LIFECYCLE_STATE_VERSION: "jet-lifecycle-state-v1"
 
 STORE_LIFECYCLE_CHECKSUM_FIELD: "checksum\t"
 
-// Rust `render_entry`.
 store_lifecycle_render_entry: fn(entry: LifecycleJournalEntry) -> String Never! {
     out := [String]{"{STORE_LIFECYCLE_JOURNAL_VERSION}\n"}
     if entry == {
@@ -49,7 +48,6 @@ store_lifecycle_seal_body: fn(body: String) -> String Never! {
     "{body}{STORE_LIFECYCLE_CHECKSUM_FIELD}{pkg_sha256_hex(body.bytes())}\n"
 }
 
-// Rust `parse_entry`.
 store_lifecycle_parse_entry: fn(raw: String) -> LifecycleJournalEntry StoreError! {
     body: store_lifecycle_checked_body(raw)
     lines: store_lifecycle_lines(body)
@@ -127,8 +125,8 @@ store_lifecycle_parse_entry: fn(raw: String) -> LifecycleJournalEntry StoreError
     }
 }
 
-// Rust `checked_body`: the text before the last `checksum\t`, verified
-// against the 64-digit checksum that ends the member.
+// The text before the last `checksum\t`, verified against the 64-digit checksum
+// that ends the member.
 store_lifecycle_checked_body: fn(raw: String) -> String StoreError! {
     split: raw.cut_last(STORE_LIFECYCLE_CHECKSUM_FIELD) ?? return Err(StoreError.InvalidData("missing checksum"))
     if !split.after.ends_with("\n") -> return Err(StoreError.InvalidData("truncated checksum"))
@@ -142,8 +140,8 @@ store_lifecycle_checked_body: fn(raw: String) -> String StoreError! {
     Ok(split.before)
 }
 
-// Rust `render_snapshot`, with the sequence already rendered so admission can
-// size the longest possible spelling.
+// Render a snapshot, with the sequence already rendered so admission can size
+// the longest possible spelling.
 store_lifecycle_render_snapshot_text: fn(through: String, roots: [String:LifecycleRoot]) -> String Never! {
     out := [String]{"{STORE_LIFECYCLE_SNAPSHOT_VERSION}\nthrough\t{through}\n{STORE_LIFECYCLE_STATE_VERSION}\n"}
     ids: store_lifecycle_sorted_ids(roots)
@@ -172,7 +170,6 @@ LifecycleSnapshotRecord: struct {
     roots: [String:LifecycleRoot],
 }
 
-// Rust `parse_snapshot`.
 store_lifecycle_parse_snapshot: fn(raw: String) -> LifecycleSnapshotRecord StoreError! {
     body: store_lifecycle_checked_body(raw)
     lines: store_lifecycle_lines(body)
@@ -254,8 +251,7 @@ store_lifecycle_parse_snapshot: fn(raw: String) -> LifecycleSnapshotRecord Store
     Ok(LifecycleSnapshotRecord{through: through, roots: roots})
 }
 
-// Rust `validate_snapshot_state`: every root's phase agrees with its
-// timestamps and target sets.
+// Every root's phase agrees with its timestamps and target sets.
 store_lifecycle_validate_snapshot_state: fn(roots: [String:LifecycleRoot]) StoreError! {
     ids: store_lifecycle_sorted_ids(roots)
     loop id in ids {
@@ -293,7 +289,7 @@ store_lifecycle_validate_snapshot_state: fn(roots: [String:LifecycleRoot]) Store
     }
 }
 
-// Rust `canonical_state`: the state text the lifecycle revision digests.
+// The state text the lifecycle revision digests.
 store_lifecycle_canonical_state: fn(roots: [String:LifecycleRoot]) -> String Never! {
     out := [String]{"{STORE_LIFECYCLE_STATE_VERSION}\n"}
     ids: store_lifecycle_sorted_ids(roots)
@@ -419,8 +415,7 @@ store_lifecycle_nibble: fn(code: Int) -> Int StoreError! {
     }
 }
 
-// Rust `str::lines`: split at LF, drop a CR before an LF; a final LF ends
-// the last line.
+// Split at LF, drop a CR before an LF; a final LF ends the last line.
 store_lifecycle_lines: fn(text: String) -> [String] Never! {
     segments: text.split("\n").to_list()
     count: if text.ends_with("\n") -> segments.len() - 1 else -> segments.len()

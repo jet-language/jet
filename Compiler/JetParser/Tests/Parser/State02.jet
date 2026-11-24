@@ -20,7 +20,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     prepared: parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
     assert(prepared.fenced_statements.is_empty())
     assert(prepared.tokens == expected)
-    // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
+    // Token value equality is observable; pointer identity is not a Jet API.
 }
 
 #Test("suffix_failure_contracts_cover_nested_type_positions") {
@@ -129,8 +129,8 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     source: "Host: struct {{}}\nimpl Host {{\n    open: fn(self, path: String) -[FS]> Int\n}}\nrun: fn() {{}}\n"
     lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    // Rust `parse(^tokens).is_err()`: the ordinary parse reports an error. The check
-    // acceptance (`jfmt_check_parse_accepts`) admits E0081 on purpose, as `parse_for_check` does.
+    // The ordinary parse reports an error. The check acceptance (`jfmt_check_parse_accepts`)
+    // admits E0081 on purpose, as `parse_for_check` does.
     assert(
         loop d in parser_test_result(source).diagnostics {
             if d.severity == 1 {
@@ -191,7 +191,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 }
 
 #Test("marker_template_type_holes_stay_in_the_template_ast") {
-    // The Rust fixture's retired `~self.value` is spelled `.copy()`.
+    // The retired `~self.value` is spelled `.copy()`.
     parsed: program("\nTypeName: struct {{\n    impl Marker {{\n        expand: fn(self, target: Target) {{\n            param: target.type_params[0].name\n            get_value: fn(self) -> @param {{ self.value.copy() }}\n            type_name: fn(self) -> String {{ target.name }}\n        }}\n    }}\n}}\n")
     declaration: loop item in parsed.items {
         if item == .MarkerDecl(d) {

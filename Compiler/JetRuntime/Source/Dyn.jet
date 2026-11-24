@@ -1,8 +1,7 @@
-// Canonical native Dyn provider; DataABI.jet is the only offset/tag table. The
-// Rust original owns tags and structural PartialEq; the Rust original owns
-// ordered JSON render semantics. Exact Int words retain shared owners. Text
-// constructors clone, sequence constructors adopt, sequence getters lend; Dyn
-// is the sole public carrier.
+// Canonical native Dyn provider; DataABI.jet is the only offset/tag table.
+// Tags, structural equality and ordered JSON render semantics are fixed.
+// Exact Int words retain shared owners. Text constructors clone, sequence
+// constructors adopt, sequence getters lend; Dyn is the sole public carrier.
 // Reads borrow an initialized word of a live native Dyn or List; writes own a
 // word of one. RawWords.jet performs the access.
 dyn_word: fn(address: I64) -> I64 { rt_text_word(address) }
@@ -793,10 +792,9 @@ dyn_f64: fn(kind: I64, payload: I64) -> Float {
     dyn_kinds_stop(site, verb, left, rt_static_text(" by "), right, err)
 }
 
-// The exact order of an Int and a finite or infinite Float (Rust
-// dyn_integer_float_compare): -1, 0 or 1, or 2 when the Float is NaN. The
-// Int's nearest Float decides unless it equals the Float; an equal Float is
-// either exact or a whole number, compared as an Int.
+// The exact order of an Int and a finite or infinite Float: -1, 0 or 1, or 2
+// when the Float is NaN. The Int's nearest Float decides unless it equals the
+// Float; an equal Float is either exact or a whole number, compared as an Int.
 dyn_int_float_order: fn(integer: I64, float: Float) -> I64 {
     if float != float -> return I64{2}
     infinity: Float{1.0} / Float{0.0}
@@ -947,7 +945,7 @@ dyn_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
 // jet_dyn_set_path over `steps`, a runtime Array of Text (key) and Int (index)
 // trees. A key missing at the last step is appended; the reached node takes the
 // owned `value` (their contents swap, and the value's shell drops the replaced
-// contents). Every refusal names its step as Rust does.
+// contents). Every refusal names its step.
 #Export(c) jet_dyn_set_path: fn(tree: I64, steps: I64, value: I64, site: I64, err: I64) -> I64 {
     sequence: dyn_word(wrapping(steps + DYN_PAYLOAD))
     count: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
@@ -1149,8 +1147,8 @@ data_dyn_bytes_text: fn(sequence: I64) -> I64 {
 
 data_dyn_datetime_clone: fn(value: I64) -> I64 { time_glue_clone(value, DYN_DATETIME_BYTES) }
 
-// Split seconds into days/remainder before adding the frozen i32 offset,
-// retaining Rust's i128 sum at both i64 extremes.
+// Split seconds into days/remainder before adding the frozen i32 offset, so
+// the sum stays exact at both i64 extremes.
 data_dyn_datetime_text: fn(value: I64) -> I64 {
     seconds: dyn_word(wrapping(value + DYN_DATETIME_SECS))
     offset: dyn_word(wrapping(value + DYN_DATETIME_OFFSET))

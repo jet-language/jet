@@ -8,7 +8,7 @@ use {
     jet_sema.[SemaGraphResult, SemaSourceOrigin, sema_gate_host_reads]
 }
 
-// Rust Driver.compiler_nodes_for_bundle_with_outputs. These are static
+// The compiler nodes of a bundle with its outputs. These are static
 // identities, not BuildNodeRecords: no duration or why-ran observation exists
 // until an actual build action runs. Core owns the sole hash byte recipe.
 // The check nodes (jet_driver_build_check_nodes), then the outputs' compile
@@ -174,7 +174,7 @@ jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks
         compiles.push(compiled)
         links.push(linked)
     }
-    // Rust's enum order is Check, Compile, Link (not string key order).
+    // The node kind order is Check, Compile, Link (not string key order).
     loop node in compiles -> checks.push(node)
     loop node in links -> checks.push(node)
     checks.move()

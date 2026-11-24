@@ -600,10 +600,7 @@ recording_canonical_json: fn(value: Dyn) -> String {
             loop field in fields -> members[field.key] = field.value
             keys := members.keys().to_list()
             keys.sort()
-            parts := [String]{}
-            loop key in keys {
-                parts.push("{foundation_json_quote(key)}:{recording_canonical_json(members[key])}")
-            }
+            parts: loop key in keys -> "{foundation_json_quote(key)}:{recording_canonical_json(members[key])}"
             "{{{parts.join(",")}}}"
         }
         // The JSON parser produces no other variant.

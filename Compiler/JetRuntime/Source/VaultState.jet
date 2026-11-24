@@ -1,6 +1,6 @@
 // Owned native provider state; Record key storage is the canonical native
-// Secret, not a Rust Vec/key object. Raw u64 bit words retain the entire
-// reference range (including its high bit).
+// Secret. Raw u64 bit words retain the entire reference range (including its
+// high bit).
 VAULT_STORE_BYTES: I64{40}
 
 VAULT_STORE_UUID: I64{0}
@@ -74,7 +74,7 @@ vault_put_u64: fn(target: I64, value: I64) {
 }
 
 // UTF-8 preflight only protects the raw test boundary. NFC is the shared native
-// provider48a5f5ae9, never Rust JetCString reinterpretation.
+// provider48a5f5ae9.
 vault_validate_text: fn(text: I64, reason: Bool) -> Bool {
     length: rt_text_len(text)
     limit: if reason -> I64{256} else -> I64{128}
@@ -162,7 +162,7 @@ vault_record_drop: fn(record: I64) {
     jet_rt_free(record, VAULT_RECORD_BYTES, I64{8})
 }
 
-// Rust derive compares key bytes too; immutable hashes never replace equality.
+// Equality compares key bytes too; immutable hashes never replace equality.
 vault_record_equal: fn(left: I64, right: I64) -> Bool {
     if !jet_rt_string_eq(rt_text_word(wrapping(left + VAULT_RECORD_NAME)), rt_text_word(wrapping(right + VAULT_RECORD_NAME))) {
         return false
@@ -378,7 +378,7 @@ vault_put_u16: fn(target: I64, value: I64) {
 }
 
 // Scratch8192 is exclusive; the output32 must not alias it. Crypto primitives
-// consume raw packed key32, never a nominal Rust signing/X25519 carrier.
+// consume raw packed key32, never a nominal signing/X25519 carrier.
 vault_public_hash_bytes: fn(key_type: I64, key: I64, count: I64, digest: I64, scratch: I64) -> Bool {
     if (count != I64{32}) { return false }
     public: wrapping(scratch + I64{4160})

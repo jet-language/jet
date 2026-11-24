@@ -111,7 +111,7 @@ env_shell_nix_projection_command: fn(env: ShellEnv, program: String, rest: [Stri
     // may itself run inside a sandbox with an empty PATH, where a PATH lookup
     // fails with exit 127 and looks like a refused namespace.
     env_shell_check_rootless_namespace(unshare, shell)
-    // Rust hands the unshare, shell, mount, and binary descriptors to the
+    // The unshare, shell, mount, and binary descriptors must reach the
     // namespace so a path swap after verification cannot redirect it. Those
     // are open files, which Core cannot pass to a child, so the projection
     // fails closed here, after the host proved it can build the namespace.
@@ -195,7 +195,7 @@ env_shell_check_rootless_namespace: fn(unshare: String, shell: String) -[Exec, T
     }
 }
 
-// Rust `ExitStatus` display.
+// The display form of an exit status.
 env_shell_exit_status_text: fn(receipt: ProcessReceipt) -> String Never! {
     if receipt.signal == .Val(number) -> return "signal: {number}"
     "exit status: {receipt.code}"

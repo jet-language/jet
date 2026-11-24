@@ -56,7 +56,6 @@ jet_cli_find_text: fn(text: String, start: Int, end: Int) -> String Never! {
     semindex_doc_text(text.bytes(), start, end)
 }
 
-// Rust `str.split_once`.
 jet_cli_find_split_once: fn(text: String, separator: String) -> [String]? Never! {
     if !text.contains(separator) -> return None
     parts: text.split(separator).to_list()
@@ -76,7 +75,6 @@ jet_cli_find_byte: fn(text: String, byte: Int, last: Bool) -> Int Never! {
     found
 }
 
-// Rust `split_whitespace`.
 jet_cli_find_words: fn(text: String) -> [String] Never! {
     collapsed: jet_cli_doc_collapse_whitespace(text)
     if collapsed == "" -> return [String]{}
@@ -177,13 +175,13 @@ jet_cli_find_signature_shape: fn(rendered: String) -> JetCLIFindShape? Never! {
     Val(JetCLIFindShape{inputs: inputs, output: jet_cli_find_compact(output)})
 }
 
-// Does `value` parse as an Int (Rust `str.parse<i64>().is_ok()`)?
+// Does `value` parse as an Int?
 jet_cli_find_parses_int: fn(value: String) -> Bool Never! {
     _: Int.parse(value) ?? return false
     true
 }
 
-// Does `value` parse as a Float (Rust `str.parse<f64>().is_ok()`)?
+// Does `value` parse as a Float?
 jet_cli_find_parses_float: fn(value: String) -> Bool Never! {
     _: Float.parse(value) ?? return false
     true
@@ -462,7 +460,7 @@ jet_cli_find_render: fn(mode: JetCLIFindMode, query: String, matches: [JetCLIFin
 }
 
 // `jet find …` (`run_find` up to the check): the query mode and the entry to
-// search, resolved as the Rust host resolves it.
+// search.
 jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     effect_name := String?{None}
     example_raw := String?{None}

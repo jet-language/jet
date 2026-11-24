@@ -702,8 +702,8 @@ iter_repeat: fn(source: I64, count: I64, loops: Bool) -> I64 {
     state := U64{3237998146}
     at := trap_word(header) - I64{1}
     loop at > (I64{0}) {
-        // `wrapping` governs its one operator: the LCG's multiply and add
-        // each wrap (Rust wrapping_mul(..).wrapping_add(1)).
+        // `wrapping` governs its one operator: the LCG's multiply and add each
+        // wrap.
         state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1})
         other: wrapping(I64{(state >> U64{33}) % wrapping(U64{at + I64{1}})})
         coll_copy(wrapping(data + at * stride), scratch, coll_payload(meta))
@@ -1372,7 +1372,7 @@ iter_zip_stop: fn(context: I64) {
     trap_exit(EXIT_RUNTIME_PANIC)
 }
 
-// Only sources whose Rust size_hint bounds agree supply a progress total.
+// Only sources whose size hint bounds agree supply a progress total.
 // Custom chunks/windows/dedup/zip/split iterators intentionally have no hint.
 iter_exact_length: fn(node: I64) -> I64 {
     kind: trap_word(node)

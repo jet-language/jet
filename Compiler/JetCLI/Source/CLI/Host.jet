@@ -261,7 +261,6 @@ use {
 // `ICE`: Jet's own defect.
 JET_CLI_EXIT_ICE: EXIT_ICE
 
-// Rust host `render_internal_fault`.
 jet_cli_ice: fn(what: String) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{
         stdout: "",
@@ -279,19 +278,17 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 }
 
 // `jet check <file>`: compile through the Jet compiler, place each diagnostic
-// on the file that owns it, and report the outcome the Rust host prints; `json`
-// selects the machine outcome. An explicit file outside every project that
-// imports `project.<module>` is E2393 before the compile. A `project` check
-// (bare or directory) of a program, not a library, runs in Run mode, so an
-// entry with no `run: fn` is E0101
-// (`check_projection_with_options_and_preflight`). `verbose` on an
-// explicit-file check adds the check's scope and proof rows on stdout
-// (first-hour.md lesson 3). `finish` ends the process with the outcome once the
-// compile ran, skipping the teardown of its result.
-// `recording` publishes the outcome as the invocation's receipt before the
-// process ends (CheckReceipt.jet). `profile` is the `--profile` the compile
-// selects ("" for the default); the machine and verbose outcomes name it.
-// `style` (`jet check --style`) adds the opt-in style checks' findings
+// on the file that owns it, and report the outcome; `json` selects the machine
+// outcome. An explicit file outside every project that imports
+// `project.<module>` is E2393 before the compile. A `project` check (bare or
+// directory) of a program, not a library, runs in Run mode, so an entry with
+// no `run: fn` is E0101. `verbose` on an explicit-file check adds the check's
+// scope and proof rows on stdout (first-hour.md lesson 3). `finish` ends the
+// process with the outcome once the compile ran, skipping the teardown of its
+// result. `recording` publishes the outcome as the invocation's receipt
+// before the process ends (CheckReceipt.jet). `profile` is the `--profile` the
+// compile selects ("" for the default); the machine and verbose outcomes name
+// it. `style` (`jet check --style`) adds the opt-in style checks' findings
 // (StyleCheck.jet) to the compile's own. In the Jet repository the path case
 // rule's findings (PathCase.jet) follow. `target_machine` is the machine
 // without an OS the program is checked for ("" for the host).
@@ -2404,10 +2401,9 @@ jet_cli_traced_authority: fn(invocation: JetCLIInvocationAuthority?, result: Jet
     authority
 }
 
-// The E1803 report of `authority` (rendered as the Rust host reports it, exit
-// 1), or None when it denies nothing the program requires (Authority.jet).
-// `json` reports it as `jet run --json` reports its problems
-// (jet_cli_run_problems).
+// The E1803 report of `authority` (exit 1), or None when it denies nothing the
+// program requires (Authority.jet). `json` reports it as `jet run --json`
+// reports its problems (jet_cli_run_problems).
 jet_cli_authority_report: fn(file: String, source: String, color: Bool, json: Bool, authority: JetCLIAuthority) -[FS, Env]> JetDriverVerbOutput? Never! {
     refusal: jet_cli_authority_refusal(authority) ?? return None
     Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, [Diagnostic]{refusal}, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR})
@@ -3014,9 +3010,9 @@ jet_cli_write_verbose_lints: fn(file: String, source: String, color: Bool, json:
 }
 
 // The report of the problems a run shows, for stderr: the human report, or
-// under `--json` the `diagnostics` status `jet check --json` prints (`ok`
-// when none is an error), as the Rust host's `report_problems_with_summary`.
-// Stdout stays the program's, and the report never chooses the exit code.
+// under `--json` the `diagnostics` status `jet check --json` prints (`ok` when
+// none is an error). Stdout stays the program's, and the report never chooses
+// the exit code.
 jet_cli_run_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> String Never! {
     if !json -> return jet_driver_report_problems(file, source, diagnostics, color, true)
     if diagnostics.len() == 0 -> return ""
@@ -4053,7 +4049,7 @@ jet_cli_fmt_rejected: fn(diagnostics: [Diagnostic]) -> JetCLIFmtSource Never! {
     JetCLIFmtSource{text: "", diagnostics: diagnostics, report: None}
 }
 
-// The text after the last `needle` in `text` (Rust `rsplit_once`).
+// The text after the last `needle` in `text`.
 jet_cli_fmt_after_last: fn(text: String, needle: String) -> String? Never! {
     parts: text.split(needle).to_list()
     if parts.len() < 2 -> return None
@@ -4148,12 +4144,12 @@ JetCLIFmtMark: struct {
     report: Int,
 }
 
-// The Rust `format_source_for_fmt` copy materialization: `origin` must check
-// clean as written, then `.copy()` goes in at every implicit copy site. The sites
-// are sema's one copy-site rule (#3738): the Safe `.copy()` edits it gives the
-// same bytes under `#Policy(copies: .Explicit)` are the copies the default policy
-// makes implicitly. Sema spans point into the source as read, so marks go in
-// before any package-target migration.
+// The `jet fmt` copy materialization: `origin` must check clean as written,
+// then `.copy()` goes in at every implicit copy site. The sites are sema's one
+// copy-site rule (#3738): the Safe `.copy()` edits it gives the same bytes
+// under `#Policy(copies: .Explicit)` are the copies the default policy makes
+// implicitly. Sema spans point into the source as read, so marks go in before
+// any package-target migration.
 jet_cli_fmt_explicit_copies: fn(source: String, origin: String, color: Bool) -> JetCLIFmtSource {
     jet_cli_fmt_policy_marks(source, origin, color, JET_CLI_FMT_EXPLICIT_COPIES_POLICY, "", [String]{".copy()"})
 }
@@ -4380,7 +4376,8 @@ jet_cli_fmt_changed_files: fn() -> [String]? {
     Val(found)
 }
 
-// Rust `Path.strip_prefix(display_root)`, else the path as given.
+// `path` relative to `display_root` when it lies below it, else the path as
+// given.
 jet_cli_fmt_relative: fn(path: String, root: String) -> String Never! {
     if path == root -> return ""
     prefix: if root.ends_with("/") -> root else -> "{root}/"
@@ -4395,7 +4392,7 @@ jet_cli_fmt_relative: fn(path: String, root: String) -> String Never! {
 // Flags the environment run takes unchanged.
 JET_CLI_EXTERNAL_FMT_FORWARDED: [String]{"--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y"}
 
-// Rust `str.trim_start_matches` for a string prefix.
+// `text` with every leading copy of the string `prefix` removed.
 jet_cli_trim_start_matches: fn(text: String, prefix: String) -> String Never! {
     rest := text
     loop prefix.len() > 0 && rest.starts_with(prefix) {
@@ -4434,8 +4431,8 @@ jet_cli_external_formatter_program: fn(package: String) -> String? Never! {
     Val(program)
 }
 
-// Rust `Path.extension(path) == Some(language)`: the text after the last
-// `.` of the file name, when that `.` is not the name's first byte.
+// The text after the last `.` of the file name, when that `.` is not the name's
+// first byte.
 jet_cli_external_fmt_matches: fn(path: String, language: String) -> Bool Never! {
     name: jet_cli_fmt_file_name(path)
     bytes: name.bytes()
@@ -4447,8 +4444,8 @@ jet_cli_external_fmt_matches: fn(path: String, language: String) -> Bool Never! 
     foundation_byte_text(bytes, dot + 1, bytes.len()) == language
 }
 
-// Rust `Path` ordering: component by component, so `a/b` sorts before
-// `a.nix` (`BTreeSet<PathBuf>` in `collect_external_fmt_files`).
+// Component by component, so `a/b` sorts before `a.nix` (`BTreeSet<PathBuf>` in
+// `collect_external_fmt_files`).
 jet_cli_external_fmt_path_less: fn(left: String, right: String) -> Bool Never! {
     left_parts: left.split("/").to_list()
     right_parts: right.split("/").to_list()
@@ -4696,8 +4693,8 @@ jet_cli_external_fmt: fn(raw: [String], color: Bool) -> JetDriverVerbOutput {
 }
 
 // The process's stdin, stdout and stderr is-terminal host facts, as the three
-// ASCII `0`/`1` bytes the receipt context identity frames (Rust IsTerminal),
-// read through the compiler-private raw leaf `core.term.jet_term_is_terminal_raw`.
+// ASCII `0`/`1` bytes the receipt context identity frames, read through the
+// compiler-private raw leaf `core.term.jet_term_is_terminal_raw`.
 jet_cli_terminal_bits: fn() -> [U8] {
     bits := [U8]{}
     loop fd in 0..<3 -> bits.push(if cli_term.jet_term_is_terminal_raw(fd) -> U8{49} else -> U8{48})

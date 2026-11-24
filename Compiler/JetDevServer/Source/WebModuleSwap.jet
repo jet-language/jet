@@ -471,10 +471,7 @@ WebModuleSwapReceipt: struct {
         preserved_names := [String]{}
         loop fact in self.preserved -> preserved_names.push("{fact.kind().as_str()}:{fact.key()}")
         preserved: preserved_names.join(",")
-        reset_names := [String]{}
-        loop fact in self.reset {
-            reset_names.push("{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})")
-        }
+        reset_names: loop fact in self.reset -> "{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})"
         reset: reset_names.join(",")
         "operation={self.operation.as_str()} status={self.status.as_str()} phase={self.phase.as_str()} identity={self.identity.module_ref}/{self.identity.page} candidate={self.candidate_identity.module_ref}/{self.candidate_identity.page} source_revision={self.source_revision} build_revision={self.build_revision} changed_modules=[{changed}] reasons=[{reasons}] preserved=[{preserved}] reset=[{reset}] committed_page={self.committed_page.artifact} active_page={self.active_page.artifact}"
     }

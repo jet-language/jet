@@ -84,8 +84,8 @@ jet_cli_prove: fn(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
     JetCLIPlan.Prove{target: target, lenses: request.lenses.move(), capture: request.capture.move(), replay: request.replay.move(), color: color, json: json}
 }
 
-// Rust `lens_shows`: no lens shows every facet; `all` shows every facet but
-// the solver's; otherwise a facet shows when its lens was named.
+// No lens shows every facet; `all` shows every facet but the solver's;
+// otherwise a facet shows when its lens was named.
 jet_cli_prove_lens_shows: fn(lenses: [String], facet: String) -> Bool Never! {
     if lenses.len() == 0 -> return true
     if lenses.contains("all") -> return facet != "solver"
@@ -97,8 +97,8 @@ jet_cli_prove_lens_checked: fn(lenses: [String]) -> Bool Never! {
     jet_cli_prove_lens_shows(lenses, "refinements") || jet_cli_prove_lens_shows(lenses, "effects") || jet_cli_prove_lens_shows(lenses, "taint")
 }
 
-// Rust `canonical_lens_names`: the named lenses once each, in vocabulary
-// order; `all` stands for every lens it already shows.
+// The named lenses once each, in vocabulary order; `all` stands for every lens
+// it already shows.
 jet_cli_prove_lens_names: fn(lenses: [String]) -> [String] Never! {
     if lenses.contains("all") {
         return if lenses.contains("solver") -> [String]{"all", "solver"} else -> [String]{"all"}
@@ -340,8 +340,8 @@ jet_cli_prove_collect: fn(directory: String, found: ^[String]) -[FS]> JetCLIRead
 }
 
 // `normalized`: a path under the current directory is shown relative to it;
-// empty and inner `.` components drop. A leading `.` stays, as Rust's
-// `Path.components` keeps it: `jet prove .` shows `./a.jet`.
+// empty and inner `.` components drop. A leading `.` stays: `jet prove .` shows
+// `./a.jet`.
 jet_cli_prove_normalized: fn(path: String, cwd: String) -> String Never! {
     text := path
     prefix: if cwd.ends_with("/") -> cwd else -> "{cwd}/"

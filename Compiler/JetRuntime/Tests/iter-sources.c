@@ -1,5 +1,5 @@
 // Raw producer ABI witnesses; source-policy behavior is tested by Core goldens.
-// No Rust owner layout and no simulated stop: use the actual comptime rail.
+// No foreign owner layout and no simulated stop: use the actual comptime rail.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

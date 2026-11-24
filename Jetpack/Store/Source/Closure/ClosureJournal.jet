@@ -1,7 +1,6 @@
-// The append-only closure journal (Rust `jetpack::Store::Journal`): load
-// and validate the closure graph with its store proofs, merge canonical
-// action records, and append durable checksummed transactions that compact
-// into one snapshot.
+// The append-only closure journal: load and validate the closure graph with its
+// store proofs, merge canonical action records, and append durable checksummed
+// transactions that compact into one snapshot.
 use {
     files: core.files
     process: core.process
@@ -81,8 +80,7 @@ store_closure_graph_structure_read_only: fn(verification: ^StoreVerification, ro
 }
 
 // The cleanup/lifecycle inputs: every closure object digest and the closure
-// head (a digest over every journal transaction). Rust memoized this per
-// process on the WAL identity stamp; each call here recomputes it.
+// head (a digest over every journal transaction). Each call recomputes it.
 store_lifecycle_inputs_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -> {known: [String], closure_head: String} StoreError! {
     _: store_recover_closure_journal_unlocked(verification, roots)
     graph: store_load_graph_mode(verification, roots, true)
@@ -534,7 +532,6 @@ store_journal_write_entry: fn(journal: String, sequence: Int, entry: ClosureJour
     Ok(final_path)
 }
 
-// Rust `{sequence:020}`.
 store_journal_pad_sequence: fn(sequence: Int) -> String Never! {
     text := "{sequence}"
     loop text.len() < 20 -> text = "0{text}"
@@ -675,7 +672,7 @@ store_parse_journal_entry: fn(raw: String) -> ClosureJournalEntry StoreError! {
     Ok(ClosureJournalEntry{kind: kind, objects: objects, records: ordered, deleted_records: deleted_records})
 }
 
-// Rust `unhex` with the journal's error texts.
+// Hex decoding with the journal's error texts.
 store_journal_unhex: fn(value: String) -> String StoreError! {
     if store_unhex_text(value) == {
         .Text(text) -> Ok(text)

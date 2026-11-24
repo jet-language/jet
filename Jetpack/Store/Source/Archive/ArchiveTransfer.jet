@@ -664,8 +664,8 @@ store_archive_map_member_path: fn(source_out: String, member: String, destinatio
     if suffix.contains("..") {
         return Err(StoreError.InvalidData("archive package metadata points outside its primary output"))
     }
-    // Rust `Path::join` of the remaining components; an empty suffix keeps
-    // the joined trailing separator.
+    // The remaining components joined; an empty suffix keeps the joined
+    // trailing separator.
     joined: suffix.join("/")
     Ok("{destination}/{joined}")
 }
@@ -1222,13 +1222,13 @@ store_archive_lstat: fn(path: String) -> files.Stat? StoreError! {
     Ok(Val(info))
 }
 
-// No-follow metadata, or None when it cannot be read (Rust `.is_ok()`).
+// No-follow metadata, or None when it cannot be read.
 store_archive_lstat_ok: fn(path: String) -> files.Stat? Never! {
     info: files.stat(path) ?? return None
     Val(info)
 }
 
-// `path` with its final extension replaced (Rust `Path::with_extension`).
+// `path` with its final extension replaced.
 store_archive_with_extension: fn(path: String, extension: String) -> String Never! {
     parent: files.dirname(path)
     name: files.basename(path)

@@ -1,6 +1,5 @@
-// They run the in-process host (Rust `cfg(test)`): services are direct children
-// in their own process group. `platform_start_identity_contracts_are_explicit`
-// asserted the Rust source text and has no behavioral claim to port.
+// They run the in-process host: services are direct children in their own
+// process group.
 use {
     files: core.files
     sys: core.sys
@@ -42,7 +41,7 @@ services_test_read_pid: fn(dir: String) -> Int? {
     }
 }
 
-// Rust test `is_alive`: a zombie is dead; otherwise `kill -0`.
+// A zombie is dead; otherwise `kill -0`.
 services_test_is_alive: fn(pid: Int) -> Bool {
     if sys.is_linux() {
         if services_read_text_bounded("/proc/{pid}/stat", 4096) == .Ok(stat) {

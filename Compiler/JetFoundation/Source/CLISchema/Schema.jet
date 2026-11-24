@@ -196,7 +196,7 @@ JobRegistry: struct {
         loop _ in 0..<self.jobs.len() -> state.push(0)
         stack := [CLIJobVisit]{}
         // Reuse the completed-node marks: visiting an already validated
-        // subtree cannot change Rust's lexically-first failing root.
+        // subtree cannot change the lexically-first failing root.
         loop name in names {
             cli_schema_job_enter(self.jobs, index, name, state, stack)
             loop stack.len() > 0 -> _ := cli_schema_job_finish(self.jobs, index, state, stack)
@@ -323,9 +323,10 @@ cli_schema_job_doc: fn(function: Func) -> String? Never! {
     None
 }
 
-// JetShow and Rust Display share the shortest round-trippable digits but use
-// different notation. This adapter only changes notation, never recomputes a
-// floating-point value, so metadata has no second numeric formatter.
+// JetShow and the wire Display share the shortest round-trippable digits but
+// use different notation. This adapter only changes notation, never
+// recomputes a floating-point value, so metadata has no second numeric
+// formatter.
 cli_schema_job_float_display: fn(value: Float) -> String Never! {
     shown: "{value}"
     exponent_at: shown.find("e")
@@ -444,7 +445,7 @@ cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
     loop index in 0..<inputs.len() {
         if inputs[index].positional != None -> positionals.push(index)
     }
-    // Rust's positional sort is stable: equal positions retain written order.
+    // Equal positions retain written order.
     positionals.sort_by(fn(a: Int, b: Int) { (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}) })
     words := [String]{}
     loop index in positionals -> words.push(inputs[index].flag)

@@ -52,7 +52,7 @@ HangarArchiveReport: struct {
     signed: Bool,
     root: String,
 
-    // Stable `jet.status/v1` output for the Hangar CLI (Rust `report_json`).
+    // Stable `jet.status/v1` output for the Hangar CLI.
     json: fn(self, action: String) -> String ReportError! {
         fields: StatusFields.new()
             .with("bytes", Dyn.Int(self.bytes))
@@ -464,8 +464,8 @@ store_archive_validate_digest: fn(value: String) StoreError! {
     if !valid -> return Err(StoreError.InvalidData("invalid output digest `{value}`"))
 }
 
-// The normal components of `path` as Rust `Path::components` yields them:
-// repeated separators and interior `.` vanish; a leading `.` stays.
+// The normal components of `path`: repeated separators and interior `.` vanish;
+// a leading `.` stays.
 store_archive_path_components: fn(path: String) -> [String] Never! {
     components := [String]{}
     segments: path.split("/").to_list()
@@ -529,8 +529,8 @@ store_archive_is_under: fn(path: String, root: String) -> Bool Never! {
     true
 }
 
-// The components of `path` after the `root` prefix, or None when `path`
-// does not start with `root` (Rust `Path::strip_prefix`).
+// The components of `path` after the `root` prefix, or None when `path` does
+// not start with `root`.
 store_archive_strip_prefix: fn(path: String, root: String) -> [String]? Never! {
     if !store_archive_is_under(path, root) -> return None
     inner: store_archive_path_components(path)

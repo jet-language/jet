@@ -1,7 +1,7 @@
 // Machine-wide artifact store claims.
 // Native operations retain their real #3593/#3594 provider gates. Pure wire,
 // identity and configuration regressions below do not substitute for them.
-// BLOCKED #4417: exact Rust Float wire text requires the canonical service;
+// BLOCKED #4417: exact Float wire text requires the canonical service;
 // #4415 optional/fallible return lowering and #4303 trim remain compiler gates.
 // #3598 / #4262 retain protocol parser/main Compiler integration prerequisites.
 use {
@@ -22,7 +22,7 @@ store_artifact_test_open: fn(config: ArtifactStoreConfig) -[FS, Env, Rand]> Arti
     ArtifactStore.open(config) ?? panic("store opens")
 }
 
-// A store with capacity `cap` and no disk reserve (Rust `test_store`).
+// A store with capacity `cap` and no disk reserve.
 store_artifact_test_store: fn(root: String, cap: Int) -[FS, Env, Rand]> ArtifactStore {
     store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(cap).with_reserve_bytes(0))
 }
@@ -400,9 +400,8 @@ store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> In
     store_artifact_test_cleanup(root)
 }
 
-// Reduced from the Rust re-exec of the test binary: the second process is a
-// live `sleep` child whose kernel identity owns the lease file, which is the
-// ownership record the Rust child writes through `acquire_lease`.
+// The second process is a live `sleep` child whose kernel identity owns the
+// lease file, which is the ownership record `acquire_lease` writes.
 #Test("artifact store second process live lease blocks prune") {
     if !sys.is_linux() {
         return
@@ -609,7 +608,7 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0: #run `{"schema":"jet.build-record/v0","prog
     }
 }
 
-// Backing-field migration regression: public Rust accessor APIs stay intact.
+// Backing-field migration regression: public accessor APIs stay intact.
 #Test("artifact store handle accessors preserve canonical identities") {
     hex: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     digest: ArtifactDigest.from_hex(hex) ?? panic("valid digest")

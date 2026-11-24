@@ -511,10 +511,7 @@ kit_ui_run: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     owned: entry.mode != "coverage"
     annotation: if owned -> kit_known_ledger(ctx.known, entry.path) else -> ""
     fixed: if owned -> kit_known_ledger(ctx.known, kit_ui_fixed_path(entry.path)) else -> ""
-    outcomes := [KitOutcome]{}
-    loop outcome in kit_ui_outcomes(entry, ctx) {
-        outcomes.push(kit_cases_known_verdict(outcome, if outcome.tier == "-" -> annotation else -> fixed))
-    }
+    outcomes: loop outcome in kit_ui_outcomes(entry, ctx) -> kit_cases_known_verdict(outcome, if outcome.tier == "-" -> annotation else -> fixed)
     outcomes
 }
 

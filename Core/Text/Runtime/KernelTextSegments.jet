@@ -1,8 +1,8 @@
 // Owned UAX #29 word and sentence segmentation over the pinned Unicode 17.0.0
 // Word_Break and Sentence_Break JUCD assets. Scalars stream through the
 // canonical UTF-8 seam; boundaries are byte offsets into that one buffer, and
-// each returned segment is an owned String exactly as Rust materializes one
-// String per segment. Borrowed word views remain held on #4392.
+// each returned segment is an owned String. Borrowed word views remain held
+// on #4392.
 use {
     text_asset: core.text.runtime.unicode_assets
     text_string: core.text.runtime.kernel_unicode_string
@@ -79,9 +79,8 @@ SB_STERM: 13
 
 SB_CLOSE: 14
 
-// Rust jet_text_word_reduce:583-603 (WB4) unit: base Word_Break class, first
-// scalar (WB3c lookahead), class of the last attached scalar (WB3c/WB3d) and
-// exclusive end byte. Rust stores (class, char) units plus scalar end indexes.
+// The WB4 unit: base Word_Break class, first scalar (WB3c lookahead), class
+// of the last attached scalar (WB3c/WB3d) and exclusive end byte.
 WordUnit: struct {
     class: Int,
     first: Int,
@@ -89,8 +88,8 @@ WordUnit: struct {
     end: Int,
 }
 
-// Rust jet_text_word_reduce:583-603. Extend, Format and ZWJ attach to the
-// preceding unit unless it is CR, LF or Newline.
+// WB4: Extend, Format and ZWJ attach to the preceding unit unless it is CR,
+// LF or Newline.
 word_reduce: fn(raw: [U8]) -> [WordUnit] Never! {
     word_asset: text_word_break.UNICODE_WORD_BREAK
     units := [WordUnit]{}
@@ -125,7 +124,7 @@ is_midnum_q: fn(class: Int) -> Bool {
 
 is_word_newline: fn(class: Int) -> Bool { class == WB_NEWLINE || class == WB_CR || class == WB_LF }
 
-// Rust jet_text_word_break_at:605-652, WB3-WB13b and WB999 between units i, i+1.
+// WB3-WB13b and WB999 between units i, i+1.
 word_break_at: fn(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! {
     pc: units[i].class
     cc: units[i + 1].class
@@ -170,8 +169,8 @@ word_break_at: fn(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! 
     true  // WB999
 }
 
-// Rust jet_text_word_segments:654-687 boundary pass: WB15/WB16 regional
-// indicator parity, otherwise word_break_at. Returns each segment's end byte.
+// The word boundary pass: WB15/WB16 regional indicator parity, otherwise
+// word_break_at. Returns each segment's end byte.
 word_boundaries: fn(raw: [U8]) -> [Int] Never! {
     out := [Int]{}
     if raw.len() == 0 -> return out
@@ -198,7 +197,7 @@ owned_segment: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     String.from_bytes(out) ?? panic("Unicode segment split a UTF-8 scalar")
 }
 
-// Rust jet_text_word_segments:654-687: every UAX #29 word segment, owned.
+// Every UAX #29 word segment, owned.
 word_segments: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
     out := [String]{}
@@ -210,8 +209,8 @@ word_segments: fn(text: String) -> [String] Never! {
     out
 }
 
-// Rust jet_text_words:689-694: keep segments containing an Alphabetic or
-// Numeric (Nd/Nl/No) scalar; other segments are rejected before materializing.
+// Keep segments containing an Alphabetic or Numeric (Nd/Nl/No) scalar; other
+// segments are rejected before materializing.
 words: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
     alphabetic: text_alphabetic.UNICODE_ALPHABETIC
@@ -235,15 +234,14 @@ words: fn(text: String) -> [String] Never! {
 
 is_sentence_para: fn(class: Int) -> Bool { class == SB_SEP || class == SB_CR || class == SB_LF }
 
-// Rust jet_text_sentence_segments:847-861 unit: Sentence_Break class and
-// exclusive end byte. Rust stores the classes and scalar end indexes.
+// A sentence unit: Sentence_Break class and exclusive end byte.
 SentenceUnit: struct {
     class: Int,
     end: Int,
 }
 
-// Rust jet_text_sentence_breaks:794-842 (SB3-SB11). SB998/SB999 do not break;
-// SB11 places the break after ATerm/STerm Close* Sp* unless SB8/SB8a/SB9/SB10.
+// Sentence breaks (SB3-SB11). SB998/SB999 do not break; SB11 places the break
+// after ATerm/STerm Close* Sp* unless SB8/SB8a/SB9/SB10.
 sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     n: units.len()
     breaks := [Bool]{}
@@ -304,8 +302,8 @@ sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
     false
 }
 
-// Rust jet_text_sentence_segments:844-878 boundary pass. Extend and Format
-// attach to the preceding unit unless it is CR, LF or Sep (SB5).
+// The sentence boundary pass. Extend and Format attach to the preceding unit
+// unless it is CR, LF or Sep (SB5).
 sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
     out := [Int]{}
     if raw.len() == 0 -> return out
@@ -333,7 +331,7 @@ sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
     out
 }
 
-// Rust jet_text_sentence_segments:844-878: every UAX #29 sentence segment, owned.
+// Every UAX #29 sentence segment, owned.
 sentence_segments: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
     out := [String]{}
@@ -345,8 +343,8 @@ sentence_segments: fn(text: String) -> [String] Never! {
     out
 }
 
-// Rust jet_text_sentences:880-885: pinned White_Space trim of each segment;
-// segments that trim to empty are dropped.
+// Pinned White_Space trim of each segment; segments that trim to empty are
+// dropped.
 sentences: fn(text: String) -> [String] Never! {
     raw: text_string.utf8_bytes(text)
     out := [String]{}

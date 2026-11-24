@@ -1,11 +1,8 @@
 # HAND-PORT tests/web_build.rs:923-971 jet_cli_explicit_native_target_runs_web_default_natively
 # PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+# The app's package defaults to the web target; naming the host machine runs it natively.
 fixture: JetCLIExplicitNativeTargetRunsWebDefaultNatively.fixture
-requires: tool:rustc
-step: rustc -vV
-exit: any
-capture: host stdout after "host: "
-step: jet run --target {cap:host} app.jet
+step: jet run --target hosted app.jet
 exit: 0
 stdout: = jet_cli_explicit_native_target_runs_web_default_natively.stdout.expected
 

@@ -1,7 +1,6 @@
-// The closure graph of Hangar objects and canonical action records (Rust
-// `jetpack::Store::Closure`): universe isolation, reference queries, the
-// canonical action key, legacy migration, and the one registration boundary
-// that appends a durable closure transaction.
+// The closure graph of Hangar objects and canonical action records: universe
+// isolation, reference queries, the canonical action key, legacy migration, and
+// the one registration boundary that appends a durable closure transaction.
 use files: core.files
 
 STORE_RECEIPTS_DIR: "receipts"
@@ -17,7 +16,7 @@ ClosureRecord: struct {
     primary: String,
     action_key: String,
     outputs: [String:String],
-    // Sorted and unique (Rust `BTreeSet`).
+    // Sorted and unique.
     references: [String],
     // Canonical versioned producer replay record.
     producer_record: String,
@@ -60,14 +59,14 @@ RegistrationMode: enum {
 ClosureGraph: struct {
     objects: [String:ClosureObject],
     records: [String:ClosureRecord],
-    // Sorted and unique (Rust `BTreeSet`).
+    // Sorted and unique.
     deleted_records: [String],
 
     empty: fn() -> ClosureGraph Never! {
         ClosureGraph{objects: [String:ClosureObject]{}, records: [String:ClosureRecord]{}, deleted_records: [String]{}}
     }
 
-    // Records in Rust `BTreeMap` order.
+    // Records in key order.
     sorted_records: fn(self) -> [ClosureRecord] Never! {
         ids := self.records.keys().to_list()
         ids.sort()
@@ -150,7 +149,7 @@ ClosureGraph: struct {
 }
 
 // Every digest reachable from `start` through `index`, excluding `start`,
-// sorted (Rust depth-first walk into a `BTreeSet`).
+// sorted.
 store_closure_walk: fn(index: [String:[String]], start: String) -> [String] Never! {
     seen := [String:Bool]{}
     pending := index.get(start) ?? [String]{}
@@ -224,9 +223,8 @@ store_closure_graph_structure: fn(verification: ^StoreVerification, roots: Hanga
     store_closure_graph_structure_unlocked(verification, roots)
 }
 
-// The migration + graph read is a pure function of committed journal state.
-// Rust memoized it per process on the WAL state stamp; every call here reads
-// the committed state, which the stamp would have proven equal.
+// The migration + graph read is a pure function of committed journal state;
+// every call reads the committed state.
 store_closure_graph_structure_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots) -> ClosureGraph StoreError! {
     migrated: store_migrate_closure_graph_unlocked(verification, roots)
     Ok(migrated.graph)
@@ -268,14 +266,13 @@ store_entry_closure_objects_rehash: fn(verification: ^StoreVerification, roots: 
 }
 
 // Closure members already proven against their seals by this verification
-// owner (Rust process-wide `PROVEN_MEMBERS`). A 28-package env shares one
-// toolchain closure; without this each package re-stat-walks every shared
-// member. Entry-level verification never consults this memo, so the sealed
-// drift law for package outputs is unchanged; member drift is caught by the
-// next command (the trust window ratified for
+// owner. A 28-package env shares one toolchain closure; without this each
+// package re-stat-walks every shared member. Entry-level verification never
+// consults this memo, so the sealed drift law for package outputs is unchanged;
+// member drift is caught by the next command (the trust window ratified for
 // stat-identical content). The set is keyed by (hangar root, digest), so a
-// member replaced under a different digest never hits. A canonical digest
-// never contains a tab, so the joined key is unambiguous.
+// member replaced under a different digest never hits. A canonical digest never
+// contains a tab, so the joined key is unambiguous.
 store_proven_member_key: fn(hangar: String, digest: String) -> String Never! {
     "{hangar}\t{digest}"
 }
@@ -883,8 +880,8 @@ store_descriptor_for_entry: fn(verification: ^StoreVerification, roots: HangarRo
     }
     outputs := entry.named_outputs.copy()
     outputs["out"] = primary
-    // Rust descriptor_for_entry treats a rejected producer as absent for
-    // path projection; the validation boundary still rejects invalid records.
+    // A rejected producer is absent for path projection; the validation
+    // boundary still rejects invalid records.
     decoded: if ProducerRecord.decode(entry.producer_record) == {
         .Ok(producer) -> Val(producer)
         .Err(_) -> None

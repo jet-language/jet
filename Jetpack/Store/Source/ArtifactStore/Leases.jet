@@ -1,8 +1,7 @@
 // Ownership and liveness of the artifact store: the process identity written
 // into lock and lease files, the store lock and build leases that release
 // themselves only while their ownership record is unchanged, lease and owner
-// line parsing, and the checksummed access journal that orders pruning (Rust
-// `jet_store` Lease, StoreLock, LeaseRecord, JournalState, owner liveness).
+// line parsing, and the checksummed access journal that orders pruning.
 use {
     jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text, pkg_sha256_hex]
     sys: core.sys
@@ -20,10 +19,10 @@ ArtifactProcessIdentity: struct {
     }
 
     // This process: its PID and kernel start token, or a fallback token where
-    // the platform exposes none. #3594: Rust's fallback is ONE process-wide
-    // OnceLock token; this per-open token makes two stores in one process on a
-    // non-Linux host see each other's lock/leases as a dead same-PID owner.
-    // A process-wide identity provider is required; no substitute is invented.
+    // the platform exposes none. #3594: this per-open token makes two stores
+    // in one process on a non-Linux host see each other's lock/leases as a
+    // dead same-PID owner. A process-wide identity provider is required; no
+    // substitute is invented.
     current: fn() -[FS, Env, Rand]> ArtifactProcessIdentity ArtifactStoreError! {
         pid: sys.pid()
         if store_artifact_lookup_process_start(pid) == {
@@ -259,8 +258,7 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
     Ok(state)
 }
 
-// One verified journal record (Rust `(operation, key, sequence)`), with the
-// entry length it names.
+// One verified journal record, with the entry length it names.
 ArtifactJournalRecord: struct {
     operation: String,
     key: ArtifactEntryKey,
@@ -268,9 +266,9 @@ ArtifactJournalRecord: struct {
     sequence: Int,
 }
 
-// One checksummed journal line (Rust parse_journal_line); None for a torn,
-// foreign or corrupt line, including an unknown operation. One trailing CR is
-// dropped here, as in Rust; nothing is recorded from a refused line.
+// One checksummed journal line; None for a torn, foreign or corrupt line,
+// including an unknown operation. One trailing CR is dropped here; nothing is
+// recorded from a refused line.
 store_artifact_parse_journal_line: fn(line: [U8]) -> ArtifactJournalRecord? Never! {
     end: if line.len() > 0 && (Int{line[line.len() - 1]}) == 13 -> line.len() - 1 else -> line.len()
     text: String.from_bytes(store_artifact_slice(line, 0, end)) ?? return None
@@ -291,10 +289,10 @@ store_artifact_parse_journal_line: fn(line: [U8]) -> ArtifactJournalRecord? Neve
 // wire key plus a few short fields, far below this.
 STORE_ARTIFACT_JOURNAL_TAIL_WINDOW: 65536
 
-// The journal's last sequence number, read from its final line alone (Rust
-// journal_tail_sequence). Every append numbers after the previous maximum and
-// compaction renumbers in file order, so the final line carries the maximum.
-// None marks a torn or corrupt tail: the caller compacts.
+// The journal's last sequence number, read from its final line alone. Every
+// append numbers after the previous maximum and compaction renumbers in file
+// order, so the final line carries the maximum. None marks a torn or corrupt
+// tail: the caller compacts.
 store_artifact_journal_tail_sequence: fn(path: String) -[FS]> Int? ArtifactStoreError! {
     length: if files.stat(path) == {
         .Ok(info) -> info.size

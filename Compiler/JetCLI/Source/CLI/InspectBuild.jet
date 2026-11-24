@@ -476,10 +476,7 @@ jet_cli_build_steps_read: fn(graph: BuildPlanExecution, path: String) -> Bool Ne
 // The `[[comptime_inputs]]` rows of `generated`: each source's package-relative
 // path and the SHA-256 of its bytes.
 jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [ComptimeInput] Never! {
-    inputs := [ComptimeInput]{}
-    loop source_file in generated {
-        inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
-    }
+    inputs: loop source_file in generated -> ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"}
     inputs
 }
 
@@ -1128,7 +1125,7 @@ jet_cli_build_host: fn(owned_request: ^^JetDriverCompileRequest, scope: ^JetDriv
 
 // Exact IEEE-754 fixed-three formatting, including half-to-even and -0.
 // Multiplying the binary significand by 125 is exact in Int; 1000 = 125*8.
-// A floating multiply/round would double-round and diverge from Rust's {:.3}.
+// A floating multiply/round would double-round.
 jet_cli_build_duration: fn(value: Float) -> String Never! {
     bits: build_math.to_bits(value)
     raw_exponent: (bits >> 52) & 2047

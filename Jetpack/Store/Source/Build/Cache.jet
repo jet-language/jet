@@ -1,9 +1,8 @@
 // The action cache: input snapshots, output capture and restore, action
-// records, and the no-follow file primitives under them. Ported 1:1 from
-// crates/jet-comptime Build/{cache_cas,execution_runtime}.rs (the remote
-// transport belongs to the unported remote builder; see Model.jet). The Rust
-// openat/mkdirat/renameat FFI is the ratified Core directory handle
-// whose relative opens refuse links.
+// records, and the no-follow file primitives under them (the remote transport
+// belongs to the unported remote builder; see Model.jet). Directory access
+// goes through the ratified Core directory handle, whose relative opens refuse
+// links.
 use {
     jet_foundation.[
         DiagnosticBuildError,
@@ -42,8 +41,7 @@ BUILD_NO_BYTE_LIMIT: -1
 
 BUILD_READ_CHUNK_BYTES: 1048576
 
-// Rust `io::Error`: the kind the cache decisions branch on, and the message
-// `io_action` reports.
+// The kind the cache decisions branch on, and the message `io_action` reports.
 BuildIOKind: enum {
     NotFound,
     InvalidInput,
@@ -134,8 +132,8 @@ ActionCacheStatus: enum {
     Miss(CacheMissReason),
 }
 
-// A local action record (Rust `ActionResultRecord`). A failed record carries
-// the structured report that reached the build edge; success never does.
+// A local action record. A failed record carries the structured report that
+// reached the build edge; success never does.
 ActionResultRecord: struct {
     key: String,
     outcome: ActionOutcome,
@@ -257,7 +255,6 @@ build_folder_skipped: fn(relative: String) -> Bool Never! {
     false
 }
 
-// Rust `capture_declared_outputs`.
 build_capture_declared_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, key: String, outcome: ActionOutcome, status: ActionCacheStatus) -[FS, Env, Exec, Time, Rand]> ActionResultRecord BuildIOError! {
     outputs := [ActionOutputRecord]{}
     total := 0
@@ -279,10 +276,10 @@ build_read_budget: fn(used: Int) -> Int Never! {
     if remaining < BUILD_MAX_ACTION_FILE_BYTES -> remaining else -> BUILD_MAX_ACTION_FILE_BYTES
 }
 
-// Rust `restore_action_outputs`: the record must name exactly the declared
-// outputs, in order, before any byte is restored. A kept output that already
-// holds the recorded bytes is left as it is; when one holds bytes no build
-// wrote (build_output_write), nothing is restored and its path is returned.
+// The record must name exactly the declared outputs, in order, before any byte
+// is restored. A kept output that already holds the recorded bytes is left as
+// it is; when one holds bytes no build wrote (build_output_write), nothing is
+// restored and its path is returned.
 build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> String? BuildIOError! {
     matches := record.outputs.len() == action.outputs.len()
     if matches {
@@ -360,8 +357,7 @@ build_output_write: fn(base: String, kept: KeptOutput, made: ContentDigest, *, b
     Ok(BuildOutputWrite.Write)
 }
 
-// `path` relative to `base` as its normal components (Rust `strip_prefix`
-// then `Component::Normal`).
+// `path` relative to `base` as its normal components.
 build_relative_components: fn(base: String, path: String, escape: String) -> [String] BuildIOError! {
     if !cli_paths.is_relative_to(cli_paths.of(path), cli_paths.of(base)) {
         return Err(BuildIOError.new(.InvalidInput, escape))
@@ -435,14 +431,13 @@ build_stream_host_digest: fn(path: String) -[FS]> ContentDigest BuildIOError! {
     ContentDigest.parse("sha256:{hasher.digest()}") ?? return Err(BuildIOError.new(.InvalidData, err.message))
 }
 
-// Rust `secure_read_file_bounded`: open `base` as a real directory and walk
-// every parent component without following links. The final name is
-// inspected through the held parent without following a link and must be a
-// regular file before it is opened; the open itself never waits on a FIFO or
-// device peer (Core's non-blocking reader, the `jet self completions --for`
-// pattern), and the opened file must be that same inode. Its size is checked
-// against `limit` before any byte is read (when `limit >= 0`), and the read
-// stops one byte past `limit`.
+// Open `base` as a real directory and walk every parent component without
+// following links. The final name is inspected through the held parent without
+// following a link and must be a regular file before it is opened; the open
+// itself never waits on a FIFO or device peer (Core's non-blocking reader, the
+// `jet self completions --for` pattern), and the opened file must be that same
+// inode. Its size is checked against `limit` before any byte is read (when
+// `limit >= 0`), and the read stops one byte past `limit`.
 build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
     parts: build_relative_components(base, path, "cache path escapes root")
     if parts.len() == 0 {
@@ -648,10 +643,9 @@ build_output_parent: fn(base: String, parts: [String]) -[FS]> files.Directory Bu
     Ok(directory)
 }
 
-// Rust `atomic_restore_file`: walk (creating 0755) every parent without
-// following links, write a fresh `.jet-restore-<nonce>` exclusively (0600,
-// or 0755 when `executable`), fsync it, then rename it over the final name
-// inside the held directory.
+// Walk (creating 0755) every parent without following links, write a fresh
+// `.jet-restore-<nonce>` exclusively (0600, or 0755 when `executable`), fsync
+// it, then rename it over the final name inside the held directory.
 build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, executable: Bool) -[FS, Rand]> BuildIOError! {
     parts: build_relative_components(base, path, "build output escapes root")
     if parts.len() == 0 {
@@ -683,8 +677,8 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, execut
     }
 }
 
-// Rust `ensure_real_directory`: create a directory tree without ever
-// following an existing link; `..` is refused.
+// Create a directory tree without ever following an existing link; `..` is
+// refused.
 build_ensure_real_directory: fn(path: String) -[FS]> BuildIOError! {
     current := if path.starts_with("/") -> "/" else -> ""
     loop part in path.split("/") {
@@ -722,9 +716,8 @@ build_ensure_real_directory_step: fn(current: String, symlink: String, not_direc
     }
 }
 
-// Rust `prepare_output_destination`: every parent of `output` below `root`
-// is a real directory (created when missing); a final link is removed so the
-// restore never writes through it.
+// Every parent of `output` below `root` is a real directory (created when
+// missing); a final link is removed so the restore never writes through it.
 build_prepare_output_destination: fn(root: String, output: String) -[FS]> BuildIOError! {
     parent: files.dirname(output)
     parts: build_relative_components(root, if parent == "" -> root else -> parent, "build output parent escapes project root")
@@ -752,7 +745,6 @@ build_hex_encode: fn(bytes: [U8]) -> String Never! {
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
-// Rust `hex_decode` (`RemoteCacheError::InvalidRecord` messages).
 build_hex_decode: fn(value: String) -> [U8] BuildIOError! {
     raw: value.bytes()
     if raw.len() % 2 != 0 -> return Err(BuildIOError.new(.InvalidData, "hex field has odd length"))
@@ -796,7 +788,7 @@ build_parse_outcome: fn(value: String) -> ActionOutcome BuildIOError! {
     }
 }
 
-// Rust `str::parse::<i32>`: optional sign, ASCII digits, in range.
+// Optional sign, ASCII digits, in range.
 build_parse_i32: fn(text: String) -> Int? Never! {
     digits: if text.starts_with("+") || text.starts_with("-") -> text.slice(1, text.len()) else -> text
     if digits == "" -> return None
@@ -810,7 +802,6 @@ build_parse_i32: fn(text: String) -> Int? Never! {
     Val(value)
 }
 
-// Rust `str::parse::<u64>`.
 build_parse_u64: fn(text: String) -> Int? Never! {
     if text == "" || text.len() > 20 -> return None
     loop byte in text.bytes() {
@@ -822,7 +813,6 @@ build_parse_u64: fn(text: String) -> Int? Never! {
     Val(value)
 }
 
-// Rust `write_action_record`.
 build_write_action_record: fn(store: BuildArtifactStoreHandle, key: String, record: ActionResultRecord) -[FS, Env, Exec, Time, Rand]> BuildIOError! {
     text := "{record.key}\noutcome={build_encode_outcome(record.outcome)}\n"
     if record.failure_report == .Val(report) {
@@ -843,8 +833,8 @@ build_cache_restore_miss_reason: fn(error: BuildIOError) -> CacheMissReason Neve
     }
 }
 
-// Rust `read_action_record`: the first line names the key; one outcome; a
-// failure report exactly when the outcome failed, and then no outputs.
+// The first line names the key; one outcome; a failure report exactly when the
+// outcome failed, and then no outputs.
 build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS, Env, Exec, Time, Rand]> ActionResultRecord? BuildIOError! {
     stored: store.get_record(key)
     bytes: stored ?? return Ok(None)
@@ -900,8 +890,7 @@ build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
     Ok(Val(ActionResultRecord{key: key, outcome: found, outputs: outputs, failure_report: failure_report, status: ActionCacheStatus.Hit(.LocalActionRecordMatched)}))
 }
 
-// Rust `str::lines`: split on `\n`, drop one trailing empty line and a `\r`
-// before each `\n`.
+// Split on `\n`, drop one trailing empty line and a `\r` before each `\n`.
 build_record_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     loop line in text.split("\n") {
@@ -915,11 +904,10 @@ build_record_lines: fn(text: String) -> [String] Never! {
     lines
 }
 
-// Rust `record_comptime_cache_event`: opt-in proof evidence appended to
-// `JET_COMPTIME_CACHE_OBSERVATION_PATH` when it is absolute and inside
-// `$HOME/.cache`. A `.` or `..` component is refused, so the prefix check
-// confines the path, and a final link is never followed. It never supplies
-// or influences a cache decision.
+// Opt-in proof evidence appended to `JET_COMPTIME_CACHE_OBSERVATION_PATH` when
+// it is absolute and inside `$HOME/.cache`. A `.` or `..` component is refused,
+// so the prefix check confines the path, and a final link is never followed. It
+// never supplies or influences a cache decision.
 build_record_cache_event: fn(action: String, key: String, status: ActionCacheStatus, phase: String, outcome: ActionOutcome?) -[FS, Env]> {
     path: sys.get(ENV_JET_COMPTIME_CACHE_OBSERVATION_PATH) ?? return
     home: sys.get("HOME") ?? return
@@ -974,9 +962,9 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
     writer.flush().drop("cache observation evidence is best-effort")
 }
 
-// The `jet.err/v1` wire of one structured report (Rust
-// `JetErrorReport::to_json`). The report type carries no origin frame, and
-// the executor's reports never carry a journey, so neither field is written.
+// The `jet.err/v1` wire of one structured report. The report type carries no
+// origin frame, and the executor's reports never carry a journey, so neither
+// field is written.
 build_report_to_json: fn(report: DiagnosticBuildError) -> String BuildIOError! {
     Ok(pkg_json_render(build_report_tree(report)))
 }
@@ -1035,8 +1023,8 @@ build_report_tree: fn(report: DiagnosticBuildError) -> Dyn BuildIOError! {
     Ok(Dyn.Object(fields))
 }
 
-// Rust `JetErrorReport::from_json`: decode the canonical wire and refuse any
-// spelling `build_report_to_json` would not write back byte for byte.
+// Decode the canonical wire and refuse any spelling `build_report_to_json`
+// would not write back byte for byte.
 build_report_from_json: fn(text: String) -> DiagnosticBuildError BuildIOError! {
     tree: json.parse(text) ?? return Err(build_report_invalid("invalid error report: {err.reason}"))
     report: build_report_from_tree(tree)
@@ -1149,10 +1137,10 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     Ok(DiagnosticBuildError{code: code, message: message, typed_identity: typed_identity, causes: causes, context_frames: context_frames, conversion_history: conversion_history, details: details})
 }
 
-// Rust `JetErrorReport::render` on the stderr edge (no `--json` wire in this
-// process): the E3015 entry report through its registry row, with the
-// structured rows as its detail. The executor's reports carry no journey, so
-// no journey block is written.
+// The error report on the stderr edge (no `--json` wire in this process): the
+// E3015 entry report through its registry row, with the structured rows as
+// its detail. The executor's reports carry no journey, so no journey block is
+// written.
 build_report_render: fn(report: DiagnosticBuildError) -> String Never! {
     row: diagnostic_registry_row("E3015") ?? panic("registered entry error row is missing")
     message: build_terminal_text(report.message)
@@ -1209,8 +1197,8 @@ build_indent: fn(depth: Int) -> String Never! {
     out
 }
 
-// Rust `jet_write_terminal_text`: `\n`, `\r`, `\t` short escapes; every other
-// control scalar and U+2028/U+2029 as `\u{xxxx}`.
+// `\n`, `\r`, `\t` short escapes; every other control scalar and U+2028/U+2029
+// as `\u{xxxx}`.
 build_terminal_text: fn(value: String) -> String Never! {
     out := ""
     loop scalar in value.chars() {
@@ -1239,7 +1227,7 @@ build_scalar_code: fn(text: String) -> Int Never! {
     ((first & 7) << 18) + ((Int{raw[1]} & 63) << 12) + ((Int{raw[2]} & 63) << 6) + (Int{raw[3]} & 63)
 }
 
-// Rust `{:04x}`: lowercase hex, at least four digits.
+// Lowercase hex, at least four digits.
 build_hex4: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef"
     out := ""

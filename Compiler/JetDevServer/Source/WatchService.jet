@@ -212,10 +212,7 @@ watch_json_optional_strings: fn(items: [String?]) -> String Never! {
 }
 
 watch_json_dev_entries: fn(entries: [DevWatchEntry]) -> String Never! {
-    parts := [String]{}
-    loop entry in entries {
-        parts.push("{{\"path\":{foundation_json_quote(entry.path)},\"change_kind\":{foundation_json_quote(entry.change_kind)},\"game_kind\":{foundation_json_quote(entry.game_kind)},\"old_digest\":{watch_json_optional(entry.old_digest)},\"new_digest\":{watch_json_optional(entry.new_digest)}}}")
-    }
+    parts: loop entry in entries -> "{{\"path\":{foundation_json_quote(entry.path)},\"change_kind\":{foundation_json_quote(entry.change_kind)},\"game_kind\":{foundation_json_quote(entry.game_kind)},\"old_digest\":{watch_json_optional(entry.old_digest)},\"new_digest\":{watch_json_optional(entry.new_digest)}}}"
     parts.join(",")
 }
 

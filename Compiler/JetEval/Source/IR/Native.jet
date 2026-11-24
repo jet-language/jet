@@ -421,10 +421,7 @@ jet_eval_native_start: fn(c: ^JetEvalNativeChild, session: JetEvalNativeSession,
 // bound entry program `stub`, which declare no source.
 jet_eval_native_stub_listing: fn(stub: X64Executable) -> String {
     names := name_table_sized(8)
-    listed := [String]{}
-    loop function in x64_comptime_functions(x64_executable_header(stub), stub.tail, stub.tail_at, names, every: true) {
-        listed.push("{function.start}\t{function.end}\t0\t\t{names.texts[function.name]}\n")
-    }
+    listed: loop function in x64_comptime_functions(x64_executable_header(stub), stub.tail, stub.tail_at, names, every: true) -> "{function.start}\t{function.end}\t0\t\t{names.texts[function.name]}\n"
     listed.join("")
 }
 
@@ -505,10 +502,7 @@ jet_eval_native_load: fn(built: ^^JetEvalIRComptime, config: JetEvalConfig, thre
             names.push("")
             next
         }
-        rows := [Int]{}
-        loop slot in 0..<code.functions[id].param_count {
-            rows.push(code.functions[id].slot_type[slot])
-        }
+        rows: loop slot in 0..<code.functions[id].param_count -> code.functions[id].slot_type[slot]
         result: code.functions[id].result
         size: if result >= 0 && code.types[result].size > 8 -> code.types[result].size else -> 8
         name: "{JET_EVAL_NATIVE_PREFIX}item_{index}"
@@ -782,10 +776,7 @@ jet_eval_native_missing: fn(code: ^IRModule, session: JetEvalNativeSession) {
         index += 2
         symbol: code.names[code.functions[id].a[at]].copy()
         start: code.functions[id].b[at]
-        rows := [Int]{}
-        loop arg in start..<(start + code.functions[id].c[at]) {
-            rows.push(code.functions[id].slot_type[code.functions[id].args[arg]])
-        }
+        rows: loop arg in start..<(start + code.functions[id].c[at]) -> code.functions[id].slot_type[code.functions[id].args[arg]]
         dst: code.functions[id].dst[at]
         result: if dst >= 0 -> code.functions[id].slot_type[dst] else -> -1
         stub := jet_eval_native_missing_stub(code, "{JET_EVAL_NATIVE_PREFIX}missing_{index /% 2}", symbol, rows, result)

@@ -16,7 +16,7 @@ BUILD_PLUGIN_MAX_MANIFEST_BYTES: 65536
 
 BUILD_PLUGIN_MAX_COMPONENT_BYTES: 67108864
 
-// A plugin package refusal: the Rust error string.
+// A plugin package refusal: the error string.
 #Error
 BuildPluginPackageError: struct {
     message: String,
@@ -35,8 +35,8 @@ WasmComponentPluginSpec: struct {
     component_digest: ContentDigest,
     requested_caps: [BuildEffect],
 
-    // Rust `load_packaged_bytes`: validate a manifest/component byte pair
-    // without reading either path, so the bytes verified are the bytes run.
+    // Validate a manifest/component byte pair without reading either path, so
+    // the bytes verified are the bytes run.
     load_packaged_bytes: fn(manifest: [U8], component: [U8]) -> WasmComponentPluginSpec BuildPluginPackageError! {
         if manifest.len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES {
             return Err(cli_build_plugin_error("plugin manifest exceeds {BUILD_PLUGIN_MAX_MANIFEST_BYTES} bytes"))
@@ -54,8 +54,7 @@ WasmComponentPluginSpec: struct {
         Ok(spec)
     }
 
-    // Rust `from_manifest_text`: `key = value` lines, `#` comments outside
-    // quotes, each field once.
+    // `key = value` lines, `#` comments outside quotes, each field once.
     from_manifest_text: fn(text: String) -> WasmComponentPluginSpec BuildPluginPackageError! {
         if text.bytes().len() > BUILD_PLUGIN_MAX_MANIFEST_BYTES {
             return Err(cli_build_plugin_error("plugin manifest exceeds {BUILD_PLUGIN_MAX_MANIFEST_BYTES} bytes"))
@@ -97,7 +96,7 @@ WasmComponentPluginSpec: struct {
     }
 }
 
-// Rust `manifest_line_without_comment`: the line before an unquoted `#`.
+// The line before an unquoted `#`.
 cli_build_plugin_manifest_line: fn(line: String) -> String Never! {
     quoted := false
     escaped := false
@@ -117,7 +116,7 @@ cli_build_plugin_manifest_line: fn(line: String) -> String Never! {
     line.copy()
 }
 
-// Rust `manifest_string`: a non-empty quoted string with `\"` and `\\` only.
+// A non-empty quoted string with `\"` and `\\` only.
 cli_build_plugin_manifest_string: fn(value: String, field: String) -> String BuildPluginPackageError! {
     text: value.trim()
     if text.len() < 2 || !text.starts_with("\"") || !text.ends_with("\"") {
@@ -146,8 +145,7 @@ cli_build_plugin_manifest_string: fn(value: String, field: String) -> String Bui
     Ok(String.from_bytes(out) ?? "")
 }
 
-// Rust `manifest_capabilities`: a bracketed list of quoted build abilities,
-// kept in canonical order (Rust `BTreeSet`).
+// A bracketed list of quoted build abilities, kept in canonical order.
 cli_build_plugin_manifest_capabilities: fn(value: String) -> [BuildEffect] BuildPluginPackageError! {
     if !value.starts_with("[") || !value.ends_with("]") {
         return Err(cli_build_plugin_error("plugin manifest abilities must be a list"))
@@ -168,8 +166,8 @@ cli_build_plugin_manifest_capabilities: fn(value: String) -> [BuildEffect] Build
     Ok(capabilities)
 }
 
-// Rust `validate_component_binary`: the Component Model preamble, then every
-// section's id and length framing up to the end of the bytes.
+// The Component Model preamble, then every section's id and length framing up
+// to the end of the bytes.
 cli_build_plugin_validate_component: fn(bytes: [U8]) BuildPluginPackageError! {
     preamble: [U8]{U8{0}, U8{97}, U8{115}, U8{109}, U8{13}, U8{0}, U8{1}, U8{0}}
     if bytes.len() < 8 || bytes.slice(0, 8) != preamble {
@@ -191,7 +189,7 @@ cli_build_plugin_validate_component: fn(bytes: [U8]) BuildPluginPackageError! {
     }
 }
 
-// Rust `read_u32_leb`: one unsigned LEB128 u32 at `offset`, advancing it.
+// One unsigned LEB128 u32 at `offset`, advancing it.
 cli_build_plugin_read_u32_leb: fn(bytes: [U8], offset: ^Int) -> Int BuildPluginPackageError! {
     value := 0
     shift := 0
@@ -211,9 +209,9 @@ cli_build_plugin_read_u32_leb: fn(bytes: [U8], offset: ^Int) -> Int BuildPluginP
     Err(cli_build_plugin_error("plugin component section length uses an overlong integer"))
 }
 
-// Rust `read_packaged_file_bounded`: a regular, non-symlink package file of
-// at most `limit` bytes, opened without following a final link and checked
-// again after opening, read with one byte of headroom.
+// A regular, non-symlink package file of at most `limit` bytes, opened without
+// following a final link and checked again after opening, read with one byte of
+// headroom.
 cli_read_packaged_file_bounded: fn(path: String, label: String, limit: Int) -[FS]> [U8] BuildPluginPackageError! {
     linked: files.lstat(path) ?? return Err(cli_build_plugin_error("could not stat plugin {label}: {err}"))
     if linked.is_symlink || !linked.is_file {

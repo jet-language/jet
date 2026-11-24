@@ -50,7 +50,7 @@ FoundationFetchError: enum {
         }
     }
 
-    // Rust Display intentionally hides transport detail for the three TLS kinds.
+    // Display intentionally hides transport detail for the three TLS kinds.
     to_string: fn(self) -> String Never! {
         if self == {
             .IO(detail) -> detail
@@ -63,19 +63,19 @@ FoundationFetchError: enum {
     }
 }
 
-// Rust FetchError::http; the detail is retained even when Display hides it.
+// An HTTP fetch error; the detail is retained even when Display hides it.
 foundation_fetch_http_error: fn(url: String, detail: String) -> FoundationFetchError Never! {
     return FoundationFetchError.HTTP{kind: foundation_fetch_classify_http_error(url, detail), detail: detail}
 }
 
-// Rust fetch_with_root_timeout_and_http's unsupported-scheme error construction.
+// The unsupported-scheme error construction.
 // The transport owner uses this on its unsupported-scheme branch; no fetch here.
 foundation_fetch_scheme_error: fn(url: String) -> FoundationFetchError Never! {
     scheme: url.split_once("://")?.before ?? url
     return FoundationFetchError.Scheme("unsupported URL scheme `{scheme}`; expected `file://`, `http://`, or `https://`")
 }
 
-// Rust classify_http_error: ASCII folding only, root > certificate > handshake.
+// ASCII folding only, root > certificate > handshake.
 foundation_fetch_classify_http_error: fn(url: String, detail: String) -> FoundationFetchErrorKind Never! {
     if !url.starts_with("https://") -> return FoundationFetchErrorKind.General
     lower: detail.to_ascii_lower()
@@ -91,8 +91,8 @@ foundation_fetch_classify_http_error: fn(url: String, detail: String) -> Foundat
     FoundationFetchErrorKind.General
 }
 
-// Rust host_from_url is lexical: port/userinfo/query are NOT stripped, and
-// missing/empty hosts are NOT rejected. Core's validated URL parser differs.
+// Port/userinfo/query are NOT stripped, and missing/empty hosts are NOT
+// rejected. Core's validated URL parser differs.
 foundation_fetch_host_from_url: fn(url: String) -> String Never! {
     rest := url
     if url.starts_with("https://") -> rest = url.removeprefix("https://") else if url.starts_with("http://") {
@@ -102,7 +102,7 @@ foundation_fetch_host_from_url: fn(url: String) -> String Never! {
     rest
 }
 
-// Rust resolve_redirect does not normalize a URL. In particular //other/path
+// Redirect resolution does not normalize a URL. In particular //other/path
 // is root-relative to the *current* authority, not an RFC scheme-relative URL.
 // Empty authority is preserved; transport must validate each resulting hop.
 foundation_fetch_resolve_redirect: fn(current: String, location: String) -> String FoundationFetchError! {

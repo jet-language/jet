@@ -298,8 +298,8 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert_eq(jet_driver_target_machine_by_name("sensor ", "0.0.1"), None)
 }
 
-// All 61 Rust enum variants, including variants produced by later hardware
-// and firmware callers. Literal expectations are Rust derive(Debug) spelling.
+// All 61 enum variants, including variants produced by later hardware and
+// firmware callers. Literal expectations are the derived `Debug` spelling.
 #Test("every_target_machine_error_has_exact_rust_debug_text") {
     assert_eq(jet_target_machine_error_debug(.MissingTargetTriple), "MissingTargetTriple")
     assert_eq(jet_target_machine_error_debug(.MissingMemoryKind{kind: .MMIO}), "MissingMemoryKind {{ kind: Mmio }}")
@@ -366,7 +366,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert_eq(jet_target_machine_errors_debug([TargetMachineError]{}), "[]")
 }
 
-// Rust TargetHardwareFacts.validate_into: every push site and precedence.
+// Every push site and precedence.
 #Test("hardware_validation_preserves_all_fact_errors_in_order") {
     hardware := jet_target_hardware_empty()
     hardware.svd = Val(SVDProvenance{source: "", sha256: "invalid"})
@@ -477,7 +477,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(jet_target_capabilities_for_core_usage("").is_empty())
 }
 
-// Rust SvdProvenance.is_valid is deliberately weaker than ProviderContract.
+// SVD provenance validity is deliberately weaker than ProviderContract.
 #Test("svd_digest_and_effect_set_keep_their_distinct_rust_contracts") {
     hardware := jet_target_hardware_empty()
     hardware.svd = Val(SVDProvenance{source: "vendor.svd", sha256: "sha256:a b"})
@@ -495,10 +495,9 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     )
 }
 
-// Main/Pip CLI-37 ruling: sum RAM facts exactly; Rust's u64 accumulator
-// wrapping is a latent defect (tandem Rust u128 fix belongs to integration).
-// Used bytes still saturate at u64::MAX, so a greater RAM total cannot overflow
-// the RAM budget. In particular MAX + 2 must not become a one-byte budget.
+// Sum RAM facts exactly; a u64 accumulator would wrap. Used bytes still
+// saturate at u64::MAX, so a greater RAM total cannot overflow the RAM budget.
+// In particular MAX + 2 must not become a one-byte budget.
 #Test("ram_region_totals_above_u64_max_keep_the_true_budget") {
     machine := jet_target_machine_wasm_no_os("0.0.1")
     machine.memory = [MemoryRegion]{

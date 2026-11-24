@@ -1,6 +1,6 @@
 use textparse: core.text.parse
 
-// Kit grammar spans and Rust-compatible predicates use UTF-8 byte offsets.
+// Kit grammar spans and predicates use UTF-8 byte offsets.
 // String.len/index/slice use Unicode scalar positions, so do not mix them here.
 kit_steps_byte_slice: fn(text: String, start: Int, end: Int) -> String {
     String.from_bytes(text.bytes().slice(start, end)) ?? panic("kit byte span is not a UTF-8 boundary")
@@ -66,7 +66,7 @@ kit_steps_surround_punctuation: fn(text: String, commas: Bool) -> String {
     String.from_bytes(output) ?? panic("punctuation scan changed UTF-8")
 }
 
-// Rust from_utf8_lossy: one U+FFFD per maximal invalid subsequence.
+// One U+FFFD per maximal invalid subsequence.
 kit_steps_utf8_lossy: fn(bytes: [U8]) -> String {
     String.from_bytes(bytes) ?? return kit_steps_invalid_utf8(bytes)
 }

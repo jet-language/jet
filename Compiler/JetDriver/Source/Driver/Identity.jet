@@ -114,23 +114,21 @@ JetDriverHostFacts: struct {
     compiler_source: String?{None},
 }
 
-// Rust `CompileMode`: `Program` compiles a package for check, build, or run
-// (its artifact starts at the package entry); `Test` compiles the `jet test`
-// harness: named `#Test` bodies are checked and lowered, E0601 reports a file
-// with none, and the artifact is a TestExecutable whose harness runs them.
-// `Doc` compiles as `Program` does and also keeps each user module's checked
-// declarations (`JetDriverDocModule`) for `jet doc`.
-// `Comptime` checks the program and runs its build-time values through the
-// canonical comptime stage (checked, built to JetIR, evaluated by JetEval),
-// then stops: nothing is built or emitted for run time. Config surfaces
-// (Jetpack EnvModel) evaluate their typed values this way.
-// `Eval` and `RootRun` check the selected root of the entry module and build
-// it as slot IR that runs natively, without AOT emission. Eval checks the
+// `Program` compiles a package for check, build, or run (its artifact starts at
+// the package entry); `Test` compiles the `jet test` harness: named `#Test`
+// bodies are checked and lowered, E0601 reports a file with none, and the
+// artifact is a TestExecutable whose harness runs them. `Doc` compiles as
+// `Program` does and also keeps each user module's checked declarations
+// (`JetDriverDocModule`) for `jet doc`. `Comptime` checks the program and runs
+// its build-time values through the canonical comptime stage (checked, built to
+// JetIR, evaluated by JetEval), then stops: nothing is built or emitted for run
+// time. Config surfaces (Jetpack EnvModel) evaluate their typed values this
+// way. `Eval` and `RootRun` check the selected root of the entry module and
+// build it as slot IR that runs natively, without AOT emission. Eval checks the
 // selected root's transitive pure row; RootRun leaves effects to its runtime
-// authorizer.
-// `Check` is `jet check`: the Program checks, then it stops before lowering.
-// No Core reachability pruning and no C export rows; the entry and the
-// foreign facts are still resolved, so their diagnostics are the same.
+// authorizer. `Check` is `jet check`: the Program checks, then it stops before
+// lowering. No Core reachability pruning and no C export rows; the entry and
+// the foreign facts are still resolved, so their diagnostics are the same.
 JetDriverCompileMode: enum {
     Program,
     Check,
@@ -142,15 +140,14 @@ JetDriverCompileMode: enum {
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
-// read it (Rust `ProgramModule`: `alias`, `source`, the post-sema
-// `items`, and `block_spans`, so derived impls and inferred failure contracts
-// are the ones the checker settled). `path` is the module's display path:
-// relative to the entry root when beneath it, which is the stable path
-// `jet doc` prints; `physical_path` is the snapshot file's canonical path,
-// which machine reports name. `module_name`, `functions`, `name_references`,
-// and `call_facts` are the module's checked rows (Rust `SemIndexEffectFacts`
-// summaries and the name ledger's references); the name ledger's `symbols`
-// names the call facts' callee ids.
+// read it (`alias`, `source`, the post-sema `items`, and `block_spans`, so
+// derived impls and inferred failure contracts are the ones the checker
+// settled). `path` is the module's display path: relative to the entry root
+// when beneath it, which is the stable path `jet doc` prints; `physical_path`
+// is the snapshot file's canonical path, which machine reports name.
+// `module_name`, `functions`, `name_references`, and `call_facts` are the
+// module's checked rows; the name ledger's `symbols` names the call facts'
+// callee ids.
 JetDriverDocModule: struct {
     path: String,
     physical_path: String,
@@ -229,6 +226,9 @@ JetDriverCoreSource: struct {
     source: fn(self) -> String Never! {
         permit: self.text.guard_edit()
         if permit.value.text == .Val(text) -> return text
+        // Unreachable: jet_driver_core_text and jet_driver_core_text_file, the
+        // only makers of a JetDriverCoreText, set one of the two, and nothing
+        // clears either.
         reader: permit.value.reader ?? panic("the Core source `{self.path}` has neither text nor reader")
         text: reader.read(permit.value.file) ?? panic("can't read the Core library source `{permit.value.file}`")
         permit.value.text = Val(text)
@@ -1262,9 +1262,10 @@ jet_driver_diagnostic_without_span: fn(code: String, what: String, why: String, 
     diagnostic_from_registry(code, None, what, why, fix)
 }
 
-// A diagnostic worded entirely by its registry row (Rust
-// `Diagnostic.from_row` with no holes).
+// A diagnostic worded entirely by its registry row.
 jet_driver_row_diagnostic: fn(code: String, span: Span?) -> Diagnostic {
+    // Unreachable: the callers (Loader.jet) pass only the literal codes E1013,
+    // E1360, E1361, E1362 and E1363, each a row of DiagnosticRows.jet.
     row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic_from_registry(code, span, row.what, row.why, row.fix)
 }

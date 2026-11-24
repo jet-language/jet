@@ -124,7 +124,6 @@ EvidenceExpectationError: enum {
     InvalidOutcome(expectation: EvidenceExpectation, outcome: EvidenceOutcome),
 }
 
-// Rust `EvidenceOutcome.as_str`.
 evidence_outcome_name: fn(value: EvidenceOutcome) -> String Never! {
     if value == {
         .Proved -> "proved"
@@ -141,7 +140,6 @@ evidence_outcome_name: fn(value: EvidenceOutcome) -> String Never! {
     }
 }
 
-// Rust `EvidenceOutcome.is_failure`.
 evidence_outcome_is_failure: fn(value: EvidenceOutcome) -> Bool Never! {
     if value == {
         .Failed | .Error -> true
@@ -149,7 +147,6 @@ evidence_outcome_is_failure: fn(value: EvidenceOutcome) -> Bool Never! {
     }
 }
 
-// Rust `EvidenceOutcome.is_incomplete`.
 evidence_outcome_is_incomplete: fn(value: EvidenceOutcome) -> Bool Never! {
     if value == {
         .Unavailable | .Incomplete | .NotObserved | .Skipped -> true
@@ -157,7 +154,6 @@ evidence_outcome_is_incomplete: fn(value: EvidenceOutcome) -> Bool Never! {
     }
 }
 
-// Rust `EvidenceExpectation.as_str`.
 evidence_expectation_name: fn(value: EvidenceExpectation) -> String Never! {
     if value == {
         .Ordinary -> "ordinary"
@@ -165,32 +161,28 @@ evidence_expectation_name: fn(value: EvidenceExpectation) -> String Never! {
     }
 }
 
-// Rust `EvidenceExpectation.validate`: an expected failure describes only a
-// failed or (unexpectedly) passed observation.
+// An expected failure describes only a failed or (unexpectedly) passed
+// observation.
 evidence_expectation_validate: fn(expectation: EvidenceExpectation, outcome: EvidenceOutcome) EvidenceExpectationError! {
     if expectation == EvidenceExpectation.ExpectedFailure && outcome != EvidenceOutcome.Failed && outcome != EvidenceOutcome.Passed {
         return Err(EvidenceExpectationError.InvalidOutcome{expectation: expectation, outcome: outcome})
     }
 }
 
-// Rust `Display for EvidenceExpectationError`.
 evidence_expectation_error_text: fn(error: EvidenceExpectationError) -> String Never! {
     if error == {
         .InvalidOutcome(expectation, outcome) -> "evidence expectation {evidence_expectation_name(expectation)} cannot describe outcome {evidence_outcome_name(outcome)}"
     }
 }
 
-// Rust `EvidenceRecord.validate`.
 evidence_record_validate: fn(record: EvidenceRecord) EvidenceExpectationError! {
     evidence_expectation_validate(record.expectation, record.outcome)
 }
 
-// Rust `EvidenceRecord.is_expected_failure`.
 evidence_record_is_expected_failure: fn(record: EvidenceRecord) -> Bool Never! {
     record.outcome == EvidenceOutcome.Failed && record.expectation == EvidenceExpectation.ExpectedFailure
 }
 
-// Rust `EvidenceRecord.is_unexpected_pass`.
 evidence_record_is_unexpected_pass: fn(record: EvidenceRecord) -> Bool Never! {
     record.outcome == EvidenceOutcome.Passed && record.expectation == EvidenceExpectation.ExpectedFailure
 }

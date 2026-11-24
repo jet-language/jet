@@ -2107,7 +2107,7 @@ ir_x64_zone_regions: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, poll_in
     }
     if !has_zone -> return [Int]{}
     sunk := [Int]{}
-    sunk.try_reserve(f.op.len()) ?? panic("reserve failed")
+    sunk.try_reserve(f.op.len()) ?? ()
     loop _ in 0..<f.op.len() -> sunk.push(-1)
     poll: if poll_in >= -1 -> poll_in else -> (ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1)
     trap: if trap_in >= -1 -> trap_in else -> (ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1)
@@ -4810,7 +4810,7 @@ ir_x64_pads: fn(e: ^IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
         return
     }
     if e.pad_label.len() == 0 && f.op.len() > 0 {
-        e.pad_label.try_reserve(f.op.len()) ?? panic("reserve failed")
+        e.pad_label.try_reserve(f.op.len()) ?? ()
         loop _ in 0..<f.op.len() -> e.pad_label.push(-1)
     }
     // Keys by hash (ir_x64_key_hash) -> head row in `entries`, chained via `next`.
@@ -6200,21 +6200,21 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     op_count: f.op.len()
     e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_head: [Int]{}, end_tail: [Int]{}, end_sites: [Int]{}, end_next: [Int]{}, end_pending: 0, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: al.has_stream_store, below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
     if op_count > 0 {
-        e.end_of.try_reserve(op_count) ?? panic("reserve failed")
-        e.absorbed.try_reserve(op_count) ?? panic("reserve failed")
-        e.code.bytes.try_reserve(op_count * 12 + 64) ?? panic("reserve failed")
+        e.end_of.try_reserve(op_count) ?? ()
+        e.absorbed.try_reserve(op_count) ?? ()
+        e.code.bytes.try_reserve(op_count * 12 + 64) ?? ()
         loop _ in 0..<op_count {
             e.end_of.push(-1)
             e.absorbed.push(false)
         }
         if !fast_o0 {
-            e.picks.try_reserve(op_count) ?? panic("reserve failed")
+            e.picks.try_reserve(op_count) ?? ()
             loop _ in 0..<op_count -> e.picks.push(-1)
         }
         if al.has_loop {
-            e.tests.try_reserve(op_count) ?? panic("reserve failed")
-            e.rotated.try_reserve(op_count) ?? panic("reserve failed")
-            e.exits.try_reserve(op_count) ?? panic("reserve failed")
+            e.tests.try_reserve(op_count) ?? ()
+            e.rotated.try_reserve(op_count) ?? ()
+            e.exits.try_reserve(op_count) ?? ()
             loop _ in 0..<op_count {
                 e.tests.push(-1)
                 e.rotated.push(false)
@@ -6241,7 +6241,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     if f.stack_check -> grow_site = ir_x64_stack_check(e, 16 + 8 * al.saved.len() + al.frame_bytes)
     entered: e.code.bytes.len()
     positions := [Int]{}
-    positions.try_reserve(op_count + 1) ?? panic("reserve failed")
+    positions.try_reserve(op_count + 1) ?? ()
     fast_regs := [Int]{}
     wrap: if fast_o0 -> 0 else -> ir_x64_wrap(e, m, f, al, fast_regs)
     if wrap > 0 {

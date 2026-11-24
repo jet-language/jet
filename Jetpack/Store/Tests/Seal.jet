@@ -1,6 +1,5 @@
-// Rust set exact mtimes with `touch -m -d @s.ns`; Core's `sys.utime` takes
-// whole seconds, so fixtures first pin the payload to a whole-second mtime
-// and every restore is exact at that precision.
+// Core's `sys.utime` takes whole seconds, so fixtures first pin the payload to
+// a whole-second mtime and every restore is exact at that precision.
 use {
     files: core.files
     sys: core.sys
@@ -165,8 +164,7 @@ store_test_make_writable: fn(path: String) Never! {
     store_test_drop_roots(roots)
 }
 
-// Rust ran the armed window on its own thread so the thread-local memo died
-// with it; the port arms, exercises, and disarms the command memo in order.
+// The test arms, exercises, and disarms the command memo in order.
 #Test("store armed command memo checks identity once and stays scoped") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
@@ -212,7 +210,7 @@ store_test_make_writable: fn(path: String) Never! {
     store_test_drop_roots(roots)
 }
 
-// Rust COMMAND_MEMO semantics, exercised without native filesystem leaves.
+// Command memo semantics, exercised without native filesystem leaves.
 // #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification owner keeps armed memo shared and invocation isolated") {
     verification := StoreVerification.new()
@@ -236,7 +234,7 @@ store_test_make_writable: fn(path: String) Never! {
     assert_eq(store_seal_memo_get(verification, "object"), None)
 }
 
-// Rust VERIFIED_DIGESTS/hash-count ownership: invalidation drops all kinds for
+// Verified digest and hash-count ownership: invalidation drops all kinds for
 // one path, while resetting observation counts never removes a cached digest.
 // #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification owner separates digest kinds counts and invalidation") {
@@ -273,9 +271,9 @@ store_test_set_census_enabled: fn(verification: ^StoreVerification, enabled: Boo
     permit.value.seal_census_enabled = enabled
 }
 
-// Rust census_note/census_report: disabled census is absent, enabled counts
-// include every check, and the rendered descending rows stop at fifteen.
-// #4454: generated IR takes an owner value slot twice; keep this real case.
+// Disabled census is absent, enabled counts include every check, and the
+// rendered descending rows stop at fifteen. #4454: generated IR takes an owner
+// value slot twice; keep this real case.
 #Test("store verification census counts checks and bounds descending report") {
     verification := StoreVerification.new()
     store_test_set_census_enabled(verification, false)
@@ -294,9 +292,8 @@ store_test_set_census_enabled: fn(verification: ^StoreVerification, enabled: Boo
     assert(!report.contains("disabled"))
 }
 
-// Rust PROVEN_MEMBERS/invalidate_proven_member: the (hangar, digest) proof is
-// shared by copies of one owner, absent from another owner, and invalidation
-// drops only the exact (hangar, digest) member.
+// The (hangar, digest) proof is shared by copies of one owner, absent from
+// another owner, and invalidation drops only the exact (hangar, digest) member.
 #Test("store verification owner shares proven closure members and invalidates exactly") {
     verification := StoreVerification.new()
     other := StoreVerification.new()
@@ -320,10 +317,9 @@ store_test_set_census_enabled: fn(verification: ^StoreVerification, enabled: Boo
     assert(!store_proven_member_contains(other, key))
 }
 
-// Rust closure_object_rehashes + Seal::remove: a proven member stays trusted
-// for its owner inside the window even after its bytes
-// drift, another owner re-hashes and sees the drift, and removing the seal
-// drops the owner's proof so the next check re-hashes real bytes.
+// A proven member stays trusted for its owner inside the window even after its
+// bytes drift, another owner re-hashes and sees the drift, and removing the
+// seal drops the owner's proof so the next check re-hashes real bytes.
 #Test("store seal removal invalidates the owner's proven closure member") {
     verification := StoreVerification.new()
     other := StoreVerification.new()

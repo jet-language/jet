@@ -73,7 +73,7 @@ static Error *error(int64_t tag,int64_t limit,int64_t frames) {
     Text *export_name=text("\xcc\x81""export");const char message[]="guest \"error\"\n\0";
     Text *m=jet_rt_string_from_static(message,(int64_t)sizeof(message)-1);
     Fault *fault=jet_rt_record_new_plugin_fault(export_name,m,s);jet_rt_string_drop(export_name);jet_rt_string_drop(m);
-    // Valid native carrier construction; never reinterpret or mock a Rust box.
+    // Valid native carrier construction; never reinterpret or mock a box.
     Error *e=jet_rt_alloc(24,8);e->tag=tag;e->fault=fault;e->limit=limit;return e;
 }
 static void expect(Text *t,const char *bytes,int64_t length) { assert(t->length==length);assert(memcmp(t->data,bytes,(size_t)length)==0);jet_rt_string_drop(t); }

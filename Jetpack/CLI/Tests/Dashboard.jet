@@ -86,9 +86,8 @@ cli_dashboard_test_frames_contain: fn(frames: [String], needle: String) -> Bool 
     assert(run.frames[0].contains("reading store…"))
 }
 
-// Reduced: Rust also proves the restore sequence is written while a panic
-// unwinds; Jet tests have no panic capture, so the claim pins the exact
-// enter and restore sequences the screen guard writes.
+// Jet tests have no panic capture, so the claim pins the exact enter and
+// restore sequences the screen guard writes.
 #Test("terminal restore sequences bracket the dashboard") {
     esc: terminal_esc()
     assert(cli_dashboard_screen_enter_sequence().starts_with("{esc}[?1049h"))

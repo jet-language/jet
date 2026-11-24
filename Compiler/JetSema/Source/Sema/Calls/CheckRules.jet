@@ -155,25 +155,23 @@ sema_call_rules_hear: fn(
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
-    state: ^SemaOwnershipState,
-    tail_store: ^SemaStatementTailStore,
-    context: ^SemaCheckContext,
+    check: ^SemaBodyCheck,
     diagnostics: ^[Diagnostic],
 ) -> SemaCallRuleHearing {
-    hearing := SemaCallRuleHearing{from: context.comptime_body_sources.len()}
+    hearing := SemaCallRuleHearing{from: check.context.comptime_body_sources.len()}
     owner: sema_scope_function_owner_key(scopes)
     site_owner: if site == "" -> "{owner}" else -> "{owner}.{site}"
-    table: if receiver == .Val(written) -> sema_rule_table(written, owner, scopes, context) else -> "{owner}"
+    table: if receiver == .Val(written) -> sema_rule_table(written, owner, scopes, check.context) else -> "{owner}"
     if receiver != None && site == "" {
-        context.rule_tables.calls_at.push(name_span.start)
-        context.rule_tables.call_tables.push("{table}")
+        check.context.rule_tables.calls_at.push(name_span.start)
+        check.context.rule_tables.call_tables.push("{table}")
     }
     end := name_span.end
     loop argument in args -> end = argument.span.end
     span: Span{start: name_span.start, end: end}
     waiting := [Int]{}
     loop index in 0..<rules.len() {
-        if sema_comptime_body_value_find(context, environment.module_identity, site_owner, rules[index].span, name_span) == .Val(landed) {
+        if sema_comptime_body_value_find(check.context, environment.module_identity, site_owner, rules[index].span, name_span) == .Val(landed) {
             if sema_call_rule_rejects(landed.value, span, diagnostics) {
                 hearing.rejected = true
                 return hearing
@@ -186,10 +184,10 @@ sema_call_rules_hear: fn(
     // A check without the registration graph (a compile-time run's own
     // program) hears no rule; the compile's own check of the same call does.
     graph: program.registration_graph ?? return hearing
-    call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, sema_rule_table_keys(table, frame, scopes), owner, environment, program, scopes, state, tail_store, context)
+    call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, sema_rule_table_keys(table, frame, scopes), owner, environment, program, scopes, check)
     loop index in waiting {
         call.words[SEMA_CALL_RULE_PAIRED_WORD] = if rules[index].paired -> 1 else -> 0
-        sema_call_rule_stage(context, environment, owner, site_owner, rules[index], call, name_span)
+        sema_call_rule_stage(check.context, environment, owner, site_owner, rules[index], call, name_span)
     }
     hearing.staged = true
     hearing
@@ -214,16 +212,14 @@ sema_call_rules_hear_stand_in: fn(
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
-    state: ^SemaOwnershipState,
-    tail_store: ^SemaStatementTailStore,
-    context: ^SemaCheckContext,
+    check: ^SemaBodyCheck,
     diagnostics: ^[Diagnostic],
 ) -> Bool {
     if !sema_call_rules_heard_here(scopes) -> return false
     if program.registration_graph == .Val(graph) {
         rules: sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
         if rules.len() == 0 -> return false
-        return sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, state, tail_store, context, diagnostics).rejected
+        return sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, check, diagnostics).rejected
     }
     false
 }
@@ -401,16 +397,14 @@ sema_rule_call_value: fn(
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
-    state: ^SemaOwnershipState,
-    tail_store: ^SemaStatementTailStore,
-    context: ^SemaCheckContext,
+    check: ^SemaBodyCheck,
 ) -> SemaCallRuleHeard {
     file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-    caller: sema_rule_identity(graph, owner, context.rule_identities)
+    caller: sema_rule_identity(graph, owner, check.context.rule_identities)
     callee_identity := "{name}"
     if callee == .Val(id) {
-        callee_key: sema_symbol_key(program, context, id)
-        callee_identity = sema_rule_identity(graph, callee_key, context.rule_identities)
+        callee_key: sema_symbol_key(program, check.context, id)
+        callee_identity = sema_rule_identity(graph, callee_key, check.context.rule_identities)
     }
     heard := SemaCallRuleHeard{
         words: [Int]{0, 0, 1, 2, 3, span.start, span.end, 4, name_span.start, name_span.end, args.len(), 0, 0, 0},
@@ -431,11 +425,11 @@ sema_rule_call_value: fn(
         else -> heard.words.extend([Int]{0, 0, 0, 0, 0, 0})
     }
     loop argument in args {
-        probed: sema_rule_probe(argument.expr, environment, program, scopes, state, tail_store, context)
+        probed: sema_rule_probe(argument.expr, environment, program, scopes, check)
         ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
-        known := if probed == .Val(checked) -> sema_rule_known(checked, program, context) else -> TComptimeValue?{None}
+        known := if probed == .Val(checked) -> sema_rule_known(checked, program, check.context) else -> TComptimeValue?{None}
         if known == None && probed == .Val(checked) && (sema_stream_handle_owner(checked.ty) ?? "") == "Path" {
-            known = sema_rule_known_path(argument.expr, environment, program, scopes, state, tail_store, context)
+            known = sema_rule_known_path(argument.expr, environment, program, scopes, check)
         }
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
@@ -474,14 +468,14 @@ sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: ^SemaRu
 // no type expected, or, when that fails on a type name (`Checkout`,
 // `Box<Int>`), its check where the prelude `Type` is expected, which makes
 // it that type's `Type` value.
-sema_rule_probe: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> TExpr? {
+sema_rule_probe: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TExpr? {
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(expression, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+    probed: sema_probe_expression(expression, None, environment, program, scopes, check, probe_diagnostics)
     if probed != None || sema_module_no_prelude(environment, program) -> return probed
     if expression == .Ident(_, _, _) || expression == .TypeValue(_, _, _) {
         value_type: sema_expr_expected_type(Type.Named{name: sema_core_source_type_name(program, "core.prelude", "Type")}, environment, program)
         type_diagnostics := [Diagnostic]{}
-        return sema_probe_expression(expression, Val(value_type), environment, program, scopes, state, tail_store, context, type_diagnostics)
+        return sema_probe_expression(expression, Val(value_type), environment, program, scopes, check, type_diagnostics)
     }
     None
 }
@@ -719,12 +713,12 @@ sema_rule_known_written: fn(graph: SemaRegistrationGraph, module_index: Int, exp
 
 // A heard `Path{…}` argument, known when its text is: the built-in Path
 // keeps that text, only turning `\` into `/` (Path.from).
-sema_rule_known_path: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> TComptimeValue? {
+sema_rule_known_path: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) -> TComptimeValue? {
     if expression == .TypedLit(_, body, _, _) {
         if body == .Value(value) {
             probe_diagnostics := [Diagnostic]{}
-            text: sema_probe_expression(value, Val(Type.String), environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
-            return sema_rule_known_path_text(sema_rule_known(text, program, context) ?? return None)
+            text: sema_probe_expression(value, Val(Type.String), environment, program, scopes, check, probe_diagnostics) ?? return None
+            return sema_rule_known_path_text(sema_rule_known(text, program, check.context) ?? return None)
         }
     }
     None

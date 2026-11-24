@@ -665,11 +665,21 @@ reach_test_registry_member: fn(module_name: String, name: String) -> Bool {
     false
 }
 
+// Whether `value` carries a jet_builtins role (`#Builtin.Role(.InlineMapped)`)
+// and its module's `text` calls it by its qualified name `pair`: lowering the
+// role reaches that call though neither the program nor the compiler spells
+// it, so it is a source route as a call by a literal name is.
+reach_test_role_self_call: fn(value: Func, text: String, pair: String) -> Bool {
+    role := false
+    loop marker in value.markers -> role = role || marker.name == "Role" || marker.name.ends_with(".Role")
+    role && (text.contains("{pair}(") || text.contains("{pair}<"))
+}
+
 // A Core module that isn't routed leaves each top-level function no reached
-// code names, so one the compiler calls by a literal name must be a route:
-// JET_DRIVER_SOURCE_ROUTES holds exactly those of the compiler's sources
-// that aren't registry members.
-#Test("each top-level Core function the compiler calls by a literal name right after its module's is a source route") {
+// code names, so one the compiler calls by a literal name, or a role reaches
+// by its qualified name, must be a route: JET_DRIVER_SOURCE_ROUTES holds
+// exactly those that aren't registry members.
+#Test("each top-level Core function the compiler calls by a literal name right after its module's, or its role reaches by its qualified name, is a source route") {
     files := [String]{}
     reach_test_sources("Compiler", files)
     pairs: reach_test_spelled_pairs(files)
@@ -678,15 +688,16 @@ reach_test_registry_member: fn(module_name: String, name: String) -> Bool {
     loop row in CORE_SOURCE_OWNED_ROWS {
         if JET_DRIVER_ROUTED_MODULES.contains(row.module_name) -> next
         prefix: "{row.module_name}."
-        spelled := false
+        text: reach_test_read(row.path)
+        spelled := text.contains(prefix)
         loop pair in pairs -> spelled = spelled || pair.starts_with(prefix)
         if !spelled -> next
-        text: reach_test_read(row.path)
         parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: false}, compiler_threads_single())
         loop item in parsed.parsed.program.items {
             if item == .Func(value) {
                 pair: "{prefix}{value.name}"
-                if value.name.starts_with("__") || !pairs.contains(pair) || reach_test_registry_member(row.module_name, value.name) {
+                reached: pairs.contains(pair) || reach_test_role_self_call(value, text, pair)
+                if value.name.starts_with("__") || !reached || reach_test_registry_member(row.module_name, value.name) {
                     next
                 }
                 if JET_DRIVER_SOURCE_ROUTES.contains(pair) {

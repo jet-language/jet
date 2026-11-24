@@ -18,7 +18,7 @@ PkgJSONDocument: enum {
     Failed(String),
 }
 
-// Rust `JSON::parse`: at most 1 MiB and 64 nesting levels.
+// At most 1 MiB and 64 nesting levels.
 pkg_json_parse_protocol: fn(text: String) -> PkgJSONDocument Never! {
     if text.bytes().len() > PKG_JSON_MAX_PROTOCOL_BYTES {
         return PkgJSONDocument.Failed("JSON input exceeds the 1 MiB limit")
@@ -26,8 +26,7 @@ pkg_json_parse_protocol: fn(text: String) -> PkgJSONDocument Never! {
     pkg_json_parse_bounded(text, PKG_JSON_MAX_PROTOCOL_BYTES)
 }
 
-// Rust `JSON::parse_json_with_limit`: at most `max_bytes` and 64 nesting
-// levels.
+// At most `max_bytes` and 64 nesting levels.
 pkg_json_parse_bounded: fn(text: String, max_bytes: Int) -> PkgJSONDocument Never! {
     if text.bytes().len() > max_bytes {
         return PkgJSONDocument.Failed("JSON input exceeds the {max_bytes}-byte limit")

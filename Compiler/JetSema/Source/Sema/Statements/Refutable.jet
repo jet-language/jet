@@ -1112,14 +1112,14 @@ sema_stmt_refutable_assign_capture_identity: fn(pattern: ^TPattern, name: BindNa
 // The miss route runs in its own frame on the live scope table and on the
 // live ownership state (sema_ownership_fork), both rolled back at the end
 // (instead of on copies of the whole table and state).
-sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaRefutableFallbackCheck {
-    if sema_body_fallback_exit(fallback, context, scopes, diagnostics) {
+sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaRefutableFallbackCheck {
+    if sema_body_fallback_exit(fallback, check.context, scopes, diagnostics) {
         return SemaRefutableFallbackCheck{or_fallback: None, statements: [TStmt]{}, complete: false, ambient_err: None}
     }
     before := diagnostics.len()
     fallback_mark: sema_scope_mark(scopes)
-    fork: sema_ownership_fork(state)
-    sema_scope_enter(scopes, state, "refutable.fallback@{span.start}")
+    fork: sema_ownership_fork(check.state)
+    sema_scope_enter(scopes, check.state, "refutable.fallback@{span.start}")
     carrier := sema_expr_unwrap_tag(subject_ty)
     result := SemaRefutableFallbackCheck{or_fallback: None, statements: [TStmt]{}, complete: false, ambient_err: None}
     if carrier == {
@@ -1127,10 +1127,10 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
             owner := sema_scope_local_owner_key(scopes)
             local_module: sema_scope_environment_module_text(environment, program)
             key: symbol_key_text(SymbolKind.Local, local_module, owner, "err")
-            symbol := Symbol{id: sema_symbol_id_of(program, context, key), kind: SymbolKind.Local, name: "err", module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_ty), visibility: 0}
+            symbol := Symbol{id: sema_symbol_id_of(program, check.context, key), kind: SymbolKind.Local, name: "err", module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_ty), visibility: 0}
             frame: scopes.current
             sema_scope_push_binding(scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
-            sema_ownership_declare_ambient_binding(state, symbol)
+            sema_ownership_declare_ambient_binding(check.state, symbol)
             result.ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_ty))
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -1138,13 +1138,13 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
 
     // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback
     // overwrites it. Jet has no exchange on a field of the write-borrowed `context`.
-    enclosing_err_denial: context.fallback_err_denial.copy()
-    context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
+    enclosing_err_denial: check.context.fallback_err_denial.copy()
+    check.context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
     if fallback == {
         .Value(value) -> {
-            checked := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            checked := sema_check_expression(value, None, environment, program, scopes, check, diagnostics)
             if checked != None {
-                item: checked ?? sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(value))
+                item: checked ?? sema_node(check.context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(value))
                 result.or_fallback = Val(TOrFallback.Value{value: item})
                 result.statements.push(TStmt.ExprStmt{value: item, span: expr_span(value)})
             }
@@ -1152,16 +1152,16 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
         }
         .Block(body, value, block_span) -> {
             block_mark: sema_scope_mark(scopes)
-            sema_scope_enter(scopes, state, "refutable.block@{block_span.start}")
+            sema_scope_enter(scopes, check.state, "refutable.block@{block_span.start}")
             // copy: `block_return_type` restores scopes.return_type after the fallback block
             // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`.
             block_return_type: scopes.return_type.copy()
             block_loop_depth: scopes.loop_depth
-            checked_block := sema_check_statements(body, block_return_type, environment, program, scopes, state, tail_store, context, diagnostics, block_loop_depth)
+            checked_block := sema_check_statements(body, block_return_type, environment, program, scopes, check, diagnostics, block_loop_depth)
             if value == .Val(tail) {
-                _ := sema_check_expression(tail, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                _ := sema_check_expression(tail, None, environment, program, scopes, check, diagnostics)
             }
-            sema_single_use_leave_scope(scopes, state, diagnostics)
+            sema_single_use_leave_scope(scopes, check.state, diagnostics)
             sema_scope_rollback(scopes, block_mark)
             diverges := value == None && (sema_stmt_refutable_block_exits(body) || sema_stmt_refutable_tree_block_has_never_expr(checked_block.value))
             valid := diverges && checked_block.complete
@@ -1188,7 +1188,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                 .Val(expression) -> {
                     if {
                         scopes.return_type == None -> {
-                            _ := sema_check_expression(expression, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                            _ := sema_check_expression(expression, None, environment, program, scopes, check, diagnostics)
                             diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
                         }
                         else -> {
@@ -1196,10 +1196,10 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                             // fallback overwrites it. Jet has no exchange on a field of the
                             // write-borrowed `scopes`.
                             fallback_return_type: scopes.return_type.copy()
-                            checked: sema_stmt_check_return_value(expression, fallback_return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+                            checked: sema_stmt_check_return_value(expression, fallback_return_type, environment, program, scopes, check, diagnostics)
                             if checked != None {
                                 checked_value: checked
-                                if sema_stmt_record_return_views(expression, checked_value.ty, scopes, state, context, diagnostics) && sema_stmt_move_direct(expression, state, scopes, "`return`", diagnostics) {
+                                if sema_stmt_record_return_views(expression, checked_value.ty, scopes, check.state, check.context, diagnostics) && sema_stmt_move_direct(expression, check.state, scopes, "`return`", diagnostics) {
                                     return_tree = Val(TOrFallback.Return{value: Val(checked_value)})
                                     statement_value = Val(checked_value)
                                 }
@@ -1223,7 +1223,7 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                     diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `?? panic(\"message\")`"))
                 }
                 else -> {
-                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
+                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, check, diagnostics)
                     if message != None {
                         checked: message ?? sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, name_span)
                         location := sema_expression_panic_location(environment, program, scopes, name_span)
@@ -1253,8 +1253,8 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                     diagnostics.push(sema_error("E0115", route_span, "`next` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 }
                 else -> {
-                    if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) {
-                        sema_ownership_check_loop_move_backedge(state, context.loop_value_frames[frame_index], diagnostics)
+                    if sema_loop_value_resolve_frame(check.context, None) == .Val(frame_index) {
+                        sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], diagnostics)
                     }
                     result.or_fallback = Val(TOrFallback.Continue)
                     result.statements.push(TStmt.Continue{label: None, span: route_span})
@@ -1280,8 +1280,8 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
                     diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 }
                 else -> {
-                    if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) {
-                        sema_ownership_check_loop_move_backedge(state, context.loop_value_frames[frame_index], diagnostics)
+                    if sema_loop_value_resolve_frame(check.context, Val(label)) == .Val(frame_index) {
+                        sema_ownership_check_loop_move_backedge(check.state, check.context.loop_value_frames[frame_index], diagnostics)
                     }
                     result.or_fallback = Val(TOrFallback.ContinueLabel{label: label})
                     result.statements.push(TStmt.Continue{label: Val(label), span: route_span})
@@ -1290,32 +1290,32 @@ sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, s
             }
         }
     }
-    context.fallback_err_denial = enclosing_err_denial
-    sema_single_use_leave_scope(scopes, state, diagnostics)
-    sema_ownership_fork_rollback(state, fork)
-    sema_ownership_fork_close(state, fork)
+    check.context.fallback_err_denial = enclosing_err_denial
+    sema_single_use_leave_scope(scopes, check.state, diagnostics)
+    sema_ownership_fork_rollback(check.state, fork)
+    sema_ownership_fork_close(check.state, fork)
     sema_scope_rollback(scopes, fallback_mark)
     result.complete = result.complete && diagnostics.len() == before
     result
 }
 
-sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
+sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TStmt? {
     before := diagnostics.len()
-    subject_value: sema_check_pattern_subject(binding.init, pattern, binding.ty, environment, program, scopes, state, tail_store, context, diagnostics)
+    subject_value: sema_check_pattern_subject(binding.init, pattern, binding.ty, environment, program, scopes, check, diagnostics)
     subject: subject_value ?? {
-        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, environment, program, scopes, state, context, diagnostics)
+        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, environment, program, scopes, check.state, check.context, diagnostics)
         return None
     }
-    checked_pattern := sema_check_pattern(subject, sema_stmt_refutable_contextual_pattern(pattern, subject.ty, environment, program), TPatternPosition.Binding, binding.mutable, false, environment, program, scopes, state, tail_store, context, diagnostics)
+    checked_pattern := sema_check_pattern(subject, sema_stmt_refutable_contextual_pattern(pattern, subject.ty, environment, program), TPatternPosition.Binding, binding.mutable, false, environment, program, scopes, check, diagnostics)
     move_subject := false
     loop fact in checked_pattern.bindings {
         if !sema_ownership_type_is_copy(fact.ty) -> move_subject = true
     }
     // The fallback runs only when the pattern missed, so the subject is
     // still whole there; the success path moves it into the captures after.
-    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, program, scopes, state, tail_store, context, diagnostics)
+    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, program, scopes, check, diagnostics)
     move_valid := true
-    if move_subject && !sema_stmt_move_direct(binding.init, state, scopes, "the pattern binding", diagnostics) {
+    if move_subject && !sema_stmt_move_direct(binding.init, check.state, scopes, "the pattern binding", diagnostics) {
         move_valid = false
     }
     locals := [TLocal]{}
@@ -1332,7 +1332,7 @@ sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallba
             .Val(value) -> value.ty
             .None -> Type.Int
         }
-        installed := sema_stmt_destructure_local(name, ty, binding.mutable, environment, program, scopes, state, context, diagnostics) ?? next
+        installed := sema_stmt_destructure_local(name, ty, binding.mutable, environment, program, scopes, check.state, check.context, diagnostics) ?? next
         if checked_pattern_tree != None {
             typed := checked_pattern_tree ?? next
             sema_stmt_refutable_assign_capture_identity(typed.pattern, name, installed)
@@ -1386,18 +1386,18 @@ sema_stmt_else_presence_names: fn(arms: [SwitchArm], scopes: SemaScopeTable) -> 
 // Refines the stable Optional `name` to its payload for the rest of the
 // current scope: check `x ?? fallback` and bind the payload under the same
 // name, as the refutable binding `x == .Val(x) ?? { fallback }` does.
-sema_stmt_check_optional_refinement: fn(name: BindName, fallback: OrFallback, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
+sema_stmt_check_optional_refinement: fn(name: BindName, fallback: OrFallback, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TStmt? {
     guarded: Expr.OrFallback{value: Expr.Ident{name: name.name, span: name.span, id: AST_NODE_GENERATED}, fallback: fallback, is_option: true, span: span, id: AST_NODE_GENERATED}
-    value: sema_check_expression(guarded, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    value: sema_check_expression(guarded, None, environment, program, scopes, check, diagnostics) ?? return None
     // The refinement is a new local; its identity names the guard so it never
     // collides with the carrier binding it shadows.
     owner: "{sema_scope_local_owner_key(scopes)}/flow@{span.start}"
     local_module: sema_scope_environment_module_text(environment, program)
     key: symbol_key_text(SymbolKind.Local, local_module, owner, name.name)
-    id: sema_symbol_id_of(program, context, key)
+    id: sema_symbol_id_of(program, check.context, key)
     symbol: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_identity: environment.module_identity, owner: Val(owner), span: name.span, ty: Val(value.ty), visibility: 0}
     sema_scope_refine_local(scopes, symbol, key)
-    sema_ownership_declare_binding(state, symbol, false)
+    sema_ownership_declare_binding(check.state, symbol, false)
     Val(TStmt.Let{local: checked_symbol_local(name.name, name.span, id, value.ty), let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
 }
 
@@ -1522,17 +1522,17 @@ sema_stmt_note_false_bound: fn(name: String, name_span: Span, op: BinOp, limit: 
 
 // Rebinds the guarded name for the rest of the block with its narrowed
 // interval, the way sema_stmt_check_optional_refinement rebinds a payload.
-sema_stmt_check_bounds_refinement: fn(refinement: SemaStmtBoundsRefinement, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
+sema_stmt_check_bounds_refinement: fn(refinement: SemaStmtBoundsRefinement, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TStmt? {
     read: Expr.Ident{name: refinement.name, span: refinement.name_span, id: AST_NODE_GENERATED}
-    value: sema_check_expression(read, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    value: sema_check_expression(read, None, environment, program, scopes, check, diagnostics) ?? return None
     owner: "{sema_scope_local_owner_key(scopes)}/bounds@{span.start}"
     local_module: sema_scope_environment_module_text(environment, program)
     key: symbol_key_text(SymbolKind.Local, local_module, owner, refinement.name)
-    id: sema_symbol_id_of(program, context, key)
+    id: sema_symbol_id_of(program, check.context, key)
     symbol: Symbol{id: id, kind: SymbolKind.Local, name: refinement.name, module_identity: environment.module_identity, owner: Val(owner), span: refinement.name_span, ty: Val(value.ty), visibility: 0}
     sema_scope_refine_local(scopes, symbol, key)
     scopes.bindings[scopes.bindings.len() - 1].integer_bounds = Val(refinement.bounds)
-    sema_ownership_declare_binding(state, symbol, false)
+    sema_ownership_declare_binding(check.state, symbol, false)
     local := checked_symbol_local(refinement.name, refinement.name_span, id, value.ty)
     local.integer_bounds = Val(refinement.bounds)
     Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
@@ -1541,19 +1541,19 @@ sema_stmt_check_bounds_refinement: fn(refinement: SemaStmtBoundsRefinement, span
 // The `else` of a guard table holds the payload of every stable `x == None`
 // arm subject. Each refinement leads the block as `x: x ?? <no else arm>`, the
 // dead-end binding `x == .Val(x) ?? { }`.
-sema_stmt_check_else_complement: fn(names: [BindName], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
-    sema_scope_enter(scopes, state, "if.else@{span.start}")
+sema_stmt_check_else_complement: fn(names: [BindName], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+    sema_scope_enter(scopes, check.state, "if.else@{span.start}")
     statements := [TStmt]{}
     complete := true
     loop name in names {
-        refined: sema_stmt_check_optional_refinement(name, OrFallback.Value{value: Expr.NoElse{span: name.span, id: AST_NODE_GENERATED}}, name.span, environment, program, scopes, state, tail_store, context, diagnostics)
+        refined: sema_stmt_check_optional_refinement(name, OrFallback.Value{value: Expr.NoElse{span: name.span, id: AST_NODE_GENERATED}}, name.span, environment, program, scopes, check, diagnostics)
         if refined == {
             .Val(statement) -> { statements.push(statement) }
             .None -> complete = false
         }
     }
-    checked: sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
-    sema_single_use_leave_scope(scopes, state, diagnostics)
+    checked: sema_check_statements(body, return_type, environment, program, scopes, check, diagnostics, loop_depth)
+    sema_single_use_leave_scope(scopes, check.state, diagnostics)
     loop statement in checked.value -> statements.push(statement)
     SemaStatementResult{value: statements, complete: complete && checked.complete}
 }

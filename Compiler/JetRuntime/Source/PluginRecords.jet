@@ -65,8 +65,8 @@ plugin_frame_drop_fields: fn(frame: I64) {
 
 #Export(c) jet_rt_record_seq_list_rec_plugin_frame_get: fn(sequence: I64, index: I64) -> I64 {
     length: dyn_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
-    // The Rust original indexes vec[index as usize]: fatal foreign OOB, not the
-    // Jet language panic used by Dyn's own sequence policy.
+    // Indexing out of bounds is a fatal foreign OOB, not the Jet language
+    // panic used by Dyn's own sequence policy.
     if (index < I64{0} || index >= length) { rt_seq_index_oob_stop(length, index) }
     dyn_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + index * PLUGIN_FRAME_BYTES
 }

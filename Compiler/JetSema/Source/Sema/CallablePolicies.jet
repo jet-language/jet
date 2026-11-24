@@ -153,7 +153,7 @@ sema_policy_package_declarations: fn(inputs: [SemaRegistrationModuleInput], pack
 }
 
 // Settings use the same default/label/variadic binder as every ordinary call.
-sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
     wrapper_name: sema_policy_wrapper_name(policy.name, target.symbol.name)
     wrapper: sema_call_resolve_direct(wrapper_name, [Type]{}, environment, program, scopes, policy.name_span, diagnostics) ?? return None
     all_params: sema_call_params_from_type(wrapper.signature) ?? return None
@@ -167,7 +167,7 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
         defaults: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return None else -> sema_call_local_default_values(wrapper, binding, environment, program, scopes) ?? return None
         binding = sema_call_materialize_defaults(params, binding, arguments, defaults, policy.name_span, diagnostics) ?? return None
     }
-    {lowered, pins} := sema_call_check_bound_arguments_owned(state, policy.name, params, None, true, binding, arguments, environment, program, scopes, tail_store, context, policy.name_span, diagnostics) ?? return None
+    {lowered, pins} := sema_call_check_bound_arguments_owned(check, policy.name, params, None, true, binding, arguments, environment, program, scopes, policy.name_span, diagnostics) ?? return None
     captured := callee
     captured_ty: all_params[count].ty ?? return None
     tree_expr_retype(captured, captured_ty)
@@ -204,7 +204,7 @@ sema_policy_local_calls: fn(environment: SemaScopeEnvironment, program: SemaProg
     None
 }
 
-sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
     // The callee's policies are read from its registered declaration in
     // place: returning the declaration copied the whole function, body
     // included, on every direct call.
@@ -215,12 +215,12 @@ sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, environme
     index := policies.len()
     loop index > 0 {
         index -= 1
-        callee = sema_policy_wrap(callee, target, policies[index], environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        callee = sema_policy_wrap(callee, target, policies[index], environment, program, scopes, check, diagnostics) ?? return None
     }
     Val(callee)
 }
 
-sema_policy_try_apply: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_policy_try_apply: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.name != "apply" || !sema_call_gate_is_unshadowed(call.name, scopes) {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
@@ -238,7 +238,7 @@ sema_policy_try_apply: fn(call: Call, expected: Type?, environment: SemaScopeEnv
         index -= 1
         if call.args[index].expr == .Call(policy, _) {
             if sema_policy_builtin(policy.name) -> next
-            callee = sema_policy_wrap(callee, target, policy, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+            callee = sema_policy_wrap(callee, target, policy, environment, program, scopes, check, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         } else {
             diagnostics.push(sema_error("E0355", call.args[index].span, "`apply` received an invalid callable policy", "policy values are checked before application and cannot change a callable's signature", "write `apply(policy(…), function)`"))
             return SemaDirectSpecialCheck{handled: true, value: None}

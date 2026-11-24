@@ -143,7 +143,7 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
                     entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(relative[index])), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
                 } else { entries.push(jet_cli_status_text(dirty[index].path)) }
             } else {
-                // Rust uses the original path in JSON without --diff.
+                // JSON names the original path without --diff.
                 stdout = "{stdout}{relative[index]}\n"
                 if request.diff {
                     stdout = "{stdout}{jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)}"
@@ -158,7 +158,7 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         if !result.changed -> next
         cli_files.write(result.path, result.formatted) ?? return JetDriverVerbOutput{stdout: "", stderr: "{stderr}{jet_cli_report("E2105", "couldn't write `{result.path}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", exit_code: JET_DRIVER_EXIT_USAGE}
     }
-    // Rust write mode emits no success status, including --json. A refused
+    // Write mode emits no success status, including --json. A refused
     // package.jet still fails the run.
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: if refused -> JET_DRIVER_EXIT_USAGE else -> JET_DRIVER_EXIT_OK}
 }

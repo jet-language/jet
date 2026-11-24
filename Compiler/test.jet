@@ -528,10 +528,7 @@ jetpack_map: fn(path: String) -> JetpackMap Err! {
     if names.len() == 0 || names.len() != sections.len() {
         return Err("`{path}` lists no claims with their sections")
     }
-    claims := [JetpackClaim]{}
-    loop (index, name) in names {
-        claims.push(JetpackClaim{name: name.copy(), section: sections[index].copy()})
-    }
+    claims: loop (index, name) in names -> JetpackClaim{name: name.copy(), section: sections[index].copy()}
     sources := [String]{}
     if json_field(tree, "files") == .Array(items) {
         loop item in items {
@@ -1068,10 +1065,7 @@ fuzz_rows: fn(rows: TestRows) {
     if programs.len() == 0 {
         return
     }
-    checks := [ProcessSpec]{}
-    loop program in programs {
-        checks.push(fuzz_command(setup, program.cwd, [String]{"check", "--json", program.name}))
-    }
+    checks: loop program in programs -> fuzz_command(setup, program.cwd, [String]{"check", "--json", program.name})
     checked: process.run_all(checks, fuzz_jobs(checks.len())) ?? {
         rows.fail("fuzz", "couldn't start the fuzz checks: {err}")
         return

@@ -64,10 +64,7 @@ lsp_target_retained_elsewhere: fn(state: LSPDiagnosticState, root: String, targe
 }
 
 lsp_checked_module_paths: fn(checked: LSPChecked) -> [String] Never! {
-    paths := [String]{}
-    loop module_ref in checked.modules {
-        paths.push(if module_ref.physical_path != "" -> module_ref.physical_path else -> module_ref.path)
-    }
+    paths: loop module_ref in checked.modules -> if module_ref.physical_path != "" -> module_ref.physical_path else -> module_ref.path
     paths
 }
 

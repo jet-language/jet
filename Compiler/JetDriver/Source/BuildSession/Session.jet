@@ -603,7 +603,7 @@ build_session_path_error: fn(path: String) -> BuildSessionError? Never! {
 }
 
 build_session_caps: fn(values: [String]) -> [String]? {
-    // Rust BuildEffect declaration order, not lexical string order.
+    // BuildEffect declaration order, not lexical string order.
     out := [String]{}
     normalized := [String]{}
     loop value in values {
@@ -632,6 +632,9 @@ build_session_cap_name: fn(flag: String) -> String Never! {
         "exec" -> "Exec"
         "log" -> "Log"
         "gpu" -> "GPU"
+        // Unreachable: no build path makes a PolicyDenied error (the one
+        // reader of this table renders its `required_caps`); only the
+        // BuildServices test builds one, with no caps.
         else -> panic("invalid checked build effect")
     }
 }
@@ -1061,6 +1064,7 @@ build_session_safe_name: fn(name: String) -> String {
             bytes.push(byte)
         } else if n < 128 || n >= 192 { bytes.push(U8{95}) }
     }
+    // Unreachable: every byte kept above is ASCII.
     String.from_bytes(bytes) ?? panic("invalid generated module name")
 }
 
@@ -1256,7 +1260,7 @@ build_session_add_probe: fn(state: ^BuildSessionState, args: [BuildSessionValue]
         toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "probe toolchain does not belong to this build")
     }
     // All source probe constructors use ambient-record provenance without a
-    // lock. Rust rejects reproducible classification on these same values.
+    // lock, so reproducible classification rejects these same values.
     if reproducibility == "reproducible" {
         return build_session_error_fail(state, BuildSessionError.MissingLockedProvenance{value: name})
     }
@@ -1386,6 +1390,7 @@ build_session_error_json_text: fn(value: String) -> String Never! {
         if number == 34 -> escaped = "\\\"" else if number == 92 -> escaped = "\\\\" else if number == 10 {
             escaped = "\\n"
         } else if number == 13 { escaped = "\\r" } else if number == 9 { escaped = "\\t" } else if number < 32 {
+            // Unreachable: both bytes come from the ASCII digits above.
             pair: String.from_bytes([U8]{digits[number /% 16], digits[number % 16]}) ?? panic("invalid hex")
             escaped = "\\u00{pair}"
         }
@@ -1394,6 +1399,8 @@ build_session_error_json_text: fn(value: String) -> String Never! {
         }
     }
     bytes.push(U8{34})
+    // Unreachable: the bytes are `value`'s own UTF-8 sequences in order, with
+    // ASCII escapes in place of single ASCII bytes.
     String.from_bytes(bytes) ?? panic("JSON preserves UTF8")
 }
 

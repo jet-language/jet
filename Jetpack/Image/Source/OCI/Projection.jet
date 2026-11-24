@@ -16,7 +16,6 @@ ProjectionReport: struct {
     omitted: [String],
     rejected: [String],
 
-    // Rust `ProjectionReport::default()`.
     empty: fn() -> ProjectionReport Never! {
         ProjectionReport{included: [String]{}, changed: [String]{}, omitted: [String]{}, rejected: [String]{}}
     }
@@ -135,8 +134,8 @@ image_json_strings: fn(values: [String]) -> Dyn Never! {
     Dyn.Array(items)
 }
 
-// Rust `write_atomic_json`: one inspection view through create-new, sync,
-// rename, recovering a stale temporary from an interrupted run.
+// One inspection view through create-new, sync, rename, recovering a stale
+// temporary from an interrupted run.
 image_write_atomic_json: fn(layout: String, name: String, json_text: String) -[FS, Env]> ImageError! {
     path: files.join(layout, name)
     node: image_node(path) ?? OCINode.Missing

@@ -631,8 +631,8 @@ cli_program_name: fn(argv0: String) -> String Never! {
     name
 }
 
-// Rust `JetArgsSpec::help`; the text after the program name is the
-// compiler's (CliEntry.jet sema_cli_entry_help).
+// The help text; the text after the program name is the compiler's
+// (CliEntry.jet sema_cli_entry_help).
 cli_usage: fn(level: CLILevel) -> String Never! { "Usage: {level.program}{level.help}" }
 
 cli_root_level: fn(spec: CLISpec, program: String) -> CLILevel Never! {
@@ -1153,10 +1153,10 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
     "missing required argument{plural}: {names.join(", ")}"
 }
 
-// The `args.spec()` builder (Rust `JetArgsSpec`). A spec keeps its
-// nested command specs in one list of levels: level 0 is the spec itself and
-// a command entry names the level of its own spec. `ArgsSpec` and
-// `ParsedArgs` declare their methods here; a call is an ordinary Core call.
+// The `args.spec()` builder. A spec keeps its nested command specs in one list
+// of levels: level 0 is the spec itself and a command entry names the level of
+// its own spec. `ArgsSpec` and `ParsedArgs` declare their methods here; a call
+// is an ordinary Core call.
 
 // Entry kinds of one spec level.
 ARG_FLAG: 0
@@ -1419,8 +1419,7 @@ args_label: fn(entry: ArgEntry) -> String Never! {
     out
 }
 
-// Rust `JetArgsSpec::help` for one level. Every level names the program
-// argv[0] runs as.
+// The help text for one level. Every level names the program argv[0] runs as.
 args_help: fn(spec: ArgsSpec, at: Int) -[Exec.Args]> String Never! {
     argv: rt.argv()
     s := "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}"

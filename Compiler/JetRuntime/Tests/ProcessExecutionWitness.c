@@ -1,4 +1,4 @@
-// Real child plain ProcessSpec native ABI witness. No Rust layout reads: Spec,
+// Real child plain ProcessSpec native ABI witness. Spec,
 // ProcessReceipt and ProcessChild are opaque; receipt fields are read by the
 // physical offsets in ProcessExecutionReceipt.jet (code0 output8 errors16
 // success24 signal32 timed_out40; signal is an inline Int? word, 2^62 when
@@ -512,8 +512,8 @@ int main(int argc, char **argv, char **envp) {
         puts("ProcessExecution controlled-world refusal: native stop, no child, errsentinel untouched");
     }
 
-    // 18/19. Strict capture decoding preserves Rust's invalid/incomplete
-    // Utf8Error text instead of silently producing replacement characters.
+    // 18/19. Strict capture decoding preserves the invalid/incomplete UTF-8
+    // error text instead of silently producing replacement characters.
     {
         const char *scripts[]={"printf '\\377'","printf '\\342'"};
         const char *causes[]={"invalid utf-8 sequence of 1 bytes from index 0",

@@ -197,9 +197,8 @@ IR_COMPILER_OWNED_CORE_RECORDS: #run { [IRCompilerOwnedRecord]{
     {name: "Expired", fields: [String]{}},
 } }
 
-// The compiler-owned records whose fields are typed by the Core record rows
-// (Rust compiler_owned_core_record), each record's fields at its name's id
-// in `keys` (id 0 holds none).
+// The compiler-owned records whose fields are typed by the Core record rows,
+// each record's fields at its name's id in `keys` (id 0 holds none).
 IRCompilerOwnedCore: struct {
     keys: NameTable,
     fields: [[TypeTupleField]],
@@ -251,11 +250,10 @@ ir_compiler_owned_core_fields: fn() -> IRCompilerOwnedCore Never! {
 // The fields of the compiler-owned record row spelled `name`, written over the
 // row's own type parameters (`ir_compiler_owned_generic_params`), or
 // None when no such row exists; `core` is ir_compiler_owned_core_fields.
-// Rows follow Rust compiler_owned_type_defs:
-// `FieldError`, `Range`, the generic Core carriers, the geometry records, the
-// keyed-vault records, the data summaries, `AllocError`,
+// Rows: `FieldError`, `Range`, the generic Core carriers, the geometry
+// records, the keyed-vault records, the data summaries, `AllocError`,
 // `VJPRun`, the Core records and the math records. Callers resolve declared
-// nominals first, as Rust's rows dedupe by key in favor of declarations.
+// nominals first: rows dedupe by key in favor of declarations.
 ir_compiler_owned_record_fields: fn(name: String, core: IRCompilerOwnedCore) -> [TypeTupleField]? Never! {
     if name == IR_RANGE_RECORD -> return Val(ir_range_record_fields())
     t: Type.Named{name: "T"}
@@ -319,8 +317,7 @@ ir_compiler_owned_record_fields: fn(name: String, core: IRCompilerOwnedCore) -> 
     None
 }
 
-// The non-generic geometry carriers (Rust COMPILER_OWNED_GEOMETRY_RECORDS
-// rows without type parameters); their `x`/`y` types are Core record rows.
+// The non-generic geometry carriers; their `x`/`y` types are Core record rows.
 IR_COMPILER_OWNED_GEOMETRY_POINTS: #run { [String]{
     "ScreenPoint",
     "WorldPoint",
@@ -343,9 +340,9 @@ IR_COMPILER_OWNED_MATH_RECORDS: #run { [IRCompilerOwnedRecord]{
     {name: "Vec4", fields: [String]{"x", "y", "z", "w"}},
 } }
 
-// The carrier record rows of Rust compiler_owned_type_defs between `Range`
-// and the Core records (generic Core carriers, geometry, keyed vault,
-// data summaries, `AllocError`, `VJPRun`), in program order.
+// The carrier record rows between `Range` and the Core records (generic Core
+// carriers, geometry, keyed vault, data summaries, `AllocError`, `VJPRun`),
+// in program order.
 IR_COMPILER_OWNED_CARRIER_RECORDS: #run { [String]{
     "DataJoin",
     "Group",
@@ -375,8 +372,7 @@ IR_COMPILER_OWNED_CARRIER_RECORDS: #run { [String]{
     "VJPRun",
 } }
 
-// The type parameters of a compiler-owned row (Rust compiler_owned_type_defs
-// `generic_params`); empty for every other row.
+// The type parameters of a compiler-owned row; empty for every other row.
 ir_compiler_owned_generic_params: fn(name: String) -> [String] Never! {
     if name == "HookDecision" || name == "HookOutcome" -> return [String]{"T", "E"}
     if name == "DataJoin" -> return [String]{"L", "R"}
@@ -401,12 +397,12 @@ IRCompilerOwnedEnum: struct {
 // Compiler-owned runtime enums (`IOError`, `Dyn`, `Ordering`, ...): enums no
 // Core source declares. Each joins every program as one row under its bare
 // canonical key, so an enum literal, a variant pattern and the backends name
-// the same IR type as the Rust runtime does. A Core-declared enum needs no
-// row here: its Core declaration claims the bare name wherever its module is
-// loaded. Where its module line lists its cases, that CORE_ENUM_CASE_ROWS row
-// stands in when no single declaration is loaded, carrying the family's Core
-// payload rows (ir_core_enum_payload), so a program that holds a `Key` or a
-// `DataEvent` without loading the declaring module lays it out the same.
+// the same IR type. A Core-declared enum needs no row here: its Core
+// declaration claims the bare name wherever its module is loaded. Where its
+// module line lists its cases, that CORE_ENUM_CASE_ROWS row stands in when no
+// single declaration is loaded, carrying the family's Core payload rows
+// (ir_core_enum_payload), so a program that holds a `Key` or a `DataEvent`
+// without loading the declaring module lays it out the same.
 IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
     {name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},

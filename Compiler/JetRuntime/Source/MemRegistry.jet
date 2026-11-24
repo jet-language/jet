@@ -1,5 +1,5 @@
 // Canonical native Mem observation counters; not the heap/Sentry range ledger.
-// The Rust original owns seven independent AtomicUsize words. 234/246/306/324 and
+// Seven independent atomic words. 234/246/306/324 and
 // Arena/Bump/Fixed/Pool lifecycle callers update these hooks. x86-64 usize is 64
 // bits; signed I64 carries its unchanged unsigned bit pattern. sync_add/CAS are
 // indivisible wrapping updates; sync_load is a relaxed aligned load. Snapshot is
@@ -32,7 +32,7 @@ mem_registry_unsigned_less: fn(left: I64, right: I64) -> Bool Never! {
     _ := sync_add(wrapping(mem_registry_root + I64{8}), I64{1})
     previous: sync_add(wrapping(mem_registry_root + I64{16}), bytes)
     sum: wrapping(previous + bytes)
-    // The Rust original saturates only the high-water candidate, not the live word.
+    // Saturate only the high-water candidate, not the live word.
     live: if mem_registry_unsigned_less(sum, previous) -> I64{-1} else -> sum
     high := sync_load(wrapping(mem_registry_root + I64{32}))
     loop mem_registry_unsigned_less(high, live) {

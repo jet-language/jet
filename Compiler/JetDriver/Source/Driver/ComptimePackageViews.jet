@@ -272,7 +272,7 @@ jet_driver_package_read_profiles: fn(root: String) -[FS, Env, Exec, Time.Wait]> 
     )
 }
 
-// `profile_view`: collisions in key order (the Rust BTreeMap order).
+// `profile_view`: collisions in key order.
 jet_driver_package_profile_view: fn(profile: PackageProfileSpec) -> ProfileView Never! {
     keys := profile.collisions.keys().to_list()
     keys.sort()
@@ -397,18 +397,12 @@ jet_driver_package_package_value: fn(view: PackageView) -> TComptimeValue Never!
 }
 
 jet_driver_package_declaration_value: fn(type_name: String, view: ManifestView) -> TComptimeValue Never! {
-    dependencies := [TComptimeValue]{}
-    loop dependency in view.dependencies {
-        dependencies.push(jet_driver_package_dependency_value(dependency))
-    }
+    dependencies: loop dependency in view.dependencies -> jet_driver_package_dependency_value(dependency)
     packages := [TComptimeValue]{}
     loop package in view.packages -> packages.push(jet_driver_package_target_entry_value(package))
     outputs := [TComptimeValue]{}
     loop output in view.outputs -> outputs.push(jet_driver_package_output_value(output))
-    profiles := [TComptimeValue]{}
-    loop profile in view.build_profiles {
-        profiles.push(jet_driver_package_build_profile_value(profile))
-    }
+    profiles: loop profile in view.build_profiles -> jet_driver_package_build_profile_value(profile)
     TComptimeValue.Struct{
         type_name: type_name,
         fields: [TComptimeField]{

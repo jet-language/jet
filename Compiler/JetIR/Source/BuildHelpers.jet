@@ -54,11 +54,11 @@ ir_math_scalar_type: fn(type_name: String) -> Type Never! {
     Type.Float
 }
 
-// Rust's f64.NAN, the positive quiet NaN 0x7FF8000000000000, from its bits.
-// `0.0 / 0.0` is not a constant: a compiler built by rustc folds it to this
-// value while a natively built compiler divides at run time and gets x86's
-// negative default NaN 0xFFF8000000000000, so the emitted bits would depend
-// on which compiler built the compiler.
+// The positive quiet NaN 0x7FF8000000000000, from its bits. `0.0 / 0.0` is
+// not a constant: folding it at compile time yields this value while a
+// natively built compiler divides at run time and gets x86's negative
+// default NaN 0xFFF8000000000000, so the emitted bits would depend on which
+// compiler built the compiler.
 ir_canonical_nan: fn() -> Float Never! { math.from_bits(0x7FF8000000000000) }
 
 // A checked numeric bound (`Int.MAX`, `U64.MAX`, `Float.NAN`, ...). Every integer bound fits a

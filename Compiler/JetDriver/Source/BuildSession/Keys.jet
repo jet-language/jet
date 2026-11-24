@@ -1,8 +1,8 @@
-// Stable static plan identity: the Rust v2 length-prefixed byte contract.
+// Stable static plan identity: the v2 length-prefixed byte contract.
 // These keys contain no observed filesystem/cache/runtime facts.
 // This file is compiler-private linkage, not the public core.build module.
-// Reuse the compiler's canonical Rust Debug scalar table for failed values
-// and key recipes; no second Unicode-printability convention.
+// Reuse the compiler's canonical Debug scalar table for failed values and key
+// recipes; no second Unicode-printability convention.
 use {
     jet_foundation.[JET_RUST_DEBUG_ESCAPED_RANGES]
     build_crypto: core.crypto
@@ -110,6 +110,9 @@ build_key_target_kind: fn(kind: String) -> String Never! {
         "install" -> "Install"
         "package" -> "Package"
         "publish" -> "Publish"
+        // Unreachable: a BuildSessionTarget is made only by
+        // build_session_add_target, whose eight callers (Session.jet's
+        // `b.add_*` handlers) pass exactly the eight kinds above.
         else -> panic("invalid checked target kind")
     }
 }
@@ -171,6 +174,7 @@ build_key_debug_text: fn(value: String) -> String Never! {
                         if number == 0 -> break
                     }
                     digits.reverse()
+                    // Unreachable: every byte comes from the ASCII alphabet above.
                     hex: String.from_bytes(digits) ?? panic("hex is ASCII")
                     parts.push("\\u{{{hex}}}")
                 } else { parts.push(String.from_bytes_lossy(raw[start..<position])) }
@@ -188,6 +192,8 @@ build_key_contribution: fn(value: BuildSessionValue) -> String Never! {
         .Char(data) -> "Char('{data}')"
         .Text(data) -> "Text({build_key_debug_text(data)})"
         .Enum(data) -> "Enum({build_key_debug_text(data)})"
+        // Unreachable: build_session_contribute, the one writer of
+        // `state.contributions`, refuses these four values before it records.
         .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> panic("invalid checked build contribution")
     }
 }

@@ -220,8 +220,8 @@ services_service_spec: fn(env: ^ShellEnv, plan: DevServicePlan, resolved: ^Servi
         kind.prepare(if resolved.ports.len() > 0 -> resolved.ports[0] else -> kind.port(), resolved.data_dir, env)
     }
     services_remove_quiet(services_stopping_path(resolved.dir))
-    // Create (truncate) both logs up front, as Rust's `File::create` did, so
-    // an unwritable log fails before spawn.
+    // Create (truncate) both logs up front, so an unwritable log fails before
+    // spawn.
     _: files.create(services_stdout_path(resolved.dir)) ?? return Err(ServicesError.new("{err}"))
     _: files.create(services_stderr_path(resolved.dir)) ?? return Err(ServicesError.new("{err}"))
     if resolved.run.len() == 0 {

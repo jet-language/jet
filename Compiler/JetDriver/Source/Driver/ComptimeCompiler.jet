@@ -261,10 +261,7 @@ jet_driver_compiler_receipt: fn(path: String, root: String, span: Span) -[FS, En
     }
     if jet_driver_run_receipt_decode(bytes) == {
         .Ok(receipt) -> {
-            sections := [TComptimeValue]{}
-            loop section in receipt.sections {
-                sections.push(jet_driver_compiler_pair(section.name, section.type_name))
-            }
+            sections: loop section in receipt.sections -> jet_driver_compiler_pair(section.name, section.type_name)
             TComptimeValue.Present{
                 value: TComptimeValue.Struct{
                     type_name: CORE_COMPILER_RUN_RECEIPT,

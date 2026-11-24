@@ -197,8 +197,7 @@ use {
 // The one language edition (greenfield: one meaning, no edition-gated behavior).
 JET_DRIVER_EDITION: "2026"
 
-// S51 (Rust `Syntax.FIRST_PARTY_RESERVED`): first-party short names reserved
-// before packages land.
+// S51: first-party short names reserved before packages land.
 JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
     "core",
     "jet",
@@ -1379,11 +1378,10 @@ JetDriverInlineCarrier: struct {
     block: JetDriverInlinePackage,
 }
 
-// The entry root's inline Package carrier (Rust Loader `load_file`): the
-// entry's own block, else the stock entry `run.jet` / `src/run.jet`
-// (DEFAULT_ENTRY_FILE) that carries one (`find_inline_package_root_checked`). A structure failure
-// (E1360/E1361/E1362) or a carrier beside `package.jet` (E1363) is reported
-// at the carrier's path and selects no carrier.
+// The entry root's inline Package carrier: the entry's own block, else the stock entry `run.jet`
+// / `src/run.jet` (DEFAULT_ENTRY_FILE) that carries one (`find_inline_package_root_checked`). A
+// structure failure (E1360/E1361/E1362) or a carrier beside `package.jet` (E1363) is reported at
+// the carrier's path and selects no carrier.
 jet_driver_root_inline_carrier: fn(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, has_manifest: Bool, diagnostics: ^[Diagnostic]) -> JetDriverInlineCarrier? {
     root: snapshot.roots[root_index]
     if root.identity != snapshot.entry_root_identity -> return None
@@ -1418,7 +1416,7 @@ jet_driver_root_inline_carrier: fn(snapshot: JetDriverAuthorizedSourceSnapshot, 
         if !block.found -> next
         if has_manifest {
             // The entry's own block and a stock carrier both report the
-            // registry row (Rust `package_facts_for_entry`).
+            // registry row.
             conflict: jet_driver_row_diagnostic("E1363", Val(Span{start: block.start, end: block.end}))
             diagnostics.push(diagnostic_with_source_path(conflict, carrier_path, 0))
             return None
@@ -2878,10 +2876,8 @@ jet_driver_find_module_import_target: fn(
     dependency: jet_driver_find_dependency(source_package, module_name)
     if dependency == .Val(selected_dependency) {
         if selected_dependency.target_root_index < 0 {
-            // A version dependency resolves only to the toolchain's
-            // first-party battery of its name (the CLI's
-            // jet_cli_first_party_battery, after the Rust jetpack's embedded
-            // batteries registry).
+            // A version dependency resolves only to the toolchain's first-party
+            // battery of its name.
             if selected_dependency.script_version == None && jet_driver_dependency_selector(selected_dependency.source, selected_dependency.name) == .Val(selector) {
                 diagnostics.push(jet_driver_diagnostic("E0603", span, "the version dependency `{selected_dependency.name}` (`{selector}`) has no matching first-party battery", "a version dependency resolves only to the toolchain's battery `Jetpack/Provider/Batteries/{selected_dependency.name}`, whose package.jet declares that name and a version the selector matches", "depend on a first-party battery by its name and version, or use a path dependency such as `./{selected_dependency.name}`"))
                 return None
@@ -3100,9 +3096,9 @@ jet_driver_missing_file_import: fn(unit: JetDriverSourceUnit, import_path: Strin
     jet_driver_diagnostic("E0603", span, "can't find the file `{import_path}`", "a file import path must point at an existing `.jet` file next to this file's tree", "create `{import_path}.jet`, or fix the path in `use \"{import_path}\"` (authority path `{prefix}{resolved.path}` is missing)")
 }
 
-// (Rust `resolve_code_module_file`): the source unit a body-less
-// `name: module` declares, `name.jet` beside the declaring file, else
-// `name/module.jet`; E0607 when neither is in the source snapshot.
+// The source unit a body-less `name: module` declares, `name.jet` beside the
+// declaring file, else `name/module.jet`; E0607 when neither is in the source
+// snapshot.
 jet_driver_code_module_file: fn(source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, name: String, name_span: Span, diagnostics: ^[Diagnostic]) -> Int? {
     candidates: [String]{name, "{name}/module"}
     loop candidate in candidates {
@@ -3118,9 +3114,8 @@ jet_driver_code_module_file: fn(source_units: [JetDriverSourceUnit], unit: JetDr
     None
 }
 
-// E0604 for an import that closes a cycle. Rust lists the load stack: the
-// entry's import chain down to the file that is imported again, then the
-// circle itself.
+// E0604 for an import that closes a cycle. The entry's import chain down to the
+// file that is imported again, then the circle itself.
 jet_driver_import_cycle: fn(resolved_imports: [SemaRegistrationImportEdge], source_units: [JetDriverSourceUnit], table: ModuleTable, entry_identity: ModuleID, target_identity: ModuleID, module_identity: ModuleID) -> Diagnostic {
     lead: jet_driver_module_path(resolved_imports, entry_identity, target_identity) ?? [ModuleID]{target_identity}
     chain: jet_driver_module_path(resolved_imports, target_identity, module_identity) ?? [ModuleID]{module_identity}
@@ -3657,15 +3652,14 @@ jet_driver_path_leaf: fn(path: String) -> String Never! {
     parts.pop() ?? path
 }
 
-// Make every package one namespace. A name declared in two
-// member files is E0624 and a library package declaring `run: fn` is E0625.
-// Each member records its package (`namespace`), the names it contributes
-// (`namespace_names`) and the command functions it keeps to itself
-// (`namespace_private`, which sema doesn't refuse as E0105 against a
-// sibling's same name); semantic registration keeps ONE name -> declaring
-// member table per package and consults it after a module's own
-// declarations and imports (Rust `NameLedger.namespace_owner`). No member
-// receives import rows or edges for its siblings.
+// Make every package one namespace. A name declared in two member files is
+// E0624 and a library package declaring `run: fn` is E0625. Each member records
+// its package (`namespace`), the names it contributes (`namespace_names`) and
+// the command functions it keeps to itself (`namespace_private`, which sema
+// doesn't refuse as E0105 against a sibling's same name); semantic registration
+// keeps ONE name -> declaring member table per package and consults it after a
+// module's own declarations and imports. No member receives import rows or
+// edges for its siblings.
 jet_driver_bind_package_namespaces: fn(
     modules: ^[JetDriverLoadedModule],
     source_units: [JetDriverSourceUnit],
@@ -3795,9 +3789,9 @@ jet_driver_core_source_owner_key: fn(module_name: String) -> String Never! {
     "{JET_DRIVER_CORE_SOURCE_ROOT}/{module_name}"
 }
 
-// Rust `core_source_import_module`: the Core module an import names, including
-// a selective `use core.x.[T]` import. A `jet.runtime.<m>` interface module
-// loads through the same Core unit lookup (RuntimeInterface.jet).
+// The Core module an import names, including a selective `use core.x.[T]`
+// import. A `jet.runtime.<m>` interface module loads through the same Core unit
+// lookup (RuntimeInterface.jet).
 jet_driver_core_import_module: fn(declaration: ImportDecl) -> String? {
     name := ""
     if declaration.kind == {
@@ -3811,12 +3805,11 @@ jet_driver_core_import_module: fn(declaration: ImportDecl) -> String? {
     None
 }
 
-// Rust `check_reserved_import`: a file or local module import may not bind a
-// root of `reserved` (E1002): JET_DRIVER_RESERVED_ROOTS as each unit loads, then the
-// roots of the languages the loaded packages declare
-// (jet_driver_check_package_languages). Selective imports load nothing, Core
-// paths are resolved by the Core unit lookup (E1001), and target profiles are
-// compiler-owned namespaces.
+// A file or local module import may not bind a root of `reserved` (E1002):
+// JET_DRIVER_RESERVED_ROOTS as each unit loads, then the roots of the languages the
+// loaded packages declare (jet_driver_check_package_languages). Selective imports
+// load nothing, Core paths are resolved by the Core unit lookup (E1001), and target
+// profiles are compiler-owned namespaces.
 jet_driver_check_reserved_import: fn(declaration: ImportDecl, reserved: [String], diagnostics: ^[Diagnostic]) -> Bool {
     if declaration.kind == .Unqualified(_, _, _, _, _) -> return true
     if jet_driver_core_import_module(declaration) != None -> return true
@@ -3891,9 +3884,8 @@ jet_driver_language_root: fn(block: TraitImplBlock) -> String? {
     None
 }
 
-// The one leading `package: { … }` carrier of a source
-// (Rust `Package.extract_inline_package`). Offsets index the original text;
-// `error` is the E1360/E1361/E1362 structure failure.
+// The one leading `package: { … }` carrier of a source. Offsets index the
+// original text; `error` is the E1360/E1361/E1362 structure failure.
 JetDriverInlinePackage: struct {
     found: Bool,
     start: Int,
@@ -4046,7 +4038,7 @@ jet_driver_inline_block_end: fn(bytes: [U8], open: Int) -> Int Never! {
 }
 
 // The start of a `package: {` carrier in top-level item position at or after
-// `from`, or -1 (Rust `find_top_level_inline_package`).
+// `from`, or -1.
 jet_driver_inline_top_level_package: fn(bytes: [U8], from: Int) -> Int Never! {
     if !jet_driver_inline_package_spot(bytes, from) -> return -1
     jet_driver_inline_item_scan(bytes, from, bytes.len()).found
@@ -4235,10 +4227,7 @@ jet_driver_inline_top_level_package_threads: fn(bytes: [U8], from: Int, threads:
     bounds.push(bytes.len())
     if bounds.len() <= 2 -> return jet_driver_inline_top_level_package(bytes, from)
     inputs: Shared{JetDriverInlineShared{bytes: bytes}}
-    parts := [Shared<JetDriverInlinePart>]{}
-    loop part in 0..<(bounds.len() - 1) {
-        parts.push(Shared{JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}}})
-    }
+    parts: loop part in 0..<(bounds.len() - 1) -> Shared{JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}}}
     _ := jet_driver_inline_scan_parts(inputs, parts, 0)
     loop part in 0..<parts.len() {
         output := jet_driver_inline_part_take(parts[part])
@@ -4251,6 +4240,9 @@ jet_driver_inline_top_level_package_threads: fn(bytes: [U8], from: Int, threads:
 // A part's output row, after its thread joined.
 jet_driver_inline_part_take: fn(part: Shared<JetDriverInlinePart>) -> JetDriverInlineScan {
     permit: part.guard_edit()
+    // Unreachable: the one caller takes each part once, after
+    // jet_driver_inline_scan_parts joined it, and its thread pushed one output
+    // (a thread that stops stops that join first).
     permit.value.outputs.pop() ?? panic("an item scan thread left no output")
 }
 
@@ -4276,8 +4268,8 @@ jet_driver_inline_scan_part: fn(inputs: Shared<JetDriverInlineShared>, part: Sha
     1
 }
 
-// Blank `start..<end` with spaces, keeping line endings, so every span stays
-// an offset into the original text (Rust `InlinePackageBlock.mask_source`).
+// Blank `start..<end` with spaces, keeping line endings, so every span stays an
+// offset into the original text.
 jet_driver_blank_source_range: fn(source: String, start: Int, end: Int) -> String {
     bytes := source.bytes()
     jet_driver_blank_bytes(bytes, start, end)
@@ -4294,8 +4286,7 @@ jet_driver_blank_bytes: fn(bytes: ^[U8], start: Int, end: Int) Never! {
     }
 }
 
-// The source an ordinary parse reads: the inline carrier masked away (Rust
-// `Package.mask_inline_package_source`).
+// The source an ordinary parse reads: the inline carrier masked away.
 jet_driver_mask_inline_package: fn(source: String, carrier: JetDriverInlinePackage) -> String {
     // copy: the masked source is a new owned String. Without an inline carrier it equals `source`,
     // the caller's file text (a read parameter), which stays with the caller.
@@ -4304,8 +4295,8 @@ jet_driver_mask_inline_package: fn(source: String, carrier: JetDriverInlinePacka
 }
 
 // Only the carrier's body, at its original offsets, for the manifest field
-// parser (Rust `InlinePackageBlock.body`). Every byte outside the body is
-// blanked, so text after the carrier never reaches the field lexer.
+// parser. Every byte outside the body is blanked, so text after the carrier
+// never reaches the field lexer.
 jet_driver_inline_package_body: fn(source: String, carrier: JetDriverInlinePackage) -> String {
     bytes := source.bytes()
     loop offset in 0..<bytes.len() {
@@ -4377,13 +4368,11 @@ JetDriverCoreIdentifierDemand: struct {
     // with `ParseError`. Syntactic, as for `.abs`: Sema alone decides
     // whether the receiver is a Sender or a number's text.
     prelude_failure: Bool{false},
-    // Rust sema checks a qualified `core.<module>.<member>` call through a root
-    // `use core: core` alias by its fixed typed row and lowers it to the
-    // member's Core ABI host function (hmac_sha256). Natively that member's
-    // body is its Core source module, so the scan records each
-    // `<head>.<segment>` (and `<head>.<segment>.<segment>`) chain whose first
-    // segment names a Core module, and the loader loads that module when
-    // `<head>` aliases `core`.
+    // A qualified `core.<module>.<member>` call through a root `use core:
+    // core` alias names that member's Core source module, so the scan records
+    // each `<head>.<segment>` (and `<head>.<segment>.<segment>`) chain whose
+    // first segment names a Core module, and the loader loads that module
+    // when `<head>` aliases `core`.
     core_paths: [String],
     // The method of each `input.<method>` call the source spells (`input`
     // not itself a member): `input.csv<Row>()` is core.encoding.csv
@@ -4567,10 +4556,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     bare_alias := [[Int]]{}
     loop row in CORE_BARE_SOURCE_MODULES {
         bare.push(jet_driver_core_demand_name(tables, row.name))
-        aliases := [Int]{}
-        loop alias in jet_driver_core_bare_aliases(row.name) {
-            aliases.push(jet_driver_core_demand_name(tables, alias))
-        }
+        aliases: loop alias in jet_driver_core_bare_aliases(row.name) -> jet_driver_core_demand_name(tables, alias)
         bare_alias.push(aliases)
     }
     bare_rows := [Int]{}
@@ -4598,10 +4584,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     }
     typed_heads := [Int]{}
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
-    context_fields := [Int]{}
-    loop field in SEMA_CONTEXT_CORE_FIELDS {
-        context_fields.push(jet_driver_core_demand_name(tables, field))
-    }
+    context_fields: loop field in SEMA_CONTEXT_CORE_FIELDS -> jet_driver_core_demand_name(tables, field)
     prelude_failure_names := [Int]{jet_driver_core_demand_name(tables, "send")}
     loop at in JET_DRIVER_PRELUDE_FAILURE_METHODS {
         prelude_failure_names.push(jet_driver_core_demand_name(tables, BUILTIN_METHOD_ROWS[at].name))
@@ -4904,10 +4887,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: ^^Lexed, runs: [Int
     }
     names: jet_driver_core_demand_names(lexed.tables)
     inputs: Shared{JetDriverDemandShared{lexed: [Lexed]{lexed.move()}, names: names, collect_bare: collect_bare}}
-    parts := [Shared<JetDriverDemandPart>]{}
-    loop part in 0..<workers {
-        parts.push(Shared{JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}}})
-    }
+    parts: loop part in 0..<workers -> Shared{JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}}}
     _ := jet_driver_demand_scan_parts(inputs, parts, runs, 0)
     loop part in parts {
         output := jet_driver_demand_part_take(part)
@@ -4951,12 +4931,17 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: ^^Lexed, runs: [Int
 // The lexed unit, back from the shared inputs after the join.
 jet_driver_demand_shared_take: fn(inputs: Shared<JetDriverDemandShared>) -> Lexed {
     permit: inputs.guard_edit()
+    // Unreachable: the demand scan makes `inputs` with the one lexed unit, and
+    // its threads only read it; this take runs once, after every join.
     permit.value.lexed.pop() ?? panic("the demand scan left the lexed unit in its shared inputs")
 }
 
 // A part's output row, after its thread joined.
 jet_driver_demand_part_take: fn(part: Shared<JetDriverDemandPart>) -> JetDriverCoreIdentifierDemand {
     permit: part.guard_edit()
+    // Unreachable: the one caller takes each part once, after
+    // jet_driver_demand_scan_parts joined it, and its thread pushed one output
+    // (a thread that stops stops that join first).
     permit.value.outputs.pop() ?? panic("a demand scan thread left no output")
 }
 
@@ -5041,7 +5026,7 @@ jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, thread
 }
 
 // A user source parse: the inline carrier is masked; a structure failure
-// replaces the parse (Rust Loader `prepare_frontend_module`).
+// replaces the parse.
 jet_driver_parse_user_source: fn(text: String) -> ParseResult {
     unit := jet_driver_parse_user_unit(text, false)
     unit.parsed.move()
@@ -5412,10 +5397,10 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
     kept
 }
 
-// The runtime unit row (`core.<area>.runtime.<unit>`) a Core import path
-// names, itself or one member of it (`core.a.runtime.u.f`). The longest unit
-// wins, so nested `core.text.runtime.assets.x` is never member `x` of a
-// sibling unit `core.text.runtime.assets` (Rust `core_runtime_import`).
+// The runtime unit row (`core.<area>.runtime.<unit>`) a Core import path names,
+// itself or one member of it (`core.a.runtime.u.f`). The longest unit wins, so
+// nested `core.text.runtime.assets.x` is never member `x` of a sibling unit
+// `core.text.runtime.assets`.
 jet_driver_core_runtime_row: fn(core_sources: [JetDriverCoreSource], path: String) -> Int? {
     best := Int?{None}
     best_len := 0
@@ -5432,10 +5417,9 @@ jet_driver_core_runtime_row: fn(core_sources: [JetDriverCoreSource], path: Strin
     best
 }
 
-// Rust `bind_core_runtime_imports`: in a Core source, `use core.a.runtime.u.f`
-// or `use g: core.a.runtime.u.f` is the one-member list
-// `use core.a.runtime.u.[f]` (local name `g`), so the unit resolves through
-// the selective-import path like any member list.
+// In a Core source, `use core.a.runtime.u.f` or `use g: core.a.runtime.u.f` is
+// the one-member list `use core.a.runtime.u.[f]` (local name `g`), so the unit
+// resolves through the selective-import path like any member list.
 jet_driver_core_runtime_member_imports: fn(program: ^Program, core_sources: [JetDriverCoreSource]) Never! {
     rewritten := [ImportDecl]{}
     loop declaration in program.imports {
@@ -5636,9 +5620,9 @@ jet_driver_unit_text_declares: fn(request: JetDriverCompileRequest, unit: JetDri
 
 // The runtime unit row a source file is when it sits at that unit's
 // `Core/<area>/runtime/<unit>.jet` path and is byte-identical to the embedded
-// unit (Rust `core_runtime_entry`). Only that exact text earns Core-source
-// privileges, so `jet test` over a unit runs its controls through the real
-// loader path and grants nothing Core does not already run.
+// unit. Only that exact text earns Core-source privileges, so `jet test` over a
+// unit runs its controls through the real loader path and grants nothing Core
+// does not already run.
 jet_driver_runtime_entry_row: fn(core_sources: [JetDriverCoreSource], unit: JetDriverSourceUnit, source: String) -> Int? {
     loop (row_index, row) in core_sources {
         if !row.runtime -> next
@@ -5650,8 +5634,7 @@ jet_driver_runtime_entry_row: fn(core_sources: [JetDriverCoreSource], unit: JetD
 }
 
 // E1001 for a program outside Core that names the Core-private
-// `core.<area>.runtime` namespace (Rust `core_private_unit_diagnostic`), and
-// E1013 for one that names `jet_builtins`.
+// `core.<area>.runtime` namespace, and E1013 for one that names `jet_builtins`.
 jet_driver_core_private_unit: fn(module_name: String, span: Span) -> Diagnostic? {
     if module_name == CORE_BUILTINS_MODULE || module_name.starts_with("{CORE_BUILTINS_MODULE}.") {
         return Val(jet_driver_row_diagnostic("E1013", Val(span)))
@@ -6171,7 +6154,7 @@ jet_driver_fill_line_starts: fn(request: JetDriverCompileRequest, source_units: 
 
 jet_driver_line_starts_range: fn(texts: [String], start: Int, end: Int) -> [[Int]] Never! {
     out := [[Int]]{}
-    out.try_reserve(end - start) ?? panic("reserve failed")
+    out.try_reserve(end - start) ?? ()
     loop i in start..<end -> out.push(parser_line_starts(texts[i].bytes()))
     out
 }
@@ -6232,8 +6215,8 @@ jet_driver_core_unit: fn(
         target: jet_driver_add_core_unit(source_units, queued, generated, row.module_name, row.path, row_index, row.source())
         loop (part_index, part) in core_sources {
             if part.owner != module_name || part.owned_members.len() == 0 -> next
-            // Rust Loader schedules each part module once (`scheduled.insert`):
-            // an alias import may already have cataloged this part.
+            // Each part module is scheduled once: an alias import may already
+            // have cataloged this part.
             scheduled := false
             loop unit in source_units {
                 if jet_driver_unit_is_embedded(unit) && unit.module_name == part.module_name {
@@ -6329,8 +6312,9 @@ jet_driver_owned_parts: fn(source_units: ^[JetDriverSourceUnit], queued: ^[Bool]
 }
 
 // E1001 for a `core.*` path that names no Core module. The Core-private
-// `core.<area>.runtime` namespace names its public module. A selective `use core.x.[..]` is checked
-// by Rust's checker, whose fix reads "import one of" (`fix_verb`).
+// `core.<area>.runtime` namespace names its public module. A selective
+// `use core.x.[..]` is checked by the checker, whose fix reads "import one
+// of" (`fix_verb`).
 jet_driver_unknown_core_module: fn(module_name: String, span: Span, fix_verb: String) -> Diagnostic {
     if jet_driver_core_private_unit(module_name, span) == .Val(private) -> return private
     jet_driver_diagnostic("E1001", span, "there is no core module `{module_name}`", "`core` is compiler-known in M10, and only the frozen core modules exist", "{fix_verb} one of: {jet_driver_importable_core_modules()}")
@@ -6381,8 +6365,8 @@ jet_driver_place_core_module: fn(modules: [JetDriverLoadedModule], source_units:
 // 2633-2785 appends the Core source modules after every user module: first the
 // Core modules user code imports (or reaches by naming a bare `URL`), in Core
 // table order, each followed by the private parts it owns; then, breadth first,
-// the Core modules those import, in import order. Host-only Core modules, which
-// Rust never loads, come last in load order.
+// the Core modules those import, in import order. Host-only Core modules come
+// last in load order.
 jet_driver_order_core_modules: fn(modules: ^^[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], bare_modules: [String]) -> [JetDriverLoadedModule] Never! {
     // Discover the complete index order before taking any module. Pop and
     // keyed removal transfer ownership without shifting a vector per module.
@@ -6558,9 +6542,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
 
     source_units := catalog.source_units
     selected_entry: source_units[entry_index ?? 0]
-    // Rust read_load threads the organization floor, then the entry package's
-    // policy, through the entire user-source closure, including imports, not
-    // each dependency's own floor.
+    // The organization floor, then the entry package's policy, apply to the
+    // entire user-source closure, including imports, not each dependency's
+    // own floor.
     // copy: the request keeps its organization rows for the rest of the compile.
     package_policy := request.organization_policy.copy()
     loop package in catalog.packages {
@@ -6944,9 +6928,9 @@ jet_driver_load_walk: fn(
                 words = Val(spelled.move())
             }
         }
-        // Established bare names use the same declaring-owner table as Rust.
-        // The lowercase URL typed head remains supported without adding a
-        // lowercase nominal alias.
+        // Established bare names use the same declaring-owner table. The
+        // lowercase URL typed head remains supported without adding a lowercase
+        // nominal alias.
         if !embedded {
             loop bare in CORE_BARE_SOURCE_MODULES {
                 if !demand.bare_names.contains(bare.name) -> next
@@ -7211,8 +7195,8 @@ jet_driver_load_walk: fn(
             _ := aliases.add(alias_key, target_unit_index)
             target_unit: source_units[target_unit_index]
             target_identity: module_intern(table, jet_driver_unit_module_identity(target_unit))
-            // Core library modules import one another like the Rust loader's
-            // transitive Core closure; only user module edges must be acyclic.
+            // Core library modules import one another as a transitive Core
+            // closure; only user module edges must be acyclic.
             if !jet_driver_unit_is_embedded(target_unit) && jet_driver_module_reaches(module_edges, target_identity, module_identity) {
                 diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, table, module_intern(table, jet_driver_unit_module_identity(source_units[entry_index ?? 0])), target_identity, module_identity))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
@@ -7300,12 +7284,12 @@ jet_driver_load_walk: fn(
                 }
             }
         }
-        // (Rust `load_file`): a body-less `name: module` loads the file
-        // it declares and binds it as a synthetic file import aliased `name`,
-        // after the file's own imports. Body-less modules of Core sources
-        // name sibling Core files the catalog already holds as modules.
-        // Keep synthetic imports beside the program until every lookup on its
-        // own items and imports has finished, then append them to it.
+        // A body-less `name: module` loads the file it declares and binds it as
+        // a synthetic file import aliased `name`, after the file's own imports.
+        // Body-less modules of Core sources name sibling Core files the catalog
+        // already holds as modules. Keep synthetic imports beside the program
+        // until every lookup on its own items and imports has finished, then
+        // append them to it.
         synthetic_imports := [ImportDecl]{}
         if !embedded {
             loop item in program.items {
@@ -7321,8 +7305,8 @@ jet_driver_load_walk: fn(
                         diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, table, module_intern(table, jet_driver_unit_module_identity(source_units[entry_index ?? 0])), target_identity, module_identity))
                         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                     }
-                    // Rust names the file relative to the declaring file,
-                    // without its extension: `name` or `name/module`.
+                    // Name the file relative to the declaring file, without
+                    // its extension: `name` or `name/module`.
                     direct: jet_driver_file_import_path(unit.relative_path, definition.name)
                     import_path: if direct.valid && direct.path == target_unit.relative_path -> definition.name else -> "{definition.name}/module"
                     synthetic: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
@@ -7370,7 +7354,7 @@ jet_driver_load_walk: fn(
                     core_module: jet_driver_core_import_module(scoped.declaration)
                     if target_index == None {
                         if core_module == .Val(core_name) {
-                            // Rust reports an unknown selective Core path per
+                            // Report an unknown selective Core path per
                             // member, naming `core.x.member`, at the module path.
                             unknown := [Diagnostic]{}
                             target_index = jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, core_name, importer_core, entry_module, entry_index ?? 0, module_alias_span, unknown)

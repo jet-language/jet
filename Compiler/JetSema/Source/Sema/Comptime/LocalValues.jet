@@ -126,10 +126,7 @@ sema_comptime_local_value_candidate: fn(
     }
     graph: program.registration_graph ?? return false
     if graph.check_tests && !graph.every_core_body -> return false
-    calls := [SemaCallSiteFact]{}
-    loop index in fact_start..<context.call_facts.len() {
-        calls.push(context.call_facts[index].copy())
-    }
+    calls: loop index in fact_start..<context.call_facts.len() -> context.call_facts[index].copy()
     sema_comptime_call_facts_impurity(graph, calls, true) == None
 }
 

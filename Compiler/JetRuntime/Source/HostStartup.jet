@@ -45,9 +45,8 @@ rt_host_env_capture_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// Rust 1.90.0 library/std/src/sys/env/unix.rs, env().parse:
-// search '=' AFTER byte zero, permit names starting '=', skip malformed rows.
-// https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/env/unix.rs
+// Environment parsing: search '=' AFTER byte zero, permit names starting
+// '=', skip malformed rows.
 host_environment_split: fn(bytes: I64) -> I64 {
     // `bytes` borrows one live NUL-terminated startup string.
     if (rt_text_byte(bytes) == I64{0}) { return I64{-1} }

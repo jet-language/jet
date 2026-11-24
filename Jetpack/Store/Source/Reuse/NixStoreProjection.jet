@@ -52,9 +52,8 @@ store_reuse_entries_by_id: fn(entries: [StoreEntry]) -> [StoreEntry] Never! {
     sorted
 }
 
-// Rust `nix_store_projection_for_entry_index`: follow the recorded digest
-// edges of the read-only package index instead of replaying the closure
-// graph. An incomplete index is a warm miss.
+// Follow the recorded digest edges of the read-only package index instead of
+// replaying the closure graph. An incomplete index is a warm miss.
 store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreEntry, snapshot_root: String, index: NixProjectionIndex) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
@@ -106,8 +105,7 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
     store_reuse_projection_list(roots, producer, logical_digests, snapshot_root)
 }
 
-// Rust `nix_store_projection_for_entry`: the closure record in the Hangar
-// graph names every transitive runtime object.
+// The closure record in the Hangar graph names every transitive runtime object.
 store_nix_store_projection_for_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
@@ -220,8 +218,8 @@ store_reuse_projection_list: fn(roots: HangarRoots, producer: ProducerRecord, lo
     Ok(projection)
 }
 
-// Rust `canonical_nix_output_path`: `nix.output.<name>`, or `nix.store-path`
-// for `out`; both must agree when present.
+// `nix.output.<name>`, or `nix.store-path` for `out`; both must agree when
+// present.
 store_reuse_canonical_nix_output_path: fn(producer: ProducerRecord, name: String) -> String StoreError! {
     output: store_reuse_store_fact(producer.facts.get("nix.output.{name}"))
     store_path: if name == "out" -> store_reuse_store_fact(producer.facts.get("nix.store-path")) else -> String?{None}
@@ -250,8 +248,8 @@ store_reuse_store_fact: fn(value: String?) -> String? Never! {
     Val(fact)
 }
 
-// Rust `add_nix_projection_path`: one plain `/nix/store/<name>` per digest;
-// a logical path may not map to two digests.
+// One plain `/nix/store/<name>` per digest; a logical path may not map to two
+// digests.
 store_reuse_add_nix_projection_path: fn(logical_digests: ^[String:String], logical: String, digest: String) StoreError! {
     name: files.basename(logical)
     if logical != "/nix/store/{name}" || name == "" || name == "." || name == ".." {
@@ -312,11 +310,10 @@ OpenedNixProjection: struct {
     bindings: [NixProjectionBinding],
 }
 
-// Rust `open_nix_projection_sources` (Linux): pin each source no-follow. A
-// held directory reaches the child at its reserved descriptor; a single-file
-// object, whose identity validation re-checks, and a symlink root, whose
-// target is the witness, project as their canonical source. Other hosts
-// project the verified sources directly.
+// Pin each source no-follow. A held directory reaches the child at its reserved
+// descriptor; a single-file object, whose identity validation re-checks, and a
+// symlink root, whose target is the witness, project as their canonical source.
+// Other hosts project the verified sources directly.
 store_reuse_open_nix_projection_sources: fn(projections: [NixStoreProjection]) -> OpenedNixProjection StoreError! {
     stable := [NixProjectionPath]{}
     bindings := [NixProjectionBinding]{}

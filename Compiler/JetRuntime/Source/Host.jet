@@ -40,9 +40,9 @@ HOST_ROOT_BYTES: I64{69632}
     }
 }
 
-// Rust lang_start ignores SIGPIPE for program mains, not for host-loaded
-// libraries. The native program-main wrapper calls this after init arrays;
-// entryless hosts retain their signal disposition unless opting in explicitly.
+// SIGPIPE is ignored for program mains, not for host-loaded libraries. The
+// native program-main wrapper calls this after init arrays; entryless hosts
+// retain their signal disposition unless opting in explicitly.
 #Export(c) jet_rt_host_program_start: fn() {
     #Unsafe("rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE") {
         status: os_syscall_stack4_i64(I64{13}, I64{13}, I64{1}, I64{0}, I64{0}, I64{0}, I64{8})
@@ -308,8 +308,8 @@ host_is_tty: fn(fd: I64) -> Bool {
 
 // A fork's hold on stdout (RouteSys.jet jet_sys_fork_raw): the lock, with
 // pending bytes drained first so the child never re-emits bytes the parent
-// already printed (Rust's line writer holds none). The forking thread
-// blocks on the lock and never parks a fiber, as for the fork gate.
+// already printed. The forking thread blocks on the lock and never parks a
+// fiber, as for the fork gate.
 host_fork_hold: fn() {
     if (host_root == I64{0}) {
         return

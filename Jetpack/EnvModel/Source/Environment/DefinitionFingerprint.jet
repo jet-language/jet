@@ -71,7 +71,7 @@ FingerprintBudget: struct {
     }
 }
 
-// Rust `Path::components` contains `Component::ParentDir`.
+// Whether the path has a `..` component.
 env_hook_has_parent_component: fn(path: String) -> Bool Never! {
     loop part in path.split("/") {
         if part == ".." -> return true
@@ -79,7 +79,7 @@ env_hook_has_parent_component: fn(path: String) -> Bool Never! {
     false
 }
 
-// Rust `Path::starts_with`: whole components only.
+// Whole components only.
 env_hook_path_within: fn(path: String, root: String) -> Bool Never! {
     if path == root -> return true
     base: if root.ends_with("/") -> root else -> "{root}/"
@@ -202,8 +202,8 @@ env_hook_u64_le: fn(value: Int) -> [U8] Never! {
     out
 }
 
-// Rust `SHA256::read_file_nofollow`: the bytes of a regular file opened
-// without following a final link, or None when the file exceeds `limit`.
+// The bytes of a regular file opened without following a final link, or None
+// when the file exceeds `limit`.
 env_hook_read_nofollow: fn(path: String, limit: Int) -[FS]> [U8]? IOError! {
     reader := files.open(path, links: .Refuse)
     info: reader.stat()
@@ -221,7 +221,7 @@ env_hook_read_nofollow: fn(path: String, limit: Int) -[FS]> [U8]? IOError! {
     Ok(Val(bytes))
 }
 
-// Rust `Path::components` split: normal parts and whether `..` appears.
+// Normal parts and whether `..` appears.
 env_hook_normal_component_count: fn(path: String) -> Int Never! {
     count := 0
     loop part in path.split("/") {
@@ -321,7 +321,7 @@ env_hook_add_input_path: fn(root: String, path: String, relative: String, kind: 
     budget.push(inputs, "{kind}:special:{relative}", "file-type={info.kind:Debug}".bytes())
 }
 
-// Rust `Option<SystemTime>` Debug on Unix, the directory modification stamp.
+// The directory modification stamp in its optional `Debug` spelling.
 env_hook_system_time_debug: fn(modified: DateTime) -> String Never! {
     ns: modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     seconds: ns / 1000000000

@@ -147,10 +147,7 @@ jet_cli_solver_atom: fn(affine: JetCLISolverAffine, relation: String) -> JetCLIS
     loop term in affine.terms -> g = jet_cli_solver_gcd(g, term.coefficient)
     reduced := affine.copy()
     if g > 1 {
-        terms := [JetCLISolverTerm]{}
-        loop term in affine.terms {
-            terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
-        }
+        terms: loop term in affine.terms -> JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g}
         constant: if relation == "le" -> -((-affine.constant) /% g) else -> affine.constant /% g
         if relation != "le" && constant * g != affine.constant {
             return Ok(JetCLISolverBool.Constant(relation == "ne"))
@@ -181,10 +178,7 @@ jet_cli_solver_compare: fn(lhs: JetCLISolverAffine, op: String, rhs: JetCLISolve
 // --- canonical formula bytes --------------------------------------------------
 
 jet_cli_solver_terms_json: fn(value: JetCLISolverAffine) -> String Never! {
-    terms := [String]{}
-    loop term in value.terms {
-        terms.push("{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}")
-    }
+    terms: loop term in value.terms -> "{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}"
     "[{terms.join(",")}]"
 }
 
@@ -428,10 +422,7 @@ jet_cli_solver_reduce: fn(row: JetCLISolverDerived) -> JetCLISolverDerived Never
     loop term in row.affine.terms -> g = jet_cli_solver_gcd(g, term.coefficient)
     loop m in row.multipliers -> g = jet_cli_solver_gcd(g, m)
     if g <= 1 -> return row.copy()
-    terms := [JetCLISolverTerm]{}
-    loop term in row.affine.terms {
-        terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
-    }
+    terms: loop term in row.affine.terms -> JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g}
     multipliers := [Int]{}
     loop m in row.multipliers -> multipliers.push(m /% g)
     JetCLISolverDerived{affine: JetCLISolverAffine{constant: row.affine.constant /% g, terms: terms}, multipliers: multipliers}
@@ -484,10 +475,7 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: ^JetCLISolverSteps
                 cp: jet_cli_solver_coefficient(p.affine, variable)
                 cq: -jet_cli_solver_coefficient(q.affine, variable)
                 combined: jet_cli_solver_combine(jet_cli_solver_scale(p.affine, cq), cp, q.affine)
-                multipliers := [Int]{}
-                loop k in 0..<count {
-                    multipliers.push(jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k]))
-                }
+                multipliers: loop k in 0..<count -> jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k])
                 row: jet_cli_solver_reduce(JetCLISolverDerived{affine: combined, multipliers: multipliers})
                 if row.affine.terms.len() == 0 {
                     _: jet_cli_solver_charge(steps)
@@ -633,10 +621,7 @@ jet_cli_solver_search: fn(formula: JetCLISolverFormula, steps: ^JetCLISolverStep
             }
         }
     }
-    parts := [String]{}
-    loop (index, _) in branches {
-        parts.push("{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}")
-    }
+    parts: loop (index, _) in branches -> "{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}"
     Ok(JetCLISolverOutcome.Proved(JetCLISolverProved{certificate: "{{\"branches\":[{parts.join(",")}],\"kind\":\"branches\"}}", steps: steps.used}))
 }
 

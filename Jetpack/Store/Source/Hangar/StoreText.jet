@@ -1,6 +1,6 @@
 // Byte-exact text and framing helpers shared by the Hangar records: lowercase
-// hex fields, Rust `str::lines`, `rsplit_once`, and the length-prefixed
-// frames that feed SHA-256 identities.
+// hex fields, line splitting, splitting at the last separator, and the
+// length-prefixed frames that feed SHA-256 identities.
 
 // Lowercase hex of the UTF-8 bytes of `value`.
 store_hex_text: fn(value: String) -> String Never! { store_hex_bytes(value.bytes()) }
@@ -71,8 +71,7 @@ store_unhex_text: fn(value: String) -> StoreUnhex Never! {
     StoreUnhex.Text(text)
 }
 
-// Rust `str::lines`: split at LF, drop a CR before an LF, and a final LF
-// ends the last line.
+// Split at LF, drop a CR before an LF, and a final LF ends the last line.
 store_text_lines: fn(raw: String) -> [String] Never! {
     if raw == "" -> return [String]{}
     segments: raw.split("\n").to_list()
@@ -90,7 +89,6 @@ store_text_lines: fn(raw: String) -> [String] Never! {
     lines
 }
 
-// Rust `rsplit_once(needle)`.
 store_text_split_last: fn(text: String, needle: String) -> {before: String, after: String}? Never! {
     raw: text.bytes()
     pattern: needle.bytes()
@@ -119,7 +117,7 @@ store_push_u64_le: fn(out: ^[U8], value: Int) Never! {
     loop shift in 0..<8 -> out.push(U8{((value >> (shift * 8))) & 255})
 }
 
-// Append `value` as 16 little-endian bytes (Rust `i128::to_le_bytes`).
+// Append `value` as 16 little-endian bytes.
 store_push_i128_le: fn(out: ^[U8], value: Int) Never! {
     loop shift in 0..<8 -> out.push(U8{((value >> (shift * 8))) & 255})
     fill: if value < 0 -> 255 else -> 0
@@ -137,7 +135,7 @@ store_push_frame: fn(out: ^[U8], field: [U8]) Never! {
     store_push_bytes(out, field)
 }
 
-// Sorted, de-duplicated copy of `values` (Rust `BTreeSet<String>`).
+// Sorted, de-duplicated copy of `values`.
 store_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values.copy()
     sorted.sort()
@@ -149,7 +147,7 @@ store_sorted_unique: fn(values: [String]) -> [String] Never! {
     out
 }
 
-// The keys of `map` in Rust `BTreeMap` order.
+// The keys of `map` in key order.
 store_sorted_keys: fn(map: [String:String]) -> [String] Never! {
     keys := map.keys().to_list()
     keys.sort()
@@ -157,7 +155,7 @@ store_sorted_keys: fn(map: [String:String]) -> [String] Never! {
 }
 
 // Whether `path` equals `prefix` or lies below it, compared by whole
-// components (Rust `Path::starts_with`).
+// components.
 store_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
     left: store_path_components(path)
     right: store_path_components(prefix)
@@ -169,8 +167,7 @@ store_path_starts_with: fn(path: String, prefix: String) -> Bool Never! {
     true
 }
 
-// The normal components of `path` (Rust `Path::components` without the
-// root, `.` components dropped, repeated separators collapsed).
+// The normal components of `path`.
 store_path_components: fn(path: String) -> [String] Never! {
     out := [String]{}
     loop part in path.split("/") {
@@ -180,7 +177,7 @@ store_path_components: fn(path: String) -> [String] Never! {
     out
 }
 
-// Rust `Path::strip_prefix`: the remainder of `path` below `prefix`.
+// The remainder of `path` below `prefix`.
 store_path_strip_prefix: fn(path: String, prefix: String) -> String? Never! {
     if !store_path_starts_with(path, prefix) -> return None
     left: store_path_components(path)
@@ -196,8 +193,8 @@ store_path_below: fn(path: String, prefix: String) -> Bool Never! {
     (store_path_strip_prefix(path, prefix) ?? "") != ""
 }
 
-// Whether `path` is one or more normal relative components (no root, no
-// `..`, no leading `.`), Rust `components().all(Normal)` on a relative path.
+// Whether `path` is one or more normal relative components (no root, no `..`,
+// no leading `.`).
 store_path_is_normal_relative: fn(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") || path == "." || path.starts_with("./") -> return false
     loop part in path.split("/") {

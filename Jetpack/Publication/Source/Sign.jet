@@ -28,7 +28,7 @@ PublicationGeneratedKey: struct {
     public_key_hex: String,
 }
 
-// Rust keys_dir / key_paths. Empty HOME remains a supplied value, not absence.
+// keys_dir / key_paths. Empty HOME remains a supplied value, not absence.
 publication_keys_dir: fn() -[Env]> String Never! {
     override: sys.get(ENV_JET_KEYS_DIR) ?? ""
     if override != "" -> return override
@@ -54,7 +54,7 @@ publication_read_public_key: fn(registry: String) -[FS, Env]> String? Never! {
     Val(key)
 }
 
-// Rust keygen/write_private_seed/set_mode. The canonical Foundation publisher
+// keygen/write_private_seed/set_mode. The canonical Foundation publisher
 // owns root creation, exclusive reservation, descriptor permissions, fsync,
 // binding checks, atomic create-new/replace and cleanup (#3593).
 publication_keygen: fn(registry: String, force: Bool) -[FS, Env, Time, Rand]> PublicationGeneratedKey PublicationDiagnosticError! {
@@ -84,7 +84,7 @@ publication_keygen: fn(registry: String, force: Bool) -[FS, Env, Time, Rand]> Pu
     Ok(PublicationGeneratedKey{seed_path: paths.seed_path, public_key_path: paths.public_key_path, public_key_hex: public})
 }
 
-// Rust keygen's write step: the seed through write_private_seed, then the
+// keygen's write step: the seed through write_private_seed, then the
 // public key only after the private seed succeeds, both at the ONE key_paths
 // result reported to the caller. Public publication is protected too, but
 // preserves its required 0644 wire mode.
@@ -106,8 +106,8 @@ publication_write_private_seed: fn(path: String, seed: [U8], force: Bool) -[FS, 
     }
 }
 
-// Rust sign: sign the hash STRING's UTF-8 bytes, not the decoded hash digest.
-// This shared pure seam also permits deterministic real-crypto tests without RNG.
+// Sign the hash STRING's UTF-8 bytes, not the decoded hash digest. This shared
+// pure seam also permits deterministic real-crypto tests without RNG.
 publication_sign_bytes: fn(seed: [U8], content_hash: String) -> String PublicationDiagnosticError! {
     key: crypto.SigningKey.from_bytes(seed) ?? return Err(publication_sign_crypto_error("signing key must contain exactly 32 bytes"))
     signature: if crypto.sign(key, content_hash.bytes()) == {
@@ -154,8 +154,8 @@ publication_sign: fn(seed_path: String, content_hash: String) -[FS, Env]> String
     }
 }
 
-// Rust verify: malformed base64, bad keys/lengths and failed verification are
-// false; Core strict verification rejects small-order/noncanonical points and S.
+// Malformed base64, bad keys/lengths and failed verification are false; Core
+// strict verification rejects small-order/noncanonical points and S.
 publication_verify: fn(public_key_hex: String, content_hash: String, signature_b64: String) -> Bool PublicationDiagnosticError! {
     signature_bytes: publication_sign_base64_decode(signature_b64) ?? return Ok(false)
     key_bytes: publication_sign_hex_decode(public_key_hex) ?? return Ok(false)
@@ -168,7 +168,7 @@ publication_verify: fn(public_key_hex: String, content_hash: String, signature_b
     Ok(verified)
 }
 
-// String errors in Rust's private encoding helpers, not Diagnostic failures.
+// String errors in the private encoding helpers, not Diagnostic failures.
 #Error
 PublicationSigningEncodingError: struct {
     message: String,
@@ -183,7 +183,7 @@ publication_sign_hex_decode: fn(text: String) -> [U8] PublicationSigningEncoding
     Ok(bytes)
 }
 
-// Reuse Core's standard decoder, then enforce Rust's canonical roundtrip rule
+// Reuse Core's standard decoder, then enforce the canonical roundtrip rule
 // independently of the importing package's edition-specific decoder strictness.
 publication_sign_base64_decode: fn(text: String) -> [U8] PublicationSigningEncodingError! {
     if text.bytes().len() %% 4 != 0 {
@@ -212,8 +212,8 @@ publication_e1248: fn(path: String) -> Diagnostic Never! {
     )
 }
 
-// Main's tandem corrects Rust's hand-rendered E1292 defect. The canonical row
-// owns ALL static entropy prose; callers render it through diagnostic_render.
+// The canonical E1292 row owns ALL static entropy prose; callers render it
+// through diagnostic_render.
 publication_e1292: fn() -> Diagnostic Never! {
     row: diagnostic_registry_row("E1292") ?? panic("E1292 must be registered")
     diagnostic_from_registry(row.code, None, row.what, row.why, row.fix)

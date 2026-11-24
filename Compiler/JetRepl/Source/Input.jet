@@ -39,10 +39,7 @@ repl_reanchor_span: fn(span: Span, offset: Int) -> Span Never! {
 repl_reanchor: fn(diagnostic: ^^Diagnostic, offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span == .Val(span) -> updated.span = Val(repl_reanchor_span(span, offset))
-    labels := [DiagnosticLabel]{}
-    loop label in updated.labels {
-        labels.push(DiagnosticLabel{span: repl_reanchor_span(label.span, offset), message: label.message})
-    }
+    labels: loop label in updated.labels -> DiagnosticLabel{span: repl_reanchor_span(label.span, offset), message: label.message}
     updated.labels = labels
     if updated.edit == .Val(edit) {
         updated.edit = Val(TextEdit{span: repl_reanchor_span(edit.span, offset), new_text: edit.new_text})

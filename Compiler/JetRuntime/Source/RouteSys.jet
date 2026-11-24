@@ -30,7 +30,7 @@ sys_some: fn(some: I64, value: I64) -> I64 {
     sys_some(some, host_call(I64{111}, I64{0}, I64{0}, I64{0}))
 }
 
-// The Rust original getgroups(0, NULL): the count (or -1).
+// getgroups(0, NULL): the count (or -1).
 #Export(c) jet_sys_groups_count_raw: fn(some: I64) -> I64 {
     sys_some(some, sys_groups(I64{0}, I64{0}))
 }
@@ -629,9 +629,9 @@ sys_load_bits: fn(info: I64, result: I64, offset: I64) -> I64 {
     host_sample_out(result, available, value, errno)
 }
 
-// The Rust original times(&tms) and sysconf(_SC_CLK_TCK): (true, utime, stime,
-// cutime, cstime, elapsed, ticks). musl's times is the raw system call and its
-// _SC_CLK_TCK the constant 100.
+// times(&tms) and sysconf(_SC_CLK_TCK): (true, utime, stime, cutime, cstime,
+// elapsed, ticks). musl's times is the raw system call and its _SC_CLK_TCK
+// the constant 100.
 #Export(c) jet_sys_times_raw: fn(available: I64, user: I64, system: I64, child_user: I64, child_system: I64, elapsed: I64, ticks: I64) {
     buffer: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(buffer, I64{32})

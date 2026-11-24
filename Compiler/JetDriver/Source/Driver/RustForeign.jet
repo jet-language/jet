@@ -160,10 +160,7 @@ jet_driver_rust_foreign_dependencies: fn(entries: [JetDriverRustForeignEntry]) -
         versions[parts[0]] = version
     }
     names.sort()
-    rows := [JetDriverRustForeignDependency]{}
-    loop name in names {
-        rows.push(JetDriverRustForeignDependency{name: name.copy(), version: versions[name]})
-    }
+    rows: loop name in names -> JetDriverRustForeignDependency{name: name.copy(), version: versions[name]}
     Ok(rows)
 }
 
@@ -240,10 +237,7 @@ JetDriverRustForeignRecordIndex: struct {
 }
 
 jet_driver_rust_foreign_function: fn(declaration: ExternFn) -> JetDriverRustForeignFunction Never! {
-    params := [JetDriverRustForeignParam]{}
-    loop param in declaration.params {
-        params.push(JetDriverRustForeignParam{convention: param.convention, name: param.name, ty: param.ty})
-    }
+    params: loop param in declaration.params -> JetDriverRustForeignParam{convention: param.convention, name: param.name, ty: param.ty}
     close: if declaration.close == .Val(value) -> Val(value.name) else -> None
     JetDriverRustForeignFunction{name: declaration.name, params: params, return_type: declaration.return_type, rust_path: declaration.rust_path, generated: declaration.generated, close: close}
 }

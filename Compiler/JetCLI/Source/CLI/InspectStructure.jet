@@ -216,9 +216,9 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
         ledger = GateLedger{}
         names: name_ledger_from_facts(NameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
         sema_gate_append_structure(ledger, names)
-        // Rust preserves any published structure facts on frontend failure:
-        // the text report prints ahead of the diagnostics, and the one JSON
-        // failure envelope carries them in its `structure` field.
+        // Published structure facts survive a frontend failure: the text
+        // report prints ahead of the diagnostics, and the one JSON failure
+        // envelope carries them in its `structure` field.
         if json {
             source: jet_cli_inspection_source(result, snapshot, file)
             fields := [JetCLIStatusField]{}

@@ -1,9 +1,7 @@
 // The one binary record format for compiler records (#2517).
 //
-// This is the Jet implementation of `jet_foundation.RecordCodec`. Both
-// implementations write the same bytes for the same record, and a conformance
-// test compares them. The layout, with every integer an unsigned LEB128
-// `uvarint` in its minimal form:
+// This is the Jet implementation of `jet_foundation.RecordCodec`. The layout,
+// with every integer an unsigned LEB128 `uvarint` in its minimal form:
 //
 //   "JETR"                         magic, 4 bytes
 //   uvarint format                 RECORD_FORMAT (1)
@@ -24,8 +22,7 @@
 // 7 map with keys sorted by their UTF-8 bytes, 8 a 32-byte digest.
 //
 // The encoding is canonical and the decoder rejects every other byte form.
-// Decode problems carry the Rust codec's messages; a caller treats any
-// problem as a cache miss.
+// A caller treats any decode problem as a cache miss.
 use core.collections.[Row, Rows]
 
 RECORD_FORMAT: 1

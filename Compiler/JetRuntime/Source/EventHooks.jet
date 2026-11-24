@@ -1,15 +1,15 @@
-// Synchronous hooks over the Event listener cells. One meaning with the Rust
-// reference types JetHook, JetDecisionHook. A declared hook or decision
+// Synchronous hooks over the Event listener cells: hooks and decision hooks.
+// A declared hook or decision
 // point is one process cell every task runs, so the box count is atomic and
 // the listener cell is the locked core of Events.jet.
 //
 // HookBox32: refs0 core8 fallback16 meta24
-//   A Hook<T, R> or DecisionHook<T, E> handle. Its clones share the box (Rust
-//   clones share the listener Rc; a Hook clone's fallback is an equal value).
+//   A Hook<T, R> or DecisionHook<T, E> handle. Its clones share the box (and
+//   the listener cell; a Hook clone's fallback is an equal value).
 //   core is an EventCore holding the listeners. A Hook owns its fallback R
 //   slot under its copied descriptor meta; a DecisionHook keeps 0 in both.
 //   A DecisionHook's core is observed under source DecisionHook; a Hook's
-//   records nothing (Rust jet_event_observe has no Hook source).
+//   records nothing.
 
 hook_new: fn(fallback: I64, meta: I64, source: I64) -> I64 {
     hook: jet_rt_alloc(I64{32}, I64{8})

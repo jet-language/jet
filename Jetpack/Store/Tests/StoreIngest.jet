@@ -91,9 +91,9 @@ store_test_assert_nothing_published: fn(verification: ^StoreVerification, roots:
     store_test_drop_roots(roots)
 }
 
-// Rust ingest lifts each Hangar `io::Error` through `From<io::Error>` into
-// `IngestError::IO(err.to_string())`: a non-directory Hangar root keeps its
-// exact InvalidData message and E1315 diagnostic, and nothing is staged.
+// Ingest lifts each Hangar I/O failure into `IngestError.IO` with its message:
+// a non-directory Hangar root keeps its exact InvalidData message and E1315
+// diagnostic, and nothing is staged.
 #Test("store ingest lifts hangar store failures to typed io diagnostics") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
@@ -124,8 +124,8 @@ store_test_assert_nothing_published: fn(verification: ^StoreVerification, roots:
 }
 
 // The one explicit StoreError -> IngestError uplift keeps every StoreError
-// kind's Rust message (`io::Error::to_string`), including the canonical
-// IOError display of a wrapped Core failure, under the E1315 IO diagnostic.
+// kind's message, including the canonical IOError display of a wrapped Core
+// failure, under the E1315 IO diagnostic.
 #Test("store ingest store error uplift keeps each kind message") {
     hangar: "/hangar"
     lifted: store_ingest_store_error(StoreError.InvalidInput("cannot seal a non-canonical Hangar object"))

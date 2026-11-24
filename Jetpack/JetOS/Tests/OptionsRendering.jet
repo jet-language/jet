@@ -99,7 +99,7 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
     assert_eq(jetos_safe_identifier("_aB09"), "_aB09")
     assert_eq(jetos_clean_bool_json("\"...users.TrUe\""), "true")
     loop value in ([String]{"false", "1", "true!", "truｅ", "", "TRUE ", ".False"}) {
-        // clean_symbol trims the trailing space, as Rust does.
+        // clean_symbol trims the trailing space.
         assert_eq(jetos_clean_bool_json(value), if value == "TRUE " -> "true" else -> "false")
     }
 }

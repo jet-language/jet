@@ -1939,7 +1939,7 @@ valid_store_text: fn(text: String) -> Bool Never! {
     loop i in 0..<raw.len() {
         value: Int{raw[i]}
         if value < 32 || value == 127 -> return false
-        // Rust char::is_control is Unicode Cc, not only ASCII controls.
+        // Control characters are Unicode Cc, not only ASCII controls.
         if value == 194 && i + 1 < raw.len() {
             next: Int{raw[i + 1]}
             if next >= 128 && next <= 159 -> return false
@@ -2151,7 +2151,7 @@ priv StateCursor: struct {
     offset: Int,
 }
 
-// Rust usize parsing: optional `+`, decimal digits only.
+// Optional `+`, decimal digits only.
 service_parse_count: fn(text: String) -> Int? Never! {
     if text.starts_with("-") -> return None
     workflow_i64(text)
@@ -2459,7 +2459,7 @@ rollout_encode: fn(tree_name: String, state: RolloutState) -> [U8] ServiceError!
     Ok(bytes)
 }
 
-// Text lines as Rust `str::lines` yields them: a trailing `\r` is dropped.
+// Text lines: a trailing `\r` is dropped.
 priv RolloutLines: struct {
     lines: [String],
     next: Int,
@@ -3503,7 +3503,7 @@ workflow_find: fn(tree: ServiceTree, run_id: Int) -> Int? Never! {
 }
 
 workflow_visible: fn(text: String, limit: Int) -> Bool Never! {
-    // Empty payloads are valid; Rust char::is_control includes C0, DEL and C1.
+    // Empty payloads are valid; control characters include C0, DEL and C1.
     if text == "" -> return true
     valid_service_text(text, limit)
 }
@@ -3736,7 +3736,7 @@ priv commit_snapshot: fn(tree: ^ServiceTree, payload: String) ServiceError! {
 }
 
 valid_record_payload: fn(text: String) -> Bool Never! {
-    // Rust allows empty messages/records but rejects every Unicode Cc scalar.
+    // Empty messages/records are allowed but every Unicode Cc scalar is rejected.
     text.len() == 0 || valid_service_text(text, 1048576)
 }
 

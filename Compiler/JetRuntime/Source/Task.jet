@@ -82,7 +82,7 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
     jet_rt_string_eq(sync_load(wrapping(left + TASK_FAILURE_REASON)), sync_load(wrapping(right + TASK_FAILURE_REASON)))
 }
 
-// Panicked is raw in show/display but Rust str Debug quoted in debug.
+// Panicked is raw in show/display but quoted in debug.
 task_failure_render: fn(failure: I64, debug: Bool) -> I64 {
     kind: sync_load(wrapping(failure + TASK_FAILURE_TAG))
     result: jet_rt_string_builder_new()
@@ -482,8 +482,8 @@ task_join_returned: fn(child: I64) -> Bool {
     sync_load(wrapping(child + I64{24})) != I64{0} && sync_load(wrapping(child + I64{32})) == I64{0}
 }
 
-// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
-// and join(self):717 consumes the sole handle. Lexical group cleanup is a
+// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); join(self)
+// consumes the sole handle. Lexical group cleanup is a
 // separate retained drain, using done@24 wake-all. Under `jet perf run` each
 // wait names the awaited task (PerfSamples.jet perf_samples_wait). Each wait
 // notes the joined task, so a join that closes a wait cycle stops with it
@@ -556,9 +556,9 @@ task_panic_site_hand: fn(child: I64, reason: I64) {
     scheduler_joined_store(control, jet_rt_string_clone(reason), site)
 }
 
-// A literal mirror of the Rust original, including its transported-header
-// fallback and the compiler-shaped location suffix. Never strips arbitrary
-// parenthesized text: the suffix must end ')' and contain a location colon.
+// A literal mirror, including its transported-header fallback and the
+// compiler-shaped location suffix. Never strips arbitrary parenthesized text:
+// the suffix must end ')' and contain a location colon.
 task_panic_prefix: fn(data: I64, length: I64, at: I64) -> Bool {
     at + I64{7} <= length && trap_byte(wrapping(data + at)) == I64{112} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{97} && trap_byte(wrapping(wrapping(data + at) + I64{2})) == I64{110} && trap_byte(wrapping(wrapping(data + at) + I64{3})) == I64{105} && trap_byte(wrapping(wrapping(data + at) + I64{4})) == I64{99} && trap_byte(wrapping(wrapping(data + at) + I64{5})) == I64{58} && trap_byte(wrapping(wrapping(data + at) + I64{6})) == I64{32}
 }
@@ -686,9 +686,9 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
     jet_rt_native_task_join(child, I64{1}, out)
 }
 
-// Completion frames are nested native List headers at TCB@80. Each callback
-// is a closure header [refs,code,release]. Batch-reverse order matches Rust;
-// callbacks registered by callbacks drain in the next batch of this frame.
+// Completion frames are nested native List headers at TCB@80. Each callback is
+// a closure header [refs,code,release]. Batch-reverse order; callbacks
+// registered by callbacks drain in the next batch of this frame.
 scheduler_task_completion_begin: fn() -> I64 {
     stack := sync_load(wrapping(thread_base() + I64{80}))
     if (stack == I64{0}) {

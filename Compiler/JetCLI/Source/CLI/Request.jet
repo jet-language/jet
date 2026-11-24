@@ -1833,10 +1833,7 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
 // repository path, so a Core file's comptime inputs (`Core/<dir>/<asset>`)
 // resolve among the built-in assets.
 jet_cli_builtin_core_rows: fn() -> [JetDriverCoreSource] Never! {
-    rows := [JetDriverCoreSource]{}
-    loop row in CORE_SOURCE_OWNED_ROWS {
-        rows.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})})
-    }
+    rows: loop row in CORE_SOURCE_OWNED_ROWS -> JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})}
     rows
 }
 

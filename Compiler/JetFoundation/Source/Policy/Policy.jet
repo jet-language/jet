@@ -1,10 +1,8 @@
 // Compiler-owned scoped policy registry and resolution ladder. PolicyKey,
-// PolicyValue, PolicyScope (Rust `Authority.Scope`) and PolicyDeclaration live
-// in AST/Statements.jet. The build-fact contribution law (SourceScope,
-// ContributionLayer, Fact*) is owned by
-// Jetpack/PackageModel/Source/Merge/FactLaw.jet, not repeated here.
+// PolicyValue, PolicyScope and PolicyDeclaration live in AST/Statements.jet.
+// The build-fact contribution law (SourceScope, ContributionLayer, Fact*) is
+// owned by Jetpack/PackageModel/Source/Merge/FactLaw.jet, not repeated here.
 
-// Rust `PolicyKey.name`.
 policy_key_name: fn(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
@@ -35,7 +33,6 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
     }
 }
 
-// Rust `PolicyKey.parse`.
 policy_key_parse: fn(name: String) -> PolicyKey? Never! {
     if name == {
         "unsafe" -> Val(PolicyKey.Unsafe)
@@ -65,7 +62,6 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
     }
 }
 
-// Rust `PolicyKey.is_audited_gate`.
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
         .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes | .Failures | .Runtime -> false
@@ -73,7 +69,6 @@ policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     }
 }
 
-// Rust `PolicyValue.display`.
 policy_value_display: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
@@ -153,7 +148,6 @@ runtime_marker_mode: fn(marker: Marker) -> PolicyValue? Never! {
     None
 }
 
-// Rust `Authority.Scope.name`.
 policy_scope_name: fn(scope: PolicyScope) -> String Never! {
     if scope == {
         .Organization -> "organization"
@@ -164,7 +158,7 @@ policy_scope_name: fn(scope: PolicyScope) -> String Never! {
     }
 }
 
-// Rust `Authority.Scope.rank`: the lexical ladder, outer to inner.
+// The lexical ladder, outer to inner.
 policy_scope_rank: fn(scope: PolicyScope) -> Int Never! {
     if scope == {
         .Organization -> 0
@@ -195,7 +189,6 @@ POLICY_ALL_SCOPES: #run { [PolicyScope]{PolicyScope.Organization, PolicyScope.Pa
 // function, method or block policies.
 POLICY_BODY_SCOPES: #run { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
 
-// Rust `POLICY_RULES`.
 POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
@@ -226,7 +219,6 @@ POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.Runtime, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Tighten},
 } }
 
-// Rust `rule`.
 policy_rule: fn(key: PolicyKey) -> PolicyRule Never! {
     loop row in POLICY_RULES {
         if row.key == key -> return row
@@ -280,7 +272,7 @@ PolicyError: enum {
     Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span, outer_site: PolicyDeclaration),
     Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span, outer_site: PolicyDeclaration),
 
-    // Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
+    // The derived `Debug` spelling of PolicyError (package-policy conflicts
     // print it verbatim).
     impl Debug {
         debug: fn(self) -> String {
@@ -359,11 +351,10 @@ policy_span_debug_text: fn(span: Span) -> String Never! {
     "Span {{ start: {span.start}, end: {span.end} }}"
 }
 
-// Rust `resolve_policy` (the `ResolutionKey for PolicyKey` arm of `resolve`):
-// declarations resolve outer-to-inner into one effective value, and every
+// Declarations resolve outer-to-inner into one effective value, and every
 // shadowed or tightened declaration stays in the provenance chain.
 policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
-    // Rust sorts by scope rank with a stable sort: written order within a rung.
+    // A stable sort by scope rank: written order within a rung.
     ordered := [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
         loop declaration in declarations {
@@ -401,7 +392,7 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
     Ok(Val(EffectivePolicy{key: key, value: value, provenance: chain}))
 }
 
-// The widening arm of Rust `resolve_policy`.
+// The widening arm of policy resolution.
 policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled {
         return false
@@ -421,7 +412,7 @@ policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Boo
     true
 }
 
-// The `PolicyCombine.Merge` arm of Rust `resolve_policy`; None is a conflict.
+// The `PolicyCombine.Merge` arm of policy resolution; None is a conflict.
 policy_merge: fn(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
     if outer == .Limit(a) && inner == .Limit(b) {
         return Val(PolicyValue.Limit{value: if a < b -> a else -> b})
@@ -433,7 +424,7 @@ policy_merge: fn(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! 
     None
 }
 
-// Rust `gate_widens`, arm for arm (including its non-reflexive cases).
+// Whether a gate widens, arm for arm (including its non-reflexive cases).
 policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if outer == PolicyValue.Forbid && inner == PolicyValue.Allow -> return true
     if inner == PolicyValue.Allow -> return false
@@ -459,7 +450,7 @@ policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     true
 }
 
-// Rust `parse_value` returns the refusal as a `String`.
+// The refusal is returned as a `String`.
 #Error
 PolicyValueError: struct {
     detail: String,
@@ -467,7 +458,7 @@ PolicyValueError: struct {
     message: fn(self) -> String Never! { self.detail }
 }
 
-// Rust `parse_value`: one package-policy value for `key`.
+// One package-policy value for `key`.
 policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
     value: raw.trim()
     if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" {

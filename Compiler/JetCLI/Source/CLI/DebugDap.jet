@@ -1320,10 +1320,7 @@ jet_cli_dap_registers: fn(session: ^NativeSession, frame: Int) -> String NativeD
         .Err(error) -> return Err(error)
     }
     shown: at ?? return Ok("{{\"variables\":[]}}")
-    rows := [String]{}
-    loop row in native_registers_at(session, shown) {
-        rows.push("{{\"name\":{foundation_json_quote(row.name)},\"value\":{foundation_json_quote(jet_cli_dap_register_value(row))},\"variablesReference\":0}}")
-    }
+    rows: loop row in native_registers_at(session, shown) -> "{{\"name\":{foundation_json_quote(row.name)},\"value\":{foundation_json_quote(jet_cli_dap_register_value(row))},\"variablesReference\":0}}"
     Ok("{{\"variables\":[{rows.join(",")}]}}")
 }
 
