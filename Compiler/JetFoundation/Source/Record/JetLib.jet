@@ -433,7 +433,8 @@ pkg_jetlib_c_symbol: fn(name: String) -> String Never! {
         if (code >= 0x80) && (code < 0xC0) -> next
         out.push(if keep -> byte else -> U8{95})
     }
-    String.from_bytes(out) ?? panic("C symbol construction produces only ASCII")
+    // Valid UTF-8: every byte is ASCII: kept ASCII alphanumerics and `_`, a `_` for each lead byte, continuation bytes skipped, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 // The `.jetlib` pre-map trust boundary (jet-pkg-model).

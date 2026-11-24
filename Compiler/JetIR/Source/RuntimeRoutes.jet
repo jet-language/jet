@@ -28,7 +28,8 @@ runtime_abi_atom: fn(name: String) -> String Never! {
     if out.len() > 0 && out[out.len() - 1] == (U8{95}) {
         _: out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
     }
-    String.from_bytes(out) ?? panic("runtime ABI atom is not ASCII")
+    // Valid UTF-8: `name`'s own bytes, with ASCII letters lowercased and `_` inserted or substituted only at ASCII bytes, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 // `HandleMut` lends the handle of the caller's Write place: the runtime

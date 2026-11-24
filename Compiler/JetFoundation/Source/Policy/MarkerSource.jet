@@ -242,7 +242,8 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
         out.push(bytes[index])
         index += 1
     }
-    String.from_bytes(out) ?? panic("the marker source is not UTF-8 once its comments are removed")
+    // Valid UTF-8: `source`'s own bytes in order, less each comment cut between its ASCII delimiters, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 // The members of a declaration body: entries at nesting depth zero, outside

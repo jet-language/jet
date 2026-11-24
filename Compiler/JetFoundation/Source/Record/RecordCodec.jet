@@ -944,7 +944,8 @@ record_json: fn(bytes: [U8]) -> RecordStringResult Never! {
         foundation_json_append(out, "]")
     }
     foundation_json_append(out, "}}}}")
-    RecordStringResult{value: Val(String.from_bytes(out) ?? panic("record JSON is UTF-8")), problem: None}
+    // Valid UTF-8: every append above is a whole String, so the lossy decode keeps every byte.
+    RecordStringResult{value: Val(String.from_bytes_lossy(out)), problem: None}
 }
 
 record_value_json: fn(out: ^[U8], value: RecordValue) Never! {

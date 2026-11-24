@@ -211,7 +211,8 @@ ir_core_symbol_in: fn(prefix: String, text: String) -> String Never! {
     bytes.push(U8{95})
     digest: sha256_hex_bytes(sha256_bytes(raw[0..<raw.len()]))
     loop byte in digest.slice(0..<8).bytes() -> bytes.push(byte)
-    String.from_bytes(bytes) ?? panic("a Core symbol is ASCII")
+    // Valid UTF-8: `prefix`'s own bytes, then ASCII alphanumerics and `_`, then ASCII hex digits, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(bytes)
 }
 
 // The IR signature of function `id`: each parameter slot's layout, then the

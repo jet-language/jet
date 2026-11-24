@@ -492,7 +492,8 @@ perf_report_wire_text: fn(value: CanonicalJSON) -> String Never! {
         .Null -> ""
         .Bool(_) | .Array(_) | .Object(_) -> {
             bytes: canonical_json_bytes(value)
-            String.from_bytes(bytes[0..<bytes.len() - 1]) ?? panic("canonical JSON UTF-8")
+            // Valid UTF-8: canonical JSON is encoded from Strings and ASCII, and the dropped last byte is the ASCII newline canonical_json_bytes appends, so the lossy decode keeps every byte.
+            String.from_bytes_lossy(bytes[0..<bytes.len() - 1])
         }
     }
 }

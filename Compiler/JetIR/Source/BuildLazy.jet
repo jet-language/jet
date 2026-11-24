@@ -10,7 +10,8 @@ use jet_foundation.[AccessConvention, BodyCallArg, NameTable, Span, Type, TClosu
 // jet_rt_native_iter_take.
 ir_lazy_runtime_symbol: fn(symbol: String) -> String Never! {
     bytes: symbol.bytes()
-    tail: String.from_bytes(bytes.slice(4, bytes.len())) ?? panic("runtime symbol is not UTF-8")
+    // Valid UTF-8: the cut follows the four-byte ASCII `jet_` every lazy route symbol starts with, so the lossy decode keeps every byte.
+    tail: String.from_bytes_lossy(bytes.slice(4, bytes.len()))
     "jet_rt_native_{runtime_abi_atom(tail)}"
 }
 

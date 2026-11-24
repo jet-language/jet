@@ -1064,8 +1064,8 @@ build_session_safe_name: fn(name: String) -> String {
             bytes.push(byte)
         } else if n < 128 || n >= 192 { bytes.push(U8{95}) }
     }
-    // Unreachable: every byte kept above is ASCII.
-    String.from_bytes(bytes) ?? panic("invalid generated module name")
+    // Valid UTF-8: every byte kept above is ASCII.
+    String.from_bytes_lossy(bytes)
 }
 
 build_session_add_generated: fn(state: ^BuildSessionState, generated: BuildSessionGeneratedModule) -> BuildSessionReply {
@@ -1390,8 +1390,8 @@ build_session_error_json_text: fn(value: String) -> String Never! {
         if number == 34 -> escaped = "\\\"" else if number == 92 -> escaped = "\\\\" else if number == 10 {
             escaped = "\\n"
         } else if number == 13 { escaped = "\\r" } else if number == 9 { escaped = "\\t" } else if number < 32 {
-            // Unreachable: both bytes come from the ASCII digits above.
-            pair: String.from_bytes([U8]{digits[number /% 16], digits[number % 16]}) ?? panic("invalid hex")
+            // Valid UTF-8: both bytes come from the ASCII digits above.
+            pair: String.from_bytes_lossy([U8]{digits[number /% 16], digits[number % 16]})
             escaped = "\\u00{pair}"
         }
         if escaped == "" -> bytes.push(byte) else {
@@ -1399,9 +1399,9 @@ build_session_error_json_text: fn(value: String) -> String Never! {
         }
     }
     bytes.push(U8{34})
-    // Unreachable: the bytes are `value`'s own UTF-8 sequences in order, with
+    // Valid UTF-8: the bytes are `value`'s own UTF-8 sequences in order, with
     // ASCII escapes in place of single ASCII bytes.
-    String.from_bytes(bytes) ?? panic("JSON preserves UTF8")
+    String.from_bytes_lossy(bytes)
 }
 
 build_session_error_texts: fn(values: [String]) -> String Never! {

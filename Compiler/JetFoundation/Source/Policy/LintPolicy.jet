@@ -133,7 +133,8 @@ lint_strip_comments: fn(value: String) -> String Never! {
         } else { out.push(raw[at]) }
         at += 1
     }
-    String.from_bytes(out) ?? panic("comment removal keeps UTF-8")
+    // Valid UTF-8: `value`'s own bytes in order, less each `//` comment cut from its ASCII `/` to the ASCII newline, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {

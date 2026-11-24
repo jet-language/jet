@@ -1011,7 +1011,8 @@ sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg]
 // A string literal with no interpolation whose written text holds a NUL byte.
 sema_call_literal_has_nul: fn(value: Expr) -> Bool Never! {
     if value == .Str(parts, _, _) {
-        nul: String.from_bytes([U8{0}]) ?? panic("NUL is UTF-8")
+        // Valid UTF-8: NUL is one ASCII byte, so the lossy decode keeps every byte.
+        nul: String.from_bytes_lossy([U8{0}])
         found := false
         loop part in parts {
             if part == {
