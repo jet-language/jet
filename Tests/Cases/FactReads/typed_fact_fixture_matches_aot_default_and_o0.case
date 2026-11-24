@@ -1,6 +1,10 @@
 # HAND-PORT tests/fact_reads.rs:298-301 typed_fact_fixture_matches_aot_default_and_O0
 # PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
-# Exact original unchanged typed-fact fixture and existing golden across original full matrix, including stderr relational parity.
+# The original typed-fact fixture is unchanged and runs across the original's full matrix, including stderr relational parity.
+# The expected stdout follows the fixture's print order, one line per print. The Rust-era golden came from another print order: it had
+# one `false` before `report` and two after.
+# Expected line 2 is `send_report.reflect().effects.values.len()`. `send_report: fn() {}` writes no effect row, and a read folded
+# inside the check has no inferred row, so `values` is empty (Docs/Spec/Reference/metaprogramming.md, "The signature's `effects`").
 # Expected lines 9-10 are `#package.name`/`#package.version`, the current package's identity (spec.md:4872-4874):
 # the port's fixture package.jet is case_fixture 0.1.0; the Rust-era golden ran in package fact_reads 0.0.0.
 fixture: TypedFactFixtureMatchesAOTDefaultAndO0.fixture
