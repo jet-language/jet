@@ -725,8 +725,10 @@ A `TypeInfo` lists what the type implements and binds, and the form of a number:
 - `numeric` is the `NumericInfo` of a number type: whether it is `signed`, its
   width in `bits` and whether it `is_float`. A builtin number reflects too:
   `I32.reflect().numeric` is `signed: true, bits: 32`, `U8`'s is unsigned
-  with 8 bits and `F32`'s is a 32-bit float. A `distinct` type over a number
-  reports its base's form; any other type has `None`.
+  with 8 bits and `F32`'s is a 32-bit float. Its `identity` is the number
+  type's `TypeId`, so `F64` and `Float` reflect one identity, and a sized
+  number's (`I32`, `Float`) binds its width as `bits`. A `distinct` type over
+  a number reports its base's form; any other type has `None`.
 
 [`TypeFacts`](../../../Examples/Metaprogramming/Reflection/TypeFacts/run.jet)
 reads all three: a marker body, a comptime constant, ordinary code and fn
