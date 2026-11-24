@@ -54,14 +54,14 @@ jet_cli_repl_history_none: fn() -> JetCLIReplHistory Never! {
 }
 
 jet_cli_repl_history_unavailable: fn(reason: String) {
-    jet_cli_repl_err("warning: REPL history is unavailable ({reason}); continuing with session-only history\n")
+    jet_cli_repl_err("Warning: REPL history is unavailable ({reason}); continuing with session-only history\n")
 }
 
 jet_cli_repl_history_limit: fn() -> Int {
     text: history_sys.get(ENV_JET_REPL_HISTORY_LIMIT) ?? return JET_CLI_REPL_HISTORY_LIMIT
     limit: Int.parse(text.trim()) ?? -1
     if limit < 0 {
-        jet_cli_repl_err("warning: JET_REPL_HISTORY_LIMIT `{text}` is not a count; keeping the latest {JET_CLI_REPL_HISTORY_LIMIT} submissions\n")
+        jet_cli_repl_err("Warning: JET_REPL_HISTORY_LIMIT `{text}` is not a count; keeping the latest {JET_CLI_REPL_HISTORY_LIMIT} submissions\n")
         return JET_CLI_REPL_HISTORY_LIMIT
     }
     limit
@@ -113,7 +113,7 @@ jet_cli_repl_history_load: fn(held: JetCLIRootedDirectory) -> [String] JetCLIRea
     }
     records: jet_cli_repl_history_parse(bytes)
     if records.valid < bytes.len() {
-        jet_cli_repl_err("warning: corrupt history tail in `{jet_cli_rooted_join(held.path, JET_CLI_REPL_HISTORY_FILE)}`: {bytes.len() - records.valid} byte(s) discarded, {records.entries.len()} entries kept\n")
+        jet_cli_repl_err("Warning: corrupt history tail in `{jet_cli_rooted_join(held.path, JET_CLI_REPL_HISTORY_FILE)}`: {bytes.len() - records.valid} byte(s) discarded, {records.entries.len()} entries kept\n")
         held.replace(JET_CLI_REPL_HISTORY_FILE, bytes.slice(0, records.valid), Val(0o600)) ?? return Err(err)
     }
     Ok(records.entries)
