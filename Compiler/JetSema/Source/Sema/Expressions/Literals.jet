@@ -27,6 +27,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     UnOp,
+    UnitFamilyDef,
     UnitRatio,
     AST_EMPTY_CALL_ARG_FLAGS,
     expr_is_map_slot_or,
@@ -88,7 +89,19 @@ sema_expression_unit_literal_time_fact: fn(suffix: String, graph: SemaRegistrati
     None
 }
 
-sema_expression_unit_literal_fact: fn(suffix: String, graph: SemaRegistrationGraph) -> SemaRegistrationUnitFact? {
+// The unit a literal's suffix names in the module at registration row
+// `module_row`: a member of a family that module declares names its own
+// literals, so a file's `#UnitFamily(Lag) { ms }` makes its `5ms` a `Ms`
+// while a Core body's `5ms` stays a Duration. Elsewhere Core's time units
+// come first, then any loaded family's member of that name.
+sema_expression_unit_literal_fact: fn(suffix: String, graph: SemaRegistrationGraph, module_row: Int) -> SemaRegistrationUnitFact? {
+    if module_row >= 0 && module_row < graph.modules.len() {
+        loop item in graph.modules[module_row].program.items {
+            if item == .UnitFamily(definition) && sema_expression_unit_literal_member_fact(suffix, graph, module_row, definition) == .Val(fact) {
+                return Val(fact)
+            }
+        }
+    }
     time_fact: sema_expression_unit_literal_time_fact(suffix, graph)
     if time_fact == .Val(fact) -> return Val(fact)
     type_name: sema_expression_unit_literal_type_name(suffix)
@@ -97,35 +110,41 @@ sema_expression_unit_literal_fact: fn(suffix: String, graph: SemaRegistrationGra
         return Val(fact)
     }
     loop module_row_index in 0..<graph.modules.len() {
-        loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
-            if graph.modules[module_row_index].program.items[item_index] == {
-                .UnitFamily(definition) -> {
-                    owner: definition.resolved_owner ?? ""
-                    if definition.family == "Time" && owner == "core.units" -> next
-                    has_offset_member: loop member in definition.members {
-                        if member.offset.numerator != 0 {
-                            break true
-                        }
-                    } ?? false
-                    if definition.base != None && has_offset_member -> next
-                    loop member in definition.members {
-                        if member.name == suffix {
-                            return Val(SemaRegistrationUnitFact{
-                                name: sema_expression_unit_literal_type_name(member.name),
-                                package: definition.resolved_owner ?? graph.modules[module_row_index].package_identity,
-                                family: definition.family,
-                                member: member.name,
-                                dimension: definition.resolved_dimension,
-                                scale: member.scale,
-                                scale_provenance: member.scale_provenance,
-                                offset: member.offset,
-                                kind: QuantityKind.Linear,
-                            })
-                        }
-                    }
-                }
-                .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        loop item in graph.modules[module_row_index].program.items {
+            if item == .UnitFamily(definition) && sema_expression_unit_literal_member_fact(suffix, graph, module_row_index, definition) == .Val(fact) {
+                return Val(fact)
             }
+        }
+    }
+    None
+}
+
+// The linear unit member `suffix` of `definition`, a family the module at
+// registration row `module_row_index` declares; None for Core's time family
+// (sema_expression_unit_literal_time_fact) and a based family with an offset
+// member.
+sema_expression_unit_literal_member_fact: fn(suffix: String, graph: SemaRegistrationGraph, module_row_index: Int, definition: UnitFamilyDef) -> SemaRegistrationUnitFact? {
+    owner: definition.resolved_owner ?? ""
+    if definition.family == "Time" && owner == "core.units" -> return None
+    has_offset_member: loop member in definition.members {
+        if member.offset.numerator != 0 {
+            break true
+        }
+    } ?? false
+    if definition.base != None && has_offset_member -> return None
+    loop member in definition.members {
+        if member.name == suffix {
+            return Val(SemaRegistrationUnitFact{
+                name: sema_expression_unit_literal_type_name(member.name),
+                package: definition.resolved_owner ?? graph.modules[module_row_index].package_identity,
+                family: definition.family,
+                member: member.name,
+                dimension: definition.resolved_dimension,
+                scale: member.scale,
+                scale_provenance: member.scale_provenance,
+                offset: member.offset,
+                kind: QuantityKind.Linear,
+            })
         }
     }
     None
@@ -133,7 +152,7 @@ sema_expression_unit_literal_fact: fn(suffix: String, graph: SemaRegistrationGra
 
 sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if suffix != "" && program.registration_graph == .Val(facts_graph) {
-        fact: sema_expression_unit_literal_fact(suffix, facts_graph)
+        fact: sema_expression_unit_literal_fact(suffix, facts_graph, sema_app_module_row(environment, facts_graph))
         if fact == .Val(unit) {
             if unit.name == "Duration" && unit.family == "Time" {
                 is_float := float_value != None

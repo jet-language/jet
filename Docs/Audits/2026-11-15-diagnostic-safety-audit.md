@@ -28,7 +28,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E-WEB-RUN | WebProgramRunNotSupported | Compiler/JetCLI/Source/CLI/Front.jet:2232 | run it in a browser |
 | E-WEB-TARGET-BROWSER | WasmFunctionUsesBrowser | Compiler/JetSema/Source/Sema/WebPartition.jet:170 | browser calls stay in JS code |
 | E-WEB-UNSUPPORTED | WebConstructNotSupported | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:442 | the function uses constructs the web output lowers |
-| E0001 | StrayCharacter | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1015 | no opt-in gives a meaningless character a meaning |
+| E0001 | StrayCharacter | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1034 | no opt-in gives a meaningless character a meaning |
 | E0002 | UnterminatedText | Compiler/JetLexer/Source/Lexer/Payload.jet:93 | no opt-in decides where unterminated text ends |
 | E0003 | InvalidStatement | Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet:55 | no opt-in gives an incomplete statement a meaning |
 | E0029 | DuplicateAccessMarker | Compiler/JetParser/Source/Parser/Items.jet:941 | one parameter has one access mode; write the one meant |
@@ -63,7 +63,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0124 | BranchTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/Control.jet:3071 | the expression has one type |
 | E0126 | DefaultReadsLaterParameter | Compiler/JetSema/Source/Sema/FunctionHeaders.jet:290 | no opt-in gives a parameter its value early |
 | E0133 | UnsupportedDecimalOperator | Compiler/JetSema/Source/Sema/Expressions.jet:1533 | no opt-in runs an operator Decimal does not define |
-| E0134 | UnknownUnitSuffix | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:182 | no opt-in gives an unknown unit a type |
+| E0134 | UnknownUnitSuffix | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:201 | no opt-in gives an unknown unit a type |
 | E0135 | LiteralOutsideRange | Compiler/JetSema/Source/Sema/Calls/Static.jet:1842 | a value outside the bounds is not a value of the type |
 | E0136 | RangeValueWithoutCheck | Compiler/JetSema/Source/Sema/Calls/Static.jet:1938 | the fallible `?` form checks the bounds; nothing skips the check |
 | E0139 | ContractUsesEffect | Compiler/JetSema/Source/Sema/Contracts.jet:177 | no opt-in makes an effect run the same whether its check is kept or erased |
@@ -86,7 +86,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0173 | DynCondition | Compiler/JetSema/Source/Sema/Calls/Data.jet:83 | Jet has no implicit truthiness; compare the value |
 | E0174 | TypestateMoveWithoutArrow | Compiler/JetSema/Source/Sema/Registration/StateFacts.jet:407 | add the arrow to the state list |
 | E0180 | RequiredContractNotTrue | Compiler/JetSema/Source/Sema/PreludeRows.jet:328 | the callee's contract is its own requirement |
-| E0211 | CopyNotSupported | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:313 | a function, trait value or opaque type has no copy to run |
+| E0211 | CopyNotSupported | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:332 | a function, trait value or opaque type has no copy to run |
 | E0213 | WriteMarkerNotOnPlace | Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet:51 | a value without storage has nothing to lend |
 | E0218 | PinWithoutWriteWindow | Compiler/JetSema/Source/Sema/Ownership/Pins.jet:27 | a temporary has no place to pin |
 | E0227 | MarkedFunctionValue | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:1383 | a function type with the same marks reaches the program |
@@ -154,10 +154,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0437 | PipeValueOutsideStep | Compiler/JetSema/Source/Sema/Diagnostics.jet:400 | `<>` belongs inside a `\|>` step or an `if` table header |
 | E0444 | HoleHeaderInPipeStep | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | a hole table starts outside a pipe step |
 | E0446 | FixedArrayElementwiseMismatch | Compiler/JetSema/Source/Sema/Expressions/FixedArithmetic.jet:128 | both arrays have one shape, or the value has the slots' type |
-| E0501 | UntypedEmptyList | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:635 | a type context gives the list its element type |
+| E0501 | UntypedEmptyList | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:654 | a type context gives the list its element type |
 | E0502 | InvalidMapKeyType | Compiler/JetSema/Source/Sema/Comparability.jet:898 | a map key is an eligible scalar, enum, tuple or struct |
-| E0503 | StringIndex | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1275 | the text methods walk characters or bytes |
-| E0504 | MixedCollectionLiteral | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:324 | no opt-in gives one collection two element types |
+| E0503 | StringIndex | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1294 | the text methods walk characters or bytes |
+| E0504 | MixedCollectionLiteral | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:343 | no opt-in gives one collection two element types |
 | E0505 | InvalidIndexType | Compiler/JetSema/Source/Sema/Calls/Data.jet:129 | a collection is indexed with its own index or key type |
 | E0506 | UnhashableSetElement | Compiler/JetSema/Source/Sema/Calls/Static.jet:971 | a set holds hashable types |
 | E0507 | CollectionChangedWhileRead | Compiler/JetSema/Source/Sema/Statements.jet:3007 | collect the changes and apply them after the loop |
@@ -268,7 +268,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0911 | UnknownMigrationVerb | Compiler/JetParser/Source/Parser/Declarations/Migrations.jet:98 | migrations use `rename`, `add`, `remove` and `change` |
 | E0913 | MissingAssociatedType | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3372 | the impl gives every associated type |
 | E0914 | UnknownInterpolationSelector | Compiler/JetParser/Source/Parser/Expressions.jet:1500 | the selector is one the interpolation knows |
-| E0915 | MissingDisplay | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1678 | the type implements `Display`, or a field with one is printed |
+| E0915 | MissingDisplay | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1697 | the type implements `Display`, or a field with one is printed |
 | E0917 | RecursiveInlineAlways | Compiler/JetSema/Source/Sema/MarkerRules.jet:2366 | a recursive function is not `#Inline(Always)` |
 | E0918 | InlineAlwaysAddressTaken | Compiler/JetSema/Source/Sema/MarkerRules.jet:2513 | a function whose address is taken is not `#Inline(Always)` |
 | E0921 | MemoryDenialViolated | Compiler/JetSema/Source/Sema/Effects/Checks.jet:6413 | the denial is lifted where the rights tree sets it |
@@ -301,7 +301,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0960 | ReservedContributionNamespace | Compiler/JetParser/Source/Parser/Declarations/Modules.jet:209 | contributions name a reserved namespace |
 | E0961 | InvalidMemberSpread | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:190 | spread entries are bare field or package names |
 | E0962 | RejectOutsideTemplate | Compiler/JetSema/Source/Sema/Calls/Resolution.jet:140 | `reject` belongs in a marker's `expand` template or `check` rule |
-| E0963 | InvalidFixedListLength | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:584 | the length is an in-range compile-time integer |
+| E0963 | InvalidFixedListLength | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:603 | the length is an in-range compile-time integer |
 | E0964 | FixedListLengthChange | Compiler/JetSema/Source/Sema/Calls/Collections.jet:274 | a list whose length changes is a `[T]` |
 | E0966 | InvalidModuleContribution | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:54 | the contribution is a struct literal of its namespace's type |
 | E0967 | ModuleSourceConflict | Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet:144 | each source name has one ref |
@@ -450,7 +450,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1306 | DuplicateCliFlag | Compiler/JetSema/Source/Sema/Registration/Items.jet:4656 | each field derives a distinct, unreserved flag |
 | E1308 | RunParameterNotCli | Compiler/JetSema/Source/Sema/Outputs.jet:380 | the parameter type is a `#CLI` struct |
 | E1310 | MisplacedVariadicParameter | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:189 | the rest parameter is last, with no default |
-| E1311 | SpreadNotList | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:377 | the operand is a list |
+| E1311 | SpreadNotList | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:396 | the operand is a list |
 | E1312 | SpreadWithoutVariadic | Compiler/JetSema/Source/Sema/Calls/Binder.jet:222 | the callee ends in a variadic parameter |
 | E1313 | VariadicBoundNotImplemented | Compiler/JetSema/Source/Sema/Calls/Checking.jet:979 | the argument's type implements the bound |
 | E1314 | VariadicOutsideLoop | Compiler/JetSema/Source/Sema/FunctionHeaders.jet:524 | the parameter is used in a direct source loop |
