@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6999,
-    "rev": 113875,
+    "rev": 113900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50,7 +50,7 @@
         "radar:G2"
       ]
     },
-    "completionCursor": "2026-11-24T12:02:57.043Z",
+    "completionCursor": "2026-11-24T14:03:02.925Z",
     "dayStart": {
       "date": "2026-11-24",
       "openCards": 290,
@@ -30301,6 +30301,23 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T02:26:32.194Z"
+        },
+        {
+          "n": 23,
+          "text": "A match that writes into its subject binds its payload writable when the subject is a list element: in fn(packets: &[Packet]), if &packets[0].retries == { .Val(n) -> { n += 1 } .None -> {} } compiles and changes packets[0]. Today (dev 7d4ea640b9, tip23 compiler) it fails with Jet.ImmutableAssignment ('n was made with :'), while the same match through a field (if &holder.packet.retries == …) and through a window bound first (slot: &packets[i]; if &slot.retries == …) both work. Proof: Tests/UI/Ownership/match_place_binds_optional_payload_as_write_window.jet gains a bump_element case through a list index and a window of a window, and its snapshot stays (no errors).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T14:02:01.325Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/UI",
+              "--filter",
+              "match_place_binds_optional_payload_as_write_window"
+            ]
+          }
         }
       ],
       "refs": [
@@ -30319,9 +30336,9 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-24T02:26:32.194Z",
+      "updated": "2026-11-24T14:02:01.325Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 22
+      "criteriaLastN": 23
     },
     {
       "id": "c0441rvj",
@@ -65624,7 +65641,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-24T13:49:32.148Z",
+      "updated": "2026-11-24T14:11:44.104Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 25
     },
@@ -76236,27 +76253,37 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T12:52:06.999Z",
-      "updated": "2026-11-24T13:44:09.020Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-24T14:26:25.188Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0jjynlr",
       "num": 6998,
-      "title": "Write and take marks move from & and && to ^ and ^^; links keep @ (D-MARK-CARET1 cutover)",
-      "body": "Owner ruling, 2026-11-24: links keep @ (the earlier @ to ^ link move is cancelled), and the ownership marks move: a write is ^ where it was &, and a take is ^^ where it was &&. Meaning and positions are unchanged: ^T and ^self in signatures, write windows ^values[2..3], first := ^counts[0], if ^shape == { … }, takes ^^T, fn(^^self), task ^^job { … }. & and && keep only bitwise and logical and between two values; infix ^ stays a parse error and exclusive-or stays a ~ b. One greenfield cutover with no alias: prefix & or && left over is an ordinary parse error. Scale on dev: about 24,200 signature write marks in 1,836 .jet files, about 2,650 value-position write windows in 253 files, and about 2,900 take marks in 1,065 files. Decision record: D-MARK-CARET1 (draft).",
+      "title": "Write and take marks move from & and && to ^ and ^^ (D-MARK-CARET1 cutover); links keep @",
+      "body": "Owner ruling, 2026-11-24, verbatim: \"I approve the & and && to ^ and ^^ conversion\". The write mark &T becomes ^T and the take mark &&T becomes ^^T in every position: signatures and receivers (^self, ^^self), function types (fn(^T) -> R, ^^fn(...)), write windows and element marks (edit: ^xs[a..<b], slot: ^xs[i]), matches that write into their subject (if ^place == { ... }), the stated receiver footprint (^self.field, ^self.[a, b]) and task captures (task ^^name { ... }). Meaning and placement are unchanged. & and && keep only their operator meanings; infix ^ stays a parse error and exclusive-or stays ~. Links keep @ (D-MEMREF1=A); the drafted link move D-LINK-CARET1 is withdrawn because ^ now marks a write. Size: about 24,200 signature write marks in 1,836 files, 2,650 value-position windows in 253 files and 2,900 take marks in 1,065 files (crude scan, 2026-11-24). Greenfield: one canonical form, no alias, no teaching diagnostic for a leftover & mark.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "G1",
       "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": "1) Registry: the write and take mark rows in Compiler/JetFoundation/Data/Syntax (Spellings.jet, CoreSurface.jet) become ^ and ^^; OP_CARET in MathLayout.jet records prefix ^ and ^^ as the marks. 2) Lexer: ^^ is one token; parser reads ^/^^ where it read &/&& as marks; prefix &/&& become ordinary parse errors. 3) Sema, fmt, LSP (hover, semantic tokens, signature help), and every diagnostic text that prints a mark. 4) jet fix migration plan mark-caret1 rewrites every use in Core, Compiler, Jetpack, Tools, Examples and every Tests tree, case fixture and template, plus Compiler/Prelude; run it once, in one cutover commit with the compiler change, built with a seed that reads both only for that one bootstrap step. 5) UI snapshots, goldens, editor grammars (Tools/Editors). 6) Spec, reference pages, syntax-decisions.md D-CALLSITE-MARK2/D-MOVE-SIGIL1 text, LANGUAGE_REWRITES.",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Two landings, because the compiler is written in Jet and its seed only reads & marks. Step A (one batch): the lexer and parser read ^ and ^^ as marks wherever & and && are marks, beside the old spelling; the formatter prints ^ and ^^. This bridge exists only until step B lands in the next batch. Step B (on the step-A batch compiler): a jet fix migration plan (mark-caret1) rewrites every mark in Core, Compiler, Jetpack, Tools, Examples, Docs code blocks and every Tests tree, case fixture and template; the parser stops reading & and && as marks; the registry (CoreSurface SIGIL_WRITE and SIGIL_MOVE, Spellings, MathLayout OP_CARET and OP_AMP notes), diagnostics text, UI snapshots, semantic tokens, editor grammars, spec and reference prose and LANGUAGE_REWRITES move in the same commit. The converter rule: a & or && is a mark when no operand ends before it (or a keyword such as task, if, return, in precedes it) and a name, [ or ( follows it.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner ruling, 2026-11-24, verbatim: \"I approve the & and && to ^ and ^^ conversion\". It followed the side-by-side comparison of the two spellings (24 excerpts from dev, five whole files and a layered program that runs today). The card now carries the mark cutover; the drafted link move D-LINK-CARET1 is withdrawn because ^ now marks a write, and links keep @. D-MARK-CARET1 holds the ruling as a draft until its review is posted, after which it is ratified A with the quoted ruling."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Correction, 2026-11-24: the previous log entry is wrong. The owner asked to discuss moving the write and take marks to ^ and ^^ (and with it keeping @ for links); he did not decide it. Everything that entry changed is reverted: the title, body, plan and criteria are restored, D-MARK-CARET1 is deleted, and D-LINK-CARET1 is restored as a draft. The link move stays as the owner approved it, pending that discussion."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -76271,48 +76298,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Registry: the write mark is ^ and the take mark is ^^ in Compiler/JetFoundation/Data/Syntax (Spellings.jet and CoreSurface.jet), and OP_CARET in MathLayout.jet records prefix ^ and ^^ as the marks; infix ^ stays a parse error; links stay @.",
+          "text": "First: a dated adversarial audit in Docs/Audits attacks the ^/^^ spelling against the strongest alternatives (today's &/&&, C++ T&, Rust &mut, Swift inout, Odin ^) on reading, typing (dead keys on European layouts), diff noise and tooling; every gap it finds is engineered away or named with its cost and mitigation. D-MARK-CARET1 then carries the full ballot record, is reviewed and posted, and is ratified A with the owner's quoted ruling.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T13:55:13.401Z"
+          "at": "2026-11-24T14:10:54.253Z"
         },
         {
           "n": 2,
-          "text": "Lexer, parser, sema, fmt and the LSP read and print ^T, ^self, ^place, ^^T, ^^self and task ^^name; a leftover prefix & or && mark is an ordinary parse error, with no alias and no teaching diagnostic; infix & and && keep their operator meanings.",
+          "text": "Step A: the lexer and parser read ^T and ^^T as the write and take marks in every position & and && hold today (signatures, receivers, function types, windows, element marks, match subjects, receiver footprints, task captures), beside the old spelling, and the formatter prints ^ and ^^; a UI case covers each position, nested and layered (the Layers.jet program from the comparison runs and prints the same output in both spellings).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T13:55:14.470Z"
+          "at": "2026-11-24T14:10:55.105Z"
         },
         {
           "n": 3,
-          "text": "A jet fix migration plan (mark-caret1) rewrites every write and take mark in Core, Compiler, Jetpack, Tools, Examples, Compiler/Prelude and every Tests tree, case fixture and template in one cutover; a sweep finds no prefix & or && mark left.",
+          "text": "Step B: a jet fix migration plan (mark-caret1) rewrites every mark in Core, Compiler, Jetpack, Tools, Examples, Docs code blocks and every Tests tree, case fixture and template in one cutover; bitwise & and logical && are untouched (a sweep finds no operator rewritten and no & or && mark left); the parser stops reading & and && as marks, with no alias and no teaching diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T13:55:15.523Z"
+          "at": "2026-11-24T14:10:55.950Z"
         },
         {
           "n": 4,
-          "text": "Diagnostics and UI snapshots that print a mark, the editor grammars and the semantic tokens show ^ and ^^; the full suite has no new failure on the batch compiler.",
+          "text": "Registry, diagnostics and tools show ^ and ^^: CoreSurface SIGIL_WRITE and SIGIL_MOVE, the Spellings rows, the MathLayout OP_CARET and OP_AMP notes, every diagnostic's what/why/fix text and UI snapshot that names a mark, LSP semantic tokens, hover and completion text, and the editor grammars; the full suite has no new failure on the batch compiler.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T13:55:16.747Z"
+          "at": "2026-11-24T14:10:56.834Z"
         },
         {
           "n": 5,
-          "text": "The spec, the reference pages, the D-CALLSITE-MARK2 and D-MOVE-SIGIL1 text and LANGUAGE_REWRITES describe ^ and ^^ marks; D-MARK-CARET1 carries the full ballot record of the owner's ruling and is ratified A.",
+          "text": "The spec, the reference pages, the guides and LANGUAGE_REWRITES describe ^ and ^^ marks; D-CALLSITE-MARK2 and D-MOVE-SIGIL1 rationale in syntax-decisions.md records the respelling and its reason; no prose still teaches & or && as a mark.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T13:55:17.751Z"
+          "at": "2026-11-24T14:10:57.698Z"
         }
       ],
       "refs": [],
@@ -76320,7 +76347,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T13:44:02.626Z",
-      "updated": "2026-11-24T13:55:17.751Z",
+      "updated": "2026-11-24T14:11:00.326Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     }
@@ -138493,18 +138520,18 @@
       "cardId": "c0jjynlr",
       "group": "syntax",
       "title": "Write and take marks are spelled ^ and ^^",
-      "situation": "D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A spell a write as &T and a take as &&T. The same symbols are bitwise and logical and between two values. ^ has no grammar meaning today.",
+      "situation": "D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A spell a write as &T and a take as &&T. The same symbols are bitwise and logical and between two values, so & and && each carry two meanings told apart by position. ^ has no grammar meaning today: infix ^ is a parse error and exclusive-or is ~ (MathLayout.jet OP_CARET, OP_TILDE).",
       "gist": "Which symbols mark a write and a take: & and &&, or ^ and ^^?",
       "lesson": "A mark that shares its symbol with an operator costs every reader a second look; a free symbol costs nothing to give a job.",
       "explainer": "",
       "story": "Ana reads fn fill(^buf: Buffer, n: Int) and a few lines down a && b. Each symbol now has one job, so she never stops to ask which one she is reading.",
       "inWild": "Pascal and Odin read ^ as a reference. No common language uses ^^.",
-      "detail": "Owner ruling, 2026-11-24, given directly in session: cancel the move of links from @ to ^, and use ^ in place of & (^ for edit permission, ^^ for move marking). It amends the spelling of D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A only; what a write or a take means, and where a mark may appear, are unchanged. Links keep @ (D-MEMREF1=A). Infix ^ stays a parse error, and exclusive-or stays a ~ b. Prefix & and && become ordinary parse errors with no alias and no teaching diagnostic. Cutover on card #6998.",
+      "detail": "Owner ruling, 2026-11-24, given directly in session: \"I approve the & and && to ^ and ^^ conversion\". It followed the side-by-side comparison of today's and the converted spelling over 24 excerpts from dev and five whole files, in which links keep @. It amends the spelling of D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A only; what a write or a take means, and where a mark may appear, are unchanged. Because ^ now marks a write, links keep @ (D-MEMREF1=A) and the drafted link move D-LINK-CARET1 is withdrawn. Infix ^ stays a parse error and exclusive-or stays ~. After the cutover, prefix & and && are ordinary parse errors with no alias and no teaching diagnostic; & and && keep their operator meanings. Known cost, recorded from D-MOVE-SIGIL1: ^ is a dead key on German, French, Spanish, Portuguese, Swiss and Nordic layouts, now on the most common mark. Cutover on card #6998.",
       "options": [
         {
           "key": "A",
           "name": "Marks use ^ and ^^",
-          "detail": "fn bump(^self), edit: ^values[2..3], first := ^counts[0], if ^shape == { … }, seal: fn(^^self), file: ^^GzFile, task ^^job { … }. & and && keep only their operator meanings."
+          "detail": "fn bump(^self), edit: ^values[2..<3], first: ^counts[0], if ^shape == { … }, seal: fn(^^self), file: ^^GzFile, task ^^job { … }. & and && keep only their operator meanings."
         },
         {
           "key": "B",
@@ -138520,7 +138547,7 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: none yet. The owner ruled directly on 2026-11-24; the known cost is that ^ is a dead key on German, French, Spanish, Portuguese, Swiss and Nordic layouts."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: none yet. The owner ruled directly on 2026-11-24 after the side-by-side comparison; the adversarial audit of the cutover is the first criterion of card #6998."
       },
       "checkInstructions": null,
       "surface": null,
@@ -138528,7 +138555,7 @@
       "reviewedBy": null,
       "draft": true,
       "status": "open",
-      "created": "2026-11-24T13:54:33.537Z"
+      "created": "2026-11-24T14:10:00.279Z"
     }
   ],
   "questions": [
@@ -140051,9 +140078,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Engineer away downsides",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-24T12:21:57.924Z"
+      "status": "answered",
+      "answer": "Revised in r3: every option's downsides are engineered away where possible, and each one that stays is named with its mitigation. A (recommended): four of six removed. The client's same-turn ordering closes the request window, and a late client is covered by a 500 ms set-aside. Host parts travel as references, so only generated text is resent. The #6903 cancel queue parks requests, and hosts without Jet regions are withheld. Two stay: Zed and Helix cannot send the notification (E is the fix), and it is the first jet/ method (versioned under experimental). B: one of four removed. VS Code's middleware sends the member only when the versions match. Three stay: per-client transport wrappers, proxies that drop the member, and no Zed or Helix path. C: two of three removed. The 'no precedent' claim was false, since jet.impact and jet.reasoning already exist, and the command is left out of Helix's picker. One round trip per version stays, at a few bytes. D: cannot be engineered away; D-EMBED-REGION1=A rules out client-owned mapping, and the fix for it is A. E: the first draft's server-side HTML and Markdown parsing is gone. The package's own Jet region finder runs on the server instead, so every client works with no client code. F: notebook sync is standard and atomic, but its downsides come from the notebook model and none can be removed: cell URIs need client mapping, vscode-languageclient only syncs real notebooks, and Neovim does not sync notebooks. A fresh Claude Opus agent reviewed r3 adversarially; it required five fixes, and r3 makes all of them.",
+      "created": "2026-11-24T12:21:57.924Z",
+      "answeredAt": "2026-11-24",
+      "answeredBy": "Orchestrator"
     },
     {
       "id": "q2nay2he",
@@ -140080,17 +140109,6 @@
       "created": "2026-11-24T12:22:39.554Z",
       "answeredAt": "2026-11-24",
       "answeredBy": "Orchestrator"
-    },
-    {
-      "id": "q4hah36e",
-      "cardId": "c08rzqfr",
-      "decisionId": "D-MAP-ENTRY1",
-      "by": "owner",
-      "kind": "question",
-      "text": "All of these absolutely fucking suck. I want something that is consistent, clean, clear, and idiomatic and cohesive. Given the commonality of maps, it must be as short as possible. What about just a space between two types? Give me an entire new set of unique options that meet my requirements",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-24T13:44:09.020Z"
     }
   ],
   "ideas": [
@@ -140923,6 +140941,190 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T14:26:25.188Z",
+      "by": "Orchestrator",
+      "action": "question.delete",
+      "ref": "q4hah36e",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T14:11:44.105Z",
+      "by": "Orchestrator",
+      "action": "question.answer",
+      "ref": "q15z7go2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T14:11:28.588Z",
+      "by": "Orchestrator",
+      "action": "question.answer",
+      "ref": "q15z7go2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T14:11:27.112Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-LSP-HOSTDOC1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T14:11:00.326Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "phase,priority"
+    },
+    {
+      "at": "2026-11-24T14:10:58.565Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T14:10:57.698Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#5: The owner approved the mark move to ^ and ^^; the withdrawn link move criteria no longer apply; was: The spec, the reference pages and LANGUAGE_REWRITES describe ^ links; D-LINK-CARET1 carries the full ballot record of the owner's ruling and is ratified A."
+    },
+    {
+      "at": "2026-11-24T14:10:56.834Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#4: The owner approved the mark move to ^ and ^^; the withdrawn link move criteria no longer apply; was: Diagnostics and UI snapshots that print a link, the editor grammars and the semantic tokens show ^; the full suite has no new failure on the batch compiler."
+    },
+    {
+      "at": "2026-11-24T14:10:55.950Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#3: The owner approved the mark move to ^ and ^^; the withdrawn link move criteria no longer apply; was: A jet fix migration plan (link-caret1) rewrites every link use in Core, Compiler, Jetpack, Tools, Examples and every Tests tree, case fixture and template in one cutover; a sweep finds no @ link left."
+    },
+    {
+      "at": "2026-11-24T14:10:55.105Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#2: The owner approved the mark move to ^ and ^^; the withdrawn link move criteria no longer apply; was: Lexer, parser, sema, fmt and the LSP read and print ^T and ^value; a leftover @ link is an ordinary parse error, with no alias and no teaching diagnostic."
+    },
+    {
+      "at": "2026-11-24T14:10:54.253Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#1: The owner approved the mark move to ^ and ^^; the withdrawn link move criteria no longer apply; was: Registry: SIGIL_LINK is ^ in CoreSurface.jet, the @ link row leaves Spellings.jet, and OP_CARET in MathLayout.jet records prefix ^ as the link; infix ^ stays a parse error."
+    },
+    {
+      "at": "2026-11-24T14:10:39.989Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "title,body,plan"
+    },
+    {
+      "at": "2026-11-24T14:10:36.275Z",
+      "by": "Orchestrator",
+      "action": "decision.delete",
+      "ref": "D-LINK-CARET1",
+      "note": "Links are spelled with ^ instead of @",
+      "draft": true
+    },
+    {
+      "at": "2026-11-24T14:10:00.279Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-MARK-CARET1",
+      "note": "Write and take marks are spelled ^ and ^^ (draft)"
+    },
+    {
+      "at": "2026-11-24T14:03:02.925Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-24T14:03:02.925Z"
+    },
+    {
+      "at": "2026-11-24T14:02:01.325Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00rqc09",
+      "note": "22 criteria, soft limit 6: A defect found in the write-place semantics this card owns; it belongs here, not on a card of its own"
+    },
+    {
+      "at": "2026-11-24T14:02:01.325Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#23 A match that writes into its subject binds its payload writa"
+    },
+    {
+      "at": "2026-11-24T13:55:59.503Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T13:55:58.449Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#5: Reverted: the owner had not ruled; the mark question is under discussion; was: The spec, the reference pages, the D-CALLSITE-MARK2 and D-MOVE-SIGIL1 text and LANGUAGE_REWRITES describe ^ and ^^ marks; D-MARK-CARET1 carries the full ballot record of the owner's ruling and is rati"
+    },
+    {
+      "at": "2026-11-24T13:55:57.358Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#4: Reverted: the owner had not ruled; the mark question is under discussion; was: Diagnostics and UI snapshots that print a mark, the editor grammars and the semantic tokens show ^ and ^^; the full suite has no new failure on the batch compiler."
+    },
+    {
+      "at": "2026-11-24T13:55:56.315Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#3: Reverted: the owner had not ruled; the mark question is under discussion; was: A jet fix migration plan (mark-caret1) rewrites every write and take mark in Core, Compiler, Jetpack, Tools, Examples, Compiler/Prelude and every Tests tree, case fixture and template in one cutover; "
+    },
+    {
+      "at": "2026-11-24T13:55:55.285Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#2: Reverted: the owner had not ruled; the mark question is under discussion; was: Lexer, parser, sema, fmt and the LSP read and print ^T, ^self, ^place, ^^T, ^^self and task ^^name; a leftover prefix & or && mark is an ordinary parse error, with no alias and no teaching diagnostic;"
+    },
+    {
+      "at": "2026-11-24T13:55:54.184Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jjynlr",
+      "note": "#1: Reverted: the owner had not ruled; the mark question is under discussion; was: Registry: the write mark is ^ and the take mark is ^^ in Compiler/JetFoundation/Data/Syntax (Spellings.jet and CoreSurface.jet), and OP_CARET in MathLayout.jet records prefix ^ and ^^ as the marks; in"
+    },
+    {
+      "at": "2026-11-24T13:55:53.198Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0jjynlr",
+      "note": "title,body,plan"
+    },
+    {
+      "at": "2026-11-24T13:55:51.270Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-LINK-CARET1",
+      "note": "Links are spelled with ^ instead of @ (draft)"
+    },
+    {
+      "at": "2026-11-24T13:55:50.303Z",
+      "by": "Orchestrator",
+      "action": "decision.delete",
+      "ref": "D-MARK-CARET1",
+      "note": "Write and take marks are spelled ^ and ^^",
+      "draft": true
+    },
     {
       "at": "2026-11-24T13:55:17.751Z",
       "by": "Orchestrator",
