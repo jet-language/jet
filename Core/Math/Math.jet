@@ -44652,19 +44652,6 @@ Transform2: struct<T, From, To> {
         )
     }
 
-    // Rust geometry_method_return: a Float-scalar Transform2's `then` and
-    // `inverse` return the Float `Transform`. The checker routes those calls
-    // here.
-    __then_float: fn<Next>(self, next: Transform2<T, To, Next>) -> Transform<From, Next> TransformError! {
-        composed: self.then<Next>(next) ?? return Err(err)
-        Ok(Transform<From, Next>{m00: composed.m00, m01: composed.m01, m10: composed.m10, m11: composed.m11, tx: composed.tx, ty: composed.ty, from_frame: composed.from_frame, to_frame: composed.to_frame})
-    }
-
-    __inverse_float: fn(self) -> Transform<To, From> TransformError! {
-        inverted: self.inverse() ?? return Err(err)
-        Ok(Transform<To, From>{m00: inverted.m00, m01: inverted.m01, m10: inverted.m10, m11: inverted.m11, tx: inverted.tx, ty: inverted.ty, from_frame: inverted.from_frame, to_frame: inverted.to_frame})
-    }
-
     point: fn<P: GeometryPoint>(self, point: P) -> Point2<T, To> TransformError! {
         value: point.__coordinates()
         if value.frame_id != 0 && value.frame_id != self.from_frame {

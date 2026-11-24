@@ -27,9 +27,6 @@ ir_handle_type_without_tags: fn(ty: Type) -> Type Never! {
 
 ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandleRoute? {
     if operation == {
-        // ir_handle_method stops a Transform method as a dedicated
-        // operation before it asks for a route.
-        .MathMethod(_, _) -> return None
         .DurationNew(unit, is_float) -> {
             symbol := if is_float -> "jet_duration_from_float" else -> "jet_duration_from_int"
             return Val(ir_handle_h(symbol, [Bool]{false, false}))
