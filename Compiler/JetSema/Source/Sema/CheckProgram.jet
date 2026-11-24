@@ -3414,7 +3414,7 @@ sema_check_registered_memory_position: fn(job: SemaBodyJob, module_index: Int, m
                 panic("a selected source function lost its original item")
             }
             .NominalMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].nominals[owner].ty) ?? "", graph.modules[module_index].nominals[owner].methods[row].declaration.name, graph.modules[module_index].nominals[owner].methods[row].declaration.span)
-            .ImplMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_type_graph_base_name(graph.modules[module_index].impls[owner].target_type) ?? "", graph.modules[module_index].impls[owner].methods[row].declaration.name, graph.modules[module_index].impls[owner].methods[row].declaration.span)
+            .ImplMethod(_, owner, row) -> return sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, sema_function_memory_type_owner(graph.modules[module_index].impls[owner].target_type), graph.modules[module_index].impls[owner].methods[row].declaration.name, graph.modules[module_index].impls[owner].methods[row].declaration.span)
         }
     }
     panic("a registered Jet body check lost its owning graph")

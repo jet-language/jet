@@ -31,6 +31,7 @@ use jet_foundation.[
     policy_scope_name,
     policy_scope_rank,
     policy_value_display,
+    type_name,
 ]
 
 // The package-scoped `gc` policies of the packages that declare any:
@@ -288,10 +289,11 @@ sema_function_memory_collect_items: fn(items: [Item], module_identity: ModuleID,
                 }
             }
             .Impl(implementation) -> {
-                // An operator hook on a built-in scalar (`impl Float.Mul(Vec3)`)
-                // registers that scalar as its owner type, which has no nominal
-                // base name, so its rows are found under the free-function owner.
-                owner: if sema_registration_builtin_scalar(implementation.type_name) == None -> implementation.type_name else -> ""
+                // An impl on a built-in scalar (`impl Float.Mul(Vec3)`,
+                // `impl I16.Roundable`) registers that scalar as its owner
+                // type, whose row is found under the scalar's own name
+                // (sema_function_memory_type_owner).
+                owner: if sema_registration_builtin_scalar(implementation.type_name) == .Val(scalar) -> sema_function_memory_type_owner(scalar) else -> implementation.type_name
                 loop function in implementation.methods {
                     sema_function_memory_visit(walk, module_identity, owner, function, false, outer, declarations)
                 }
@@ -665,13 +667,25 @@ sema_function_memory_position: fn(plan: SemaFunctionMemoryPlan, module_identity:
     plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), name, span))
 }
 
-// The owner name a method's memory row is found by: the base name of its
-// owning type, "" for a free function.
+// The owner name a method's memory row is found by: its owning type's
+// (sema_function_memory_type_owner), "" for a free function.
 sema_function_memory_owner: fn(kind: TFuncKind) -> String Never! {
     if kind == {
-        .Method(_, owner_type) -> sema_type_graph_base_name(owner_type) ?? ""
-        .TraitMethod(_, _, owner_type, _, _) -> sema_type_graph_base_name(owner_type) ?? ""
+        .Method(_, owner_type) -> sema_function_memory_type_owner(owner_type)
+        .TraitMethod(_, _, owner_type, _, _) -> sema_function_memory_type_owner(owner_type)
         .TopLevel -> ""
+    }
+}
+
+// The owner name of methods on `ty`: its base name, or a built-in scalar's
+// own name (`I16`). Each size's impl a number family or a `#loop` expands
+// shares one declaration span and method name, so the size tells their rows
+// apart; "" for a type with neither.
+sema_function_memory_type_owner: fn(ty: Type) -> String Never! {
+    if sema_type_graph_base_name(ty) == .Val(name) -> return name
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> type_name(ty)
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
 }
 

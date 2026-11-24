@@ -96,3 +96,85 @@ first_of: fn<T, S: Holds<T>>(store: S) -> T { store.first() }
     parameter_rows: trait_instance_errors(parameter).join("; ")
     assert(parameter_rows.contains("E0104: Trait `Holds<T>` names the type parameter `T`"), parameter_rows)
 }
+
+// Each size a number family's impl or a `#loop` over sizes expands shares
+// one declaration span and method name; the size keeps each copy's own
+// signature, so `-> Self` is that size.
+#Test("each size's copy of one impl returns that size") {
+    family: `Twice: trait {
+    twice: fn(self) -> Self Never!,
+}
+
+impl Signed.Twice {
+    twice: fn(self) -> Self Never! { self + self }
+}
+
+impl IEEE.Twice {
+    twice: fn(self) -> Self Never! { Self{Float{self} * 2.0} }
+}
+
+run: fn() {
+    print(I16{3}.twice())
+    print(Float{0.75}.twice())
+}
+`
+    assert_eq(trait_instance_errors(family).join("; "), "")
+    looped: `Same: trait {
+    same: fn(self) -> Self Never!,
+}
+
+#loop T in [I8, I16] {
+    impl T.Same {
+        same: fn(self) -> T Never! { self }
+    }
+}
+
+run: fn() {
+    print(I16{2}.same())
+}
+`
+    assert_eq(trait_instance_errors(looped).join("; "), "")
+}
+
+// A program's own type under a size name is that name's type everywhere in
+// it: a `#loop` that binds `T` to it writes the program's type, and a
+// number family's impl has no copy for that size there.
+#Test("a program's own type under a size name keeps it from a family's copies") {
+    looped: `U8: struct {
+    label: String,
+}
+
+Pick: trait {
+    pick: fn(self, other: Self) -> String Never!,
+}
+
+#loop T in [U8] {
+    impl T.Pick {
+        pick: fn(self, other: T) -> String Never! { other.label }
+    }
+}
+
+run: fn() {
+    print(U8{label: "mine"}.pick(U8{label: "theirs"}))
+}
+`
+    assert_eq(trait_instance_errors(looped).join("; "), "")
+    family: `U8: struct {
+    label: String,
+}
+
+Twice: trait {
+    twice: fn(self) -> Self Never!,
+}
+
+impl Unsigned.Twice {
+    twice: fn(self) -> Self Never! { self + self }
+}
+
+run: fn() {
+    print(U16{2}.twice())
+    print(U8{label: "mine"}.label)
+}
+`
+    assert_eq(trait_instance_errors(family).join("; "), "")
+}

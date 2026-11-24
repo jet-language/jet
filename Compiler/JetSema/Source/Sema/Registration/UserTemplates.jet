@@ -301,8 +301,10 @@ sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue]
 // (FOUNDATION_SIZE_ALIASES: `impl I8.Roundable` … `impl I64.Roundable`):
 // the definition, moved out of the list and written for `Self`, is the
 // template each size expands with `Self` bound to its name. A module that
-// declares or imports a type of the family's name keeps its own. A list with
-// no family impl comes back as it was.
+// declares or imports a type of the family's name keeps its own; one that
+// declares or imports a type under a size name (`U8: struct`) gets no copy
+// for that size, whose name there is its own type. A list with no family
+// impl comes back as it was.
 sema_derive_expand_family_impls: fn(items: &&[Item], imports: [ImportDecl], diagnostics: &[Diagnostic]) -> [Item] {
     has_family: loop item in items {
         if item == .Impl(definition) && foundation_number_family(definition.type_name) {
@@ -318,6 +320,11 @@ sema_derive_expand_family_impls: fn(items: &&[Item], imports: [ImportDecl], diag
     }
     loop item in items {
         if item == .Impl(_) -> next
+        // A size alias (`U8: Unsigned<8>`, as Core's Prelude declares) names
+        // the family's own size.
+        if item == .TypeAlias(alias) && alias.target == .Apply(applied, _) && foundation_number_family(applied) {
+            next
+        }
         taken.push(sema_registration_root_name(item))
     }
     expanded := [Item]{}
@@ -328,7 +335,7 @@ sema_derive_expand_family_impls: fn(items: &&[Item], imports: [ImportDecl], diag
             template.type_name = "Self"
             body: [DeriveBodyItem]{DeriveBodyItem.Item{value: Item.Impl{value: template}}}
             loop alias in FOUNDATION_SIZE_ALIASES {
-                if alias.family != family -> next
+                if alias.family != family || taken.contains(alias.name) -> next
                 // F64 is Float, so its impl is written for `Float`.
                 size: foundation_family_type(alias.family, alias.sizes) ?? next
                 scope: [NamedCtValue]{NamedCtValue{name: "Self", value: CtValue.Str{value: type_name(size)}}}

@@ -105,6 +105,7 @@ use {
         diagnostic_sentence_case_line,
         expr_source_span,
         expr_span,
+        foundation_size_alias,
         name_find,
         name_index,
         name_intern,
@@ -726,7 +727,19 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
 sema_derive_expand_type: fn(expansion: &SemaDeriveExpansion, ty: Type) -> Type Never! {
     zero: Span{start: 0, end: 0}
     if ty == {
-        .Named(name) -> Type.Named{name: sema_derive_expand_name(expansion, name, zero)}
+        .Named(name) -> {
+            expanded: sema_derive_expand_name(expansion, name, zero)
+            // A value that names a built-in scalar no file can rebind
+            // (`Self` as `Float` in a number family's impl) is that type, as
+            // the parser reads the name written out. A size name (`U8`)
+            // stays a name, as the parser leaves one in a file that binds
+            // it: it resolves where the item lands, to the program's own
+            // `U8` there, else to Core's size (sema_type_graph_resolve_named).
+            if expanded != name && foundation_size_alias(expanded) == None {
+                if sema_registration_builtin_scalar(expanded) == .Val(scalar) -> return scalar
+            }
+            Type.Named{name: expanded}
+        }
         .List(inner) -> Type.List{element: sema_derive_expand_type(expansion, inner)}
         .Case(name, payload) -> Type.Case{name: name, payload: sema_derive_expand_type(expansion, payload)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_expand_type(expansion, inner)}

@@ -129,7 +129,7 @@ build_session_schedule_typed_wait: fn(state: BuildSessionState, consumer: Int, p
 // The steps that carry step `id` to its round, earliest first: at each
 // step, the first producer whose round reaches it.
 build_session_schedule_chain: fn(state: BuildSessionState, promises: [String:Int], rounds: [Int], id: Int) -> [String] Never! {
-    chain := [String]{state.actions[id].name.copy()}
+    steps := [Int]{id}
     current := id
     loop {
         found := -1
@@ -142,11 +142,12 @@ build_session_schedule_chain: fn(state: BuildSessionState, promises: [String:Int
             }
         }
         if found < 0 -> break
-        chain.push(state.actions[found].name.copy())
+        steps.push(found)
         current = found
     }
-    chain.reverse()
-    chain
+    steps.reverse()
+    // copy: the chain is an owned report; each step's name stays on the plan's state.
+    loop step in steps -> state.actions[step].name.copy()
 }
 
 // The first schedule fact that refuses the plan: a step that waits on

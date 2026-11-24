@@ -1631,6 +1631,14 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             } else if !(caller >= 0 && module_is_core(graph.modules[caller].module_identity)) {
                 row = sema_type_unscoped_nominal_row(graph, name, caller)
             }
+            // A number family nothing the caller sees binds is Core's, as a
+            // size name is (sema_type_graph_resolve_size_name): `Unsigned<8>`
+            // is U8 wherever core.prelude is not loaded.
+            if resolved == None && row == None && foundation_number_family(name) {
+                if foundation_family_sizes(rewritten) == .Val(sizes) {
+                    if foundation_family_type(name, sizes) == .Val(sized) -> return sized
+                }
+            }
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets; under
             // JET_KEEP_GOING an alias expands only from a settled module row
