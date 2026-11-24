@@ -30,6 +30,7 @@ use {
         ast_program,
         compiler_threads_admit,
         compiler_threads_joined,
+        compiler_threads_taken,
         compiler_transfer_rows,
         expr_span,
         name_count,
@@ -863,7 +864,7 @@ parser_prepare_sliced_slots: fn(tokens: [Token], tables: TokenTables, source: [U
 // validates boundaries/rules, and collects chunk-local `ParserMarkerScope`s.
 parser_prepare_direct_slot: fn(source: [U8], slot: Shared<ParserChunkSlot>) -> Int {
     permit := slot.guard_edit()
-    data := permit.value.prepared.pop() ?? panic("missing direct parser chunk")
+    data := compiler_threads_taken(permit.value.prepared)
     chunk_tokens := data.tokens.move()
     chunk_tables := data.tables.move()
     chunk_source := if source.len() > 0 && permit.value.byte_end > permit.value.byte_start -> source.slice(permit.value.byte_start, permit.value.byte_end) else -> [U8]{}
@@ -989,7 +990,7 @@ parser_chunk_scan_interp_idents: fn(tokens: [Token], tables: TokenTables, indexe
 // `line_starts` slice, and runs all chunk-local post-passes on this thread.
 parser_parse_slot_part: fn(marker_scopes: [ParserMarkerScope], source_end: Int, allow_environment_reads: Bool, slot: Shared<ParserChunkSlot>) -> Int {
     permit := slot.guard_edit()
-    data := permit.value.prepared.pop() ?? panic("missing prepared parser chunk")
+    data := compiler_threads_taken(permit.value.prepared)
     chosen := [Int]{}
     compiler_transfer_rows<Int>(chosen, permit.value.chosen_heads)
     chunk_tokens := if chosen.len() > 0 -> parser_colon_insert_module_heads(data.tokens.move(), chosen) else -> data.tokens.move()
@@ -1138,7 +1139,7 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     any_reexport := false
     loop slot in slots {
         permit: slot.guard_edit()
-        output := permit.value.outputs.pop() ?? panic("a chunk parse thread left no output")
+        output := compiler_threads_taken(permit.value.outputs)
         loop diagnostic in output.diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> failed = true
         }

@@ -57,7 +57,7 @@
 // The other addresses (`.debug_addr`'s, the call sites', `.debug_line`'s and
 // `.debug_jetline`'s) and the section offsets are relocations against
 // section symbols, so any ELF linker can place the sections.
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single]
 
 ELF64_R_X86_64_32: 10
 
@@ -1296,7 +1296,7 @@ dwarf_info_rows: fn(program: X64ObjectModule, functions: [X64CompiledFunction], 
 // A part's rows, after its thread joined.
 dwarf_info_part_take: fn(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
     permit: part.guard_edit()
-    permit.value.outputs.pop() ?? panic("a DWARF info thread left no rows")
+    compiler_threads_taken(permit.value.outputs)
 }
 
 // One function's subprogram DIE in `info`: its start is `.debug_addr` index

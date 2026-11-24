@@ -31,6 +31,7 @@ use jet_foundation.[
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_joined,
+    compiler_threads_taken,
     compiler_threads_heaviest_first,
     diagnostic_with_alternative_edit,
     diagnostic_with_edit,
@@ -262,7 +263,7 @@ sema_graph_scan_claimed: fn(shared_state: Shared<SemaGraphScan>) -> [SemaGraphSc
 // the threads' cell.
 sema_graph_scan_take: fn(shared_state: Shared<SemaGraphScan>, found: ^^[SemaGraphScanFound?]) -> SemaGraphScanDone {
     permit: shared_state.guard_edit()
-    graph := permit.value.graphs.pop() ?? panic("the scanned graph left its scan")
+    graph := compiler_threads_taken(permit.value.graphs)
     SemaGraphScanDone{graph: graph, modules: compiler_take_rows<SemaGraphModuleResult>(permit.value.modules), rows: compiler_take_rows<Int>(permit.value.rows), order: compiler_take_rows<Int>(permit.value.order), found: found}
 }
 

@@ -41,6 +41,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_limit,
     compiler_threads_joined,
+    compiler_threads_taken,
     expr_span,
     symbol_builtin,
     symbol_find,
@@ -1527,7 +1528,7 @@ sema_check_declaration_module_in_shared: fn(shared_state: Shared<SemaCheckShared
 // lookups; the old flag.
 sema_check_shared_counting: fn(shared_state: Shared<SemaCheckShared>, counting: Bool) -> Bool {
     permit: shared_state.guard_edit()
-    program := permit.value.programs.pop() ?? panic("the declaration program tables left the threads' shared state")
+    program := compiler_threads_taken(permit.value.programs)
     old: sema_comptime_precheck_graph_counting(program)
     program.registration_graph = sema_comptime_precheck_counting(program.registration_graph.move(), counting)
     permit.value.programs.push(program)

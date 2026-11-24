@@ -17,6 +17,7 @@ use jet_foundation.[
     compiler_threads_limit,
     compiler_threads_failure_text,
     compiler_threads_joined,
+    compiler_threads_taken,
     symbol_find,
     symbol_key_text,
     symbol_table_key,
@@ -731,8 +732,8 @@ sema_comptime_precheck_items: fn(environments: ^[SemaScopeEnvironment], programs
         start = end
     }
     permit: shared_state.guard_edit()
-    environment := permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
-    program := permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    environment := compiler_threads_taken(permit.value.environments)
+    program := compiler_threads_taken(permit.value.programs)
     program.registration_graph = sema_comptime_precheck_counting(program.registration_graph.move(), counting)
     environments.push(environment)
     programs.push(program)
@@ -802,7 +803,7 @@ sema_comptime_precheck_enter_store: fn(run: SemaPrecheckEnterRun, offset: Int, e
 
 sema_comptime_precheck_enter_take: fn(run: SemaPrecheckEnterRun, offset: Int) -> SemaPrecheckEntered {
     permit: run.out.guard_edit()
-    permit.value.entered[offset].pop() ?? panic("a precheck enter cell lost its entered module")
+    compiler_threads_taken(permit.value.entered[offset])
 }
 
 sema_comptime_precheck_enter_worker: fn(run: SemaPrecheckEnterRun, module_identities: [ModuleID], start: Int, count: Int, version: Int, queue: SemaFinalizeCoreQueue) -> Int {
@@ -1023,7 +1024,7 @@ sema_comptime_precheck_enter: fn(shared_state: Shared<SemaPrecheckShared>, modul
     permit: shared_state.guard_edit()
     // The environment moves out of the shared state and back, so entering
     // never copies it.
-    environment := permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    environment := compiler_threads_taken(permit.value.environments)
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     entered: sema_scope_environment_enter_comptime_module(environment, permit.value.programs[0], module_identity, empty)
     comptime_scopes := sema_comptime_scopes_init(None)

@@ -22,6 +22,7 @@ use {
         compiler_take_rows,
         compiler_threads_admit,
         compiler_threads_joined,
+        compiler_threads_taken,
         compiler_threads_partition,
         compiler_transfer_rows,
         TTryConvert,
@@ -700,7 +701,7 @@ ir_reachable_core_rows: fn(functions: ^[FnBody], decls: DeclTable, symbols: ^[Sy
     }
     if trace_sink == .Val(sink) -> sink.progress("lower", read, candidate_count)
     permit: slot.guard_edit()
-    back := permit.value.functions.pop() ?? panic("the checked functions left the reachability state")
+    back := compiler_threads_taken(permit.value.functions)
     compiler_transfer_rows<FnBody>(functions, back)
     compiler_transfer_rows<SymbolTable>(symbols, permit.value.symbols)
     compiler_transfer_rows<Interner>(interners, permit.value.interners)

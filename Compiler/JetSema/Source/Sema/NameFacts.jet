@@ -33,6 +33,7 @@ use jet_foundation.[
     TVisibility,
     compiler_threads_admit,
     compiler_threads_joined,
+    compiler_threads_taken,
     compiler_threads_partition,
     compiler_transfer_rows,
     symbol_find,
@@ -717,12 +718,12 @@ sema_name_shared_fill: fn(shared_state: Shared<SemaNameShared>, graph: ^^SemaReg
 sema_name_shared_take: fn(shared_state: Shared<SemaNameShared>, modules: ^[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     permit: shared_state.guard_edit()
     compiler_transfer_rows<SemaGraphModuleResult>(modules, permit.value.modules)
-    permit.value.graphs.pop() ?? panic("the name collection lost its registration graph")
+    compiler_threads_taken(permit.value.graphs)
 }
 
 sema_name_shared_take_owner_names: fn(shared_state: Shared<SemaNameShared>) -> [Int:String] {
     permit: shared_state.guard_edit()
-    permit.value.owner_names.pop() ?? panic("the name collection lost its owner index")
+    compiler_threads_taken(permit.value.owner_names)
 }
 
 // Runs threads `from..<workers`, each collecting the parts it claims, and
