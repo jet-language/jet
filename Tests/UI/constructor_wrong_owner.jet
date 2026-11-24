@@ -1,0 +1,22 @@
+// E0181: a type's static `new` is its constructor, so a call `Type.new(…)`
+// gives a `Type`, and a `new` whose result is another type is refused.
+Celsius: struct {
+    degrees: Float,
+
+    new: fn(degrees: Float) -> Float { degrees }
+}
+
+Light: enum {
+    On,
+    Off,
+
+    new: fn(level: Int) -> Int { level }
+}
+
+run: fn() {
+    print(Celsius.new(21.5))
+    print(Celsius{degrees: 1.5}.degrees)
+    print(Light.new(3))
+    print(Light.On)
+    print(Light.Off)
+}

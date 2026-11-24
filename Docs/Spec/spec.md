@@ -910,6 +910,16 @@ impl Circle {
 }
 ```
 
+A static `new` is the type's constructor, wherever it is declared: in the
+body, an inherent `impl`, or as `Type.new: fn`. `Type.new(…)` gives a `Type`,
+so the result of `new` is the owner type or one of its states (`Gate.Closed`),
+and may sit behind `?` or a failure contract (`Type?`, `Type E!`). Any other
+result is **E0181**. A struct with no fields whose body declares only static
+functions, none of which takes or returns the struct, is the tidy error
+**L0309** unless the struct has states, derives or an impl anywhere. No value
+of such a struct carries anything, so the fix is a `name: module { … }`
+holding the same functions.
+
 `Type{ body }` is the one typed-literal head for every type (D-DOTCTOR3): the
 body uses the type's literal notation, such as elements for `[U8]{42, 0}` and
 entries for `[String:Int]{"a": 1}`. A body of exactly one expression is decided
