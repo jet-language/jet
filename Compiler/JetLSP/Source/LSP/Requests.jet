@@ -71,13 +71,21 @@ lsp_handle_request: fn(server: ^LSPServer, method: String, params: Dyn?, id: Dyn
     }
 }
 
-// Cancellation and tracing need no answer: the loop answers each request in
-// turn, so none is still running when its cancellation arrives.
-lsp_handle_notification: fn(server: ^LSPServer, method: String, params: Dyn?, stdout: ^lsp_request_term.Stdout) IOError! {
+// Cancellation needs nothing here: the loop answers a request whose cancel is
+// already queued with RequestCancelled before running it, and a request that
+// has started runs to its end. Tracing needs no answer. An opened document
+// whose newer edit is already queued is marked dirty instead of published,
+// so the first request after that edit publishes it.
+lsp_handle_notification: fn(server: ^LSPServer, method: String, params: Dyn?, input: ^LSPInput, stdout: ^lsp_request_term.Stdout) IOError! {
     if method == {
         "exit" -> server.exited = true
         "textDocument/didOpen" -> {
             uri: lsp_update_document(server.diagnostic_state, params, is_open: true) ?? return
+            lsp_read_more(input)
+            if lsp_edit_queued(input, uri) {
+                server.diagnostic_state.dirty[uri] = true
+                return
+            }
             lsp_publish_document_diagnostics(server, uri, stdout) ?? return Err(err)
             _ := server.diagnostic_state.dirty.remove(uri)
         }

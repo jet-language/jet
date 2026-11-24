@@ -1,8 +1,15 @@
 // The server loop: JSON-RPC messages over standard input and output, each
-// framed by a `Content-Length` header. Requests are answered in arrival
-// order; before each one, the documents edited since their last publication
-// are checked and republished, so a request reads current diagnostics.
+// framed by a `Content-Length` header. The server is single-threaded and
+// answers in arrival order. Before it answers a request it reads, without
+// waiting, the input that has already arrived and frames each complete
+// message into its queue: a request whose `$/cancelRequest` is queued is
+// answered with RequestCancelled without running, and a document whose newer
+// edit is queued is not published. A request that has started runs to its
+// end. Before each request, the documents edited since their last
+// publication are checked and republished, so a request reads current
+// diagnostics.
 use {
+    core.encoding.[Dyn]
     lsp_loop_term: core.term
     jet_foundation.[foundation_byte_text]
 }
@@ -10,12 +17,109 @@ use {
 // The longest message body the server reads.
 LSP_MAX_MESSAGE_BYTES: 67108864
 
-// The next message body; None at the end of input. A body can arrive in
-// several reads, so reading goes on until `Content-Length` bytes are in; only
-// an empty read, the end of input, cuts it short.
-lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
-    header: lsp_loop_term.read_until("\r\n\r\n") ?? return Err(LSPRPCError{code: -32700, message: "could not read a message header: {err}"})
-    if header == "" -> return Ok(None)
+// The most input bytes one read asks for.
+LSP_READ_BYTES: 65536
+
+// A message read whole and not yet served: the parsed message, or, for a
+// body that is not a JSON-RPC message, the error response that answers it.
+// A framing or read problem, `stop`, ends the session where it stands in the
+// order.
+LSPQueued: struct {
+    message: Dyn?,
+    refusal: String{""},
+    stop: String{""},
+}
+
+// The input read and not yet served: the bytes of a message still arriving,
+// and the queue of framed messages in two parts. `next` holds the oldest,
+// newest first, so the next message pops off its end; `arrived` holds those
+// framed since, oldest first, and moves into `next` when `next` runs out.
+// `ended` is set at the end of input and after a stop, when nothing more is
+// read.
+LSPInput: struct {
+    pending: [U8],
+    next: [LSPQueued],
+    arrived: [LSPQueued],
+    ended: Bool,
+}
+
+lsp_input: fn() -> LSPInput Never! {
+    LSPInput{pending: [U8]{}, next: [LSPQueued]{}, arrived: [LSPQueued]{}, ended: false}
+}
+
+// Waits for input, then frames what came.
+lsp_read_waiting: fn(input: ^LSPInput) -[IO, Time.Wait]> {
+    bytes: lsp_loop_term.take(LSP_READ_BYTES) ?? return lsp_read_failed(input, err)
+    lsp_take_in(input, bytes)
+}
+
+// Frames the input that has already arrived, without waiting for more.
+lsp_read_more: fn(input: ^LSPInput) -[IO, Time.Wait]> {
+    loop !input.ended {
+        got: lsp_loop_term.take_within(LSP_READ_BYTES, 0ms) ?? return lsp_read_failed(input, err)
+        bytes: got ?? return
+        lsp_take_in(input, bytes)
+    }
+}
+
+// A read that failed ends the session after the messages framed before it.
+lsp_read_failed: fn(input: ^LSPInput, failure: IOError) Never! {
+    part: if lsp_header_end(input.pending, 0) < 0 -> "header" else -> "body"
+    lsp_stop_input(input, "could not read a message {part}: {failure}")
+}
+
+// An empty read is the end of input.
+lsp_take_in: fn(input: ^LSPInput, bytes: ^^[U8]) Never! {
+    if {
+        bytes.is_empty() -> input.ended = true
+        else -> input.pending.extend(bytes)
+    }
+    lsp_frame(input)
+}
+
+lsp_stop_input: fn(input: ^LSPInput, problem: String) Never! {
+    input.arrived.push(LSPQueued{message: None, stop: problem})
+    input.pending = [U8]{}
+    input.ended = true
+}
+
+// Queues each complete message in `pending`. At the end of input, bytes left
+// without a header's blank line are read as a header whose body never came;
+// none left is a clean end.
+lsp_frame: fn(input: ^LSPInput) Never! {
+    at := 0
+    size: input.pending.len()
+    loop at < size {
+        end: lsp_header_end(input.pending, at)
+        if end < 0 && !input.ended -> break
+        length: lsp_content_length(foundation_byte_text(input.pending, at, if end < 0 -> size else -> end)) ?? return lsp_stop_input(input, err.message)
+        start: end + 4
+        if end < 0 || size - start < length {
+            if input.ended -> return lsp_stop_input(input, "input ended inside a message body")
+            break
+        }
+        text: String.from_bytes(input.pending.slice(start, start + length)) ?? return lsp_stop_input(input, "a message body is not UTF-8")
+        input.arrived.push(lsp_queued(text))
+        at = start + length
+    }
+    if at > 0 -> input.pending = input.pending.slice(at, size)
+}
+
+// The offset of the first header's blank line (`\r\n\r\n`) at or after
+// `from` in `bytes`; -1 when none has arrived.
+lsp_header_end: fn(bytes: [U8], from: Int) -> Int Never! {
+    at := from
+    loop at + 4 <= bytes.len() {
+        if bytes[at] == 13 && bytes[at + 1] == 10 && bytes[at + 2] == 13 && bytes[at + 3] == 10 {
+            return at
+        }
+        at += 1
+    }
+    -1
+}
+
+// The body length a header names in its `Content-Length` line.
+lsp_content_length: fn(header: String) -> Int LSPRPCError! {
     length := -1
     loop line in header.split("\r\n") {
         colon: line.find(":")
@@ -31,13 +135,58 @@ lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
     if length > LSP_MAX_MESSAGE_BYTES {
         return Err(LSPRPCError{code: -32700, message: "a message is longer than {LSP_MAX_MESSAGE_BYTES} bytes"})
     }
-    bytes := lsp_loop_term.take(length) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
-    loop bytes.len() < length {
-        rest: lsp_loop_term.take(length - bytes.len()) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
-        if rest.len() == 0 -> return Err(LSPRPCError{code: -32700, message: "input ended inside a message body"})
-        bytes.extend(rest)
+    Ok(length)
+}
+
+lsp_queued: fn(body: String) -> LSPQueued Never! {
+    if lsp_parse_rpc_message(body) == {
+        .Ok(message) -> LSPQueued{message: Val(message)}
+        .Err(problem) -> LSPQueued{message: None, refusal: lsp_error_response(lsp_refused_id(body), problem.code, problem.message)}
     }
-    Ok(Val(String.from_bytes(bytes) ?? return Err(LSPRPCError{code: -32700, message: "a message body is not UTF-8"})))
+}
+
+// The oldest queued message; None when the queue is empty.
+lsp_next_queued: fn(input: ^LSPInput) -> LSPQueued? Never! {
+    if input.next.is_empty() {
+        loop !input.arrived.is_empty() { input.next.push(input.arrived.pop() ?? return None) }
+    }
+    input.next.pop()
+}
+
+// Whether a `$/cancelRequest` naming the request `id` is queued.
+lsp_cancel_queued: fn(input: LSPInput, id: Dyn) -> Bool Never! {
+    named: lsp_serialize_id(id)
+    if named == "null" -> return false
+    loop queued in input.next {
+        if lsp_queued_cancels(queued, named) -> return true
+    }
+    loop queued in input.arrived {
+        if lsp_queued_cancels(queued, named) -> return true
+    }
+    false
+}
+
+lsp_queued_cancels: fn(queued: LSPQueued, named: String) -> Bool Never! {
+    message: queued.message ?? return false
+    if lsp_text_member(message, "method") != Val("$/cancelRequest") -> return false
+    lsp_serialize_id(lsp_param(lsp_member(message, "params"), "id") ?? return false) == named
+}
+
+// Whether a `textDocument/didChange` of the document `uri` is queued.
+lsp_edit_queued: fn(input: LSPInput, uri: String) -> Bool Never! {
+    loop queued in input.next {
+        if lsp_queued_edits(queued, uri) -> return true
+    }
+    loop queued in input.arrived {
+        if lsp_queued_edits(queued, uri) -> return true
+    }
+    false
+}
+
+lsp_queued_edits: fn(queued: LSPQueued, uri: String) -> Bool Never! {
+    message: queued.message ?? return false
+    if lsp_text_member(message, "method") != Val("textDocument/didChange") -> return false
+    lsp_params_uri(lsp_member(message, "params")) == Val((uri))
 }
 
 // Serves until `exit` or the end of input. The exit code is 0 when a
@@ -45,18 +194,17 @@ lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
 lsp_serve: fn(checker: ^^LSPChecker) -> Int {
     server := lsp_server(checker)
     stdout := lsp_loop_term.stdout()
+    input := lsp_input()
     loop {
-        text: if lsp_read_message() == {
-            .Val(body) -> body
-            .None -> {
-                return lsp_exit_code(server)
+        if {
+            lsp_next_queued(input) == .Val(queued) -> {
+                if queued.stop != "" -> return lsp_stop(queued.stop)
+                lsp_serve_message(server, queued, input, stdout) ?? return lsp_stop("could not write to the client: {err}")
+                if server.exited -> return lsp_exit_code(server)
             }
-            .Err(problem) -> {
-                return lsp_stop(problem.message)
-            }
+            input.ended -> return lsp_exit_code(server)
+            else -> lsp_read_waiting(input)
         }
-        lsp_serve_message(server, text, stdout) ?? return lsp_stop("could not write to the client: {err}")
-        if server.exited -> return lsp_exit_code(server)
     }
 }
 
@@ -67,13 +215,8 @@ lsp_stop: fn(message: String) -> Int {
     1
 }
 
-lsp_serve_message: fn(server: ^LSPServer, text: String, stdout: ^lsp_loop_term.Stdout) IOError! {
-    message: if lsp_parse_rpc_message(text) == {
-        .Ok(value) -> value
-        .Err(problem) -> {
-            return lsp_write_message(stdout, lsp_error_response(lsp_refused_id(text), problem.code, problem.message))
-        }
-    }
+lsp_serve_message: fn(server: ^LSPServer, queued: LSPQueued, input: ^LSPInput, stdout: ^lsp_loop_term.Stdout) IOError! {
+    message: queued.message ?? return lsp_write_message(stdout, queued.refusal)
     method: lsp_text_member(message, "method") ?? return
     params: lsp_member(message, "params")
     if lsp_member(message, "id") == {
@@ -81,7 +224,7 @@ lsp_serve_message: fn(server: ^LSPServer, text: String, stdout: ^lsp_loop_term.S
             if !server.initialized && method != "exit" {
                 return
             }
-            lsp_handle_notification(server, method, params, stdout) ?? return Err(err)
+            lsp_handle_notification(server, method, params, input, stdout) ?? return Err(err)
         }
         .Val(id) -> {
             if !server.initialized && method != "initialize" {
@@ -90,13 +233,15 @@ lsp_serve_message: fn(server: ^LSPServer, text: String, stdout: ^lsp_loop_term.S
             if server.shutdown {
                 return lsp_write_message(stdout, lsp_error_response(id, -32600, "the server is shutting down"))
             }
-            if method == "initialize" {
-                if server.initialized {
-                    return lsp_write_message(stdout, lsp_error_response(id, -32600, "the server is already initialized"))
-                }
-                server.initialized = true
+            if method == "initialize" && server.initialized {
+                return lsp_write_message(stdout, lsp_error_response(id, -32600, "the server is already initialized"))
             }
-            lsp_flush_dirty(server, stdout) ?? return Err(err)
+            lsp_read_more(input)
+            if lsp_cancel_queued(input, id) {
+                return lsp_write_message(stdout, lsp_error_response(id, -32800, "the request was cancelled"))
+            }
+            if method == "initialize" -> server.initialized = true
+            lsp_flush_dirty(server, input, stdout) ?? return Err(err)
             lsp_write_message(stdout, lsp_handle_request(server, method, params, id)) ?? return Err(err)
         }
     }
