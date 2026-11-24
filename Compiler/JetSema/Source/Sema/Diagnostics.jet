@@ -3,6 +3,7 @@
 use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    DiagnosticRegistryRow,
     Expr,
     InternalTag,
     SourceFile,
@@ -273,6 +274,15 @@ sema_lint: fn(code: String, span: Span, what: String, why: String, fix: String) 
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }
 
+// The row of `code`, which every caller writes as a quoted literal
+// (`sema_diagnostic_row("E0610")`). Unreachable stop:
+// Tools/Agent/DiagnosticCensus.jet counts each quoted code in a compiler
+// source as an emission, and its gate fails on an emitted code with no row,
+// so the registry holds every code a caller can name.
+sema_diagnostic_row: fn(code: String) -> DiagnosticRegistryRow {
+    diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+}
+
 // L0511: a user binding or parameter spelled `err`.
 sema_err_shadow_lint: fn(span: Span) -> Diagnostic {
     sema_lint("L0511", span, "Binding `err` shadows the fallback's ambient failure report", "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there", "Rename the binding, or use it outside a fallback")
@@ -280,32 +290,32 @@ sema_err_shadow_lint: fn(span: Span) -> Diagnostic {
 
 // E0610: `use alias.item` whose alias names no module in scope.
 sema_unknown_module_alias: fn(module_alias: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0610") ?? panic("E0610 has no registry row")
+    row: sema_diagnostic_row("E0610")
     sema_error("E0610", span, row.what.replace("{{alias}}", module_alias), row.why.replace("{{alias}}", module_alias), row.fix.replace("{{alias}}", module_alias))
 }
 
 // E0628: `name.member` where `name` is the item this module takes from its
 // file module `name` (`wrap: module` with `wrap: wrap.wrap`).
 sema_taken_over_file_member: fn(name: String, member: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0628") ?? panic("E0628 has no registry row")
+    row: sema_diagnostic_row("E0628")
     sema_error("E0628", span, row.what.replace("{{name}}", name).replace("{{member}}", member), row.why.replace("{{name}}", name).replace("{{member}}", member), row.fix.replace("{{name}}", name).replace("{{member}}", member))
 }
 
 // E0629: a module (`text`, `lib.inner`) read where a value is expected.
 sema_module_used_as_value: fn(name: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0629") ?? panic("E0629 has no registry row")
+    row: sema_diagnostic_row("E0629")
     sema_error("E0629", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
 }
 
 // E0636: a type (`Rock`, a type parameter) read where a value is expected.
 sema_type_used_as_value: fn(name: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0636") ?? panic("E0636 has no registry row")
+    row: sema_diagnostic_row("E0636")
     sema_error("E0636", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
 }
 
 // E0639: a function outside a type body or `impl` declares `self`.
 sema_self_outside_method: fn(name: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0639") ?? panic("E0639 has no registry row")
+    row: sema_diagnostic_row("E0639")
     sema_error("E0639", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
 }
 
@@ -495,14 +505,14 @@ sema_unknown_name_at: fn(name: String, span: Span, environment: SemaScopeEnviron
 
 // E0640: compile-time code reads a run-time local or parameter.
 sema_comptime_reads_runtime_value: fn(name: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E0640") ?? panic("E0640 has no registry row")
+    row: sema_diagnostic_row("E0640")
     sema_error("E0640", span, row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name))
 }
 
 // E1018: a compile-time value named `name` holds the runtime handle `handle`
 // (sema_comptime_value_runtime_handle).
 sema_comptime_runtime_handle_diagnostic: fn(name: String, handle: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E1018") ?? panic("E1018 has no registry row")
+    row: sema_diagnostic_row("E1018")
     what: row.what.replace("{{name}}", name).replace("{{type}}", handle)
     why: row.why.replace("{{type}}", handle)
     fix: row.fix.replace("{{type}}", handle)
@@ -510,7 +520,7 @@ sema_comptime_runtime_handle_diagnostic: fn(name: String, handle: String, span: 
 }
 
 sema_comptime_method_runtime_call_diagnostic: fn(name: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E1019") ?? panic("E1019 has no registry row")
+    row: sema_diagnostic_row("E1019")
     sema_error("E1019", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
 }
 
@@ -518,7 +528,7 @@ sema_comptime_method_runtime_call_diagnostic: fn(name: String, span: Span) -> Di
 // `#run`, `#if` or `#run` block inside `#Runtime(.Only)` code) would run
 // `#Runtime(.Only)` code while building.
 sema_runtime_only_build_time_diagnostic: fn(subject: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E1022") ?? panic("E1022 has no registry row")
+    row: sema_diagnostic_row("E1022")
     sema_error("E1022", span, row.what.replace("{{subject}}", subject), row.why, row.fix)
 }
 
@@ -587,7 +597,7 @@ sema_trait_value_unimplemented: fn(required: Type, offered: Type, span: Span) ->
                 why = "a `{name}` value carries only `{name}`; the type inside it isn't known here, so no impl can make it `{bound}`"
                 fix = "pass the value before it becomes a `{name}` value, if its type implements `{bound}`"
             }
-            row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+            row: sema_diagnostic_row("E0905")
             return Val(sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix)))
         }
     }
@@ -654,7 +664,7 @@ sema_nested_fn_failure_mismatch: fn(required: Type, offered: Type, span: Span) -
     required_fails: sema_type_nested_fn_failure_gap(required, offered, false) ?? return None
     required_form: if required_fails -> "can fail" else -> "cannot fail"
     offered_form: if required_fails -> "cannot fail" else -> "can fail"
-    row: diagnostic_registry_row("E0638") ?? panic("E0638 has no registry row")
+    row: sema_diagnostic_row("E0638")
     what: row.what.replace("{{required}}", type_name(required)).replace("{{required_form}}", required_form).replace("{{offered_form}}", offered_form)
     Val(sema_error("E0638", span, what, row.why, row.fix))
 }

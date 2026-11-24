@@ -562,9 +562,9 @@ ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: 
 
 #Test("ir_drop_plan_into matches ir_drop_plan including multi-drop slots") {
     m := ir_module_new()
-    str_row: ir_type_row(m, Type.String) ?? panic("no String row")
+    str_row: ir_scalar_type_row(m, Type.String)
     m.types[str_row].drop = "jet_rt_string_drop"
-    i64_row: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    i64_row: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("multi_drop", "test:drop.multi", "", "drop.jet", 1)
     s0: ir_slot(f, str_row, IRSlotKind.Local, ir_intern_name(m, "s0"), 1)
     x: ir_slot(f, i64_row, IRSlotKind.Local, ir_intern_name(m, "x"), 2)

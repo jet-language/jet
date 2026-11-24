@@ -4,6 +4,7 @@
 use {
     math: core.math
     jet_foundation.[
+        BodyHandleOp,
         LIST_TYPE_OWNER,
         AST_NODE_GENERATED,
         AccessConvention,
@@ -31,7 +32,6 @@ use {
         CallContractRow,
         CtValue,
         Diagnostic,
-        diagnostic_registry_row,
         Dimension,
         DimensionAxis,
         EffectRowEntry,
@@ -58,7 +58,6 @@ use {
         Symbol,
         SymbolID,
         SymbolKind,
-        TBinaryOp,
         TCanonicalField,
         TComptimeValue,
         TGenericParam,
@@ -703,8 +702,8 @@ sema_expr_operator_ordering_variant: fn(op: BinOp) -> String Never! {
 sema_expr_operator_ordering_test: fn(op: BinOp, comparison: TExpr, span: Span, line: Int) -> TExpr Never! {
     variant := sema_expr_operator_ordering_variant(op)
     ordering := sema_tree_node(Type.Named{name: "Ordering"}, TExprKind.EnumLit{enum_type: "Ordering", variant: variant, payload: TEnumPayload.Unit}, span)
-    test_op := TBinaryOp.Eq
-    if op == BinOp.Le || op == BinOp.Ge || op == BinOp.Ne -> test_op = TBinaryOp.Ne
+    test_op := BinOp.Eq
+    if op == BinOp.Le || op == BinOp.Ge || op == BinOp.Ne -> test_op = BinOp.Ne
     sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: comparison, rhs: ordering}, span)
 }
 
@@ -1029,33 +1028,6 @@ sema_expr_operator_function_candidate: fn(graph: SemaRegistrationGraph, function
     candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true, derived: function.declaration.compiler_generated})
 }
 
-sema_expr_tree_binary_op: fn(op: BinOp) -> TBinaryOp Never! {
-    if op == {
-        .Add -> TBinaryOp.Add
-        .Sub -> TBinaryOp.Sub
-        .Mul -> TBinaryOp.Mul
-        .Div -> TBinaryOp.Div
-        .FloorDiv -> TBinaryOp.FloorDiv
-        .Mod -> TBinaryOp.Mod
-        .Rem -> TBinaryOp.Rem
-        .Pow -> TBinaryOp.Pow
-        .BitAnd -> TBinaryOp.BitAnd
-        .BitOr -> TBinaryOp.BitOr
-        .BitXor -> TBinaryOp.BitXor
-        .Shl -> TBinaryOp.Shl
-        .Shr -> TBinaryOp.Shr
-        .Eq -> TBinaryOp.Eq
-        .Ne -> TBinaryOp.Ne
-        .Lt -> TBinaryOp.Lt
-        .Gt -> TBinaryOp.Gt
-        .Le -> TBinaryOp.Le
-        .Ge -> TBinaryOp.Ge
-        .Compare -> TBinaryOp.Compare
-        .And -> TBinaryOp.And
-        .Or -> TBinaryOp.Or
-    }
-}
-
 sema_expr_binary_name: fn(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+"
@@ -1348,7 +1320,7 @@ sema_expr_expected_owned: fn(value: ^^TExpr, expected: Type?, environment: SemaS
             payload: sema_tree_node(owned.ty, TExprKind.MapLit{entries: entries}, span)
             return Val(sema_tree_node(required, TExprKind.JSONLit{variant: "Object", arg: Val(payload), clone_arg: false}, span))
         }
-        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: owned.move(), operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span))
+        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: owned.move(), operation: BodyHandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span))
     }
     if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(lifted_type) {
         span: owned.span
@@ -1796,7 +1768,7 @@ sema_expr_check_geometry_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
     same_kind: (left_point && right_point) || (left_delta && right_delta)
     same_space: type_identity_equal(sema_expr_geometry_space(lhs.ty) ?? lhs.ty, sema_expr_geometry_space(rhs.ty) ?? rhs.ty)
     if (op == BinOp.Eq || op == BinOp.Ne) && same_kind && same_space {
-        test_op: if op == BinOp.Ne -> TBinaryOp.Ne else -> TBinaryOp.Eq
+        test_op: if op == BinOp.Ne -> BinOp.Ne else -> BinOp.Eq
         return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
@@ -1805,12 +1777,12 @@ sema_expr_check_geometry_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
 
 sema_expr_check_duration_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span) -> TExpr? {
     if lhs.ty == (Type.Named{name: "Duration"}) && rhs.ty == Type.Int && (op == BinOp.Mul || op == BinOp.Div) {
-        operation := THandleOp.DurationScale
-        if op == BinOp.Div -> operation = THandleOp.DurationDivide
+        operation := BodyHandleOp.DurationScale
+        if op == BinOp.Div -> operation = BodyHandleOp.DurationDivide
         return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: lhs, operation: operation, args: [TExpr]{rhs}}, span))
     }
     if lhs.ty == Type.Int && rhs.ty == (Type.Named{name: "Duration"}) && op == BinOp.Mul {
-        return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: rhs, operation: THandleOp.DurationScale, args: [TExpr]{lhs}}, span))
+        return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: rhs, operation: BodyHandleOp.DurationScale, args: [TExpr]{lhs}}, span))
     }
     None
 }
@@ -1825,7 +1797,7 @@ sema_expr_check_time_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
     if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge || op == BinOp.Compare {
         if lhs.ty != rhs.ty -> return None
         result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
-        return Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+        return Val(sema_tree_node(result_ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     result := Type?{None}
     if {
@@ -1843,7 +1815,7 @@ sema_expr_check_time_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
         }
     }
     result_ty: result ?? return None
-    Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+    Val(sema_tree_node(result_ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
 }
 
 SemaExprDistinctFacts: struct {
@@ -1940,7 +1912,7 @@ sema_expr_check_distinct_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
             effective_rhs = sema_tree_node(base, TExprKind.DistinctRaw{value: rhs}, span)
             result_ty = base
         }
-        return Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: effective_lhs, rhs: effective_rhs}, span))
+        return Val(sema_tree_node(result_ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: effective_lhs, rhs: effective_rhs}, span))
     }
     if op == BinOp.Eq || op == BinOp.Ne {
         if !sema_expr_distinct_same(lhs.ty, rhs.ty, left_facts, right_facts) {
@@ -1948,7 +1920,7 @@ sema_expr_check_distinct_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
             diagnostics.push(sema_error("E0753", span, "a `{type_name(lhs.ty)}` can't be compared with a `{type_name(rhs.ty)}`", "`{distinct.name}` is a distinct type; it only compares equal to another `{distinct.name}`", "use `.raw()` to compare the underlying values, or construct a `{distinct.name}`"))
             return None
         }
-        return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+        return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     None
 }
@@ -2315,7 +2287,7 @@ sema_expr_unit_is_scalable: fn(fact: SemaRegistrationUnitFact) -> Bool Never! {
 sema_expr_unit_binary_result: fn(op: BinOp, lhs: TExpr, rhs: TExpr, left_fact: SemaRegistrationUnitFact, right_fact: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
     left_value := sema_expr_unit_raw(sema_expr_unit_conversion(lhs, left_fact, destination, span, line, environment, program), span)
     right_value := sema_expr_unit_raw(sema_expr_unit_conversion(rhs, right_fact, destination, span, line, environment, program), span)
-    raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
+    raw := sema_tree_node(Type.Float, TExprKind.Binary{op: op, overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
     if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge {
         return sema_tree_node(Type.Bool, raw.kind.move(), span)
     }
@@ -2342,7 +2314,7 @@ sema_expr_unit_dimension_overflow: fn(op: BinOp, span: Span, diagnostics: ^[Diag
 sema_expr_unit_mixed_result: fn(op: BinOp, lhs: TExpr, rhs: TExpr, left_source: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_source: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, result_ty: Type, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
     left_value := sema_expr_unit_raw(sema_expr_unit_conversion(lhs, left_source, left_destination, span, line, environment, program), span)
     right_value := sema_expr_unit_raw(sema_expr_unit_conversion(rhs, right_source, right_destination, span, line, environment, program), span)
-    raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
+    raw := sema_tree_node(Type.Float, TExprKind.Binary{op: op, overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
     result_fact := sema_expr_unit_fact(result_ty, environment, program) ?? left_destination
     sema_expr_unit_wrap_raw(raw, result_fact, span, line, environment, program)
 }
@@ -2364,7 +2336,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
                 return None
             }
             scalar: sema_expr_numeric_conversion(rhs, Type.Float, span, line) ?? return None
-            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: sema_expr_unit_raw(lhs, span), rhs: scalar}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: op, overflow: false, line: line, lhs: sema_expr_unit_raw(lhs, span), rhs: scalar}, span)
             return Val(sema_expr_unit_wrap_raw(raw, fact, span, line, environment, program))
         }
         if right_fact != None && left_fact == None && sema_expr_is_numeric(lhs.ty) {
@@ -2374,7 +2346,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
                 return None
             }
             scalar: sema_expr_numeric_conversion(lhs, Type.Float, span, line) ?? return None
-            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: scalar, rhs: sema_expr_unit_raw(rhs, span)}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: op, overflow: false, line: line, lhs: scalar, rhs: sema_expr_unit_raw(rhs, span)}, span)
             return Val(sema_expr_unit_wrap_raw(raw, fact, span, line, environment, program))
         }
         if left_fact != None && right_fact != None {
@@ -2390,7 +2362,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
             }
             raw_lhs := sema_expr_unit_raw(lhs, span)
             raw_rhs := sema_expr_unit_raw(rhs, span)
-            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: raw_lhs, rhs: raw_rhs}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: op, overflow: false, line: line, lhs: raw_lhs, rhs: raw_rhs}, span)
             if dimensions.axes.len() == 0 -> return Val(raw)
             return Val(sema_tree_node(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind.move(), span))
         }
@@ -2421,7 +2393,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
             }
             left_value := if sema_expr_unit_fact(lhs.ty, environment, program) != None -> sema_expr_unit_raw(lhs, span) else -> lhs
             right_value := if sema_expr_unit_fact(rhs.ty, environment, program) != None -> sema_expr_unit_raw(rhs, span) else -> rhs
-            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: op, overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
             if dimensions.axes.len() == 0 -> return Val(raw)
             return Val(sema_tree_node(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind.move(), span))
         }
@@ -2509,7 +2481,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
             }
             if type_identity_equal(lhs.ty, rhs.ty) {
                 result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge -> Type.Bool else -> lhs.ty
-                return Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+                return Val(sema_tree_node(result_ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
             }
             sema_expr_unit_arithmetic_mismatch(op, lhs.ty, rhs.ty, span, diagnostics)
             return None
@@ -2610,7 +2582,7 @@ sema_expr_written_negative_integer: fn(value: Expr) -> Bool Never! {
 // `1 / base.pow(n)`; ir_precise_division stops a zero base at the line.
 sema_expr_negative_int_power: fn(base: TExpr, exponent: TExpr, line: Int, span: Span) -> TExpr Never! {
     positive: sema_tree_node(Type.Int, TExprKind.Unary{op: TUnaryOp.Neg, operand: exponent}, exponent.span)
-    power: sema_tree_node(Type.Int, TExprKind.Binary{op: TBinaryOp.Pow, overflow: true, line: line, lhs: base, rhs: positive}, span)
+    power: sema_tree_node(Type.Int, TExprKind.Binary{op: BinOp.Pow, overflow: true, line: line, lhs: base, rhs: positive}, span)
     one: sema_tree_node(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
     sema_tree_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "quotient", args: [TExpr]{one, power}}, span)
 }
@@ -3548,7 +3520,7 @@ sema_expr_impl_conditions_check: fn(graph: SemaRegistrationGraph, function: Sema
             met: sema_type_bound_satisfied_with_generics(graph, substitutions[found].ty, bound, function.symbol.module_identity, generic_params) ?? next
             if met -> next
             shown: type_name(substitutions[found].ty)
-            row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+            row: sema_diagnostic_row("E0905")
             fix := "implement `{bound}` for `{shown}`, or call `{function.symbol.name}` on a value whose `{condition.name}` is `{bound}`"
             loop param in generic_params {
                 if param.name == shown {
@@ -4083,7 +4055,7 @@ sema_expr_check_take_pattern_method: fn(receiver: Expr, receiver_value: TExpr, m
                 }
                 ok_ty := if tuple_fields.len() == 0 -> Type.Named{name: "Unit"} else -> Type.Tuple{fields: tuple_fields}
                 result_ty := Type.Result{ok: ok_ty, err: Type.String}
-                operation := THandleOp.CursorTakePattern{parts: parts, canonical: canonical}
+                operation := BodyHandleOp.CursorTakePattern{parts: parts, canonical: canonical}
                 value := sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
                 checked := sema_expr_expected(value, expected, environment, program, diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: checked}
@@ -4107,7 +4079,7 @@ sema_expr_check_take_pattern_method: fn(receiver: Expr, receiver_value: TExpr, m
             }
             ok_ty := if tuple_fields.len() == 0 -> Type.Named{name: "Unit"} else -> Type.Tuple{fields: tuple_fields}
             result_ty := Type.Result{ok: ok_ty, err: Type.String}
-            operation := THandleOp.ReaderTakePattern{parts: parts, canonical: canonical}
+            operation := BodyHandleOp.ReaderTakePattern{parts: parts, canonical: canonical}
             value := sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
             checked := sema_expr_expected(value, expected, environment, program, diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: checked}
@@ -5207,7 +5179,7 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
 // `if #phase == ...`.
 sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> TExpr? {
     if name == "#caller" {
-        row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
+        row: sema_diagnostic_row("E2427")
         diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
         return None
     }
@@ -5243,7 +5215,7 @@ sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environ
 // the place of each call is `#caller`.
 sema_site_here_default_check: fn(expr: Expr, diagnostics: ^[Diagnostic]) {
     if expr == .Ident(name, span, _) && name == "#here" {
-        row: diagnostic_registry_row("E2428") ?? panic("E2428 must have a registry row")
+        row: sema_diagnostic_row("E2428")
         diagnostics.push(sema_error("E2428", span, row.what, row.why, row.fix))
     }
 }
@@ -5943,7 +5915,7 @@ sema_expr_generic_bound_operator: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Sp
     if !bound -> return None
     // A fixed-width instantiation checks overflow as its concrete operator
     // does (sema_expr_check_binary_operands), at this operator's line.
-    Val(sema_tree_node(lhs.ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: true, line: line, lhs: lhs, rhs: rhs}, span))
+    Val(sema_tree_node(lhs.ty, TExprKind.Binary{op: op, overflow: true, line: line, lhs: lhs, rhs: rhs}, span))
 }
 
 // E2511: a lane or linalg operator outside its fixed operand shapes.
@@ -6563,12 +6535,12 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         dynamic_right: sema_expr_expected(rhs, Val(sema_dyn_type()), environment, program, diagnostics) ?? return None
         ty: if arithmetic -> sema_dyn_type() else -> Type.Bool
         if equality {
-            value: sema_tree_node(ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
+            value: sema_tree_node(ty, TExprKind.Binary{op: op, overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
             return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
         }
         site: "{sema_dyn_site(left)} {sema_expr_binary_name(op)} {sema_dyn_site(right)}"
         location: sema_expression_panic_location(environment, program, scopes, span)
-        operation: if arithmetic -> THandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> THandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
+        operation: if arithmetic -> BodyHandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> BodyHandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
         value: sema_tree_node(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
@@ -6582,7 +6554,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         }
         if lhs.ty != Type.Bool || rhs.ty != Type.Bool -> return None
         ty: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, diagnostics) ?? return None
-        value: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span}
+        value: TExpr{ty: ty, kind: TExprKind.Binary{op: op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span}
         if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
@@ -6865,7 +6837,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     }
     // Built and kept in place (sema_expr_expected copies its borrowed value,
     // and with it both operand trees, at every level).
-    value: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span}
+    value: TExpr{ty: ty, kind: TExprKind.Binary{op: op, overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span}
     if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }

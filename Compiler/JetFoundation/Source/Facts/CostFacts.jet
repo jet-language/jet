@@ -33,7 +33,7 @@ checked_cost_min: fn(left: Int, right: Int) -> Int Never! { if left < right -> l
 
 checked_cost_max: fn(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
 
-checked_cost_combine_bounds: fn(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
+checked_cost_combine_bounds: fn(op: BinOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
     if op == {
         .Add -> return checked_cost_bounded(checked_cost_min(left.lo + right.lo, 0), checked_cost_max(left.hi + right.hi, 0))
         .Sub -> return checked_cost_bounded(checked_cost_min(left.lo - right.hi, 0), checked_cost_max(left.hi - right.lo, 0))
@@ -230,7 +230,7 @@ body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact
     }
     if tid.id == TYPE_ID_INT.id {
         if node.kind == .Binary(op, _, _, left, right) {
-            if op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul {
+            if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul {
                 return Val(body_cost_int_operation_fact(table, tree, op, left, right))
             }
         } else if node.kind == .OverflowOpt(prefix, operation, _, left, right) {
@@ -267,7 +267,7 @@ body_cost_fact: fn(table: Interner, tree: BodyTree, node: BodyNode) -> TCostFact
 
 // The cost of the exact Int `left op right`, `op` `+`, `-` or `*`
 // (body_cost_fact).
-body_cost_int_operation_fact: fn(table: Interner, tree: BodyTree, op: TBinaryOp, left: Int, right: Int) -> TCostFact Never! {
+body_cost_int_operation_fact: fn(table: Interner, tree: BodyTree, op: BinOp, left: Int, right: Int) -> TCostFact Never! {
     lhs: body_cost_integer_bounds(table, tree, left)
     rhs: body_cost_integer_bounds(table, tree, right)
     result := TIntegerBounds?{None}
@@ -282,12 +282,12 @@ body_cost_int_operation_fact: fn(table: Interner, tree: BodyTree, op: TBinaryOp,
 // name) computes: on an unbounded Int either word is the exact operator
 // itself (JetIR ir_overflow_opt), so it grows as the operator does. None
 // for any other word or operator.
-body_cost_int_policy_operator: fn(prefix: String, operation: String) -> TBinaryOp? Never! {
+body_cost_int_policy_operator: fn(prefix: String, operation: String) -> BinOp? Never! {
     if prefix != "wrapping" && prefix != "saturating" -> return None
     if operation == {
-        "add" -> Val(TBinaryOp.Add)
-        "sub" -> Val(TBinaryOp.Sub)
-        "mul" -> Val(TBinaryOp.Mul)
+        "add" -> Val(BinOp.Add)
+        "sub" -> Val(BinOp.Sub)
+        "mul" -> Val(BinOp.Mul)
         else -> None
     }
 }

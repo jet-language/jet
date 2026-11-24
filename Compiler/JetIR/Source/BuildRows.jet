@@ -20,7 +20,7 @@ use {
         FnBody,
         Span,
         SymbolID,
-        TBinaryOp,
+        BinOp,
         TBuiltinOp,
         TCLIBinding,
         TComptimeField,
@@ -321,7 +321,7 @@ ir_rows_row_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index
 }
 
 // `table[row].field (op)= value`: writes directly to column `field` at `slot`.
-ir_rows_field_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, field_name: String, op: TBinaryOp?, value: Int, span: Span) -> Bool Never! {
+ir_rows_field_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, field_name: String, op: BinOp?, value: Int, span: Span) -> Bool Never! {
     if ir_body_node(p, b, receiver).kind == .Index(base, index, kind, _, _, _) {
         if kind != .List -> return false
         table: ir_rows_backing_table(m, p, b, base)
@@ -347,7 +347,7 @@ ir_rows_field_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: In
 
 // `table[row] = value`: single bounds check, scatters every field of `value`
 // into its column at `slot`.
-ir_rows_row_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index: Int, op: TBinaryOp?, value: Int, span: Span) -> Bool Never! {
+ir_rows_row_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index: Int, op: BinOp?, value: Int, span: Span) -> Bool Never! {
     if op != None -> return false
     table: ir_rows_backing_table(m, p, b, base)
     if table < 0 -> return false

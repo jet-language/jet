@@ -186,7 +186,7 @@ ir_timing_finding: fn(f: IRFunction, at: Int, message: String) -> String Never! 
 
 // mix(key, data) = (key ^ data) + data, wrapping, with `key` fixed.
 ir_timing_test_function: fn(m: ^IRModule, op: IROp, overflow: Int) -> IRFunction Never! {
-    word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 64})
     f := ir_function_new("mix", "test:timing.jet.mix", "", "timing.jet", 1)
     key: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "key"), 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)

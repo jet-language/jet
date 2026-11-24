@@ -3093,7 +3093,7 @@ sema_function_check_registered_unregistered: fn(job: SemaBodyJob, module_index: 
     if program.registration_graph == .Val(graph) {
         return sema_function_check_unregistered_in_graph(graph, job, module_index, owner_key, function_kind, scopes, program)
     }
-    panic("a registered Jet body check lost its owning graph")
+    Val(sema_function_check_unavailable(owner_key, "its body check has neither a memory-plan row nor a registration graph"))
 }
 
 sema_function_check_unregistered_method: fn(module_row: SemaRegistrationModule, method: SemaRegistrationFunction, owner_key: String, function_kind: TFuncKind, scopes: SemaScopeTable, program: SemaProgramTables) -> SemaFunctionResult? {
@@ -3140,11 +3140,11 @@ sema_function_check_unregistered_in_graph: fn(graph: SemaRegistrationGraph, job:
             if graph.modules[module_index].program.items[item_index] == .Func(func) {
                 return sema_function_check_unregistered(func, owner_key, function_kind, scopes, program)
             }
-            panic("a selected source function lost its original item")
         }
         .NominalMethod(_, owner, row) -> return sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].nominals[owner].methods[row], owner_key, function_kind, scopes, program)
         .ImplMethod(_, owner, row) -> return sema_function_check_unregistered_method(graph.modules[module_index], graph.modules[module_index].impls[owner].methods[row], owner_key, function_kind, scopes, program)
     }
+    Val(sema_function_check_unavailable(owner_key, "its top-level item is not a function"))
 }
 
 // Keep the actual environment's retained function name, not a context shadow.

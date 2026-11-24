@@ -280,10 +280,10 @@ ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
 #Test("Builder pass eliminates non-escaping string formatting whose only read is jet_char_len") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    exact: ir_scalar_type_row(m, Type.Int)
     ptr: ir_pointer_row(m)
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no Word row")
-    text: ir_type_row(m, Type.String) ?? panic("no String row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    text: ir_scalar_type_row(m, Type.String)
     rt_val: ir_intern_name(m, "jet_rt_string_builder_value")
     rt_ps: ir_intern_name(m, "jet_rt_string_builder_push_static")
     rt_p: ir_intern_name(m, "jet_rt_string_builder_push")

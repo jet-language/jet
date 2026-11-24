@@ -15,7 +15,7 @@ use jet_foundation.[
     FnBody,
     NodeKind,
     Span,
-    TBinaryOp,
+    BinOp,
     body_each_expr_child,
     body_node,
     body_stmt,
@@ -541,7 +541,7 @@ jet_driver_recursion_expression: fn(tree: BodyTree, hits: [Int:Int], id: Int) ->
         .InlineBlock(body) -> jet_driver_recursion_statements(tree, hits, body)
         .Binary(op, _, _, lhs, rhs) -> {
             right := jet_driver_recursion_expression(tree, hits, rhs)
-            if op == TBinaryOp.And || op == TBinaryOp.Or {
+            if op == BinOp.And || op == BinOp.Or {
                 right = jet_driver_recursion_maybe(right)
             }
             jet_driver_recursion_then(jet_driver_recursion_expression(tree, hits, lhs), right)

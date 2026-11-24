@@ -158,7 +158,7 @@ jet_cli_solver_affine_of: fn(interner: Interner, tree: BodyTree, id: Int, scope:
     }
 }
 
-jet_cli_solver_relation: fn(op: TBinaryOp) -> String? Never! {
+jet_cli_solver_relation: fn(op: BinOp) -> String? Never! {
     if op == {
         .Lt -> Val("<")
         .Le -> Val("<=")
@@ -171,7 +171,7 @@ jet_cli_solver_relation: fn(op: TBinaryOp) -> String? Never! {
 }
 
 // `lhs <op> rhs` over integers; any other operand type is unsupported.
-jet_cli_solver_comparison: fn(interner: Interner, tree: BodyTree, op: TBinaryOp, lhs: Int, rhs: Int, scope: JetCLISolverScope) -> JetCLISolverBool JetCLISolverUnknown! {
+jet_cli_solver_comparison: fn(interner: Interner, tree: BodyTree, op: BinOp, lhs: Int, rhs: Int, scope: JetCLISolverScope) -> JetCLISolverBool JetCLISolverUnknown! {
     symbol: jet_cli_solver_relation(op) ?? return Err(jet_cli_solver_unsupported("an operator other than + - * and comparisons"))
     if !jet_cli_solver_type_bounds(body_type(interner, tree, lhs)).integer || !jet_cli_solver_type_bounds(body_type(interner, tree, rhs)).integer {
         return Err(jet_cli_solver_unsupported("a comparison of values that are not integers"))

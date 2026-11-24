@@ -2,7 +2,7 @@
 // core.build's `Build` and its handles is the Core method its declaration
 // checks, whose work is the build host's.
 use {
-    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, BUILD_OPTION_HOOK_DEFAULT, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ExprField, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, core_identity_is, diagnostic_registry_row, expr_span, type_name]
+    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, BUILD_OPTION_HOOK_DEFAULT, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ExprField, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, core_identity_is, expr_span, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -355,7 +355,7 @@ sema_build_compiler_site: fn(environment: SemaScopeEnvironment, program: SemaPro
     }
     written: environment.source_origin == SemaSourceOrigin.Snapshot
     if written && root != "" && environment.package_identity == root -> return true
-    row: diagnostic_registry_row("E0776") ?? panic("E0776 must have a registry row")
+    row: sema_diagnostic_row("E0776")
     diagnostics.push(sema_error("E0776", span, row.what, row.why, row.fix))
     false
 }

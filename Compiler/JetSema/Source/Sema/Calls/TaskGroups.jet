@@ -4,6 +4,7 @@
 // lexical groups, pending joins, and task-lambda boundaries.
 use {
     jet_foundation.[
+        BodyHandleOp,
         AST_NODE_GENERATED,
         AccessConvention,
         Call,
@@ -19,7 +20,7 @@ use {
         Symbol,
         SymbolID,
         SymbolKind,
-        TBinaryOp,
+        BinOp,
         TBranchClass,
         TCapture,
         TCaptureFacts,
@@ -1169,7 +1170,7 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
     }
     join := method == "join"
     result_type := if join -> sema_taskgroup_failure_result(payload) else -> Type.Named{name: "Unit"}
-    operation := if join -> THandleOp.TaskJoin else -> THandleOp.TaskDetach
+    operation := if join -> BodyHandleOp.TaskJoin else -> BodyHandleOp.TaskDetach
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     effect_name := if join -> "Time.Wait" else -> ""
@@ -1185,10 +1186,10 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
 // returns nothing.
 sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     selected: if {
-        method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(THandleOp.TaskPause)
-        method == "resume" && args.len() == 0 -> Val(THandleOp.TaskResume)
-        method == "cancel" && args.len() == 0 -> Val(THandleOp.TaskCancel)
-        else -> THandleOp?{None}
+        method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(BodyHandleOp.TaskPause)
+        method == "resume" && args.len() == 0 -> Val(BodyHandleOp.TaskResume)
+        method == "cancel" && args.len() == 0 -> Val(BodyHandleOp.TaskCancel)
+        else -> BodyHandleOp?{None}
     }
     operation: selected ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if sema_taskgroup_task_payload(receiver_value.ty) == None || !sema_type_is_builtin_handle(receiver_value.ty, "Task") {
@@ -1427,7 +1428,7 @@ sema_readiness_tree: fn(table: ^^SemaReadinessTable, branches: ^^[SemaStatementR
             }
         }
         loop statement in branch.value.move() -> body.push(statement)
-        condition: sema_tree_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tree_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
+        condition: sema_tree_node(Type.Bool, TExprKind.Binary{op: BinOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tree_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
         reversed.push(TMixedArm{condition: condition, body: body})
     }
     dispatch := [TMixedArm]{}

@@ -277,8 +277,8 @@ ir_opt_local_box_read: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, 
 // reads.
 ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     res_tid: ir_module_intern_tid(m, Type.Named{name: "Res"})
     res: ir_intern_type(m, "Res", ir_layout(IRTypeKind.Pointer, res_tid, 8, 8, IRClass.Pointer, false, 64, ""))
     boxed: ir_mark_box(m, res)
@@ -394,7 +394,7 @@ ir_opt_local_box_test_module: fn(escape: Bool, moved: Bool) -> IRModule Never! {
 // Stores) and moves the box into `joined`, as an inlined call's return
 // moves its Result box into the call's result.
 ir_opt_local_box_join_arm: fn(m: ^IRModule, run: ^IRFunction, joined: Int, tag: Int, line: Int) Never! {
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     alloc: ir_intern_name(m, "jet_rt_alloc")
     size: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(run, IROp.Const, size, 16, -1, -1, line)
@@ -416,8 +416,8 @@ ir_opt_local_box_join_arm: fn(m: ^IRModule, run: ^IRFunction, joined: Int, tag: 
 // Drop). With `escape`, the slot's box is stored, so it outlives the reads.
 ir_opt_local_box_join_test_module: fn(escape: Bool) -> IRModule Never! {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     res_tid: ir_module_intern_tid(m, Type.Named{name: "Res"})
     res: ir_intern_type(m, "Res", ir_layout(IRTypeKind.Pointer, res_tid, 8, 8, IRClass.Pointer, false, 64, ""))
     boxed: ir_mark_box(m, res)

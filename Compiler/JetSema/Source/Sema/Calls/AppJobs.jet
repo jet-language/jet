@@ -13,7 +13,6 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     CallArg,
     Diagnostic,
-    diagnostic_registry_row,
     Expr,
     Func,
     ModuleID,
@@ -153,7 +152,7 @@ sema_app_job_refused: fn(found: String, at: Span, diagnostics: ^[Diagnostic]) ->
 }
 
 sema_app_job_not_one: fn(found: String, at: Span, diagnostics: ^[Diagnostic]) -> SemaAppJob? {
-    entry: diagnostic_registry_row("E2817") ?? panic("E2817 must have a registry row")
+    entry: sema_diagnostic_row("E2817")
     diagnostics.push(sema_error("E2817", at, entry.what.replace("{{found}}", found), entry.why, entry.fix))
     None
 }

@@ -328,8 +328,8 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
 #Test("LICM hoists loop-invariant aggregate field loads before the loop") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     agg_tid: ir_module_intern_tid(m, Type.Named{name: "Pair"})
     agg: ir_intern_type(m, "test Pair", ir_layout(IRTypeKind.Aggregate, agg_tid, 16, 8, IRClass.Memory, false, 64, ""))
     g := ir_function_new("scan", "test:licm.jet.scan", "", "licm.jet", 1)
@@ -383,8 +383,8 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
 #Test("LICM does not hoist loads out of a loop that stores to memory") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     agg_tid: ir_module_intern_tid(m, Type.Named{name: "Cell"})
     agg: ir_intern_type(m, "test Cell", ir_layout(IRTypeKind.Aggregate, agg_tid, 8, 8, IRClass.Memory, false, 64, ""))
     g := ir_function_new("mut_scan", "test:licm.jet.mut_scan", "", "licm.jet", 1)
@@ -432,8 +432,8 @@ ir_opt_licm_with: fn(m: IRModule, stop_keys: [Bool], safe_routes: [Int], char_le
 
 #Test("LICM hoists an IR_LOAD_LENGTH Int load from a memory-pure loop") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     list_tid: ir_module_intern_tid(m, Type.List{element: Type.Int})
     list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
     g := ir_function_new("len_hoist", "test:licm.jet.len_hoist", "", "licm.jet", 1)

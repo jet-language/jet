@@ -246,8 +246,8 @@ ir_opt_split_put: fn(code: ^IROptCode, f: ^IRFunction, current: [Int], at: Int) 
 // Blocks hands the two back before it, the Block's End after it.
 #Test("A Loop gets slots of its own for the words it shares and hands written ones back on every way out") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("count", "test:split.jet.count", "", "split.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word

@@ -23,7 +23,6 @@ use jet_foundation.[
     core_unbuilt_call,
     core_unbuilt_method,
     Diagnostic,
-    diagnostic_registry_row,
     InternalTag,
     EffectRowEntry,
     EnumLitArg,
@@ -233,7 +232,7 @@ sema_call_core_crypto_expert_gate: fn(module_name: String, member: String, span:
 sema_call_core_vault_build_time_gate: fn(module_name: String, member: String, span: Span, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if module_name != "core.crypto.vault" -> return false
     if !sema_scope_build_time(scopes, environment, program) -> return false
-    row: diagnostic_registry_row("E1265") ?? panic("E1265 must have a registry row")
+    row: sema_diagnostic_row("E1265")
     diagnostics.push(sema_error("E1265", span, "`{module_name}.{member}()` can't be reached from a build-time context", row.why, row.fix))
     true
 }
@@ -769,7 +768,7 @@ sema_call_core_tolerant_form_lint: fn(environment: SemaScopeEnvironment, module_
     if module_is_core(environment.module_identity) {
         return
     }
-    row: diagnostic_registry_row("L0208") ?? panic("L0208 has no registry row")
+    row: sema_diagnostic_row("L0208")
     lint: sema_lint("L0208", span, row.what.replace("{{member}}", member), row.why, row.fix.replace("{{member}}", member))
     if written != member {
         diagnostics.push(lint)

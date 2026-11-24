@@ -33,7 +33,6 @@ use jet_foundation.[
     expr_span,
     symbol_key_text,
     symbol_table_key,
-    diagnostic_registry_row,
     checked_symbol_local,
     type_name,
     module_text,
@@ -123,7 +122,7 @@ sema_app_server_only_endpoint_check: fn(func: Func, graph: SemaRegistrationGraph
         loop other in func.markers {
             loop name in SEMA_APP_SERVER_ONLY_MARKERS {
                 if !sema_app_marker_is(other, name, graph, module_identity) -> next
-                entry: diagnostic_registry_row("E2819") ?? panic("E2819 must have a registry row")
+                entry: sema_diagnostic_row("E2819")
                 diagnostics.push(sema_error("E2819", marker.span, entry.what.replace("{{method}}", func.name).replace("{{marker}}", other.name).replace("{{endpoint}}", marker.name), entry.why, entry.fix.replace("{{method}}", func.name).replace("{{endpoint}}", marker.name)))
                 return
             }
@@ -292,7 +291,7 @@ sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, m
     }
     if {
         declared -> {
-            entry: diagnostic_registry_row("E2812") ?? panic("E2812 must have a registry row")
+            entry: sema_diagnostic_row("E2812")
             diagnostics.push(sema_error("E2812", method_span, entry.what.replace("{{remote}}", shown).replace("{{method}}", method), entry.why, entry.fix.replace("{{method}}", method)))
         }
         else -> {
@@ -962,7 +961,7 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
     }
     key_name: sema_app_marker_string(marker, key_at, environment, program, scopes) ?? "…"
     key_method_at: sema_app_signing_key_at(methods, key_name, graph, method_module) ?? {
-        entry: diagnostic_registry_row("E2814") ?? panic("E2814 must have a registry row")
+        entry: sema_diagnostic_row("E2814")
         diagnostics.push(sema_error("E2814", sema_app_marker_span(marker, key_at), entry.what.replace("{{key}}", key_name).replace("{{service}}", service), entry.why, entry.fix.replace("{{key}}", key_name)))
         return None
     }

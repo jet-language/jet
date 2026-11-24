@@ -50,7 +50,6 @@ use {
         core_call_typed_signature,
         core_module_export,
         core_module_has_type,
-        diagnostic_registry_row,
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
         expr_span,
@@ -1718,7 +1717,7 @@ sema_public_failure_shown_name: fn(source: String, span: Span, leaf: String) -> 
 }
 
 sema_public_failure_diagnostic: fn(function: String, member: String, span: Span, source: String) -> Diagnostic {
-    row: diagnostic_registry_row("E2421") ?? panic("E2421 has no registry row")
+    row: sema_diagnostic_row("E2421")
     what: row.what.replace("{{function}}", function).replace("{{member}}", member)
     why: row.why.replace("{{member}}", member)
     fix: row.fix.replace("{{function}}", function).replace("{{member}}", member)

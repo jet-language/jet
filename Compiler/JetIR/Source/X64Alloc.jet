@@ -1884,7 +1884,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
 // atomic add's old value takes the register of its delta, which ends there.
 #Test("A word storage takes a home near rbp, and an atomic add's old value its delta's register") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     pointer: ir_pointer_row(m)
     f := ir_function_new("words", "test:words.jet.words", "", "words.jet", 1)
     delta: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
@@ -2410,7 +2410,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 // registers serve four slots.
 #Test("A result takes a register its instruction reads for the last time") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     g := ir_function_new("g", "test:share.jet.g", "", "share.jet", 1)
     v: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "v"), 1)
     g.result = word
@@ -2443,7 +2443,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 // caller with fewer slots than the callee's row allocates.
 #Test("A callee row past the caller's slots is no exact Int operand") {
     m := ir_module_new()
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(m, Type.Int)
     loop k in 0..<16 {
         filler := ir_function_new("g{k}", "test:route.jet.g{k}", "", "route.jet", 1)
         n: ir_slot(filler, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
@@ -2477,7 +2477,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 // product, the sum and both copies: no movaps between them.
 #Test("A Float result takes the xmm register its instruction reads for the last time") {
     m := ir_module_new()
-    float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+    float: ir_scalar_type_row(m, Type.Float)
     f := ir_function_new("f", "test:share.jet.f", "", "share.jet", 2)
     x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
     y: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "y"), 2)
@@ -2506,7 +2506,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     loop round in 0..<2 {
         crowded: round == 1
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        float: ir_scalar_type_row(m, Type.Float)
         f := ir_function_new("f", "test:low.jet.f", "", "low.jet", 1)
         x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
         f.result = float
@@ -2547,7 +2547,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 #Test("A Float slot that lives across more calls than it is used goes home") {
     loop calls in [1, 3] {
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        float: ir_scalar_type_row(m, Type.Float)
         f := ir_function_new("f", "test:keep.jet.f", "", "keep.jet", 1)
         x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = float
@@ -2575,9 +2575,9 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 #Test("A Float slot keeps its register over calls colder than its uses") {
     loop cold in [false, true] {
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        float: ir_scalar_type_row(m, Type.Float)
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+        flag: ir_scalar_type_row(m, Type.Bool)
         tick: ir_intern_name(m, "tick")
         f := ir_function_new("f", "test:cold.jet.f", "", "cold.jet", 1)
         rare: ir_slot(f, flag, IRSlotKind.Param, ir_intern_name(m, "rare"), 1)
@@ -2624,7 +2624,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 #Test("A function builds its aggregate result in the caller's storage only when no argument can alias it") {
     loop level in 0..<3 {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         pair_tid: ir_module_intern_tid(m, Type.Named{name: "Pair"})
         pair: ir_intern_type(m, "Pair", IRType{ty: pair_tid, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
         make := ir_function_new("make", "test:pair.jet.make", "", "pair.jet", 1)

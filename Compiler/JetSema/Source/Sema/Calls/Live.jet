@@ -22,7 +22,6 @@ use jet_foundation.[
     Call,
     CallArg,
     Diagnostic,
-    diagnostic_registry_row,
     EffectRowEntry,
     Expr,
     Lambda,
@@ -339,7 +338,7 @@ sema_live_is_closure: fn(expression: Expr) -> Bool Never! {
 // An `app.live` closure that is not one remote call: E2816, naming what it
 // is instead.
 sema_live_not_remote: fn(found: String, at: Span, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
-    entry: diagnostic_registry_row("E2816") ?? panic("E2816 must have a registry row")
+    entry: sema_diagnostic_row("E2816")
     diagnostics.push(sema_error("E2816", at, entry.what.replace("{{found}}", found), entry.why, entry.fix))
     None
 }

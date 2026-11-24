@@ -43,7 +43,7 @@ BuiltinMethodLowering: enum {
     Show,
     Predicate,
     BitCount,
-    Arithmetic(operation: TBinaryOp),
+    Arithmetic(operation: BinOp),
     Euclidean(remainder: Bool),
     Overflow(prefix: String, operation: String),
     Atomic(operation: String),
@@ -286,11 +286,11 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.Bytes, name: "write", parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{symbol: "JetByteBuffer.write"}}},
     // Numbers.
     {receiver: BuiltinMethodReceiver.Scalar, name: "to_string", parameters: [Type]{}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Show},
-    {receiver: BuiltinMethodReceiver.Integer, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}},
-    {receiver: BuiltinMethodReceiver.Float, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}},
+    {receiver: BuiltinMethodReceiver.Integer, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: BinOp.Pow}},
+    {receiver: BuiltinMethodReceiver.Float, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: BinOp.Pow}},
     // IEEE 754 totalOrder, as `<=>`: -NaN < -inf < ... < -0.0 < +0.0 < ... <
     // +inf < NaN.
-    {receiver: BuiltinMethodReceiver.Float, name: "compare", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Compare}},
+    {receiver: BuiltinMethodReceiver.Float, name: "compare", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Ordering"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: BinOp.Compare}},
     {receiver: BuiltinMethodReceiver.Float, name: "is_nan", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Predicate},
     {receiver: BuiltinMethodReceiver.Float, name: "is_infinite", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Predicate},
     {receiver: BuiltinMethodReceiver.Float, name: "is_finite", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Predicate},

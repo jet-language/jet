@@ -4,6 +4,7 @@
 // called with its checked value and only claims methods backed by exact core
 // registration facts or intrinsic List receiver types.
 use jet_foundation.[
+    BodyHandleOp,
     ASTTables,
     AccessConvention,
     CallArg,
@@ -274,7 +275,7 @@ sema_call_concurrency_check_sender: fn(receiver: Expr, receiver_value: TExpr, ar
     if !sema_stream_handle_effect_fact(environment, program, scopes, check.context, "Sender.send", span, result_type, "Time.Wait", diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
+    built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.SenderSend, args: lowered}, span)
     checked := sema_expr_expected(built, expected, environment, program, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }

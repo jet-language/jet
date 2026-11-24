@@ -45,7 +45,6 @@ use jet_foundation.[
     jet_ring_classify_prelude_closure,
     jet_ring_closure_rows_layer,
     jet_ring_prelude_closure_layer,
-    diagnostic_registry_row,
     boundary_head_owner_module,
     SymbolTable,
     symbol_find,
@@ -596,7 +595,7 @@ sema_core_check_ui_usage: fn(usage: String, span: Span?, needs: [String], report
             next
         }
         reported.push(capability.copy())
-        registry: diagnostic_registry_row("E2937") ?? panic("E2937 has no registry row")
+        registry: sema_diagnostic_row("E2937")
         diagnostics.push(sema_error_optional("E2937", span, registry.what.replace("{{service}}", usage).replace("{{capability}}", capability), registry.why, registry.fix.replace("{{capability}}", capability)))
     }
 }

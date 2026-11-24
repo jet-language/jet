@@ -2,6 +2,7 @@
 // The owner is a type name, never a runtime receiver; owner and method generic
 // arguments stay separate through inference and checked-tree construction.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     BuiltinStaticOwnerRule,
     BuiltinStaticRow,
@@ -36,7 +37,6 @@ use jet_foundation.[
     core_call,
     core_module_has_member,
     core_module_has_type,
-    diagnostic_registry_row,
     expr_span,
     foundation_named_type,
     jet_target_layout_atomic_scalar_type,
@@ -885,7 +885,7 @@ sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], arg
             reference := TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
             Val(TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: rooted, path: path, generics: owner_args}, owner_type: None, method: reference, type_args: [Type]{}, args: call_args})
         }
-        .DurationNew(unit) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
+        .DurationNew(unit) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: BodyHandleOp.DurationNew{unit: unit, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
         .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: sema_call_numeric_at_line(operation, line)})
         .Precise(precise_type, function) -> Val(TExprKind.PreciseBuiltin{type_name: precise_type, function: function, args: values})
@@ -1991,6 +1991,6 @@ sema_call_ui_shortcut_cmd_key: fn(argument: CallArg, diagnostics: ^[Diagnostic])
     if literal == None -> reason = "the key must be one plain string literal"
     if labeled -> reason = "the key must be positional"
     shortcut: literal ?? "<expression>"
-    row: diagnostic_registry_row("E2938") ?? panic("E2938 must have a registry row")
+    row: sema_diagnostic_row("E2938")
     diagnostics.push(sema_error("E2938", argument.span, "Invalid UI shortcut literal `{shortcut}`: {reason}", row.why, row.fix))
 }

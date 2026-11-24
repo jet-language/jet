@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, BinOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_foundation.[TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
@@ -2530,7 +2530,7 @@ ir_tuple_members_in: fn(m: ^IRModule, p: IRProgram, fields: [TypeTupleField], la
     Val(members)
 }
 
-ir_binary_op: fn(op: TBinaryOp) -> IROp? Never! {
+ir_binary_op: fn(op: BinOp) -> IROp? Never! {
     if op == {
         .Add -> Val(IROp.Add)
         .Sub -> Val(IROp.Sub)
@@ -2554,11 +2554,11 @@ ir_binary_op: fn(op: TBinaryOp) -> IROp? Never! {
     }
 }
 
-ir_compare_op: fn(op: TBinaryOp) -> Bool Never! {
+ir_compare_op: fn(op: BinOp) -> Bool Never! {
     op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
 }
 
-ir_route_member: fn(op: TBinaryOp) -> String Never! {
+ir_route_member: fn(op: BinOp) -> String Never! {
     if op == {
         .Div -> "div"
         .Rem -> "rem"
@@ -2580,7 +2580,7 @@ ir_route_member: fn(op: TBinaryOp) -> String Never! {
 // `op=` under an `#Overflow` mode never reaches here: sema lowers it to
 // `place = OverflowOpt(...)` (Statements/Assignments.jet
 // sema_stmt_policy_compound).
-ir_assign_overflow: fn(op: TBinaryOp) -> Bool Never! {
+ir_assign_overflow: fn(op: BinOp) -> Bool Never! {
     op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Pow || op == .Shl || op == .Shr
 }
 
@@ -2593,7 +2593,7 @@ ir_slot_is_duration: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
 // route as the slow path); its other operators call their located Prelude
 // route; a fixed width with overflow checking (or a trapping op) calls
 // jet_<w>_trap_<op>.
-ir_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: TBinaryOp, overflow: Bool, line: Int, left_ty: Type, left: Int, right: Int, right_ty: Type, span: Span) -> Int Never! {
+ir_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: BinOp, overflow: Bool, line: Int, left_ty: Type, left: Int, right: Int, right_ty: Type, span: Span) -> Int Never! {
     if left < 0 || right < 0 -> return ir_fail_slot(b, span, "binary operator on Unit")
     kind: ir_kind_of(m, b, left)
     // A Duration operand of a Float quantity's arithmetic (`distance /
@@ -2740,7 +2740,7 @@ ir_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: TBinaryOp, overflow
 // implements the operator trait for `right_ty`: that implementation's hook
 // (`add`, `sub`, `mul`, `div`), or -1 when none is selected. The trait is the
 // one that fills the operator's role (owned_trait_for_role).
-ir_operator_impl: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: TBinaryOp, left_ty: Type, left: Int, right_ty: Type, right: Int, span: Span) -> Int Never! {
+ir_operator_impl: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: BinOp, left_ty: Type, left: Int, right_ty: Type, right: Int, span: Span) -> Int Never! {
     symbol: if op == {
         .Add -> "+"
         .Sub -> "-"
@@ -2806,7 +2806,7 @@ ir_fixed_power: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, left: Int, right: 
 // other is not, when it is the other operand's record. The record constructor
 // stops with the range stop on a value beyond i64, so `+` and `-` stop on
 // overflow as `*` and `/` do (jet_duration_scale, jet_duration_divide).
-ir_time_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: TBinaryOp, site: Int, left: Int, left_record: IRWordRecord, right: Int, right_record: IRWordRecord, span: Span) -> Int Never! {
+ir_time_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, op: BinOp, site: Int, left: Int, left_record: IRWordRecord, right: Int, right_record: IRWordRecord, span: Span) -> Int Never! {
     duration_ty: Type.Named{name: "Duration"}
     duration_row: ir_value_type(m, p, duration_ty) ?? return ir_type_fail(b, span, duration_ty)
     duration_record := ir_word_record(m, p, duration_row) ?? return ir_fail_slot(b, span, "Duration without its word record")
@@ -3196,7 +3196,7 @@ ir_order_decide: fn(m: ^IRModule, b: ^IRBuilder, below: Int, sign: Int, decided:
 // `a < b < c`: each comparison runs only while every earlier one held, and
 // each operand is evaluated once. The right operand an open test keeps for
 // the next comparison is dropped on the arm that leaves the chain early.
-ir_compare_chain: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, operands: [Int], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
+ir_compare_chain: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, operands: [Int], operators: [BinOp], hooks: [Bool], span: Span) -> Int Never! {
     if operators.len() == 0 || operands.len() != operators.len() + 1 {
         return ir_fail_slot(b, span, "comparison chain shape")
     }

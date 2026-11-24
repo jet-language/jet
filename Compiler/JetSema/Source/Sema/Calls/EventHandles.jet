@@ -3,6 +3,7 @@
 // DispatchReport handles. A handler is a retained `Fn(T)` callback; every
 // method borrows its receiver.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -193,7 +194,7 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
         handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args)), false, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         values.push(handler)
     }
-    value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{symbol: sema_event_route_symbol(owner, method)}, args: values}, span)
+    value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.EventMethod{symbol: sema_event_route_symbol(owner, method)}, args: values}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

@@ -783,6 +783,15 @@ ir_module_intern_tid: fn(m: ^IRModule, ty: Type) -> TypeID Never! {
     type_intern_syntax(m.interner[0], ty)
 }
 
+// The row of a scalar that every module lays out on its own: Int, Bool,
+// Float, String, or an IntN of 8, 16, 32 or 64 bits. Unreachable stop:
+// ir_type_row (BuildTypes.jet) builds a layout for each of these without
+// IRProgram, an IntN of those widths taking its well-known type id
+// (type_id_well_known), so it never gives None for them.
+ir_scalar_type_row: fn(m: ^IRModule, ty: Type) -> Int Never! {
+    ir_type_row(m, ty) ?? panic("{ir_type_name(ty)} has no row")
+}
+
 // The written Type of `tid` in `m`'s own interner. A standalone module whose
 // types are only well-known scalars (ir_type_row) never gets an interner,
 // and those ids read without one.
@@ -937,7 +946,7 @@ ir_row_key: fn(m: IRModule, row: Int) -> String Never! { m.type_keys[row].copy()
 ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
     hash: stable_id("ir.symbol", key)
     symbol := [U8]{}
-    symbol.try_reserve(prefix.len() + 16) ?? panic("symbol allocation failed")
+    symbol.try_reserve(prefix.len() + 16) ?? ()
     loop byte in prefix.bytes() -> symbol.push(byte)
     // Most significant nibble first: each rotate brings the next one down.
     rest := hash

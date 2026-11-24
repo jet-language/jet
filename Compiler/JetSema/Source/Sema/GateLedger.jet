@@ -1,7 +1,7 @@
 // One compile-time read model for source and policy gates.
 use {
     jet_foundation.[ASTTables, GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, MARKER_ALLOW, MARKER_SCRUB, NameLedger, StructureFact, Program, Item, Func, Expr, ExprNode, Stmt, StmtNode, Span, StateDecl, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_expr, ast_visit_expr, ast_visit_statement]
-    jet_foundation.[Diagnostic, Name, NameTable, Type, StrPart, ast_program, diagnostic_registry_row, expr_source_start, name_count, name_find, name_intern, name_table_sized, name_text]
+    jet_foundation.[Diagnostic, Name, NameTable, Type, StrPart, ast_program, expr_source_start, name_count, name_find, name_intern, name_table_sized, name_text]
     jet_lexer.[Token]
     jet_parser.[jfmt_format_program_with_tokens]
 }
@@ -551,7 +551,7 @@ sema_gate_module_forbids: fn(row: SemaGateModule) -> Bool Never! {
 // The registered E3415 refusal of the `key` gate at `site`, which `policy`
 // forbids.
 sema_gate_denied: fn(key: PolicyKey, site: String, span: Span?, policy: String) -> Diagnostic Never! {
-    row: diagnostic_registry_row("E3415") ?? panic("E3415 has no registry row")
+    row: sema_diagnostic_row("E3415")
     what: row.what.replace("{{gate}}", policy_key_name(key)).replace("{{site}}", site).replace("{{policy}}", policy)
     sema_error_optional("E3415", span, what, row.why, row.fix.replace("{{policy}}", policy))
 }

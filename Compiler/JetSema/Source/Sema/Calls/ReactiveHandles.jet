@@ -2,6 +2,7 @@
 // Reactive subscriptions are recorded by lambda checking; these helpers only
 // construct the native operation and preserve its ordinary call/effect facts.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     CallArg,
     CoreCallRecord,
@@ -311,9 +312,9 @@ sema_call_try_reactive_handle_method: fn(receiver: Expr, receiver_value: TExpr, 
     result_type := sema_reactive_handle_result(owner, method, receiver_value.ty)
     checked_args: sema_reactive_checked_handle_args(owner, method, args, receiver, receiver_value.ty, span, environment, program, scopes, check, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     operation: if {
-        owner == "Effect" -> THandleOp.ReactiveEffectMethod
-        method == "set" -> THandleOp.ReactiveSet
-        else -> THandleOp.ReactiveGet
+        owner == "Effect" -> BodyHandleOp.ReactiveEffectMethod
+        method == "set" -> BodyHandleOp.ReactiveSet
+        else -> BodyHandleOp.ReactiveGet
     }
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: checked_args}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}

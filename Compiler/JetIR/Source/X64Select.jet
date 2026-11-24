@@ -6624,7 +6624,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 // is none.
 #Test("A frame over sema's frame bound is a selection error") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("twice", "test:frame.jet.twice", "", "frame.jet", 1)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = word
@@ -6648,7 +6648,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 // bridge word, calls twice itself on the segment, then jet_rt_stack_shrink.
 #Test("A body with a stack check compares rsp with the thread's limit first and grows onto a segment") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("twice", "test:grow.jet.twice", "", "grow.jet", 1)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = word
@@ -6676,7 +6676,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 // one scaled-index load on the slots' registers (or the scratch ones).
 #Test("An element address folds into the Load that reads it") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("load", "test:index.jet.load", "", "index.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     i: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
@@ -6723,7 +6723,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 // scaled-index load, as the plain element address is.
 #Test("A pointer step folds into the Load that reads it") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     pointer_row: ir_pointer_row(m)
     f := ir_function_new("load", "test:step.jet.load", "", "step.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
@@ -6773,7 +6773,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 // on top: the sum is that one load at data + 24.
 #Test("A constant offset folds into the displacement of the Load that reads it") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("load", "test:offset.jet.load", "", "offset.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
@@ -6875,8 +6875,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     x64_store_indexed_imm(probe, X64_RAX, -1, 1, 16, -1, 8)
     assert(probe.bytes == [U8]{0x48, 0xc7, 0x40, 0x10, 0xff, 0xff, 0xff, 0xff})
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    byte: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? panic("no U8 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    byte: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 8})
     f := ir_function_new("store", "test:store.jet.store", "", "store.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
@@ -6943,8 +6943,8 @@ ir_x64_code_find: fn(code: [U8], want: [U8], from: Int) -> Int Never! {
     x64_movnti(probe, X64_R10, X64_R11, 8, 0, X64_RDX, 4)
     assert(probe.bytes == [U8]{0x43, 0x0f, 0xc3, 0x14, 0xda})
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    half: ir_type_row(m, Type.IntN{signed: false, bits: 16}) ?? panic("no U16 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    half: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 16})
     f := ir_function_new("stream", "test:stream.jet.stream", "", "stream.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     value: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "value"), 1)
@@ -7082,8 +7082,8 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
 // innermost loop's alignment, which the function's start keeps.
 #Test("A rotated innermost Loop's passes start on its alignment") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("count", "test:head.jet.count", "", "head.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
@@ -7119,8 +7119,8 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
 #Test("An If whose arms only compute one slot picks it with a cmov") {
     loop reads_result in [false, true] {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+        truth: ir_scalar_type_row(m, Type.Bool)
         f := ir_function_new("step", "test:select.jet.step", "", "select.jet", 1)
         x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = word
@@ -7176,8 +7176,8 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
 
 #Test("A self-updating Collatz step on Mod 2 == 0 picks with a branchless cmov") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("collatz_step", "test:select.jet.collatz_step", "", "select.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
@@ -7210,8 +7210,8 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
 
 #Test("Bit-test fusion of Mod 8 == 0 inside a rotated loop fuses both entry and back-edge") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("pad8", "test:select.jet.pad8", "", "select.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
@@ -7301,7 +7301,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert_eq(probe.bytes, [U8]{0x0f, 0xa2, 0x0f, 0x01, 0xd0})
     loop calls in [false, true] {
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        float: ir_scalar_type_row(m, Type.Float)
         f := ir_function_new("fused", "test:fma.jet.fused", "", "fma.jet", 1)
         a: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "a"), 1)
         b: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "b"), 1)
@@ -7357,11 +7357,11 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("Float bits and an exact Int's widening run inline, the runtime call their slow path") {
     loop shape in 0..<3 {
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-        text: ir_type_row(m, Type.String) ?? panic("no String row")
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        float: ir_scalar_type_row(m, Type.Float)
+        int_row: ir_scalar_type_row(m, Type.Int)
+        flag: ir_scalar_type_row(m, Type.Bool)
+        text: ir_scalar_type_row(m, Type.String)
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         symbol: if shape == {
             0 -> "jet_std_math_to_bits"
             1 -> "jet_std_math_from_bits"
@@ -7424,8 +7424,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // prologue (ir_x64_wrap): `xor edx, edx; ret` falls straight into it.
 #Test("An early Return leaves before the frame is built") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("early", "test:wrap.jet.early", "", "wrap.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
@@ -7507,7 +7507,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // take r8 and r9 and it saves no callee-saved register.
 #Test("A leaf keeps its values in caller-saved registers") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("square", "test:leaf.jet.square", "", "leaf.jet", 1)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = word
@@ -7534,8 +7534,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // the Bool. So a function of them stays a leaf, whose values take r8 first.
 #Test("A 64-bit atomic is its locked instruction on the word in place") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("atomics", "test:atomics.jet.atomics", "", "atomics.jet", 1)
     place: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "place"), 1)
     delta: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
@@ -7593,8 +7593,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // with no sete.
 #Test("A compare_exchange read only by an If branches on its ZF") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("claim", "test:atomics.jet.claim", "", "atomics.jet", 1)
     place: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "place"), 1)
     seen: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "seen"), 1)
@@ -7633,7 +7633,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert(!x64_assemble_template("mov rax, {{e}} ; -> return", [String]{"a", "b", "c", "d", "e"}, true, false).quiet)
     assert(!x64_assemble_template("call {{target}}", [String]{"target"}, false, false).quiet)
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     tls := ir_function_new("tls", "test:quiet.jet.tls#asm", "tls__asm", "quiet.jet", 1)
     tls.result = word
     tls.asm = Val(ir_x64_test_leaf("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true))
@@ -7684,7 +7684,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // it lives in rdi, moves to r10 before it.
 #Test("A small leaf keeps its values in rsi and rdi too") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     spill := ir_function_new("spill", "test:open.jet.spill", "", "open.jet", 1)
     x: ir_slot(spill, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     spill.result = word
@@ -7754,7 +7754,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // read from registers that the loads before them fill.
 #Test("A tail call moves a source passed twice aside once") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     slow := ir_function_new("slow", "test:twice.jet.slow", "", "twice.jet", 1)
     loop name in ([String]{"first", "second", "third", "fourth"}) {
         _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, name), 1)
@@ -7798,7 +7798,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A leaf's values move onto scratch registers no template over them writes") {
     loop op in ([IROp]{IROp.Add, IROp.Mul}) {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         f := ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 1)
         x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = word
@@ -7839,7 +7839,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // two, each stored to its home before a route call and loaded back after it.
 #Test("Values live across exact Int routes take r8 and r9") {
     m := ir_module_new()
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(m, Type.Int)
     f := ir_function_new("spread", "test:spread.jet.spread", "", "spread.jet", 1)
     n: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = int_row
@@ -7897,7 +7897,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // with bit 62 set. One in the inline range stays a runtime parse.
 #Test("A big-integer constant is a static exact Int") {
     m := ir_module_new()
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(m, Type.Int)
     f := ir_function_new("big", "test:big.jet.big", "", "big.jet", 1)
     f.result = int_row
     texts: [String]{"-123456789012345678901234567890", "4611686018427387904", "4611686018427387903", "-4611686018427387904", "-4611686018427387905"}
@@ -7936,7 +7936,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // those two.
 #Test("A module carries only the numeric stop texts its code can name") {
     plain := ir_module_new()
-    int_row: ir_type_row(plain, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(plain, Type.Int)
     sum := ir_function_new("sum", "test:stop.jet.sum", "", "stop.jet", 1)
     a: ir_slot(sum, int_row, IRSlotKind.Param, ir_intern_name(plain, "a"), 1)
     b: ir_slot(sum, int_row, IRSlotKind.Param, ir_intern_name(plain, "b"), 1)
@@ -7951,7 +7951,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         assert(ir_x64_text_rows_get(none.texts, text) < 0)
     }
     fixed := ir_module_new()
-    word: ir_type_row(fixed, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(fixed, Type.IntN{signed: true, bits: 64})
     quotient := ir_function_new("quotient", "test:stop.jet.quotient", "", "stop.jet", 1)
     x: ir_slot(quotient, word, IRSlotKind.Param, ir_intern_name(fixed, "x"), 1)
     y: ir_slot(quotient, word, IRSlotKind.Param, ir_intern_name(fixed, "y"), 1)
@@ -7973,9 +7973,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TURN_KEY}) {
         m := ir_module_new()
         m.stop_points = true
-        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        int_row: ir_scalar_type_row(m, Type.Int)
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+        flag: ir_scalar_type_row(m, Type.Bool)
         route: ir_intern_name(m, "jet_int_owned_to_i64")
         poll: ir_stop_poll(m, key)
         f := ir_function_new("at", "test:route.jet.at", "", "route.jet", 1)
@@ -8016,8 +8016,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         loop indirect in ([Bool]{false, true}) {
             m := ir_module_new()
             m.stop_points = true
-            int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-            flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+            int_row: ir_scalar_type_row(m, Type.Int)
+            flag: ir_scalar_type_row(m, Type.Bool)
             word: ir_word_row(m)
             poll: ir_stop_poll(m, key)
             g := ir_function_new("g", "test:turn.jet.g", "", "turn.jet", 1)
@@ -8076,8 +8076,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     loop cycle in ([Bool]{false, true}) {
         m := ir_module_new()
         m.stop_points = true
-        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        int_row: ir_scalar_type_row(m, Type.Int)
+        flag: ir_scalar_type_row(m, Type.Bool)
         poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
         g := ir_function_new("g", "test:cycle.jet.g", "", "cycle.jet", 1)
         n: ir_slot(g, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
@@ -8159,8 +8159,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A stop edge runs another's tail only when that tail keeps the values read after it") {
     loop shape in 0..<3 {
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        float: ir_scalar_type_row(m, Type.Float)
+        flag: ir_scalar_type_row(m, Type.Bool)
         word: ir_word_row(m)
         enter: ir_intern_name(m, "jet_rt_cleanup_enter")
         leave: ir_intern_name(m, "jet_rt_cleanup_leave")
@@ -8363,8 +8363,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // variable's ranges name more than one place and never overlap.
 #Test("A Loop split's variable is in the split's place over the split's range") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    truth: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("count", "test:split.jet.count", "", "split.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
@@ -8419,7 +8419,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // and x, folded into n, is in n's place.
 #Test("A named slot folded into another is located in that slot's place") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("twice", "test:fold.jet.twice", "", "fold.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
@@ -8451,7 +8451,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 // reads no position past the code's.
 #Test("A named slot that never lives has no location") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("keep", "test:dead.jet.keep", "", "dead.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
@@ -8481,10 +8481,10 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         loop proven in ([Bool]{true, false}) {
             m := ir_module_new()
             m.zone_table = listed
-            int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-            float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-            flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-            text: ir_type_row(m, Type.String) ?? panic("no String row")
+            int_row: ir_scalar_type_row(m, Type.Int)
+            float: ir_scalar_type_row(m, Type.Float)
+            flag: ir_scalar_type_row(m, Type.Bool)
+            text: ir_scalar_type_row(m, Type.String)
             word: ir_word_row(m)
             poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
             f := ir_function_new("plotted", "test:plot.jet.plotted", "", "plot.jet", 1)
@@ -8581,9 +8581,9 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A zone site on a stop edge gets its stub like a site of the body") {
     m := ir_module_new()
     m.zone_table = true
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    text: ir_type_row(m, Type.String) ?? panic("no String row")
+    int_row: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
+    text: ir_scalar_type_row(m, Type.String)
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     f := ir_function_new("marked", "test:zone.jet.marked", "", "zone.jet", 1)
     name: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
@@ -8629,8 +8629,8 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     loop listed in ([Bool]{false, true}) {
         m := ir_module_new()
         m.zone_table = listed
-        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        text: ir_type_row(m, Type.String) ?? panic("no String row")
+        int_row: ir_scalar_type_row(m, Type.Int)
+        text: ir_scalar_type_row(m, Type.String)
         f := ir_function_new("zoned", "test:zone.jet.zoned", "", "zone.jet", 1)
         name: ir_slot(f, text, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(f, IROp.ConstText, name, ir_intern_text(m, "zoned"), -1, -1, 2)
@@ -8675,7 +8675,7 @@ ir_x64_test_stop_edge: fn(f: ^IRFunction, flag: Int, callee: Int, exit: IROp, li
 
 #Test("A dying r8 operand of an exact Int route needs no routed frame home") {
     m := ir_module_new()
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(m, Type.Int)
     word_row: ir_word_row(m)
     f := ir_function_new("dying_r8", "test:route.jet.dying_r8", "", "route.jet", 1)
     ptr: ir_slot(f, word_row, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
@@ -8710,7 +8710,7 @@ ir_x64_test_stop_edge: fn(f: ^IRFunction, flag: Int, callee: Int, exit: IROp, li
 #Test("Exact Int Mod and FloorDiv by a non-zero constant skip session propagate") {
     m := ir_module_new()
     m.stop_points = true
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(m, Type.Int)
     f := ir_function_new("div2", "test:div2.jet.div2", "", "div2.jet", 1)
     x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = int_row

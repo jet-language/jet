@@ -16,7 +16,7 @@ use {
         StmtKind,
         SymbolID,
         SymbolTable,
-        TBinaryOp,
+        BinOp,
         TCostFact,
         TCostKind,
         TCostState,
@@ -352,12 +352,12 @@ jet_driver_cost_has_growth_candidate: fn(tree: BodyTree, interner: Interner, dep
             if depths[body_node_index(tree, value)] == 0 -> next
             if !jet_driver_cost_int_place(tree, interner, place) -> next
             if op == .Val(operator) {
-                if operator == TBinaryOp.Mul || operator == TBinaryOp.Shl -> return true
+                if operator == BinOp.Mul || operator == BinOp.Shl -> return true
                 next
             }
             kind: body_node(tree, value).kind
             if kind == .Binary(operator, _, _, _, _) {
-                if operator == TBinaryOp.Mul || operator == TBinaryOp.Shl -> return true
+                if operator == BinOp.Mul || operator == BinOp.Shl -> return true
             } else if kind == .OverflowOpt(_, _, _, _, _) { return true }
         }
     }
@@ -791,8 +791,8 @@ jet_driver_cost_growth: fn(tree: BodyTree, interner: Interner, nodes: ^[Int:Bool
 // (jet_driver_cost_carries_place); a shift's must read it as it is, so a
 // canonical Huffman code's `code = (code + count) << 1`, which its bit-length
 // loop bounds, is no spill site.
-jet_driver_cost_operation_grows: fn(tree: BodyTree, interner: Interner, place: BodyPlace, operator: TBinaryOp, left: Int, right: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
-    product: operator == TBinaryOp.Mul
+jet_driver_cost_operation_grows: fn(tree: BodyTree, interner: Interner, place: BodyPlace, operator: BinOp, left: Int, right: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
+    product: operator == BinOp.Mul
     step := Int?{None}
     if jet_driver_cost_carries_place(tree, place, left, product, turn, binds) -> step = Val(right)
     if step == None && product && jet_driver_cost_carries_place(tree, place, right, true, turn, binds) {
@@ -808,7 +808,7 @@ jet_driver_cost_operation_grows: fn(tree: BodyTree, interner: Interner, place: B
 // byte in before the product.
 jet_driver_cost_carries_place: fn(tree: BodyTree, place: BodyPlace, id: Int, mixed: Bool, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     if jet_driver_cost_updates_place(tree, place, id, turn, binds) -> return true
-    if mixed && body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.BitXor || op == TBinaryOp.BitOr) {
+    if mixed && body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.BitXor || op == BinOp.BitOr) {
         return jet_driver_cost_carries_place(tree, place, left, true, turn, binds) || jet_driver_cost_carries_place(tree, place, right, true, turn, binds)
     }
     false
@@ -905,13 +905,13 @@ jet_driver_cost_int_place: fn(tree: BodyTree, interner: Interner, place: BodyPla
 // alone or as one side of `^^`.
 jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
     if body_node(tree, condition).kind == .Binary(op, _, _, left, right) {
-        if op == TBinaryOp.And {
+        if op == BinOp.And {
             return jet_driver_cost_caps(tree, left, place, turn, binds) || jet_driver_cost_caps(tree, right, place, turn, binds)
         }
-        if op == TBinaryOp.Lt || op == TBinaryOp.Le {
+        if op == BinOp.Lt || op == BinOp.Le {
             return jet_driver_cost_capped(tree, place, left, turn, binds)
         }
-        if op == TBinaryOp.Gt || op == TBinaryOp.Ge {
+        if op == BinOp.Gt || op == BinOp.Ge {
             return jet_driver_cost_capped(tree, place, right, turn, binds)
         }
     }
@@ -922,8 +922,8 @@ jet_driver_cost_caps: fn(tree: BodyTree, condition: Int, place: BodyPlace, turn:
 // `place`, or it plus, less, times or shifted by some Int
 // (jet_driver_cost_caps).
 jet_driver_cost_capped: fn(tree: BodyTree, place: BodyPlace, id: Int, turn: [Int:Bool], binds: JetDriverCostBinds) -> Bool Never! {
-    if body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul || op == TBinaryOp.Shl) {
-        if op == TBinaryOp.Mul && jet_driver_cost_updates_place(tree, place, right, turn, binds) {
+    if body_node(tree, id).kind == .Binary(op, _, _, left, right) && (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Shl) {
+        if op == BinOp.Mul && jet_driver_cost_updates_place(tree, place, right, turn, binds) {
             return true
         }
         return jet_driver_cost_updates_place(tree, place, left, turn, binds)
@@ -951,13 +951,13 @@ jet_driver_cost_updates_place: fn(tree: BodyTree, place: BodyPlace, id: Int, tur
 
 // Whether an Int update by `operator` with step node `step` of `tree` grows
 // geometrically (jet_driver_cost_growth).
-jet_driver_cost_step_grows: fn(tree: BodyTree, interner: Interner, operator: TBinaryOp, step: Int) -> Bool Never! {
+jet_driver_cost_step_grows: fn(tree: BodyTree, interner: Interner, operator: BinOp, step: Int) -> Bool Never! {
     bounds: body_cost_integer_bounds(interner, tree, step)
-    if operator == TBinaryOp.Mul {
+    if operator == BinOp.Mul {
         if bounds == .Val(factor) -> return factor.lo < -1 || factor.hi > 1
         return true
     }
-    if operator == TBinaryOp.Shl {
+    if operator == BinOp.Shl {
         if bounds == .Val(shift) -> return shift.hi > 0
         return true
     }
@@ -1046,7 +1046,7 @@ jet_driver_cost_place_path: fn(tree: BodyTree, id: Int) -> String? Never! {
 // The cost of assigning `value` to `place` with compound operator `op`: a
 // store into a map entry edits the map's possibly shared backing store, and
 // an Int `+=`, `-=` or `*=` is an exact Int operation.
-jet_driver_cost_assign_fact: fn(tree: BodyTree, interner: Interner, place: BodyPlace, op: TBinaryOp?, value: Int) -> TCostFact? Never! {
+jet_driver_cost_assign_fact: fn(tree: BodyTree, interner: Interner, place: BodyPlace, op: BinOp?, value: Int) -> TCostFact? Never! {
     target := TIntegerBounds?{None}
     if place == .Expr(expression) {
         if body_node(tree, expression).kind == .Index(_, _, kind, _, _, _) {
@@ -1061,7 +1061,7 @@ jet_driver_cost_assign_fact: fn(tree: BodyTree, interner: Interner, place: BodyP
         target = local.integer_bounds
     }
     operator: op ?? return None
-    if operator != TBinaryOp.Add && operator != TBinaryOp.Sub && operator != TBinaryOp.Mul {
+    if operator != BinOp.Add && operator != BinOp.Sub && operator != BinOp.Mul {
         return None
     }
     operand: body_cost_integer_bounds(interner, tree, value)

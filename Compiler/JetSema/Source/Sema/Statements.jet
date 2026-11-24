@@ -31,7 +31,6 @@ use {
         Symbol,
         SymbolID,
         SymbolKind,
-        TBinaryOp,
         TComptimeValue,
         TARGET_OS_ALL,
         TFieldRef,
@@ -73,8 +72,6 @@ SemaStatementRollbackMethods: struct {
     snapshot: TMethodRef,
     restore: TMethodRef,
 }
-
-sema_stmt_binary_type: fn(op: BinOp) -> TBinaryOp Never! { sema_expr_tree_binary_op(op) }
 
 sema_stmt_check_block: fn(body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic], owner: String, loop_depth: Int) -> SemaStatementResult {
     sema_scope_enter(scopes, check.state, owner)

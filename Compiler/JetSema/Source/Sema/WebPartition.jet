@@ -13,7 +13,7 @@
 // chosen (`web_reason`). The same edges place code at the app boundary
 // (sema_web_placement_check): JS code reaches no server resource (E2823), and
 // a method the server runs uses no `Browser` (E2824).
-use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_registry_row, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
+use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -246,7 +246,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         marker: if function.endpoint != "" -> function.endpoint else -> function.system_run
         found := [Diagnostic]{}
         if marker != "" && reaches[0][at] {
-            entry: diagnostic_registry_row("E2824") ?? panic("E2824 must have a registry row")
+            entry: sema_diagnostic_row("E2824")
             found.push(sema_error("E2824", meta.name_span, entry.what.replace("{{method}}", name).replace("{{marker}}", marker), entry.why, entry.fix.replace("{{method}}", name)))
         } else if reached[at] != "" {
             inherited: loop edge in callee_first[at]..<callee_first[at + 1] {
@@ -255,7 +255,7 @@ sema_web_placement_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
                 }
             } ?? false
             if !inherited {
-                entry: diagnostic_registry_row("E2823") ?? panic("E2823 must have a registry row")
+                entry: sema_diagnostic_row("E2823")
                 found.push(sema_error("E2823", meta.name_span, entry.what.replace("{{function}}", name).replace("{{resource}}", reached[at]), entry.why, entry.fix.replace("{{function}}", name).replace("{{resource}}", reached[at])))
             }
         }

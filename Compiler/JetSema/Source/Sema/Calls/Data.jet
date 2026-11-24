@@ -1,6 +1,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    BodyHandleOp,
     CallArg,
     CallLabel,
     CoreCallRecord,
@@ -117,11 +118,11 @@ sema_dyn_site: fn(expr: Expr) -> String Never! {
     }
 }
 
-sema_dyn_index_operation: fn(ty: Type, site: String, span: Span, index_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> THandleOp? {
+sema_dyn_index_operation: fn(ty: Type, site: String, span: Span, index_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> BodyHandleOp? {
     location: sema_expression_panic_location(environment, program, scopes, span)
     resolved: sema_expr_expected_type(ty, environment, program)
-    if resolved == Type.String -> return Val(THandleOp.DynIndexKey{site: site, location: location})
-    if resolved == Type.Int -> return Val(THandleOp.DynIndexAt{site: site, location: location})
+    if resolved == Type.String -> return Val(BodyHandleOp.DynIndexKey{site: site, location: location})
+    if resolved == Type.Int -> return Val(BodyHandleOp.DynIndexAt{site: site, location: location})
     diagnostics.push(sema_error("E0505", index_span, "Dyn index must be String or Int, not {sema_type_show(ty)}", "Dyn indexes object keys and array positions", "use a String key or an Int index"))
     None
 }
@@ -139,10 +140,10 @@ sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, a
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     typed := [TExpr]{}
-    operation := THandleOp.DynKeys
+    operation := BodyHandleOp.DynKeys
     result_ty := Type.List{element: Type.String}
     if method == "len" {
-        operation = THandleOp.DynLen{site: "{sema_dyn_site(receiver)}.len()", location: sema_expression_panic_location(environment, program, scopes, span)}
+        operation = BodyHandleOp.DynLen{site: "{sema_dyn_site(receiver)}.len()", location: sema_expression_panic_location(environment, program, scopes, span)}
         result_ty = Type.Int
     }
     if count == 1 {
@@ -156,13 +157,13 @@ sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, a
                 diagnostics.push(sema_error("E0505", args[0].span, "Dyn index must be String or Int, not {sema_type_show(argument.ty)}", "Dyn indexes object keys and array positions", "use a String key or an Int index"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            operation = if index_ty == Type.String -> THandleOp.DynGetKey else -> THandleOp.DynGetAt
+            operation = if index_ty == Type.String -> BodyHandleOp.DynGetKey else -> BodyHandleOp.DynGetAt
         }
         if method == "has" {
-            operation = THandleOp.DynHas
+            operation = BodyHandleOp.DynHas
             result_ty = Type.Bool
         }
-        if method == "remove" -> operation = THandleOp.DynRemove
+        if method == "remove" -> operation = BodyHandleOp.DynRemove
     }
     convention: if method == "remove" -> AccessConvention.Write else -> AccessConvention.Read
     if !sema_ownership_check_call_receiver(check.state, receiver, convention, scopes, span, diagnostics) {
@@ -249,7 +250,7 @@ sema_data_check_encode: fn(receiver: Expr, receiver_value: TExpr, method: String
     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SerdeEncode{stored: stored}, args: [TExpr]{}}, span)
+    value := sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.SerdeEncode{stored: stored}, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
@@ -290,7 +291,7 @@ sema_data_check_field_error_under: fn(args: [CallArg], span: Span, expected: Typ
 
 SemaDataAccessorContract: struct {
     result_type: Type,
-    operation: THandleOp,
+    operation: BodyHandleOp,
     argument_types: [Type],
 }
 
@@ -298,14 +299,14 @@ sema_data_accessor_contract: fn(method: String, receiver_ty: Type, alias: Bool) 
     data := if alias -> sema_dyn_type() else -> receiver_ty
     error := sema_data_decode_error()
     if method == {
-        "field" -> Val(SemaDataAccessorContract{result_type: sema_data_result(data, error), operation: if alias -> THandleOp.JSONField else -> THandleOp.DynField, argument_types: [Type]{Type.String}})
-        "at" -> Val(SemaDataAccessorContract{result_type: sema_data_result(data, error), operation: if alias -> THandleOp.JSONAt else -> THandleOp.DynAt, argument_types: [Type]{Type.Int}})
-        "int" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.Int, error), operation: if alias -> THandleOp.JSONInt else -> THandleOp.DynInt, argument_types: [Type]{}})
-        "text" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.String, error), operation: if alias -> THandleOp.JSONText else -> THandleOp.DynText, argument_types: [Type]{}})
-        "bool" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.Bool, error), operation: if alias -> THandleOp.JSONBool else -> THandleOp.DynBool, argument_types: [Type]{}})
-        "float" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.Float, error), operation: if alias -> THandleOp.JSONFloat else -> THandleOp.DynFloat, argument_types: [Type]{}})
-        "to_text" -> Val(SemaDataAccessorContract{result_type: Type.Option{inner: Type.String}, operation: if alias -> THandleOp.JSONToText else -> THandleOp.DynToText, argument_types: [Type]{}})
-        "equal_unordered" -> Val(SemaDataAccessorContract{result_type: Type.Bool, operation: if alias -> THandleOp.JSONEqualUnordered else -> THandleOp.DynEqualUnordered, argument_types: [Type]{Type.Named{name: "Dyn"}}})
+        "field" -> Val(SemaDataAccessorContract{result_type: sema_data_result(data, error), operation: if alias -> BodyHandleOp.JSONField else -> BodyHandleOp.DynField, argument_types: [Type]{Type.String}})
+        "at" -> Val(SemaDataAccessorContract{result_type: sema_data_result(data, error), operation: if alias -> BodyHandleOp.JSONAt else -> BodyHandleOp.DynAt, argument_types: [Type]{Type.Int}})
+        "int" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.Int, error), operation: if alias -> BodyHandleOp.JSONInt else -> BodyHandleOp.DynInt, argument_types: [Type]{}})
+        "text" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.String, error), operation: if alias -> BodyHandleOp.JSONText else -> BodyHandleOp.DynText, argument_types: [Type]{}})
+        "bool" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.Bool, error), operation: if alias -> BodyHandleOp.JSONBool else -> BodyHandleOp.DynBool, argument_types: [Type]{}})
+        "float" -> Val(SemaDataAccessorContract{result_type: sema_data_result(Type.Float, error), operation: if alias -> BodyHandleOp.JSONFloat else -> BodyHandleOp.DynFloat, argument_types: [Type]{}})
+        "to_text" -> Val(SemaDataAccessorContract{result_type: Type.Option{inner: Type.String}, operation: if alias -> BodyHandleOp.JSONToText else -> BodyHandleOp.DynToText, argument_types: [Type]{}})
+        "equal_unordered" -> Val(SemaDataAccessorContract{result_type: Type.Bool, operation: if alias -> BodyHandleOp.JSONEqualUnordered else -> BodyHandleOp.DynEqualUnordered, argument_types: [Type]{Type.Named{name: "Dyn"}}})
         else -> None
     }
 }
@@ -795,7 +796,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
                         return SemaMethodSpecialCheck{handled: true, value: None}
                     }
-                    value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DynDecode{ty: target, stored: stored}, args: [TExpr]{}}, span)
+                    value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.DynDecode{ty: target, stored: stored}, args: [TExpr]{}}, span)
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
                 }
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, program, scopes, check, diagnostics)
@@ -813,7 +814,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
                     return SemaMethodSpecialCheck{handled: true, value: None}
                 }
-                value := sema_tree_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.TestSuiteRun, args: [TExpr]{}}, span)
+                value := sema_tree_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.TestSuiteRun, args: [TExpr]{}}, span)
                 return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
             }
             // `t.suite("name", body)` declares a code suite:
@@ -902,7 +903,7 @@ sema_data_check_test_setting: fn(row: TestSettingRow, receiver: Expr, receiver_v
     }
     key: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: TEST_SETTINGS_PLAN_ENV}}}, span)
     line: sema_tree_node(Type.String, TExprKind.StrLit{parts: parts}, span)
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.TestSetting, args: [TExpr]{key, line}}, span)
+    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.TestSetting, args: [TExpr]{key, line}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

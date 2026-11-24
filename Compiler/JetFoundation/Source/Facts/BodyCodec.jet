@@ -2344,15 +2344,15 @@ body_codec_get_opt_float: fn(bytes: [U8], input: ^BodyCodecIn) -> Float? Never! 
     None
 }
 
-body_codec_put_list_tbinaryop: fn(out: ^BodyCodecOut, values: [TBinaryOp]) Never! {
+body_codec_put_list_binop: fn(out: ^BodyCodecOut, values: [BinOp]) Never! {
     body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_tbinaryop(out, value)
+    loop value in values -> body_codec_put_binop(out, value)
 }
 
-body_codec_get_list_tbinaryop: fn(bytes: [U8], input: ^BodyCodecIn) -> [TBinaryOp] Never! {
+body_codec_get_list_binop: fn(bytes: [U8], input: ^BodyCodecIn) -> [BinOp] Never! {
     count: body_codec_get_count(bytes, input, 1)
-    values := [TBinaryOp]{}
-    loop _ in 0..<count -> values.push(body_codec_get_tbinaryop(bytes, input))
+    values := [BinOp]{}
+    loop _ in 0..<count -> values.push(body_codec_get_binop(bytes, input))
     values
 }
 
@@ -2551,7 +2551,7 @@ body_codec_put_nodekind: fn(out: ^BodyCodecOut, value: NodeKind) Never! {
         }
         .Binary(p0, p1, p2, p3, p4) -> {
             body_codec_put_tag(out, 29)
-            body_codec_put_tbinaryop(out, p0)
+            body_codec_put_binop(out, p0)
             body_codec_put_bool(out, p1)
             body_codec_put_int(out, p2)
             body_codec_put_int(out, p3)
@@ -2560,7 +2560,7 @@ body_codec_put_nodekind: fn(out: ^BodyCodecOut, value: NodeKind) Never! {
         .CompareChain(p0, p1, p2) -> {
             body_codec_put_tag(out, 30)
             body_codec_put_list_int(out, p0)
-            body_codec_put_list_tbinaryop(out, p1)
+            body_codec_put_list_binop(out, p1)
             body_codec_put_list_bool(out, p2)
         }
         .Unary(p0, p1) -> {
@@ -2662,7 +2662,7 @@ body_codec_put_nodekind: fn(out: ^BodyCodecOut, value: NodeKind) Never! {
         }
         .LayoutCompare(p0, p1, p2) -> {
             body_codec_put_tag(out, 49)
-            body_codec_put_tbinaryop(out, p0)
+            body_codec_put_binop(out, p0)
             body_codec_put_int(out, p1)
             body_codec_put_int(out, p2)
         }
@@ -3072,7 +3072,7 @@ body_codec_get_nodekind: fn(bytes: [U8], input: ^BodyCodecIn) -> NodeKind Never!
             NodeKind.RequireStop{kind: f0, location: f1, always_stops: f2}
         }
         29 -> {
-            f0: body_codec_get_tbinaryop(bytes, input)
+            f0: body_codec_get_binop(bytes, input)
             f1: body_codec_get_bool(bytes, input)
             f2: body_codec_get_int(bytes, input)
             f3: body_codec_get_int(bytes, input)
@@ -3081,7 +3081,7 @@ body_codec_get_nodekind: fn(bytes: [U8], input: ^BodyCodecIn) -> NodeKind Never!
         }
         30 -> {
             f0: body_codec_get_list_int(bytes, input)
-            f1: body_codec_get_list_tbinaryop(bytes, input)
+            f1: body_codec_get_list_binop(bytes, input)
             f2: body_codec_get_list_bool(bytes, input)
             NodeKind.CompareChain{operands: f0, operators: f1, hooks: f2}
         }
@@ -3183,7 +3183,7 @@ body_codec_get_nodekind: fn(bytes: [U8], input: ^BodyCodecIn) -> NodeKind Never!
             NodeKind.LayoutLiteral{value: f0}
         }
         49 -> {
-            f0: body_codec_get_tbinaryop(bytes, input)
+            f0: body_codec_get_binop(bytes, input)
             f1: body_codec_get_int(bytes, input)
             f2: body_codec_get_int(bytes, input)
             NodeKind.LayoutCompare{op: f0, lhs: f1, rhs: f2}
@@ -3834,7 +3834,7 @@ body_codec_get_tpaniclocal: fn(bytes: [U8], input: ^BodyCodecIn) -> TPanicLocal 
     TPanicLocal{display_name: f0, local: f1}
 }
 
-body_codec_put_tbinaryop: fn(out: ^BodyCodecOut, value: TBinaryOp) Never! {
+body_codec_put_binop: fn(out: ^BodyCodecOut, value: BinOp) Never! {
     if value == {
         .Add -> { body_codec_put_tag(out, 0) }
         .Sub -> { body_codec_put_tag(out, 1) }
@@ -3861,31 +3861,31 @@ body_codec_put_tbinaryop: fn(out: ^BodyCodecOut, value: TBinaryOp) Never! {
     }
 }
 
-body_codec_get_tbinaryop: fn(bytes: [U8], input: ^BodyCodecIn) -> TBinaryOp Never! {
+body_codec_get_binop: fn(bytes: [U8], input: ^BodyCodecIn) -> BinOp Never! {
     position: body_codec_get_tag(bytes, input, 22, 0)
     if position == {
-        1 -> TBinaryOp.Sub
-        2 -> TBinaryOp.Mul
-        3 -> TBinaryOp.Div
-        4 -> TBinaryOp.FloorDiv
-        5 -> TBinaryOp.Mod
-        6 -> TBinaryOp.Rem
-        7 -> TBinaryOp.Pow
-        8 -> TBinaryOp.BitAnd
-        9 -> TBinaryOp.BitOr
-        10 -> TBinaryOp.BitXor
-        11 -> TBinaryOp.Shl
-        12 -> TBinaryOp.Shr
-        13 -> TBinaryOp.Eq
-        14 -> TBinaryOp.Ne
-        15 -> TBinaryOp.Lt
-        16 -> TBinaryOp.Gt
-        17 -> TBinaryOp.Le
-        18 -> TBinaryOp.Ge
-        19 -> TBinaryOp.Compare
-        20 -> TBinaryOp.And
-        21 -> TBinaryOp.Or
-        else -> TBinaryOp.Add
+        1 -> BinOp.Sub
+        2 -> BinOp.Mul
+        3 -> BinOp.Div
+        4 -> BinOp.FloorDiv
+        5 -> BinOp.Mod
+        6 -> BinOp.Rem
+        7 -> BinOp.Pow
+        8 -> BinOp.BitAnd
+        9 -> BinOp.BitOr
+        10 -> BinOp.BitXor
+        11 -> BinOp.Shl
+        12 -> BinOp.Shr
+        13 -> BinOp.Eq
+        14 -> BinOp.Ne
+        15 -> BinOp.Lt
+        16 -> BinOp.Gt
+        17 -> BinOp.Le
+        18 -> BinOp.Ge
+        19 -> BinOp.Compare
+        20 -> BinOp.And
+        21 -> BinOp.Or
+        else -> BinOp.Add
     }
 }
 
@@ -7757,17 +7757,17 @@ body_codec_get_list_tlocal: fn(bytes: [U8], input: ^BodyCodecIn) -> [TLocal] Nev
     values
 }
 
-body_codec_put_opt_tbinaryop: fn(out: ^BodyCodecOut, value: TBinaryOp?) Never! {
+body_codec_put_opt_binop: fn(out: ^BodyCodecOut, value: BinOp?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
-        body_codec_put_tbinaryop(out, inner)
+        body_codec_put_binop(out, inner)
         return
     }
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_tbinaryop: fn(bytes: [U8], input: ^BodyCodecIn) -> TBinaryOp? Never! {
-    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_tbinaryop(bytes, input))
+body_codec_get_opt_binop: fn(bytes: [U8], input: ^BodyCodecIn) -> BinOp? Never! {
+    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_binop(bytes, input))
     None
 }
 
@@ -7933,7 +7933,7 @@ body_codec_put_stmtkind: fn(out: ^BodyCodecOut, value: StmtKind) Never! {
         .Assign(p0, p1, p2, p3, p4) -> {
             body_codec_put_tag(out, 7)
             body_codec_put_bodyplace(out, p0)
-            body_codec_put_opt_tbinaryop(out, p1)
+            body_codec_put_opt_binop(out, p1)
             body_codec_put_int(out, p2)
             body_codec_put_int(out, p3)
             body_codec_put_span(out, p4)
@@ -8230,7 +8230,7 @@ body_codec_get_stmtkind: fn(bytes: [U8], input: ^BodyCodecIn) -> StmtKind Never!
         }
         7 -> {
             f0: body_codec_get_bodyplace(bytes, input)
-            f1: body_codec_get_opt_tbinaryop(bytes, input)
+            f1: body_codec_get_opt_binop(bytes, input)
             f2: body_codec_get_int(bytes, input)
             f3: body_codec_get_int(bytes, input)
             f4: body_codec_get_span(bytes, input)

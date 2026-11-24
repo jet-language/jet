@@ -41,7 +41,6 @@ use jet_foundation.[
     ViewSource,
     ViewSourcePath,
     ViewSourceProjection,
-    diagnostic_registry_row,
     diagnostic_with_edit,
     diagnostic_with_edit_grade,
     diagnostic_with_label,
@@ -2737,7 +2736,7 @@ sema_ownership_keep_mutations: fn(state: ^SemaOwnershipState, branch: SemaOwners
 // build's own Core compile (the runtime step), which still has those sites,
 // and a program that only embeds Core drops a lint in Core (sema_core_lint_dropped).
 sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
-    row: diagnostic_registry_row("E0514") ?? panic("E0514 has no registry row")
+    row: sema_diagnostic_row("E0514")
     loop binding in state.mutable_bindings {
         written := false
         loop start in binding.starts {
@@ -7524,7 +7523,7 @@ sema_ownership_reject_frozen_write: fn(state: SemaOwnershipState, expr: Expr, ac
     site: sema_ownership_frozen_expr_site(state, expr, scopes) ?? return false
     name := sema_receiver_mark_place_root(expr) ?? "the frozen value"
     freeze_site := "`freeze(...)` at line {site.line}, column {site.column}"
-    row: diagnostic_registry_row("E1113") ?? panic("E1113 has no registry row")
+    row: sema_diagnostic_row("E1113")
     what := row.what.replace("{{name}}", name).replace("{{action}}", action).replace("{{freeze_site}}", freeze_site)
     diagnostics.push(sema_error("E1113", span, what, row.why, row.fix))
     true

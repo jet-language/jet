@@ -2,7 +2,7 @@
 // Role marker, makes the function it marks the one that fills role `AbsF32`.
 // Lowering then finds that function through its role (FnBody.role and JetIR
 // ir_core_role_row), never through its name.
-use jet_foundation.[CORE_BUILTINS_MODULE, Diagnostic, Marker, ModuleID, Span, diagnostic_registry_row, module_is_core, owned_trait_for_role]
+use jet_foundation.[CORE_BUILTINS_MODULE, Diagnostic, Marker, ModuleID, Span, module_is_core, owned_trait_for_role]
 
 // The jet_builtins marker that gives a Core function its role.
 SEMA_CORE_ROLE_MARKER: "Role"
@@ -193,13 +193,13 @@ sema_core_roles_check_filled: fn(graph: ^SemaRegistrationGraph, fill: SemaCoreRo
 
 // E1014: `name` fills `role`, which `first` already fills.
 sema_duplicate_core_role: fn(name: String, role: String, first: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E1014") ?? panic("E1014 has no registry row")
+    row: sema_diagnostic_row("E1014")
     what: row.what.replace("{{name}}", name).replace("{{role}}", role).replace("{{first}}", first)
     sema_error("E1014", span, what, row.why, row.fix.replace("{{role}}", role))
 }
 
 // E1015: no Core function fills `role`.
 sema_missing_core_role: fn(role: String, span: Span) -> Diagnostic {
-    row: diagnostic_registry_row("E1015") ?? panic("E1015 has no registry row")
+    row: sema_diagnostic_row("E1015")
     sema_error("E1015", span, row.what.replace("{{role}}", role), row.why, row.fix.replace("{{role}}", role))
 }
