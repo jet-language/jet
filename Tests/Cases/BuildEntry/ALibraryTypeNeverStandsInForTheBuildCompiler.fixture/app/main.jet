@@ -1,0 +1,27 @@
+use patterns
+
+build: fn(b: Build) -[Meta.Code.Rewrite]> {
+    app: b.add_executable("app", ["main.jet"], [])
+    trace(b.compiler(app))
+    b.default(app)
+}
+
+// `Compiler` here is the compiler value `b.compiler` returns.
+trace: fn(meta: Compiler) -[Meta.Code.Rewrite]> {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        fn(event) {
+            if event == .Checked(.Function(f)) -> meta.rewrite_body(f, #code { "traced" })
+        },
+    )
+}
+
+Traced: struct {
+    impl Marker {
+        sites: [.Function],
+    }
+}
+
+#Traced greet: fn() -> String { "plain" }
+
+run: fn() { print("{greet()} {patterns.width("a+b")}") }
