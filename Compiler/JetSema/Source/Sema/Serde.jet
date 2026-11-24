@@ -332,7 +332,10 @@ sema_serde_shape_fix: fn(ty: Type, codec: String) -> String? Never! {
     if ty == {
         .Map(key, _, value) -> {
             if key != Type.String {
-                return Val("a map's keys are text on the wire, so only a map keyed by `String` has `{codec}`: use `[String: {type_name(value)}]` and convert each key to and from its text")
+                // The suggested map is spelled the way the type printer
+                // spells the refused one (`[K:V]`), each part printed by it.
+                keyed: "[{type_name(Type.String)}:{type_name(value)}]"
+                return Val("a map's keys are text on the wire, so only a map keyed by `String` has `{codec}`: use `{keyed}` and convert each key to and from its text")
             }
             return sema_serde_shape_fix(value, codec)
         }
