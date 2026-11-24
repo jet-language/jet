@@ -166,7 +166,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0515 | DeepCheckLeavesItsBody | Compiler/JetSema/Source/Sema/Statements.jet:7932 | take the exit out of the `#On(.Deep)` body |
 | E0516 | DeepCheckPropagatesFailure | Compiler/JetSema/Source/Sema/Statements.jet:7969 | handle the failure inside the body |
 | E0517 | DeepCheckChangesState | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3354 | change a copy the body makes itself |
-| E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1770 | no opt-in imports a file that is not there |
+| E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1772 | no opt-in imports a file that is not there |
 | E0604 | UseCycle | Compiler/JetSema/Source/Sema/InlineModules.jet:2389 | move the shared names into a module both import |
 | E0605 | PrivateItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:463 | reach the item through its module's public declarations |
 | E0606 | AmbiguousModule | Compiler/JetCLI/Source/CLI/Project.jet:130 | the full module path names one module |
@@ -397,7 +397,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:581 | the effect is added to the dependency's grant line |
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:314 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:869 | `mem.Heap` or a counting allocator over it with a valid cap |
-| E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3771 | the file is readable and writable |
+| E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3772 | the file is readable and writable |
 | E1227 | EngineProtocolMismatch | Compiler/JetCLI/Source/CLI/InspectB.jet:685 | `jet` and its engines come from one toolchain |
 | E1228 | MissingEngine | Compiler/JetCLI/Source/CLI/InspectB.jet:666 | install the engine with the toolchain |
 | E1230 | AmbiguousWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:20 | a longer path or an `@source` names one member |
@@ -524,10 +524,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:135 | refresh the view after the next stop |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:345 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:345 | the string's owner lives as long as the view, or the string is copied |
-| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2104 | the entry resolves |
-| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2105 | the module graph resolves |
-| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2106 | the Core closure resolves |
-| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2107 | every applicable tier lowers |
+| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2106 | the entry resolves |
+| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2107 | the module graph resolves |
+| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2108 | the Core closure resolves |
+| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2109 | every applicable tier lowers |
 | E2393 | ImportWithoutProject | Compiler/JetCLI/Source/CLI/Entry.jet:1666 | the file sits in a package or workspace |
 | E2401 | InvalidDelegationTarget | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3918 | the field implements the trait |
 | E2402 | MissingErrorConversion | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1181 | declare the conversion |
@@ -621,7 +621,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:1155 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:186 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:1157 | the entry handles the failure |
-| E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:3157 | the fatal trap is fixed |
+| E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:3158 | the fatal trap is fixed |
 | E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:906 | the policy owner changes the outer policy |
 | E3106 | InvalidUnsafeObligationMode | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:894 | a permitted obligation mode |
 | E3107 | MissingUnsafeObligation | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:1017 | the obligations are stated |
@@ -647,7 +647,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3220 | NoInlineForeignBinder | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1627 | `c`, `cpp` or `asm` |
 | E3222 | InlineForeignBuildFailed | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1643 | the foreign code or signature is fixed |
 | E3223 | AsmOperandMismatch | Compiler/JetSema/Source/Sema/InlineAssembly.jet:22 | operands match the signature |
-| E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1005 | build for Windows |
+| E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1028 | build for Windows |
 | E3261 | InvalidCImportBody | Compiler/JetParser/Source/Parser/Items.jet:1650 | name the C symbol with `= symbol` |
 | E3301 | OsApiOnNoOsTarget | Compiler/JetSema/Source/Sema/Calls/Core.jet:730 | use `core`-level APIs |
 | E3302 | UnknownTarget | Compiler/JetCLI/Source/CLI/Doctor.jet:348 | a supported target |

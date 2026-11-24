@@ -6719,6 +6719,18 @@ or ambiguous references carry no target. Structural `expr`, `stmt`, `item`,
 and written `type` boundaries support refactoring without spelling guesses
 (D-SEMINDEX1, D-WD2).
 
+`jet inspect semindex --audit <before.jet> <after.jet>` checks both revisions
+of one program and prints the structural audit between their indexes: the
+declarations `after.jet` added, removed, or changed the structural signature
+of. A declaration is matched by its human identity (`fn:audit.score`), and it
+changed when its `signature_id` did; moving it within the file, editing its
+body or reformatting it changes nothing. Each list is sorted by identity.
+Under `--json` the audit is the `audit` member (`before`, `after`, `added`,
+`removed`, `changed`) of the `inspect.semindex` status line. A revision that
+fails its check stops the command with that revision's report. A file's name
+is part of its identities, so the two revisions are one module at two paths,
+such as `base/main.jet` and `head/main.jet`.
+
 The registry exposes semantic projections through `semindex`, `output`, and
 related inspect actions; it has no dossier route. Tools consume the checked
 index and command/output schemas rather than reconstructing field mappings. LSP

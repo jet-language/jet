@@ -1,0 +1,9 @@
+# Original tests/semindex.rs:1067-1109; source bytes and predicates retained.
+# The audit compares one module at two revisions (base/audit.jet, then
+# head/audit.jet): a file's name is part of its identities.
+fixture: StructuralAuditTracksCallableSignatureChanges.fixture
+step: jet inspect semindex --audit {work}/base/audit.jet {work}/head/audit.jet --json
+exit: 0
+json: stdout doc $.audit.added = [] # original predicate: score is not added
+json: stdout doc $.audit.removed = [] # original predicate: score is not removed
+json: stdout doc $.audit.changed = ["fn:audit.score"] # original predicate: score changed; run did not

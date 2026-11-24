@@ -237,6 +237,7 @@ use {
     ]
     jet_plugin.[jet_plugin_link]
     jet_sema.[SEMA_CLI_ENTRY_NAME, sema_no_run_diagnostic, sema_user_template_ct_value]
+    jet_semindex.[SemIndex]
     jet_pkg_model.[
         JET_VERSION,
         ClaimsGrade,
@@ -3947,6 +3948,48 @@ jet_cli_semindex_result: fn(file: String, color: Bool, json: Bool, result: JetDr
         return JetDriverVerbOutput{stdout: "{jet_cli_semindex_status_json(index)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     JetDriverVerbOutput{stdout: jet_cli_semindex_text(index), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// One revision of `jet inspect semindex --audit`: its checked index, or the
+// output that stopped it, as `jet inspect semindex` reports that revision.
+JetCLISemindexSide: enum {
+    Indexed(index: SemIndex),
+    Stopped(output: JetDriverVerbOutput),
+}
+
+jet_cli_semindex_side: fn(file: String, color: Bool, json: Bool) -> JetCLISemindexSide {
+    if jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc) == {
+        .Refused(refusal) -> return JetCLISemindexSide.Stopped{output: refusal}
+        .Compiled(result, snapshot) -> {
+            if jet_cli_errors(result.diagnostics).len() > 0 || result.internal_problem != None {
+                return JetCLISemindexSide.Stopped{output: jet_cli_semindex_result(file, color, json, result, snapshot)}
+            }
+            return JetCLISemindexSide.Indexed{index: jet_cli_checked_semindex(result)}
+        }
+    }
+}
+
+// `jet inspect semindex --audit <before.jet> <after.jet>`: check both
+// revisions, then print the structural audit between their indexes
+// (jet_cli_semindex_audit_report). The first revision that fails its check
+// stops the command with that revision's report.
+jet_cli_semindex_audit: fn(before_file: String, after_file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    before: jet_cli_semindex_side(before_file, color, json)
+    if before == {
+        .Stopped(output) -> return output.move()
+        .Indexed(_) -> {}
+    }
+    after: jet_cli_semindex_side(after_file, color, json)
+    if after == {
+        .Stopped(output) -> return output.move()
+        .Indexed(_) -> {}
+    }
+    if before == .Indexed(earlier) {
+        if after == .Indexed(later) {
+            return JetDriverVerbOutput{stdout: jet_cli_semindex_audit_report(before_file, after_file, earlier, later, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+    }
+    jet_cli_ice("`jet inspect semindex --audit` lost a checked revision")
 }
 
 // ---- `jet fmt` (`run_fmt` / `run_fmt_stdin`) ----

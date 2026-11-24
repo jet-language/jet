@@ -876,10 +876,33 @@ jet_cli_inspect_env_host: fn(file: String, source: String, base_dir: String, col
 }
 
 // `jet inspect semindex <file.jet>`: the semantic index of the checked entry,
-// compiled by the host (`JetCLIPlan.Semindex`).
+// compiled by the host (`JetCLIPlan.Semindex`). `--audit <before.jet>` makes
+// it the structural audit from that earlier revision to the entry
+// (`semindex-audit`, Host.jet jet_cli_semindex_audit).
 jet_cli_semindex: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    path: jet_cli_inspect_first_positional(args) ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/Basics/Hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    JetCLIPlan.Semindex{file: jet_cli_inspect_absolutize(path), color: color, json: json}
+    audit := String?{None}
+    file := String?{None}
+    index := 0
+    loop index < args.len() {
+        argument: args[index]
+        if {
+            argument == "--audit" -> {
+                index += 1
+                if index == args.len() {
+                    return jet_cli_inspect_b_fail("E2104", "`--audit` needs the earlier revision's entry file", "jet inspect semindex --audit base/main.jet head/main.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+                }
+                audit = Val(jet_cli_inspect_absolutize(args[index]))
+            }
+            !argument.starts_with("-") && file == .None -> file = Val(jet_cli_inspect_absolutize(argument))
+            else -> {}
+        }
+        index += 1
+    }
+    path: file ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/Basics/Hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if audit != None {
+        return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "semindex-audit", file: path, subject: audit, json: json, color: color, threads: None, notice: "", project: false}}
+    }
+    JetCLIPlan.Semindex{file: path, color: color, json: json}
 }
 
 // `jet inspect output <file.jet> [<address>]`: the first non-flag word is the
