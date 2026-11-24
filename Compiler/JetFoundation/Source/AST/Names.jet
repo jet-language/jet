@@ -213,6 +213,21 @@ name_intern_hashed: fn(table: ^NameTable, text: String, hash: Int) -> Name Never
     name_insert(table, slot, hash, bytes, 0, bytes.len(), String.from_bytes(bytes) ?? "")
 }
 
+// The slot of the name pair `first`, `second`: each part's id in `table`,
+// interned when new, the first in the high half. A lookup keyed by a pair
+// slot never joins the two names into one text.
+name_pair_slot: fn(table: ^NameTable, first: String, second: String) -> Int Never! {
+    (name_index(name_intern(table, first)) << 32) | name_index(name_intern(table, second))
+}
+
+// The slot of the name pair `first`, `second` when `table` holds both
+// names; never interns.
+name_pair_find_slot: fn(table: NameTable, first: String, second: String) -> Int? Never! {
+    first_name: name_find(table, first) ?? return None
+    second_name: name_find(table, second) ?? return None
+    Val((name_index(first_name) << 32) | name_index(second_name))
+}
+
 name_table_grow: fn(table: ^NameTable) Never! {
     capacity: (table.mask + 1) * 2
     mask: capacity - 1

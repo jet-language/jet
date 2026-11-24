@@ -41,6 +41,7 @@ use {
         decl_table_find_symbol,
         module_is_core,
         name_count,
+        name_index,
         name_intern,
         name_table_sized,
         sema_casing_is_alphanumeric,
@@ -159,8 +160,10 @@ jet_driver_cost_cover: fn(functions: [FnBody], callees: JetDriverCostCallees) ->
             cover.covered.push(JetDriverCostCovered{position: position, name: functions[position].name})
         }
     }
-    // Each covered specialization's `<target>/<name>`, interned once.
+    // Each covered specialization by its target (high half) and its name's
+    // id in `specializations`.
     specializations := name_table_sized(16)
+    covered := [Int:Bool]{}
     gap_rows := [Int:Bool]{}
     cursor := 0
     loop cursor < cover.covered.len() {
@@ -174,9 +177,9 @@ jet_driver_cost_cover: fn(functions: [FnBody], callees: JetDriverCostCallees) ->
                 if callees.bodies[row] == .Val(target) {
                     if jet_driver_cost_reports(functions[target]) && functions[target].generic_params.len() > 0 {
                         specialization: "{functions[target].name}__generic__{jet_driver_cost_type_suffix(type_args)}"
-                        known: name_count(specializations)
-                        _ := name_intern(specializations, "{target}/{specialization}")
-                        if name_count(specializations) > known {
+                        key: (target << 32) | name_index(name_intern(specializations, specialization))
+                        if covered.get(key) == None {
+                            covered[key] = true
                             cover.covered.push(JetDriverCostCovered{position: target, name: specialization})
                         }
                     }
