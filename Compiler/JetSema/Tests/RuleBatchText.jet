@@ -1,0 +1,7 @@
+// The collecting loop of a rule batch is generated Jet text. It must parse
+// with no error, and a lint it might raise must never stop the compiler.
+use jet_sema.[sema_call_rule_batch_expression]
+
+#Test("a heard call's rule batch text parses with no error") {
+    if sema_call_rule_batch_expression() == .Unit(_, _) -> panic("the batch expression is empty")
+}

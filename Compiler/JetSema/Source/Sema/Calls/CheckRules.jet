@@ -233,8 +233,11 @@ sema_rule_call_value: fn(
     caller := owner
     callee_identity := name
     if program.registration_graph == .Val(graph) {
-        caller = sema_compiler_identity(graph, owner)
-        if callee == .Val(id) -> callee_identity = sema_compiler_identity(graph, sema_symbol_key(program, context, id))
+        caller = sema_rule_identity(graph, owner, context.rule_identities)
+        if callee == .Val(id) {
+            callee_key: sema_symbol_key(program, context, id)
+            callee_identity = sema_rule_identity(graph, callee_key, context.rule_identities)
+        }
     }
     values := [TComptimeValue]{}
     loop argument in args {
@@ -262,6 +265,27 @@ sema_rule_call_value: fn(
             TComptimeField{name: "receiver", value: receiver},
         },
     }
+}
+
+// The identities a body's heard calls name, by declaration key
+// (SemaCheckContext.rule_identities).
+SemaRuleIdentities: struct {
+    keys: [String],
+    identities: [String],
+}
+
+// sema_compiler_identity of the declaration keyed `key`, found once per body
+// and kept in `known`: every heard call of a body names the body as its
+// caller, and its calls of one callee name that callee. A body names few,
+// so a key is found by a scan.
+sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: &SemaRuleIdentities) -> String {
+    loop (index, written) in known.keys {
+        if written == key -> return "{known.identities[index]}"
+    }
+    identity: sema_compiler_identity(graph, key)
+    known.keys.push("{key}")
+    known.identities.push("{identity}")
+    identity
 }
 
 // One CompilerArg of a heard call, whose value the build knows as `known`.
@@ -753,8 +777,8 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: &[SemaComptime
     batches
 }
 
-// A rule's batch item, in the rule's own module: `__jet_rules[i].check(__jet_calls[i])`
-// for each call, collected in order.
+// A rule's batch item, in the rule's own module: `__jet_rules[i].check(call)`
+// for each call of `__jet_calls`, collected in order.
 sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRuleBatch, pass: Int, rules: &&[TComptimeValue], calls: &&[TComptimeValue]) -> SemaComptimeItemSource {
     file := ""
     if sema_registration_module_index(graph, batch.rule.module_identity) == .Val(row) -> file = "{graph.modules[row].source_file}"
@@ -779,11 +803,17 @@ sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRul
     }
 }
 
-// The collecting loop a batch runs, parsed as the language writes it.
+// The collecting loop a batch runs, parsed as the language writes it. It
+// reads each list once: a read of a prepared list carries its whole value
+// into the checked body and the IR. Only an error in the text stops it; a
+// lint never does.
 sema_call_rule_batch_expression: fn() -> Expr {
-    text: "RULE_BATCH: loop index in 0..<{SEMA_CALL_RULE_CALLS_LOCAL}.len() -> {SEMA_CALL_RULE_RULES_LOCAL}[index].check({SEMA_CALL_RULE_CALLS_LOCAL}[index])\n"
+    text: "RULE_BATCH: loop (index, call) in {SEMA_CALL_RULE_CALLS_LOCAL} -> {SEMA_CALL_RULE_RULES_LOCAL}[index].check(call)\n"
     parsed: parse_generated_source(text.bytes())
-    if parsed.diagnostics.len() == 0 && parsed.program.items.len() == 1 {
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("the rule batch loop does not parse: {diagnostic.code} {diagnostic.what}")
+    }
+    if parsed.program.items.len() == 1 {
         if parsed.program.items[0] == .Const(definition) -> return definition.value
     }
     panic("the rule batch loop does not parse")

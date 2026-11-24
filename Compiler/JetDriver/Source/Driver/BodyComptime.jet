@@ -235,24 +235,21 @@ jet_driver_comptime_body_source_add: fn(
     sources.push(item)
 }
 
-jet_driver_comptime_body_sources: fn(modules: [SemaGraphModuleResult]) -> [SemaComptimeBodySource] Never! {
-    sources := [SemaComptimeBodySource]{}
-    seen := name_table_sized(2)
-    loop graph_module in modules {
-        loop source in graph_module.comptime_body_sources {
-            key: "{source.module_identity.id}\n{source.key}"
-            if name_find(seen, key) != None -> next
-            _ := name_intern(seen, key)
-            sources.push(source.copy())
-        }
-    }
-    sources
+// A body source's place in a graph: `owner`, the row of the module it sits
+// in, and `row`, its row among that module's sources
+// (SemaGraphModuleResult.comptime_body_sources).
+JetDriverBodySourceRow: struct {
+    owner: Int,
+    row: Int,
 }
 
-jet_driver_pending_comptime_body_sources: fn(
+// The body sources of `modules` that `values` holds no staged value for,
+// the first of each `module\nkey`, by place: a caller copies only the
+// sources it goes on to take.
+jet_driver_pending_comptime_body_rows: fn(
     modules: [SemaGraphModuleResult],
     values: [SemaComptimeItemValue],
-) -> [SemaComptimeBodySource] Never! {
+) -> [JetDriverBodySourceRow] Never! {
     // The `module\nkey` of every staged body value, collected once rather
     // than rescanning every value per source.
     present := name_column_table(values.len())
@@ -261,11 +258,33 @@ jet_driver_pending_comptime_body_sources: fn(
             _ := name_intern(present, "{value.module_identity.id}\n{value.key}")
         }
     }
-    pending := [SemaComptimeBodySource]{}
-    loop source in jet_driver_comptime_body_sources(modules) {
-        if name_find(present, "{source.module_identity.id}\n{source.key}") == None -> pending.push(source)
+    rows := [JetDriverBodySourceRow]{}
+    seen := name_table_sized(2)
+    loop (owner, graph_module) in modules {
+        loop (row, source) in graph_module.comptime_body_sources {
+            key: "{source.module_identity.id}\n{source.key}"
+            if name_find(seen, key) != None -> next
+            _ := name_intern(seen, key)
+            if name_find(present, key) == None -> rows.push(JetDriverBodySourceRow{owner: owner, row: row})
+        }
     }
-    pending
+    rows
+}
+
+// The body sources at `rows` of `modules` (jet_driver_pending_comptime_body_rows).
+jet_driver_comptime_body_sources_at: fn(modules: [SemaGraphModuleResult], rows: [JetDriverBodySourceRow]) -> [SemaComptimeBodySource] Never! {
+    sources := [SemaComptimeBodySource]{}
+    loop at in rows {
+        sources.push(modules[at.owner].comptime_body_sources[at.row].copy())
+    }
+    sources
+}
+
+jet_driver_pending_comptime_body_sources: fn(
+    modules: [SemaGraphModuleResult],
+    values: [SemaComptimeItemValue],
+) -> [SemaComptimeBodySource] Never! {
+    jet_driver_comptime_body_sources_at(modules, jet_driver_pending_comptime_body_rows(modules, values))
 }
 
 // Whether a pending source is a call a check rule hears.
@@ -280,7 +299,7 @@ jet_driver_comptime_rules_pending: fn(pending: [SemaComptimeBodySource]) -> Bool
 // `graph` and so reads its name facts (jet_driver_comptime_body_pass,
 // jet_driver_validate_checked_text).
 jet_driver_comptime_reads_names: fn(graph: SemaGraphResult, values: [SemaComptimeItemValue]) -> Bool Never! {
-    if jet_driver_pending_comptime_body_sources(graph.modules, values).len() > 0 -> return true
+    if jet_driver_pending_comptime_body_rows(graph.modules, values).len() > 0 -> return true
     loop graph_module in graph.modules {
         loop call in graph_module.comptime_requests {
             if call.checked_text != None -> return true
@@ -802,21 +821,25 @@ jet_driver_land_local_values: fn(
         landing.stopped = true
         jet_driver_trace_step_begin(request.trace_sink, "comptime.land.open")
         open: jet_driver_local_values_open(bodies, stage, functions)
-        pending: if open -> jet_driver_pending_comptime_body_sources(bodies.modules, values) else -> [SemaComptimeBodySource]{}
-        jet_driver_trace_step_end(request.trace_sink, "comptime.land.open", pending.len())
+        rows: if open -> jet_driver_pending_comptime_body_rows(bodies.modules, values) else -> [JetDriverBodySourceRow]{}
+        jet_driver_trace_step_end(request.trace_sink, "comptime.land.open", rows.len())
         if !open -> break
-        if pending.len() == 0 {
+        if rows.len() == 0 {
             landing.stopped = false
             break
         }
         // A site pending again ends the landing, so it ends.
         again := false
-        loop source in pending {
-            site: "{source.module_identity.id}\n{source.key}"
+        loop at in rows {
+            site: "{bodies.modules[at.owner].comptime_body_sources[at.row].module_identity.id}\n{bodies.modules[at.owner].comptime_body_sources[at.row].key}"
             if name_find(tried, site) != None -> again = true
             _ := name_intern(tried, site)
         }
         if again -> break
+        // A site that is neither a local value nor a `name: #run value`
+        // local ends the landing before any source is copied.
+        if !jet_driver_local_sources_only(bodies.modules, rows) -> break
+        pending: jet_driver_comptime_body_sources_at(bodies.modules, rows)
         // The sites whose values the comptime phase computed ahead land
         // those (sema_comptime_local_values_ahead); a run computes the rest,
         // and none runs when no site is left.
@@ -831,7 +854,6 @@ jet_driver_land_local_values: fn(
                 run_sources.push(sema_comptime_body_item_source(pending[index]))
             }
         }
-        if !jet_driver_local_sources_only(body_sources) -> break
         if run_sources.len() == 0 {
             jet_driver_trace_step_begin(request.trace_sink, "comptime.land.splice")
             // copy: the splice checks the owners with the values before the
@@ -967,11 +989,13 @@ jet_driver_local_values_open: fn(bodies: SemaFinalizeBodies, stage: SemaComptime
     sema_comptime_function_diagnostics(functions, function_diagnostics) && !sema_local_values_blocked(function_diagnostics)
 }
 
-// Whether every source of `sources` is a local value or an explicit
-// `name: #run value` local (SemaComptimeItemSource.local_binding).
-jet_driver_local_sources_only: fn(sources: [SemaComptimeItemSource]) -> Bool Never! {
-    loop source in sources {
-        if !source.local_value && !source.local_binding -> return false
+// Whether every body source at `rows` of `modules` is a local value or an
+// explicit `name: #run value` local (SemaComptimeBodySource.local_binding).
+jet_driver_local_sources_only: fn(modules: [SemaGraphModuleResult], rows: [JetDriverBodySourceRow]) -> Bool Never! {
+    loop at in rows {
+        if !modules[at.owner].comptime_body_sources[at.row].local_value && !modules[at.owner].comptime_body_sources[at.row].local_binding {
+            return false
+        }
     }
     true
 }
