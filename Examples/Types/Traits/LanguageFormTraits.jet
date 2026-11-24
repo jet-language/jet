@@ -1,7 +1,12 @@
 // A user type implements a language form's trait, and the form calls it.
 // Each interpolation style selector is its core.text.fmt trait's method:
 // `{value:Hex(4)}` is `value.hex(4)`, so a type with the impl takes the
-// selector, and so does a generic value bounded by the trait.
+// selector, and so does a generic value bounded by the trait. Decode,
+// rounding and the line loop work the same way: `tree.decode<T>()` calls
+// T's `Decode`, `math.round(x)` calls x's `math.Roundable`, and
+// `loop line in source.lines()` walks the source's `Iterable`.
+use math: core.math
+
 Gauge: struct {
     level: Int,
 
@@ -41,6 +46,59 @@ Gauge: struct {
             "percent<{share:Percent(digits)}>"
         }
     }
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> Gauge [FieldError]! {
+            level: tree.decode<Int>() ?? return Err(err)
+            Ok(Gauge{level: level})
+        }
+    }
+}
+
+// An amount in tenths that rounds to whole units of ten.
+Tenths: struct {
+    value: Int,
+
+    impl math.Roundable {
+        rounded: fn(self, mode: math.Rounding) -> Tenths Never! {
+            whole: math.fraction(self.value, 10) ?? panic("ten is not zero")
+            Tenths{value: Int{whole.rounded(mode)} * 10}
+        }
+    }
+}
+
+// A text whose `lines()` is a loop source: its Iterable hands the loop a
+// cursor, and the cursor's Iterator steps one line at a time.
+Script: struct {
+    text: String,
+
+    lines: fn(self) -> ScriptLines { ScriptLines{text: self.text.copy()} }
+}
+
+ScriptLines: struct {
+    text: String,
+
+    impl Iterable {
+        Iter: ScriptCursor,
+
+        iter: fn(&&self) -> ScriptCursor { ScriptCursor{rows: self.text.split("\n").to_list(), at: 0} }
+    }
+}
+
+ScriptCursor: struct {
+    rows: [String],
+    at: Int,
+
+    impl Iterator {
+        Item: String,
+
+        next: fn(&self) -> String? {
+            if self.at == self.rows.len() -> return None
+            row: self.rows[self.at].copy()
+            self.at += 1
+            Val(row)
+        }
+    }
 }
 
 // A generic value bounded by the trait takes the selector too.
@@ -58,4 +116,12 @@ run: fn() {
     // The Core impls format the built-in numbers as before.
     half: Float{5} / 2.0
     print("{255:Hex(4)} {5:Bin} {8:Oct} {1234567:Grouped(0)} {half:Fixed(3)} {half:Percent(1)}")
+    // Decode, rounding and the line loop call the user type's impls.
+    decoded: Dyn.Int(17).decode<Gauge>() ?? panic("decode: {err[0].reason}")
+    print("{decoded:Hex(2)} {decoded.level}")
+    print("{math.round(Tenths{value: 25}).value} {math.round_even(Tenths{value: 25}).value} {math.floor(Tenths{value: -25}).value} {math.trunc(Tenths{value: -25}).value}")
+    script: Script{text: "alpha\nbeta\ngamma"}
+    loop line in script.lines() {
+        print("line {line}")
+    }
 }
