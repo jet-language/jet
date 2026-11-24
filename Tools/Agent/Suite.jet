@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // Suite runs one `jet test Compiler` profile of a tree against a compiler
 // snapshot with its matching jetpack.
 // Usage:
@@ -12,8 +11,8 @@
 // The running jet is SUITE_RUNNER, else the snapshot itself: a jet older than
 // the test setting rows needs a newer SUITE_RUNNER, which keeps the slicing,
 // baselines and verdicts while the snapshot builds and runs rows.
-// SUITE_OUT defaults to $JET_SCRATCH_ROOT/lanes/Main/q/sg. Roots: the table of
-// Tools/Agent/roots.sh.
+// SUITE_OUT defaults to $JET_SCRATCH_ROOT/lanes/Main/q/sg. Roots: the table
+// Tools/Agent/roots.env.
 // jetpack: the corpora use the jetpack beside the snapshot's jet. A snapshot
 // without one gets JETPACK when set, else base/SHA/jetpack, where SHA is
 // JETDIR/COMMIT, else TREE/.chain-base (a hosted engine built from the same
@@ -26,6 +25,7 @@
 use {
     files: core.files
     process: core.process
+    roots: "Roots"
     sys: core.sys
     term: core.term
 }
@@ -45,7 +45,7 @@ run: fn() {
 
 suite: fn(label: String, tree: String, jetdir: String, profile: String, settings: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     sg: process.env_nonempty("SUITE_OUT") ?? "{scratch_root()}/lanes/Main/q/sg"
-    base: root("JET_BASE_ROOT", "{scratch_root()}/discovery/base")
+    base: roots.value("JET_BASE_ROOT")
     // The rows stage in memory (the testkit's scratch is /dev/shm, counted
     // against the pool's memory budget), so no row waits on a slow scratch disk
     // (#6610 c4: a golden shard took 546 s on the lanes' build disk, 67 s in
@@ -216,7 +216,7 @@ fail: fn(message: String) -[IO]> Int Never! {
     1
 }
 
-// --- roots (Tools/Agent/roots.sh) -------------------------------------------
+// --- roots (Tools/Agent/roots.env) ------------------------------------------
 
 // `name` as the machine's `${XDG_CONFIG_HOME:-~/.config}/jet/env` leaves it
 // over the environment (the shell tools source the file first), else
@@ -229,7 +229,7 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
 }
 
 state_root: fn() -[Env, FS]> String Never! {
-    root("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev")
+    roots.value("JET_STATE_ROOT")
 }
 
-scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
+scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }

@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // The compiler chain: export a tree, build its stages through the content
 // addressed stage store, take a machine build slot, and the hashing, change
 // classification, store and binary checks the chain reads.
@@ -93,6 +92,7 @@ use {
     files: core.files
     json: core.encoding.json
     process: core.process
+    dev_roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
@@ -324,17 +324,7 @@ pack_compare: fn(dir: String) -[Exec, FS, IO]> String? Never! {
 // --- stage inputs -----------------------------------------------------------
 
 // The dev tool roots' `jet` that runs repository tools: JET_BIN, else the seed.
-tool_jet: fn() -[Env]> String Never! {
-    bin: process.env_get("JET_BIN") ?? ""
-    if bin != "" -> return bin
-    seed: process.env_get("JET_SEED") ?? ""
-    if seed != "" -> return "{seed}/jet"
-    seeds: process.env_get("JET_SEEDS") ?? ""
-    if seeds != "" -> return "{seeds}/current/jet"
-    data: process.env_get("XDG_DATA_HOME") ?? ""
-    if data != "" -> return "{data}/jet-seeds/current/jet"
-    "{process.env_get("HOME") ?? ""}/.local/share/jet-seeds/current/jet"
-}
+tool_jet: fn() -[Env, FS]> String Never! { dev_roots.value("JET_BIN") }
 
 // The output rows of Tools/Agent/CompilerPackages.jet of `tree`.
 compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
@@ -771,7 +761,7 @@ root_of: fn(name: String, fallback: String) -[Env, FS]> String Never! {
     if value != "" -> value.copy() else -> fallback.copy()
 }
 
-// The dev tool roots (the table of Tools/Agent/roots.sh), the checkout whose
+// The dev tool roots (the table Tools/Agent/roots.env), the checkout whose
 // tools run (JET_TOOLCHAIN_ROOT, else the current directory) and the
 // canonical build root.
 Roots: struct {
@@ -786,11 +776,10 @@ Roots: struct {
 }
 
 roots: fn() -[Env, Exec, FS, IO]> Roots Never! {
-    home: process.env_nonempty("HOME") ?? ""
-    state: root_of("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{home}/.cache"}/jet-dev")
-    scratch: root_of("JET_SCRATCH_ROOT", state)
-    run: root_of("JET_RUN_ROOT", "{scratch}/run")
-    seeds: root_of("JET_SEEDS", "{process.env_nonempty("XDG_DATA_HOME") ?? "{home}/.local/share"}/jet-seeds")
+    state: dev_roots.value("JET_STATE_ROOT")
+    scratch: dev_roots.value("JET_SCRATCH_ROOT")
+    run: dev_roots.value("JET_RUN_ROOT")
+    seeds: dev_roots.value("JET_SEEDS")
     named: process.env_nonempty("JET_TOOLCHAIN_ROOT") ?? ""
     tools: if named != "" -> absolute(named) else -> files.cwd() ?? fail("no current directory: {err}")
     r14: "{scratch}/discovery/r14"

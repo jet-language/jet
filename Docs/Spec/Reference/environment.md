@@ -134,7 +134,7 @@ object. A URL's user and password never appear in that list.
 | `JETPACK_WORKER` | plain name | The writer whose scratch directory a Jetpack bootstrap assembly or proof uses, `$JET_STATE_ROOT/jetpack-bootstrap/<worker>-<tag>`, so concurrent writers keep apart. Unset, `lead`. |
 | `JET_AGENT_EVAL_*` | path | The scratch directories of the cold-agent evaluation (`Tools/AgentEval/RunColdContext.jet`): `SCRATCH_DIR` the tasks', `ADAPTER_SCRATCH_DIR` the model adapters'. Unset, `agent-eval` and `agent-eval-adapters` under the test scratch. |
 | `JET_AGENT_WORKLOAD_*` | path | The agent workload gate's files (`Tools/CI/AgentWorkloads.jet`): `BASELINE` the baseline it compares against, `REPORT` the report it writes, `SCRATCH_DIR` its scratch. Unset, the checkout's baseline and report, and `TMPDIR`. |
-| `JET_BASE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the published compilers. Unset, `$JET_SCRATCH_ROOT/discovery/base`. |
+| `JET_BASE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.env`): the published compilers. Unset, `$JET_SCRATCH_ROOT/discovery/base`. |
 | `JET_BOOTSTRAP_*` |  | The runner protocol the scaling gate (`Tools/Perf/Scaling/Gate`) hands a compiler of kind `bootstrap`, in an otherwise cleared environment: `MODE`, `FACTORY_TIER`, `SOURCE_ROOT`, `ENTRY`, `OUTPUT` and `RECEIPT`. |
 | `JET_BUILD_LINE` | text | The build line the gauntlet's performance receipt records. Unset, the receipt records none. |
 | `JET_CANVAS_BROWSER` | `chromium` or `firefox` | The browser of a `Tools/CanvasTest/Run.jet` scenario when `--browser` names none. Unset, `chromium`. |
@@ -152,7 +152,7 @@ object. A URL's user and password never appear in that list.
 | `JET_COMPILED_WORKLOAD_*` |  | The compiled workload producer's settings (`Tools/CI/CompiledWorkloads.jet`): `PLATFORM` the report's platform, `JET_BIN` the compiler (else `JET`, else `jet` on PATH), `CANDIDATE_COMMIT` the commit it reports for (else HEAD), `SCRATCH` its scratch (never under `/tmp`), `KEEP_SCRATCH=1` to keep it, `TIMEOUT_MS` each measurement's limit (unset, 180000), and `PEER_LAUNCHER` the peer launcher (else one built from `Tools/CI/CompiledWorkloadPeerLauncher.jet`), which gets `PEER_CONTRACT` and reads `PEER_PROBE_ROOT`. |
 | `JET_COMPILER_IDENTITY` | `name@version#build-id` | Names the running compiler's identity, which keys its receipts and versions its target layout. Unset, `jet` takes the identity built into it (its `jet.identity` part, [`devtools embed`](cli.md)), and a `jet-bare`, which has none, reads the one line of the `IDENTITY` file beside its executable; with neither, every compile refuses (Jet.DriverOperationFailed) and names both. Every test program `jet test` runs, a code suite of `Compiler` (its `packages`, `selfhost` and `perf` profiles) or a package's own tests, gets the identity of the jet that built it here, so a test that compiles runs in a shell that sets none. A corpus row's child never takes it from the shell that runs `jet test`: a row that needs one sets it with `env:`. |
 | `JET_CPU_AFFINITY` | CPU list | The CPUs the gauntlet's performance receipt records the run as pinned to. Unset, what `taskset` reports, else `/proc`. |
-| `JET_DEV_WORKTREE` | path | Checkout tool root (`Tools/Agent/roots.sh`): the checkout the lander commits to. Unset, the checkout holding the tool. |
+| `JET_DEV_WORKTREE` | path | Checkout tool root (`Tools/Agent/Roots.jet`): the checkout the lander commits to. Unset, the checkout holding the tool. |
 | `JET_ENUM_CODEC_*` |  | The enum codec benchmark's settings (`Tools/Perf/EnumCodecBench/run.jet`): `BENCH_COMMAND` the adapter command, `BENCH_SCRATCH_ROOT` its scratch parent, `BENCH_PROTOCOL` and `BENCH_PROFILE` what it hands the adapter, and the rest the metadata its receipt records when the command line names none: the compiler, toolchain and codec library with their versions, the entry point, the optimized and LTO settings, and the commit. |
 | `JET_FRAME_CAPTURE` | path | The file the gauntlet's game-frame entry writes its screen to, as a PAM image. Unset, no capture. |
 | `JET_FRONT_TIMEOUT_MS` | milliseconds | The timeout of each front-end command a compiler registry transport runs. Unset, 600000. |
@@ -168,17 +168,17 @@ object. A URL's user and password never appear in that list.
 | `JET_RELEASE_LOCK_HELD` | `1` | **Set by** `Tools/Release/Admit.jet` for the run it starts in the release slot, which inherits its release lock. |
 | `JET_RELEASE_SLOT` | empty | Set empty, `Tools/Release/Admit.jet` runs the gate in place instead of again under `Tools/Agent/Chain.jet slot --release`. |
 | `JET_RELEASE_WORK` | path | The release train's work root, read by `Tools/Release/Admit.jet` and `Tools/Agent/Land.jet`; `paused` in it stops new trains. Unset, `$JET_STATE_ROOT/release`. |
-| `JET_RUN_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the land queue, locks and slot ledger. Unset, `$JET_SCRATCH_ROOT/run`. |
+| `JET_RUN_ROOT` | path | Checkout tool root (`Tools/Agent/roots.env`): the land queue, locks and slot ledger. Unset, `$JET_SCRATCH_ROOT/run`. |
 | `JET_SAFETY_ARTIFACTS` | path | The admitted native artifacts JSON the `safety-gate` row of `Tools/Agent/VerifyFull.jet` runs the full safety gate against (Docs/Spec/safety.md). Unset, the row runs the gate's source leg. |
 | `JET_SCALING_QUEUE_STAMP` | path | **Set by** the proof queue for a queued scaling job: the stamp file whose time `Tools/Perf/Scaling/Enqueue/run.jet` dates the job by. Required. |
-| `JET_SCRATCH_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the large shared scratch, under which the test kit also keeps its scratch and state. Unset, `$JET_STATE_ROOT`. |
-| `JET_SEED` | path | Checkout tool root (`Tools/Agent/roots.sh`): the admitted seed compiler's directory. Unset, `$JET_SEEDS/current`. |
-| `JET_SEEDS` | path | Checkout tool root (`Tools/Agent/roots.sh`): the seed store. Unset, `${XDG_DATA_HOME:-~/.local/share}/jet-seeds`. |
+| `JET_SCRATCH_ROOT` | path | Checkout tool root (`Tools/Agent/roots.env`): the large shared scratch, under which the test kit also keeps its scratch and state. Unset, `$JET_STATE_ROOT`. |
+| `JET_SEED` | path | Checkout tool root (`Tools/Agent/roots.env`): the admitted seed compiler's directory. Unset, `$JET_SEEDS/current`. |
+| `JET_SEEDS` | path | Checkout tool root (`Tools/Agent/roots.env`): the seed store. Unset, `${XDG_DATA_HOME:-~/.local/share}/jet-seeds`. |
 | `JET_SELFHOST_SCRATCH` | path | The directory the self-host study (`Tools/Perf/Selfhost`) makes its run directories in. Unset, `$JET_STATE_ROOT/selfhost`. |
 | `JET_SOURCE` | path | The program `Tools/CanvasTest/Run.jet native-lifecycle` serves with `jet dev --canvas`, and a `scenario` serves when neither `--port` nor `--source` names one. Unset, `Examples/Tooling/CanvasBlueprintDemo.jet`. |
-| `JET_STATE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): per-user dev state and caches. Each root is read from the environment, else from `${XDG_CONFIG_HOME:-~/.config}/jet/env`. Unset, `${XDG_CACHE_HOME:-~/.cache}/jet-dev`. |
+| `JET_STATE_ROOT` | path | Checkout tool root (`Tools/Agent/roots.env`): per-user dev state and caches. Each root is read from the environment, else from `${XDG_CONFIG_HOME:-~/.config}/jet/env`. Unset, `${XDG_CACHE_HOME:-~/.cache}/jet-dev`. |
 | `JET_STREAM_BENCH_COMMAND` | command line | The Jet command `Tools/Perf/StreamBench/run.jet` runs, split as a shell splits it. Unset, `Tools/Agent/JetEnv.jet jet`. |
-| `JET_TARGET_ROOT` | path | Checkout tool root (`Tools/Agent/roots.sh`): the build target directories. Unset, `$JET_SCRATCH_ROOT/targets`. |
+| `JET_TARGET_ROOT` | path | Checkout tool root (`Tools/Agent/roots.env`): the build target directories. Unset, `$JET_SCRATCH_ROOT/targets`. |
 | `JET_TEST_SCRATCH` | path | The scratch directory of a compiler check of `Tools/Agent/LaneCheck.jet`. Unset, `$JET_SCRATCH_ROOT/lane-check`. |
 | `JET_TEST_SHARD` | index | The shard of the native suites `Tools/Agent/VerifyFull.jet` runs, of `JET_TEST_SHARD_COUNT`. Unset, 0. |
 | `JET_TEST_SHARD_COUNT` | count | How many shards `Tools/Agent/VerifyFull.jet` splits the native suites into. Unset, 1. |
