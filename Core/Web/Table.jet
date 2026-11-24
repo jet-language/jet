@@ -165,7 +165,7 @@ sort: fn<T, E>(rows: [T], descending: Bool, key_fn: fn(T) -> String E!) -> [T] E
     out := copy_values<T>(rows)
     n := out.len()
     if n < 2 -> return out
-    loop i in 0..<n {
+    loop _i in 0..<n {
         loop j in 0..<(n - 1) {
             a := key_fn(out[j])
             b := key_fn(out[j + 1])
@@ -396,7 +396,7 @@ projected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] Never! {
     }
     sort_index := column_index<T>(table.columns, table.state.sort.column)
     if sort_index >= 0 && rows.len() > 1 {
-        loop i in 0..<rows.len() {
+        loop _i in 0..<rows.len() {
             loop j in 0..<(rows.len() - 1) {
                 left := table.columns[sort_index].project(rows[j].value)
                 right := table.columns[sort_index].project(rows[j + 1].value)

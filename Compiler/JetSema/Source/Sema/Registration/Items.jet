@@ -1147,6 +1147,11 @@ SemaRegistrationGraph: struct {
     // Every Core body is checked whether a checked body names it or not
     // (JET_KEEP_GOING, `jet check Core`), so none waits for demand.
     every_core_body: Bool{false},
+    // `jet check Core` (driver core_entry with every_core_body, not the Core
+    // library's sealing check): the program is Core's own check, so
+    // finalization reports Core's lints rather than dropping them
+    // (CheckProgram.jet sema_core_lint_dropped).
+    core_own_check: Bool{false},
     // The Core library's check (driver JetDriverCompileRequest.core_seal):
     // finalization summarizes the Core functions for a bound program
     // (CoreSeal.jet) into SemaGraphResult.core_seal.

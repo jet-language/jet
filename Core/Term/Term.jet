@@ -395,7 +395,7 @@ confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! {
 choose: fn(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(terminal_invalid("choose needs at least one item"))
     terminal_prompt(choose_menu(prompt, options), true)
-    loop attempt in 0..<11 {
+    loop _attempt in 0..<11 {
         terminal_prompt("> ", true)
         read: terminal_line()
         answer: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))

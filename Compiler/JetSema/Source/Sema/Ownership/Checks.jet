@@ -2748,7 +2748,7 @@ sema_ownership_keep_mutations: fn(state: &SemaOwnershipState, branch: SemaOwners
 // whether or not it can run; the edit swaps ` :=` for `:`. It reports as a
 // lint until the repo-wide `:=` -> `:` sweep lands: as an error it stops the
 // build's own Core compile (the runtime step), which still has those sites,
-// and a lint in Core is dropped (sema_core_source_lint).
+// and a program that only embeds Core drops a lint in Core (sema_core_lint_dropped).
 sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     row: diagnostic_registry_row("E0514") ?? panic("E0514 has no registry row")
     loop binding in state.mutable_bindings {

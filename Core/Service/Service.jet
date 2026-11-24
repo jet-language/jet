@@ -1617,7 +1617,7 @@ authority_has_uncommitted: fn(endpoint: ServiceEndpoint) -> Bool ServiceError! {
     bound: registry_store(endpoint)
     store: bound ?? return Ok(false)
     runtime: ServiceRuntime{store: store, retention_ms: 0}
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
     loop entry in entries {
@@ -2068,7 +2068,7 @@ state_read_unlocked: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter
 }
 
 state_load: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter) -> [String] ServiceError! {
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     lock: authority_file_lock(authority.store, "state")
     state_read_unlocked(authority, adapter)
 }
@@ -2129,7 +2129,7 @@ state_write: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, record
 }
 
 state_append: fn(authority: TreeStateAuthority, record: String) ServiceError! {
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     lock: authority_file_lock(authority.store, "state")
     records: state_read_unlocked(authority, TreeStateAdapter.EventLog)
     if records.len() >= 100000 -> return Err(ServiceError.Policy("event-log record limit exceeded"))
@@ -2476,7 +2476,7 @@ rollout_operation_lock: fn(tree: ServiceTree) -> ServiceFileLock ServiceError! {
 rollout_store_load: fn(tree: ServiceTree) -> RolloutState? ServiceError! {
     authority: tree.state_authority ?? return Ok(None)
     path: rollout_path(authority)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     lock: authority_file_lock(path, "rollout")
     row := [Int]{}
     if service_stat(path) == {
@@ -2492,7 +2492,7 @@ rollout_store_write: fn(tree: ServiceTree) ServiceError! {
     authority: tree.state_authority ?? return Ok()
     path: rollout_path(authority)
     bytes: rollout_encode(tree.name, rollout_snapshot(tree))
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     lock: authority_file_lock(path, "rollout")
     state_create_parent(path, "rollout")
     state_validate_path(path)
@@ -3505,7 +3505,7 @@ commit_snapshot: fn(tree: &ServiceTree, payload: String) ServiceError! {
         return Err(ServiceError.Policy("snapshot record exceeds the state record limit"))
     }
     record: state_record("v{authority.version}:", payload)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     state_write(authority, TreeStateAdapter.Snapshot, [String]{record})
     tree.snapshot = Val(record)
 }
@@ -4289,7 +4289,7 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
     bound: authority_bound_store(endpoint)
     store: bound ?? return Ok([PendingEntry]{})
     runtime: ServiceRuntime{store: store, retention_ms: 0}
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries: authority_load(runtime)
     pending := pending_registry().guard_edit()
     slot: pending_queue_slot(pending.value, store, endpoint)
@@ -4338,7 +4338,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]
     bound: authority_bound_store(endpoint)
     store: bound ?? return Err(ServiceError.Partitioned("service endpoint has no bound authority store for pending delivery"))
     runtime: ServiceRuntime{store: store, retention_ms: 0}
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     receipts: authority_load(runtime)
     normalized := [PendingEntry]{}
     loop entry in entries {
@@ -4387,7 +4387,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
     runtime: ServiceRuntime{store: store, retention_ms: 0}
     authority_validate_runtime(runtime)
     operation: authority_operation_lock(runtime, id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries: authority_entries(runtime, authority_read(runtime))
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
@@ -4418,7 +4418,7 @@ delivery_entry: fn(delivery: Delivery) -> DeliveryRead ServiceError! {
     runtime: ServiceRuntime{store: delivery.store, retention_ms: 0}
     authority_validate_runtime(runtime)
     operation: authority_operation_lock(runtime, delivery.id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     records := authority_read(runtime)
     entries := authority_entries(runtime, records)
     if authority_cleanup_expired(runtime, entries, service_now()) {
@@ -4502,7 +4502,7 @@ delivery_cancel: fn(delivery: Delivery) -> Delivery ServiceError! {
     runtime: ServiceRuntime{store: delivery.store, retention_ms: 0}
     authority_validate_runtime(runtime)
     operation: authority_operation_lock(runtime, delivery.id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries: authority_entries(runtime, authority_read(runtime))
     index: delivery_entry_index(entries, delivery.id) ?? return Err(ServiceError.Unknown("delivery `{delivery.id}` is unknown"))
     entry: entries[index]
@@ -4529,7 +4529,7 @@ runtime_send: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, message: St
     authority_validate_text(key, "idempotency key", 1024, false)
     authority_validate_text(message, "service message", 1048576, true)
     operation: authority_operation_lock(runtime, key)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries := authority_entries(runtime, authority_read(runtime))
     now: service_now()
     if authority_cleanup_expired(runtime, entries, now) {
@@ -4576,7 +4576,7 @@ priv retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEn
     id: delivery.id
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries := authority_entries(runtime, authority_read(runtime))
     now: service_now()
     if authority_cleanup_expired(runtime, entries, now) {
@@ -4608,7 +4608,7 @@ runtime_dead_letter: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery
 priv authority_dead_letter: fn(runtime: ServiceRuntime, id: String) -> DeliveryEntry ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries: authority_load(runtime)
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
@@ -4624,7 +4624,7 @@ runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Serv
     id: delivery.id
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries: authority_load(runtime)
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
@@ -4649,7 +4649,7 @@ runtime_commit: fn(runtime: ServiceRuntime, delivery: Delivery) ServiceError! {
 priv authority_commit: fn(runtime: ServiceRuntime, id: String) ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
-    gate := authority_gate().guard_edit()
+    _gate := authority_gate().guard_edit()
     entries := authority_entries(runtime, authority_read(runtime))
     now: service_now()
     target_expired := false

@@ -195,7 +195,7 @@ Semaphore: struct {
     // After `limit`, marks `expired` and wakes every waiter.
     priv expire: fn(self, expired: Shared<Bool>, limit: time.Duration) -[Time.Wait]> Never! {
         timeout(limit)
-        guard := self.count.guard_edit()
+        _guard := self.count.guard_edit()
         flag := expired.guard_edit()
         flag.value = true
         self.changed.notify_all()

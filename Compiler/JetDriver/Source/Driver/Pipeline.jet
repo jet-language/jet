@@ -117,8 +117,8 @@ use {
         sema_comptime_value_sites_empty,
         sema_copy_facts_table_empty,
         sema_core_bound_counters,
+        sema_core_lint_dropped,
         sema_core_seal_offered,
-        sema_core_source_lint,
         SemaLintAllowance,
         sema_lint_allowances,
         sema_lint_allowed,
@@ -6417,6 +6417,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
     if kg.enabled || request.every_core_body -> registration_graph.every_core_body = true
+    if request.core_entry && request.every_core_body && !request.core_seal -> registration_graph.core_own_check = true
     if request.core_seal -> registration_graph.core_seal = true
     // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
     // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
@@ -6445,6 +6446,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // row without one keeps its registered facts known
     // (sema_registration_settle_modules).
     if kg.enabled -> sema_registration_settle_modules(registration_graph)
+    core_own_check: registration_graph.core_own_check
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
     comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
@@ -6456,7 +6458,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // Finalization drops Core's lints (sema_finalize_graph); the stage's own
         // reports land here before it, so they are dropped here too.
         loop diagnostic in comptime_stage.diagnostics {
-            if !sema_core_source_lint(diagnostic) -> load.diagnostics.push(diagnostic)
+            if !sema_core_lint_dropped(diagnostic, own_check: core_own_check) -> load.diagnostics.push(diagnostic)
         }
         jet_driver_keep_going_diagnostics(kg, "sema.check", load.diagnostics)
         jet_driver_keep_going_incomplete_modules(kg, "sema.check", comptime_stage.modules)

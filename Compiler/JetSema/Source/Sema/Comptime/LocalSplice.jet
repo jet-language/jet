@@ -879,7 +879,7 @@ sema_local_value_splice: fn(
     earlier_complete: sema_comptime_function_diagnostics(earlier_functions, earlier_diagnostics)
     pass_diagnostics := [Diagnostic]{}
     pass_complete: sema_comptime_function_diagnostics(comptime_functions, pass_diagnostics)
-    if earlier_complete != pass_complete || sema_local_splice_kept_diagnostics(earlier_diagnostics) != sema_local_splice_kept_diagnostics(pass_diagnostics) {
+    if earlier_complete != pass_complete || sema_local_splice_kept_diagnostics(earlier_diagnostics, own_check: graph.core_own_check) != sema_local_splice_kept_diagnostics(pass_diagnostics, own_check: graph.core_own_check) {
         return sema_local_splice_none(graph)
     }
     if sema_local_splice_demands_core(graph, comptime_functions) || sema_local_splice_holds_host_value(values, landed_keys) || sema_local_splice_binding_failed(landed, values) {
@@ -1146,11 +1146,11 @@ sema_local_splice_owners: fn(
 }
 
 // `diagnostics` but for its lints on Core source, which sema_finalize_graph
-// drops, as one string to compare.
-sema_local_splice_kept_diagnostics: fn(diagnostics: [Diagnostic]) -> String Never! {
+// drops (sema_core_lint_dropped), as one string to compare.
+sema_local_splice_kept_diagnostics: fn(diagnostics: [Diagnostic], own_check: Bool{false}) -> String Never! {
     kept := [String]{}
     loop diagnostic in diagnostics {
-        if !sema_core_source_lint(diagnostic) -> kept.push("{diagnostic:Debug}")
+        if !sema_core_lint_dropped(diagnostic, own_check: own_check) -> kept.push("{diagnostic:Debug}")
     }
     kept.join("\n")
 }
