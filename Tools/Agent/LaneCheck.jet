@@ -56,9 +56,13 @@
 // Tests/diagnostics_census_baseline.tsv admits it, the compiler-data ratchet
 // (Tools/Agent/CompilerData.jet --check, #6793), which refuses a compiler-data
 // source file whose text-keyed lookups, Shared cells or payload enums differ
-// from its Tests/compiler_data.tsv row, and the script-pairing guard
+// from its Tests/compiler_data.tsv row, the script-pairing guard
 // (Tools/Agent/ScriptPairing.jet --check), which refuses a repository-management
-// script in another language that the change adds without its gauntlet pair.
+// script in another language that the change adds without its gauntlet pair,
+// and the known-failing owner check (Tools/Agent/KnownFailingOwner.jet
+// --check, the tool Tests/Guards/known_failing_owner.jet runs), which refuses
+// a Tests/known-failing.tsv row or a KNOWN-FAILING header that names a card
+// the live Tower board does not hold open, so a card a row names cannot close.
 //
 // It does not run tests or formatters, regenerate artifacts, or build a
 // compiler. Those stay with the orchestrator.
@@ -137,8 +141,10 @@ run: fn() {
 }
 
 // The tree checks every mode runs first, in this order: the names the
-// census gives their passes (Tools/Agent/Land.jet LANE_CHECKS).
-TREE_CHECKS: [String]{"personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing"}
+// census gives their passes (Tools/Agent/Land.jet LANE_CHECKS), then the
+// known-failing owner check, which the census holds through its guards pass
+// (Tests/Guards/known_failing_owner.jet runs the same tool).
+TREE_CHECKS: [String]{"personal-info", "assembly", "unsafe-ratchet", "vocabulary-rows", "body-tree-rows", "core-enum-cases", "diagnostic-census", "compiler-data", "script-pairing", "known-failing-owner"}
 
 // Run the tree check `name`; one that refuses ends the run with exit 1.
 tree_check: fn(name: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
@@ -152,6 +158,7 @@ tree_check: fn(name: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> () {
         name == "diagnostic-census" -> diagnostic_census(repo)
         name == "compiler-data" -> compiler_data(repo)
         name == "script-pairing" -> script_pairing(repo)
+        name == "known-failing-owner" -> known_failing_owner(repo)
         else -> usage("jet Tools/Agent/LaneCheck.jet --check [{TREE_CHECKS.join(" | ")}]")
     }
 }
@@ -277,6 +284,24 @@ script_pairing: fn(repo: String) -[Env, Exec, FS, IO]> () {
         return
     }
     check_refused(process.combined_output(pairing).trim_end(), "the change adds a script in another language without its gauntlet pair (see above)")
+}
+
+// The known-failing owner check with $JET, else the `jet` on PATH; it never
+// writes. A ledger row or a KNOWN-FAILING header that names a card the live
+// board no longer holds open is refused.
+known_failing_owner: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
+    owners: known_failing_owner_spec(jet, repo, repo).run() ?? return check_refused("", "{jet} could not run Tools/Agent/KnownFailingOwner.jet: {err}")
+    if owners.code == 0 && owners.signal == None {
+        return
+    }
+    check_refused(process.combined_output(owners).trim_end(), "a known-failing row or header names a card that is not open on the board (see above; move it to the open card that owns the remaining work before closing a card)")
+}
+
+// This checkout's known-failing owner check of `tree`: its ledger, its
+// KNOWN-FAILING headers and the live board it finds.
+known_failing_owner_spec: fn(jet: String, repo: String, tree: String) -[Env, Exec]> ProcessSpec {
+    tool_cmd([String]{jet, "{repo}/Tools/Agent/KnownFailingOwner.jet", "--check"}, repo).cwd(tree)
 }
 
 check_refused: fn(output: String, reason: String) -[Exec, IO]> () {
@@ -1331,4 +1356,35 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
         if setting.name == "JET_BIN" -> tool = setting.value
     }
     assert_eq(tool, "/opt/jet/bin/jet")
+}
+
+#Test("the known-failing owner check refuses a row or header whose card is done") {
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? panic("set JET to the compiler under test"))
+    repo: repo_root()
+    tree: files.mkdtemp("lane-known-failing") ?? panic("a temporary directory cannot be made: {err}")
+    files.create_dir_all("{tree}/Tests/Cases/Fixture") ?? panic("{tree}: {err}")
+    board: "{tree}/board.json"
+    files.write(board, "{{\"cards\": [{{\"num\": 1234, \"phase\": \"done\"}}, {{\"num\": 2345, \"phase\": \"building\"}}]}}") ?? panic("{board}: {err}")
+    ledger: "{tree}/Tests/known-failing.tsv"
+    header: "{tree}/Tests/Cases/Fixture/header.case"
+    git: process.cmd([String]{"git", "init", "-q"}).cwd(tree).run() ?? panic("git init {tree}: {err}")
+    assert_eq(git.code, 0)
+    owners: fn(case_text: String, row_card: String) -> Ran {
+        files.write(header, case_text) ?? panic("{header}: {err}")
+        files.write(ledger, "Tests/Cases/Fixture/row.case\t{row_card}\tnot built yet\n") ?? panic("{ledger}: {err}")
+        added: process.cmd([String]{"git", "add", "-A"}).cwd(tree).run() ?? panic("git add {tree}: {err}")
+        assert_eq(added.code, 0)
+        ran: known_failing_owner_spec(jet, repo, tree).env("TOWER_DATA", board).run() ?? panic("{jet} could not run Tools/Agent/KnownFailingOwner.jet: {err}")
+        Ran{code: ran.code, text: process.combined_output(ran)}
+    }
+    plain: "step: jet check a.jet\nexit: 0\n"
+    open_row: owners(plain, "#2345")
+    assert(open_row.code == 0, open_row.text)
+    done_row: owners(plain, "#1234")
+    assert(done_row.code == 65, done_row.text)
+    assert(done_row.text.contains("Tests/known-failing.tsv:1: Tests/Cases/Fixture/row.case names #1234, which is not open on the board"), done_row.text)
+    done_header: owners("# KNOWN-FAILING #1234 not built yet\n{plain}", "#2345")
+    assert(done_header.code == 65, done_header.text)
+    assert(done_header.text.contains("Tests/Cases/Fixture/header.case:1: its KNOWN-FAILING header names #1234"), done_header.text)
+    files.remove_all(tree) ?? panic("{tree}: {err}")
 }
