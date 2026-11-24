@@ -1,0 +1,17 @@
+# Inline modules named with one letter, `a` and `b`, check and run like any
+# other: a word of the compiler's own Prelude text (the `a` of an error
+# message) never reads as a use of module `a`, so it asks for no core.meta
+# record the load never reached.
+fixture: OneLetterInlineModules/Input
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "world 3 camera 4 moved 7\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "world 3 camera 4 moved 7\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "world 3 camera 4 moved 7\n"
