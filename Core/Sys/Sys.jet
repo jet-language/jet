@@ -1053,7 +1053,7 @@ loadavg: fn() -[Env]> [Float] Never! {
 }
 
 times: fn() -[Env]> [Float] Never! {
-    row: core.sys.__times()
+    row: sys_rt.times()
     if !row.available -> return [Float]{0.0, 0.0, 0.0, 0.0, 0.0}
     ticks: if row.ticks < 1 -> 1 else -> row.ticks
     elapsed: if row.elapsed < 0 -> 0 else -> row.elapsed
@@ -1155,7 +1155,7 @@ usage: fn(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
         .Program -> 0
         .Children -> -1
     }
-    row: core.sys.__rusage(who)
+    row: sys_rt.rusage(who)
     if !row.available -> return Err(unsupported("usage"))
     if row.errno != 0 -> return Err(limit_error(.Read, "usage", row.errno))
     user: Duration.microseconds(row.user) ?? return Err(syscall_input(.Read, Val("usage"), "user CPU time is outside Duration's range"))
@@ -1174,7 +1174,7 @@ usage: fn(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
 lock_memory: fn(future: Bool{false}) -[Env]> IOError! {
     // MCL_CURRENT 1 | MCL_ONFAULT 4, plus MCL_FUTURE 2.
     flags: if future -> 7 else -> 5
-    call_unit(core.sys.__mlockall(flags), "lock_memory", .Write, None)
+    call_unit(sys_rt.mlockall(flags), "lock_memory", .Write, None)
 }
 
 /// How the kernel shares the CPU among processes (sched(7)). `Normal` is the
@@ -1195,7 +1195,7 @@ Scheduling: enum {
 /// The scheduling of process `pid`, this program when 0. A process under
 /// SCHED_DEADLINE has no `Scheduling` and reads as `IOError.Unsupported`.
 scheduling: fn(pid: Int{0}) -[Env]> Scheduling IOError! {
-    row: core.sys.__sched_get(pid)
+    row: sys_rt.sched_get(pid)
     if !row.available -> return Err(unsupported("scheduling"))
     if row.errno != 0 -> return Err(process_error(.Read, "scheduling", row.errno))
     if row.policy == 0 -> return Ok(Scheduling.Normal)
@@ -1242,7 +1242,7 @@ set_scheduling: fn(policy: Scheduling, pid: Int{0}) -[Env, Exec]> IOError! {
             ),
         )
     }
-    result: core.sys.__sched_set(pid, row.kind, row.priority)
+    result: sys_rt.sched_set(pid, row.kind, row.priority)
     if !result.available -> return Err(unsupported("set_scheduling"))
     if result.errno != 0 -> return Err(process_error(.Write, "set_scheduling", result.errno))
     Ok()
@@ -1252,7 +1252,7 @@ set_scheduling: fn(policy: Scheduling, pid: Int{0}) -[Env, Exec]> IOError! {
 /// before the next one of its priority. Linux reports the slice for every
 /// policy; it is zero for `Fifo`, which has no slice.
 round_robin_interval: fn(pid: Int{0}) -[Env]> Duration IOError! {
-    row: core.sys.__sched_rr_interval(pid)
+    row: sys_rt.sched_rr_interval(pid)
     if !row.available -> return Err(unsupported("round_robin_interval"))
     if row.errno != 0 -> return Err(process_error(.Read, "round_robin_interval", row.errno))
     Ok(Duration.nanoseconds(row.value) ?? return Err(syscall_input(.Read, Val("round_robin_interval"), "the slice is outside Duration's range")))
@@ -1269,7 +1269,7 @@ cpu_time: fn(pid: Int{0}) -[Env]> Duration IOError! {
     // No Linux pid exceeds PID_MAX_LIMIT (4194304), so a larger one names no
     // process; the bound also keeps the kernel's clock id from wrapping.
     if pid > 4194304 -> return Err(process_error(.Read, "cpu_time", 3))
-    row: core.sys.__cpu_clock(pid)
+    row: sys_rt.cpu_clock(pid)
     if !row.available -> return Err(unsupported("cpu_time"))
     if row.errno != 0 -> return Err(process_error(.Read, "cpu_time", row.errno))
     Ok(Duration.nanoseconds(row.value) ?? return Err(syscall_input(.Read, Val("cpu_time"), "the CPU time is outside Duration's range")))
@@ -1290,7 +1290,7 @@ tree_cpu_time: fn(pid: Int{0}) -[Env, FS.Read]> Duration IOError! {
     if pid > 4194304 -> return Err(process_error(.Read, "tree_cpu_time", 3))
     if name() != "linux" -> return Err(unsupported("tree_cpu_time"))
     root: if pid == 0 -> getpid() else -> pid
-    clock: core.sys.__times()
+    clock: sys_rt.times()
     ticks: if !clock.available || clock.ticks < 1 -> 100 else -> clock.ticks
     // Parents before children: a child a parent reaps between the two reads
     // is missed once, never counted twice.
@@ -1366,7 +1366,7 @@ set_wall_clock: fn(time: DateTime) -[Env]> IOError! {
             ),
         )
     }
-    row: core.sys.__clock_set(ns)
+    row: sys_rt.clock_set(ns)
     if !row.available -> return Err(unsupported("set_wall_clock"))
     if row.errno != 0 -> return Err(limit_error(.Write, "set_wall_clock", row.errno))
     Ok()
@@ -1385,7 +1385,7 @@ priv process_errors: module {
 }
 
 limit_read: fn(resource: Int, operation: String) -[Env]> {soft: Int?, hard: Int?} IOError! {
-    row: core.sys.__rlimit(resource)
+    row: sys_rt.rlimit(resource)
     if !row.available -> return Err(unsupported(operation))
     if row.errno != 0 -> return Err(limit_error(.Read, operation, row.errno))
     Ok({soft: limit_value(row.soft), hard: limit_value(row.hard)})
@@ -1404,7 +1404,7 @@ limit_write: fn(resource: Int, soft: Int?, hard: Int?, operation: String) IOErro
             ),
         )
     }
-    row: core.sys.__set_rlimit(resource, soft ?? -1, hard ?? -1)
+    row: sys_rt.set_rlimit(resource, soft ?? -1, hard ?? -1)
     if !row.available -> return Err(unsupported(operation))
     if row.value != 0 -> return Err(limit_error(.Write, operation, row.errno))
     Ok()
@@ -1453,19 +1453,19 @@ limit_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
 
 getpgid: fn(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpgid: inspect a process group") {
-        return call_value(core.sys.__getpgid(pid), "getpgid", .Resolve, None)
+        return call_value(sys_rt.getpgid(pid), "getpgid", .Resolve, None)
     }
 }
 
 getsid: fn(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getsid: inspect a process session") {
-        return call_value(core.sys.__getsid(pid), "getsid", .Resolve, None)
+        return call_value(sys_rt.getsid(pid), "getsid", .Resolve, None)
     }
 }
 
 #Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls")
 getpriority: fn(which: Int) -[Env]> Int IOError! {
-    row: core.sys.__getpriority(which)
+    row: sys_rt.getpriority(which)
     if !row.available -> return Err(unsupported("getpriority"))
     if row.value == -1 && row.errno != 0 -> return Err(syscall_error(.Resolve, None, row.errno))
     Ok(row.value)
@@ -1473,7 +1473,7 @@ getpriority: fn(which: Int) -[Env]> Int IOError! {
 
 #Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes")
 setpriority: fn(which: Int, priority: Int) -[Env]> IOError! {
-    call_unit(core.sys.__setpriority(which, priority), "setpriority", .Write, None)
+    call_unit(sys_rt.setpriority(which, priority), "setpriority", .Write, None)
 }
 
 #Unsafe("posix utime: the caller owns the file whose timestamps it rewrites")
@@ -1481,7 +1481,7 @@ utime: fn(path: String, atime: Int, mtime: Int) -[FS, Env]> IOError! {
     if is_unix() && has_nul(path) {
         return Err(syscall_input(.Write, Val(path), "path contains NUL"))
     }
-    call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
+    call_unit(sys_rt.utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
 sync: fn() -[FS, Env]> Never! { sys_rt.sync() }
@@ -1498,7 +1498,7 @@ set_current_dir: fn(path: String) -[FS, Env]> IOError! {
 
 #Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once")
 pipe: fn() -[FS, Env]> [Int] IOError! {
-    row: core.sys.__pipe()
+    row: sys_rt.pipe()
     _: call_value({available: row.available, value: row.value, errno: row.errno}, "pipe", .Resolve, None)
     Ok([Int]{row.read_fd, row.write_fd})
 }
@@ -1779,7 +1779,7 @@ mkfifo: fn(path: String, mode: Int) -[FS, Env]> IOError! {
     if is_unix() && has_nul(path) {
         return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
     }
-    call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
+    call_unit(sys_rt.mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
 }
 
 /// The kind of device file `mknod` makes: a character device reads and
@@ -1812,34 +1812,34 @@ mknod: fn(path: String, mode: Int, kind: DeviceKind, major: Int, minor: Int) -[F
         .Character -> 8192
         .Block -> 24576
     }
-    call_unit(core.sys.__mknod(path, mode + file_type, dev), "mknod", .Resolve, Val(path))
+    call_unit(sys_rt.mknod(path, mode + file_type, dev), "mknod", .Resolve, Val(path))
 }
 
 #Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child")
-fork: fn() -[Env, Exec]> Int IOError! { call_value(core.sys.__fork(), "fork", .Resolve, None) }
+fork: fn() -[Env, Exec]> Int IOError! { call_value(sys_rt.fork(), "fork", .Resolve, None) }
 
 #Unsafe("posix setsid: the caller owns the process session topology it changes")
-setsid: fn() -[Env, Exec]> Int IOError! { call_value(core.sys.__setsid(), "setsid", .Write, None) }
+setsid: fn() -[Env, Exec]> Int IOError! { call_value(sys_rt.setsid(), "setsid", .Write, None) }
 
 #Unsafe("posix wait: the caller owns the child processes it reaps")
 wait: fn() -[Env, Time.Wait]> Int IOError! {
-    row: core.sys.__wait()
+    row: sys_rt.wait()
     _: call_value({available: row.available, value: row.value, errno: row.errno}, "wait", .Close, None)
     Ok(row.status)
 }
 
 #Unsafe("posix waitpid: the caller owns the child process it reaps")
 waitpid: fn(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
-    row: core.sys.__waitpid(pid, options)
+    row: sys_rt.waitpid(pid, options)
     _: call_value({available: row.available, value: row.value, errno: row.errno}, "waitpid", .Close, None)
     Ok(row.status)
 }
 
 #Unsafe("posix setuid: the caller drops or changes process credentials deliberately")
-setuid: fn(uid: Int) -[Env]> IOError! { call_unit(core.sys.__setuid(uid), "setuid", .Write, None) }
+setuid: fn(uid: Int) -[Env]> IOError! { call_unit(sys_rt.setuid(uid), "setuid", .Write, None) }
 
 #Unsafe("posix setgid: the caller drops or changes process credentials deliberately")
-setgid: fn(gid: Int) -[Env]> IOError! { call_unit(core.sys.__setgid(gid), "setgid", .Write, None) }
+setgid: fn(gid: Int) -[Env]> IOError! { call_unit(sys_rt.setgid(gid), "setgid", .Write, None) }
 
 /// A process's real, effective and saved user or group IDs. The kernel
 /// checks access against `effective`; `saved` lets a privileged program give
@@ -1954,7 +1954,7 @@ group_by_id: fn(gid: Int) -[FS.Read]> Group? IOError! {
 priv id_rows: module {
     // Group 0 reads the user IDs, 1 the group IDs.
     ids_of: fn(group: Int, operation: String) -[Env]> Ids IOError! {
-        row: core.sys.__resid(group)
+        row: sys_rt.resid(group)
         if !row.available -> return Err(unsupported(operation))
         if row.errno != 0 -> return Err(syscall_error(.Read, None, row.errno))
         Ok(Ids{real: row.real, effective: row.effective, saved: row.saved})
@@ -1965,7 +1965,7 @@ priv id_rows: module {
         id_input(real, operation)
         id_input(effective, operation)
         id_input(saved, operation)
-        call_unit(core.sys.__set_resid(group, real ?? -1, effective ?? -1, saved ?? -1), operation, .Write, None)
+        call_unit(sys_rt.set_resid(group, real ?? -1, effective ?? -1, saved ?? -1), operation, .Write, None)
     }
 
     // 4294967295 is (uid_t)-1, which the kernel reads as "keep".
@@ -2070,16 +2070,16 @@ priv id_rows: module {
 }
 
 #Unsafe("posix setpgrp: the caller owns the process group topology it changes")
-setpgrp: fn() -[Env]> IOError! { call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None) }
+setpgrp: fn() -[Env]> IOError! { call_unit(sys_rt.setpgrp(), "setpgrp", .Write, None) }
 
 #Unsafe("posix setpgid: the caller owns the process group topology it changes")
 setpgid: fn(pid: Int, pgid: Int) -[Env]> IOError! {
-    call_unit(core.sys.__setpgid(pid, pgid), "setpgid", .Write, None)
+    call_unit(sys_rt.setpgid(pid, pgid), "setpgid", .Write, None)
 }
 
 #Unsafe("posix kill: the caller owns or is entitled to signal the target process")
 kill: fn(pid: Int, signal: Int) -[Env]> IOError! {
-    call_unit(core.sys.__kill(pid, signal), "kill", .Write, None)
+    call_unit(sys_rt.kill(pid, signal), "kill", .Write, None)
 }
 
 /// Restores signal `number`'s default action (SIG_DFL), so the signal raised
@@ -2087,7 +2087,7 @@ kill: fn(pid: Int, signal: Int) -[Env]> IOError! {
 /// signal number, the fault signals too.
 #Unsafe("posix signal reset: the caller owns the process signal disposition it resets")
 reset_signal: fn(number: Int) -[Env]> IOError! {
-    call_unit(core.sys.__reset_signal(number), "reset_signal", .Write, None)
+    call_unit(sys_rt.reset_signal(number), "reset_signal", .Write, None)
 }
 
 #Unsafe("posix initgroups: the caller changes supplementary groups deliberately")
@@ -2095,7 +2095,7 @@ initgroups: fn(user: String, group: Int) -[Env]> IOError! {
     if is_unix() && has_nul(user) {
         return Err(syscall_input(.Write, None, "username contains NUL"))
     }
-    call_unit(core.sys.__initgroups(user, group), "initgroups", .Write, None)
+    call_unit(sys_rt.initgroups(user, group), "initgroups", .Write, None)
 }
 
 platform: fn() -[Env]> String Never! { "{name()}-{arch()}" }
