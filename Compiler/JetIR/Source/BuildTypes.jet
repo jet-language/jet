@@ -1912,19 +1912,66 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         }
     }
     if kind == .Float32 {
-        // The F32 display exports read the binary32 bits zero-extended in an
-        // integer word (Display.jet), not an SSE argument: the value crosses
-        // through a zeroed frame word.
-        pointer: ir_pointer_row(m)
-        area: ir_temp(m, b, pointer)
-        ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
-        zero: ir_word_const(m, b, 0)
-        ir_emit(b.f, IROp.Store, -1, area, 0, zero, b.line)
-        ir_emit(b.f, IROp.Store, -1, area, 0, slot, b.line)
-        bits: ir_load_word(m, b, area, 0)
+        bits: ir_float32_bits(m, b, slot)
         return ir_runtime(m, b, symbol, [Int]{bits}, string_row)
     }
     ir_runtime(m, b, symbol, [Int]{slot}, string_row)
+}
+
+// The F32 display exports read the binary32 bits zero-extended in an integer
+// word (JetRuntime Display.jet), not an SSE argument: the value in `slot`
+// crosses through a zeroed frame word.
+ir_float32_bits: fn(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
+    pointer: ir_pointer_row(m)
+    area: ir_temp(m, b, pointer)
+    ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, area, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, area, 0, slot, b.line)
+    ir_load_word(m, b, area, 0)
+}
+
+// The runtime route that writes the Int, fixed-width integer, Float, F32,
+// Bool or Char in `slot`, of checked type `ty`, under `mode` straight into
+// a text sink, a builder or a print's line (JetRuntime Display.jet
+// jet_rt_string_builder_push_int and the rest), with no String of its own:
+// the text ir_render makes of it. "" when it renders any other way: another
+// type (a unit type's magnitude among them), a selected implementation, a
+// Char's Debug quotes or a print-style helper (ir_print_style_scalar).
+ir_render_scalar_route: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slot: Int, mode: IRRender) -> String Never! {
+    if slot < 0 -> return ""
+    builtin: if ir_untag(ty) == {
+        .Int | .Float | .Bool | .Char | .IntN(_, _) | .Float32 -> true
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+    if !builtin || ir_render_impl_row(m, p, b, slot, mode) != None -> return ""
+    kind: ir_kind_of(m, b, slot)
+    row: m.types[b.f.slot_type[slot]]
+    if mode == .Print {
+        helper: if kind == {
+            .Int -> "__print_int"
+            .Word -> if row.signed || row.size < 8 -> "__print_int" else -> ""
+            .Float -> "__print_float"
+            .Char | .Bool | .Float32 | .Unit | .String | .Pointer | .Aggregate -> ""
+        }
+        if helper != "" && ir_print_style_row(p, helper) >= 0 -> return ""
+    }
+    if kind == {
+        .Int -> "jet_rt_string_builder_push_int"
+        .Word -> if row.signed -> "jet_rt_string_builder_push_i64" else -> "jet_rt_string_builder_push_u64"
+        .Bool -> "jet_rt_string_builder_push_bool"
+        .Char -> if mode == .Debug -> "" else -> "jet_rt_string_builder_push_char"
+        .Float -> "jet_rt_string_builder_push_float"
+        .Float32 -> "jet_rt_string_builder_push_float32"
+        .Unit | .String | .Pointer | .Aggregate -> ""
+    }
+}
+
+// `route` (ir_render_scalar_route) writing `slot` into the text sink `sink`,
+// polled or not as BuildExpr.jet ir_sink_call is.
+ir_push_scalar: fn(m: &IRModule, b: &IRBuilder, sink: Int, slot: Int, route: String, polled: Bool) Never! {
+    value: if ir_kind_of(m, b, slot) == .Float32 -> ir_float32_bits(m, b, slot) else -> slot
+    ir_sink_call(m, b, route, [Int]{sink, value}, polled)
 }
 
 ir_push_static: fn(m: &IRModule, b: &IRBuilder, builder: Int, text: String) Never! {
@@ -1969,11 +2016,16 @@ ir_render_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: I
 // implementation makes of `slot` (Debug never uses one), or -1 when none is
 // selected.
 ir_render_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
-    if mode == .Debug || name_count(p.render_impls_keys) <= 1 -> return -1
+    row: ir_render_impl_row(m, p, b, slot, mode) ?? return -1
+    ir_render_impl_call(m, p, b, slot, row, if mode == .Show || mode == .Print -> "Printable" else -> "Display")
+}
+
+// The implementation function ir_render_impl calls for `slot` under `mode`.
+ir_render_impl_row: fn(m: IRModule, p: IRProgram, b: IRBuilder, slot: Int, mode: IRRender) -> Int? Never! {
+    if mode == .Debug || name_count(p.render_impls_keys) <= 1 -> return None
     trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
     receiver_ty: ir_row_ty(m, p, b.f.slot_type[slot])
-    row: name_column_value(p.render_impls_keys, p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, receiver_ty)}") ?? return -1
-    ir_render_impl_call(m, p, b, slot, row, trait_short)
+    name_column_value(p.render_impls_keys, p.render_impls, "{trait_short}|{ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, receiver_ty)}")
 }
 
 // Whether a Display implementation is selected for `slot`'s type, or for its
@@ -2183,6 +2235,12 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
         start: ir_args(b.f, [Int]{slot, builder})
         ir_emit(b.f, IROp.Call, -1, helper, start, 2, b.line)
         ir_stop_check(m, b)
+        return
+    }
+    // A number, Bool or Char writes its digits straight into the builder.
+    route: ir_render_scalar_route(m, p, b, ty, slot, mode)
+    if route != "" {
+        ir_push_scalar(m, b, builder, slot, route, true)
         return
     }
     text: ir_render(m, p, b, ty, slot, mode, span)

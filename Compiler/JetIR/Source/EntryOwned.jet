@@ -157,7 +157,12 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_rt_string_builder_finish",
     "jet_rt_string_builder_new",
     "jet_rt_string_builder_push",
+    "jet_rt_string_builder_push_bool",
+    "jet_rt_string_builder_push_float",
+    "jet_rt_string_builder_push_i64",
+    "jet_rt_string_builder_push_int",
     "jet_rt_string_builder_push_static",
+    "jet_rt_string_builder_push_u64",
     "jet_rt_string_builder_value",
     "jet_rt_string_clear",
     "jet_rt_string_clone",
@@ -177,6 +182,8 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_term_stderr_is_terminal",
     "jet_term_stdio_put_text_raw",
     "jet_term_stdout_is_terminal",
+    "jet_term_stdout_line_begin",
+    "jet_term_stdout_line_end",
     "jet_term_write_stdout_line",
     "memcmp",
 } }
@@ -387,11 +394,13 @@ IR_OWNED_ATTACH_ROUTES: #run { [String]{
 // with a stack check (IRFunction.stack_check), whose growth reads the
 // thread's block (JetRuntime StackSegment.jet). Its
 // process.exit calls jet_std_process_exit_owned, which publishes no stop
-// (there is no root to take one). Its print keeps jet_term_write_stdout_line,
-// the one stdout buffer every program writes through: block-buffered on a
-// pipe or file, line-buffered on a terminal, and drained by the owned main's
-// exit, process.exit, every stop report and the fault report (JetRuntime
-// Host.jet), so the lines and their order match a rooted main's.
+// (there is no root to take one). Its print keeps jet_term_write_stdout_line
+// and the line a print writes in place (jet_term_stdout_line_begin and
+// jet_term_stdout_line_end), the one stdout buffer every program writes
+// through: block-buffered on a pipe or file, line-buffered on a terminal,
+// and drained by the owned main's exit, process.exit, every stop report and
+// the fault report (JetRuntime Host.jet), so the lines and their order match
+// a rooted main's.
 // `owned_observe` is set when it calls jet_rt_observe_link (an observed
 // build, Build.jet ir_observe_link).
 ir_entry_own: fn(m: &IRModule) -> String Never! {

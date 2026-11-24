@@ -17,13 +17,13 @@ exit: 0
 stderr: !~ "NoPrintInLib" # importing the package left its group off
 step: jet emit --ir quiet/main.jet
 exit: 0
-stdout: ~ "call_runtime jet_term_write_stdout_line" # greet's print writes directly
+stdout: ~ "call_runtime jet_term_stdout_line_end" # greet's print writes its line straight into stdout
 stdout: !~ "lints.jet.install" # no lint group code
 stdout: !~ "NoPrintInLib" # and no finding
 stdout: !~ "event" # and no hook dispatch
 step: jet emit --ir app/main.jet
 exit: 0
-stdout: ~ "call_runtime jet_term_write_stdout_line" # the enabled lint changes no call either
+stdout: ~ "call_runtime jet_term_stdout_line_end" # the enabled lint changes no call either
 stdout: !~ "lints.jet.install" # its group runs while compiling, not in the program
 stdout: !~ "NoPrintInLib" # no finding value is built
 stdout: !~ "event" # no hook dispatch

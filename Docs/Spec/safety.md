@@ -3170,63 +3170,63 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 28,
+      "line": 34,
       "column": 5,
       "reason": "TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 32,
+      "line": 38,
       "column": 5,
       "reason": "runtime startup publishes the root before any program thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 41,
+      "line": 47,
       "column": 5,
       "reason": "rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 58,
+      "line": 64,
       "column": 5,
       "reason": "the caller lends length readable bytes for the complete synchronous write"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 75,
+      "line": 81,
       "column": 5,
       "reason": "the caller lends length readable bytes; writev borrows its own LF until return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 104,
+      "line": 110,
       "column": 5,
       "reason": "cpuid only reports processor identification"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 124,
+      "line": 130,
       "column": 5,
       "reason": "the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 244,
+      "line": 278,
       "column": 5,
       "reason": "the held host lock lends enough scratch for Linux TCGETS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Host.jet",
-      "line": 314,
+      "line": 348,
       "column": 5,
       "reason": "an idempotent install: every writer stores the same code address"
     },
@@ -12250,15 +12250,15 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 38:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 46:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 28:5 | "TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 32:5 | "runtime startup publishes the root before any program thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 41:5 | "rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 58:5 | "the caller lends length readable bytes for the complete synchronous write" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 75:5 | "the caller lends length readable bytes; writev borrows its own LF until return" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 104:5 | "cpuid only reports processor identification" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 124:5 | "the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 244:5 | "the held host lock lends enough scratch for Linux TCGETS" |
-| Compiler | Compiler/JetRuntime/Source/Host.jet | 314:5 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 34:5 | "TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 38:5 | "runtime startup publishes the root before any program thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 47:5 | "rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 64:5 | "the caller lends length readable bytes for the complete synchronous write" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 81:5 | "the caller lends length readable bytes; writev borrows its own LF until return" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 110:5 | "cpuid only reports processor identification" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 130:5 | "the output lock exclusively owns the initialized buffer and length; write borrows its pending bytes" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 278:5 | "the held host lock lends enough scratch for Linux TCGETS" |
+| Compiler | Compiler/JetRuntime/Source/Host.jet | 348:5 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 40:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 180:9 | "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 373:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |

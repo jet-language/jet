@@ -3982,7 +3982,8 @@ ir_short_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, is_and: Bool, links
 }
 
 // A string literal: an immortal static text when every part is literal, else
-// a runtime builder fed each part.
+// a runtime builder fed each part, its value made (ir_string_part) and then
+// written (ir_string_write).
 ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], span: Span) -> Int Never! {
     literal := ""
     all_literal := true
@@ -3999,75 +4000,127 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
         return slot
     }
     builder: ir_text_builder(m, b)
-    loop (index, part) in parts {
-        if part == {
-            .Literal(text) -> {
-                args := [Int]{builder}
-                loop arg in ir_static_text(m, b, text) -> args.push(arg)
-                _: ir_runtime(m, b, "jet_rt_string_builder_push_static", args, -1)
-            }
-            .Interpolation(value, format) -> {
-                // A computed selector number prints through the part before it.
-                if format == .Number -> next
-                count: ir_string_count(parts, index)
-                // `{x:Fixed(n)}` / `{x:Grouped(n)}` of a Float: the
-                // core.text.fmt kernel the reference lowers it to
-                // (jet_fmt_decimal / jet_fmt_grouped, host i64 precision).
-                kernel: if format == {
-                    .Fixed(_) -> "jet_fmt_decimal"
-                    .Grouped(_) -> "jet_fmt_grouped"
-                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> ""
-                }
-                precision: if format == {
-                    .Fixed(digits) | .Grouped(digits) -> digits
-                    .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> 0
-                }
-                if kernel != "" && ir_untag(ir_ty(m, p, b, value)) == .Float {
-                    slot: ir_expr(m, p, b, value)
-                    if ir_failed(b) -> return -1
-                    // The kernels treat a negative precision as zero.
-                    digits: if count >= 0 -> ir_expr(m, p, b, count) else -> ir_word_const(m, b, precision)
-                    if ir_failed(b) || digits < 0 -> return -1
-                    string_row: ir_string_row(m)
-                    text: ir_runtime(m, b, kernel, [Int]{slot, digits}, string_row)
-                    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
-                    ir_release(m, b, text)
-                    ir_release(m, b, slot)
-                    next
-                }
-                // Every other selector is its Core/Text/Fmt.jet helper.
-                if format != .Display && format != .Debug {
-                    text: ir_string_format(m, p, b, value, format, count, span)
-                    if ir_failed(b) || text < 0 -> return -1
-                    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
-                    ir_release(m, b, text)
-                    // `:Unit(name)` follows the magnitude with the generated
-                    // unit type name.
-                    if format == .Unit(.Name) {
-                        if ir_untag(ir_ty(m, p, b, value)) == .Named(unit_type) {
-                            args := [Int]{builder}
-                            loop arg in ir_static_text(m, b, " {ir_short_name(unit_type)}") {
-                                args.push(arg)
-                            }
-                            _: ir_runtime(m, b, "jet_rt_string_builder_push_static", args, -1)
-                        }
-                    }
-                    next
-                }
-                debug: format == .Debug
-                slot: ir_expr(m, p, b, value)
-                if ir_failed(b) -> return -1
-                value_type: ir_ty(m, p, b, value)
-                text: ir_render(m, p, b, value_type, slot, if debug -> IRRender.Debug else -> IRRender.Display, span)
-                if ir_failed(b) -> return -1
-                _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
-                ir_release(m, b, text)
-                ir_release(m, b, slot)
-            }
-        }
+    loop index in 0..<parts.len() {
+        pieces := [IRStringPiece]{}
+        releases := [Int]{}
+        if !ir_string_part(m, p, b, parts, index, pieces, releases, span) -> return -1
+        ir_string_write(m, b, builder, pieces, true)
+        loop slot in releases -> ir_release(m, b, slot)
     }
     string_row: ir_string_row(m)
     ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+}
+
+// One piece of a String literal's text (ir_string_pieces): a literal's
+// `text` when `slot` is -1, else the value in `slot`, a number, Bool or
+// Char that scalar route `route` writes (BuildTypes.jet
+// ir_render_scalar_route), or with no route a String.
+IRStringPiece: struct {
+    text: String,
+    slot: Int,
+    route: String,
+}
+
+// Adds the pieces of part `index` of String literal `parts` to `pieces`,
+// its value made, and to `releases` the fresh slots to release once they
+// are written; false when building failed.
+ir_string_part: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], index: Int, pieces: &[IRStringPiece], releases: &[Int], span: Span) -> Bool Never! {
+    if parts[index] == {
+        .Literal(text) -> pieces.push(IRStringPiece{text: text, slot: -1, route: ""})
+        .Interpolation(value, format) -> {
+            // A computed selector number prints through the part before it.
+            if format == .Number -> return true
+            count: ir_string_count(parts, index)
+            // `{x:Fixed(n)}` / `{x:Grouped(n)}` of a Float: the
+            // core.text.fmt kernel the reference lowers it to
+            // (jet_fmt_decimal / jet_fmt_grouped, host i64 precision).
+            kernel: if format == {
+                .Fixed(_) -> "jet_fmt_decimal"
+                .Grouped(_) -> "jet_fmt_grouped"
+                .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> ""
+            }
+            precision: if format == {
+                .Fixed(digits) | .Grouped(digits) -> digits
+                .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> 0
+            }
+            if kernel != "" && ir_untag(ir_ty(m, p, b, value)) == .Float {
+                slot: ir_expr(m, p, b, value)
+                if ir_failed(b) -> return false
+                // The kernels treat a negative precision as zero.
+                digits: if count >= 0 -> ir_expr(m, p, b, count) else -> ir_word_const(m, b, precision)
+                if ir_failed(b) || digits < 0 -> return false
+                string_row: ir_string_row(m)
+                text: ir_runtime(m, b, kernel, [Int]{slot, digits}, string_row)
+                pieces.push(IRStringPiece{text: "", slot: text, route: ""})
+                releases.push(text)
+                releases.push(slot)
+                return true
+            }
+            // Every other selector is its Core/Text/Fmt.jet helper.
+            if format != .Display && format != .Debug {
+                text: ir_string_format(m, p, b, value, format, count, span)
+                if ir_failed(b) || text < 0 -> return false
+                pieces.push(IRStringPiece{text: "", slot: text, route: ""})
+                releases.push(text)
+                // `:Unit(name)` follows the magnitude with the generated
+                // unit type name.
+                if format == .Unit(.Name) {
+                    if ir_untag(ir_ty(m, p, b, value)) == .Named(unit_type) {
+                        pieces.push(IRStringPiece{text: " {ir_short_name(unit_type)}", slot: -1, route: ""})
+                    }
+                }
+                return true
+            }
+            mode: if format == .Debug -> IRRender.Debug else -> IRRender.Display
+            slot: ir_expr(m, p, b, value)
+            if ir_failed(b) -> return false
+            value_type: ir_ty(m, p, b, value)
+            // A number, Bool or Char is written straight into the text.
+            route: ir_render_scalar_route(m, p, b, value_type, slot, mode)
+            if route != "" {
+                pieces.push(IRStringPiece{text: "", slot: slot, route: route})
+                releases.push(slot)
+                return true
+            }
+            text: ir_render(m, p, b, value_type, slot, mode, span)
+            if ir_failed(b) -> return false
+            pieces.push(IRStringPiece{text: "", slot: text, route: ""})
+            releases.push(text)
+            releases.push(slot)
+        }
+    }
+    true
+}
+
+// Writes `pieces` (ir_string_pieces) into text sink `sink`, a builder or a
+// print's line. `polled` false emits no stop check after a write: a print's
+// line holds the output lock until it ends (ir_print_line).
+ir_string_write: fn(m: &IRModule, b: &IRBuilder, sink: Int, pieces: [IRStringPiece], polled: Bool) Never! {
+    loop piece in pieces {
+        if piece.slot < 0 {
+            if piece.text == "" -> next
+            args := [Int]{sink}
+            loop arg in ir_static_text(m, b, piece.text) -> args.push(arg)
+            ir_sink_call(m, b, "jet_rt_string_builder_push_static", args, polled)
+            next
+        }
+        if piece.route != "" {
+            ir_push_scalar(m, b, sink, piece.slot, piece.route, polled)
+            next
+        }
+        ir_sink_call(m, b, "jet_rt_string_builder_push", [Int]{sink, piece.slot}, polled)
+    }
+}
+
+// A text sink write `symbol(args)` with no result: polled as ir_runtime
+// polls, or with no stop check inside a print's line.
+ir_sink_call: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], polled: Bool) Never! {
+    if polled {
+        _: ir_runtime(m, b, symbol, args, -1)
+        return
+    }
+    start: ir_args(b.f, args)
+    ir_emit(b.f, IROp.CallRuntime, -1, ir_intern_name(m, symbol), start, args.len(), b.line)
 }
 
 // The Int node of the computed selector number of the part at `index`: the
@@ -4371,14 +4424,27 @@ ir_note_binder_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, id: Symb
 // buffer fills, before stderr, any read of stdin, a child and the
 // process stop. A value whose type selects a Display implementation prints
 // that rendering: an explicit Display before the Printable show. Any other
-// value renders under the task's print style (IRRender.Print).
+// value renders under the task's print style (IRRender.Print). An
+// interpolated String literal and a number, Bool or Char make no String of
+// the line: their pieces are written straight into stdout's buffer
+// (ir_print_pieces).
 ir_print: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) Never! {
+    node: ir_body_node(p, b, value)
+    if node.kind == .StrLit(parts) {
+        if ir_print_parts(m, p, b, parts, span) -> return
+    }
     value_ty: ir_ty(m, p, b, value)
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) {
         return
     }
     mode: if ir_render_has_display(m, p, b, value_ty, slot) -> IRRender.Display else -> IRRender.Print
+    route: ir_render_scalar_route(m, p, b, value_ty, slot, mode)
+    if route != "" {
+        ir_print_pieces(m, b, [IRStringPiece]{IRStringPiece{text: "", slot: slot, route: route}})
+        ir_release(m, b, slot)
+        return
+    }
     text: ir_render(m, p, b, value_ty, slot, mode, span)
     if ir_failed(b) {
         return
@@ -4389,6 +4455,44 @@ ir_print: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) 
     _: ir_runtime(m, b, "jet_term_write_stdout_line", [Int]{text, flush}, -1)
     if text != slot -> ir_release(m, b, text)
     ir_release(m, b, slot)
+}
+
+// `print("…{x}…")`: every part's value made in order (ir_string_part), then
+// all of them written as one stdout line (ir_print_pieces). False, emitting
+// nothing, for a literal with no interpolation, which prints as its static
+// text.
+ir_print_parts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], span: Span) -> Bool Never! {
+    interpolated := false
+    loop part in parts {
+        if part == .Interpolation(_, _) -> interpolated = true
+    }
+    if !interpolated -> return false
+    pieces := [IRStringPiece]{}
+    releases := [Int]{}
+    loop index in 0..<parts.len() {
+        if !ir_string_part(m, p, b, parts, index, pieces, releases, span) -> return true
+    }
+    ir_print_pieces(m, b, pieces)
+    loop slot in releases -> ir_release(m, b, slot)
+    true
+}
+
+// One print line of `pieces`, each value already made. JetRuntime Host.jet
+// jet_term_stdout_line_begin takes stdout's lock and answers the text sink
+// each piece is written into, with no stop check between: a stop taken
+// there would leave holding the lock. jet_term_stdout_line_end then writes
+// the LF, lets the lock go and is the line's stop check.
+ir_print_pieces: fn(m: &IRModule, b: &IRBuilder, pieces: [IRStringPiece]) Never! {
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    flush: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, flush, 0, -1, -1, b.line)
+    pointer_row: ir_pointer_row(m)
+    sink: ir_temp(m, b, pointer_row)
+    begin: ir_intern_name(m, "jet_term_stdout_line_begin")
+    start: ir_args(b.f, [Int]{})
+    ir_emit(b.f, IROp.CallRuntime, sink, begin, start, 0, b.line)
+    ir_string_write(m, b, sink, pieces, false)
+    _: ir_runtime(m, b, "jet_term_stdout_line_end", [Int]{sink, flush}, -1)
 }
 
 // A call of a checked user function: arguments in order; a fresh argument

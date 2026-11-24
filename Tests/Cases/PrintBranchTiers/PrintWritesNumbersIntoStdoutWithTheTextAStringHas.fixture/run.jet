@@ -1,0 +1,62 @@
+// Every number, Bool and Char prints and interpolates with the same text
+// whether a print writes it straight into stdout's buffer or a String is
+// built first, and a part that prints its own line prints it first.
+widen: fn(x: Int) -> Int { x * 1000000007 * 1000000007 * 1000000007 }
+
+float: fn(x: Float) -> Float { x }
+
+single: fn(x: F32) -> F32 { x }
+
+noisy: fn(x: Int) -> Int {
+    print("inner {x}")
+    x + 1
+}
+
+run: fn() {
+    small: 42
+    negative: -7
+    big: widen(3)
+    print(small)
+    print(negative)
+    print(big)
+    print(-big)
+    print(I64{-9223372036854775807} - I64{1})
+    print(U64{18446744073709551615})
+    print(U8{255})
+    print(I32{-2147483648})
+    print(true)
+    print(false)
+    print('x')
+    print('é')
+    half: float(1.5)
+    zero: float(0.0) * float(-1.0)
+    huge: float(1e300)
+    tiny: float(1.0e-7)
+    wide: float(123456789012345680000.0)
+    print(half)
+    print(zero)
+    print(-zero)
+    print(huge)
+    print(tiny)
+    print(wide)
+    print(Float.NAN)
+    print(Float.INFINITY)
+    print(-Float.INFINITY)
+    print(single(1.5))
+    print(single(-2.0))
+    print(F32.NAN)
+    print("{small} {negative} {big} {-big}")
+    print("i64 {I64{-5}} u64 {U64{18446744073709551615}} u8 {U8{7}}")
+    print("bool {true}/{false} char {'q'}/{'q':Debug} debug {small:Debug}")
+    print("float {half} {zero} {-zero} {huge} {tiny} {wide} {Float.NAN} {-Float.INFINITY} {float(2.0):Debug}")
+    print("f32 {single(0.1)} {single(-2.0):Debug} {F32.NAN}")
+    print("{small}")
+    text: "built {small} {half} {true} {'z'} {big}"
+    print(text)
+    print(text.len())
+    print("outer {noisy(small)} {noisy(negative)}")
+    loop i in 0..<3 {
+        print(i)
+        print("row {i}: {i * 2} {half * Float{i}}")
+    }
+}

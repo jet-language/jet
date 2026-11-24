@@ -1,0 +1,41 @@
+# A print of a number, Bool or Char, or of an interpolated String literal,
+# writes the digits straight into the stdout buffer: no String is made for the
+# line or any number in it. The text is byte for byte what a built String
+# holds on every optimization level: Int (inline and boxed), the fixed widths,
+# Float (NaN, the infinities, both zeros, exponent forms), F32, Bool, Char and
+# Debug forms; a part whose value prints its own line prints it first. A
+# 6000-line print loop keeps its owned main and allocates nothing per line,
+# and a test's prints still reach its capture.
+requires: os-name:linux
+requires: arch:x86_64
+requires: tool:python3
+fixture: PrintWritesNumbersIntoStdoutWithTheTextAStringHas.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 run.jet
+exit: 0
+stdout: = print_writes_numbers_into_stdout_with_the_text_a_string_has.out
+step o1: jet run -O1 run.jet
+exit: 0
+stdout: = print_writes_numbers_into_stdout_with_the_text_a_string_has.out
+step o2: jet run -O2 run.jet
+exit: 0
+stdout: = print_writes_numbers_into_stdout_with_the_text_a_string_has.out
+step: jet inspect decisions loop.jet
+exit: 0
+stdout: ~ "Main: program-owned" # the print loop needs no process root
+step alloc: jet perf run --lens=alloc loop.jet --out alloc.jettrace
+exit: 0
+stdout: lines = 6000 # every line arrives
+stdout: ~ "line 2999: 8997 1499.5 false\n" # the last one too
+step: python3 allocations.py alloc.jettrace
+exit: 0
+json: stdout doc $ <= 1 # the runtime's one start-up block: no allocation per line
+step writes: jet perf run loop.jet --out writes.jettrace
+exit: 0
+step: python3 writes.py writes.jettrace
+exit: 0
+json: stdout doc $ <= 2 # the 95688 bytes leave one 64 KiB buffer at a time
+step: jet test capture.jet
+exit: 1
+stdout: ~ "seen 42 and true\n42\n" # the failing test's capture holds both lines
+stdout: ~ "prints then fails: FAIL" # the test's row

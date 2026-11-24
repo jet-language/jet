@@ -1,8 +1,9 @@
 # A stop poll follows a runtime call only when the runtime's stops receipt
 # (runtime.stops, read from the runtime IR at library build: JetIR
 # BuildLibrary.jet ir_stop_exports) names the export, or the callee is no
-# runtime export. `shown` converts an Int to text (jet_rt_int_to_string),
-# which reaches no stop publisher, so nothing polls after it; `joined` builds
+# runtime export. `shown` writes an Int's digits into its text
+# (jet_rt_string_builder_push_int), which reaches no stop publisher, so
+# nothing polls after it; `joined` builds
 # text (jet_rt_string_builder_*), whose growth leaves a pending stop to the
 # next check and whose capacity overflow ends the process, so it reaches
 # none either; `wait` sleeps, which can deliver a cancellation or a deadline,
@@ -13,7 +14,7 @@ env: NO_COLOR=1
 step: jet inspect decisions -O0 main.jet
 env: JET_OPT_DUMP=shown
 exit: 0
-stdout: ~ "<- jet_rt_int_to_string (" # the Int's text conversion, writing its text
+stdout: ~ "call_runtime jet_rt_string_builder_push_int (" # the Int's digits, written into its text
 stdout: count "jet_ir_stop_poll" = 0 # no poll follows it
 step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=shown
