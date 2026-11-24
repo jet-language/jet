@@ -81,6 +81,7 @@ use {
         effect_scope_argument_valid,
         effect_scope_name,
         effect_value_text_valid,
+        foundation_number_family,
         marker_hook_of_declaration,
         marker_registered,
         marker_registered_accepts_arguments,
@@ -2690,6 +2691,9 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
     name: parser_bump(state)
     type_params := parser_parse_type_params(state)
     parser_expect(state, TOKEN_COLON, "`:` before the aliased type")
+    // `Byte: Unsigned<8>`: a number family at a written size, which the type
+    // parse reads as that size's own type (D-CORE-NUMFAMILY1).
+    family_size: parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_LT && foundation_number_family(parser_value(state, parser_current(state)))
     target := if {
         parser_state_section_ahead(state) -> {
             section_start: parser_current(state).span
@@ -2708,7 +2712,7 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
         end = parser_prev_token_end(state)
     }
     parser_finish_statement(state)
-    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params.move(), target: target.ty, target_span: target.span, span: Span{start: name.span.start, end: end}, choices: choices}
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params.move(), target: target.ty, target_span: target.span, span: Span{start: name.span.start, end: end}, choices: choices, family_size: family_size}
 }
 
 // A computed alias's choices, after the `{` of its `#run` body: `if cond ->

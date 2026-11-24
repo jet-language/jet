@@ -63,6 +63,55 @@ foundation_named_type: fn(name: String) -> Type Never! {
     }
 }
 
+// D-CORE-NUMFAMILY1: Core declares each number family once
+// (Core/Prelude/Prelude.jet): `Signed<bits>` and `Unsigned<bits>` over
+// `builtin.Word<bits>`, `IEEE<exponent, fraction>` over
+// `builtin.FloatWord<exponent, fraction>`. Only standard sizes exist. A
+// written size is the compiler's own type for it, so `Unsigned<8>` and its
+// alias `U8` are one type and every report shows `U8`.
+FOUNDATION_NUMBER_FAMILIES: [String]{"Signed", "Unsigned", "IEEE"}
+
+foundation_number_family: fn(name: String) -> Bool Never! {
+    FOUNDATION_NUMBER_FAMILIES.contains(name)
+}
+
+// The written sizes of a family application, when every argument is a
+// number literal (`Unsigned<8>`, `IEEE<11, 52>`). None when one is a name,
+// as inside the family's own declaration (`Unsigned<bits>`).
+foundation_family_sizes: fn(args: [Type]) -> [Int]? Never! {
+    sizes := [Int]{}
+    loop arg in args {
+        if arg == .Measure(measure) && measure == .Literal(_, value) {
+            sizes.push(value)
+        } else {
+            return None
+        }
+    }
+    Val(sizes)
+}
+
+// The type a family names at `sizes`: `Signed<8|16|32|64>` and
+// `Unsigned<8|16|32|64>` are IntN, `IEEE<8, 23>` is F32 and `IEEE<11, 52>`
+// is F64. None for any other size, which no family has.
+foundation_family_type: fn(name: String, sizes: [Int]) -> Type? Never! {
+    if (name == "Signed" || name == "Unsigned") && sizes.len() == 1 && FOUNDATION_FAMILY_WORD_BITS.contains(sizes[0]) {
+        return Val(Type.IntN{signed: name == "Signed", bits: sizes[0]})
+    }
+    if name == "IEEE" && sizes.len() == 2 {
+        if sizes[0] == 8 && sizes[1] == 23 -> return Val(Type.Float32)
+        if sizes[0] == 11 && sizes[1] == 52 -> return Val(Type.Float)
+    }
+    None
+}
+
+// The sizes a whole-number family has, in bits.
+FOUNDATION_FAMILY_WORD_BITS: [Int]{8, 16, 32, 64}
+
+// The sizes `name`'s family has, as a report lists them.
+foundation_family_size_list: fn(name: String) -> String Never! {
+    if name == "IEEE" -> "`IEEE<8, 23>` (F32) and `IEEE<11, 52>` (F64)" else -> "`{name}<8>`, `{name}<16>`, `{name}<32>` and `{name}<64>`"
+}
+
 // Canonical live-link type `@T` (`Type.Apply{name: "@", args: [T]}`), matching
 // `Ptr<T>`, `View<T>`, and `Cell<T>` without breaking downstream Type matches.
 foundation_link_type: fn(inner: Type) -> Type Never! {

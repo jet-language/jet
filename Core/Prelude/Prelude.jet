@@ -10,6 +10,24 @@ package: {
 }
 
 use core: core
+use builtin: jet_builtins
+
+// The number families (D-CORE-NUMFAMILY1): one generic definition per number
+// kind, over the compiler's storage, and only standard sizes. A written size
+// is the compiler's own type for it, so `Unsigned<8>` and `U8` are one type,
+// every report shows `U8`, and `Unsigned<24>` is E0314. The familiar names
+// (`U8`, `F32`) are still the compiler's own, not aliases declared here.
+Signed: struct<bits: Int> {
+    raw: builtin.Word<bits>,
+}
+
+Unsigned: struct<bits: Int> {
+    raw: builtin.Word<bits>,
+}
+
+IEEE: struct<exponent: Int, fraction: Int> {
+    raw: builtin.FloatWord<exponent, fraction>,
+}
 
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
 // including the optional-to-failure view, are ordinary reachable Jet bodies.

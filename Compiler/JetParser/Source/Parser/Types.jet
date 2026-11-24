@@ -23,7 +23,11 @@ use {
         type_name,
         type_union_sort,
         foundation_link_type,
+        foundation_family_size_list,
+        foundation_family_sizes,
+        foundation_family_type,
         foundation_named_type,
+        foundation_number_family,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -781,8 +785,18 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
         return ParsedType{ty: Type.Apply{name: name, args: args}, span: parser_cover(prefix, token.span)}
     }
     close: parser_type_gt_span(state)
-    ty: parser_apply_named_type(name, args)
-    ParsedType{ty: ty, span: parser_cover(prefix, close)}
+    span: parser_cover(prefix, close)
+    // D-CORE-NUMFAMILY1: a number family at a written size is that size's
+    // type (`Unsigned<8>` is U8); a size no family has is E0314.
+    if foundation_number_family(name) && foundation_family_sizes(args) == .Val(sizes) {
+        sized: foundation_family_type(name, sizes) ?? {
+            written: loop size in sizes -> "{size}"
+            parser_add_error_code(state, "E0314", span, "`{name}<{written.join(", ")}>` is no size of the `{name}` family", "a number family has only its standard sizes: {foundation_family_size_list(name)}", "use a standard size, or a range type such as `Int(0..127)` for a narrower set of values")
+            Type.Apply{name: name, args: args}
+        }
+        return ParsedType{ty: sized, span: span}
+    }
+    ParsedType{ty: parser_apply_named_type(name, args), span: span}
 }
 
 // One written type argument. An integer literal is the argument of a

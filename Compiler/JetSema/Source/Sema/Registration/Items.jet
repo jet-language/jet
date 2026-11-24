@@ -3347,9 +3347,10 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
 // parameters over a plain type (E0324) are not registered. An alias without
 // type parameters stands when it names a record type (`Bounds: {min: Int,
 // max: Int}`) or one application of a generic type (`Names: Set<String>`,
-// `Scores: [String: Int]`): it still only shortens a generic spelling. A
-// range constraint on a base other than `Int` is reported and the type still
-// registers.
+// `Scores: [String: Int]`, and `Byte: Unsigned<8>`, whose target the parser
+// reads as U8 and marks `family_size`): it still only shortens a generic
+// spelling. A range constraint on a base other than `Int` is reported and the
+// type still registers.
 sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item: Item, diagnostics: &[Diagnostic]) -> Bool {
     if item == {
         .Distinct(definition) -> {
@@ -3368,7 +3369,7 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
             }
         }
         .TypeAlias(definition) -> {
-            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) && !sema_registration_generic_application(definition.target) {
+            if definition.type_params.len() == 0 && !definition.family_size && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) && !sema_registration_generic_application(definition.target) {
                 if sema_casing_alias_number_zero(definition) == .Val(zero) {
                     diagnostics.push(sema_casing_alias_number_diagnostic(definition, zero))
                     return false

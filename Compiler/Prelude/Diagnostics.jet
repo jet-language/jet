@@ -4975,6 +4975,29 @@ DestructureShapeMismatch: struct {
     }
 }
 
+NumberFamilySize: struct {
+    written: String,
+    name: String,
+    sizes: String,
+
+    impl Diagnostic {
+        code: "E0314",
+        safety_class: .Soundness,
+        safety_reason: "No number family has that size, so the type would have no storage and no operations.",
+        expert_path: "none: only the standard sizes exist; a range type such as `Int(0..127)` names a narrower set of values",
+        stage: [.Parse],
+        meaning: "A number family written at a size it does not have",
+
+        what: fn(self) -> String { "`{self.written}` is no size of the `{self.name}` family" }
+
+        why: fn(self) -> String { "a number family has only its standard sizes: {self.sizes}" }
+
+        fix: fn(self) -> String {
+            "use a standard size, or a range type such as `Int(0..127)` for a narrower set of values"
+        }
+    }
+}
+
 CheckedTextOutsideUnsafe: struct {
     impl Diagnostic {
         code: "E0387",

@@ -6065,6 +6065,7 @@ body_codec_put_typealiasdef: fn(out: &BodyCodecOut, value: TypeAliasDef) Never! 
     body_codec_put_span(out, value.target_span)
     body_codec_put_span(out, value.span)
     body_codec_put_list_typealiaschoice(out, value.choices)
+    body_codec_put_bool(out, value.family_size)
 }
 
 body_codec_get_typealiasdef: fn(bytes: [U8], input: &BodyCodecIn) -> TypeAliasDef Never! {
@@ -6077,7 +6078,8 @@ body_codec_get_typealiasdef: fn(bytes: [U8], input: &BodyCodecIn) -> TypeAliasDe
     f6: body_codec_get_span(bytes, input)
     f7: body_codec_get_span(bytes, input)
     f8: body_codec_get_list_typealiaschoice(bytes, input)
-    TypeAliasDef{is_pub: f0, is_package_pub: f1, name: f2, name_span: f3, type_params: f4, target: f5, target_span: f6, span: f7, choices: f8}
+    f9: body_codec_get_bool(bytes, input)
+    TypeAliasDef{is_pub: f0, is_package_pub: f1, name: f2, name_span: f3, type_params: f4, target: f5, target_span: f6, span: f7, choices: f8, family_size: f9}
 }
 
 body_codec_put_typealiaschoice: fn(out: &BodyCodecOut, value: TypeAliasChoice) Never! {

@@ -1579,6 +1579,17 @@ size_of: fn<N: Int>(packet: Packet<N>) -> Int { N }
 Only `Int` makes a number parameter; any other bound declares a type
 parameter.
 
+The number types are such instances (D-CORE-NUMFAMILY1). The prelude
+declares each number family once: `Signed<bits>` and `Unsigned<bits>` for
+whole numbers, `IEEE<exponent, fraction>` for binary floats. A family has
+only its standard sizes, each with a familiar name: `Signed<8>` through
+`Signed<64>` are `I8` through `I64`, `Unsigned<8>` through `Unsigned<64>`
+are `U8` through `U64`, `IEEE<8, 23>` is `F32` and `IEEE<11, 52>` is `F64`,
+which is `Float`. A size and its name are one type, and reports use the
+name: a mismatch with `Unsigned<8>` says `U8`. Any other size, such as
+`Unsigned<24>`, is E0314; a narrower set of values is a range type such as
+`Int(0..127)`.
+
 ## Closures and function values
 
 A lambda is `fn(params) { body }`: the `fn` keyword, its parameters and a
