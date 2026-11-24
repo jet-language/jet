@@ -1635,7 +1635,18 @@ semindex_expr: fn(expr: ExprNode, db: &SemDB, ctx: &SemWalk, modules: [JetDriver
             values: loop field in fields -> field.value
             semindex_list("fields", values, db, ctx, modules)
         }
-        .TypedLit(_, body, _, _) -> {
+        .TypedLit(head, body, span, _) -> {
+            // A record head (`Point{`, `shapes.Point{`, `Box<Int>{`) is a
+            // written type use: its name opens the literal, and
+            // semindex_type_refs reads it as it reads any written type.
+            written: if head == {
+                Val(ty) -> if ty == {
+                    .Named(name) | .Apply(name, _) -> name.count_bytes()
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> 0
+                }
+                None -> 0
+            }
+            if written > 0 -> semindex_type_node(db, ctx, "head", "scalar", Span{start: span.start, end: span.start + written})
             values: if body == {
                 .Fields(fields) -> loop field in fields -> field.value
                 .Elements(elements) -> elements

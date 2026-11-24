@@ -1,0 +1,27 @@
+# The server answers on a file of a large multi-module package. A copy of
+# Compiler/JetFoundation (some two hundred modules) gets a small probe module
+# that the case opens, so the check covers the whole package. The probe's
+# diagnostics, a definition and a hover must each come back within a bound.
+# Building the semantic index used to grow with the square of the package, so
+# on this package the server never answered.
+copy: {root}/Compiler/JetFoundation foundation
+write: foundation/Source/Probe.jet = "probe_width: fn(span: Span) -> Int {\n    span.end - span.start\n}\n\nprobe_twice: fn(span: Span) -> Int {\n    probe_width(span) * 2\n}\n"
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://{work}/foundation\",\"capabilities\":{}}}"
+recv lsp until $.id = 1 within 30s
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/foundation/Source/Probe.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"probe_width: fn(span: Span) -> Int {\\n    span.end - span.start\\n}\\n\\nprobe_twice: fn(span: Span) -> Int {\\n    probe_width(span) * 2\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics" within 60s
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/foundation/Source/Probe.jet\"},\"position\":{\"line\":5,\"character\":6}}}"
+recv lsp until $.id = 2 within 30s
+json: stdout doc $.result.uri = "file://{work}/foundation/Source/Probe.jet"
+json: stdout doc $.result.range = {"start":{"line":0,"character":0},"end":{"line":0,"character":11}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/foundation/Source/Probe.jet\"},\"position\":{\"line\":0,\"character\":23}}}"
+recv lsp until $.id = 3 within 30s
+stdout: ~ "Span: struct" # the hover shows the package's own Span
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99 within 30s
+json: stdout doc $.result = null
+close lsp
+exit: any # the server exit status after close is not part of this contract
