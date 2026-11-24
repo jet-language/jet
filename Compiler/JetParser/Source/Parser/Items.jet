@@ -91,6 +91,7 @@ use {
         target_os_key,
         target_os_named,
         type_name,
+        type_structural_head_names,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -130,6 +131,8 @@ use {
         TOKEN_LT,
         TOKEN_MINUS,
         TOKEN_PIPE,
+        TOKEN_QUESTION,
+        TOKEN_QUESTION_DOT,
         TOKEN_RAW_STRING,
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
@@ -3118,8 +3121,38 @@ parser_parse_operator_rhs: fn(state: &JetParserState, trait_name: String?, owner
 // `modifiers` holds the markers written above `impl`.
 parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start: parser_bump(state)
+    // `impl [T].Trait`, `impl [T#N].Trait`, `impl T?.Trait` and
+    // `impl [K: V].Trait` implement a trait for every list, fixed array,
+    // optional or map: the head is the shape written over fresh parameter
+    // names, which sema binds per receiver, and every name after it is the
+    // trait's path.
+    head := ParsedType?{None}
+    head_text := ""
+    if parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_QUESTION_DOT {
+        // `impl T?.Trait`: the lexer reads `?.` as one optional-chain token,
+        // which here closes the head and opens the trait's path.
+        name: parser_bump(state)
+        chain: parser_bump(state)
+        head = Val(ParsedType{ty: Type.Option{inner: Type.Named{name: parser_value(state, name)}}, span: Span{start: name.span.start, end: chain.span.start + 1}})
+    }
+    if head == None && (parser_current_kind(state) == TOKEN_LBRACKET || (parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_QUESTION)) {
+        head = Val(parser_parse_type(state, 0))
+        parser_expect(state, TOKEN_DOT, "`.` and the trait after a structural `impl` head")
+    }
+    if head == .Val(written_head) {
+        // The canonical spelling names the impl and is what `jet fmt` prints.
+        head_text = if written_head.ty == .Map(key, _, value) -> "[{type_name(key)}: {type_name(value)}]" else -> type_name(written_head.ty)
+        names: type_structural_head_names(written_head.ty) ?? [String]{}
+        fresh := names.len() > 0
+        loop index in 1..<names.len() {
+            if names.slice(0, index).contains(names[index]) -> fresh = false
+        }
+        if !fresh {
+            parser_add_error_code(state, "E0003", written_head.span, "`impl {head_text}` is not a structural head", "a structural impl implements its trait for every list, fixed array, optional or map, so each position of its head is a new parameter name", "write the head over distinct names: `[T]`, `[T#N]`, `T?` or `[K: V]`")
+        }
+    }
     parts := [Token]{}
-    parts.push(parser_expect_name(state, "after `impl`"))
+    parts.push(parser_expect_name(state, if head == None -> "after `impl`" else -> "for the trait of a structural `impl` head"))
     loop parser_current_kind(state) == TOKEN_DOT && !parser_aborting(state) {
         parser_bump(state)
         parts.push(parser_expect_name(state, "after `.` in `impl`"))
@@ -3129,7 +3162,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // impl, `impl Pair<T: Priced>.Describe`, which applies only where `T`
     // meets its bounds; sema checks the list names the type's parameters.
     type_params := [TypeParam]{}
-    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && !(parts.len() >= 2 && parser_impl_trait_args_ahead(state)) {
+    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && head == None && !(parts.len() >= 2 && parser_impl_trait_args_ahead(state)) {
         open: parser_current(state).span
         params: parser_parse_type_params(state)
         bounded: loop param in params {
@@ -3153,15 +3186,16 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // `impl Scores.Store<Int> {`: the arguments of a parameterized trait
     // join the trait's name.
     trait_args := ""
-    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && parts.len() >= 2 {
+    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && (parts.len() >= 2 || head != None) {
         trait_args = parser_parse_trait_args(state)
     }
     first: parts[0]
     count: parts.len()
-    is_error_conversion: parser_current_kind(state) == TOKEN_UNIFIED_ARROW
-    is_protocol_impl: count == 2 && (parser_value(state, parts[1]) == "Client" || parser_value(state, parts[1]) == "Server") && parser_current_kind(state) == TOKEN_LBRACE
-    literal_capability: count >= 3 && parser_value(state, parts[count - 2]) == "Literal" && (parser_value(state, parts[count - 1]) == "Int" || parser_value(state, parts[count - 1]) == "Float")
+    is_error_conversion: head == None && parser_current_kind(state) == TOKEN_UNIFIED_ARROW
+    is_protocol_impl: head == None && count == 2 && (parser_value(state, parts[1]) == "Client" || parser_value(state, parts[1]) == "Server") && parser_current_kind(state) == TOKEN_LBRACE
+    literal_capability: head == None && count >= 3 && parser_value(state, parts[count - 2]) == "Literal" && (parser_value(state, parts[count - 1]) == "Int" || parser_value(state, parts[count - 1]) == "Float")
     owner_count := if {
+        head != None -> 0
         count == 1 || is_error_conversion || is_protocol_impl -> count
         literal_capability -> count - 2
         else -> count - 1
@@ -3174,9 +3208,11 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             owner_count -= 1
         }
     }
-    type_name := parser_value(state, first)
+    // A structural head is named by its canonical spelling (`[T]`, `[T#N]`,
+    // `T?`, `[K: V]`), which sema reads back as the head's type.
+    type_name := if head != None -> head_text else -> parser_value(state, first)
     loop index in 1..<owner_count -> type_name = "{type_name}.{parser_value(state, parts[index])}"
-    type_span: parser_cover(first.span, parts[owner_count - 1].span)
+    type_span: if head == .Val(written) -> written.span else -> parser_cover(first.span, parts[owner_count - 1].span)
     has_trait: owner_count < count
     trait_name := String?{None}
     trait_span := Span?{None}

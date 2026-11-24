@@ -1,0 +1,40 @@
+// A loop's header calls its iterator's `next`, so a failure of `next` needs
+// a route into the function's own failure, as any fallible call's does.
+#Error
+ReadError: enum {
+    Torn,
+}
+
+Reads: struct {
+    left: Int,
+
+    impl Iterator {
+        Item: Int,
+
+        next: fn(&self) -> Int? ReadError! {
+            if self.left == 0 -> return Err(ReadError.Torn)
+            self.left -= 1
+            Val(self.left)
+        }
+    }
+}
+
+Source: struct {
+    from: Int,
+
+    impl Iterable {
+        Iter: Reads,
+
+        iter: fn(&&self) -> Reads { Reads{left: self.from} }
+    }
+}
+
+source: fn(from: Int) -> Source { Source{from: from} }
+
+total: fn(from: Int) -> Int Never! {
+    sum := 0
+    loop item in source(from) -> sum += item
+    sum
+}
+
+run: fn() { print(total(2)) }

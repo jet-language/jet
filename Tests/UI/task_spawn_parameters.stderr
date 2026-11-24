@@ -1,26 +1,26 @@
-Error: Jet.ValueNotSendable: this task returns `fn(Int) -[]> Int`, which isn't sendable
+Error: Jet.ValueNotSendable: This task returns `fn(Int) -[]> Int Never!`, which isn't sendable
   --> Tests/UI/task_spawn_parameters.jet:2:15
     |
   2 |     t: task { fn(x: Int) { x } }
     |               ^^^^^^^^^^^^^^^^
- Why: the closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
+ Why: The closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/Jet.ValueNotSendable
 
-Error: Jet.FallbackTypeMismatch: the fallback is Int (a whole number), but the success value is fn(Int) -[]> Int
+Error: Jet.FallbackTypeMismatch: The fallback is Int (a whole number), but the success value is fn(Int) -[]> Int Never!
   --> Tests/UI/task_spawn_parameters.jet:3:23
     |
   3 |     print(t.join() ?? 0)
     |                       ^
- Why: both sides of `??` must be the same type
- Fix: use fn(Int) -[]> Int here
+ Why: Both sides of `??` must be the same type
+ Fix: Use fn(Int) -[]> Int Never! here
 More: jet-lang.dev/e/Jet.FallbackTypeMismatch
 
-Error: Jet.ValueTypeMismatch: `print` doesn't know how to show fn(Int) -[]> Int
-  --> Tests/UI/task_spawn_parameters.jet:3:13
+Error: Jet.ValueTypeMismatch: `print` doesn't know how to show fn(Int) -[]> Int Never!
+  --> Tests/UI/task_spawn_parameters.jet:3:11
     |
   3 |     print(t.join() ?? 0)
-    |             ^^^^^^^^^^^
- Why: print shows values that have a display
- Fix: print one of its parts instead
+    |           ^^^^^^^^^^^^^
+ Why: Print shows values that have a display
+ Fix: Print one of its parts instead
 More: jet-lang.dev/e/Jet.ValueTypeMismatch

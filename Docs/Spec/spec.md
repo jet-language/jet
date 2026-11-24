@@ -1025,6 +1025,15 @@ orphan rule the owner of either the trait or the type may write the impl. An
 `impl Int.Trait` for a trait the module does not declare is E0301; wrap the
 built-in type in a type the module declares instead.
 
+The same module may implement its trait for every value of a built-in shape:
+`impl [T].Describe` for every list, `impl [T#N].Describe` for every fixed
+array, `impl T?.Describe` for every optional and `impl [K: V].Describe` for
+every map. Each position of the head is a new parameter name: inside the
+methods `T`, `K` and `V` are the receiver's types and `N` is its length as an
+`Int`. A head name that resolves to a type in scope, a repeated name or a
+nested shape such as `[[T]]` is E0003. The head carries no bounds, so the
+methods ask nothing of `T` that every type does not offer.
+
 An impl of a generic type may apply only under conditions on the type's
 parameters (D-IMPL-COND1=A): `impl Pair<T: Priced>.Describe { … }` makes a
 `Pair<T>` `Describe` only where `T` is `Priced`, and inside its methods `T` is
@@ -7551,7 +7560,7 @@ reads it runs the probe first. A probe that finds no folder fails the build
 before any step runs (E3505), naming each folder it looked in and why it
 passed it over. Examples:
 [`Tests/Cases/BuildEntry/run_steps_read_a_found_folder.case`](../../Tests/Cases/BuildEntry/run_steps_read_a_found_folder.case),
-[`Tests/UI/build_find_folder_missing.jet`](../../Tests/UI/build_find_folder_missing.jet).
+[`Tests/UI/E3505_build_find_folder_missing.jet`](../../Tests/UI/E3505_build_find_folder_missing.jet).
 
 Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and

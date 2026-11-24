@@ -48,20 +48,24 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
             if profile != "" -> selected.profile = profile
             selected.setting_overrides = settings
             explained: jet_driver_explain_build_fact(selected, key)
-            if explained.fact == .Val(fact) {
-                lines := [String]{}
+            if explained.derivation == .Val(record) {
                 code := key.copy()
+                // The module value's own lines come before the chain.
+                prefix := ""
                 if module_value == .Val(value) {
-                    // The chain's first line is `<fact> = <folded value>`.
-                    folded: fact.explain().split("\n").to_list()[0].split(" = ").to_list()
+                    // The record's claim is `<fact> = <folded value>`.
+                    folded: record.claim.split(" = ").to_list()
                     shown: if folded.len() > 1 -> folded[folded.len() - 1] else -> ""
-                    lines.push("`{value.binding}` is `{value.instantiation}`: `{value.function}` reads its module argument `{value.parameter}`")
-                    lines.push("{value.parameter} = #build.settings.{value.setting} value:{shown}")
+                    prefix = "`{value.binding}` is `{value.instantiation}`: `{value.function}` reads its module argument `{value.parameter}`\n{value.parameter} = #build.settings.{value.setting} value:{shown}\n"
                     code = value.query.copy()
                 }
-                loop line in fact.explain().split("\n") -> lines.push(line.removeprefix("  "))
-                explanation: DiagnosticExplanation{code: code, stage: "", meaning: lines[0], what: Val(lines.join("\n")), why: Val(JET_CLI_BUILD_FACT_WHY), fix: Val(JET_CLI_BUILD_FACT_FIX), example: None}
-                return jet_cli_explanation_output(explanation, color, json)
+                what := "{prefix}{record.claim}"
+                if record.payload == .Val(payload) && payload == .BuildFactChain(writers) {
+                    loop writer in writers -> what = "{what}\n{writer}"
+                }
+                meaning: what.split("\n").to_list()[0]
+                explanation: DiagnosticExplanation{code: code, stage: "", meaning: meaning, what: Val(what), why: Val(JET_CLI_BUILD_FACT_WHY), fix: Val(JET_CLI_BUILD_FACT_FIX), example: None}
+                return jet_cli_derived_explanation_output(explanation, Val(record), color, json)
             }
             if explained.diagnostics.len() == 0 {
                 return JetCLIPlan.Done{output: jet_cli_ice("build fact `{key}` resolved to no writer")}

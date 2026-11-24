@@ -1500,6 +1500,56 @@ type_name: fn(ty: Type) -> String Never! {
     }
 }
 
+// The shape family of a list, fixed array, optional or map, which every
+// instance of that shape shares with the structural impl head written for it
+// (`impl [T].Trait`, `impl [T#N].Trait`, `impl T?.Trait`, `impl [K: V].Trait`):
+// the key such an impl is filed under and a receiver of the shape finds it by.
+// None for any other type.
+type_structural_family: fn(ty: Type) -> String? Never! {
+    if ty == .List(_) -> return Val("[]")
+    if ty == .FixedList(_, _) -> return Val("[#]")
+    if ty == .Option(_) -> return Val("?")
+    if ty == .Map(_, _, _) -> return Val("[:]")
+    None
+}
+
+// The parameter names of structural impl head `head`, in its family's order:
+// `T` of `[T]` and `T?`, `T` then `N` of `[T#N]`, `K` then `V` of `[K: V]`.
+// None when `head` is not one of those shapes over plain names.
+type_structural_head_names: fn(head: Type) -> [String]? Never! {
+    if head == .List(element) {
+        if element == .Named(name) -> return Val([String]{name})
+    }
+    if head == .FixedList(element, length) {
+        if element == .Named(name) {
+            if length == .Symbol(_, extent) -> return Val([String]{name, extent})
+        }
+    }
+    if head == .Option(inner) {
+        if inner == .Named(name) -> return Val([String]{name})
+    }
+    if head == .Map(key, _, value) {
+        if key == .Named(key_name) {
+            if value == .Named(value_name) -> return Val([String]{key_name, value_name})
+        }
+    }
+    None
+}
+
+// The arguments list, fixed array, optional or map `ty` binds to the
+// parameters of its structural impl head (type_structural_head_names), in the
+// same order; a fixed array's length is a number argument. None for any other
+// type.
+type_structural_args: fn(ty: Type) -> [Type]? Never! {
+    if ty == .List(element) -> return Val([Type]{element})
+    if ty == .FixedList(element, length) {
+        return Val([Type]{element, Type.Measure{measure: length}})
+    }
+    if ty == .Option(inner) -> return Val([Type]{inner})
+    if ty == .Map(key, _, value) -> return Val([Type]{key, value})
+    None
+}
+
 // (Rust `AST.union_member_tag`): a union member's own tag. Rust spells a
 // declared member by its own name, so every nominal reads without its
 // module qualifier (`module.LocalDate` is `LocalDate`); a compound spelling

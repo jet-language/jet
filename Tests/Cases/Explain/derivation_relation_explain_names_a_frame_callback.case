@@ -1,0 +1,16 @@
+# A module's `on_frame` callback is a record subject of its own: `jet explain
+# main.on_frame` answers when the module has one callback, with the schedule
+# the frame scheduler checked and the operations it ordered as premises.
+# `--json` adds the record itself as `derivation`.
+fixture: DerivationRelationKeepsTheFrameSchedule.fixture
+env: NO_COLOR=1
+step: jet explain main.on_frame main.jet
+exit: 0
+stdout: ~ "checked frame resource schedule" # the record's claim
+stdout: ~ "Known by jet-sema · checked-frame-accesses · static derivation" # its producer, rule and method
+stdout: ~ "Subject: main.on_frame@" # the callback, by where it starts
+stdout: ~ "Premises: " # the operations it ordered
+step: jet explain main.on_frame main.jet --json
+exit: 0
+json: stdout doc $.derivation.rule = "checked-frame-accesses" # the record whole
+json: stdout doc $.derivation.payload.operations #>= 2 # its schedule travels with it

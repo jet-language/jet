@@ -1,6 +1,6 @@
 // The impl contract check for the compiler-owned traits (OWNED_TRAITS in
 // jet_foundation, each row the trait's declaration).
-use jet_foundation.[AccessConvention, Diagnostic, Func, NamedType, OwnedMethod, OwnedTrait, Param, Span, Type, access_sigil, type_identity_equal, type_name]
+use jet_foundation.[AccessConvention, Diagnostic, Func, NamedType, OwnedMethod, OwnedTrait, Param, Span, Type, access_sigil, owned_trait, type_identity_equal, type_name]
 
 // E0906, E0907 and E0913 for an impl of an owned trait on `owner_type`:
 // `rhs` is an operator's right-hand type or a conversion's source,
@@ -58,9 +58,69 @@ sema_owned_render: fn(method: OwnedMethod, names: [String], types: [Type]) -> St
     }
     rendered: "{method.name}: fn({parts.join(", ")})"
     if method.returns == .Val(returned) {
-        return "`{rendered} -> {type_name(sema_inference_substitute_type(returned, names, types))}`"
+        return "`{rendered} -> {type_name(sema_owned_infallible(sema_inference_substitute_type(returned, names, types)))}`"
     }
     "`{rendered}`"
+}
+
+// Whether the owned trait `trait_name` infers its associated type
+// `associated_name` from the failure of its method `method_name`: `next`
+// for `Iterator.Error`, from `next: fn(&self) -> Item? Error!`. An impl that
+// leaves that type unset binds it to the failure its method declares.
+sema_owned_failure_binds: fn(trait_name: String, associated_name: String, method_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
+    if owned.contract == .Methods(declared, names, _) {
+        if !names.contains(associated_name) -> return false
+        loop wanted in declared {
+            if wanted.name != method_name -> next
+            if wanted.returns == .Val(returned) {
+                if returned == .Result(_, error) {
+                    return error == (Type.Named{name: associated_name})
+                }
+            }
+            return false
+        }
+    }
+    false
+}
+
+// Whether an impl of the owned trait `trait_name` may leave its associated
+// type `associated_name` unset: one of the trait's methods fails with it
+// (sema_owned_failure_binds).
+sema_owned_failure_infers: fn(trait_name: String, associated_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
+    if owned.contract == .Methods(declared, _, _) {
+        loop wanted in declared {
+            if sema_owned_failure_binds(trait_name, associated_name, wanted.name) -> return true
+        }
+    }
+    false
+}
+
+// Binds each associated type of the owned trait `trait_name` that `names`
+// leaves unset and the trait infers from `method`'s failure to the failure
+// `method` declares (its written `T E!`, else `Never`), in the parallel
+// substitution lists `names` and `types`.
+sema_owned_bind_failure: fn(trait_name: String, method: Func, names: &[String], types: &[Type]) {
+    owned: owned_trait(trait_name) ?? return
+    if owned.contract == .Methods(_, associated_names, _) {
+        loop name in associated_names {
+            if names.contains(name) || !sema_owned_failure_binds(trait_name, name, method.name) {
+                next
+            }
+            names.push(name.copy())
+            types.push(sema_owned_failure_of(method.return_type))
+        }
+    }
+}
+
+// The failure a method declares in its written return: the error of
+// `T E!`, else `Never`.
+sema_owned_failure_of: fn(return_type: Type?) -> Type Never! {
+    if return_type == .Val(written) {
+        if written == .Result(_, error) -> return error.copy()
+    }
+    Type.Named{name: "Never"}
 }
 
 // A result that can't fail (`T Never!`) is its value `T`.
@@ -107,7 +167,7 @@ sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String]
     }
     if wanted.returns == .Val(expected) {
         returned: actual.return_type ?? return false
-        return type_identity_equal(sema_inference_substitute_type(sema_owned_infallible(returned), names, types), sema_inference_substitute_type(expected, names, types))
+        return type_identity_equal(sema_owned_infallible(sema_inference_substitute_type(returned, names, types)), sema_owned_infallible(sema_inference_substitute_type(expected, names, types)))
     }
     sema_owned_returns_nothing(actual.return_type)
 }
@@ -138,12 +198,15 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
         if bound == .Val(ty) {
             names.push(name.copy())
             types.push(ty)
-        } else { unbound.push(name.copy()) }
+        } else if !sema_owned_failure_infers(trait_name, name) { unbound.push(name.copy()) }
     }
     if unbound.len() > 0 {
         diagnostics.push(sema_owned_unbound(trait_name, unbound, span))
         return false
     }
+    // An associated type left unset that the trait infers from a method's
+    // failure (`Iterator.Error`) is the failure that method declares.
+    loop method in methods { sema_owned_bind_failure(trait_name, method, names, types) }
     loop binding in sibling {
         if !names.contains(binding.name) {
             names.push(binding.name)
@@ -370,10 +433,10 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     errors: loop index in 0..<associated.len() if associated[index].name == "Error" -> index
     hole_bindings: loop index in 0..<associated.len() if associated[index].name == "Hole" -> index
     builds: loop index in 0..<methods.len() if methods[index].name == "build" -> index
-    error_type: if errors.len() > 0 -> associated[errors[0]].ty.copy() else -> Type.Named{name: "Error"}
-    hole_type: if hole_bindings.len() > 0 -> associated[hole_bindings[0]].ty.copy() else -> Type.String
-    error_name: type_name(error_type)
-    hole_name: type_name(hole_type)
+    // The bound `Error` and `Hole` are read in place (sema_owned_binding_is);
+    // unbound, they read as `Error` and `String`.
+    error_name: if errors.len() > 0 -> type_name(associated[errors[0]].ty) else -> "Error"
+    hole_name: if hole_bindings.len() > 0 -> type_name(associated[hole_bindings[0]].ty) else -> type_name(Type.String)
     check_expected: "`check: fn(text: String) -[]> {error_name}!`"
     hole_expected: "`encode_hole: fn<T: Printable>(value: T) -[]> {hole_name}`"
     build_expected: "`build: fn(parts: [String], holes: [{hole_name}]) -[]> {owner_name}`"
@@ -424,7 +487,7 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
             check_ok = false
             if check.return_type == .Val(returned) {
                 if returned == .Result(ok, err) {
-                    check_ok = ok == (Type.Named{name: "Unit"}) && type_identity_equal(err, error_type)
+                    check_ok = ok == (Type.Named{name: "Unit"}) && sema_owned_binding_is(associated, errors, Type.Named{name: "Error"}, err)
                 }
             }
         }
@@ -439,7 +502,7 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
             hole_ok = hole.type_params[0].name == "T" && hole.type_params[0].bounds == ([String]{"Printable"})
         }
         if hole_ok {
-            hole_ok = if hole.return_type == .Val(returned) -> type_identity_equal(returned, hole_type) else -> false
+            hole_ok = if hole.return_type == .Val(returned) -> sema_owned_binding_is(associated, hole_bindings, Type.String, returned) else -> false
         }
         if !hole_ok {
             diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, hole.name_span))
@@ -449,7 +512,8 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
         build: methods[builds[0]]
         build_ok := build.type_params.len() == 0 && sema_owned_pure(build) && build.params.len() == 2
         if build_ok {
-            build_ok = sema_owned_list_param(build.params[0], Type.String) && sema_owned_list_param(build.params[1], hole_type)
+            holes_param: if hole_bindings.len() > 0 -> sema_owned_list_param(build.params[1], associated[hole_bindings[0]].ty) else -> sema_owned_list_param(build.params[1], Type.String)
+            build_ok = sema_owned_list_param(build.params[0], Type.String) && holes_param
         }
         if build_ok {
             build_ok = if build.return_type == .Val(returned) -> sema_owned_owner_name(returned) == owner_name else -> false
@@ -464,6 +528,13 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
         }
     }
     diagnostics.len() == count
+}
+
+// Whether `actual` is the type of the first binding among `associated`'s
+// rows `rows`, or `fallback` when there is none.
+sema_owned_binding_is: fn(associated: [NamedType], rows: [Int], fallback: Type, actual: Type) -> Bool Never! {
+    if rows.len() > 0 -> return type_identity_equal(actual, associated[rows[0]].ty)
+    type_identity_equal(actual, fallback)
 }
 
 // A read parameter `name: [element]` with no label, default or spread.

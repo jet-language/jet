@@ -4615,28 +4615,6 @@ DevtoolsPublicationUnlabeled: struct {
     }
 }
 
-DuplicateDevtoolsPanel: struct {
-    identity: String,
-    first: String,
-
-    impl Diagnostic {
-        code: "E1410",
-        safety_class: .Soundness,
-        safety_reason: "Two panels with one identity give that identity two meanings.",
-        expert_path: "none: one panel per identity",
-        meaning: "Devtools panel identity is registered more than once",
-        detail: true,
-
-        what: fn(self) -> String { "Devtools panel `{self.identity}` is registered twice" }
-
-        why: fn(self) -> String {
-            "One package/module/function identity may describe only one panel (first at {self.first})"
-        }
-
-        fix: fn(self) -> String { "Keep one marked public `panel` function for this package" }
-    }
-}
-
 InvalidDevtoolsPanel: struct {
     panel: String,
 

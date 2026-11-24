@@ -4821,13 +4821,25 @@ body_codec_put_derivationpayload: fn(out: &BodyCodecOut, value: DerivationPayloa
             body_codec_put_tag(out, 0)
             body_codec_put_frameschedule(out, p0)
         }
+        .BuildFactChain(p0) -> {
+            body_codec_put_tag(out, 1)
+            body_codec_put_list_string(out, p0)
+        }
     }
 }
 
 body_codec_get_derivationpayload: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationPayload Never! {
-    body_codec_skip_tag(bytes, input, 1)
-    f0: body_codec_get_frameschedule(bytes, input)
-    DerivationPayload.FrameSchedule{schedule: f0}
+    position: body_codec_get_tag(bytes, input, 2, 0)
+    if position == {
+        1 -> {
+            f0: body_codec_get_list_string(bytes, input)
+            DerivationPayload.BuildFactChain{writers: f0}
+        }
+        else -> {
+            f0: body_codec_get_frameschedule(bytes, input)
+            DerivationPayload.FrameSchedule{schedule: f0}
+        }
+    }
 }
 
 body_codec_put_tcapturefacts: fn(out: &BodyCodecOut, value: TCaptureFacts) Never! {
@@ -8992,13 +9004,14 @@ body_codec_put_tforinmethod: fn(out: &BodyCodecOut, value: TForInMethod) Never! 
             body_codec_put_tag(out, 5)
             body_codec_put_string(out, p0)
         }
-        .Iterable(p0, p1, p2, p3, p4) -> {
+        .Iterable(p0, p1, p2, p3, p4, p5) -> {
             body_codec_put_tag(out, 6)
             body_codec_put_string(out, p0)
             body_codec_put_string(out, p1)
             body_codec_put_string(out, p2)
             body_codec_put_string(out, p3)
             body_codec_put_type(out, p4)
+            body_codec_put_ttryconvert(out, p5)
         }
     }
 }
@@ -9020,7 +9033,8 @@ body_codec_get_tforinmethod: fn(bytes: [U8], input: &BodyCodecIn) -> TForInMetho
             f2: body_codec_get_string(bytes, input)
             f3: body_codec_get_string(bytes, input)
             f4: body_codec_get_type(bytes, input)
-            TForInMethod.Iterable{coll_type: f0, iter_type: f1, iter_symbol: f2, next_symbol: f3, item_type: f4}
+            f5: body_codec_get_ttryconvert(bytes, input)
+            TForInMethod.Iterable{coll_type: f0, iter_type: f1, iter_symbol: f2, next_symbol: f3, item_type: f4, failure: f5}
         }
         else -> TForInMethod.Chars
     }

@@ -859,6 +859,13 @@ than adding an implicit `Err` wrapper that its protocol ABI cannot accept.
 A user Iterable enters the same runtime loop cursor as other checked sources:
 the loop consumes its source once, `iter` runs once, and `Iterator.next`
 absence ends iteration. Native emission supplies the owner's loop-source bridge.
+`Iterator.next` answers `Item? Error!`. An impl that leaves `Error` unset binds
+it to the failure its `next` declares, `Never` when it declares none; a
+written `Error` must be that failure. When `Error` is not `Never`, the loop
+header's `next` call is an implicit fallible call: its failure passes up
+through the enclosing function's carrier with the same conversions, effects
+and diagnostics, the loop-owned iterator is dropped on that exit, and no
+further `next` call happens.
 
 A callable returning a view names the checked relationship between its
 borrowed owner arguments and that return with a higher-ranked lifetime.

@@ -59,6 +59,7 @@ use jet_foundation.[
     ViewSourcePath,
     derivation_identity,
     derivation_payload_json,
+    derivation_payload_kind,
     derivation_record,
     expr_span,
     failure_contract_shown_name,
@@ -1895,7 +1896,7 @@ sema_compiler_index_derivation_value: fn(record: DerivationRecord) -> TComptimeV
             value: TComptimeValue.Struct{
                 type_name: "CompilerDerivationPayload",
                 fields: [TComptimeField]{
-                    TComptimeField{name: "kind", value: sema_compiler_index_string("frame_schedule")},
+                    TComptimeField{name: "kind", value: sema_compiler_index_string(derivation_payload_kind(value))},
                     TComptimeField{name: "json", value: sema_compiler_index_string(derivation_payload_json(value))},
                 },
             },

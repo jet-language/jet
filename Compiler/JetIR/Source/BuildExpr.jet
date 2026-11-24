@@ -916,13 +916,13 @@ ir_stmt_body_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, s
                     .LinesFile -> "jet_rt_native_iter_file_lines"
                     .LinesStdin -> "jet_rt_native_iter_stdin_lines"
                     .LinesProcessStream -> "jet_rt_native_iter_process_lines"
-                    .Chars | .ChannelReceiver | .EncodingReader(_) | .Iterable(_, _, _, _, _) -> ""
+                    .Chars | .ChannelReceiver | .EncodingReader(_) | .Iterable(_, _, _, _, _, _) -> ""
                 }
                 .None -> ""
             }
             if method_kind == .Val(kind) {
-                if kind == .Iterable(_, _, iter_symbol, next_symbol, item_type) {
-                    return ir_iterable_walk(m, p, b, label, variable, collection, step, iter_symbol, next_symbol, item_type, body, span)
+                if kind == .Iterable(_, _, iter_symbol, next_symbol, item_type, failure) {
+                    return ir_iterable_walk(m, p, b, label, variable, collection, step, iter_symbol, next_symbol, item_type, failure, body, span)
                 }
                 if kind == .EncodingReader(_) {
                     return ir_encoding_reader_walk(m, p, b, label, variable, collection, step, body, span)
@@ -8064,13 +8064,15 @@ ir_slice_walk_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ba
 
 // `loop x in value` over a type with an `Iterable` impl: `iter` takes the
 // value into its iterator, which the loop owns; each step calls
-// `next(iterator)`, and the walk ends at its first None. An iterator that
-// closes closes when the loop ends, by its end, `break`, `return` or a
-// failure, as a variable holding it would. The item a step
+// `next(iterator)`, and the walk ends at its first None. A `next` that fails
+// passes its failure up from the loop header as `failure` routes it, as an
+// implicit fallible call's does (ir_try_slot), so no step calls it again. An
+// iterator that closes closes when the loop ends, by its end, `break`,
+// `return` or a failure, as a variable holding it would. The item a step
 // takes out of the Option belongs to that step: `break`, `next` and the end
 // of the body drop it unless the body moved it. A step runs the body on
 // every n-th item from the first; the others are taken and dropped.
-ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, step: Int?, iter_symbol: String, next_symbol: String, item_type: Type, body: [Int], span: Span) Never! {
+ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, step: Int?, iter_symbol: String, next_symbol: String, item_type: Type, failure: TTryConvert, body: [Int], span: Span) Never! {
     iter_row: ir_function_row(p, iter_symbol) ?? return ir_fail(b, span, "loop over an Iterable whose `iter` is outside the checked program")
     next_row: ir_function_row(p, next_symbol) ?? return ir_fail(b, span, "loop over an Iterable whose `next` is outside the checked program")
     collection_ty: ir_ty(m, p, b, collection)
@@ -8112,9 +8114,21 @@ ir_iterable_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, 
         ir_emit(b.f, IROp.Store, -1, receiver, 0, iterator, b.line)
         backs.push(IRWriteBack{cell: receiver, slot: iterator})
     }
-    option: ir_call(m, p, b, next_symbol, next_args, receiver, backs, [BodyCallArg]{}, span)
-    if ir_failed(b) || option < 0 {
+    outcome: ir_call(m, p, b, next_symbol, next_args, receiver, backs, [BodyCallArg]{}, span)
+    if ir_failed(b) || outcome < 0 {
         return
+    }
+    option := outcome
+    outcome_ty: ir_row_ty(m, p, b.f.slot_type[outcome])
+    if ir_is_result(outcome_ty) {
+        converted: ir_fact_conversion(p, b, failure, span)
+        if ir_failed(b) {
+            return
+        }
+        option = ir_try_slot(m, p, b, outcome, outcome_ty, converted, None, span)
+        if ir_failed(b) || option < 0 {
+            return
+        }
     }
     present: ir_option_is_some(m, b, option)
     ir_exit_unless(m, b, present, exit)

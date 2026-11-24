@@ -1,0 +1,52 @@
+// A trait implemented for every list, fixed array, optional and map
+// answers a direct call, a bounded generic's call and a trait value's call.
+Describe: trait {
+    describe: fn(self) -> String
+}
+
+impl [T].Describe {
+    describe: fn(self) -> String { "list of {self.len()}" }
+}
+
+impl [T#N].Describe {
+    describe: fn(self) -> String { "array of {N}" }
+}
+
+impl T?.Describe {
+    describe: fn(self) -> String {
+        if self == {
+            .Val(_) -> "some"
+            .None -> "none"
+        }
+    }
+}
+
+impl [K: V].Describe {
+    describe: fn(self) -> String { "map of {self.len()}" }
+}
+
+find: fn(present: Bool) -> Int? {
+    if present -> Val(7) else -> None
+}
+
+show: fn<T: Describe>(value: T) -> String {
+    value.describe()
+}
+
+shown: fn(value: Describe) -> String {
+    value.describe()
+}
+
+run: fn() {
+    print([1, 2, 3].describe())
+    print([Int#4]{1, 2, 3, 4}.describe())
+    print(find(true).describe())
+    print(["a": 1, "b": 2].describe())
+    print(show(["x", "y"]))
+    print(show([Float#2]{1.5, 2.5}))
+    print(show(find(false)))
+    print(show(["k": true]))
+    print(shown([4, 5]))
+    items: [Describe]{[1], ["n": 1, "m": 2, "o": 3]}
+    loop item in items -> print(item.describe())
+}

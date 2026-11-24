@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Fix the named graph node or generated module; inspect it with `jet inspect graph` and `jet inspect explain-build`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.BuildPlanFailed</code>: <code>Tests/UI/build_plan_invalid.stderr</code>.</p>
-<pre class="diag">Error: Jet.BuildPlanFailed: Build plan is invalid: action name `same` is registered twice
-  --&gt; Tests/UI/build_plan_invalid.jet:8:16
+<p>First UI snapshot mentioning <code>Jet.BuildPlanFailed</code>: <code>Tests/UI/build_steps_that_read_each_other.stderr</code>.</p>
+<pre class="diag">Error: Jet.BuildPlanFailed: Build plan is invalid: action dependency graph contains a cycle: `first` -&gt; `second` -&gt; `first`; a cycle has no build order, so no action in it can ever start; remove one dependency from that chain
+  --&gt; Tests/UI/build_steps_that_read_each_other.jet:8:18
     |
-  8 |         _ := b.run(&quot;same&quot;, b.found(shell), [])
-    |                ^^^
+  8 |         first: b.run(&quot;first&quot;, b.found(shell), [])
+    |                  ^^^
  Why: `build: fn` must describe one deterministic typed graph whose handles all belong to that build
  Fix: Fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph
 More: jet-lang.dev/e/Jet.BuildPlanFailed

@@ -1628,6 +1628,24 @@ an out-of-range line selects the end of the source. Their source prerequisite
 is the authorized load-only query, not a full semantic check: an undefined
 function in an otherwise parseable file does not prevent a policy essay.
 
+`jet explain <subject> [file]` also reads how the compiler knows a fact of the
+checked program, from its one derivation relation. A subject is a declaration
+path (`main.Shape.area`) or an `on_frame` callback (`main.on_frame@412`, where
+the number is the byte offset of the callback's start; `main.on_frame` alone
+answers when the module has one callback). Only a subject whose first name is a
+module of the entry's project (the entry itself, or a source file or directory
+beside it) reaches the relation; any other dotted name stays a package query,
+and `jetpack explain` is the package spelling. The entry is `file`, else the
+current directory's project entry, and it is checked whole. The explanation
+prints the subject's record (its claim, `Known by <producer> · <rule> ·
+<method>`, its subject and its premises), then each record a premise names,
+four columns deeper. A subject the module does not hold is an `E2104` report
+that lists up to five of the module's subjects, nearest first. A build fact
+(`jet explain "#build.settings.tls"`) is a record of the build-fact producer:
+its writer chain, in the order the contribution law ranks it, is the record's
+payload, and the text is that chain. With `--json`, both kinds keep the
+`explain` fields and add `derivation`, the record whole.
+
 `jet explain effects [<file>[:<line>]] [--caps] [--json]` checks the program
 and prints every effect cap in force at one site, nearest first. A file
 inside a package is checked under the package's entry, so the caps written

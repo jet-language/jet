@@ -140,26 +140,20 @@ sema_call_devtools_state_declares: fn(graph: SemaRegistrationGraph, package: Str
 }
 
 // `check_devtools_panels`: a `#DevPanel` function is the package's public
-// `panel(state: State) -> UINode`, marked once with a bare marker, whose state
+// `panel(state: State) -> UINode`, marked with a bare marker, whose state
 // struct gives every field a value before its first publication (a default, or
-// an optional type).
+// an optional type). A second `#DevPanel` on the same function is the shared
+// non-repeatable marker refusal (StackedRuleLines), reported before this check.
 sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     marker_span := Span?{None}
     marker_valid := true
-    marker_count := 0
     loop marker in func.markers {
         if marker.name != MARKER_DEV_PANEL -> next
-        if marker_count == 0 {
-            marker_span = Val(marker.span)
-            marker_valid = !marker.negated && marker.args.len() == 0
-        }
-        marker_count += 1
+        marker_span = Val(marker.span)
+        marker_valid = !marker.negated && marker.args.len() == 0
+        break
     }
     span: marker_span ?? return
-    if marker_count != 1 {
-        diagnostics.push(sema_devtools_panel_error("E1410", func.name, "a devtools panel is registered once per function", "keep one `#DevPanel` marker on the public `panel` function", span))
-        return
-    }
     if !marker_valid {
         diagnostics.push(sema_devtools_panel_error("E1411", func.name, "`#DevPanel` has no arguments and cannot be negated", "write `#DevPanel` without `!` or marker arguments", span))
         return

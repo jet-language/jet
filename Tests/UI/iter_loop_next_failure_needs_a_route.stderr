@@ -1,0 +1,8 @@
+Error: Jet.ErrorNotPropagatable: `next()` fails with `ReadError`, which can't propagate into `Never` here
+  --> Tests/UI/iter_loop_next_failure_needs_a_route.jet:36:18
+    |
+ 36 |     loop item in source(from) -> sum += item
+    |                  ^^^^^^
+ Why: `next()` is defined at `Core or generated callable (no user source location)` with effective failure contract `inferred failure contract`; the caller's `explicit Never! (proven unreachable)` contract has no route from `ReadError` to `Never`
+ Fix: The caller is declared `Never!`, so it can't fail: declare `ReadError!` in its return type, or handle `next()` locally with `??`
+More: jet-lang.dev/e/Jet.ErrorNotPropagatable

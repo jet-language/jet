@@ -13,8 +13,13 @@ DerivationObservation: struct {
     counterexample_id: String?,
 }
 
+// What a record carries besides its claim: the frame scheduler's whole
+// schedule, or a build fact's writer chain, each writer's line in the order
+// the contribution law ranked it (the record's premises are sorted, so they
+// cannot keep that order).
 DerivationPayload: enum {
     FrameSchedule(schedule: FrameSchedule),
+    BuildFactChain(writers: [String]),
 }
 
 DerivationRecord: struct {
@@ -74,6 +79,15 @@ derivation_record_validate: fn(record: DerivationRecord) -> Bool Never! {
 derivation_payload_json: fn(payload: DerivationPayload) -> String Never! {
     if payload == {
         .FrameSchedule(schedule) -> frame_schedule_json(schedule)
+        .BuildFactChain(writers) -> "{{\"writers\":[{derivation_json_strings(writers)}]}}"
+    }
+}
+
+// The payload's kind as a reader names it: `frame_schedule`, `build_fact_chain`.
+derivation_payload_kind: fn(payload: DerivationPayload) -> String Never! {
+    if payload == {
+        .FrameSchedule(_) -> "frame_schedule"
+        .BuildFactChain(_) -> "build_fact_chain"
     }
 }
 

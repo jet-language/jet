@@ -39,7 +39,6 @@ use {
         core_source_owns_type,
         foundation_link_inner,
         NamedSpan,
-        NamedType,
         OrFallback,
         Pattern,
         PlaceAccess,
@@ -71,6 +70,7 @@ use {
         TPreludeArg,
         TStaticOwner,
         TTransactionSnapshot,
+        TTryConvert,
         TUnsafeGate,
         Type,
         TypeTupleField,
@@ -2105,9 +2105,13 @@ sema_range_backward_diagnostic: fn(start: Expr, end: Expr, step: Expr?, exclusiv
     None
 }
 
+// A loop source's step: what it walks and its item. `routed` is false when
+// an Iterable's `next` fails with a failure the enclosing body has no
+// route for (its diagnostic is reported).
 SemaForInIterableFact: struct {
     method_kind: TForInMethod,
     item_type: Type,
+    routed: Bool{true},
 }
 
 SemaForInPairTypes: struct {
@@ -2155,10 +2159,13 @@ sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
 // the nominal `identity` keys, and the module that writes it: a top-level
 // impl row (the last one, as the loop source reads it), else an
 // `impl Trait { … }` block in the nominal's own body, whose methods the
-// nominal registers.
+// nominal registers. The associated types, parallel names and types,
+// include those the trait infers from a method's failure
+// (sema_owned_bind_failure).
 SemaForInTraitImpl: struct {
     module_index: Int,
-    associated_types: [NamedType],
+    associated_names: [String],
+    associated_types: [Type],
     method_keys: [String:String],
 }
 
@@ -2169,12 +2176,14 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
             if graph.modules[module_index].impls[implementation_index].trait_name != (Val(trait_name)) || graph.modules[module_index].impls[implementation_index].target_identity_key != identity {
                 next
             }
-            associated: loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.copy()
+            names := loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.name
+            types := loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.ty.copy()
             keys := [String:String]{}
             loop method in graph.modules[module_index].impls[implementation_index].methods {
                 keys[method.declaration.name] = symbol_table_key(graph.symbols, method.symbol.id)
+                sema_owned_bind_failure(trait_name, method.declaration, names, types)
             }
-            found = Val(SemaForInTraitImpl{module_index: module_index, associated_types: associated, method_keys: keys})
+            found = Val(SemaForInTraitImpl{module_index: module_index, associated_names: names, associated_types: types, method_keys: keys})
         }
     }
     if found != None -> return found
@@ -2192,7 +2201,12 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
                             }
                         }
                     }
-                    return Val(SemaForInTraitImpl{module_index: module_index, associated_types: block.assoc_type_impls, method_keys: keys})
+                    names := loop associated in block.assoc_type_impls -> associated.name
+                    types := loop associated in block.assoc_type_impls -> associated.ty
+                    loop written in block.methods {
+                        sema_owned_bind_failure(trait_name, written, names, types)
+                    }
+                    return Val(SemaForInTraitImpl{module_index: module_index, associated_names: names, associated_types: types, method_keys: keys})
                 }
             }
         }
@@ -2200,7 +2214,11 @@ sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String
     None
 }
 
-sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
+// The step of a loop over an Iterable source. The loop header calls `next`,
+// so a failure of it passes up as an implicit fallible call's does, through
+// the same conversion (sema_expression_propagation_conversion) at the
+// header `span`.
+sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type, span: Span, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaForInIterableFact? {
     if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
     if program.registration_graph == .Val(graph) {
         // Impls key their target by the declaring nominal's identity, so a
@@ -2212,8 +2230,10 @@ sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: S
         }
         iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
         iter_type := Type?{None}
-        loop associated in iterable.associated_types {
-            if associated.name == "Iter" -> iter_type = Val(associated.ty)
+        loop index in 0..<iterable.associated_names.len() {
+            if iterable.associated_names[index] == "Iter" {
+                iter_type = Val(iterable.associated_types[index])
+            }
         }
         resolved_iter_type: iter_type ?? return None
         if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
@@ -2223,15 +2243,34 @@ sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: S
         }
         iterator: sema_stmt_for_in_trait_impl(graph, "Iterator", iterator_identity) ?? return None
         item_type := Type?{None}
-        loop associated in iterator.associated_types {
-            if associated.name == "Item" -> item_type = Val(associated.ty)
+        error_type := Type?{None}
+        loop index in 0..<iterator.associated_names.len() {
+            if iterator.associated_names[index] == "Item" {
+                item_type = Val(iterator.associated_types[index])
+            }
+            if iterator.associated_names[index] == "Error" {
+                error_type = Val(iterator.associated_types[index])
+            }
         }
         item: item_type ?? return None
         iter_key: iterable.method_keys.get("iter") ?? return None
         next_key: iterator.method_keys.get("next") ?? return None
+        failure := TTryConvert.Never
+        routed := true
+        if error_type == .Val(error) && error != (Type.Named{name: "Never"}) {
+            // The step call the header stands for: its callee is `next`
+            // (sema_failure_call_provenance names a method call by its
+            // method), so the receiver is not read.
+            step_call: Expr.MethodCall{receiver: Expr.Unit{span: span, id: AST_NODE_GENERATED}, method: "next", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+            callee: SemaFailureCallee{key: next_key, inferable: false}
+            converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, environment, program, scopes, context, diagnostics)
+            routed = converted != None
+            failure = converted ?? TTryConvert.Never
+        }
         return Val(SemaForInIterableFact{
-            method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item},
+            method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item, failure: failure},
             item_type: item,
+            routed: routed,
         })
     }
     None
@@ -3316,7 +3355,7 @@ sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?
                 }
                 // Its item is the reader fact's (iterable_item_type).
                 .EncodingReader(_) -> return None
-                .Iterable(_, _, _, _, item_type) -> return Val(item_type)
+                .Iterable(_, _, _, _, item_type, _) -> return Val(item_type)
             }
         }
         .None -> {}
@@ -10123,12 +10162,13 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         method_kind := sema_stmt_for_in_method_kind(collection_expr, collection)
                         iterable_item_type := Type?{None}
                         if method_kind == None && !range_source {
-                            iterable := sema_stmt_for_in_iterable_fact(environment, program, collection.ty)
+                            iterable := sema_stmt_for_in_iterable_fact(environment, program, collection.ty, expr_span(collection_expr), scopes, context, diagnostics)
                             if iterable == None {
                                 iterable = sema_stmt_for_in_reader_fact(environment, program, collection.ty)
                             }
                             if iterable != None {
                                 fact: iterable ?? SemaForInIterableFact{method_kind: TForInMethod.Chars, item_type: Type.Named{name: "Unit"}}
+                                if !fact.routed -> valid = false
                                 method_kind = Val(fact.method_kind)
                                 iterable_item_type = Val(fact.item_type)
                             }

@@ -8,9 +8,10 @@ use jet_build_session.[
     BuildSessionJetArg,
     BuildSessionPolicy,
     BuildSessionReply,
+    BuildSessionPlan,
     BuildSessionScheduleNode,
+    BuildSessionState,
     BuildSessionValue,
-    build_plan_schedule,
     build_plan_selected_generated,
     build_session_abort,
     build_session_at,
@@ -19,6 +20,11 @@ use jet_build_session.[
     build_session_finish,
     build_session_graph,
     build_session_new,
+    build_session_schedule,
+    build_session_schedule_input,
+    build_session_schedule_name,
+    build_session_schedule_output,
+    build_session_schedule_output_count,
     build_session_set_dependencies,
     build_session_set_source,
 ]
@@ -600,9 +606,23 @@ build_graph_rules_generate: fn(session: &BuildSession, name: String, source: Str
     assert(build_graph_rules_ok(build_session_call(session, "generate", [BuildSessionValue]{.Text{value: name}}, Val(source), false, 1, 2)))
 }
 
-build_graph_rules_schedule_row: fn(node: BuildSessionScheduleNode) -> String Never! {
-    waits: loop wait in node.waits -> "{wait.path}<{wait.kind}:{wait.producer}:{wait.barrier}"
-    "{node.round} {node.kind} {node.name} [{node.outputs.join(",")}] [{waits.join(",")}]"
+build_graph_rules_schedule_row: fn(state: BuildSessionState, node: BuildSessionScheduleNode) -> String Never! {
+    outputs: loop index in 0..<build_session_schedule_output_count(state, node.producer) -> "{build_session_schedule_output(state, node.producer, index)}"
+    waits: loop wait in node.waits -> "{build_session_schedule_input(state, node.producer, wait)}<{wait.kind}:{build_session_schedule_name(state, wait.producer)}:{wait.barrier}"
+    "{node.round} {node.kind} {build_session_schedule_name(state, node.producer)} [{outputs.join(",")}] [{waits.join(",")}]"
+}
+
+// The rows of `plan`'s generation schedule (build_graph_rules_schedule_row).
+build_graph_rules_schedule_rows: fn(plan: BuildSessionPlan) -> [String] Never! {
+    permit: plan.storage.guard_read()
+    loop node in build_session_schedule(permit.value) -> build_graph_rules_schedule_row(permit.value, node)
+}
+
+// Each producer of `plan`'s generation schedule, its name and the call that
+// made it: "name: made_by".
+build_graph_rules_schedule_made: fn(plan: BuildSessionPlan) -> [String] Never! {
+    permit: plan.storage.guard_read()
+    loop node in build_session_schedule(permit.value) -> "{build_session_schedule_name(permit.value, node.producer)}: {node.made_by}"
 }
 
 // The refusal `build: fn` returning leaves, once the session is set up.
@@ -627,7 +647,7 @@ build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiag
     assert(build_graph_rules_ok(build_session_call(session, "default", [BuildSessionValue]{app}, None, false, 42, 43)))
     finished: build_session_finish(session, .Unit)
     plan: finished.plan ?? panic("the schedule admits the plan")
-    rows: loop node in build_plan_schedule(plan) -> build_graph_rules_schedule_row(node)
+    rows: build_graph_rules_schedule_rows(plan)
     assert_eq(
         rows,
         [String]{
@@ -658,7 +678,7 @@ build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiag
     assert(build_graph_rules_ok(build_session_call(session, "default", [BuildSessionValue]{app}, None, false, 52, 53)))
     finished: build_session_finish(session, .Unit)
     plan: finished.plan ?? panic("the schedule admits the plan")
-    made: loop node in build_plan_schedule(plan) -> "{node.name}: {node.made_by}"
+    made: build_graph_rules_schedule_made(plan)
     assert_eq(
         made,
         [String]{
@@ -678,8 +698,8 @@ build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiag
     assert(build_graph_rules_ok(build_session_call(session, "default", [BuildSessionValue]{app}, None, false, 52, 53)))
     finished: build_session_finish(session, .Unit)
     plan: finished.plan ?? panic("the plan is admitted")
-    made: loop node in build_plan_schedule(plan) -> node.made_by
-    assert_eq(made, [String]{"`b.generate(\"facts\")` at main.jet:3 with the `#code` at helper.jet:4"})
+    made: build_graph_rules_schedule_made(plan)
+    assert_eq(made, [String]{"facts: `b.generate(\"facts\")` at main.jet:3 with the `#code` at helper.jet:4"})
 }
 
 #Test("generation_schedule_refuses_a_step_that_waits_on_its_own_jet_source") {
@@ -731,8 +751,8 @@ build_graph_rules_round_chain: fn(session: &BuildSession, count: Int) Never! {
     build_graph_rules_round_chain(within, 17)
     finished: build_session_finish(within, .Unit)
     plan: finished.plan ?? panic("seventeen rounds fit the limit")
-    schedule: build_plan_schedule(plan)
-    assert_eq(schedule[schedule.len() - 1].round, 17)
+    rows: build_graph_rules_schedule_rows(plan)
+    assert(rows[rows.len() - 1].starts_with("17 step gen16 "), "the last of seventeen rounds holds the last step")
     past := build_graph_rules_session(125)
     build_graph_rules_round_chain(past, 18)
     diagnostic: build_graph_rules_finish_refusal(past)

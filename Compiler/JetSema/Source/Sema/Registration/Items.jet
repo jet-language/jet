@@ -148,6 +148,8 @@ use {
         type_identity_key,
         type_id_named,
         type_name,
+        type_structural_family,
+        type_structural_head_names,
         type_with_effective_parameter_fn_return,
         unit_family_distinct_defs,
         CModule,
@@ -159,6 +161,7 @@ use {
     jet_parser.[
         jfmt_decode_shapes,
         parse_generated_source,
+        parse_type_text,
         parser_line_starts,
     ]
 }
@@ -2154,11 +2157,20 @@ sema_registration_index_package_reach: fn(graph: &SemaRegistrationGraph) Never! 
 }
 
 // The impl rows registered under target type name `name`, in module/row order.
+// A structural impl (`impl [T].Trait`) is registered under its shape's family
+// (type_structural_family), which every receiver of that shape names.
 sema_registration_impl_rows_named: fn(graph: SemaRegistrationGraph, name: String) -> [SemaRegistrationRowRef] {
     found: name_find(graph.impl_row_names, name) ?? return [SemaRegistrationRowRef]{}
     slot: name_index(found)
     if slot >= graph.impl_row_buckets.len() -> return [SemaRegistrationRowRef]{}
     graph.impl_row_buckets[slot]
+}
+
+sema_registration_impl_row_key: fn(implementation: SemaRegistrationImpl) -> String {
+    if type_structural_head_names(implementation.target_type) != None {
+        if type_structural_family(implementation.target_type) == .Val(family) -> return family
+    }
+    implementation.target_type_name
 }
 
 // A Map is a sorted entry list: a whole-graph map filled in module/row order
@@ -2417,7 +2429,7 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
     impl_rows := [SemaRegistrationKeyedRow]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
-            sema_registration_keyed_row_push(impl_rows, graph.modules[module_index].impls[row].target_type_name, module_index, row)
+            sema_registration_keyed_row_push(impl_rows, sema_registration_impl_row_key(graph.modules[module_index].impls[row]), module_index, row)
         }
     }
     sema_registration_keyed_rows_sort(impl_rows)
@@ -3504,7 +3516,8 @@ sema_registration_impl_rows_trait: fn(rows: SemaRegistrationImplRows, name: Stri
 // the member file of its package that declares it.
 // `owner_rows` indexes `owner_row`'s nominals and `trait_rows` the impl
 // module's (sema_registration_impl_rows of each). `module_text` is
-// `module_row`'s identity text, which the impl's symbol keys spell.
+// `module_row`'s identity text, which the impl's symbol keys spell. A
+// structural head (`impl [T].Trait`) targets its shape over its parameters.
 sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: String, symbols: &SymbolTable, definition: ImplDef, owner_row: SemaRegistrationModule, owner_rows: SemaRegistrationImplRows, trait_rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic], item_index: Int{-1}) -> SemaRegistrationImpl {
     nominal_index: sema_registration_impl_rows_nominal(owner_rows, definition.type_name)
     target_type := Type.Named{name: definition.type_name}
@@ -3516,6 +3529,9 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
         target_identity_key = owner_row.nominals[nominal_index].identity_key
         target_module_identity = owner_row.module_identity
         owner_id = owner_row.nominals[nominal_index].symbol.id
+    } else if sema_registration_structural_head(definition.type_name) == .Val(head) {
+        target_type = head
+        target_identity_key = "{module_text}:{type_identity_key(target_type)}"
     } else {
         // An operator hook on a built-in scalar (`impl Int.Mul(Price)`)
         // receives that scalar as `self`.
@@ -3619,6 +3635,14 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, module_text:
             if !definition.type_name.contains(".") && module_is_none(row.target_module_identity) && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_builtin_impl_allowed(items, definition) {
                 diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
+            // A structural head stands for every value of its shape, so a
+            // position naming a declared type would be a concrete head.
+            if type_structural_head_names(row.target_type) == .Val(names) {
+                loop name in names {
+                    if sema_registration_impl_rows_nominal(rows, name) < 0 -> next
+                    diagnostics.push(sema_error("E0003", definition.type_span, "`impl {definition.type_name}` names the type `{name}` in its head", "a structural impl implements its trait for every value of its shape, so each position of the head is a new parameter name, not a type", "rename the parameter, as in `T` or `Item`"))
+                }
+            }
             nominal_index: sema_registration_impl_rows_nominal(rows, definition.type_name)
             if definition.trait_name == None && nominal_index >= 0 && module_row.nominals[nominal_index].kind == SemaRegistrationNominalKind.Trait {
                 diagnostics.push(sema_registration_impl_on_trait(definition))
@@ -3651,6 +3675,11 @@ sema_registration_unknown_impl_target: fn(definition: ImplDef) -> Diagnostic {
             owned_trait_is_operator(trait_name) -> "call a named method, or implement `{trait_name}` on a struct or distinct type of your own (an operator hook on `{type_name}` belongs to the package that declares the other operand type)"
             else -> "implement `{trait_name}` on a struct or distinct type of your own, or wrap `{type_name}` in one"
         }
+    }
+    if sema_registration_structural_head(type_name) != None {
+        trait_name: definition.trait_name ?? ""
+        why = "`{type_name}` stands for every value of that shape, so only the module that declares `{trait_name}` implements it there"
+        fix = "implement `{trait_name}` in the module that declares it, or wrap the value in a struct or distinct type of your own"
     }
     sema_error("E0301", definition.type_span, "`impl {header}` needs a user-defined type", why, fix)
 }
@@ -3751,7 +3780,7 @@ sema_registration_note_root_functions: fn(graph: &SemaRegistrationGraph, module_
 sema_registration_builtin_impl_allowed: fn(items: [Item], definition: ImplDef) -> Bool {
     if sema_registration_opmix_builtin_impl(items, definition) -> return true
     if definition.type_name.contains(".") -> return false
-    if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) {
+    if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) && sema_registration_structural_head(definition.type_name) == None {
         return false
     }
     trait_name: definition.trait_name ?? return false
@@ -3796,6 +3825,16 @@ sema_registration_builtin_scalar: fn(name: String) -> Type? {
         .Named(_) -> None
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(scalar)
     }
+}
+
+// The head of a structural impl (`impl [T].Trait`, `impl [T#N].Trait`,
+// `impl T?.Trait`, `impl [K: V].Trait`), which the parser names by the
+// head's canonical spelling. None for any other impl's type name.
+sema_registration_structural_head: fn(type_name: String) -> Type? {
+    if !type_name.starts_with("[") && !type_name.ends_with("?") -> return None
+    head: parse_type_text(type_name) ?? return None
+    if type_structural_head_names(head) == None -> return None
+    Val(head)
 }
 
 // The type a struct, enum, distinct or alias declaration names; "" otherwise.

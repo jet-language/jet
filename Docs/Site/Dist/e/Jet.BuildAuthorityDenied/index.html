@@ -36,11 +36,18 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare the effect, gate the ambient operation with `#Impure(&quot;reason&quot;)`, and grant it through `--allow=Exec` for Exec (or the named effect) or package/workspace policy.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>Jet.BuildAuthorityDenied</code>: <code>Tests/UI/build_action_ungranted.stderr</code>.</p>
-<pre class="diag">Error: Jet.BuildAuthorityDenied: Build action `stamp` needs `Exec`, which this build does not grant
- Why: Build authority must pass all three independent checks before any probe or action executes.
- Fix: Grant it with `--allow=Exec` or in package or workspace policy; `build: fn` declares the effect and makes the call inside `#Impure(&quot;reason&quot;)`
+<p>First UI snapshot mentioning <code>Jet.BuildAuthorityDenied</code>: <code>Tests/UI/changeset_a_failed_handler_publishes_none.stderr</code>.</p>
+<pre class="diag">Error: Jet.BuildAuthorityDenied: `meta.add`&#39;s code writes `#Unsafe`
+  --&gt; Tests/UI/changeset_a_failed_handler_publishes_none.jet:32:22
+    |
+ 32 |                 meta.add(refused, scope: &quot;refused&quot;)
+    |                      ^^^
+ Why: Code a build hands the compiler is never audited where it lands, so it can&#39;t authorize an unsafe operation; only `#Unsafe` written in a package&#39;s own source can
+ Fix: Move the unsafe operation into a function of the package&#39;s source with its own `#Unsafe(&quot;reason&quot;)` block, and call that function from the code
 More: jet-lang.dev/e/Jet.BuildAuthorityDenied
+
+1 problem found
+Run `jet explain Jet.BuildAuthorityDenied` to learn more
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

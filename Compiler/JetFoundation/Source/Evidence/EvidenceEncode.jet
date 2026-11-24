@@ -167,8 +167,17 @@ evidence_encode_derivation: fn(value: DerivationRecord, out: &[U8]) EvidenceCode
     if value.payload == {
         .None -> { out.push(U8{0}) }
         .Val(payload) -> {
-            out.push(U8{1})
-            evidence_put_string(out, derivation_payload_json(payload))
+            if payload == {
+                .FrameSchedule(_) -> {
+                    out.push(U8{1})
+                    evidence_put_string(out, derivation_payload_json(payload))
+                }
+                .BuildFactChain(writers) -> {
+                    out.push(U8{2})
+                    evidence_put_len(out, writers.len())
+                    loop writer in writers -> evidence_put_string(out, writer)
+                }
+            }
         }
     }
     return
