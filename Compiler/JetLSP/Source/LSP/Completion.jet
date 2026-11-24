@@ -111,9 +111,10 @@ lsp_completion_def_kind: fn(kind: SemKind) -> Int? Never! {
 // below `/w` is `app.store`. "" for a file `root` does not hold.
 lsp_completion_module_name: fn(root: String, path: String) -> String Never! {
     if !lsp_path_below(path, root) || !path.ends_with(".jet") -> return ""
+    bytes: path.bytes()
     from: if root.ends_with("/") -> root.count_bytes() else -> root.count_bytes() + 1
-    if from >= path.count_bytes() - 4 -> return ""
-    path.slice(from, path.count_bytes() - 4).split("/").to_list().join(".")
+    if from >= bytes.len() - 4 -> return ""
+    foundation_byte_text(bytes, from, bytes.len() - 4).split("/").to_list().join(".")
 }
 
 // Adds the top-level declarations matching `prefix` of the saved files below

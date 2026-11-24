@@ -156,7 +156,8 @@ lsp_folder_paths: fn(rows: [Dyn]) -> [String] Never! {
 // A folder URI's path, without a trailing separator.
 lsp_folder_path: fn(uri: String) -> String Never! {
     path: lsp_uri_to_path(uri)
-    if path.count_bytes() > 1 && path.ends_with("/") -> return path.slice(0, path.count_bytes() - 1)
+    bytes: path.bytes()
+    if bytes.len() > 1 && path.ends_with("/") -> return foundation_byte_text(bytes, 0, bytes.len() - 1)
     path
 }
 
@@ -196,7 +197,7 @@ lsp_file_stem: fn(path: String) -> String Never! {
     start := bytes.len()
     loop start > 0 && bytes[start - 1] != (U8{47}) -> start -= 1
     end: if path.ends_with(".jet") && bytes.len() - 4 >= start -> bytes.len() - 4 else -> bytes.len()
-    path.slice(start, end)
+    foundation_byte_text(bytes, start, end)
 }
 
 // Adds the rows of `checked`'s declarations that match `query`, only those of
