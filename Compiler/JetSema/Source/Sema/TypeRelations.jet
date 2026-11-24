@@ -2452,6 +2452,10 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
+    // A trait value meets only the traits it carries: the type inside it is
+    // not known where it is used, so no impl of another trait can be found
+    // for it (a `Shown` value passed where `Back` is expected is refused).
+    if actual_resolved == .TraitObject(carried) -> return Val(carried.contains(bound_name))
     nominal_row: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return sema_type_bound_satisfied_builtin_target(graph, actual_resolved, bound_name, caller)
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
     // The nominal row is passed in place: binding it copied the declaration.

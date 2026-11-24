@@ -1,0 +1,37 @@
+// A trait value meets only the traits it carries. A `Shown` value passed
+// where `Back` is expected is refused (E0905), as an argument and as a list
+// item, though the one type inside it implements both.
+Shown: trait {
+    show: fn(self) -> String
+}
+
+Back: trait {
+    back: fn(self) -> String
+}
+
+Point: struct {
+    x: Int
+}
+
+impl Point.Shown {
+    show: fn(self) -> String { "point {self.x}" }
+}
+
+impl Point.Back {
+    back: fn(self) -> String { "back {self.x}" }
+}
+
+take_back: fn(value: Back) -> String {
+    value.back()
+}
+
+pass: fn(value: Shown) -> String {
+    take_back(value)
+}
+
+run: fn() {
+    print(pass(Point{x: 3}))
+    shown: [Shown]{Point{x: 4}}
+    backs: [Back]{shown[0]}
+    loop item in backs -> print(item.back())
+}

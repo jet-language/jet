@@ -1,0 +1,19 @@
+# A trait value meets only the traits it carries: a `Shown` value passed
+# where `Back` is expected is refused by sema (E0905) on every tier, though
+# every implementer of `Shown` in the program implements `Back` and the
+# program writes `impl Shown.Back`. `Back` never dispatches on the key inside
+# a `Shown` value, so no second box is built around the first.
+fixture: TraitValueAsAnotherTrait.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 1
+stdout: empty
+stderr: ~ "Error: Jet.TraitNotImplemented: `Shown` isn't `Back`" # the refusal; the UI snapshot pins the whole report
+step: jet run -O1 main.jet
+exit: 1
+stdout: empty
+stderr: ~ "Error: Jet.TraitNotImplemented: `Shown` isn't `Back`" # the refusal; the UI snapshot pins the whole report
+step: jet run -O2 main.jet
+exit: 1
+stdout: empty
+stderr: ~ "Error: Jet.TraitNotImplemented: `Shown` isn't `Back`" # the refusal; the UI snapshot pins the whole report

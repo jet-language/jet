@@ -24,6 +24,7 @@ use jet_foundation.[
     sha256_hex,
     type_identity_equal,
     type_name,
+    type_unqualified_name,
 ]
 
 SemaSourceOrigin: enum {
@@ -571,15 +572,22 @@ sema_plain_carrier_mismatch: fn(required: Type, offered: Type, span: Span) -> Di
 // E0905: a value of a type that does not implement the one trait a trait
 // value names (an argument, a list item) is the missing implementation, not a
 // type mismatch. A closure gets the same report: no impl can name its type.
+// So does a value of another trait: it meets only the traits it carries.
 sema_trait_value_unimplemented: fn(required: Type, offered: Type, span: Span) -> Diagnostic? {
     if required == .TraitObject(bounds) {
-        if bounds.len() == 1 && !(offered == .TraitObject(_)) {
-            bound := bounds[0]
-            if bound.cut_last(".") == .Val(parts) -> bound = parts.after
-            name: type_name(offered)
+        if bounds.len() == 1 {
+            bound: type_unqualified_name(bounds[0])
+            name := type_name(offered)
             closure: offered == .Fn(_, _, _, _, _, _)
-            why: if closure -> "a closure has no declared type, so no impl can make it `{bound}`" else -> "`{name}` would need to implement `{bound}` before it can be used here"
-            fix: if closure -> "pass a value of a type that implements `{bound}`" else -> sema_trait_impl_fix(name, bound)
+            why := if closure -> "a closure has no declared type, so no impl can make it `{bound}`" else -> "`{name}` would need to implement `{bound}` before it can be used here"
+            fix := if closure -> "pass a value of a type that implements `{bound}`" else -> sema_trait_impl_fix(name, bound)
+            if offered == .TraitObject(carried) {
+                leaves: loop trait_name in carried -> type_unqualified_name(trait_name)
+                if leaves.contains(bound) -> return None
+                name = leaves.join(" + ")
+                why = "a `{name}` value carries only `{name}`; the type inside it isn't known here, so no impl can make it `{bound}`"
+                fix = "pass the value before it becomes a `{name}` value, if its type implements `{bound}`"
+            }
             row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
             return Val(sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix)))
         }
