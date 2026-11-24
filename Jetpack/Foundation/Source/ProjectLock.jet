@@ -144,7 +144,8 @@ env_lock_open_scope: fn(authority: ^^FoundationDirectoryAuthority, scope: String
     marker_parent: authority.child(RUNTIME_LOCK_DIR, true)
     name: "{env_lock_sanitize_scope(scope)}.lock"
     if marker_parent.create_exclusive(name, RUNTIME_LOCK_MARKER_MODE) == {
-        .Ok(writer) -> {
+        .Ok(created) -> {
+            writer := created
             writer.fsync()
             marker_parent.fsync()
         }

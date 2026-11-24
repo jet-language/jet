@@ -86,7 +86,7 @@ publication_acquire_registry_lock: fn(parent: String, name: String, delay_ms: In
     path: files.join(parent, name)
     deadline: time.unix_ns() + wait_ms * 1000000
     loop time.unix_ns() < deadline {
-        writer: if authority.create_exclusive(name, 384) == {
+        writer := if authority.create_exclusive(name, 384) == {
             .Ok(file) -> file
             .Err(error) -> if error == {
                 .AlreadyExists(_) -> {

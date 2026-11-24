@@ -1069,22 +1069,6 @@ ir_allocator_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, rec
     result
 }
 
-// `mapped.lines()`: a ViewIter over the mapping's lines. The runtime lists
-// each line's View<U8> header (the newline, and a CR before it, excluded),
-// lending the read-only bytes the MappedFile owns; the iterator takes over
-// that fresh List of headers, never a copy of the line bytes.
-ir_mapped_lines: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
-    element: ir_iter_element(ty) ?? return ir_fail_slot(b, span, "MappedFile.lines producing {ir_type_name(ty)}")
-    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    map: ir_expr(m, p, b, receiver)
-    if ir_failed(b) || map < 0 -> return -1
-    list: ir_route(m, p, b, "jet_std_fs_map_lines_view", [Int]{map}, [Bool]{true}, Type.List{element: element.copy()}, span)
-    if ir_failed(b) || list < 0 -> return -1
-    meta: ir_lazy_meta(m, p, b, element, span)
-    if meta < 0 -> return -1
-    ir_lazy_iter_from_list(m, p, b, list, element, meta, row, span)
-}
-
 // `List.try_new()` and `List.try_with_capacity(capacity)`: a new empty
 // List with room for `capacity` elements (none for `try_new`), or the
 // try_reserve `Err(AllocError)`.

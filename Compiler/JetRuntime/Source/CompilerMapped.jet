@@ -531,14 +531,6 @@ compiler_mapped_place: fn(fd: I64, to: I64, slot: I64) -> Bool {
     }
 }
 
-#Export(c) jet_std_fs_map_len: fn(map: I64) -> I64 {
-    jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40})))
-}
-
-#Export(c) jet_std_fs_map_is_empty: fn(map: I64) -> Bool {
-    rt_text_word(wrapping(map + I64{40})) == I64{0}
-}
-
 // posix_madvise over the whole mapping: madvise(pointer, length, advice).
 // Core passes MADV_NORMAL 0, RANDOM 1, SEQUENTIAL 2, WILLNEED 3, DONTNEED 4
 // or COLD 20. The bytes are read-only and private to a file (the file, its
@@ -555,95 +547,6 @@ compiler_mapped_place: fn(fd: I64, to: I64, slot: I64) -> Bool {
         return compiler_fs_errno(HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), -result, error)
     }
     I64{1}
-}
-
-// Byte windows lend the read-only mapped bytes the Map64 owner holds: the
-// route writes (data, length) and IR builds the View<U8> header over them,
-// which owns nothing. Bounds are the exact Int carriers; a boxed Int lies
-// outside any mapping.
-compiler_mapped_bound: fn(value: I64) -> I64 {
-    if (int_inline(value) && value >= I64{0}) { return value }
-    I64{-1}
-}
-
-compiler_mapped_text: fn(text: I64, value: I64) -> I64 {
-    shown: jet_rt_int_to_string(value)
-    joined: jet_rt_string_append(text, shown)
-    jet_rt_string_drop(shown)
-    joined
-}
-
-compiler_mapped_window_error: fn(map: I64, first: I64, separator: I64, second: I64, error: I64) -> I64 {
-    cause := jet_rt_string_clone(rt_static_text("mapped window "))
-    cause = compiler_mapped_text(cause, first)
-    cause = jet_rt_string_append(cause, separator)
-    cause = compiler_mapped_text(cause, second)
-    cause = jet_rt_string_append(cause, rt_static_text(" is outside file length "))
-    length: jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40})))
-    cause = compiler_mapped_text(cause, length)
-    compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), I64{0}, cause, error)
-}
-
-compiler_mapped_lend: fn(map: I64, start: I64, end: I64, output: I64, length: I64) -> I64 {
-    rt_text_store(output, wrapping(rt_text_word(wrapping(map + I64{32})) + start))
-    rt_text_store(length, end - start)
-    I64{1}
-}
-
-// `window(start, end)`: the half-open byte range start..<end.
-#Export(c) jet_std_fs_map_window_view: fn(map: I64, start: I64, end: I64, output: I64, length: I64, error: I64) -> I64 {
-    first: compiler_mapped_bound(start)
-    last: compiler_mapped_bound(end)
-    if (first < I64{0} || last < first || last > rt_text_word(wrapping(map + I64{40}))) {
-        return compiler_mapped_window_error(map, start, rt_static_text(".."), end, error)
-    }
-    compiler_mapped_lend(map, first, last, output, length)
-}
-
-// `window_len(offset, length)`: `count` bytes from `offset`.
-#Export(c) jet_std_fs_map_window_len_view: fn(map: I64, offset: I64, count: I64, output: I64, length: I64, error: I64) -> I64 {
-    first: compiler_mapped_bound(offset)
-    size: compiler_mapped_bound(count)
-    total: rt_text_word(wrapping(map + I64{40}))
-    if (first < I64{0} || size < I64{0} || first > total || size > total - first) {
-        return compiler_mapped_window_error(map, offset, rt_static_text(" length "), count, error)
-    }
-    compiler_mapped_lend(map, first, first + size, output, length)
-}
-
-// The index of the first LF at or after `at`, or `total`.
-compiler_mapped_newline: fn(base: I64, at: I64, total: I64) -> I64 {
-    cursor := at
-    loop cursor < total && rt_text_byte(wrapping(base + cursor)) != (I64{10}) -> cursor += I64{1}
-    cursor
-}
-
-// `lines()`: one 24-byte View<U8> header (length, 0, data) per line, the LF
-// and a CR before it excluded; a final unterminated line counts, an empty
-// trailing one does not. The List buffer is exactly count*24 bytes.
-#Export(c) jet_std_fs_map_lines_view: fn(map: I64, output: I64) -> I64 {
-    base: rt_text_word(wrapping(map + I64{32}))
-    total: rt_text_word(wrapping(map + I64{40}))
-    count := I64{0}
-    at := I64{0}
-    loop at < total {
-        count += I64{1}
-        at = compiler_mapped_newline(base, at, total) + I64{1}
-    }
-    data: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{24}, I64{8})
-    slot := data
-    at = I64{0}
-    loop at < total {
-        newline: compiler_mapped_newline(base, at, total)
-        end: if (newline > at && rt_text_byte(wrapping(base + newline - I64{1})) == I64{13}) -> newline - I64{1} else -> newline
-        rt_text_store(slot, end - at)
-        rt_text_store(wrapping(slot + I64{8}), I64{0})
-        rt_text_store(wrapping(slot + I64{16}), wrapping(base + at))
-        slot = wrapping(slot + I64{24})
-        at = newline + I64{1}
-    }
-    rt_text_store(output, data)
-    count
 }
 
 #Export(c) jet_rt_record_get_jet_mapped_file_path: fn(map: I64) -> I64 {
