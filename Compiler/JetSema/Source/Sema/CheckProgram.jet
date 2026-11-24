@@ -5664,16 +5664,20 @@ sema_check_body_claim: fn(plan: SemaBodyPlan, queue: SemaBodyQueue, trace_sink: 
     if rank >= total {
         return SemaBodyClaim{position: -1, job: SemaBodyJob.TopLevel{item_index: -1}, stream_module: -1, module_index: -1}
     }
-    sema_check_body_progress(trace_sink, rank, total)
+    sema_check_body_progress(trace_sink, rank, 1, total)
     position: plan.order[rank]
     SemaBodyClaim{position: position, job: plan.jobs[position], stream_module: -1, module_index: -1}
 }
 
-// Every SEMA_CHECK_PROGRESS_STRIDE-th claimed rank of a body pass's `total`
-// jobs and the last report the rank as `sema.bodies` progress.
-sema_check_body_progress: fn(trace_sink: CompilerTraceSink?, rank: Int, total: Int) {
-    if rank %% SEMA_CHECK_PROGRESS_STRIDE == 0 || rank + 1 == total {
-        if trace_sink == .Val(sink) -> sink.progress("sema.bodies", rank, total)
+// A claim of `count` jobs from rank `rank` of a body pass's `total` reports
+// its last rank as `sema.bodies` progress when it holds a multiple of
+// SEMA_CHECK_PROGRESS_STRIDE or the pass's last job. A body stream claims up
+// to 4 jobs at once from a rank the modules before it offset, so only the
+// claim's whole range is sure to meet a stride.
+sema_check_body_progress: fn(trace_sink: CompilerTraceSink?, rank: Int, count: Int, total: Int) {
+    last: rank + count - 1
+    if last - last %% SEMA_CHECK_PROGRESS_STRIDE >= rank || last + 1 >= total {
+        if trace_sink == .Val(sink) -> sink.progress("sema.bodies", last, total)
     }
 }
 
@@ -5981,7 +5985,7 @@ sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
             }
             if step.action == {
                 .Body -> {
-                    sema_check_body_progress(trace_sink, step.rank, step.total)
+                    sema_check_body_progress(trace_sink, step.rank, step.claims.len(), step.total)
                     if own_program == {
                         .Val(program) -> {
                             sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, true, step.can_finish)
@@ -6005,7 +6009,7 @@ sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
         step: sema_check_body_stream_lead_step(handle, done)
         if step.action == {
             .Body -> {
-                sema_check_body_progress(trace_sink, step.rank, step.total)
+                sema_check_body_progress(trace_sink, step.rank, step.claims.len(), step.total)
                 if own_program == {
                     .Val(program) -> {
                         sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, false, false)

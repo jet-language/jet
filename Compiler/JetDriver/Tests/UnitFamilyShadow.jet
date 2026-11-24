@@ -1,0 +1,23 @@
+// A module's own type named like a Prelude unit family shadows the catalog
+// family (sema_units_inject): `Percent: distinct Int(0..100)` beside the
+// Prelude `#UnitFamily(Percent, …)` is the module's type, not a duplicate.
+use jet_driver.[JetDriverCompileMode, jet_driver_compile]
+
+#Test("a module type named like a Prelude unit family shadows the family") {
+    source: [String]{
+        "Percent: distinct Int(0..100)",
+        "",
+        "run: fn() {{",
+        "    _: Percent.from_int(5)",
+        "}}",
+        "",
+    }
+    request := seams_request(source.join("\n"), JetDriverCompileMode.Program)
+    request.core_sources = idiom_core_rows()
+    result: jet_driver_compile(request)
+    codes := [String]{}
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
+    }
+    assert(codes.len() == 0, codes.join("; "))
+}

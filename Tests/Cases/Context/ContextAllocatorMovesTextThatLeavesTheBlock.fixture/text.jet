@@ -83,12 +83,15 @@ run: fn() {
         names.push([String]{word(6), word(7)}.join("+"))
         table["key {word(8)}"] = 8
     }
-    left: word(10)
+    // A number the optimizer can't know, and the concatenation's bytes read,
+    // not only its length: a text read only for its length costs no bytes
+    // at -O1 and -O2, so the block would serve nothing.
+    left: word(names.len() + 8)
     concat_len := 0
     before: reuser.taken
     #Context(allocator: reuser) {
         both: "{left}!"
-        concat_len = both.len()
+        if both.ends_with("0!") -> concat_len = both.len()
     }
     concat_served: reuser.taken > before
     from_return: returned(reuser)
