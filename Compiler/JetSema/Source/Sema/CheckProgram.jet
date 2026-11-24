@@ -11033,7 +11033,14 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         // declared-before-use position rule.
         comptime_scopes.slots[at].table.position_free = source.prepared.len() > 0
         comptime_scopes.slots[at].table.comptime_runtime_locals = source.runtime_locals.copy()
+        first_finding: diagnostics.len()
         checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, comptime_scopes.slots[at].table, state, tail_store, context, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, comptime_scopes.slots[at].table, state, tail_store, context, diagnostics)
+        // A rule batch's loop is parsed text (sema_call_rule_batch_expression),
+        // whose offsets name no place in the rule's file, so a finding in it
+        // is placed at the batch's span, the rule's.
+        if context.compiler_records {
+            loop index in first_finding..<diagnostics.len() -> diagnostics[index].span = Val(source.span)
+        }
         comptime_scopes.slots[at].table.comptime_runtime_locals = [String]{}
         comptime_scopes.slots[at].table.position_free = false
         sema_scope_rollback(comptime_scopes.slots[at].table, mark)

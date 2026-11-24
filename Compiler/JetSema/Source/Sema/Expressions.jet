@@ -7530,6 +7530,9 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if {
             id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             id == AST_NODE_GENERATED && type_name == "CompilerRejection" -> sema_expression_compiler_record_literal(type_name, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            // A rule batch's loop (sema_call_rule_batch_expression) is parsed
+            // text, so its record literals are ordinary struct literals.
+            context.compiler_records && SEMA_CALL_RULE_RECORDS.contains(type_name) -> sema_expression_compiler_record_literal(type_name, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -7609,6 +7612,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
         .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if {
             id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             id == AST_NODE_GENERATED && type_name == "CompilerRejection" -> sema_expression_compiler_record_literal(type_name, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            context.compiler_records && SEMA_CALL_RULE_RECORDS.contains(type_name) -> sema_expression_compiler_record_literal(type_name, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
