@@ -1,0 +1,8 @@
+Error: Jet.FieldWriteWithoutMarker: Cannot edit through `p` — it is a read-only arm binding
+  --> Tests/UI/arm_binding_write_blames_the_binding.jet:14:26
+    |
+ 14 |         .Point(p) -> { p.x = 5 }
+    |                          ^
+ Why: An arm binds a read window into `item` when the subject it tests is written without `&`, so `p` can't change it, whatever access `item` has
+ Fix: Write the subject with `&` so the arm binds a write window: `if &subject == { … }`
+More: jet-lang.dev/e/Jet.FieldWriteWithoutMarker

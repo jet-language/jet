@@ -105,6 +105,10 @@ SemaOwnershipViewFact: struct {
     // `task.group` body: it is kept so a child capturing it is judged against
     // its place, but it neither blocks nor is blocked by other views.
     contested: Bool{false},
+    // A payload binding a pattern arm opened over its subject
+    // (sema_ownership_record_pattern_view): a refused write through it blames
+    // the binding, not the owner it reads.
+    pattern: Bool{false},
     active: Bool,
     invalidated: Bool,
     invalidated_span: Span,
@@ -596,6 +600,7 @@ sema_ownership_view_snapshot: fn(source: SemaOwnershipViewFact) -> SemaOwnership
         reborrow_parent: source.reborrow_parent,
         lexical: source.lexical,
         contested: source.contested,
+        pattern: source.pattern,
         active: source.active,
         invalidated: source.invalidated,
         invalidated_span: source.invalidated_span,
@@ -1889,6 +1894,7 @@ sema_ownership_record_pattern_view: fn(state: &SemaOwnershipState, carrier: Stri
     index: state.views.len() - 1
     state.views[index].reborrow_parent = parent
     state.views[index].lexical = access == AccessConvention.Write
+    state.views[index].pattern = true
     true
 }
 
@@ -2541,7 +2547,7 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
     }
     has_view := sema_ownership_view_exists_for_expr(state, expr, scopes)
     if has_view && sema_ownership_view_has_access(state, expr, scopes, AccessConvention.Read) {
-        diagnostics.push(sema_error("E0205", span, "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+        diagnostics.push(sema_ownership_diag_read_view_write(state, expr, places[0].root, span, scopes))
         return false
     }
     binding: sema_ownership_binding_for_expr(state, expr, scopes) ?? return false
@@ -3429,7 +3435,7 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
     if !capability -> return true
     has_view: sema_ownership_view_exists_for_expr(state, expr, scopes)
     if has_view && sema_ownership_view_has_access(state, expr, scopes, AccessConvention.Read) {
-        diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
+        diagnostics.push(sema_ownership_diag_read_view_write(state, expr, places[0].root, expr_span(expr), scopes))
         return false
     }
     binding: sema_ownership_binding_for_expr(state, expr, scopes) ?? return false
@@ -3474,6 +3480,19 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
         return false
     }
     !guard_refused
+}
+
+// E0205 for a write through a read view. A payload binding of a pattern arm
+// whose subject is written without `&` (`.Point(p) -> { p.x = 5 }`) is
+// read-only whatever access the owner it reads has, so the report blames the
+// binding and asks for a write subject; any other read view blames `root`.
+sema_ownership_diag_read_view_write: fn(state: &SemaOwnershipState, expr: Expr, root: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
+    loop fact in state.views {
+        if !fact.active || !fact.pattern || fact.access != AccessConvention.Read || fact.carrier == root -> next
+        if !sema_ownership_view_fact_matches_expr(fact, expr, scopes) -> next
+        return sema_error("E0205", span, "cannot edit through `{fact.carrier}` — it is a read-only arm binding", "an arm binds a read window into `{root}` when the subject it tests is written without `&`, so `{fact.carrier}` can't change it, whatever access `{root}` has", "write the subject with `&` so the arm binds a write window: `if &subject == {{ … }}`")
+    }
+    sema_error("E0205", span, "cannot edit through `{root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead")
 }
 
 // Rust's assignment statement checks: a field write through an immutable
