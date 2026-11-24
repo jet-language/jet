@@ -17,8 +17,7 @@ use builtin: jet_builtins
 // resolve like any other, so a program's own `Signed` shadows them. Applied
 // to a standard size, a family is the compiler's own type for it, so
 // `Unsigned<8>` and `U8` are one type, every report shows `U8`, and
-// `Unsigned<24>` is E0314. The familiar names (`U8`, `F32`) are still the
-// compiler's own, not aliases declared here.
+// `Unsigned<24>` is E0314.
 Signed: struct<bits: Int> {
     raw: builtin.Word<bits>,
 }
@@ -30,6 +29,21 @@ Unsigned: struct<bits: Int> {
 IEEE: struct<exponent: Int, fraction: Int> {
     raw: builtin.FloatWord<exponent, fraction>,
 }
+
+// The size names. Each is an alias of one family size, and the compiler
+// reads its spellings from these lines (FOUNDATION_SIZE_ALIASES), so a file
+// that declares, imports or takes as a type parameter a name of its own
+// spelled like one keeps its own.
+I8: Signed<8>
+I16: Signed<16>
+I32: Signed<32>
+I64: Signed<64>
+U8: Unsigned<8>
+U16: Unsigned<16>
+U32: Unsigned<32>
+U64: Unsigned<64>
+F32: IEEE<8, 23>
+F64: IEEE<11, 52>
 
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
 // including the optional-to-failure view, are ordinary reachable Jet bodies.

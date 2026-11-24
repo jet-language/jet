@@ -1,0 +1,17 @@
+// A size name a nested module declares is that module's own type inside
+// it; outside the module, in the same file, `U8` is still Core's 8-bit
+// whole number.
+sizes: module {
+    U8: struct {
+        label: String,
+    }
+
+    describe: fn(value: U8) -> String { value.label }
+}
+
+widen: fn(value: U8) -> Int { Int{value} }
+
+run: fn() {
+    print(sizes.describe(sizes.U8{label: "nested"}))
+    print(widen(U8{7}))
+}

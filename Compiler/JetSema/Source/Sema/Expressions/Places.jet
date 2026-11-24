@@ -25,6 +25,7 @@ use {
         Type,
         type_none,
         builtin_numeric_kind,
+        foundation_named_type,
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_program,
         core_source_owns_type,
@@ -744,7 +745,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are the
     // numeric type's own constants.
     if base_local_slot == None || member == "MIN" || member == "MAX" || member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON" {
-        if sema_expression_numeric_bound_type(base, member) == .Val(bound_type) {
+        if sema_expression_numeric_bound_type(base, member, environment, program, scopes) == .Val(bound_type) {
             // Rust `numeric_const_type`: a numeric constant is a value, not a
             // call, so the site is known-pure rather than an unknown callee.
             if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, diagnostics) {
@@ -1695,16 +1696,32 @@ sema_expression_math_swizzle_parse: fn(slots: SemaSwizzleSlots, member: String, 
 
 // Rust `numeric_type_from_name` + `numeric_const_type`: the type of
 // `Numeric.MEMBER`, or None when `base` is not a numeric type name or
-// `member` is not one of its constants.
-sema_expression_numeric_bound_type: fn(base: Expr, member: String) -> Type? {
+// `member` is not one of its constants. The name means what it means
+// where it is written: a program's `Byte: Unsigned<8>` is U8, and its own
+// type spelled `U8` has no such constants.
+sema_expression_numeric_bound_type: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
+    integer_member: member == "MIN" || member == "MAX"
+    if !integer_member && member != "INFINITY" && member != "NEG_INFINITY" && member != "NAN" && member != "EPSILON" -> return None
     if base == .Ident(owner_name, _, _) {
-        kind: builtin_numeric_kind(owner_name) ?? return None
-        if member == "MIN" || member == "MAX" -> return Val(kind.ty)
-        if !kind.integer && (member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON") {
-            return Val(kind.ty)
-        }
+        written: sema_expression_written_type(owner_name, environment, program, scopes)
+        if written == .Named(_) -> return None
+        kind: builtin_numeric_kind(type_name(written)) ?? return None
+        if integer_member -> return Val(kind.ty)
+        if !kind.integer -> return Val(kind.ty)
     }
     None
+}
+
+// The type the bare type name `name` spells where it is written: the type
+// a declaration or import the scope sees names (`Byte: Unsigned<8>` is U8,
+// a program's own `U8` struct is its own), else the compiler's own type
+// the spelling names (`U8`, `Int`).
+sema_expression_written_type: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type {
+    if sema_expression_type_symbol(scopes, environment, program, name) == None -> return foundation_named_type(name)
+    if program.registration_graph == .Val(graph) {
+        return sema_type_graph_resolve_named(graph, name, sema_scope_caller_row(environment, graph))
+    }
+    Type.Named{name: name}
 }
 
 // Reading a secret-bearing value's raw bytes is an exposure.

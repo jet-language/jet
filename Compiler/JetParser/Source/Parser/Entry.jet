@@ -428,6 +428,7 @@ parser_parse_prepared: fn(input: &&ParserFenceExpansion, lexer_diagnostics: [Dia
     word_ids: parser_word_ids_for(tables)
     state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{tables.move()}, position: 0, diagnostics: leading.move(), source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads, words: word_ids}
     state.marker_scopes = parser_marker_scopes(state.tokens, state.tables[0])
+    state.bound_size_names = parser_bound_size_names(state.tokens, state.tables[0])
     program := parser_parse_program(state)
     program.has_scope_member = state.has_scope_member
     program.has_task_spawn = state.has_task_spawn
@@ -457,7 +458,9 @@ parser_parse_prepared: fn(input: &&ParserFenceExpansion, lexer_diagnostics: [Dia
 // `parser_reexport_declarations`, `parser_debug_trace_sites`, and
 // `parser_state_marker_migration` all map-reduce per chunk, joining compact
 // summaries in source order. Any chunk error or whole-file directive hands
-// the untouched stream to the one-thread parse for exact diagnostics.
+// the untouched stream to the one-thread parse for exact diagnostics, as
+// does a chunk that binds a size name (parser_bound_size_names), which
+// changes how the whole file reads that name.
 
 // A chunk thread is admitted for at least this many tokens.
 PARSER_CHUNK_MIN_TOKENS: 8192
@@ -837,7 +840,7 @@ parser_prepare_sliced_slot: fn(tokens: [Token], tables: TokenTables, source: [U8
     chunk_lines := if line_starts.len() > 0 && permit.value.line_idx_end > permit.value.line_idx_start -> line_starts.slice(permit.value.line_idx_start, permit.value.line_idx_end) else -> [Int]{}
     colon := if permit.value.needs_colon -> parser_colon_declarations_local(chunk_tokens, chunk_tables) else -> ParserColonLocal{candidates: [ParserColonInstance]{}, declared_modules: [Int]{}, declared_others: [Int]{}, clean: true}
     checked: parser_chunk_validate_tokens(chunk_tokens, chunk_tables, permit.value.index == 0, permit.value.is_last, expect_leading_semi)
-    whole: checked.whole || !colon.clean
+    whole: checked.whole || !colon.clean || parser_bound_size_names(chunk_tokens, chunk_tables).len() > 0
     scopes := if whole || checked.fences -> [ParserMarkerScope]{} else -> parser_marker_scopes_chunk(chunk_tokens, chunk_tables)
     permit.value.prepared.push(ParserChunkPrepared{tokens: chunk_tokens.move(), tables: chunk_tables.move(), source: chunk_source.move(), source_offset: permit.value.byte_start, line_starts: chunk_lines.move(), line_base: permit.value.line_idx_start, colon: colon.move(), marker_scopes: scopes.move(), whole: whole, fences: checked.fences})
     1
@@ -866,7 +869,7 @@ parser_prepare_direct_slot: fn(source: [U8], slot: Shared<ParserChunkSlot>) -> I
     chunk_source := if source.len() > 0 && permit.value.byte_end > permit.value.byte_start -> source.slice(permit.value.byte_start, permit.value.byte_end) else -> [U8]{}
     colon := parser_colon_declarations_local(chunk_tokens, chunk_tables)
     checked: parser_chunk_validate_tokens(chunk_tokens, chunk_tables, permit.value.index == 0, permit.value.is_last, true)
-    whole: checked.whole || !colon.clean
+    whole: checked.whole || !colon.clean || parser_bound_size_names(chunk_tokens, chunk_tables).len() > 0
     scopes := if whole || checked.fences -> [ParserMarkerScope]{} else -> parser_marker_scopes_chunk(chunk_tokens, chunk_tables)
     permit.value.prepared.push(ParserChunkPrepared{tokens: chunk_tokens.move(), tables: chunk_tables.move(), source: chunk_source.move(), source_offset: data.source_offset, line_starts: data.line_starts.move(), line_base: data.line_base, colon: colon.move(), marker_scopes: scopes.move(), whole: whole, fences: checked.fences})
     1

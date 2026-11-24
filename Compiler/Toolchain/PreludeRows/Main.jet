@@ -22,7 +22,7 @@ use {
     files: core.files
     process: core.process
     core.encoding.[Dyn]
-    jet_foundation.[DIAGNOSTIC_ERROR, EnumDef, Item, StructDef, Type, compiler_take_rows, foundation_fixed_integers]
+    jet_foundation.[DIAGNOSTIC_ERROR, EnumDef, Item, StructDef, Type, compiler_take_rows, foundation_size_alias]
     jet_parser.[jfmt_escape_str_lit, parse_source]
     jet_sema.[
         sema_derive_builtin_providers,
@@ -46,10 +46,7 @@ NODE_HEIGHT: 12
 
 // Whether `name` spells a fixed-width integer (`U8`, `I64`).
 fixed_int: fn(name: String) -> Bool Never! {
-    loop kind in foundation_fixed_integers() {
-        if kind.name == name -> return true
-    }
-    false
+    if foundation_size_alias(name) == .Val(ty) -> ty == .IntN(_, _) else -> false
 }
 
 #Error

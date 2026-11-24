@@ -1617,7 +1617,11 @@ name: a mismatch with `Unsigned<8>` says `U8`. Any other size, such as
 `Unsigned<24>`, is E0314; a narrower set of values is a range type such as
 `Int(0..127)`. The family names resolve like any other name: a program that
 declares or imports its own `Signed` means its own type wherever it writes
-`Signed<8>`.
+`Signed<8>`. The size names are the prelude's aliases (`U8: Unsigned<8>`),
+so they too give way to a file's own binding: a file that declares or
+imports a `U8`, or names a type parameter `U8`, means that type by `U8`. A
+program's own alias of a size (`Byte: Unsigned<8>`) is that size, with its
+constants, statics and literal: `Byte.MAX`, `Byte{7}`.
 
 ## Closures and function values
 
