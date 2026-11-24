@@ -1,0 +1,12 @@
+# A test outcome is a recorded execution in the one derivation relation:
+# `jet test` interns the outcome's record into the evidence report's relation,
+# and the evidence row names that record by its id.
+fixture: DerivationRelationRecordsATestOutcome.fixture
+env: NO_COLOR=1
+step: jet test main.jet --json
+exit: 0
+json: stdout doc $.evidence.derivations[?rule="evidence-record"] #= 1 # one record for the one outcome
+json: stdout doc $.evidence.derivations[?rule="evidence-record"][0].method = "recorded_execution"
+json: stdout doc $.evidence.derivations[?rule="evidence-record"][0].producer = "jet-test"
+json: stdout doc $.evidence.derivations[?rule="evidence-record"][0].claim = "double doubles"
+json: stdout doc $.evidence.evidence[0].derivation.id == $.evidence.derivations[?rule="evidence-record"][0].id # the row names its record

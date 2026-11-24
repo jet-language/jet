@@ -15,6 +15,7 @@ use jet_foundation.[
     Span,
     SymbolKind,
     Type,
+    derivation_record_reference,
     diagnostic_registry_row,
     expr_span,
     type_name,
@@ -195,7 +196,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
                 scheduled := lambda
                 scheduled.meta.frame_schedule = facts.schedule
                 scheduled.meta.frame_schedule_explanation = facts.explanation
-                scheduled.meta.frame_schedule_derivation = facts.derivation
+                scheduled.meta.frame_schedule_derivation = facts.derivation_record
                 callback_source = Expr.Lambda{lambda: scheduled, id: node}
             }
             frame_refusal = facts.error
@@ -218,7 +219,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         if callback.kind == {
             .Lambda(lambda) -> {
                 schedule = lambda.frame_schedule
-                derivation = lambda.frame_schedule_derivation
+                if lambda.frame_schedule_derivation == .Val(record) -> derivation = Val(derivation_record_reference(record))
             }
             .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
         }

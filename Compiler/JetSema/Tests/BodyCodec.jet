@@ -53,7 +53,8 @@ use {
         sema_core_bodies_record,
         sema_hardware_empty_use,
         sema_collect_comptime_declarations,
-        sema_finalize_registration_graph,
+        sema_finalize_graph,
+        sema_graph_trail_init,
         sema_has_error_since,
         sema_registration_prepare_graph,
     ]
@@ -66,6 +67,7 @@ use {
         DeclRow,
         Diagnostic,
         FnBody,
+        Interner,
         InternerDelta,
         ModuleID,
         Span,
@@ -74,7 +76,9 @@ use {
         TFuncKind,
         TGenericParam,
         Type,
+        TypeID,
         body_codec_get_count,
+        body_codec_get_list_type,
         body_codec_get_fnbody,
         body_codec_get_string,
         body_codec_out,
@@ -89,6 +93,7 @@ use {
         name_count,
         name_find,
         name_table_sized,
+        type_syntax,
     ]
 }
 
@@ -165,6 +170,8 @@ body_codec_source: fn() -> String {
 // which loads them. `extra` is source text added after body_codec_source().
 // With `own_entry`, the compile's entry is a module of its own, not `main`,
 // so the compiler-owned nominals registration puts in the entry live there.
+// The result keeps its registration graph, whose interner names the types
+// of its function checks.
 body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}, own_entry: Bool{false}) -> SemaGraphResult? Err! {
     threads: compiler_threads_single()
     loading: hooks.guard_read().value.core_bodies != None
@@ -175,7 +182,8 @@ body_codec_check: fn(failures: &[String], package: String, hooks: Shared<SemaReg
         failures.push("the declaration pass lost its registration graph")
         return None
     }
-    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
+    trail := sema_graph_trail_init()
+    checked := sema_finalize_graph(graph, trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, true, None)
     if !checked.complete {
         failures.push("checking failed {checked.diagnostics:Debug}")
         return None
@@ -280,7 +288,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     loop function in functions {
         out := body_codec_out()
         body_codec_put_fnbody(out, function)
-        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move()}
+        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), types: out.types.move()}
         read: body_codec_get_fnbody(out.bytes, input)
         if input.failed || input.at != input.end {
             failures.push("{function.key}: the read failed at byte {input.at} of {input.end}")
@@ -311,7 +319,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         loop cut in cuts {
             out := body_codec_out()
             body_codec_put_fnbody(out, function)
-            input := BodyCodecIn{at: 0, end: cut, failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move()}
+            input := BodyCodecIn{at: 0, end: cut, failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), types: out.types.move()}
             body_codec_get_fnbody(out.bytes, input)
             if !input.failed {
                 failures.push("{function.key}: a read of {cut} of {size} bytes did not fail")
@@ -330,7 +338,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     loop packet in packets {
         out := body_codec_out()
         body_codec_put_semaparallelbody(out, packet)
-        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move()}
+        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), types: out.types.move()}
         read: body_codec_get_semaparallelbody(out.bytes, input)
         if input.failed || input.at != input.end {
             failures.push("packet {packet.job_index}: the read failed at byte {input.at} of {input.end}")
@@ -367,7 +375,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
             }
             listed[text] = true
         }
-        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), indexed: true, strings: out.strings.move()}
+        input := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), indexed: true, strings: out.strings.move(), types: out.types.move()}
         read: body_codec_get_semaparallelbody(out.bytes, input)
         if input.failed || input.at != input.end {
             failures.push("packet {packet.job_index}: the read failed at byte {input.at} of {input.end}")
@@ -383,7 +391,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
             failures.push("packet {packet.job_index}: the packet read back writes other bytes or strings")
         }
         // A position past the list fails the read.
-        short := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: input.symbols.move(), decls: input.decls.move(), modules: input.modules.move(), indexed: true}
+        short := BodyCodecIn{at: 0, end: out.bytes.len(), failed: false, symbols: input.symbols.move(), decls: input.decls.move(), modules: input.modules.move(), indexed: true, types: input.types.move()}
         body_codec_get_semaparallelbody(out.bytes, short)
         if listed.len() > 0 && !short.failed {
             failures.push("packet {packet.job_index}: a read without its strings did not fail")
@@ -405,7 +413,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         loop cut in cuts {
             out := body_codec_out()
             body_codec_put_semaparallelbody(out, packet)
-            input := BodyCodecIn{at: 0, end: cut, failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move()}
+            input := BodyCodecIn{at: 0, end: cut, failed: false, symbols: out.symbols.move(), decls: out.decls.move(), modules: out.modules.move(), types: out.types.move()}
             body_codec_get_semaparallelbody(out.bytes, input)
             if !input.failed {
                 failures.push("packet {packet.job_index}: a read of {cut} of {size} bytes did not fail")
@@ -446,12 +454,13 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         decls: sema_core_bodies_keys(bodies.bytes, record)
         modules: sema_core_bodies_keys(bodies.bytes, record)
         strings: sema_core_bodies_keys(bodies.bytes, record)
+        types: body_codec_get_list_type(bodies.bytes, record)
         size: body_codec_get_count(bodies.bytes, record, 1)
         end: record.at + size
         if keys.get(key) == None {
             failures.push("{key}: captured, but no checked Prelude function has its key")
         }
-        input := BodyCodecIn{at: record.at, end: end, failed: false, symbols: (loop _ in symbols -> SymbolID{id: U32{1}}), decls: (loop _ in decls -> DeclID{row: stand.row}), modules: (loop _ in modules -> ModuleID{id: U32{1}}), indexed: true, strings: strings.move()}
+        input := BodyCodecIn{at: record.at, end: end, failed: false, symbols: (loop _ in symbols -> SymbolID{id: U32{1}}), decls: (loop _ in decls -> DeclID{row: stand.row}), modules: (loop _ in modules -> ModuleID{id: U32{1}}), indexed: true, strings: strings.move(), types: (loop _ in types -> TypeID{id: U32{1}})}
         packet: body_codec_get_semaparallelbody(bodies.bytes, input)
         if input.failed || input.at != end {
             failures.push("{key}: the packet read failed at byte {input.at} of {end}")
@@ -503,6 +512,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
         _: sema_core_bodies_keys(read.bytes, record)
         _: sema_core_bodies_keys(read.bytes, record)
         strings: sema_core_bodies_keys(read.bytes, record)
+        _: body_codec_get_list_type(read.bytes, record)
         size: body_codec_get_count(read.bytes, record, 1)
         last: symbols == ([String]{"core.a"}) && strings == ([String]{"core.b"}) && size == 2 && read.bytes[record.at] == U8{3}
         if !last -> panic("BodyCodec: the record of `core.b` is not its last capture")
@@ -629,6 +639,22 @@ body_codec_file: fn(captures: &&SemaCoreCaptures) -> [U8] {
     sema_core_bodies_bytes(held.bodies.move(), held.context)
 }
 
+// `text` (a Debug rendering) with each `TypeID { id: N }` spelled as the
+// type `interner` holds at N.
+body_codec_types_spelled: fn(text: String, interner: Interner) -> String {
+    parts: text.split("TypeID {{ id: ").to_list()
+    spelled := [String]{parts[0].copy()}
+    loop index in 1..<parts.len() {
+        part: parts[index]
+        close: part.find(" }}")
+        if close < 0 -> panic("BodyCodec: a TypeID rendering with no close")
+        id: Int.parse(part.slice(0..<close)) ?? panic("BodyCodec: a TypeID rendering with no number")
+        spelled.push("{type_syntax(interner, TypeID{id: U32{id}}):Debug}")
+        spelled.push(part.slice(close + 2..<part.len()))
+    }
+    spelled.join("")
+}
+
 // Checks `main` (body_codec_check of `package`, `core`) as the Core
 // library's check does, then again with the bodies file that check wrote:
 // every function check is loaded, and each module's result and the
@@ -670,6 +696,10 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     if loaded.modules.len() != captured.modules.len() {
         failures.push("{captured.modules.len()} modules were checked from text and {loaded.modules.len()} with loaded checks")
     }
+    // Each check interns its types in its own order, so the functions compare
+    // by the types their ids name, not by the ids.
+    text_types: if captured.registration_graph == .Val(graph) -> graph.interner.copy() else -> panic("BodyCodec: the check from text kept no registration graph")
+    loaded_types: if loaded.registration_graph == .Val(graph) -> graph.interner.copy() else -> panic("BodyCodec: the loading check kept no registration graph")
     loop (position, text) in captured.modules {
         if position >= loaded.modules.len() -> break
         row: loaded.modules[position]
@@ -679,7 +709,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
                 failures.push("{function.key}: checked from text, not loaded")
             }
         }
-        if "{row.functions:Debug}" != "{text.functions:Debug}" {
+        if body_codec_types_spelled("{row.functions:Debug}", loaded_types) != body_codec_types_spelled("{text.functions:Debug}", text_types) {
             failures.push("{name}: the loaded functions differ from the checked ones")
         }
         if "{row.diagnostics:Debug}" != "{text.diagnostics:Debug}" {

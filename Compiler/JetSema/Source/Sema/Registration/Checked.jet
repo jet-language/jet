@@ -133,7 +133,7 @@ use {
         access_sigil,
         CModule,
     ]
-    jet_parser.[parser_guest_import_symbol]
+    jet_parser.[parser_guest_import_symbol, parser_service_import]
 }
 
 sema_checked_module_key: fn(module_name: String, name: String) -> String Never! {
@@ -1916,9 +1916,12 @@ sema_checked_inline_foreign_row: fn(graph: SemaRegistrationGraph, module_row: Se
 // becomes the foreign row its calls bind to. The row keeps the function's
 // symbol identity, so a checked direct call to the declaration lowers as a
 // foreign C call of the marker's symbol; the declaration itself has no Jet body
-// and no FnBody.
+// and no FnBody. A compiler or build service import (parser_service_import)
+// is the same row with the service ABI, whose calls the host answers by the
+// symbol (IR ir_foreign_call).
 sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
-    symbol: parser_guest_import_symbol(registered.declaration) ?? return None
+    service: parser_service_import(registered.declaration)
+    symbol: if service == .Val(named) -> named.symbol else -> parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity: module_row.module_identity
     params: sema_checked_foreign_params(graph, module_identity, registered.parameters)
     // The failure solve projects an unannotated import onto `T Never!` (a C
@@ -1926,7 +1929,7 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
     written := registered.declaration.return_type
     if written == .Val(.Result(ok, err)) && err == (Type.Named{name: "Never"}) -> written = Val(ok)
     return_type: sema_checked_foreign_return_type(graph, module_identity, written)
-    bridge_eligible: sema_guest_import_bridge_compatible(registered.declaration)
+    bridge_eligible: service == None && sema_guest_import_bridge_compatible(registered.declaration)
     // A runtime binding crosses the runtime's route carriers (#6615).
     runtime_binding: sema_guest_runtime_binding(module_row.package_identity, registered.declaration)
     // A plain written return is the default failure carrier at every call
@@ -1950,13 +1953,17 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
         symbol: symbol,
         path: symbol,
         params: params,
-        raw_scalar_abi: !runtime_binding,
+        raw_scalar_abi: !runtime_binding && service == None,
         bridge_eligible: bridge_eligible,
         return_type: return_type,
-        abi: if runtime_binding -> SEMA_GUEST_RUNTIME_ABI else -> "C",
-        language: "c",
+        abi: if {
+            service != None -> SEMA_GUEST_SERVICE_ABI
+            runtime_binding -> SEMA_GUEST_RUNTIME_ABI
+            else -> "C"
+        },
+        language: if service == .Val(named) -> named.provider else -> "c",
         effect_root: None,
-        callback_transport: if wraps_default_failure -> Val("guest-import-result") else -> None,
+        callback_transport: if wraps_default_failure && service == None -> Val("guest-import-result") else -> None,
         callback_plan_digest: None,
         callback_identity: None,
         link_key: None,

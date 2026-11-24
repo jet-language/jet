@@ -23,6 +23,8 @@ use {
     jet_foundation.[
         BodyNode,
         BodyTree,
+        DerivationStore,
+        derivation_store_subject,
         Diagnostic,
         DiagnosticCause,
         DiagnosticMoment,
@@ -467,21 +469,11 @@ jet_cli_review_unmatched_alignment: fn(fact: SemDefinitionFact, before: [String:
     if before_side -> "unmatched_before" else -> "unmatched_after"
 }
 
-// `compiler_identity`: a fact's first derivation claim when nonempty, else
-// its display identity. The first derivation per subject, built once.
-jet_cli_review_claims: fn(index: SemIndex) -> [String:String] Never! {
-    claims := [String:String]{}
-    loop record in index.derivations {
-        if claims.has_key(record.subject) -> next
-        claims[record.subject.copy()] = record.claim.copy()
-    }
-    claims
-}
-
-jet_cli_review_identity: fn(claims: [String:String], fact: SemDefinitionFact) -> String Never! {
-    if claims.get(fact.stable_id) == .Val(claim) {
-        if claim != "" -> return claim.copy()
-    }
+// `compiler_identity`: the claim of the first derivation that concludes the
+// fact, when nonempty, else its display identity.
+jet_cli_review_identity: fn(derivations: DerivationStore, fact: SemDefinitionFact) -> String Never! {
+    records: derivation_store_subject(derivations, fact.stable_id)
+    if records.len() > 0 && records[0].claim != "" -> return records[0].claim.copy()
     fact.human_identity.copy()
 }
 
@@ -505,8 +497,6 @@ jet_cli_review_matched: fn(kind: String, stable_id: String, before_identity: Str
 jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIReviewOp] Never! {
     old_defs: before.definition_facts
     new_defs: after.definition_facts
-    old_claims: jet_cli_review_claims(before)
-    new_claims: jet_cli_review_claims(after)
     matched_before := [Int:Bool]{}
     matched_after := [Int:Bool]{}
     pairs := [JetCLIReviewPair]{}
@@ -517,8 +507,8 @@ jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIRevi
     loop pair in pairs {
         old: old_defs[pair.before_index]
         new: new_defs[pair.after_index]
-        before_identity: jet_cli_review_identity(old_claims, old)
-        after_identity: jet_cli_review_identity(new_claims, new)
+        before_identity: jet_cli_review_identity(before.derivations, old)
+        after_identity: jet_cli_review_identity(after.derivations, new)
         if old.module_path != new.module_path {
             operations.push(jet_cli_review_matched("moved", new.stable_id, before_identity, after_identity, old.module_path, new.module_path))
         }
@@ -532,12 +522,12 @@ jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIRevi
     new_counts: jet_cli_review_key_counts(new_defs)
     loop (index, fact) in old_defs {
         if matched_before.has_key(index) -> next
-        identity := jet_cli_review_identity(old_claims, fact)
+        identity := jet_cli_review_identity(before.derivations, fact)
         operations.push(JetCLIReviewOp{kind: "removed", stable_id: fact.stable_id.copy(), identity: identity.copy(), before: Val(identity.copy()), after: None, before_identity: Val(identity.move()), after_identity: None, alignment: jet_cli_review_unmatched_alignment(fact, old_counts, new_counts, true), source_operation: None})
     }
     loop (index, fact) in new_defs {
         if matched_after.has_key(index) -> next
-        identity := jet_cli_review_identity(new_claims, fact)
+        identity := jet_cli_review_identity(after.derivations, fact)
         operations.push(JetCLIReviewOp{kind: "added", stable_id: fact.stable_id.copy(), identity: identity.copy(), before: None, after: Val(identity.copy()), before_identity: None, after_identity: Val(identity.move()), alignment: jet_cli_review_unmatched_alignment(fact, old_counts, new_counts, false), source_operation: None})
     }
     jet_cli_review_effect_ops(operations, before.effects, after.effects)

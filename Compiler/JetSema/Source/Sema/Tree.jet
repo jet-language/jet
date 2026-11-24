@@ -11,6 +11,7 @@ use jet_foundation.[
     ComponentSignatureDescriptor,
     CopyFact,
     CoreCallRecord,
+    DerivationRecord,
     DerivationRef,
     Expr,
     Field,
@@ -742,7 +743,9 @@ TLambda: struct {
     executable: TLambdaBody,
     source_span: Span,
     frame_schedule: FrameSchedule?,
-    frame_schedule_derivation: DerivationRef?,
+    // The record the frame scheduler made for `frame_schedule`; the semantic
+    // index interns it into the derivation relation.
+    frame_schedule_derivation: DerivationRecord?,
     capture_facts: TCaptureFacts,
     failure_carrier: TFailureCarrier,
     effects: TEffectFacts,

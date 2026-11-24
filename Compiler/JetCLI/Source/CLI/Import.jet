@@ -137,13 +137,13 @@ jet_cli_import_report: fn(plan: JetCLIImportPlan) -> String Never! {
 
 // Rust `attach_import_evidence`: the boundary carries its derivation and record.
 jet_cli_import_attach_evidence: fn(plan: &JetCLIImportPlan) JetCLIImportPlanError! {
-    if plan.evidence.derivations.len() == 0 {
+    if plan.evidence.derivations.records.len() == 0 {
         return Err(jet_cli_import_plan_error("source import evidence has no derivation"))
     }
     if plan.evidence.records.len() == 0 {
         return Err(jet_cli_import_plan_error("source import evidence has no record"))
     }
-    derivation: plan.evidence.derivations[0].copy()
+    derivation: plan.evidence.derivations.records[0].copy()
     record: plan.evidence.records[0].copy()
     boundary := plan.boundary.copy()
     boundary = boundary.attach_derivation(derivation) ?? return Err(jet_cli_import_plan_error(err.message))

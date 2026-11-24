@@ -64,7 +64,7 @@ evidence_report_json: fn(report: EvidenceReport) -> String Never! {
         records.push(evidence_record_json(report.records[index]))
     }
     derivations := [String]{}
-    loop derivation in report.derivations -> derivations.push(derivation_record_json(derivation))
+    loop derivation in report.derivations.records -> derivations.push(derivation_record_json(derivation))
     schema: "{EVIDENCE_REPORT_SCHEMA}/v{report.schema_version}"
     "{{\"schema\":{foundation_json_quote(schema)},\"identity\":{{\"claim\":{foundation_json_quote(report.identity.claim_id)},\"evidence\":{foundation_json_quote(report.identity.evidence_id)},\"report\":{foundation_json_quote(report.identity.report_id)}}},\"producer\":{foundation_json_quote(evidence_producer_name(report.producer))},\"source\":{evidence_source_json(report.source)},\"build\":{evidence_build_json(report.build)},\"revision\":{evidence_revision_json(report.revision)},\"attachments\":{evidence_attachments_json(report.attachments)},\"diagnostics\":{evidence_diagnostics_json(report.diagnostics)},\"completeness\":{evidence_completeness_json(report.completeness)},\"derivations\":[{derivations.join(",")}],\"evidence\":[{records.join(",")}]}}"
 }

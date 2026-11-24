@@ -1,0 +1,16 @@
+# The frame scheduler's record joins the one derivation relation. The checked
+# `on_frame` callback carries the record its scheduler made, whole, and the
+# semantic index interns it beside the checked definitions' records, so the
+# relation lists it with its producer, its rule, the operations it ordered as
+# premises and the schedule itself as its payload.
+fixture: DerivationRelationKeepsTheFrameSchedule.fixture
+env: NO_COLOR=1
+step: jet inspect semindex main.jet --json
+exit: 0
+json: stdout doc $.semindex.derivations[?rule="checked-frame-accesses"] #= 1 # the callback's schedule is kept, once
+json: stdout doc $.semindex.derivations[?rule="checked-frame-accesses"][0].producer = "jet-sema"
+json: stdout doc $.semindex.derivations[?rule="checked-frame-accesses"][0].claim = "checked frame resource schedule"
+json: stdout doc $.semindex.derivations[?rule="checked-frame-accesses"][0].disposition = "current"
+json: stdout doc $.semindex.derivations[?rule="checked-frame-accesses"][0].premises #>= 2 # simulate and draw_scene, each at its call
+json: stdout doc $.semindex.derivations[?rule="checked-frame-accesses"][0].payload.operations #>= 2 # the schedule travels with its record
+json: stdout doc $.semindex.derivations[?claim="fn:main.run"] #= 1 # the definitions keep their own records beside it

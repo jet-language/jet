@@ -2693,16 +2693,21 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
     type_value := sema_type_value_literal(head, body, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if type_value.handled -> return type_value.value
     // A head that names no type is that unknown type (E0119), not a body
-    // that fails to match it. A head naming a declared type or a Core record
+    // that fails to match it, and so is a list or map head over one
+    // (`[Nope]{14}`). A head naming a declared type or a Core record
     // (`IOContext`) is known whatever the written-name table says.
     if head == .Val(written) && program.registration_graph == .Val(graph) {
-        if sema_expr_unwrap_tag(written) == .Named(written_name) {
-            if sema_expression_type_symbol(scopes, environment, program, written_name) == None && sema_expression_core_record_name(written_name, [Type]{}, expected, environment, program, scopes) == None {
-                before: diagnostics.len()
-                generic_names: loop parameter in environment.generic_params -> parameter.name
-                sema_type_unknown_written_names(graph, sema_scope_caller_row(environment, graph), written, span, generic_names, diagnostics)
-                if diagnostics.len() > before -> return None
-            }
+        unwrapped: sema_expr_unwrap_tag(written)
+        judged: if unwrapped == {
+            .Named(written_name) -> sema_expression_type_symbol(scopes, environment, program, written_name) == None && sema_expression_core_record_name(written_name, [Type]{}, expected, environment, program, scopes) == None
+            .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
+            .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        }
+        if judged {
+            before: diagnostics.len()
+            generic_names: loop parameter in environment.generic_params -> parameter.name
+            sema_type_unknown_written_names(graph, sema_scope_caller_row(environment, graph), unwrapped, span, generic_names, diagnostics)
+            if diagnostics.len() > before -> return None
         }
     }
     written_head: head ?? (expected ?? {

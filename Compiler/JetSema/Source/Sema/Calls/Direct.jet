@@ -41,6 +41,7 @@ use jet_foundation.[
     Func,
     module_is_core,
 ]
+use jet_parser.[parser_service_import]
 
 SemaDirectSpecialCheck: struct {
     handled: Bool,
@@ -1903,9 +1904,31 @@ sema_call_point_in_body: fn(target: SemaCallDirectTarget, environment: SemaScope
     false
 }
 
+// The provider of `target` when it is a compiler or build service import
+// (`#Import(jet.build, symbol: …)`, Guest.jet) called where no host answers
+// it: outside Core, in a body that runs when the program does. Only Core
+// declares one (E1806); Core's own calls are its wrappers, whose handles only
+// build code holds.
+sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
+    if module_is_core(environment.module_identity) || !module_is_core(target.symbol.module_identity) || sema_scope_build_time(scopes, environment.function_name) {
+        return None
+    }
+    graph: program.registration_graph ?? return None
+    row: sema_registration_callable_row_of(graph, target.symbol.id) ?? return None
+    if row == .Function(declaring, index) {
+        service: parser_service_import(graph.modules[declaring].functions[index].declaration) ?? return None
+        return Val(service.provider)
+    }
+    None
+}
+
 sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     if sema_call_point_in_body(target, environment, program) {
         diagnostics.push(sema_error("E0644", call.name_span, "`{target.symbol.name}` makes a point, which is declared only as a module binding's value", "a point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs", "declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`"))
+        return None
+    }
+    if sema_call_service_out_of_phase(target, environment, program, scopes) == .Val(provider) {
+        diagnostics.push(sema_error("E0956", call.name_span, "`{target.symbol.name}` is compile-time only", "it is a `{provider}` service, which the compiler answers while it builds; the running program has no compiler to ask", "move this call into `build: fn` or a `#run` binding"))
         return None
     }
     params := sema_call_params_from_type(target.signature) ?? {

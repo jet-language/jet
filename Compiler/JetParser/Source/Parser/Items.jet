@@ -1089,6 +1089,11 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
             break true
         }
     } ?? false
+    service_import: loop applied in modifiers.markers {
+        if parser_marker_spells_service_import(applied) && parser_marker_hook(state, applied) != None {
+            break true
+        }
+    } ?? false
     is_ffi: loop applied in modifiers.markers {
         if parser_marker_is_hook(state, applied, MarkerHook.FFI) {
             break true
@@ -1180,7 +1185,7 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
                 func.body = [Stmt]{statement}
                 has_body = true
             }
-            if body_required && !has_body && !value_body {
+            if body_required && !has_body && !value_body && !service_import {
                 body_span: parser_current(state).span
                 parser_add_error_code(state, "E0081", body_span, "`{func_name}: fn` has no body", "Jet functions are defined, not declared: a signature without `{{ … }}` is not a complete function. Host and FFI cells use `#Import` / `#FFI` with their required body form.", "Add a `{{ … }}` block.")
             }
@@ -1192,6 +1197,7 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     markers: func.markers.copy()
     parser_apply_function_markers(state, func, markers)
     if guest_import && !is_ffi -> parser_bind_guest_import_symbol(state, func)
+    if service_import -> parser_bind_service_import_symbol(state, func, has_body || value_body)
     ParsedFunction{value: func, has_body: has_body}
 }
 
@@ -1210,6 +1216,19 @@ parser_marker_spells_c_guest_import: fn(marker: Marker) -> Bool Never! {
 // A written `#Import(c)` that reaches the Import hook (parser_marker_hook).
 parser_marker_is_c_guest_import: fn(state: &JetParserState, marker: Marker) -> Bool Never! {
     parser_marker_spells_c_guest_import(marker) && parser_marker_hook(state, marker) != None
+}
+
+// The import of one compiler or build service, `#Import(jet.compiler, symbol:
+// "…")` or `#Import(jet.build, symbol: "…")`: Core's declaration of an
+// operation the host answers by its symbol, written with no body.
+parser_marker_spells_service_import: fn(marker: Marker) -> Bool Never! {
+    hook: marker_hook_of_declaration(marker.name) ?? return false
+    if marker.negated || hook != MarkerHook.Import -> return false
+    first: parser_marker_first_expr(marker) ?? return false
+    if first == .Field(base, member, _, _) {
+        if base == .Ident(root, _, _) -> return root == "jet" && (member == "compiler" || member == "build")
+    }
+    false
 }
 
 // `#FFI` and `#Import(c)` decide how a function's body is read (as foreign
@@ -1265,6 +1284,46 @@ parser_bind_guest_import_symbol: fn(state: &JetParserState, func: &Func) {
         }
     }
     func.body = [Stmt]{}
+}
+
+// The symbol a service import names with `symbol: "…"` moves into the
+// marker's compile-time fact, as an `#Import(c)` symbol does. The host binds
+// the declaration by that symbol, so the declaration has no Jet body.
+parser_bind_service_import_symbol: fn(state: &JetParserState, func: &Func, has_body: Bool) {
+    loop index in 0..<func.markers.len() {
+        if !parser_marker_spells_service_import(func.markers[index]) -> next
+        symbol := ""
+        loop arg_index in 0..<func.markers[index].args.len() {
+            if arg_index >= func.markers[index].arg_labels.len() -> break
+            label: func.markers[index].arg_labels[arg_index] ?? next
+            if label.name != "symbol" -> next
+            if func.markers[index].args[arg_index] == .Expr(value) && value == .Str(parts, _, _) {
+                if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
+            }
+        }
+        if symbol == "" || has_body {
+            parser_add_error_code(state, "E3212", func.markers[index].span, "a `#Import(jet.…)` declaration needs one non-empty `symbol:` string and no body", "the host answers the declaration by its symbol, so a Jet body would never run", "write `#Import(jet.build, symbol: \"service\") name: fn(args) -> Return` with no body")
+            return
+        }
+        func.markers[index].ct = Val(CtValue.Str{value: symbol})
+        func.body = [Stmt]{}
+        return
+    }
+}
+
+// The symbol a parsed service import names, from the marker's compile-time
+// fact (parser_bind_service_import_symbol), and its provider: `jet.build`
+// or `jet.compiler`. None for any other function.
+parser_service_import: fn(function: Func) -> {provider: String, symbol: String}? Never! {
+    loop marker in function.markers {
+        if !parser_marker_spells_service_import(marker) -> next
+        first: parser_marker_first_expr(marker) ?? return None
+        if first == .Field(_, member, _, _) && marker.ct == .Val(value) {
+            if value == .Str(symbol) && symbol != "" -> return Val({provider: "jet.{member}", symbol: symbol})
+        }
+        return None
+    }
+    None
 }
 
 // Rust Sema `guest_import_symbol`: the fixed C symbol the parser bound as the

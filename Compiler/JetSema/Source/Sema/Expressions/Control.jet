@@ -2414,7 +2414,18 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, scopes, state, tail_store, context, diagnostics)
     owner: sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
-    checked: checked_pattern.checked ?? return sema_expression_condition_failed(sema_expression_recovery_condition_bindings(checked_pattern.bindings, window_names, owner, local_module, environment.module_identity, program, context))
+    // A failed pattern (an arm E0305 refused) still declares every name it
+    // binds: a recovered binding with its type, the rest untyped, so the
+    // arm's uses add no E0107 after the pattern's own report.
+    checked: checked_pattern.checked ?? {
+        recovered := sema_expression_recovery_condition_bindings(checked_pattern.bindings, window_names, owner, local_module, environment.module_identity, program, context)
+        names := [BindName]{}
+        sema_pattern_test_binding_names(pattern, names)
+        loop binding in sema_expression_unchecked_condition_bindings(names, recovered, owner, local_module, environment.module_identity, program, context) {
+            recovered.push(binding)
+        }
+        return sema_expression_condition_failed(recovered)
+    }
     facts := [TPatternBindingFact]{}
     bindings := [SemaConditionBinding]{}
     loop fact in checked.bindings {

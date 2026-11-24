@@ -5,6 +5,7 @@ use jet_build_session.[
     BuildSession,
     BuildSessionDiagnostic,
     BuildSessionError,
+    BuildSessionJetArg,
     BuildSessionPolicy,
     BuildSessionReply,
     BuildSessionScheduleNode,
@@ -438,13 +439,15 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_ok(build_graph_rules_step(session, "arg", check, [BuildSessionValue]{.Text{value: "check"}})))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "file", check, [BuildSessionValue]{host})))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "file", check, [BuildSessionValue]{image})))
-    assert(build_graph_rules_failed(build_graph_rules_step(session, "file", check, [BuildSessionValue]{jet})))
+    // `.file(b.jet())` passes the compiler's own path; the executor fills it in.
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "file", check, [BuildSessionValue]{jet})))
     toolchain: build_graph_rules_value(build_session_call(session, "toolchain", [BuildSessionValue]{.Text{value: "cross"}, .Text{value: "wasm32-wasi"}}, None, false, 19, 20))
     assert(build_graph_rules_failed(build_graph_rules_step(session, "toolchain", check, [BuildSessionValue]{toolchain})))
     permit: session.storage.guard_read()
     assert_eq(permit.value.actions[0].argv, [String]{".jet/build/host/gen", "table.jet"})
     assert_eq(permit.value.actions[0].inputs, [String]{".jet/build/host/gen"})
-    assert_eq(permit.value.actions[1].argv, [String]{"jet", "check", ".jet/build/host/gen", ".jet/build/image/gen"})
+    assert_eq(permit.value.actions[1].argv, [String]{"jet", "check", ".jet/build/host/gen", ".jet/build/image/gen", "jet"})
+    assert_eq(permit.value.actions[1].jets, [BuildSessionJetArg]{BuildSessionJetArg{at: 4, flag: ""}})
     assert_eq(permit.value.actions[1].inputs, [String]{".jet/build/host/gen", ".jet/build/image/gen"})
 }
 

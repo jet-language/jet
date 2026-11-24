@@ -148,8 +148,9 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
 // `check: fn(self, call: CompilerCall) { … }`: the marker's rule, which the
 // compiler runs on each call of a declaration the marker marks. It is the
 // marker struct's method `check`: the parser gives it the
-// `CompilerRejection?` result and the closing `None` its body falls through
-// to, and `reject(value, at: part)` in it ends the rule with that finding
+// `CompilerRejection? Err!` result, so the rule may call fallible code such
+// as a finding's texts, and the closing `None` its body falls through to;
+// `reject(value, at: part)` in it ends the rule with that finding
 // (sema_call_check_marker_reject). The formatter prints it as written
 // (jfmt_fmt_marker_check).
 parser_parse_marker_check: fn(state: &JetParserState, value: &StructDef, declaration: &MarkerDecl) {
@@ -172,7 +173,7 @@ parser_parse_marker_check: fn(state: &JetParserState, value: &StructDef, declara
         }
     }
     end: Span{start: method.span.end, end: method.span.end}
-    method.return_type = Val(Type.Option{inner: Type.Named{name: "CompilerRejection"}})
+    method.return_type = Val(Type.Result{ok: Type.Option{inner: Type.Named{name: "CompilerRejection"}}, err: Type.Named{name: "Err"}})
     method.body.push(Stmt.Expr{expr: Expr.EnumLit{type_name: "", variant: "None", variant_span: Val(end), args: [EnumLitArg]{}, leading_dot: false, span: end, id: parser_node_id(state)}})
     method.marker_check = true
     declaration.check = Val(method.name_span)

@@ -516,7 +516,9 @@ native_memory_address: fn(text: String) -[]> Int? {
         }
         value = (value << 4) | nibble
     }
-    Val(value)
+    // An address is a 64-bit word: its top bit set reads as the negative Int
+    // of the same bits, as a register's value does.
+    Val(if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value)
 }
 
 // Where a `memory` read starts and what it is: its address, the heading

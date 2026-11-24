@@ -1,0 +1,15 @@
+use retain_lib.[Retain, count_evictable]
+
+Rec: struct {
+    keep: Bool,
+
+    impl Retain {
+        saved: fn(self) -> Bool { self.keep }
+    }
+}
+
+run: fn() {
+    items: [Rec{keep: true}, Rec{keep: false}, Rec{keep: false}]
+    print(count_evictable(items))
+    print(items[0].evictable())
+}

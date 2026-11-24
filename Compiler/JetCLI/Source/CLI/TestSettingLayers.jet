@@ -298,7 +298,7 @@ jet_cli_test_runs_report_write: fn(path: String, scratch: String, names: [String
             next
         }
         loop record in report.records -> records.push(record.copy())  // copy: each child's report keeps its own.
-        loop derivation in report.derivations -> derivations.push(derivation.copy())
+        loop derivation in report.derivations.records -> derivations.push(derivation.copy())
     }
     if records.len() == 0 -> return problems
     report_id: records[0].identity.report_id.copy()

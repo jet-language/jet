@@ -15672,6 +15672,29 @@ BuiltinsOutsideCore: struct {
     }
 }
 
+ServiceImportOutsideCore: struct {
+    name: String,
+    provider: String,
+
+    impl Diagnostic {
+        code: "E1806",
+        safety_class: .Soundness,
+        safety_reason: "A service import binds a declaration to an operation of the compiler or build host by its symbol, past the checks Core's declarations of those operations make; one declared outside Core could reach host state with a signature the host never agreed to.",
+        expert_path: "none: compiler and build services are reached through Core's public modules",
+        stage: [.Jet],
+        meaning: "A program outside Core declares an `#Import(jet.compiler)` or `#Import(jet.build)` service",
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "`{self.name}` imports a `{self.provider}` service, which only Core declares" }
+
+        why: fn(self) -> String {
+            "The compiler and build host answer each `{self.provider}` symbol for the declaration Core writes for it; the provider, not a program, decides which services exist and where they run."
+        }
+
+        fix: fn(self) -> String { "Call the Core function or method that declares this service, such as `core.build` or `core.compiler`." }
+    }
+}
+
 DuplicateCoreRole: struct {
     name: String,
     role: String,

@@ -1,0 +1,62 @@
+// Assemble with Compiler and run.
+use jet_foundation.[
+    DerivationDisposition,
+    DerivationMethod,
+    DerivationRecord,
+    derivation_identity,
+    derivation_record,
+    derivation_store_add,
+    derivation_store_chain,
+    derivation_store_decode,
+    derivation_store_encode,
+    derivation_store_new,
+    derivation_store_sort,
+    derivation_store_subject,
+]
+
+derivation_store_require: fn(ok: Bool, name: String) Never! {
+    if !ok -> panic("derivation relation contract: {name}")
+}
+
+derivation_store_fact: fn() -> DerivationRecord Never! {
+    derivation_record("def:a", "fn:main.a", "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{"sig:a", "sha256:a"}, derivation_identity("sha256:a", "sig:a", "", "main"))
+}
+
+derivation_store_premise: fn() -> DerivationRecord Never! {
+    derivation_record("sig:a", "signature of fn:main.a", "jet-sema", DerivationMethod.StaticDerivation, "checked-signature", [String]{"source:a"}, derivation_identity("sha256:a", "sig:a", "", "main"))
+}
+
+#Test("derivation_relation") {
+    store := derivation_store_new()
+    first: derivation_store_add(store, derivation_store_fact()) ?? panic("add the fact")
+    again: derivation_store_add(store, derivation_store_fact()) ?? panic("add an equal fact")
+    derivation_store_require(first == again && store.records.len() == 1, "an equal record is interned once")
+    _: derivation_store_add(store, derivation_store_premise()) ?? panic("add the premise")
+    forged := derivation_store_fact()
+    forged.claim = "fn:main.b"
+    refused: if derivation_store_add(store, forged) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    derivation_store_require(refused, "a record whose id is not its hash is refused")
+    stale := derivation_store_fact()
+    stale.disposition = DerivationDisposition.Stale
+    conflict: if derivation_store_add(store, stale) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    derivation_store_require(conflict, "a different record under a held id is refused")
+    derivation_store_require(derivation_store_subject(store, "def:a").len() == 1, "a subject reads the records that conclude it")
+    chain: derivation_store_chain(store, "def:a")
+    derivation_store_require(chain.len() == 2 && chain[0].depth == 0 && chain[0].record.subject == "def:a" && chain[1].depth == 1 && chain[1].record.subject == "sig:a", "the chain follows a premise to the record that concludes it")
+    derivation_store_sort(store)
+    bytes: derivation_store_encode(store) ?? panic("encode")
+    decoded := derivation_store_decode(bytes, U64.MAX) ?? panic("decode")
+    derivation_store_sort(decoded)
+    derivation_store_require(decoded.records == store.records, "the relation round-trips losslessly")
+    truncated: if derivation_store_decode(bytes.slice(0, bytes.len() - 1), U64.MAX) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    derivation_store_require(truncated, "truncated bytes are refused")
+}
