@@ -982,18 +982,6 @@ body_codec_get_list_exprpair: fn(bytes: [U8], input: ^BodyCodecIn) -> [ExprPair]
     values
 }
 
-body_codec_put_list_binop: fn(out: ^BodyCodecOut, values: [BinOp]) Never! {
-    body_codec_put_count(out, values.len())
-    loop value in values -> body_codec_put_binop(out, value)
-}
-
-body_codec_get_list_binop: fn(bytes: [U8], input: ^BodyCodecIn) -> [BinOp] Never! {
-    count: body_codec_get_count(bytes, input, 1)
-    values := [BinOp]{}
-    loop _ in 0..<count -> values.push(body_codec_get_binop(bytes, input))
-    values
-}
-
 body_codec_put_list_callarg: fn(out: ^BodyCodecOut, values: [CallArg]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_callarg(out, value)
@@ -2214,20 +2202,6 @@ body_codec_get_derivebodyitem: fn(bytes: [U8], input: ^BodyCodecIn) -> DeriveBod
             DeriveBodyItem.Loop{var: f0, var_span: f1, source: f2, body: f3, span: f4}
         }
     }
-}
-
-body_codec_put_opt_binop: fn(out: ^BodyCodecOut, value: BinOp?) Never! {
-    if value == .Val(inner) {
-        body_codec_put_bool(out, true)
-        body_codec_put_binop(out, inner)
-        return
-    }
-    body_codec_put_bool(out, false)
-}
-
-body_codec_get_opt_binop: fn(bytes: [U8], input: ^BodyCodecIn) -> BinOp? Never! {
-    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_binop(bytes, input))
-    None
 }
 
 body_codec_put_list_switcharm: fn(out: ^BodyCodecOut, values: [SwitchArm]) Never! {
@@ -4205,61 +4179,6 @@ body_codec_get_lvalue: fn(bytes: [U8], input: ^BodyCodecIn) -> LValue Never! {
             f1: body_codec_get_span(bytes, input)
             LValue.Local{name: f0, name_span: f1}
         }
-    }
-}
-
-body_codec_put_binop: fn(out: ^BodyCodecOut, value: BinOp) Never! {
-    if value == {
-        .Add -> { body_codec_put_tag(out, 0) }
-        .Sub -> { body_codec_put_tag(out, 1) }
-        .Mul -> { body_codec_put_tag(out, 2) }
-        .Div -> { body_codec_put_tag(out, 3) }
-        .FloorDiv -> { body_codec_put_tag(out, 4) }
-        .Mod -> { body_codec_put_tag(out, 5) }
-        .Rem -> { body_codec_put_tag(out, 6) }
-        .Pow -> { body_codec_put_tag(out, 7) }
-        .BitAnd -> { body_codec_put_tag(out, 8) }
-        .BitOr -> { body_codec_put_tag(out, 9) }
-        .BitXor -> { body_codec_put_tag(out, 10) }
-        .Shl -> { body_codec_put_tag(out, 11) }
-        .Shr -> { body_codec_put_tag(out, 12) }
-        .Eq -> { body_codec_put_tag(out, 13) }
-        .Ne -> { body_codec_put_tag(out, 14) }
-        .Lt -> { body_codec_put_tag(out, 15) }
-        .Gt -> { body_codec_put_tag(out, 16) }
-        .Le -> { body_codec_put_tag(out, 17) }
-        .Ge -> { body_codec_put_tag(out, 18) }
-        .Compare -> { body_codec_put_tag(out, 19) }
-        .And -> { body_codec_put_tag(out, 20) }
-        .Or -> body_codec_put_tag(out, 21)
-    }
-}
-
-body_codec_get_binop: fn(bytes: [U8], input: ^BodyCodecIn) -> BinOp Never! {
-    position: body_codec_get_tag(bytes, input, 22, 0)
-    if position == {
-        1 -> BinOp.Sub
-        2 -> BinOp.Mul
-        3 -> BinOp.Div
-        4 -> BinOp.FloorDiv
-        5 -> BinOp.Mod
-        6 -> BinOp.Rem
-        7 -> BinOp.Pow
-        8 -> BinOp.BitAnd
-        9 -> BinOp.BitOr
-        10 -> BinOp.BitXor
-        11 -> BinOp.Shl
-        12 -> BinOp.Shr
-        13 -> BinOp.Eq
-        14 -> BinOp.Ne
-        15 -> BinOp.Lt
-        16 -> BinOp.Gt
-        17 -> BinOp.Le
-        18 -> BinOp.Ge
-        19 -> BinOp.Compare
-        20 -> BinOp.And
-        21 -> BinOp.Or
-        else -> BinOp.Add
     }
 }
 
