@@ -103,7 +103,14 @@ jet_eval_compiler_value_method_record: fn(owner: String, method: String) -> Bool
         return method == "module" || method == "kind" || method == "semantic_identity" || method == "span"
     }
     if owner == "CompilerCall" {
-        return method == "caller" || method == "callee" || method == "module" || method == "span"
+        return method == "caller" || method == "callee" || method == "module" || method == "span" || method == "name" || method == "args" || method == "receiver"
+    }
+    if owner == "CompilerName" -> return method == "text" || method == "span"
+    if owner == "CompilerArg" {
+        return method == "label" || method == "type" || method == "value" || method == "function" || method == "span"
+    }
+    if owner == "CompilerRejection" {
+        return method == "code" || method == "tier" || method == "what" || method == "why" || method == "fix" || method == "span"
     }
     if owner == "CompilerStructuralNode" {
         return method == "id" || method == "ordinal" || method == "parent" || method == "slot" || method == "slot_kind" || method == "class" || method == "shape" || method == "module" || method == "span"

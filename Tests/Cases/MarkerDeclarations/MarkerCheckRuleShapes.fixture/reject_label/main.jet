@@ -1,0 +1,24 @@
+// `reject` in a `check` rule takes the finding and, optionally, `at:`.
+BadRoute: struct {
+    path: String,
+
+    impl Diagnostic {
+        what: fn(self) -> String { "`{self.path}` is not a route" }
+
+        why: fn(self) -> String { "a route starts with `/`" }
+
+        fix: fn(self) -> String { "start the route with `/`" }
+    }
+}
+
+Route: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            reject(BadRoute{path: ""}, near: call)
+        }
+    }
+}
+
+run: fn() {}

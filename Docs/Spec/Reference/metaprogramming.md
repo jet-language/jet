@@ -1168,7 +1168,10 @@ FunctionInfo's `markers`; a package-only marker reaches no function.
 `.Checked(.Call(c))` once for each checked call written in the root package's
 own source (outside its `build: fn`) whose resolved callee is the watched one,
 in the order the checker met them; `c` is a `CompilerCall` (caller, callee,
-module, span). The watched name is a function, or an ambient call such as
+module, span, then the `name` it was written with, its `args` and its
+`receiver`). A watched call's record keeps no argument facts: its `name` is
+the callee's own name over the call's span, `args` is empty and `receiver`
+is `None`; a marker's `check` rule hears all three. The watched name is a function, or an ambient call such as
 `print` that no name in scope hides; a function or method of the same name
 elsewhere is another callee, and any other name is refused (E0104). Watching
 only reads, so it needs no Meta effect, and the build refuses a value whose

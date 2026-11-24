@@ -1,0 +1,23 @@
+# A marker's `check: fn(self, call: CompilerCall)` rule (D-CORE-CHECK1=A):
+# its signature, its one `reject(finding, at: part)` form and how the
+# formatter prints it.
+fixture: MarkerCheckRuleShapes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check shape/main.jet
+exit: 1 # a second rule and a rule of another shape are refused
+stderr: ~ "Jet.DuplicateDefinition: `check: fn` is defined twice in `impl Marker`" # one rule per block
+stderr: ~ "Jet.TraitMethodMismatch: `check: fn` doesn't match the `Marker` contract" # the rule hears a CompilerCall
+stderr: ~ "Write `check: fn(self, call: CompilerCall) { … }`" # the fix writes the contract
+step: jet check reject_label/main.jet
+exit: 1 # `reject` takes only `at:` after the finding
+stderr: ~ "Jet.ArgumentCountMismatch: `reject` takes a finding and, optionally, `at:` the part of the call it names" # the shape refusal
+step: jet check reject_plain/main.jet
+exit: 1 # a finding implements `Diagnostic`
+stderr: ~ "Jet.TraitNotImplemented" # the refusal of a value without a Diagnostic impl
+stderr: ~ "does not implement `Diagnostic`" # it names what the value lacks
+step: jet check formatted/main.jet
+exit: 0 # a rule that rejects with `at:` a name or an argument checks
+step: jet fmt --check formatted/main.jet
+exit: 0 # the rule prints as written

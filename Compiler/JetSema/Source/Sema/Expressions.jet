@@ -7668,6 +7668,9 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
     if call.name == "__jet_link" && call.args.len() == 1 {
         return sema_link_check_creation(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    if call.name == "reject" && context.marker_check_call != None && sema_scope_resolve(scopes, "reject") == None {
+        return sema_call_check_marker_reject(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
         payload: sema_expression_result_call_payload(call, state, scopes)
         span: Span{start: call.name_span.start, end: expr_span(payload).end}

@@ -184,6 +184,13 @@ IR_COMPILER_OWNED_CORE_RECORDS: #run { [IRCompilerOwnedRecord]{
     {name: "NumericInfo", fields: [String]{"signed", "bits", "is_float"}},
     {name: "SourceSpan", fields: [String]{"file", "start", "end"}},
     {name: "TypeId", fields: [String]{"identity", "name", "signature"}},
+    // A call a build watches or a marker's `check` rule hears, its name and
+    // arguments, and the finding a rule's `reject` returns: laid out like
+    // SourceSpan, so a rule reads their fields as plain loads.
+    {name: "CompilerCall", fields: [String]{"caller", "callee", "module", "span", "name", "args", "receiver"}},
+    {name: "CompilerName", fields: [String]{"text", "span"}},
+    {name: "CompilerArg", fields: [String]{"label", "type", "value", "function", "span"}},
+    {name: "CompilerRejection", fields: [String]{"code", "tier", "what", "why", "fix", "span"}},
     {name: "PreparedCase", fields: [String]{"type", "variant", "args"}},
     {name: "PreparedStruct", fields: [String]{"type", "fields"}},
     {name: "PreparedField", fields: [String]{"name", "value"}},
