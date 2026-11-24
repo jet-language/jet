@@ -1432,6 +1432,17 @@ sema_registration_visibility: fn(is_pub: Bool, is_package_pub: Bool) -> Int Neve
     }
 }
 
+// The registered visibility of a declaration named `name` at a module's top
+// level. A Core item named `__…` is Core's machine space and Core declares it
+// `priv`, but user source can't spell a `__` name (E0067): the names that
+// reach one are Core's own and the code the compiler generates into any
+// module, which passes visibility. So its symbol is reachable as a public
+// one is, and `priv` keeps it out of Core's listed surface.
+priv sema_registration_item_visibility: fn(module_id: ModuleID, name: String, is_pub: Bool, is_package_pub: Bool) -> Int Never! {
+    if module_is_core(module_id) && name.starts_with("__") -> return 2
+    sema_registration_visibility(is_pub, is_package_pub)
+}
+
 // The files of one manifest package share one namespace. A
 // loose source root (the loader's `source-root:` identity) has none: each
 // loose file keeps its private names to itself.
@@ -1945,7 +1956,7 @@ sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id:
     // it, so the run holds one copy of each function key.
     key: symbol_table_key(symbols, symbol_id_value)
     signature: sema_registration_function_signature(func, raw_protocol_return, key, fallback_source_file, fallback_source_origin, source_segments)
-    visibility: sema_registration_visibility(func.is_pub, func.is_package_pub)
+    visibility: if owner == None -> sema_registration_item_visibility(module_id, func.name, func.is_pub, func.is_package_pub) else -> sema_registration_visibility(func.is_pub, func.is_package_pub)
     symbol: Symbol{
         id: symbol_id_value,
         kind: symbol_kind,
@@ -2571,7 +2582,7 @@ sema_registration_named_symbol: fn(module_id: ModuleID, module_identity: String,
         owner: None,
         span: span,
         ty: ty,
-        visibility: sema_registration_visibility(is_pub, is_package_pub),
+        visibility: sema_registration_item_visibility(module_id, name, is_pub, is_package_pub),
     }
 }
 
