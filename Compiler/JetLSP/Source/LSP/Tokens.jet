@@ -3,14 +3,16 @@
 // type holds as a type, marks the declarations and marks a name a call
 // writes through as a modification; a marked block's `lsp.semantic_tokens`
 // hooks classify its body. A retired word no grammar rule accepts is no
-// keyword. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
+// keyword. A `#` form is one token over its `#` and word: a marker is a
+// decorator, and a compiler word, fact root or `#{…}` paste is a keyword
+// marked macro. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
 // `LSP_SEMANTIC_TOKEN_MODIFIERS`. A full answer is kept per document so a
 // delta request answers only the change.
 use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverToolStageItem]
-    jet_foundation.[AccessConvention, Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_quote]
-    jet_lexer.[Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_KW_MUTATE, TOKEN_KW_MOVE, TOKEN_KW_COPY, TOKEN_KW_CONST, TOKEN_DOT, TOKEN_COLON]
+    jet_foundation.[AccessConvention, CORE_DECLARATIONS_SYNTAX_FILES, CoreDeclarationFile, Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS, core_decl_syntax_constants, foundation_byte_text, foundation_json_quote, marker_registered]
+    jet_lexer.[Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE, TOKEN_KW_MUTATE, TOKEN_KW_MOVE, TOKEN_KW_COPY, TOKEN_KW_CONST, TOKEN_DOT, TOKEN_COLON, TOKEN_HASH, TOKEN_PREP, token_text]
     jet_semindex.[SemKind]
 }
 
@@ -36,11 +38,16 @@ LSP_TOKEN_COMMENT: 9
 
 LSP_TOKEN_NAMESPACE: 11
 
+LSP_TOKEN_DECORATOR: 12
+
 LSP_MODIFIER_DECLARATION: 1
 
 LSP_MODIFIER_READONLY: 2
 
 LSP_MODIFIER_MODIFICATION: 4
+
+// A word the compiler acts on while building, not a name of the program.
+LSP_MODIFIER_MACRO: 8
 
 // A name's class: its semantic token type and modifier bits.
 LSPNameClass: struct {
@@ -172,12 +179,96 @@ LSPClassedSpan: struct {
     class: LSPNameClass,
 }
 
+// The words a `#` makes a compiler word or fact root, read from the Syntax
+// registry's rows: its `PREP_` requests (`#run`, `#if`, `#loop`),
+// `CODE_VALUE` (`#code`) and each `FACT_ROOT_` root, each without its `#`.
+LSP_COMPILER_WORDS: #run lsp_compiler_words(CORE_DECLARATIONS_SYNTAX_FILES)
+
+lsp_compiler_words: fn(syntax: [CoreDeclarationFile]) -> [String] Never! {
+    constants: core_decl_syntax_constants(syntax) ?? panic("the Syntax registry does not read: {err.message}")
+    words := [String]{}
+    loop (row, text) in constants.values {
+        name: constants.names.texts[row]
+        compiler: name.starts_with("PREP_") || name.starts_with("FACT_ROOT_") || name == "CODE_VALUE"
+        if compiler && text.starts_with("#") {
+            words.push(foundation_byte_text(text.bytes(), 1, text.count_bytes()))
+        }
+    }
+    words
+}
+
+// The `#` forms of a document as whole spans, and which of its tokens they
+// cover.
+LSPHashForms: struct {
+    spans: [LSPClassedSpan],
+    covered: [Bool],
+}
+
+// Each `#` form, classed from its `#` through its word: a compiler word or
+// fact root and a `#{…}` paste are keywords marked macro. A bare marker is a
+// decorator when the registry holds it or the index resolves it to a declared
+// marker type; a marker written through its package (`#tools.Query`) is one
+// decorator over the whole dotted name, since only a fact root, which is
+// classed first, may also stand before a `.`. A `#` before any other word
+// stays unclassed.
+lsp_hash_forms: fn(view: LSPView, classes: [Int:LSPNameClass]) -> LSPHashForms Never! {
+    tokens: view.lexed.tokens
+    bytes: view.doc.text.bytes()
+    compiler: LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: LSP_MODIFIER_MACRO}
+    forms := LSPHashForms{spans: [LSPClassedSpan]{}, covered: [Bool]{}}
+    loop _ in tokens -> forms.covered.push(false)
+    loop (at, token) in tokens {
+        // A paste is one identifier token that starts at its `#`; `#run` is
+        // one request token.
+        paste: token.kind == TOKEN_IDENT && token.span.start < bytes.len() && (Int{bytes[token.span.start]}) == 35
+        if paste || (token.kind == TOKEN_PREP && token.span.end - token.span.start > 1) {
+            forms.spans.push(LSPClassedSpan{span: token.span, class: compiler})
+            forms.covered[at] = true
+            next
+        }
+        if (token.kind != TOKEN_HASH && token.kind != TOKEN_PREP) || at + 1 >= tokens.len() -> next
+        word: tokens[at + 1]
+        if word.span.start != token.span.end -> next
+        // `#if` and `#loop` are a request `#` and its keyword; a fact root
+        // ends at its word, so `.target.os` after `#build` stays fields.
+        compiled: token.kind == TOKEN_PREP || (word.kind == TOKEN_IDENT && LSP_COMPILER_WORDS.contains(token_text(view.lexed.tables, word)))
+        last := at + 1
+        if !compiled {
+            if word.kind != TOKEN_IDENT -> next
+            loop last + 2 < tokens.len() && tokens[last + 1].kind == TOKEN_DOT && tokens[last + 2].kind == TOKEN_IDENT && tokens[last + 1].span.start == tokens[last].span.end && tokens[last + 2].span.start == tokens[last + 1].span.end {
+                last += 2
+            }
+            // Past the fact roots, a dotted `#` name is a package's marker.
+            if last == at + 1 && !lsp_hash_marker(view, classes, word) -> next
+        }
+        class: if compiled -> compiler else -> LSPNameClass{kind: LSP_TOKEN_DECORATOR, modifiers: 0}
+        forms.spans.push(LSPClassedSpan{span: Span{start: token.span.start, end: tokens[last].span.end}, class: class})
+        loop covered in at..<(last + 1) -> forms.covered[covered] = true
+    }
+    forms
+}
+
+// Whether a bare `#` name is a marker: one the registry holds, or one the
+// index resolves to a declared marker type.
+lsp_hash_marker: fn(view: LSPView, classes: [Int:LSPNameClass], name: Token) -> Bool Never! {
+    named: classes.get(name.span.end) ?? LSPNameClass{kind: -1, modifiers: 0}
+    named.kind == LSP_TOKEN_TYPE || marker_registered(token_text(view.lexed.tables, name))
+}
+
+// Whether a hook's token overlaps `span`.
+lsp_span_given: fn(given: [LSPClassedSpan], span: Span) -> Bool Never! {
+    loop other in given {
+        if other.span.start < span.end && span.start < other.span.end -> return true
+    }
+    false
+}
+
 // The protocol's relative encoding of the classified tokens that overlap
 // `range`. A token spanning lines is one entry per line, as the protocol
 // forbids an entry that crosses a line. A token a marked block's
 // `lsp.semantic_tokens` hook gives (`hooked`) takes the place of the lexer
-// tokens it overlaps; one of a kind outside `LSP_SEMANTIC_TOKEN_TYPES` is
-// left out.
+// tokens and `#` forms it overlaps; one of a kind outside
+// `LSP_SEMANTIC_TOKEN_TYPES` is left out.
 lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolStageItem]) -> [Int] Never! {
     bytes: view.doc.text.bytes()
     table: lsp_line_table_bytes(bytes)
@@ -190,16 +281,17 @@ lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolSt
             }
         }
     }
+    forms: lsp_hash_forms(view, classes)
     spans := [LSPClassedSpan]{}
-    loop token in view.lexed.tokens {
+    loop (at, token) in view.lexed.tokens {
+        if forms.covered[at] -> next
         class: lsp_token_class(token, classes) ?? next
-        covered := false
-        loop other in given {
-            if other.span.start < token.span.end && token.span.start < other.span.end {
-                covered = true
-            }
+        if !lsp_span_given(given, token.span) {
+            spans.push(LSPClassedSpan{span: token.span, class: class})
         }
-        if !covered -> spans.push(LSPClassedSpan{span: token.span, class: class})
+    }
+    loop form in forms.spans {
+        if !lsp_span_given(given, form.span) -> spans.push(form)
     }
     loop other in given -> spans.push(other)
     spans.sort_by(fn(left: LSPClassedSpan, right: LSPClassedSpan) { left.span.start <=> right.span.start })
