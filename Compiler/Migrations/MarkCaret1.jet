@@ -13,11 +13,15 @@
 // every offset and column stays where it was. The plan reads the lexer's
 // tokens: a Jet source's code, its plain and raw strings whole (the Jet they
 // quote) and the code spans of its comments; a string that quotes C or Rust
-// stays as written. A Markdown file's ```jet fences are read whole and its
-// prose by code spans; a case file's comment lines are read by code spans
-// and its other lines whole; any other text, such as an expected output or a
-// diagnostic snapshot, is read whole. A run of three or more signs, an HTML
-// entity (`&amp;`) and Rust's `&mut` stay as written.
+// stays as written, unless it holds a Jet `extern rust` block, whose link
+// names are Rust paths. In a triple-quoted string (a table of rows), a sign
+// after a word and a space also starts an operand: a signature row's first
+// parameter (`core.files reader_line &FileReader [u8]`). A Markdown file's
+// ```jet fences are read whole and its prose by code spans; a case file's
+// comment lines are read by code spans and its other lines whole; any other
+// text, such as an expected output or a diagnostic snapshot, is read whole.
+// A run of three or more signs, an HTML entity (`&amp;`) and Rust's `&mut`
+// stay as written.
 use {
     jet_lexer.[lex_generated, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING]
 }
@@ -27,6 +31,10 @@ MARK_CARET1_KEYWORDS: [String]{"task", "if", "return", "in", "else", "match", "y
 
 // Text that only C or Rust quoted in a string or a code span holds.
 MARK_CARET1_FOREIGN: [String]{"#include", "#[", "(void)", "int64_t", "static ", "pthread_", "memcpy(", "::", "let mut ", "&str", "JNIEnv"}
+
+// Text that makes a quoted string Jet even though it holds MARK_CARET1_FOREIGN
+// text: a Jet extern block, whose link names are Rust or C paths.
+MARK_CARET1_JET_FOREIGN: [String]{"extern rust "}
 
 // Rewrites the marks of one file: a Jet source (`source`, or a `.jet` or
 // `.template` path), a Markdown file, or any other text.
@@ -39,7 +47,7 @@ mark_caret1_file: fn(path: String, text: String, source: Bool) -> MigrationOutco
         source || path.ends_with(".jet") || path.ends_with(".template") -> mark_caret1_source(bytes)
         path.ends_with(".md") -> mark_caret1_markdown(bytes)
         path.ends_with(".case") -> mark_caret1_case(bytes)
-        else -> mark_caret1_text(bytes, 0, bytes.len())
+        else -> mark_caret1_text(bytes, 0, bytes.len(), false)
     }
     if count == 0 {
         return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
@@ -68,25 +76,28 @@ mark_caret1_source: fn(bytes: ^[U8]) -> Int {
 mark_caret1_code: fn(bytes: ^[U8], at: Int, width: Int) -> Int {
     line := at
     loop line > 0 && bytes[line - 1] != 10 -> line -= 1
-    if !mark_caret1_is_mark(bytes, at, width, line, bytes.len()) -> return 0
+    if !mark_caret1_is_mark(bytes, at, width, line, bytes.len(), false) -> return 0
     loop index in at..<(at + width) -> bytes[index] = U8{94}
     1
 }
 
 // A string literal's contents, between its run of opening quote bytes and
-// the matching closing run.
+// the matching closing run. A triple-quoted string's rows read a sign after
+// a word and a space as a mark.
 mark_caret1_quoted: fn(bytes: ^[U8], start: Int, end: Int) -> Int {
     quote := 0
     loop start + quote < end && bytes[start + quote] == bytes[start] -> quote += 1
     if end - start < quote * 2 -> return 0
-    mark_caret1_quoted_jet(bytes, start + quote, end - quote)
+    mark_caret1_quoted_jet(bytes, start + quote, end - quote, quote >= 3)
 }
 
-// Quoted text from `lo` to `hi` read whole, unless it quotes C or Rust.
-mark_caret1_quoted_jet: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
+// Quoted text from `lo` to `hi` read whole, unless it quotes C or Rust
+// outside a Jet extern block; `spaced` as in mark_caret1_text.
+mark_caret1_quoted_jet: fn(bytes: ^[U8], lo: Int, hi: Int, spaced: Bool) -> Int {
     contents: mark_caret1_word(bytes, lo, hi)
-    if MARK_CARET1_FOREIGN.any(fn(foreign) { contents.contains(foreign) }) -> return 0
-    mark_caret1_text(bytes, lo, hi)
+    jet: MARK_CARET1_JET_FOREIGN.any(fn(text) { contents.contains(text) })
+    if !jet && MARK_CARET1_FOREIGN.any(fn(foreign) { contents.contains(foreign) }) -> return 0
+    mark_caret1_text(bytes, lo, hi, spaced)
 }
 
 // A case file line by line: a `#` comment line by its code spans, any other
@@ -98,15 +109,16 @@ mark_caret1_case: fn(bytes: ^[U8]) -> Int {
         end := start
         loop end < bytes.len() && bytes[end] != 10 -> end += 1
         comment: mark_caret1_word(bytes, start, end).trim_start().starts_with("#")
-        count += if comment -> mark_caret1_spans(bytes, start, end) else -> mark_caret1_quoted_jet(bytes, start, end)
+        count += if comment -> mark_caret1_spans(bytes, start, end) else -> mark_caret1_quoted_jet(bytes, start, end, false)
         start = end + 1
     }
     count
 }
 
 // Each sign from `lo` to `hi` that is a mark, read with `lo` as the start of
-// its text; returns how many it rewrote.
-mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
+// its text; returns how many it rewrote. When `spaced`, a sign after a word
+// and a space starts an operand (mark_caret1_starts_operand).
+mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int, spaced: Bool) -> Int {
     count := 0
     index := lo
     loop index < hi {
@@ -117,7 +129,7 @@ mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
         run := index
         loop run < hi && bytes[run] == 38 -> run += 1
         width: run - index
-        if width <= 2 && mark_caret1_is_mark(bytes, index, width, lo, hi) {
+        if width <= 2 && mark_caret1_is_mark(bytes, index, width, lo, hi, spaced) {
             loop at in index..<run -> bytes[at] = U8{94}
             count += 1
         }
@@ -130,7 +142,7 @@ mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
 // it at once, and nothing before it on its line (back to `lo`) ends an
 // operand, a keyword aside. A sign alone in a code span (`&`) is a mark
 // unless its line speaks of operators.
-mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int) -> Bool {
+mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int, spaced: Bool) -> Bool {
     after: at + width
     if at > 0 && bytes[at - 1] == 96 && after < bytes.len() && bytes[after] == 96 {
         return mark_caret1_bare_mark(bytes, at)
@@ -138,7 +150,7 @@ mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int) -> B
     if after >= hi -> return false
     next_byte: bytes[after]
     if next_byte == 91 || next_byte == 40 {
-        return mark_caret1_starts_operand(bytes, at, lo)
+        return mark_caret1_starts_operand(bytes, at, lo, spaced)
     }
     if !mark_caret1_name_byte(next_byte) || (next_byte >= 48 && next_byte <= 57) -> return false
     word_end := after
@@ -146,7 +158,7 @@ mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int) -> B
     // An HTML entity (`&amp;`) and Rust's `&mut` are not Jet.
     if word_end < hi && bytes[word_end] == 59 -> return false
     if mark_caret1_word(bytes, after, word_end) == "mut" -> return false
-    mark_caret1_starts_operand(bytes, at, lo)
+    mark_caret1_starts_operand(bytes, at, lo, spaced)
 }
 
 // The words of a line that names `&` or `&&` as an operator rather than as
@@ -167,9 +179,11 @@ mark_caret1_bare_mark: fn(bytes: [U8], at: Int) -> Bool {
 // Whether a sign at `at` starts an operand: the line before it, back to
 // `lo` or a quoted line break (`\n`), is blank, or ends in a keyword or in a
 // byte a mark follows: `(`, `,`, `:`, `=`, `[`, `{`, `<`, `>` (`->`) or the
-// backtick opening a code span. Any other byte, such as an operand's end or a
-// query string's `=***`, makes the sign an operator or plain text.
-mark_caret1_starts_operand: fn(bytes: [U8], at: Int, lo: Int) -> Bool {
+// backtick opening a code span. When `spaced`, a word with a space after it
+// also does, as a row's name before its first parameter. Any other byte,
+// such as an operand's end or a query string's `=***`, makes the sign an
+// operator or plain text.
+mark_caret1_starts_operand: fn(bytes: [U8], at: Int, lo: Int, spaced: Bool) -> Bool {
     before := at - 1
     loop before >= lo && (bytes[before] == 32 || bytes[before] == 9) -> before -= 1
     if before < lo || bytes[before] == 10 -> return true
@@ -180,6 +194,7 @@ mark_caret1_starts_operand: fn(bytes: [U8], at: Int, lo: Int) -> Bool {
         // A quoted escape (`\n`, `\t`) ends a line or a gap, not a word.
         if start > lo && bytes[start - 1] == 92 -> start += 1
         if start > before -> return true
+        if spaced && before < at - 1 -> return true
         return MARK_CARET1_KEYWORDS.contains(mark_caret1_word(bytes, start, before + 1))
     }
     if last == 61 && before > lo && !(bytes[before - 1] == 58 || bytes[before - 1] == 32 || bytes[before - 1] == 9) {
@@ -218,7 +233,7 @@ mark_caret1_spans: fn(bytes: ^[U8], lo: Int, hi: Int) -> Int {
             index = close
             next
         }
-        count += mark_caret1_quoted_jet(bytes, index + 1, close)
+        count += mark_caret1_quoted_jet(bytes, index + 1, close, false)
         index = close + 1
     }
     count
@@ -237,7 +252,7 @@ mark_caret1_markdown: fn(bytes: ^[U8]) -> Int {
         trimmed: mark_caret1_word(bytes, start, end).trim()
         if {
             fence != 0 && trimmed == "```" -> fence = 0
-            fence == 1 -> count += mark_caret1_text(bytes, start, end)
+            fence == 1 -> count += mark_caret1_text(bytes, start, end, false)
             fence == 2 -> {}
             trimmed.starts_with("```") -> fence = if trimmed == "```jet" || trimmed.starts_with("```jet ") -> 1 else -> 2
             else -> count += mark_caret1_spans(bytes, start, end)
