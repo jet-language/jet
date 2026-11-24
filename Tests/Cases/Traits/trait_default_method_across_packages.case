@@ -1,0 +1,19 @@
+# A trait's default method runs for a type in another package that implements
+# the trait without writing it: retain_lib declares `Retain` with a default
+# `evictable` and a generic `count_evictable`; retain_app's `Rec` writes only
+# `saved`, and both the generic instance and the direct call reach the
+# default body on every tier.
+fixture: TraitDefaultMethodAcrossPackages.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check retain_app/main.jet
+exit: 0
+step o0: jet run -O0 retain_app/main.jet
+exit: 0
+stdout: = "2\nfalse\n"
+step o1: jet run -O1 retain_app/main.jet
+exit: 0
+stdout: = "2\nfalse\n"
+step o2: jet run -O2 retain_app/main.jet
+exit: 0
+stdout: = "2\nfalse\n"
