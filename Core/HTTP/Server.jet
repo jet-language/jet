@@ -1403,15 +1403,6 @@ priv route_shape: fn(segments: [HTTPSegment]) -> String Never! {
     out
 }
 
-// The shape every route answering the same requests as `pattern` has
-// (route_shape), or None for a pattern route_parse refuses: the HTTP
-// StaticRoutes rule pairs two routes of one table by it while building.
-priv __route_pattern_shape: fn(pattern: String) -> String? Never! {
-    parsed: route_parse(pattern)
-    if parsed.problem != "" -> return None
-    Val(route_shape(parsed.segments))
-}
-
 // The OpenAPI path of a parsed route: static segments percent-encoded,
 // parameters as `{name}` (jet_http_route_openapi_path).
 priv route_openapi_path: fn(segments: [HTTPSegment]) -> String Never! {
