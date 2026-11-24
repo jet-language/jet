@@ -484,9 +484,9 @@ sema_call_check_ambient_close: fn(call: Call, environment: SemaScopeEnvironment,
         return None
     }
     if program.registration_graph == .Val(graph) {
-        // An undecided bound (a Core native carrier such as `TCPListener`
-        // has no nominal row to carry a `Close` impl) is no `Close`
-        // implementation, and the user can't add one (#6120).
+        // An undecided bound (a Core native carrier has no nominal row to
+        // carry a `Close` impl) is no `Close` implementation, and the user
+        // can't add one (#6120).
         decided: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params)
         if decided != .Val(true) {
             shown: type_name(value.ty)

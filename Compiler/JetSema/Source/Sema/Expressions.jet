@@ -3590,7 +3590,7 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
                 }
             }
         }
-        if !source_declaration && !sema_network_handle_known_method(receiver_name, method) {
+        if !source_declaration {
             return false
         }
         loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
@@ -4490,8 +4490,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if time.handled -> return time
     app := sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if app.handled -> return app
-    network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if network.handled -> return network
     reflection := sema_call_try_reflection_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reflection.handled -> return reflection
     compiler_value := sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

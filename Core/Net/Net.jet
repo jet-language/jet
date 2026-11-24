@@ -38,9 +38,6 @@ SocketAddr: struct {
     port: Int,
 }
 
-// Provider sockets retain their native carriers and complete method/trait
-// contracts; source policy must not replace them with descriptor records.
-
 NetReady: struct {
     readable: Bool,
     writable: Bool,
@@ -58,6 +55,165 @@ NetReadyInterest: enum {
     Read,
     Write,
     ReadWrite,
+}
+
+// A shutdown direction and a readiness interest as the runtime numbers them.
+shutdown_code: fn(how: NetShutdown) -> Int Never! {
+    if how == {
+        .Read -> 0
+        .Write -> 1
+        .Both -> 2
+    }
+}
+
+interest_code: fn(interest: NetReadyInterest) -> Int Never! {
+    if interest == {
+        .Read -> 0
+        .Write -> 1
+        .ReadWrite -> 2
+    }
+}
+
+/// A listening TCP socket. Only Core's listens fill the `priv handle`, so a
+/// literal outside core.net cannot forge one.
+#[!Equatable, !Comparable]
+TCPListener: struct {
+    priv handle: Int,
+
+    /// The next connection, waiting at most `deadline` when one is given.
+    accept: fn(self, *, deadline: Duration?{None}) -[Net, Time.Wait]> TCPStream NetError! {
+        if deadline == .Val(limit) -> return rt.tcp_accept_deadline(self, limit.ns)
+        rt.tcp_accept(self)
+    }
+
+    /// The address the listener is bound to, as `host:port` text.
+    local_addr: fn(self) -[Net]> String NetError! { rt.listener_local_addr(self) }
+}
+
+/// A connected TCP stream. Each read waits for data once and returns what
+/// arrived, at most its limit; a `deadline` bounds that one call. Only
+/// Core's connects and accepts fill the `priv handle`.
+#[!Equatable, !Comparable]
+TCPStream: struct {
+    priv handle: Int,
+
+    /// Up to `max_bytes` bytes as UTF-8 text; "" at end of stream.
+    read: fn(self, max_bytes: Int{8192}, *, deadline: Duration?{None}) -[Net, Time.Wait]> String NetError! {
+        if deadline == .Val(limit) -> return rt.tcp_read_text_deadline(self, max_bytes, limit.ns)
+        rt.tcp_read_text(self, max_bytes)
+    }
+
+    /// Up to `max_bytes` bytes; an empty list at end of stream.
+    read_bytes: fn(self, max_bytes: Int, *, deadline: Duration?{None}) -[Net, Time.Wait]> [U8] NetError! {
+        if deadline == .Val(limit) -> return rt.tcp_read_bytes_deadline(self, max_bytes, limit.ns)
+        rt.tcp_read_bytes(self, max_bytes)
+    }
+
+    /// Appends up to `limit` bytes to `buffer`; the count, 0 at end of stream.
+    read_into: fn(self, buffer: &[U8], limit: Int, *, deadline: Duration?{None}) -[Net, Time.Wait]> Int NetError! {
+        if deadline == .Val(wait) -> return rt.tcp_read_into_deadline(self, buffer, limit, wait.ns)
+        rt.tcp_read_into(self, buffer, limit)
+    }
+
+    /// Writes all of `text`.
+    write: fn(self, text: String, *, deadline: Duration?{None}) -[Net, Time.Wait]> NetError! {
+        if deadline == .Val(limit) -> return rt.tcp_write_text_deadline(self, text, limit.ns)
+        rt.tcp_write_text(self, text)
+    }
+
+    /// Writes once; the count of `bytes` the stream took.
+    write_some: fn(self, bytes: [U8], *, deadline: Duration?{None}) -[Net, Time.Wait]> Int NetError! {
+        if deadline == .Val(limit) -> return rt.tcp_write_bytes_deadline(self, bytes, limit.ns)
+        rt.tcp_write_bytes(self, bytes)
+    }
+
+    /// Writes all of `bytes`.
+    write_bytes: fn(self, bytes: [U8], *, deadline: Duration?{None}) -[Net, Time.Wait]> NetError! {
+        if deadline == .Val(limit) -> return rt.tcp_write_all_bytes_deadline(self, bytes, limit.ns)
+        rt.tcp_write_all_bytes(self, bytes)
+    }
+
+    /// Closes the `how` direction of the stream.
+    shutdown: fn(self, how: NetShutdown) -[Net]> NetError! { rt.tcp_shutdown(self, shutdown_code(how)) }
+
+    /// Waits until the stream is ready for `interest`, at most `deadline`.
+    ready: fn(self, interest: NetReadyInterest, *, deadline: Duration) -[Net, Time.Wait]> NetReady NetError! {
+        rt.tcp_ready(self, interest_code(interest), deadline.ns)
+    }
+
+    /// The peer's and the local address, as `host:port` text.
+    peer_addr: fn(self) -[Net]> String NetError! { rt.tcp_peer_addr(self) }
+
+    local_addr: fn(self) -[Net]> String NetError! { rt.tcp_local_addr(self) }
+
+    close: fn(self) -[Net]> NetError! { rt.tcp_close(self) }
+}
+
+/// A bound UDP socket. Only Core's binds fill the `priv handle`.
+#[!Equatable, !Comparable]
+UDPSocket: struct {
+    priv handle: Int,
+
+    /// Waits until the socket is ready for `interest`, at most `deadline`.
+    ready: fn(self, interest: NetReadyInterest, *, deadline: Duration) -[Net, Time.Wait]> NetReady NetError! {
+        rt.udp_ready(self, interest_code(interest), deadline.ns)
+    }
+
+    close: fn(self) -[Net]> NetError! { rt.udp_close(self) }
+
+    /// The next datagram, its data cut to `max_bytes`, waiting at most
+    /// `deadline`.
+    receive: fn(self, max_bytes: Int, *, deadline: Duration) -[Net, Time.Wait]> UDPPacket NetError! {
+        rt.udp_receive_deadline(self, max_bytes, deadline.ns)
+    }
+
+    /// Sends `bytes` to `address` as one datagram; the count sent.
+    send_to: fn(self, bytes: [U8], address: SocketAddr, *, deadline: Duration) -[Net, Time.Wait]> Int NetError! {
+        rt.udp_send_bytes_to_deadline(self, bytes, address, deadline.ns)
+    }
+}
+
+/// A listening Unix domain socket. Only Core's listens fill the `priv handle`.
+#[!Equatable, !Comparable]
+UnixListener: struct {
+    priv handle: Int,
+
+    /// The next connection, waiting at most `deadline`.
+    accept: fn(self, *, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
+        rt.unix_accept_deadline(self, deadline.ns)
+    }
+}
+
+/// A connected Unix domain stream. Each call waits at most its `deadline`.
+/// Only Core's connects and accepts fill the `priv handle`.
+#[!Equatable, !Comparable]
+UnixStream: struct {
+    priv handle: Int,
+
+    /// Up to `max_bytes` bytes; an empty list at end of stream.
+    read_bytes: fn(self, max_bytes: Int, *, deadline: Duration) -[Net, Time.Wait]> [U8] NetError! {
+        rt.unix_read_bytes_deadline(self, max_bytes, deadline.ns)
+    }
+
+    /// Appends up to `limit` bytes to `buffer`; the count, 0 at end of stream.
+    read_into: fn(self, buffer: &[U8], limit: Int, *, deadline: Duration) -[Net, Time.Wait]> Int NetError! {
+        rt.unix_read_into_deadline(self, buffer, limit, deadline.ns)
+    }
+
+    /// Writes all of `bytes`.
+    write_bytes: fn(self, bytes: [U8], *, deadline: Duration) -[Net, Time.Wait]> NetError! {
+        rt.unix_write_all_bytes_deadline(self, bytes, deadline.ns)
+    }
+
+    /// Waits until the stream is ready for `interest`, at most `deadline`.
+    ready: fn(self, interest: NetReadyInterest, *, deadline: Duration) -[Net, Time.Wait]> NetReady NetError! {
+        rt.unix_ready(self, interest_code(interest), deadline.ns)
+    }
+
+    close: fn(self) -[Net]> NetError! { rt.unix_close(self) }
+
+    /// The read and write timeout of every later call without a deadline.
+    set_timeout: fn(self, timeout: Duration) -[Net]> NetError! { rt.unix_set_timeout(self, timeout.ns) }
 }
 
 // JetNetErrorDetail: public construction is already supported.
