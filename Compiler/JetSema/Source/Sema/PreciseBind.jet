@@ -51,7 +51,7 @@ sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
     if program.registration_graph == .Val(graph) {
         // Found on the first precise operation: most bodies hold none.
         math := -2
-        fillers := [String:String]{}
+        fillers := [String:Int]{}
         loop index in 0..<tree.nodes.len() {
             operation: sema_precise_operation(tree.nodes[index].kind) ?? next
             if math == -2 {
@@ -59,8 +59,8 @@ sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
                 if math >= 0 -> fillers = sema_precise_fillers(graph, math)
             }
             if math < 0 -> return
-            name: fillers.get(operation.role) ?? next
-            export: sema_registration_direct_symbol(graph.modules[math], name) ?? next
+            filler: fillers.get(operation.role) ?? next
+            export: sema_registration_direct_symbol(graph.modules[math], graph.modules[math].functions[filler].declaration.name) ?? next
             callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
             args: loop argument in operation.args -> BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
@@ -68,15 +68,15 @@ sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
     }
 }
 
-// The name of each function of core.math (registration row `math`) that
-// fills a precise operation's role, by that role.
-sema_precise_fillers: fn(graph: SemaRegistrationGraph, math: Int) -> [String:String] Never! {
-    fillers := [String:String]{}
+// The row in core.math's functions (registration row `math`) of each
+// function that fills a precise operation's role, by that role.
+sema_precise_fillers: fn(graph: SemaRegistrationGraph, math: Int) -> [String:Int] Never! {
+    fillers := [String:Int]{}
     module_row: graph.modules[math]
-    loop function in module_row.functions {
+    loop (position, function) in module_row.functions {
         if function.declaration.markers.len() == 0 -> next
         role: sema_core_role(function.declaration.markers, graph, module_row.module_identity)
-        if sema_precise_role_operation(role) != None -> fillers[role] = function.declaration.name.copy()
+        if sema_precise_role_operation(role) != None -> fillers[role] = position
     }
     fillers
 }

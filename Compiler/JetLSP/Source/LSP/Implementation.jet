@@ -17,44 +17,45 @@ use {
     jet_semindex.[SemDef, SemIndex]
 }
 
-// One impl head: the type it is for, the trait it implements, if any, and
-// the span of the name the editor shows for it (the trait's, else the type's).
-LSPImplSite: struct {
-    module_path: String,
-    type_name: String,
-    trait_name: String?,
-    span: Span,
+// The span of each impl head in `checked`'s modules whose trait (with
+// `traits`) or type is the declaration `def`: the span of the name the editor
+// shows for it (the trait's, else the type's).
+lsp_impl_spans: fn(checked: LSPChecked, index: SemIndex, def: SemDef, spans: ^[LSPTarget], traits: Bool{false}) Never! {
+    loop module_ref in checked.modules -> lsp_collect_impl_spans(index, def, module_ref.path, module_ref.items, spans, traits: traits)
 }
 
-lsp_impl_sites: fn(checked: LSPChecked) -> [LSPImplSite] Never! {
-    sites := [LSPImplSite]{}
-    loop module_ref in checked.modules -> lsp_collect_impl_sites(module_ref.path, module_ref.items, sites)
-    sites
-}
-
-lsp_collect_impl_sites: fn(module_path: String, items: [Item], sites: ^[LSPImplSite]) Never! {
+lsp_collect_impl_spans: fn(index: SemIndex, def: SemDef, module_path: String, items: [Item], spans: ^[LSPTarget], traits: Bool{false}) Never! {
     loop item in items {
         if item == {
             .Impl(implementation) -> {
                 if implementation.is_generated_serde -> next
-                sites.push(LSPImplSite{module_path: module_path, type_name: implementation.type_name.copy(), trait_name: implementation.trait_name.copy(), span: implementation.trait_span ?? implementation.type_span})
+                span: implementation.trait_span ?? implementation.type_span
+                if !traits -> lsp_impl_span_add(index, def, module_path, implementation.type_name, span, spans)
+                if traits && implementation.trait_name == .Val(trait_name) -> lsp_impl_span_add(index, def, module_path, trait_name, span, spans, traits: true)
             }
-            .Struct(structure) -> lsp_collect_trait_blocks(module_path, structure.name, structure.trait_impls, sites)
-            .Enum(enumeration) -> lsp_collect_trait_blocks(module_path, enumeration.name, enumeration.trait_impls, sites)
+            .Struct(structure) -> lsp_collect_trait_block_spans(index, def, module_path, structure.name, structure.trait_impls, spans, traits: traits)
+            .Enum(enumeration) -> lsp_collect_trait_block_spans(index, def, module_path, enumeration.name, enumeration.trait_impls, spans, traits: traits)
             .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) -> lsp_collect_impl_sites(module_path, body, sites)
+                if code_module.body == .Val(body) -> lsp_collect_impl_spans(index, def, module_path, body, spans, traits: traits)
             }
-            .GenericModule(generic) -> lsp_collect_impl_sites(module_path, generic.body, sites)
+            .GenericModule(generic) -> lsp_collect_impl_spans(index, def, module_path, generic.body, spans, traits: traits)
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
 }
 
-lsp_collect_trait_blocks: fn(module_path: String, owner: String, blocks: [TraitImplBlock], sites: ^[LSPImplSite]) Never! {
+// The trait blocks in the body of the type `owner`.
+lsp_collect_trait_block_spans: fn(index: SemIndex, def: SemDef, module_path: String, owner: String, blocks: [TraitImplBlock], spans: ^[LSPTarget], traits: Bool{false}) Never! {
     loop block in blocks {
         if block.compiler_generated -> next
-        sites.push(LSPImplSite{module_path: module_path, type_name: owner, trait_name: Val(block.trait_name.copy()), span: block.trait_span})
+        if traits -> lsp_impl_span_add(index, def, module_path, block.trait_name, block.trait_span, spans, traits: true)
+        if !traits -> lsp_impl_span_add(index, def, module_path, owner, block.trait_span, spans)
     }
+}
+
+// Adds `span` when `name`, written in `module_path`, names `def`.
+lsp_impl_span_add: fn(index: SemIndex, def: SemDef, module_path: String, name: String, span: Span, spans: ^[LSPTarget], traits: Bool{false}) Never! {
+    if lsp_slot_is(index, lsp_named_type_slot(index, module_path, name, traits: traits), def) -> spans.push(LSPTarget{module_path: module_path, span: span})
 }
 
 // Whether `def` is the declaration at `slot`.
@@ -77,17 +78,8 @@ lsp_requirement_trait: fn(index: SemIndex, def: SemDef) -> Int? Never! {
 lsp_implementation_spans: fn(checked: LSPChecked, index: SemIndex, def: SemDef) -> [LSPTarget] Never! {
     spans := [LSPTarget]{}
     if {
-        lsp_hierarchy_trait_kind(def.kind) -> {
-            loop site in lsp_impl_sites(checked) {
-                trait_name: site.trait_name ?? next
-                if lsp_slot_is(index, lsp_named_type_slot(index, site.module_path, trait_name, traits: true), def) -> spans.push(LSPTarget{module_path: site.module_path, span: site.span})
-            }
-        }
-        lsp_hierarchy_type_kind(def.kind) -> {
-            loop site in lsp_impl_sites(checked) {
-                if lsp_slot_is(index, lsp_named_type_slot(index, site.module_path, site.type_name), def) -> spans.push(LSPTarget{module_path: site.module_path, span: site.span})
-            }
-        }
+        lsp_hierarchy_trait_kind(def.kind) -> lsp_impl_spans(checked, index, def, spans, traits: true)
+        lsp_hierarchy_type_kind(def.kind) -> lsp_impl_spans(checked, index, def, spans)
         else -> {
             trait_slot: lsp_requirement_trait(index, def) ?? return spans
             loop member in index.members {
@@ -148,55 +140,63 @@ lsp_implementation_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     lsp_response(id, "[{rows.join(",")}]")
 }
 
-// The named types `ty` mentions, outermost first.
-lsp_type_names: fn(ty: Type, names: ^[String]) Never! {
+// Adds the slot of each named type `ty` mentions, written in `module_path`,
+// outermost first, each once.
+lsp_type_slots: fn(index: SemIndex, module_path: String, ty: Type, slots: ^[Int]) Never! {
     if ty == {
-        .Named(name) -> names.push(name.copy())
+        .Named(name) -> lsp_type_slot_add(index, module_path, name, slots)
         .Apply(name, args) -> {
-            names.push(name.copy())
-            loop arg in args -> lsp_type_names(arg, names)
+            lsp_type_slot_add(index, module_path, name, slots)
+            loop arg in args -> lsp_type_slots(index, module_path, arg, slots)
         }
         .TraitObject(bounds) -> {
-            loop bound in bounds -> names.push(bound.copy())
+            loop bound in bounds -> lsp_type_slot_add(index, module_path, bound, slots)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) -> lsp_type_names(inner, names)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) -> lsp_type_slots(index, module_path, inner, slots)
         .Map(key, _, value) -> {
-            lsp_type_names(key, names)
-            lsp_type_names(value, names)
+            lsp_type_slots(index, module_path, key, slots)
+            lsp_type_slots(index, module_path, value, slots)
         }
         .Result(ok, err) -> {
-            lsp_type_names(ok, names)
-            lsp_type_names(err, names)
+            lsp_type_slots(index, module_path, ok, slots)
+            lsp_type_slots(index, module_path, err, slots)
         }
         .Union(members) -> {
-            loop member in members -> lsp_type_names(member, names)
+            loop member in members -> lsp_type_slots(index, module_path, member, slots)
         }
         .Tuple(fields) -> {
-            loop field in fields -> lsp_type_names(field.ty, names)
+            loop field in fields -> lsp_type_slots(index, module_path, field.ty, slots)
         }
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
 }
 
-// The type names a declaration's value has: a binding's, a parameter's or a
-// field's type, a function's return type, a variant's enum, and a type
-// itself.
-lsp_value_type_names: fn(index: SemIndex, def: SemDef) -> [String] Never! {
-    names := [String]{}
+// Adds the slot of the type `name` names, as the index displays it, unless
+// it is there already.
+lsp_type_slot_add: fn(index: SemIndex, module_path: String, name: String, slots: ^[Int]) Never! {
+    slot: if index.display_paths.get(name) == .Val(shown) -> lsp_named_type_slot(index, module_path, shown) else -> lsp_named_type_slot(index, module_path, name)
+    if slot == .Val(found) && !slots.contains(found) -> slots.push(found)
+}
+
+// The slots of the named types a declaration's value has: a binding's, a
+// parameter's or a field's type, a function's return type, a variant's enum,
+// and a type itself.
+lsp_value_type_slots: fn(index: SemIndex, def: SemDef) -> [Int] Never! {
+    slots := [Int]{}
     if def.kind == {
         .Local(_, ty) -> {
-            if ty == .Val(shown) -> lsp_type_names(shown, names)
+            if ty == .Val(shown) -> lsp_type_slots(index, def.module_path, shown, slots)
         }
-        .Param(ty) -> lsp_type_names(ty, names)
-        .Field(ty, _) -> lsp_type_names(ty, names)
+        .Param(ty) -> lsp_type_slots(index, def.module_path, ty, slots)
+        .Field(ty, _) -> lsp_type_slots(index, def.module_path, ty, slots)
         .Function(callable) -> {
-            if callable.return_type == .Val(returned) -> lsp_type_names(returned, names)
+            if callable.return_type == .Val(returned) -> lsp_type_slots(index, def.module_path, returned, slots)
         }
-        .EnumVariant(parent) -> names.push(parent.copy())
-        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> names.push(def.name.copy())
+        .EnumVariant(parent) -> lsp_type_slot_add(index, def.module_path, parent, slots)
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> lsp_type_slot_add(index, def.module_path, def.name, slots)
         .Module | .Tag | .Const -> {}
     }
-    loop name in names -> index.display_paths.get(name) ?? name.copy()
+    slots
 }
 
 // The declaration of each named type of the value at the cursor.
@@ -206,11 +206,7 @@ lsp_type_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
     def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
     rows := [String]{}
-    seen := [Int]{}
-    loop name in lsp_value_type_names(index, def) {
-        slot: lsp_named_type_slot(index, def.module_path, name) ?? next
-        if seen.contains(slot) -> next
-        seen.push(slot)
+    loop slot in lsp_value_type_slots(index, def) {
         declared: index.definitions[slot].def
         rows.push(lsp_location_json(lsp_location(at.view.checked, declared.module_path, declared.def_span) ?? next))
     }

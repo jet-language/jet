@@ -75,11 +75,7 @@ lsp_checked_module_paths: fn(checked: LSPChecked) -> [String] Never! {
 lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPChecked, targets: ^[String:Bool]) -> [String:[Int]] Never! {
     groups := [String:[Int]]{}
     groups[uri] = [Int]{}
-    loop (index, diagnostic) in checked.diagnostics {
-        target: lsp_diagnostic_target(state, uri, diagnostic)
-        if !groups.has_key(target) -> groups[target] = [Int]{}
-        groups[target].push(index)
-    }
+    loop (index, diagnostic) in checked.diagnostics -> lsp_diagnostic_group_add(groups, state, uri, diagnostic, index)
     loop (target, _) in groups -> targets[target] = true
     if state.diagnostic_targets.get(uri) == .Val(previous) {
         read: lsp_checked_module_paths(checked)
@@ -94,19 +90,41 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
     groups
 }
 
-// The URI a diagnostic of `uri`'s check lands on: the open document holding
-// the file the driver placed it in, else that file, else `uri` itself.
-lsp_diagnostic_target: fn(state: LSPDiagnosticState, uri: String, diagnostic: Diagnostic) -> String Never! {
-    origin: diagnostic.origin ?? return uri.copy()
-    loop (open_uri, open) in state.docs {
-        if lsp_source_paths_equal(open.path, origin.path) -> return open_uri.copy()
+// Adds the diagnostic at `index` of `uri`'s check to the group of the URI it
+// lands on: the open document holding the file the driver placed it in, else
+// that file, else `uri` itself.
+lsp_diagnostic_group_add: fn(groups: ^[String:[Int]], state: LSPDiagnosticState, uri: String, diagnostic: Diagnostic, index: Int) Never! {
+    if diagnostic.origin == .Val(origin) {
+        loop (open_uri, open) in state.docs {
+            if lsp_source_paths_equal(open.path, origin.path) {
+                lsp_group_add(groups, open_uri, index)
+                return
+            }
+        }
+        lsp_group_add(groups, lsp_path_to_uri(origin.path), index)
+        return
     }
-    lsp_path_to_uri(origin.path)
+    lsp_group_add(groups, uri, index)
 }
 
-lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics: [Diagnostic], reports: [String], indices: [Int]) -> String Never! {
+lsp_group_add: fn(groups: ^[String:[Int]], target: String, index: Int) Never! {
+    if !groups.has_key(target) -> groups[target] = [Int]{}
+    groups[target].push(index)
+}
+
+// Whether a diagnostic of `uri`'s check lands on `uri` itself, as
+// lsp_diagnostic_group_add places it.
+lsp_diagnostic_lands_on_root: fn(state: LSPDiagnosticState, uri: String, diagnostic: Diagnostic) -> Bool Never! {
+    origin: diagnostic.origin ?? return true
+    loop (open_uri, open) in state.docs {
+        if lsp_source_paths_equal(open.path, origin.path) -> return open_uri == uri
+    }
+    lsp_path_to_uri(origin.path) == uri
+}
+
+lsp_publish_diagnostics: fn(uri: String, version: Int?, items: String) -> String Never! {
     version_json: if version == .Val(value) -> ",\"version\":{value}" else -> ""
-    "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":{lsp_diagnostic_items_json(uri, src, diagnostics, reports, indices)}}}}}"
+    "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":{items}}}}}"
 }
 
 lsp_diagnostic_items_json: fn(uri: String, src: String, diagnostics: [Diagnostic], reports: [String], indices: [Int]) -> String Never! {
@@ -248,32 +266,32 @@ lsp_publish_document_diagnostics: fn(server: ^LSPServer, uri: String, stdout: ^l
     server.published[uri] = checked
 }
 
-// The text a group's ranges are measured in and the document version it is
-// bound to: the text its diagnostics' origin read, bound to the open
-// document only when the open text's digest is that origin's; else the open
-// document's text; else none.
-LSPGroupText: struct {
-    source: String,
+// A group's items and the document version they are bound to. Their ranges
+// are measured in the text the group's diagnostics' origin read, bound to
+// the open document only when the open text's digest is that origin's; else
+// in the open document's text; else in none.
+LSPGroupItems: struct {
+    items: String,
     version: Int?,
 }
 
-lsp_group_text: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> LSPGroupText Never! {
+lsp_group_items: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> LSPGroupItems Never! {
     loop index in indices {
         if checked.diagnostics[index].origin == .Val(origin) {
             version := Int?{None}
             if state.docs.get(target) == .Val(open) {
                 if sha256_hex(open.text) == origin.revision -> version = Val(open.version)
             }
-            return LSPGroupText{source: origin.source.copy(), version: version}
+            return LSPGroupItems{items: lsp_diagnostic_items_json(target, origin.source, checked.diagnostics, checked.reports, indices), version: version}
         }
     }
-    if state.docs.get(target) == .Val(open) -> return LSPGroupText{source: open.text.copy(), version: Val(open.version)}
-    LSPGroupText{source: "", version: None}
+    if state.docs.get(target) == .Val(open) -> return LSPGroupItems{items: lsp_diagnostic_items_json(target, open.text, checked.diagnostics, checked.reports, indices), version: Val(open.version)}
+    LSPGroupItems{items: lsp_diagnostic_items_json(target, "", checked.diagnostics, checked.reports, indices), version: None}
 }
 
 lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> String Never! {
-    text: lsp_group_text(state, target, checked, indices)
-    lsp_publish_diagnostics(target, text.source, text.version, checked.diagnostics, checked.reports, indices)
+    group: lsp_group_items(state, target, checked, indices)
+    lsp_publish_diagnostics(target, group.version, group.items)
 }
 
 // A pulled report of the open document `uri`, from its own check: the
@@ -284,10 +302,9 @@ lsp_pull_report: fn(server: LSPServer, uri: String, previous: String?) -> String
     view: lsp_view_of(server, uri) ?? return "\"kind\":\"full\",\"resultId\":\"{sha256_hex("[]")}\",\"items\":[]"
     indices := [Int]{}
     loop (index, diagnostic) in view.checked.diagnostics {
-        if lsp_diagnostic_target(server.diagnostic_state, uri, diagnostic) == uri -> indices.push(index)
+        if lsp_diagnostic_lands_on_root(server.diagnostic_state, uri, diagnostic) -> indices.push(index)
     }
-    text: lsp_group_text(server.diagnostic_state, uri, view.checked, indices)
-    items: lsp_diagnostic_items_json(uri, text.source, view.checked.diagnostics, view.checked.reports, indices)
+    items: lsp_group_items(server.diagnostic_state, uri, view.checked, indices).items
     result_id: sha256_hex(items)
     if previous == .Val(seen) && seen == result_id -> return "\"kind\":\"unchanged\",\"resultId\":\"{result_id}\""
     "\"kind\":\"full\",\"resultId\":\"{result_id}\",\"items\":{items}"
@@ -330,10 +347,11 @@ lsp_close_document: fn(server: ^LSPServer, uri: String, stdout: ^lsp_diag_term.S
 
 lsp_close_document_state: fn(state: ^LSPDiagnosticState, uri: String, stdout: ^lsp_diag_term.Stdout) -[IO]> IOError! {
     if state.docs.remove(uri) == .Val(doc) {
+        closed: [String]{doc.path}
         readers := [String]{}
         loop (root, modules) in state.checked_modules {
             if root == uri || !state.docs.has_key(root) -> next
-            if lsp_reads_any(modules, [String]{doc.path.copy()}) -> readers.push(root.copy())
+            if lsp_reads_any(modules, closed) -> readers.push(root.copy())
         }
         loop root in readers -> state.dirty[root] = true
     }
@@ -342,6 +360,6 @@ lsp_close_document_state: fn(state: ^LSPDiagnosticState, uri: String, stdout: ^l
     targets: state.diagnostic_targets.remove(uri) ?? return
     loop (target, _) in targets {
         if lsp_target_retained_elsewhere(state, uri, target) -> next
-        lsp_write_message(stdout, lsp_publish_diagnostics(target, "", None, [Diagnostic]{}, [String]{}, [Int]{})) ?? return Err(err)
+        lsp_write_message(stdout, lsp_publish_diagnostics(target, None, "[]")) ?? return Err(err)
     }
 }

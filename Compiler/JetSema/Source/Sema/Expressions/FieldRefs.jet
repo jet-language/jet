@@ -16,6 +16,7 @@
 use jet_foundation.[
     Diagnostic,
     Expr,
+    Field,
     Span,
     SymbolKind,
     TextEdit,
@@ -27,12 +28,19 @@ use jet_foundation.[
     type_name,
 ]
 
-// The prelude's `FieldRef<M, T>`, resolved, when `wanted` is one. A resolved
-// Core nominal is spelled `<module>.<leaf>`; only a name ending in the leaf
-// is resolved, which keeps the test off every other type.
-sema_field_ref_type: fn(wanted: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    if wanted == .Apply(written, args) && args.len() == 2 && written.ends_with("FieldRef") {
-        if sema_field_ref_name(written) -> return Val(wanted.copy())
+// Whether `wanted` is the prelude's `FieldRef<M, T>` as resolved: a resolved
+// Core nominal is spelled `<module>.<leaf>`.
+sema_field_ref_resolved: fn(wanted: Type) -> Bool Never! {
+    if wanted == .Apply(written, args) -> return args.len() == 2 && sema_field_ref_name(written)
+    false
+}
+
+// The prelude's `FieldRef<M, T>`, resolved, when `wanted` is one written
+// unresolved; None when it is none, or is one resolved already
+// (sema_field_ref_resolved). Only a name ending in the leaf is resolved,
+// which keeps the test off every other type.
+sema_field_ref_resolve: fn(wanted: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    if wanted == .Apply(written, args) && args.len() == 2 && written.ends_with("FieldRef") && !sema_field_ref_name(written) {
         resolved: sema_expr_expected_type(wanted, environment, program)
         if resolved == .Apply(name, _) && sema_field_ref_name(name) -> return Val(resolved)
     }
@@ -63,7 +71,7 @@ sema_field_ref_probe: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvir
 // `FieldRef<M, field_ty>` from a resolved `FieldRef<M, T>`.
 sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type Never! {
     if ref_type == .Apply(name, args) -> return Type.Apply{name: name, args: [Type]{args[0].copy(), field_ty}}
-    ref_type.copy()
+    panic("a resolved FieldRef is an applied type")
 }
 
 // A selector where a `FieldRef<M, T>` is expected: the field reference it
@@ -72,33 +80,55 @@ sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type Never! {
 sema_field_ref_check: fn(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     wanted: expected ?? return SemaDirectSpecialCheck{handled: false, value: None}
     if !sema_field_ref_selector(expr) -> return SemaDirectSpecialCheck{handled: false, value: None}
-    ref_type: sema_field_ref_type(wanted, environment, program) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if sema_field_ref_resolved(wanted) -> return sema_field_ref_check_as(expr, wanted, expected, environment, program, scopes, context, diagnostics)
+    ref_type: sema_field_ref_resolve(wanted, environment, program) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    sema_field_ref_check_as(expr, ref_type, expected, environment, program, scopes, context, diagnostics)
+}
+
+// The selector `expr` checked as the resolved `FieldRef<M, T>` `ref_type`.
+sema_field_ref_check_as: fn(expr: Expr, ref_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     fact: sema_field_ref_field(expr, ref_type, environment, program, scopes, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     member_span: expr_span(expr)
-    context.name_references.push(sema_name_reference(member_span, fact.symbol.copy(), Val(SymbolKind.Field)))
-    value_type: sema_field_ref_value_type(ref_type, fact.field_ty.copy())
-    value: sema_field_ref_value(value_type, fact.symbol.name, member_span, environment, program, scopes, context) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, environment, program, diagnostics)}
+    value_type: sema_field_ref_value_type(ref_type, fact.field_ty)
+    value: sema_field_ref_value(value_type, fact.symbol.name, member_span, environment, program, scopes, context)
+    context.name_references.push(sema_name_reference(member_span, fact.symbol, Val(SymbolKind.Field)))
+    checked: value ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(checked, expected, environment, program, diagnostics)}
 }
 
 // `M`'s stored field the selector `expr` names, `M` being `ref_type`'s
 // model. None after a diagnostic at the selector.
 sema_field_ref_field: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaStructFieldFact? {
-    model: sema_field_ref_model(ref_type) ?? return None
-    span: Span{start: expr_source_start(expr), end: expr_span(expr).end}
-    chain: if expr == .EnumLit(_, variant, _, _, _, _, _) -> ".{variant}" else -> sema_expr_bare_member_chain_text(expr)
-    if context.implicit_loop_subject_depth > 0 && sema_expr_is_bare_member_chain(expr) {
-        diagnostics.push(sema_error("E-SUBJECT-CALL", span, "`{chain}` reads the loop's item `it` here, not a field of `{type_name(model)}`", "inside a loop with no binding a bare `.name` is `it{chain}`, a value of the item, before any expected type makes it a field reference", "name the loop's binding (`loop item in …`) so `{chain}` names the field, or write the item's field as `it{chain}`"))
-        return None
+    if ref_type == .Apply(_, ref_args) && ref_args.len() == 2 {
+        model: ref_args[0]
+        span: Span{start: expr_source_start(expr), end: expr_span(expr).end}
+        chain: if expr == .EnumLit(_, variant, _, _, _, _, _) -> ".{variant}" else -> sema_expr_bare_member_chain_text(expr)
+        if context.implicit_loop_subject_depth > 0 && sema_expr_is_bare_member_chain(expr) {
+            diagnostics.push(sema_error("E-SUBJECT-CALL", span, "`{chain}` reads the loop's item `it` here, not a field of `{type_name(model)}`", "inside a loop with no binding a bare `.name` is `it{chain}`, a value of the item, before any expected type makes it a field reference", "name the loop's binding (`loop item in …`) so `{chain}` names the field, or write the item's field as `it{chain}`"))
+            return None
+        }
+        if model == .Named(name) -> return sema_field_ref_owner_field(expr, model, name, [Type]{}, chain, span, environment, program, scopes, context, diagnostics)
+        if model == .Apply(name, args) -> return sema_field_ref_owner_field(expr, model, name, args, chain, span, environment, program, scopes, context, diagnostics)
+        diagnostics.push(sema_field_ref_no_struct(chain, model, span))
     }
-    owner_name := ""
-    owner_args := [Type]{}
-    if model == .Named(name) {
-        owner_name = name.copy()
-    } else if model == .Apply(name, args) {
-        owner_name = name.copy()
-        owner_args = args.copy()
-    }
+    None
+}
+
+// The field the selector `expr` (written `chain` at `span`) names of
+// `model`, the type `owner_name` applied to `owner_args`.
+sema_field_ref_owner_field: fn(
+    expr: Expr,
+    model: Type,
+    owner_name: String,
+    owner_args: [Type],
+    chain: String,
+    span: Span,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: ^SemaScopeTable,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
+) -> SemaStructFieldFact? {
     if owner_name == "" || sema_type_name_is_generic(environment.generic_params, owner_name) {
         diagnostics.push(sema_field_ref_no_struct(chain, model, span))
         return None
@@ -111,48 +141,61 @@ sema_field_ref_field: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvir
         diagnostics.push(sema_field_ref_no_struct(chain, model, span))
         return None
     }
-    shown: owner_symbol.name.copy()
+    shown: owner_symbol.name
     sees_private: sema_expr_sees_private_fields(context)
-    fields := [String]{}
-    loop field in struct_def.fields {
+    // The rows of the stored fields visible at the selector.
+    visible := [Int]{}
+    loop (row, field) in struct_def.fields {
         if field.computed != None -> next
         if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) -> next
-        fields.push(field.name.copy())
+        visible.push(row)
     }
-    member := ""
-    if expr == .Field(base, name, _, _) && sema_expr_is_bare_subject(base) {
-        member = name.copy()
-    }
-    if member == "" {
-        sema_field_ref_refused(expr, chain, shown, fields, span, diagnostics)
+    if expr == .Field(base, member, _, _) && sema_expr_is_bare_subject(base) {
+        names: loop param in struct_def.type_params -> param.name
+        loop field in struct_def.fields {
+            if field.name != member -> next
+            if field.computed != None {
+                diagnostics.push(sema_error("E0302", span, "`{chain}` is a computed field of `{shown}`", "a field reference names a stored field; a computed field stores nothing to name", "name one of `{shown}`'s stored fields: {sema_field_ref_list(struct_def.fields, visible)}"))
+                return None
+            }
+            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) {
+                diagnostics.push(sema_expression_private_field_error(member, expr_span(expr)))
+                return None
+            }
+            return Val(sema_expression_struct_field_fact(field, owner_symbol, names, owner_args, environment, program, context))
+        }
+        nearest: sema_field_ref_nearest(member, struct_def.fields, visible)
+        fix: if nearest == .Val(row) -> "did you mean `.{struct_def.fields[row].name}`?" else -> "name one of `{shown}`'s fields: {sema_field_ref_list(struct_def.fields, visible)}"
+        diagnostic: sema_error("E0302", span, "`{shown}` has no field `{member}`", "a field reference names a field `{shown}` declares; its fields are {sema_field_ref_list(struct_def.fields, visible)}", fix)
+        if nearest == .Val(row) {
+            diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(expr), new_text: struct_def.fields[row].name}))
+        } else { diagnostics.push(diagnostic) }
         return None
     }
-    names: loop param in struct_def.type_params -> param.name
-    loop field in struct_def.fields {
-        if field.name != member -> next
-        if field.computed != None {
-            diagnostics.push(sema_error("E0302", span, "`{chain}` is a computed field of `{shown}`", "a field reference names a stored field; a computed field stores nothing to name", "name one of `{shown}`'s stored fields: {sema_field_ref_list(fields)}"))
-            return None
-        }
-        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) {
-            diagnostics.push(sema_expression_private_field_error(member, expr_span(expr)))
-            return None
-        }
-        return Val(sema_expression_struct_field_fact(field, owner_symbol, names, owner_args, environment, program, context))
-    }
-    suggestion: sema_suggest_field(member, fields)
-    fix: if suggestion == .Val(candidate) -> "did you mean `.{candidate}`?" else -> "name one of `{shown}`'s fields: {sema_field_ref_list(fields)}"
-    diagnostic: sema_error("E0302", span, "`{shown}` has no field `{member}`", "a field reference names a field `{shown}` declares; its fields are {sema_field_ref_list(fields)}", fix)
-    if suggestion == .Val(candidate) {
-        diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(expr), new_text: candidate}))
-    } else { diagnostics.push(diagnostic) }
+    sema_field_ref_refused(expr, chain, shown, struct_def.fields, visible, span, diagnostics)
     None
 }
 
-// The model `M` of a resolved `FieldRef<M, T>`.
-sema_field_ref_model: fn(ref_type: Type) -> Type? Never! {
-    if ref_type == .Apply(_, args) && args.len() == 2 -> return Val(args[0].copy())
-    None
+// The row in `visible` of the field of `fields` nearest `name`, as
+// sema_suggest_field picks it: within two edits, never `name` itself, and
+// none when two tie.
+sema_field_ref_nearest: fn(name: String, fields: [Field], visible: [Int]) -> Int? Never! {
+    best := -1
+    best_distance := 3
+    ambiguous := false
+    loop row in visible {
+        distance: sema_taint_edit_distance(name, fields[row].name)
+        if distance == 0 || distance > 2 -> next
+        if {
+            distance < best_distance -> {
+                best = row
+                best_distance = distance
+                ambiguous = false
+            }
+            distance == best_distance && fields[best].name != fields[row].name -> { ambiguous = true }
+        }
+    }
+    if best < 0 || ambiguous -> None else -> Val(best)
 }
 
 // A selector whose `FieldRef` names a model this check doesn't know as a
@@ -162,21 +205,27 @@ sema_field_ref_no_struct: fn(chain: String, model: Type, span: Span) -> Diagnost
 }
 
 // A selector that names no single field: a chain, a call, or an
-// upper-case or payload-carrying name.
-sema_field_ref_refused: fn(expr: Expr, chain: String, shown: String, fields: [String], span: Span, diagnostics: ^[Diagnostic]) {
+// upper-case or payload-carrying name. `visible` are the rows of the fields
+// of `fields` it may name.
+sema_field_ref_refused: fn(expr: Expr, chain: String, shown: String, fields: [Field], visible: [Int], span: Span, diagnostics: ^[Diagnostic]) {
     if expr == .EnumLit(_, variant, _, payload, _, _, _) {
         lower: variant.lower()
         written: if payload.len() > 0 -> "`.{variant}(…)`" else -> "`.{variant}`"
-        fix: if fields.contains(lower) -> "write `.{lower}`" else -> "name one of `{shown}`'s fields: {sema_field_ref_list(fields)}"
+        named := false
+        loop row in visible {
+            if fields[row].name == lower -> named = true
+        }
+        fix: if named -> "write `.{lower}`" else -> "name one of `{shown}`'s fields: {sema_field_ref_list(fields, visible)}"
         diagnostics.push(sema_error("E0302", span, "{written} names no field of `{shown}`", "a field reference is the field's own lower-case name, with no payload; an upper-case `.Name` is an enum case", fix))
         return
     }
-    diagnostics.push(sema_error("E0302", span, "`{chain}` names no field of `{shown}`", "a field reference is one field's name; a longer chain or a call reads a value", "name the field itself, one of {sema_field_ref_list(fields)}"))
+    diagnostics.push(sema_error("E0302", span, "`{chain}` names no field of `{shown}`", "a field reference is one field's name; a longer chain or a call reads a value", "name the field itself, one of {sema_field_ref_list(fields, visible)}"))
 }
 
-sema_field_ref_list: fn(fields: [String]) -> String Never! {
-    if fields.len() == 0 -> return "none is visible here"
-    shown: loop name in fields -> "`{name}`"
+// The fields of `fields` at the rows `visible`, each in backticks.
+sema_field_ref_list: fn(fields: [Field], visible: [Int]) -> String Never! {
+    if visible.len() == 0 -> return "none is visible here"
+    shown: loop row in visible -> "`{fields[row].name}`"
     shown.join(", ")
 }
 
@@ -192,7 +241,7 @@ sema_field_ref_value: fn(value_type: Type, name: String, span: Span, environment
                     fact: sema_expression_struct_field_fact(field, owner, names, ref_args, environment, program, context)
                     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
                     reference.boxed = fact.boxed
-                    return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference.copy(), value: text, boxed: reference.boxed}}}, span))
+                    return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference, value: text, boxed: fact.boxed}}}, span))
                 }
             }
         }

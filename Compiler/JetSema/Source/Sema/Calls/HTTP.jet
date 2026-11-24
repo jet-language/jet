@@ -400,10 +400,11 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
 
         // `typed<Model>` is generic in the model only: the form it returns is
         // a `WebFormTyped<Model>`, whose field-naming methods take
-        // `FieldRef<Model, T>`.
-        model_type: sema_expr_expected_type(Type.Named{name: model_name}, environment, program)
-        typed_call: sema_call_core_source_declared("core.web.forms", "typed", [Type]{model_type.copy()}, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        form_type: Type.Apply{name: sema_core_source_type_name(program, "core.web.forms", "WebFormTyped"), args: [Type]{model_type}}
+        // `FieldRef<Model, T>`. The call reads its type arguments, so the
+        // form type takes the same list.
+        model_args: [Type]{sema_expr_expected_type(Type.Named{name: model_name}, environment, program)}
+        typed_call: sema_call_core_source_declared("core.web.forms", "typed", model_args, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        form_type: Type.Apply{name: sema_core_source_type_name(program, "core.web.forms", "WebFormTyped"), args: model_args}
         result := sema_call_http_core_unwrap_result(typed_call, form_type, "web.form could not register its typed action", span, environment, program, scopes)
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
     } else { return SemaDirectSpecialCheck{handled: true, value: None} }

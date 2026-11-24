@@ -49,26 +49,29 @@ lsp_completion_resolve_response: fn(server: LSPServer, params: Dyn?, id: Dyn) ->
             return lsp_error_response(id, -32602, "a completion item is an object")
         }
     }
-    summary: lsp_completion_summary(server, lsp_member(item, "data") ?? Dyn.Null)
-    if summary == "" -> return lsp_response(id, jet_error_json_encode_value(item))
+    summary: lsp_completion_summary_json(server, lsp_member(item, "data") ?? Dyn.Null) ?? return lsp_response(id, jet_error_json_encode_value(item))
     rows := [String]{}
     loop entry in entries {
         if entry.key == "documentation" -> next
         rows.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
     }
-    rows.push("\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(summary)}}}")
+    rows.push("\"documentation\":{{\"kind\":\"markdown\",\"value\":{summary}}}")
     lsp_response(id, "{{{rows.join(",")}}}")
 }
 
-// The summary of the declaration `data` names in its document's check, or "".
-lsp_completion_summary: fn(server: LSPServer, data: Dyn) -> String {
-    uri: lsp_text_member(data, "uri") ?? return ""
-    identity: lsp_text_member(data, "identity") ?? return ""
-    view: lsp_view_of(server, uri) ?? return ""
+// The summary of the declaration `data` names in its document's check, as a
+// JSON string; None when it has none.
+lsp_completion_summary_json: fn(server: LSPServer, data: Dyn) -> String? {
+    uri: lsp_text_member(data, "uri") ?? return None
+    identity: lsp_text_member(data, "identity") ?? return None
+    view: lsp_view_of(server, uri) ?? return None
     loop symbol in view.checked.symbols {
-        if symbol.identity == identity -> return symbol.summary.copy()
+        if symbol.identity == identity {
+            if symbol.summary == "" -> return None
+            return Val(foundation_json_quote(symbol.summary))
+        }
     }
-    ""
+    None
 }
 
 // The binding snippets, as `label`, `detail` and snippet text.

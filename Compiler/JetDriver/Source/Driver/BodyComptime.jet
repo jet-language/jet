@@ -294,18 +294,20 @@ jet_driver_comptime_rules_pending: fn(pending: [SemaComptimeBodySource]) -> Bool
     false
 }
 
-// The pending sources a compile without the runtime image keeps. jet-bare
-// checks every Core body in the runtime step with no image, so it runs no
-// compile-time code: a call a check rule hears keeps its ordinary checks
-// there, and each compile that can run the rule hears it. A call whose own
-// checks failed still waits on its rule, so its held errors are reported.
-jet_driver_comptime_unheard: fn(pending: [SemaComptimeBodySource]) -> [SemaComptimeBodySource] Never! {
-    kept := [SemaComptimeBodySource]{}
-    loop source in pending {
+// Drops from `pending` the sources a compile without the runtime image
+// leaves. jet-bare checks every Core body in the runtime step with no image,
+// so it runs no compile-time code: a call a check rule hears keeps its
+// ordinary checks there, and each compile that can run the rule hears it. A
+// call whose own checks failed still waits on its rule, so its held errors
+// are reported.
+jet_driver_comptime_unheard: fn(pending: ^[SemaComptimeBodySource]) Never! {
+    held := compiler_take_rows<SemaComptimeBodySource>(pending)
+    held.reverse()
+    loop held.len() > 0 {
+        source: held.pop() ?? break
         if source.rule != None && !source.rule_held -> next
-        kept.push(source.copy())
+        pending.push(source)
     }
-    kept
 }
 
 // Whether the body recheck or the checked-text validation evaluates over
@@ -406,7 +408,7 @@ jet_driver_comptime_body_pass: fn(
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
     jet_driver_trace_step_begin(request.trace_sink, "comptime.body.pending")
     pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
-    if request.eval_config.native == None -> pending = jet_driver_comptime_unheard(pending)
+    if request.eval_config.native == None -> jet_driver_comptime_unheard(pending)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.pending", pending.len())
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.bodies_pending", pending.len(), -1)
