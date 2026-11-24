@@ -681,10 +681,6 @@ SemaGraphResult: struct {
     // again without stand-ins (sema_finalize_program), else "".
     core_stand_ins: Int{0},
     core_stand_in_rerun: String{""},
-    // The registration graph finalization checked against (values and
-    // failure projections applied), handed back by sema_finalize_graph so its
-    // caller can undo the edits (sema_graph_trail_undo); None otherwise.
-    registration_graph: SemaRegistrationGraph?{None},
     // `SemaRegistrationGraph.retain_programs`: each module's program as sema
     // settled it, indexed like `modules`; empty otherwise.
     programs: [Program]{[Program]{}},
@@ -694,6 +690,14 @@ SemaGraphResult: struct {
     // The answers of the debugger's probes (EvalProbe.jet), ordered by
     // probe, expression and function; empty without probes.
     eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+}
+
+// What sema_finalize_graph hands back: its result, and the registration graph
+// the finalization checked against (values and failure projections applied),
+// moved back to the caller so it can undo the edits (sema_graph_trail_undo).
+SemaFinalized: struct {
+    result: SemaGraphResult,
+    graph: SemaRegistrationGraph,
 }
 
 sema_name_facts_empty: fn() -> NameFacts Never! {

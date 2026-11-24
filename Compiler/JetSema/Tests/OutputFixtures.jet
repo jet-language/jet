@@ -126,17 +126,13 @@ output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     // types are rows of the finalized graph's interner, which the
     // finalization hands back with that graph.
     trail := sema_graph_trail_init()
-    checked := sema_finalize_graph(graph.copy(), trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), true, None)
+    finalized := sema_finalize_graph(graph.copy(), trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), true, None)
+    checked := finalized.result.move()
     if !checked.complete {
         failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
         return
     }
-    finalized := checked.registration_graph.move()
-    checked.registration_graph = None
-    finalized_graph := finalized.move() ?? {
-        failures.push("solved effect publication: finalization handed back no graph")
-        return
-    }
+    finalized_graph := finalized.graph.move()
     key: symbol_key_text(SymbolKind.Function, "output-fixture.main", "", "launch")
     solved := [String]?{None}
     settled_return := Type?{None}

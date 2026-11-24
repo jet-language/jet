@@ -292,9 +292,8 @@ sema_finalize_registration_graph: fn(graph: ^^SemaRegistrationGraph, resolved: ^
     owned := resolved.move()
     resolved_graph := owned.move() ?? sema_comptime_graph_with_values(graph, values)
     trail := sema_graph_trail_init()
-    result := sema_finalize_graph(resolved_graph, trail, stage, values, comptime_functions, host_hooks, threads, true, trace_sink)
-    result.registration_graph = None
-    result
+    finalized: sema_finalize_graph(resolved_graph, trail, stage, values, comptime_functions, host_hooks, threads, true, trace_sink)
+    finalized.result.move()
 }
 
 // Demand: after the body pass, every generated codec an
@@ -387,14 +386,14 @@ sema_derive_waves: fn(owned: ^^SemaRegistrationGraph, values: [SemaComptimeItemV
 
 // sema_finalize_registration_graph on `resolved`, the registration graph
 // with `values` applied, moved in: every edit finalization makes to it is
-// recorded on `trail`, and the graph comes back as the result's
-// `registration_graph`, so the caller can undo the edits instead of keeping
+// recorded on `trail`, and the graph comes back beside the result
+// (SemaFinalized.graph), so the caller can undo the edits instead of keeping
 // a copy of the registration graph. Values never change the graph's
 // identities or `complete`, which are read from `resolved`. `build_names`
 // builds the bundle's name facts; without it the result carries only their
 // structure facts, for a caller that builds the names itself once it has
 // changed the modules (the driver's checked-text merge).
-sema_finalize_graph: fn(resolved: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, build_names: Bool, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
+sema_finalize_graph: fn(resolved: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, build_names: Bool, trace_sink: CompilerTraceSink?) -> SemaFinalized {
     bodies := sema_finalize_bodies_empty()
     bodies.build_names = build_names
     body_graph := sema_finalize_bodies(resolved, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
@@ -491,10 +490,10 @@ sema_finalize_demand: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail,
 // The whole-program half of sema_finalize_graph over the `bodies` of
 // sema_finalize_bodies after the rounds of their Core demand
 // (sema_finalize_demand): the failure solve and recheck, and every
-// whole-program pass after them. The graph moves in and comes back as the
-// result's `registration_graph`, with its edits on `trail`. `values` and
+// whole-program pass after them. The graph moves in and comes back beside
+// the result (SemaFinalized.graph), with its edits on `trail`. `values` and
 // `comptime_functions` are the ones the bodies were checked against.
-sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: ^^SemaFinalizeBodies) -> SemaGraphResult {
+sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: ^^SemaFinalizeBodies) -> SemaFinalized {
     after_body_graph := owned.move()
     held := bodies.move()
     sema_core_demand_counters(after_body_graph, held.core_tally, trace_sink)
@@ -987,7 +986,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
     if final_graph.core_seal -> sema_core_derive_bodies(final_graph, core_bodies)
     captures: if final_graph.core_seal -> SemaCoreCaptures{bodies: core_bodies.move(), context: sema_core_bodies_context(final_graph)} else -> SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}
     eval_answers: sema_eval_probe_answers(modules)
-    result := SemaGraphResult{
+    result: SemaGraphResult{
         package_identity: final_graph.package_identity,
         entry_module_identity: final_graph.entry_module_identity,
         modules: modules.move(),
@@ -1013,8 +1012,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
         memory_projections: effects.memory_projections.move(),
         eval_answers: eval_answers,
     }
-    result.registration_graph = Val(final_graph.move())
-    result.move()
+    SemaFinalized{result: result.move(), graph: final_graph.move()}
 }
 
 // A lint reported against embedded Core library source (`<corelib>/…`),
