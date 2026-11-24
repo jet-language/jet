@@ -217,13 +217,16 @@ lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, de
 }
 
 // Places the occurrences of `target` in `checked` not yet seen; true when it
-// placed any.
+// placed any. A derive-written body (an enum's `equal` and `compare`) is
+// checked past the end of its module's text, so its uses have no place in
+// the file and are left out.
 lsp_place_occurrences: fn(checked: LSPChecked, target: LSPTarget, seen: &[String:Bool], found: &LSPOpenOccurrences, declaration: Bool{false}) -> Bool {
     index: checked.index ?? return false
     placed := false
     loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
         module_ref: checked.modules[lsp_module_index(checked, occurrence.module_path) ?? next]
         if module_ref.physical_path == "" -> next
+        if occurrence.span.end > module_ref.source.count_bytes() -> next
         key: "{module_ref.physical_path}:{occurrence.span.start}"
         if seen.has_key(key) -> next
         seen[key] = true
