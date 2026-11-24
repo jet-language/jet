@@ -1623,6 +1623,13 @@ imports a `U8`, or names a type parameter `U8`, means that type by `U8`. A
 program's own alias of a size (`Byte: Unsigned<8>`) is that size, with its
 constants, statics and literal: `Byte.MAX`, `Byte{7}`.
 
+An impl of a family is that family's one definition for every size:
+`impl Signed.Roundable { … }` is the impl of `I8` through `I64`, and
+`impl IEEE.Roundable { … }` that of `F32` and `Float`. Inside it, `Self` is
+each size in turn, so `-> Self` returns an `I16` from the `I16` impl and
+`Self{x}` makes one. A program that declares or imports its own `Signed`
+implements its own type by `impl Signed.…`.
+
 ## Closures and function values
 
 A lambda is `fn(params) { body }`: the `fn` keyword, its parameters and a

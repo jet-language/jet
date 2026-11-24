@@ -38253,18 +38253,15 @@ Roundable: trait {
     rounded: fn(self, mode: Rounding) -> Self Never!,
 }
 
-impl Float.Roundable {
-    rounded: fn(self, mode: Rounding) -> Float Never! { round_in_mode(self, mode) }
-}
-
-// An F32 rounds through its exact Float widening. Below 2^23 in magnitude the
-// integral result is an F32 again; any other F32 (a NaN, an infinity, a value
+// The IEEE family's one impl (F32 and Float): a value rounds through its
+// exact Float widening. Below 2^52 in magnitude the integral result is a
+// value of its own size again; any other value (a NaN, an infinity, a value
 // already whole) is itself.
-impl F32.Roundable {
-    rounded: fn(self, mode: Rounding) -> F32 Never! {
-        wide: Float.from_f32(self)
-        if !(fabs(wide) < Float{8388608.0}) -> return self
-        F32{round_in_mode(wide, mode)}
+impl IEEE.Roundable {
+    rounded: fn(self, mode: Rounding) -> Self Never! {
+        wide: Float{self}
+        if !(fabs(wide) < Float{4503599627370496.0}) -> return self
+        Self{round_in_mode(wide, mode)}
     }
 }
 
@@ -38642,36 +38639,14 @@ impl Int.Roundable {
     rounded: fn(self, mode: Rounding) -> Int Never! { self }
 }
 
-impl I8.Roundable {
-    rounded: fn(self, mode: Rounding) -> I8 Never! { self }
+// The Signed and Unsigned families' one impl each: every size is already
+// integral and is itself.
+impl Signed.Roundable {
+    rounded: fn(self, mode: Rounding) -> Self Never! { self }
 }
 
-impl I16.Roundable {
-    rounded: fn(self, mode: Rounding) -> I16 Never! { self }
-}
-
-impl I32.Roundable {
-    rounded: fn(self, mode: Rounding) -> I32 Never! { self }
-}
-
-impl I64.Roundable {
-    rounded: fn(self, mode: Rounding) -> I64 Never! { self }
-}
-
-impl U8.Roundable {
-    rounded: fn(self, mode: Rounding) -> U8 Never! { self }
-}
-
-impl U16.Roundable {
-    rounded: fn(self, mode: Rounding) -> U16 Never! { self }
-}
-
-impl U32.Roundable {
-    rounded: fn(self, mode: Rounding) -> U32 Never! { self }
-}
-
-impl U64.Roundable {
-    rounded: fn(self, mode: Rounding) -> U64 Never! { self }
+impl Unsigned.Roundable {
+    rounded: fn(self, mode: Rounding) -> Self Never! { self }
 }
 
 // Whether a value of sign `negative` and magnitude `quotient` + `remainder` /
