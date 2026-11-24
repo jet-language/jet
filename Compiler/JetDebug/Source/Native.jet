@@ -6098,8 +6098,9 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
 // The functions of the Jet source `file`, by their index in the line
 // table. A path names the files whose recorded path (native_line_source)
 // is it or ends with it, so `Sema/CheckProgram.jet` or an editor's absolute
-// path picks one of the image's same-named files; a base name, or a path no
-// file's matches, names every file of that base name.
+// path picks one of the image's same-named files; a base name names every
+// file of that base name, and so does a path no file's matches when only
+// one source has that base name (a path into two of them names none).
 native_line_functions: fn(image: NativeImage, file: String) -> [Int] Never! {
     wanted: native_files.basename(file)
     target: if file.contains("/") -> native_files.normalize(file) else -> file

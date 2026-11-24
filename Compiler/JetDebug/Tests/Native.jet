@@ -292,8 +292,9 @@ native_test_line_functions: fn() -> [X64JetlineFunction] {
 }
 
 // Two packages' files of one base name: a path picks one, by its last
-// components or whole under the compilation directory; the base name, or a
-// path neither file's ends with, names both.
+// components or whole under the compilation directory; the base name names
+// both, and a path neither file's ends with names none, since it could be
+// either.
 #Test("a_breakpoint_path_picks_one_of_two_same_named_files") {
     // One row each: line 5 at the function's start.
     rows: [U8]{U8{0}, U8{4}}
@@ -303,7 +304,7 @@ native_test_line_functions: fn() -> [X64JetlineFunction] {
     assert_eq(native_line_addresses(image, "Check.jet", 5), [Int]{0x1000, 0x1020})
     assert_eq(native_line_addresses(image, "JetSema/Source/Check.jet", 5), [Int]{0x1000})
     assert_eq(native_line_addresses(image, "/src/Compiler/JetEval/Source/Check.jet", 5), [Int]{0x1020})
-    assert_eq(native_line_addresses(image, "Other/Check.jet", 5), [Int]{0x1000, 0x1020})
+    assert_eq(native_line_addresses(image, "Other/Check.jet", 5), [Int]{})
 }
 
 #Test("an_unavailable_debugger_is_e2203") {
