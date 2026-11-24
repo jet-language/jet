@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113650,
+    "rev": 113675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42996,6 +42996,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "c2 progress: 6444-c2 landed (dev 7583396c60). Owned-main print goes through the shared stdout buffer. On the batch 15 compiler, cases PrintBranchTiers/print_writes_numbers_into_stdout_with_the_text_a_string_has and BuildEntry/package_lint_import_silent PASS, and golden shows no new failures. c2 stays open until its named proof runs: strace -c on a 3M-print owned-main loop into a pipe shows at most one write per 64 KiB, and the same-run bench against Rust with a BufWriter gives Jet/Rust < 1.00. That measurement waits for the heavy slot."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Burn-down ranking (2026-11-24, by remaining workload; G2Regressions read the open criteria against dev 8a8ea0ee0b): 1d. c1's Runtime/stdin_buffered_reads already PASSes on batch12; it still needs the committed same-run cat receipt against Rust (perf host). c2 is the owned-main stdout buffer in the runtime: hours, plus a strace proof."
         },
         {
@@ -43088,7 +43093,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-24T01:17:50.572Z",
+      "updated": "2026-11-24T03:13:44.643Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -46929,6 +46934,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "c3 progress: applied 95 of G2Regressions' 106 G5 criterion rewrites (88 provenance-tag strips, 7 Rust-era proofs replaced with Jet suite filters), each checked against the criterion's current text first. The scan now lists 12 open G5 criteria, all on frozen cards (#3596 c1-c2, #3598 c1-c3, #4195 c2-c3, #4614 c1, #6620 c1-c4), which Tower refuses to edit. Their ready rewrites (7 replacements, 5 splits) are in land/6568-c3.proposals.json for the owner to apply or to unfreeze. c3 stays open until then; the scan was not narrowed to hide them."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Burn-down ranking (2026-11-24, by remaining workload; G2Regressions read the open criteria against dev 8a8ea0ee0b): 1h Main-only. c3 is a Tower board scan and split of open G5 criteria (no Proof: clause, or a `(was #N)` tag), and workers can't write Tower."
         },
         {
@@ -47154,7 +47164,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T14:08:03.130Z",
-      "updated": "2026-11-24T00:39:54.620Z",
+      "updated": "2026-11-24T02:42:22.079Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 18
     },
@@ -57247,11 +57257,11 @@
         {
           "n": 2,
           "text": "The authority testkit cases that still fail (grants and providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr) each pass or have their known-failing row re-pointed at the card that owns the unbuilt feature. Proof: `jet test Compiler --profile cases --filter Authority/` shows no FAIL and no KNOWN-FAILING row naming #6843.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:34.766Z"
+          "evidence": "dev d09297a76c (6843-c4-c6-c7). On the batch 14 compiler, cases --filter Authority/ gives 53 PASS, 0 FAIL, 9 KNOWN-FAILING, none naming #6843; each re-pointed row cites its owning open card.",
+          "at": "2026-11-24T03:31:40.539Z"
         },
         {
           "n": 3,
@@ -57265,11 +57275,11 @@
         {
           "n": 4,
           "text": "Every row in Tests/known-failing.tsv that names this card passes and is retired, or moves to the card that owns its unbuilt feature. Proof: no row names this card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:35.675Z"
+          "evidence": "On dev 7ff5df3a66, git grep '#6843' over Tests/known-failing.tsv, Tests/UI, Tests/Cases and Examples finds 0 rows. Every row moved to its owning open card (69 cards got a criterion naming their rows; frozen #1346 keeps its 1 Java-importer row).",
+          "at": "2026-11-24T03:31:41.398Z"
         },
         {
           "n": 5,
@@ -57322,8 +57332,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-22T02:10:23.721Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T03:31:41.398Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
     {
@@ -60085,11 +60095,11 @@
         {
           "n": 3,
           "text": "One sleep: `tasks.sleep(ms: Int)` (Core/Tasks/Tasks.jet:270, unit-less, clamps negatives) is deleted, every caller uses `time.sleep(Duration)` (D-CORE-ONE-NAME1=A), and a negative Duration behaves as core-library.md states. Proof: `git grep -n -E '^sleep: fn' -- Core` prints only Core/Time/Time.jet, and `jet test Compiler --profile cases --filter CoreLib/sleep_negative_duration` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:42.102Z"
+          "evidence": "Landed dev 3394753e0b (6873-c3). On dev 7ff5df3a66, git grep -n -E '^sleep: fn' -- Core prints only Core/Time/Time.jet:51, and no source outside the Tower history calls tasks.sleep(. The batch 15 compiler gives cases --filter CoreLib/sleep_negative_duration PASS (and NativeApp/ all PASS).",
+          "at": "2026-11-24T03:13:43.809Z"
         },
         {
           "n": 4,
@@ -60131,7 +60141,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-24T02:27:55.726Z",
+      "updated": "2026-11-24T03:13:43.809Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
@@ -70583,12 +70593,12 @@
         },
         {
           "n": 4,
-          "text": "MetaSuite family J34 (native callbacks and C calling convention) passes its witness Examples/Interop/FFI/Callbacks/run.jet on every applicable tier, so the MetaSuite check reports no owed J34 row (moved from #6845 c11). Proof: `jet test Compiler --profile cases --filter MetaSuite` lists no owed row for J34.",
+          "text": "MetaSuite family J34 (native callbacks and C calling convention) passes its witness Examples/Interop/FFI/Callbacks/run.jet on every applicable tier, so the MetaSuite check reports no owed J34 row. Proof: `jet test Compiler --profile cases --filter MetaSuite` lists no owed row for J34.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T20:36:59.633Z"
+          "at": "2026-11-24T02:42:21.059Z"
         }
       ],
       "refs": [],
@@ -70600,7 +70610,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:32.582Z",
-      "updated": "2026-11-24T00:40:06.102Z",
+      "updated": "2026-11-24T02:42:21.059Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 4
     },
@@ -70988,12 +70998,16 @@
         },
         {
           "n": 11,
-          "text": "`jet test Compiler --profile packages` passes the PackageModel claims of #3611–#3615 (FFI and C binders, language binders). Proof: `jet test Compiler --profile packages --filter PackageModel`. (was #3590 c25)",
+          "text": "`jet test Compiler --profile packages` passes the PackageModel claims of #3611–#3615 (FFI and C binders, language binders).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:19:07.343Z"
+          "at": "2026-11-24T02:41:46.934Z",
+          "proof": {
+            "profile": "packages",
+            "filter": "PackageModel"
+          }
         },
         {
           "n": 12,
@@ -71013,7 +71027,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:35.988Z",
-      "updated": "2026-11-24T02:26:58.691Z",
+      "updated": "2026-11-24T02:41:46.935Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -71184,102 +71198,130 @@
         },
         {
           "n": 6,
-          "text": "Every jetpack_tasks case passes and its known-failing rows are removed. Proof: `jet test Compiler --profile cases --filter JetpackTasks/`. (was #3693 c4)",
+          "text": "Every jetpack_tasks case passes and its known-failing rows are removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:16:59.506Z"
+          "at": "2026-11-24T02:41:47.911Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "JetpackTasks/"
+          }
         },
         {
           "n": 7,
-          "text": "A built binary dispatches the same jobs with the same output as `jet jobs`. Proof: `jet test Compiler --profile cases --filter JetpackTasks/jet_build_job_dispatch_matches_default_and_interpreter`. (was #3693 c5)",
+          "text": "A built binary dispatches the same jobs with the same output as `jet jobs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:01.519Z"
+          "at": "2026-11-24T02:41:48.874Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "JetpackTasks/jet_build_job_dispatch_matches_default_and_interpreter"
+          }
         },
         {
           "n": 8,
-          "text": "The built binary runs `after:` predecessors in order, stops on a failing predecessor, refuses a bad root argument with E1331 (exit 2) before any predecessor runs, and prints byte-identical output to `jet jobs` and `jet run`. Proof: `jet test Compiler --profile cases --filter JetpackTasks/jet_jobs_after_runs_predecessors_and_scalar_args`. (was #3693 c6)",
+          "text": "The built binary runs `after:` predecessors in order, stops on a failing predecessor, refuses a bad root argument with E1331 (exit 2) before any predecessor runs, and prints byte-identical output to `jet jobs` and `jet run`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:02.663Z"
+          "at": "2026-11-24T02:41:49.800Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "JetpackTasks/jet_jobs_after_runs_predecessors_and_scalar_args"
+          }
         },
         {
           "n": 9,
-          "text": "`jet jobs web --port 3000` forwards `--port` to the job while global flags stay with jet and `--` forwards, typed job arguments parse from argv, and reserved job names fail with E0928. Proof: `jet test Compiler --profile cases --filter JetpackTasks/jet_top_jobs_forward_flags_after_name`, `--filter jetpack_tasks/jet_run_job_typed_cli_args` and `jet test Compiler --profile ui --filter E0928`. (was #3693 c7)",
+          "text": "`jet jobs web --port 3000` forwards `--port` to the job while global flags stay with jet and `--` forwards, typed job arguments parse from argv, and reserved job names fail with E0928. Proof: `jet test Compiler --profile cases --filter JetpackTasks/jet_top_jobs_forward_flags_after_name`, `--filter jetpack_tasks/jet_run_job_typed_cli_args` and `jet test Compiler --profile ui --filter E0928`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:03.631Z"
+          "at": "2026-11-24T02:41:50.969Z"
         },
         {
           "n": 10,
-          "text": "Job graphs, authority context, working directories and arguments are validated before any job effect runs, with a failure-path case per check. Proof: `jet test Compiler --profile cases --filter JetpackTasks/validates_before_effects_`. (was #3693 c11)",
+          "text": "Job graphs, authority context, working directories and arguments are validated before any job effect runs, with a failure-path case per check.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:04.656Z"
+          "at": "2026-11-24T02:41:52.009Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "JetpackTasks/validates_before_effects_"
+          }
         },
         {
           "n": 11,
-          "text": "Declared input and output freshness, dependency invalidation, per-job working directories and affected-subgraph watch work together. Proof: `jet test Compiler --profile cases --filter JetpackTasks/freshness_and_watch_`. (was #3693 c12)",
+          "text": "Declared input and output freshness, dependency invalidation, per-job working directories and affected-subgraph watch work together.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:05.702Z"
+          "at": "2026-11-24T02:41:53.043Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "JetpackTasks/freshness_and_watch_"
+          }
         },
         {
           "n": 12,
-          "text": "Job dependency, status, inspection and the canonical lifecycle events use the one process and job identity model, with no second model. Proof: `jet test Compiler --profile cases --filter JetpackTasks/inspection_and_events_`. (was #3693 c13)",
+          "text": "Job dependency, status, inspection and the canonical lifecycle events use the one process and job identity model, with no second model.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:06.637Z"
+          "at": "2026-11-24T02:41:54.007Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "JetpackTasks/inspection_and_events_"
+          }
         },
         {
           "n": 13,
-          "text": "`jet <job>` runs a project job by name before retired words, paths and path plugins are considered, and an unknown name suggests the project's jobs. Proof: `jet test Compiler --profile cases --filter JetpackTasks/top_level_jobs_precede_retired_words_paths_and_path_plugins` and `--filter jetpack_tasks/jet_top_job_runs_by_name_and_unknown_suggests_jobs`. (was #3693 c20)",
+          "text": "`jet <job>` runs a project job by name before retired words, paths and path plugins are considered, and an unknown name suggests the project's jobs. Proof: `jet test Compiler --profile cases --filter JetpackTasks/top_level_jobs_precede_retired_words_paths_and_path_plugins` and `--filter jetpack_tasks/jet_top_job_runs_by_name_and_unknown_suggests_jobs`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:07.592Z"
+          "at": "2026-11-24T02:41:55.311Z"
         },
         {
           "n": 14,
-          "text": "An executable example sets STAGE=prod through ProcessSpec.env on launched commands, with golden output on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter ProcessSpecEnv`. (was #3693 c21)",
+          "text": "An executable example sets STAGE=prod through ProcessSpec.env on launched commands, with golden output on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:19:26.987Z"
+          "at": "2026-11-24T02:41:56.963Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "ProcessSpecEnv"
+          }
         },
         {
           "n": 15,
-          "text": "Every generator is listed in one generator registry with a `--check` mode and one implementation, and the lander runs every check as a gate, so a generated file cannot drift (architecture review Repo1; census F20, F21). Proof: `jet test Tests/Guards --filter generators_fresh` runs each registered generator's `--check` and passes. (was #5073 c2)",
+          "text": "Every generator is listed in one generator registry with a `--check` mode and one implementation, and the lander runs every check as a gate, so a generated file cannot drift (architecture review Repo1; census F20, F21). Proof: `jet test Tests/Guards --filter generators_fresh` runs each registered generator's `--check` and passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:08.530Z"
+          "at": "2026-11-24T02:41:58.059Z"
         },
         {
           "n": 16,
-          "text": "Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tables are deleted. Proof: `jet test Tests/Guards --filter generated_tables_from_build` and no precommit generator check for those tables remains. (was #6682 c2)",
+          "text": "Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tables are deleted. Proof: `jet test Tests/Guards --filter generated_tables_from_build` and no precommit generator check for those tables remains.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:17:09.847Z"
+          "at": "2026-11-24T02:41:59.055Z"
         }
       ],
       "refs": [],
@@ -71290,8 +71332,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:02:12.854Z",
-      "updated": "2026-11-22T02:10:23.727Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T02:41:59.055Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 16
     },
     {
@@ -72920,66 +72962,82 @@
         },
         {
           "n": 4,
-          "text": "Determinism under scheduling chaos: 64 schedule seeds times workers {1, 8, 64} give identical diagnostic bytes, TIR hash and binary SHA (the SPEED-500K section 10 scheduling-chaos knob). Proof: `jet test Compiler --profile cases --filter ParallelCompile/schedule_chaos_identical_output`. (was #4310 c9)",
+          "text": "Determinism under scheduling chaos: 64 schedule seeds times workers {1, 8, 64} give identical diagnostic bytes, TIR hash and binary SHA (the SPEED-500K section 10 scheduling-chaos knob).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:18:51.275Z"
+          "at": "2026-11-24T02:42:00.616Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ParallelCompile/schedule_chaos_identical_output"
+          }
         },
         {
           "n": 5,
-          "text": "Parallel check over N workers is deterministic: the canonical state dump equals the single-worker dump. Proof: `jet test Compiler --profile cases --filter ParallelCompile/check_state_dump_matches_single_worker`. (was #4310 c11)",
+          "text": "Parallel check over N workers is deterministic: the canonical state dump equals the single-worker dump.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:18:52.237Z"
+          "at": "2026-11-24T02:42:01.658Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ParallelCompile/check_state_dump_matches_single_worker"
+          }
         },
         {
           "n": 6,
-          "text": "jet explain is built for build facts, the syntax dictionary, build settings and the web graph. Proof: every Tests/known-failing.tsv row on #6418 that reports E2104 for `jet explain` passes on the default tier, and the rows are removed. (was #6418 c5)",
+          "text": "jet explain is built for build facts, the syntax dictionary, build settings and the web graph. Proof: every Tests/known-failing.tsv row on #6418 that reports E2104 for `jet explain` passes on the default tier, and the rows are removed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:18:53.193Z"
+          "at": "2026-11-24T02:42:02.642Z"
         },
         {
           "n": 7,
-          "text": "Sealed check-input reads and their read audit (CheckReads, JET_CHECK_READS_AUDIT and JET_CHECK_READS_INJECT) have a Jet implementation. Proof: `jet test Compiler --profile cases --filter BuildEntry/check_inputs_are_all_declared`. (was #6418 c134)",
+          "text": "Sealed check-input reads and their read audit (CheckReads, JET_CHECK_READS_AUDIT and JET_CHECK_READS_INJECT) have a Jet implementation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:18:54.151Z"
+          "at": "2026-11-24T02:42:03.665Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "BuildEntry/check_inputs_are_all_declared"
+          }
         },
         {
           "n": 8,
-          "text": "Each compiler package (JetFoundation, JetLexer, JetParser, JetSema, JetIR, JetBackend, JetCli and the rest) is its own library target, and independent packages compile in parallel within one cold build. Depends on #6623. Proof: the `jet build Compiler` graph receipt shows the package targets overlapping in time. (was #6682 c5)",
+          "text": "Each compiler package (JetFoundation, JetLexer, JetParser, JetSema, JetIR, JetBackend, JetCli and the rest) is its own library target, and independent packages compile in parallel within one cold build. Depends on #6623. Proof: the `jet build Compiler` graph receipt shows the package targets overlapping in time.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:20:12.956Z"
+          "at": "2026-11-24T02:42:04.759Z"
         },
         {
           "n": 9,
-          "text": "Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages. Proof: `jet test Compiler --profile cases --filter CompilerBuild/dev_and_ship_profiles`. (was #6682 c6)",
+          "text": "Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:18:55.160Z"
+          "at": "2026-11-24T02:42:05.844Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "CompilerBuild/dev_and_ship_profiles"
+          }
         },
         {
           "n": 10,
-          "text": "Every build records a core.build graph receipt with per-target wall time; receipt_diff between two commits shows the per-target time change, and the per-phase timeline for #6610 is read from it. Proof: `jet build Compiler` writes the receipt and receipt_diff of two commits' receipts lists every target with both times. (was #6682 c7)",
+          "text": "Every build records a core.build graph receipt with per-target wall time; receipt_diff between two commits shows the per-target time change, and the per-phase timeline for #6610 is read from it. Proof: `jet build Compiler` writes the receipt and receipt_diff of two commits' receipts lists every target with both times.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:20:15.018Z"
+          "at": "2026-11-24T02:42:06.831Z"
         },
         {
           "n": 11,
@@ -72999,7 +73057,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:35:08.120Z",
-      "updated": "2026-11-24T02:26:46.186Z",
+      "updated": "2026-11-24T02:42:06.831Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 11
     },
@@ -137556,6 +137614,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T03:31:41.398Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0in2dft",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T03:31:40.539Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0in2dft",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-24T03:13:44.643Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c05p5u7s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T03:13:43.809Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T02:42:22.079Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0xuffg1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T02:42:21.060Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0kkogun",
+      "note": "#4: Strip the stale (moved from #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: MetaSuite family J34 (native callbacks and C calling convention) passes its witness Examples/Interop/FFI/Callbacks/run.jet on every applicable tier, so the MetaSuite check reports no owed J34 row (mov"
+    },
+    {
+      "at": "2026-11-24T02:42:06.831Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#10: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every build records a core.build graph receipt with per-target wall time; receipt_diff between two commits shows the per-target time change, and the per-phase timeline for #6610 is read from it. Proof"
+    },
+    {
+      "at": "2026-11-24T02:42:05.844Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#9: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Build profiles give a fast `dev` profile for targeted testing and a `ship` profile for release stages. Proof: `jet test Compiler --profile cases --filter CompilerBuild/dev_and_ship_profiles`. (was #66"
+    },
+    {
+      "at": "2026-11-24T02:42:04.759Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#8: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Each compiler package (JetFoundation, JetLexer, JetParser, JetSema, JetIR, JetBackend, JetCli and the rest) is its own library target, and independent packages compile in parallel within one cold buil"
+    },
+    {
+      "at": "2026-11-24T02:42:03.665Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Sealed check-input reads and their read audit (CheckReads, JET_CHECK_READS_AUDIT and JET_CHECK_READS_INJECT) have a Jet implementation. Proof: `jet test Compiler --profile cases --filter BuildEntry/ch"
+    },
+    {
+      "at": "2026-11-24T02:42:02.642Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: jet explain is built for build facts, the syntax dictionary, build settings and the web graph. Proof: every Tests/known-failing.tsv row on #6418 that reports E2104 for `jet explain` passes on the defa"
+    },
+    {
+      "at": "2026-11-24T02:42:01.658Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#5: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Parallel check over N workers is deterministic: the canonical state dump equals the single-worker dump. Proof: `jet test Compiler --profile cases --filter ParallelCompile/check_state_dump_matches_sing"
+    },
+    {
+      "at": "2026-11-24T02:42:00.616Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r1ln6j",
+      "note": "#4: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Determinism under scheduling chaos: 64 schedule seeds times workers {1, 8, 64} give identical diagnostic bytes, TIR hash and binary SHA (the SPEED-500K section 10 scheduling-chaos knob). Proof: `jet t"
+    },
+    {
+      "at": "2026-11-24T02:41:59.055Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#16: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every generated registry table (CoreEnumRows, CoreStructureRows and the rest) comes from `b.generate` over its source registry, so it cannot be stale, and the precommit generator checks for those tabl"
+    },
+    {
+      "at": "2026-11-24T02:41:58.059Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#15: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every generator is listed in one generator registry with a `--check` mode and one implementation, and the lander runs every check as a gate, so a generated file cannot drift (architecture review Repo1"
+    },
+    {
+      "at": "2026-11-24T02:41:56.963Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#14: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: An executable example sets STAGE=prod through ProcessSpec.env on launched commands, with golden output on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter ProcessSpecEnv`. (was #3693"
+    },
+    {
+      "at": "2026-11-24T02:41:55.312Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#13: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: `jet <job>` runs a project job by name before retired words, paths and path plugins are considered, and an unknown name suggests the project's jobs. Proof: `jet test Compiler --profile cases --filter "
+    },
+    {
+      "at": "2026-11-24T02:41:54.007Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#12: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Job dependency, status, inspection and the canonical lifecycle events use the one process and job identity model, with no second model. Proof: `jet test Compiler --profile cases --filter JetpackTasks/"
+    },
+    {
+      "at": "2026-11-24T02:41:53.043Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#11: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Declared input and output freshness, dependency invalidation, per-job working directories and affected-subgraph watch work together. Proof: `jet test Compiler --profile cases --filter JetpackTasks/fre"
+    },
+    {
+      "at": "2026-11-24T02:41:52.009Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#10: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Job graphs, authority context, working directories and arguments are validated before any job effect runs, with a failure-path case per check. Proof: `jet test Compiler --profile cases --filter Jetpac"
+    },
+    {
+      "at": "2026-11-24T02:41:50.969Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#9: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: `jet jobs web --port 3000` forwards `--port` to the job while global flags stay with jet and `--` forwards, typed job arguments parse from argv, and reserved job names fail with E0928. Proof: `jet tes"
+    },
+    {
+      "at": "2026-11-24T02:41:49.800Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#8: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The built binary runs `after:` predecessors in order, stops on a failing predecessor, refuses a bad root argument with E1331 (exit 2) before any predecessor runs, and prints byte-identical output to `"
+    },
+    {
+      "at": "2026-11-24T02:41:48.874Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: A built binary dispatches the same jobs with the same output as `jet jobs`. Proof: `jet test Compiler --profile cases --filter JetpackTasks/jet_build_job_dispatch_matches_default_and_interpreter`. (wa"
+    },
+    {
+      "at": "2026-11-24T02:41:47.911Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0brgvda",
+      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every jetpack_tasks case passes and its known-failing rows are removed. Proof: `jet test Compiler --profile cases --filter JetpackTasks/`. (was #3693 c4)"
+    },
+    {
+      "at": "2026-11-24T02:41:46.935Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c04wn01h",
+      "note": "#11: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: `jet test Compiler --profile packages` passes the PackageModel claims of #3611–#3615 (FFI and C binders, language binders). Proof: `jet test Compiler --profile packages --filter PackageModel`. (was #3"
+    },
     {
       "at": "2026-11-24T02:41:45.617Z",
       "by": "Orchestrator",
