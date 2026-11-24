@@ -38,8 +38,9 @@
 // effects, and Core/Compiler/Meta.jet, the metaprogramming effects, are part
 // of the canonical effect source: each gets CoreSourceRows.jet's check, then
 // its own `jet check`. Core/Compiler/Lang.jet holds CoreSourceRows.jet's
-// generated Effect block, so it gets that check, then the Core check. Any
-// other Core path with no row fails.
+// generated Effect block, and Core/Builtins/Builtins.jet OwnedTraitRows.jet's
+// generated RoleKind block, so each gets its generator's check, then the Core
+// check. Any other Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
 // or a drifted compiler slice (its Jet tool runs under $JET too, not the seed),
@@ -452,16 +453,27 @@ META_EFFECTS_SOURCE: "Core/Compiler/Meta.jet"
 // CoreSourceRows.jet's, then the Core check.
 LANG_SOURCE: "Core/Compiler/Lang.jet"
 
+// Core/Builtins/Builtins.jet holds OwnedTraitRows.jet's generated RoleKind
+// block, so it gets that check, then the Core check.
+ROLE_KIND_SOURCE: "Core/Builtins/Builtins.jet"
+
 core_effects_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     generated: generator_check(repo, [String]{jet, "Tools/Agent/CoreSourceRows.jet", "--check"}, relative)
     checked: run_check(repo, jet, [String]{"check", target}, scratch)
     Ran{code: if generated.code != 0 -> generated.code else -> checked.code, text: "{generated.text}{checked.text}"}
 }
 
-core_lang_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
-    generated: generator_check(repo, [String]{jet, "Tools/Agent/CoreSourceRows.jet", "--check"}, relative)
+core_generated_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    generated: generator_check(repo, core_generator(relative, jet), relative)
     checked: core_check(repo, jet, relative, target, scratch)
     Ran{code: if generated.code != 0 -> generated.code else -> checked.code, text: "{generated.text}{checked.text}"}
+}
+
+// The command whose `--check` holds the generated block of Core source
+// `relative` equal to what its declarations give.
+core_generator: fn(relative: String, jet: String) -> [String] Never! {
+    if relative == ROLE_KIND_SOURCE -> return [String]{jet, "Tools/Agent/OwnedTraitRows.jet", "--check"}
+    [String]{jet, "Tools/Agent/CoreSourceRows.jet", "--check"}
 }
 
 // --- compiler check ---------------------------------------------------------
@@ -529,7 +541,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
         relative == CORE_EFFECTS_SOURCE || relative == META_EFFECTS_SOURCE -> {
             ran = core_effects_check(repo, jet, relative, target, scratch)
         }
-        relative == LANG_SOURCE -> ran = core_lang_check(repo, jet, relative, target, scratch)
+        relative == LANG_SOURCE || relative == ROLE_KIND_SOURCE -> ran = core_generated_check(repo, jet, relative, target, scratch)
         relative.starts_with("Core/") && relative.ends_with(".jet") -> {
             ran = core_check(repo, jet, relative, target, scratch)
         }
@@ -1338,6 +1350,8 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(runtime.runtime)
     assert(core_row(registry, "Core/Encoding") == None && core_row(registry, "Core/Files/Runtime/K") == None)
     assert_eq(core_probe_source("core.encoding"), "use core.encoding\n\nmain: fn() {{\n    print(\"ok\")\n}}\n")
+    assert_eq(core_generator(ROLE_KIND_SOURCE, "/j"), [String]{"/j", "Tools/Agent/OwnedTraitRows.jet", "--check"})
+    assert_eq(core_generator(LANG_SOURCE, "/j"), [String]{"/j", "Tools/Agent/CoreSourceRows.jet", "--check"})
 }
 
 #Test("JET_CHECK_MEM sizes read as bytes; anything else is refused") {
