@@ -107,6 +107,10 @@ REPLAY_ARGUMENT: I64{288}
 // A file, pipe or socket read: its result, and the bytes it filled.
 REPLAY_INPUT: I64{304}
 
+// A timed stdin wait (ProveJournal.jet rt_prove_stdin_os_wait): 1 when stdin
+// had a byte in time, 0 when the wait ran out.
+REPLAY_INPUT_WAIT: I64{320}
+
 // The outcome of an operation that did not go through: a permit that timed
 // out, a send refused, a receive that found the channel closed or empty, a
 // replayed select whose arm held no value.
@@ -793,6 +797,7 @@ replay_push_event: fn(text: I64, kind: I64, object: I64) {
             (family == REPLAY_ENTROPY) -> rt_static_text("entropy read")
             (family == REPLAY_ENV) -> rt_static_text("environment read")
             (family == REPLAY_ARGUMENTS || family == REPLAY_ARGUMENT) -> rt_static_text("argument read")
+            (family == REPLAY_INPUT_WAIT) -> rt_static_text("stdin wait")
             else -> rt_static_text("file or socket read")
         },
     )
