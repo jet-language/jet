@@ -3,14 +3,14 @@
 // line 1, editor line 0) and a storage form choice on `run`'s (line 5,
 // editor line 4).
 use {
-    jet_driver.[JetDriverToolStageItem]
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
     jet_foundation.[Span]
-    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPServer, lsp_server]
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPServer, lsp_server]
 }
 
 LSPChoicesFixtureChecker: struct {
     impl LSPChecker {
-        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             plain: LSPFixtureChecker{}
             checked := plain.check(entry, overlays)
             checked.choices.push(LSPChoice{module_path: "/w/main.jet", line: 1, kind: "copies", choice: "`left` shared: a later read uses it after this move, so the move copies it"})
@@ -19,15 +19,15 @@ LSPChoicesFixtureChecker: struct {
             checked
         }
 
-        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             LSPFixtureChecker{}.failure_marks(entry, overlays)
         }
 
-        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
             LSPFixtureChecker{}.sources(root)
         }
     }

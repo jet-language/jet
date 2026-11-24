@@ -7,6 +7,7 @@ use {
     cli_files: core.files
     codemod_hex: core.encoding.hex
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverCompileMode,
         JetDriverDocModule,
         JetDriverKeepGoing,
@@ -1181,10 +1182,10 @@ jet_cli_codemod_verify_inputs: fn(inputs: [String:String]) -[FS]> JetCLIReadErro
 }
 
 // The staged `.jet` files under the unit's source root, as compile overlays.
-jet_cli_codemod_overlays: fn(entry: String, files: JetCLICodemodFiles) -[FS]> [JetCLIOverlay] JetCLIReadError! {
+jet_cli_codemod_overlays: fn(entry: String, files: JetCLICodemodFiles) -[FS]> [JetDriverSourceDocument] JetCLIReadError! {
     root: jet_cli_source_root(entry)
     prefix: jet_cli_rooted_join(root, "")
-    overlays := [JetCLIOverlay]{}
+    overlays := [JetDriverSourceDocument]{}
     loop index in 0..<files.paths.len() {
         path: files.paths[index]
         if !path.ends_with(".jet") -> next
@@ -1194,7 +1195,7 @@ jet_cli_codemod_overlays: fn(entry: String, files: JetCLICodemodFiles) -[FS]> [J
                 next
             }
         }
-        overlays.push(JetCLIOverlay{path: path.copy(), source: source})
+        overlays.push(JetDriverSourceDocument{path: path.copy(), source: source})
     }
     Ok(overlays)
 }

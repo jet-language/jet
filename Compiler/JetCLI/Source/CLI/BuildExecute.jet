@@ -12,7 +12,7 @@ use {
     cli_time: core.time
     core.build.[BuildGraph, BuildGraphAction]
     jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionGeneratedModule, BuildSessionTarget, BuildSessionToolchain]
-    jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildPackageSettings, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
+    jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildPackageSettings, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
     jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, compiler_threads_failure_text, compiler_threads_join, compiler_threads_leave, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
@@ -521,7 +521,7 @@ jet_cli_build_target_apart: fn(node: JetCLIBuildNode, graph: BuildPlanExecution,
     entry: if node.kind == .Library -> selected.libraries[node.id].source else -> graph.targets[node.id].sources[0]
     project: cli_files.realpath(root) ?? root
     path: jet_cli_entry_join(project, entry)
-    script: jet_cli_entry_is_script(path, [JetCLIOverlay]{})
+    script: jet_cli_entry_is_script(path, [JetDriverSourceDocument]{})
     tree: jet_cli_source_root(cli_files.realpath(path) ?? path)
     loop step in steps {
         loop output in graph.actions[step].outputs {

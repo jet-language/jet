@@ -10,6 +10,7 @@ use {
     cli_files: core.files
     cli_time: core.time
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
         JetDriverCompileResult,
@@ -44,6 +45,7 @@ use {
         dotted_path_split,
         dotted_path_unresolved,
         name_facts_leaf,
+        owned_role_operator,
         owned_trait,
         owned_trait_arithmetic,
         owned_trait_commutative,
@@ -1355,8 +1357,7 @@ jet_cli_inspect_plain_number: fn(name: String) -> Bool Never! {
 jet_cli_inspect_operator_symbol: fn(trait_name: String) -> String? Never! {
     if !owned_trait_arithmetic(trait_name) -> return None
     owned: owned_trait(trait_name) ?? return None
-    if owned.operators.len() == 0 -> return None
-    Val(owned.operators[0].copy())
+    owned_role_operator(owned.role)
 }
 
 // The hook method an arithmetic operator trait names, or "".
@@ -1833,7 +1834,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 }
 
 jet_cli_inspect_checked_build_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
-    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Doc)
     if prepared.move() == {
         .Refused(output) -> return output
         .Prepared(request, _) -> {

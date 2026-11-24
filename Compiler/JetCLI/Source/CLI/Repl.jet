@@ -14,6 +14,7 @@ use {
     repl_time: core.time
     jet_backend.[X64Executable, x64_file_exec]
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
         JetDriverCompileResult,
@@ -416,7 +417,7 @@ jet_cli_repl_options: fn(session: JetCLIReplSession) -> BuildOptions Never! {
 
 jet_cli_repl_check: fn(session: JetCLIReplSession, source: String, input_start: Int) -> JetCLIReplChecked {
     repl_files.write(session.anchor, source) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
-    prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetCLIOverlay]{JetCLIOverlay{path: session.anchor, source: source}}, session.color, None, JetDriverCompileMode.Program)
+    prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetDriverSourceDocument]{JetDriverSourceDocument{path: session.anchor, source: source}}, session.color, None, JetDriverCompileMode.Program)
     compiled := jet_cli_compile_executable(prepared, None, jet_cli_repl_options(session), None, None, session.color)
     checked := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
     if compiled.move() == {
@@ -448,7 +449,7 @@ jet_cli_repl_checked: fn(session: JetCLIReplSession, result: JetDriverCompileRes
 // authority check a run makes.
 jet_cli_repl_build: fn(session: &JetCLIReplSession, program: JetCLIReplSource, input_start: Int, gate: Bool) -> JetCLIReplChecked {
     repl_files.write(session.anchor, program.text) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
-    prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetCLIOverlay]{JetCLIOverlay{path: session.anchor, source: program.text}}, session.color, None, JetDriverCompileMode.Program)
+    prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetDriverSourceDocument]{JetDriverSourceDocument{path: session.anchor, source: program.text}}, session.color, None, JetDriverCompileMode.Program)
     options: jet_cli_repl_options(session)
     compiled := jet_cli_compile_executable(prepared, None, options, None, None, session.color)
     built := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}

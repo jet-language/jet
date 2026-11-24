@@ -18,10 +18,10 @@ use {
         source_revision,
         span_json,
     ]
-    jet_driver.[jet_driver_apply_edits, jet_driver_has_errors]
+    jet_driver.[JetDriverSourceDocument, jet_driver_apply_edits, jet_driver_has_errors]
     jet_foundation.[CORE_MODULE_EXPORTS, CoreTypedCallSignature, Span, TextEdit, core_call, core_call_typed_signature, diagnostic_render_all, type_name]
     jet_impact.[ImpactReport]
-    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_lsp.[LSPChecker]
     jet_pkg_model.[WorkspaceDeclarationCache, pkg_find_manifest_root_checked, pkg_package_facts_for_entry]
     jet_semindex.[SemCallable, SemDef, SemIndex, SemRef]
 }
@@ -275,7 +275,7 @@ open_project_query_context: fn(checker: LSPChecker, entry: String, selected_path
         if revision != file.revision {
             return Err(query_error("conflict", "project source changed while Canvas was building its query"))
         }
-        checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: source}})
+        checked: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: path, source: source}})
         if jet_driver_has_errors(checked.diagnostics) {
             return Err(query_error("check", diagnostic_render_all(path, source, checked.diagnostics, false)))
         }

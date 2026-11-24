@@ -15,7 +15,10 @@
 // module: the stub here holds its facts, and its members are read from the
 // module's `Name: trait {` block (its source per Compiler/Prelude/Core.rows),
 // in the same shape. Until the module declares the trait, the members the
-// stub writes stand in; once it does, the stub may write none.
+// stub writes stand in; once it does, the stub may write none. A
+// `#Builtin.Role(.Add)` line right above a trait gives it a role: what `+`
+// or `[ ]` calls is the trait that fills the role. A role fills at most one
+// trait.
 // Usage: jet Tools/Agent/OwnedTraitRows.jet [--check|--write]
 // --check fails when a copy differs from what the declarations give it;
 // --write rewrites the copies.
@@ -34,6 +37,8 @@ CORE_ROWS_PATH: "Compiler/Prelude/Core.rows"
 PRELUDE_PATH: "Compiler/Prelude/Core/prelude.jet"
 
 CHECKED_TEXT_DECLARATION: "CheckedText: trait {{"
+
+ROLE_MARKER: Regex{"^#Builtin\.Role\(\.([A-Z][A-Za-z0-9]*)\)$"}
 
 ROWS_PATH: "Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet"
 
@@ -66,7 +71,7 @@ METHOD_NAME: Regex{"^[a-z][a-z0-9_]*$"}
 
 FLAG_COLUMNS: [String]{"local", "bare_bound", "raw_return", "any_receiver", "commutative", "codec", "conversion", "derived", "checked_text", "auto_derive", "bundle", "through_elements"}
 
-TEXT_COLUMNS: [String]{"operators", "auto_derive_family", "requires", "shares", "declared_in"}
+TEXT_COLUMNS: [String]{"auto_derive_family", "requires", "shares", "declared_in"}
 
 // The column that names the Core module declaring the trait.
 DECLARED_IN_COLUMN: "declared_in"
@@ -121,6 +126,8 @@ TraitSource: struct {
     line: Int,
     // Declared inside `Literal: module`.
     literal: Bool,
+    // The role its `#Builtin.Role(.X)` names; "" for none.
+    role: String,
     facts: [TraitFact],
     associated: [String],
     methods: [TraitMethod],
@@ -197,10 +204,16 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
     lines: source_text.split("\n").to_list()
     traits := [TraitSource]{}
     group := ""
+    // The role a `#Builtin.Role(.X)` line gives the trait it stands above.
+    role := ""
+    role_line := 0
     index := 0
     loop index < lines.len() {
         line: lines[index]
         index += 1
+        if role != "" && TRAIT_OPEN.match(line.trim()) == None {
+            return Err(rows_fail("line {role_line}: `#Builtin.Role(.{role})` stands above no trait"))
+        }
         if line.trim() == "" || line.trim().starts_with("//") -> next
         if group == "" && MODULE_OPEN.match(line) == .Val(opened) {
             if opened.groups[0] != "Literal" {
@@ -214,6 +227,11 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
             next
         }
         indent: if group == "" -> "" else -> "    "
+        if line.starts_with(indent) && ROLE_MARKER.match(line.remove_prefix(indent)) == .Val(marked) {
+            role = marked.groups[0].copy()
+            role_line = index
+            next
+        }
         opened: (if line.starts_with(indent) -> TRAIT_OPEN.match(line.remove_prefix(indent)) else -> None) ?? return Err(rows_fail("line {index}: expected `{indent}Name: trait {{`, found `{line}`"))
         name: if group == "" -> opened.groups[0].copy() else -> "{group}.{opened.groups[0]}"
         context: "trait {name}"
@@ -317,8 +335,10 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
                 return Err(rows_fail("line {start}: {context} is declared twice"))
             }
         }
-        traits.push(TraitSource{name: name, line: start, literal: group != "", facts: facts, associated: associated, methods: methods, laws: laws})
+        traits.push(TraitSource{name: name, line: start, literal: group != "", role: role, facts: facts, associated: associated, methods: methods, laws: laws})
+        role = ""
     }
+    if role != "" -> return Err(rows_fail("line {role_line}: `#Builtin.Role(.{role})` stands above no trait"))
     if group != "" -> return Err(rows_fail("`module {group}` is not closed"))
     if traits.len() == 0 -> return Err(rows_fail("{SOURCE_PATH} declares no trait"))
     Ok(traits)
@@ -437,7 +457,9 @@ contract_kinds: fn(source: TraitSource) -> [String] Never! {
     if flag(source, "conversion") -> kinds.push("conversion")
     if flag(source, "derived") -> kinds.push("derived")
     if flag(source, "checked_text") -> kinds.push("checked_text")
-    if fact(source, "operators") != None -> kinds.push("operators")
+    // A role whose trait takes a right-hand operand is an operator's: its
+    // one method is the hook the role's operators call.
+    if source.role != "" && source.associated.contains("Rhs") -> kinds.push("operator role")
     if source.literal -> kinds.push("module Literal")
     kinds
 }
@@ -460,7 +482,7 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
     if kind != "methods" && (fact(source, "shares") != None || flag(source, "any_receiver")) {
         return Err(rows_fail("{context}: `shares` and `any_receiver` belong to a methods trait"))
     }
-    if kind != "operators" && flag(source, "commutative") {
+    if kind != "operator role" && flag(source, "commutative") {
         return Err(rows_fail("{context}: `commutative` belongs to an operator trait"))
     }
     loop method in source.methods {
@@ -481,7 +503,7 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
     }
     contract := ""
     if kind == {
-        "operators" -> {
+        "operator role" -> {
             method: sole_method(source, context, kind) ?? return Err(err)
             if method.receiver != "self" || method.params.len() != 1 || method.params[0].ty != "Rhs" || !source.associated.contains("Rhs") || method.error != "Never" || method.returns == "" {
                 return Err(rows_fail("{context}: an operator hook is `Rhs: type` and `hook: fn(self, rhs: Rhs) -> Result Never!`"))
@@ -546,7 +568,6 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
         "bare_bound: {flag(source, "bare_bound")}",
         "raw_return: {flag(source, "raw_return")}",
         "contract: {contract}",
-        "operators: {quoted(words(source, "operators"))}",
         "commutative: {flag(source, "commutative")}",
         "requires: {quoted(words(source, "requires"))}",
         "auto_derive: {flag(source, "auto_derive")}",
@@ -561,6 +582,7 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
     if fact(source, DECLARED_IN_COLUMN) == .Val(module_name) {
         fields.push("declared_in: \"{module_name}\"")
     }
+    if source.role != "" -> fields.push("role: \"{source.role}\"")
     // A row stays on one line unless its contract spans lines; then, as
     // `jet fmt` writes it, each field has a line of its own.
     if !contract.contains("\n") -> return Ok("    OwnedTrait{{{fields.join(", ")}}},")
@@ -575,16 +597,16 @@ declared: fn(traits: [TraitSource], name: String) -> Bool Never! {
     false
 }
 
-// The facts no single trait can check: one trait per operator, and family
+// The facts no single trait can check: each role fills one trait, and family
 // markers that name no trait.
 check_table: fn(traits: [TraitSource]) OwnedTraitRowsError! {
-    operators := [String]{}
+    roles := [String]{}
     loop source in traits {
-        loop symbol in words(source, "operators") {
-            if operators.contains(symbol) {
-                return Err(rows_fail("trait {source.name}: the operator `{symbol}` already belongs to another trait"))
+        if source.role != "" {
+            if roles.contains(source.role) {
+                return Err(rows_fail("trait {source.name}: the role `{source.role}` already belongs to another trait"))
             }
-            operators.push(symbol.copy())
+            roles.push(source.role.copy())
         }
         family: fact(source, FAMILY_COLUMN) ?? next
         if declared(traits, family) {
@@ -609,7 +631,7 @@ homed: fn(source: TraitSource, homes: [TraitSource]) -> TraitSource OwnedTraitRo
         if home.facts.len() > 0 {
             return Err(rows_fail("{context}: the declaration in {module_name} writes a fact column; facts stay in {SOURCE_PATH}"))
         }
-        return Ok(TraitSource{name: source.name, line: source.line, literal: source.literal, facts: source.facts, associated: home.associated, methods: home.methods, laws: home.laws})
+        return Ok(TraitSource{name: source.name, line: source.line, literal: source.literal, role: source.role, facts: source.facts, associated: home.associated, methods: home.methods, laws: home.laws})
     }
     if stub_members -> return Ok(source)
     Err(rows_fail("{context}: {module_name} declares no `{source.name}: trait`"))
@@ -804,7 +826,7 @@ rows_error: fn(source: String, homes: [TraitSource]{[TraitSource]{}}) -> String 
     }
 }
 
-MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}},\n    operators: String{{\"+\"}},\n    Rhs: type,\n    Output: type,\n    add: fn(self, rhs: Rhs) -> Output Never!,\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}},\n    auto_derive_family: String{{\"Bundle\"}},\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!,\n    fill: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,\n    close: fn(&&self) IOError!,\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!,\n    }}\n}}\n"
+MINIMAL_TRAITS: "// Two traits.\n#Builtin.Role(.Add)\nAdd: trait {{\n    local: Bool{{true}},\n    Rhs: type,\n    Output: type,\n    add: fn(self, rhs: Rhs) -> Output Never!,\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}},\n    auto_derive_family: String{{\"Bundle\"}},\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!,\n    fill: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,\n    close: fn(&&self) IOError!,\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!,\n    }}\n}}\n"
 
 #Test("every generated copy matches its Prelude declaration") {
     if owned_trait_rows_main([String]{"--check"}) == .Err(error) -> panic(error.message)
@@ -812,7 +834,8 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}},\n    op
 
 #Test("a declaration renders its contract, types and facts") {
     rendered: render_rows(MINIMAL_TRAITS, true, [TraitSource]{}) ?? panic("the minimal traits did not render: {err.message}")
-    assert(rendered.contains("OwnedTrait{{name: \"Add\", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Operator{{hook: \"add\", result: None}}, operators: [String]{{\"+\"}}, commutative: false, requires: [String]{{}},"))
+    assert(rendered.contains("OwnedTrait{{name: \"Add\", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Operator{{hook: \"add\", result: None}}, commutative: false, requires: [String]{{}},"))
+    assert(rendered.contains("through_elements: false, role: \"Add\"}},"))
     assert(rendered.contains("OwnedMethod{{name: \"query\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"sql\", access: AccessConvention.Read, ty: Type.Named{{name: \"SQL\"}}}}}}, returns: Val(Type.Result{{ok: Type.List{{element: Type.Map{{key: Type.String, key_span: None, value: Type.Named{{name: \"DBValue\"}}}}}}, err: Type.Named{{name: \"DBError\"}}}})}}"))
     assert(rendered.contains("OwnedMethod{{name: \"fill\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"buffer\", access: AccessConvention.Write, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}, OwnedParam{{name: \"limit\", access: AccessConvention.Read, ty: Type.Int}}}}, returns: Val(Type.Result{{ok: Type.Int, err: Type.Named{{name: \"IOError\"}}}})}}"))
     assert(rendered.contains("OwnedMethod{{name: \"close\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Move}}, params: [OwnedParam]{{}}, returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}})}}"))
@@ -865,7 +888,9 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
     traits: MINIMAL_TRAITS
     assert(rows_error(traits.replace("    local: Bool{{true}},\n", "    local: Bool{{false}},\n")).contains("expected a fact column"))
     assert(rows_error(traits.replace("    local: Bool{{true}},\n", "    lokal: Bool{{true}},\n")).contains("not a flag column"))
-    assert(rows_error(traits.replace("    operators", "    codec: Bool{{true}},\n    operators")).contains("select different contracts"))
+    assert(rows_error(traits.replace("    local", "    codec: Bool{{true}},\n    local")).contains("select different contracts"))
+    assert(rows_error(traits.replace("Driver: trait", "#Builtin.Role(.Add)\nDriver: trait")).contains("the role `Add` already belongs to another trait"))
+    assert(rows_error(traits.replace("Add: trait", "// The sum.\nAdd: trait")).contains("stands above no trait"))
     assert(rows_error(traits.replace("Driver: trait", "Add: trait")).contains("declared twice"))
     assert(rows_error(traits.replace("(self, rhs: Rhs)", "(self, other: Int)")).contains("an operator hook is"))
     assert(rows_error(traits.replace(" -> Output Never!", " -> Output")).contains("ends `Never!`"))

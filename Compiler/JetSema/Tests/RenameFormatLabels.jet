@@ -3,8 +3,8 @@
 use {
     labels_sys: core.sys
     labels_process: core.process
-    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
-    jet_cli.[JetCLIOverlay, JetCLIPrepared, jet_cli_compile_prepared, jet_cli_native_session_at, jet_cli_prepare_overlays]
+    jet_driver.[JetDriverCompileMode, JetDriverSourceDocument, jet_driver_present_diagnostics]
+    jet_cli.[JetCLIPrepared, jet_cli_compile_prepared, jet_cli_native_session_at, jet_cli_prepare_overlays]
     jet_foundation.[DIAGNOSTIC_ERROR]
 }
 
@@ -17,7 +17,7 @@ rename_labels_runtime_dir: fn() -> String {
 }
 
 rename_labels_errors: fn(file: String) -> [String] {
-    prepared := jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, false, None, JetDriverCompileMode.Program)
+    prepared := jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{}, false, None, JetDriverCompileMode.Program)
     native: if prepared.move() == {
         .Refused(refusal) -> {
             return [String]{refusal.stderr}

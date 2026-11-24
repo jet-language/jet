@@ -159,7 +159,10 @@ vocabulary](vocabulary.md).
   `functions`, its written `markers` and its `comments`), the package's
   PackageInfo for a
   `.Package` marker, and a `.Block`'s text
-  (Examples/Metaprogramming/Reflection/MarkerSites.jet). A marker on the
+  (Examples/Metaprogramming/Reflection/MarkerSites.jet). An `expand` body's
+  `reject(finding)` raises the finding at the marker, and
+  `reject(finding, at: part)` at the span of `part`, a reflected record of
+  the target such as one of its fields' FieldInfo. A marker on the
   package record is a header line above `package.jet`'s first field
   (`#Stamp("package")`, D-PACKAGE-MARKER1=A); it resolves in the entry
   module, is placed in `package.jet`, and what it generates joins the entry

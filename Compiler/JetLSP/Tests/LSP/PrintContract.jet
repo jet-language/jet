@@ -5,10 +5,10 @@
 // imports from its Core source. This checker supplies `core.term`'s
 // declaration of `print` as Core/Term/Term.jet writes it.
 use {
-    jet_driver.[JetDriverToolStageItem]
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
     jet_foundation.[Span]
     jet_semindex.[semindex_declared, semindex_imports]
-    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_server]
+    jet_lsp.[LSPChecked, LSPChecker, LSPServer, lsp_server]
 }
 
 LSP_PRINT_URI: "file:///w/main.jet"
@@ -29,22 +29,22 @@ print: fn(text: String) -[IO, Time.Wait]> Never! {}
 
 LSPPrintChecker: struct {
     impl LSPChecker {
-        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             plain: LSPFixtureChecker{}
             checked := plain.check(entry, overlays)
             if semindex_imports(checked.modules, "core.term") -> checked.declared = semindex_declared("core.term", LSP_PRINT_CORE_TERM)
             checked
         }
 
-        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             LSPFixtureChecker{}.failure_marks(entry, overlays)
         }
 
-        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
             LSPFixtureChecker{}.sources(root)
         }
     }

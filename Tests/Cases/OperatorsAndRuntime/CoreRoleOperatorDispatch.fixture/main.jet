@@ -1,0 +1,67 @@
+// `+ - * /`, `== !=`, `< >=`, `a[k]` and `a[k] = v` on user and library
+// types. Each operator reaches the trait that fills its jet_builtins role
+// (`#Builtin.Role(.Add)` on `Add: trait`), so a type takes an operator by
+// implementing that trait, and the generic `total` reaches `Money`'s `add`
+// through the role at its instantiation.
+Money: struct {
+    cents: Int,
+
+    impl Add {
+        add: fn(self, rhs: Money) -> Money { return Money{cents: self.cents + rhs.cents} }
+    }
+
+    impl Sub(Int) {
+        sub: fn(self, rhs: Int) -> Money { return Money{cents: self.cents - rhs} }
+    }
+
+    impl Mul(Int) #Commutative {
+        mul: fn(self, rhs: Int) -> Money { return Money{cents: self.cents * rhs} }
+    }
+
+    impl Div(Int) {
+        div: fn(self, rhs: Int) -> Money { return Money{cents: self.cents /% rhs} }
+    }
+
+    impl Equatable {
+        equal: fn(self, rhs: Money) -> Bool { return self.cents == rhs.cents }
+    }
+
+    impl Comparable {
+        compare: fn(self, rhs: Money) -> Ordering { return self.cents <=> rhs.cents }
+    }
+}
+
+Ledger: struct {
+    entries: [Money],
+
+    impl Index {
+        Key: Int,
+        Value: Money,
+
+        get: fn(self, k: Int) -> Money? {
+            if k < 0 || k >= self.entries.len() -> return None
+            return Val(self.entries[k])
+        }
+    }
+
+    impl IndexMut {
+        set: fn(&self, k: Int, v: Money) {
+            if k >= 0 && k < self.entries.len() -> self.entries[k] = v
+        }
+    }
+}
+
+total: fn<T: Add>(left: T, right: T) -> T { return left + right }
+
+run: fn() {
+    a: Money{cents: 150}
+    b: Money{cents: 50}
+    print("{(a + b).cents} {(a - 25).cents} {(a * 2).cents} {(2 * b).cents} {(a / 3).cents}")
+    print("{a == b} {a != b} {a < b} {a >= b}")
+    print("{total(a, b).cents}")
+    ledger := Ledger{entries: [Money]{a, b}}
+    ledger[1] = Money{cents: 75}
+    print("{ledger[0].cents} {ledger[1].cents}")
+    vector: Vec3(1.0, 2.0, 4.0)
+    print(Vec3{vector * 2.0}.to_array())
+}

@@ -16,10 +16,10 @@ use {
         source_revision,
         write_new_file_without_symlinks,
     ]
-    jet_driver.[jet_driver_apply_edits, jet_driver_has_errors]
+    jet_driver.[JetDriverSourceDocument, jet_driver_apply_edits, jet_driver_has_errors]
     jet_env_model.[envmodel_evaluate_env, envmodel_workspace_evaluate]
     jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_byte_text, sha256_hex]
-    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_lsp.[LSPChecker]
     jet_parser.[jet_format_source]
     jet_pkg_model.[DepSpec, PackageFacts, pkg_add_dependency, pkg_dep_display_redacted, pkg_remove_dependency]
     jet_semindex.[SemAnchor, SemDef, SemIndex, SemRef, semindex_definition_kind]
@@ -650,7 +650,7 @@ project_rename_sources: fn(checker: LSPChecker, ctx: ProjectContext) -> [Project
         if source_revision(source) != file.revision {
             return Err(ProjectRenameError{kind: "conflict", message: "project source changed while Canvas was preparing its rename"})
         }
-        checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: source}})
+        checked: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: path, source: source}})
         index: checked.index ?? return Err(ProjectRenameError{kind: "check", message: "Canvas has no semantic index for `{file.path}`"})
         sources.push(ProjectRenameSource{path: path, source_id: file.path.removeprefix("./"), source: source, index: index})
     }
@@ -1237,7 +1237,7 @@ normalize_and_validate_project_changes: fn(checker: LSPChecker, ctx: ProjectCont
 }
 
 validate_project_jet_overlay: fn(checker: LSPChecker, path: String, src: String) Err! {
-    checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: src}})
+    checked: checker.check(path, [JetDriverSourceDocument]{JetDriverSourceDocument{path: path, source: src}})
     if !jet_driver_has_errors(checked.diagnostics) -> return Ok()
     errors := [Diagnostic]{}
     loop diagnostic in checked.diagnostics {
@@ -1249,7 +1249,7 @@ validate_project_jet_overlay: fn(checker: LSPChecker, path: String, src: String)
 // Checks the project with every renamed source as an overlay; the rename
 // must leave the project error-free with a semantic index.
 validate_project_rename_overlay: fn(checker: LSPChecker, ctx: ProjectContext, changes: [ProjectChange]) Err! {
-    overlays: loop change in changes -> LSPOverlay{path: change.path, source: change.after}
+    overlays: loop change in changes -> JetDriverSourceDocument{path: change.path, source: change.after}
     checked: checker.check(ctx.entry_path, overlays)
     if checked.index == None {
         return Err(project_edit_error("diagnostic", "Canvas has no semantic index of the renamed project"))
@@ -1331,7 +1331,7 @@ record_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, changes: [Pr
         if change.before != change.after && change.rel.ends_with(".{FILE_EXT}") -> sources.push(at)
     }
     if sources.len() == 0 -> return Ok()
-    overlays: loop at in sources -> LSPOverlay{path: changes[at].path, source: changes[at].before}
+    overlays: loop at in sources -> JetDriverSourceDocument{path: changes[at].path, source: changes[at].before}
     checked: checker.check(ctx.entry_path, overlays)
     before_index: checked.index ?? return Err(project_edit_error("diagnostic", "Canvas has no semantic index of the project before its rename"))
     targets := [String]{}

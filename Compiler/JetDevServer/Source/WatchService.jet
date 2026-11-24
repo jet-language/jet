@@ -13,7 +13,8 @@ use {
     core.time.[Stopwatch]
     core.watcher.[WatchHandle]
     jet_foundation.[foundation_json_quote]
-    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_driver.[JetDriverSourceDocument]
+    jet_lsp.[LSPChecker]
     jetpack_foundation.[PACKAGE_FILE]
 }
 
@@ -489,7 +490,7 @@ WatchGraph: struct {
 
     // The graph of `entry` over the modules the checker loaded for it.
     discover: fn(entry: String, checker: LSPChecker) -> WatchGraph {
-        checked: checker.check(entry, [LSPOverlay]{})
+        checked: checker.check(entry, [JetDriverSourceDocument]{})
         seen := [String:Bool]{}
         loop loaded in checked.modules {
             if loaded.physical_path != "" -> seen[loaded.physical_path] = true else if loaded.path != "" {

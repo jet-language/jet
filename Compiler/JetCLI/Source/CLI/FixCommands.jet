@@ -2,7 +2,7 @@
 // Publication uses the canonical held codemod transaction.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit, DIAGNOSTIC_ERROR, diagnostic_headline, foundation_byte_text]
     jet_lexer.[lex, Token, TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_EQ, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RBRACE, TOKEN_SEMI]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
@@ -42,7 +42,7 @@ jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> Je
 // unchanged is read from disk. It is checked as a shipped artifact is, so
 // each `debug` trace a build would refuse (E3405) brings its unwrap edit.
 jet_cli_fix_compile: fn(file: String, source: String, files: [JetCLIFixFile], texts: [String?]) -> JetCLICompiled {
-    overlays := [JetCLIOverlay]{JetCLIOverlay{path: file, source: source}}
+    overlays := [JetDriverSourceDocument]{JetDriverSourceDocument{path: file, source: source}}
     loop (row, other) in files {
         if row < texts.len() && texts[row] != None {
             if texts[row] == .Val(text) -> overlays.push(jet_cli_fix_overlay(other.path, text))
@@ -63,8 +63,8 @@ jet_cli_fix_compile: fn(file: String, source: String, files: [JetCLIFixFile], te
 
 // copy: a compile's overlay owns its file's path and text, while the file
 // table keeps both for the rounds after it.
-jet_cli_fix_overlay: fn(path: String, text: String) -> JetCLIOverlay Never! {
-    JetCLIOverlay{path: path.copy(), source: text.copy()}
+jet_cli_fix_overlay: fn(path: String, text: String) -> JetDriverSourceDocument Never! {
+    JetDriverSourceDocument{path: path.copy(), source: text.copy()}
 }
 
 // The fixes of `file` with `source` as its text and the file table `files`
@@ -208,7 +208,7 @@ jet_cli_fix_names_file: fn(files: [JetCLIFixFile], path: String) -> Bool Never! 
 // their files; none when the package has no build or it fails. A finding's
 // `syntax.rewrite` fix is its edit.
 jet_cli_fix_build_findings: fn(file: String, source: String) -> [Diagnostic] {
-    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{JetCLIOverlay{path: file, source: source}}, false, None, JetDriverCompileMode.Doc) == {
+    if jet_cli_prepare_overlays(file, file, [JetDriverSourceDocument]{JetDriverSourceDocument{path: file, source: source}}, false, None, JetDriverCompileMode.Doc) == {
         .Refused(_) -> return [Diagnostic]{}
         .Prepared(request, _) -> {
             owned := request.move()

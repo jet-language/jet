@@ -13,6 +13,7 @@ use jet_foundation.[
     MARKER_CODABLE,
     Measure,
     NodeKind,
+    OWNED_ROLE_INDEX,
     OrFallback,
     QuantityKind,
     Span,
@@ -41,6 +42,8 @@ use jet_foundation.[
     name_table,
     owned_trait_bundle,
     owned_trait_codec,
+    owned_role_method,
+    owned_trait_for_role,
     type_identity_equal,
     type_name,
     module_is_core,
@@ -1298,8 +1301,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
     }
     // A type with an `Index` impl reads `base[key]` as its `get(key)`, and a
     // key it has no value for stops the program like a missing map key.
-    if result_ty == None && sema_expression_index_hook(environment, program, base_ty, "Index") {
-        read: Expr.OrFallback{value: sema_expression_index_hook_call(base, "get", [Expr]{index}, span), fallback: OrFallback.Value{value: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{sema_expression_index_hook_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "index miss"}}, span: span, id: AST_NODE_GENERATED})}}, id: AST_NODE_GENERATED}}, is_option: false, span: span, id: AST_NODE_GENERATED}
+    if result_ty == None && sema_expression_index_hook(environment, program, base_ty, OWNED_ROLE_INDEX) {
+        read: Expr.OrFallback{value: sema_expression_index_hook_call(base, sema_expression_index_hook_method(OWNED_ROLE_INDEX), [Expr]{index}, span), fallback: OrFallback.Value{value: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{sema_expression_index_hook_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "index miss"}}, span: span, id: AST_NODE_GENERATED})}}, id: AST_NODE_GENERATED}}, is_option: false, span: span, id: AST_NODE_GENERATED}
         return sema_check_expression(read, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if result_ty == None {
@@ -1346,14 +1349,17 @@ sema_expression_index_mismatch: fn(base_ty: Type, offered: Type, span: Span) -> 
     None
 }
 
-// Whether the nominal `ty` has an impl of the prelude index hook trait
-// `trait_name` (`Index` or `IndexMut`). A user trait that shares the name is
-// not the hook, so its impl never routes `[ ]`.
-sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, trait_name: String) -> Bool {
+// Whether the nominal `ty` has an impl of the prelude trait that fills index
+// role `role` (OWNED_ROLE_INDEX for `[ ]`, OWNED_ROLE_INDEX_MUT for
+// `[ ] =`). A user trait that shares that trait's name is not the hook, so
+// its impl never routes `[ ]`.
+sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, role: String) -> Bool {
     if ty == {
         .Named(_) | .Apply(_, _) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
     }
+    owned: owned_trait_for_role(role) ?? return false
+    trait_name: owned.name
     graph: program.registration_graph ?? return false
     row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
     identity: graph.modules[row.module_index].nominals[row.row].identity_key
@@ -1381,6 +1387,10 @@ sema_expression_index_hook: fn(environment: SemaScopeEnvironment, program: SemaP
     }
     false
 }
+
+// The method a `[ ]` read or write calls through the trait that fills index
+// role `role`: that trait's one method (`get`, `set`).
+sema_expression_index_hook_method: fn(role: String) -> String Never! { owned_role_method(role) ?? "" }
 
 // `receiver.method(args…)`, a generated hook call.
 sema_expression_index_hook_call: fn(receiver: Expr, method: String, args: [Expr], span: Span) -> Expr Never! {

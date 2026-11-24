@@ -2059,17 +2059,31 @@ sema_derive_exec_value: fn(expansion: &SemaDeriveExpansion, expression: Expr) Ne
 }
 
 // `reject(value)`: a checked rule raises the diagnostic value at the rule's use
-// site. The value's `Diagnostic` impl gives each text as one literal over `self`
+// site, or with `reject(value, at: part)` at the span of `part`, a reflected
+// record of the target (a FieldInfo, a CaseInfo, a MethodInfo) that carries
+// one. The value's `Diagnostic` impl gives each text as one literal over `self`
 // fields and the `code` and `severity` constants; the code defaults to the type
 // path (`web.BadPath`). A code with a Jet registry row takes that row's rendering.
 sema_derive_reject: fn(expansion: &SemaDeriveExpansion, args: [CallArg], span: Span) Never! {
-    if args.len() != 1 || args[0].label != None || args[0].spread {
-        sema_derive_fail(expansion, sema_derive_unsupported(span, "`reject` with anything but one diagnostic value"))
+    shaped := (args.len() == 1 || args.len() == 2) && args[0].label == None && !args[0].spread
+    if shaped && args.len() == 2 {
+        placed: if args[1].label == .Val(label) -> label.name == "at" else -> false
+        if args[1].spread || !placed -> shaped = false
+    }
+    if !shaped {
+        sema_derive_fail(expansion, sema_derive_unsupported(span, "`reject` with anything but one diagnostic value and, optionally, `at:` a reflected part"))
         return
     }
     value: sema_derive_static_value(expansion, args[0].expr) ?? {
         sema_derive_fail(expansion, sema_derive_unsupported(expr_span(args[0].expr), "a `reject` argument that is not a known-time value"))
         return
+    }
+    site := expansion.site ?? span
+    if args.len() == 2 {
+        site = sema_derive_reject_site(expansion, args[1].expr) ?? {
+            sema_derive_fail(expansion, sema_derive_unsupported(expr_span(args[1].expr), "a `reject` `at:` that is not a reflected part with a source span"))
+            return
+        }
     }
     value_type: if value == .Struct(name, _) -> name else -> sema_derive_value_type_name(value)
     report: sema_derive_report(expansion, value_type) ?? {
@@ -2099,12 +2113,22 @@ sema_derive_reject: fn(expansion: &SemaDeriveExpansion, args: [CallArg], span: S
             }
         }
     }
-    site: expansion.site ?? span
     if diagnostic_registry_row(code) != None {
         sema_derive_fail(expansion, diagnostic_from_registry(code, Val(site), texts[0], texts[1], texts[2]))
         return
     }
     sema_derive_fail(expansion, Diagnostic{severity: severity, code: code, span: Val(site), what: diagnostic_sentence_case_line(texts[0]), why: diagnostic_sentence_case_line(texts[1]), fix: diagnostic_sentence_case_line(texts[2])})
+}
+
+// The span `reject(…, at: part)` raises at: the `span` SourceSpan of the
+// reflected record `part`; None for a value that carries none.
+sema_derive_reject_site: fn(expansion: SemaDeriveExpansion, part: Expr) -> Span? Never! {
+    value: sema_derive_static_value(expansion, part) ?? return None
+    source: sema_derive_struct_field(value, "span") ?? return None
+    if sema_derive_struct_field(source, "start") == .Val(.Int(start)) && sema_derive_struct_field(source, "end") == .Val(.Int(end)) {
+        return Val(Span{start: start, end: end})
+    }
+    None
 }
 
 // The visible `Diagnostic` impl for a struct literal's type: `BadPath` in the

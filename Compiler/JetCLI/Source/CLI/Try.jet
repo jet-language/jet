@@ -352,10 +352,7 @@ jet_cli_try_parse: fn(source: String) -> JetCompilerServicesParseFacts JetCLIRea
 }
 
 jet_cli_try_check: fn(queries: &JetDriverCompilerQueries, entry: String, disk: Bool) -> JetCLITryChecked JetCLITryError! {
-    overlays := [JetCLIOverlay]{}
-    loop document in jet_driver_compiler_queries_documents(queries) {
-        overlays.push(JetCLIOverlay{path: document.path, source: document.source})
-    }
+    overlays: jet_driver_compiler_queries_documents(queries)
     // The retained checked projection `try` reads is a Program-mode product.
     if jet_cli_prepare_overlays(entry, entry, overlays, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> {

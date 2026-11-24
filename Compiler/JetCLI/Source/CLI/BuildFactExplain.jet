@@ -6,7 +6,7 @@
 // passes as a fact-value argument, folded under the same chain.
 use {
     cli_files: core.files
-    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, jet_driver_explain_build_fact, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverSourceDocument, jet_driver_explain_build_fact, jet_driver_present_diagnostics]
     jet_foundation.[BuildSettingOverride, DiagnosticExplanation, SourceFile]
 }
 
@@ -40,7 +40,7 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
             .Refused(plan) -> return plan
         }
     }
-    prepared := jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
+    prepared := jet_cli_prepare_overlays(entry, entry, [JetDriverSourceDocument]{}, color, None, JetDriverCompileMode.Doc)
     if prepared.move() == {
         .Refused(output) -> JetCLIPlan.Done{output: output}
         .Prepared(request, snapshot) -> {

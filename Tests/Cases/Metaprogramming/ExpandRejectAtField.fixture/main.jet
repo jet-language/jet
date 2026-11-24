@@ -1,0 +1,40 @@
+// A marker's expand body rejects a field it cannot use at that field:
+// `reject(value, at: field)` raises the diagnostic at the reflected field's
+// span, not at the marker.
+UnsupportedField: struct {
+    field: String,
+    type_name: String,
+
+    impl Diagnostic {
+        code: "form.UnsupportedField",
+
+        what: fn(self) -> String {
+            "form field `{self.field}` has unsupported type `{self.type_name}`"
+        }
+
+        why: fn(self) -> String { "a form decodes each field from one text control" }
+
+        fix: fn(self) -> String { "use a String or Int field" }
+    }
+}
+
+FormFields: struct {
+    impl Marker {
+        sites: [.Type],
+
+        expand: fn(self, target: Target) {
+            #loop field in target.reflect().fields {
+                #if field.type.name != "String" && field.type.name != "Int" {
+                    reject(UnsupportedField{field: field.name, type_name: field.type.name}, at: field)
+                }
+            }
+        }
+    }
+}
+
+#FormFields
+Checkout: struct {
+    name: String,
+    count: Int,
+    when: [Int],
+}

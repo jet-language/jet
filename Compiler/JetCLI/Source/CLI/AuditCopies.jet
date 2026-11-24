@@ -8,6 +8,7 @@
 use {
     cli_files: core.files
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverAuthorizedSourceFile,
         JetDriverCompileMode,
         JetDriverVerbOutput,
@@ -137,7 +138,7 @@ jet_cli_audit_entry_modules: fn(file: String, source: String, color: Bool, json:
 // `.copy()` edit sema offers names one implicit copy of the clean compile.
 jet_cli_audit_copy_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFile], color: Bool) -> [JetCLICopySite] {
     shift: JET_CLI_FMT_EXPLICIT_COPIES_POLICY.len()
-    overlays: loop member in modules -> JetCLIOverlay{path: member.path, source: "{JET_CLI_FMT_EXPLICIT_COPIES_POLICY}{member.source}"}
+    overlays: loop member in modules -> JetDriverSourceDocument{path: member.path, source: "{JET_CLI_FMT_EXPLICIT_COPIES_POLICY}{member.source}"}
     sites := [JetCLICopySite]{}
     if jet_cli_compile_overlays(file, file, overlays, color, None, JetDriverCompileMode.Check, None) == .Compiled(result, snapshot) {
         loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {

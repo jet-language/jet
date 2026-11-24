@@ -15,6 +15,7 @@
 use {
     cli_files: core.files
     jet_driver.[
+        JetDriverSourceDocument,
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot,
@@ -177,7 +178,7 @@ jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{fal
 jet_cli_inspect_facts_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     kind: job.subject ?? "marker"
-    prepared := jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Check)
+    prepared := jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Check)
     if prepared.move() == {
         .Refused(refused) -> { output = refused }
         .Prepared(request, snapshot) -> {

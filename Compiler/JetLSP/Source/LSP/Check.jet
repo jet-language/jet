@@ -5,14 +5,8 @@
 // semantic index over them.
 use {
     jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
-    jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
+    jet_driver.[JetDriverDocModule, JetDriverSourceDocument, JetDriverToolStageItem]
     jet_semindex.[SemDeclared, SemIndex, SemSymbol]
-}
-
-// An open document's unsaved text, checked in place of its file.
-LSPOverlay: struct {
-    path: String,
-    source: String,
 }
 
 // One check of an entry with the open documents overlaid. `index` and
@@ -71,10 +65,10 @@ LSPChoice: struct {
 // `jet fmt --explicit-failures` writes its `?`. `sources` gives the saved
 // `.jet` files below a workspace folder, in path order.
 LSPChecker: trait {
-    check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
-    stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
-    failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
-    sources: fn(self, root: String) -[FS]> [LSPOverlay] Never!,
+    check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
+    stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
+    failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
+    sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never!,
 }
 
 // A quick fix a diagnostic offers: its primary edit, then each alternative.

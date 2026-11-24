@@ -10,14 +10,14 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Diagnostic, Span, TOOL_STAGE_LSP_COMPLETION, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json, interner_empty]
     jet_parser.[parse_source]
-    jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
+    jet_driver.[JetDriverDocModule, JetDriverSourceDocument, JetDriverToolStageItem]
     jet_semindex.[SemEffectProjection, semindex_build, semindex_build_symbols]
-    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_handle_request, lsp_member, lsp_path_below, lsp_server, lsp_update_document]
+    jet_lsp.[LSPChecked, LSPChecker, LSPServer, lsp_handle_request, lsp_member, lsp_path_below, lsp_server, lsp_update_document]
 }
 
 LSPFixtureChecker: struct {
     impl LSPChecker {
-        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
             modules := [JetDriverDocModule]{}
             diagnostics := [Diagnostic]{}
             loop overlay in overlays {
@@ -43,7 +43,7 @@ LSPFixtureChecker: struct {
             LSPChecked{diagnostics: diagnostics, modules: modules, index: Val(index), symbols: symbols}
         }
 
-        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             bytes := [U8]{}
             loop overlay in overlays.move() {
                 if overlay.path == entry -> bytes = overlay.source.bytes()
@@ -68,7 +68,7 @@ LSPFixtureChecker: struct {
             answers
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             sites := [Int]{}
             loop overlay in overlays {
                 if overlay.path != entry -> next
@@ -85,11 +85,11 @@ LSPFixtureChecker: struct {
 
         // The saved workspace below `/w`: `ClosedFirst` in `/w/first`,
         // `DiskSecond` in `/w/second` and `AddedThird` in `/w/third`.
-        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
-            saved := [LSPOverlay]{}
-            if lsp_path_below("/w/first/closed.jet", root) -> saved.push(LSPOverlay{path: "/w/first/closed.jet", source: "ClosedFirst: fn() {{}}\n"})
-            if lsp_path_below("/w/second/open.jet", root) -> saved.push(LSPOverlay{path: "/w/second/open.jet", source: "DiskSecond: fn() {{}}\n"})
-            if lsp_path_below("/w/third/added.jet", root) -> saved.push(LSPOverlay{path: "/w/third/added.jet", source: "AddedThird: fn() {{}}\n"})
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            saved := [JetDriverSourceDocument]{}
+            if lsp_path_below("/w/first/closed.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/first/closed.jet", source: "ClosedFirst: fn() {{}}\n"})
+            if lsp_path_below("/w/second/open.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/second/open.jet", source: "DiskSecond: fn() {{}}\n"})
+            if lsp_path_below("/w/third/added.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/third/added.jet", source: "AddedThird: fn() {{}}\n"})
             saved
         }
     }

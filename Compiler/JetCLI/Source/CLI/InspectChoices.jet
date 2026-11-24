@@ -45,7 +45,7 @@
 //   changes such a row; any other predicate reads the whole table, and its
 //   live query re-runs for every write to it.
 use {
-    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, DeclTable, FnBody, SymbolTable, body_node, build_options_stock, decl_table_key, module_is_core, symbol_key_leaf]
     jet_ir.[IROptInlined]
 }
@@ -378,7 +378,7 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
 // its optimization makes. The rows go in file and line order.
 jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Program)
+    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Program)
     if prepared == {
         .Refused(refusal) -> { output = refusal.move() }
         .Prepared(value, _) -> {

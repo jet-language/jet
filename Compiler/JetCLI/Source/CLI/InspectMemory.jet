@@ -11,7 +11,7 @@
 // bytes every call path from it may reserve, by the proof
 // `!Mem.Alloc(above: N)` checks, or why no bound holds.
 use {
-    jet_driver.[JetDriverCompileMode, JetDriverIceRow, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_entry_root_path, jet_driver_ice_record, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverIceRow, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_entry_root_path, jet_driver_ice_record, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, build_options_stock]
     jet_ir.[IRX64StackBound, ir_entry_wrapped_key, ir_x64_compile_module, ir_x64_stack_bounds]
 }
@@ -117,7 +117,7 @@ jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetC
 // report `jet build` gives it.
 jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Program)
+    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetDriverSourceDocument]{}, job.color, job.threads, JetDriverCompileMode.Program)
     if prepared == {
         .Refused(refusal) -> { output = refusal.move() }
         .Prepared(value, snapshot) -> {
