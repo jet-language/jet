@@ -1303,7 +1303,7 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, environment: Sema
     if sema_call_core_crypto_expert_gate(module_name, member, call.name_span, context, diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    if sema_call_core_vault_build_time_gate(module_name, member, call.name_span, scopes, environment.function_name, diagnostics) {
+    if sema_call_core_vault_build_time_gate(module_name, member, call.name_span, scopes, environment, program, diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, context) {
@@ -1903,7 +1903,7 @@ sema_call_point_in_body: fn(target: SemaCallDirectTarget, environment: SemaScope
 // (E1806); Core's own calls are its wrappers, whose handles only build code
 // holds. The call is still checked past it.
 sema_call_service_out_of_phase: fn(target: SemaCallDirectTarget, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic? {
-    if module_is_core(environment.module_identity) || !module_is_core(target.symbol.module_identity) || sema_scope_build_time(scopes, environment.function_name) {
+    if module_is_core(environment.module_identity) || !module_is_core(target.symbol.module_identity) || sema_scope_build_time(scopes, environment, program) {
         return None
     }
     graph: program.registration_graph ?? return None
