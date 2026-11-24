@@ -20,6 +20,24 @@ GateKind: enum {
     HostFacts,
 }
 
+// GateKind picks from PolicyKey (AST/Statements.jet): each gate kind is the
+// policy key that governs it, so a new kind is a policy key first. While the
+// compiler builds, GATE_KIND_COUNT checks that each case is a PolicyKey
+// case, and a stray stops the build naming it.
+GATE_KIND_COUNT: #run gate_kind_count(embed_file("GateLedger.jet"), embed_file("toolchain:Compiler/JetFoundation/Source/AST/Statements.jet"))
+
+// The number of GateKind cases in `text` (this file), once each is a case
+// of `PolicyKey` in `statements`; else the build stops naming the strays.
+gate_kind_count: fn(text: String, statements: String) -> Int {
+    kinds: effect_vocabulary_enum_cases(text, "GateKind") ?? panic("GateLedger.jet declares no `GateKind: enum {{ … }}`")
+    keys: effect_vocabulary_enum_cases(statements, "PolicyKey") ?? panic("AST/Statements.jet declares no `PolicyKey: enum {{ … }}`")
+    strays: effect_vocabulary_strays(kinds, keys)
+    if strays.len() > 0 {
+        panic("GateLedger.jet: GateKind names kinds that `PolicyKey` in AST/Statements.jet does not declare: {strays.join(", ")}")
+    }
+    kinds.len()
+}
+
 // A build option value that removes a runtime memory-safety check
 // (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
 // The `link_args` build option: native link inputs

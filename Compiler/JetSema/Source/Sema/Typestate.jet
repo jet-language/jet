@@ -121,7 +121,7 @@ SemaStateWalk: struct {
 // in different states (`many`, in order, empty for none).
 SemaStatePlane: struct {
     impl SemaFlowPlane {
-        flow_join: fn(self, binding: Int, one: SemaFlowFact, other: SemaFlowFact, splits: &[SemaFlowSplit]) -> SemaFlowFact Never! { sema_state_join(binding, one, other, splits) }
+        flow_join: fn(self, binding: Int, one: &&SemaFlowFact, other: &&SemaFlowFact, splits: &[SemaFlowSplit]) -> SemaFlowFact Never! { sema_state_join(binding, one, other, splits) }
     }
 }
 
@@ -468,7 +468,7 @@ sema_state_join: fn(binding: Int, left: SemaFlowFact, right: SemaFlowFact, split
 
 // The paths that fall through meet (sema_flow_meet), and every split is
 // L0152.
-sema_state_merge: fn(walk: &SemaStateWalk, paths: [SemaFlowFacts], span: Span) Never! {
+sema_state_merge: fn(walk: &SemaStateWalk, paths: &&[SemaFlowFacts], span: Span) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_meet(walk.flow, paths, splits)
     sema_state_report(walk, splits, span)
@@ -481,7 +481,7 @@ sema_state_loop: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, bo
     sema_state_after_loop(walk, entered, span)
 }
 
-sema_state_after_loop: fn(walk: &SemaStateWalk, entered: SemaFlowLoop, span: Span) Never! {
+sema_state_after_loop: fn(walk: &SemaStateWalk, entered: &&SemaFlowLoop, span: Span) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_loop_leave(walk.flow, entered, splits)
     sema_state_report(walk, splits, span)
@@ -538,7 +538,7 @@ sema_state_switch: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, 
 
 // The arm paths meet by the one arm-table rule (sema_flow_arms_meet), and
 // every split is L0152.
-sema_state_arms_merge: fn(walk: &SemaStateWalk, before: SemaFlowFacts, paths: [SemaFlowFacts], has_else: Bool, exhaustive: Bool, span: Span) Never! {
+sema_state_arms_merge: fn(walk: &SemaStateWalk, before: &&SemaFlowFacts, paths: &&[SemaFlowFacts], has_else: Bool, exhaustive: Bool, span: Span) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_arms_meet(walk.flow, before, paths, has_else, exhaustive, splits)
     sema_state_report(walk, splits, span)

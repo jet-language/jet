@@ -283,15 +283,18 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
     if !load.complete || jet_driver_has_errors(load.diagnostics) || root == "" {
         return {nodes: nodes.move(), settings: settings.move()}
     }
-    // The writer rows and host reads of each package; the inputs of each
-    // source that has any; and that source's row of them for its check
-    // node, by a pass-local id of its subject (-1 at id 0, the empty
-    // subject).
+    // The writer rows and host reads of each package; the setting inputs of
+    // each package that has any; and, by a pass-local id of each source's
+    // subject (-1 at id 0, the empty subject), for its check node: its
+    // package's row of setting inputs, and where its host reads sit (its
+    // package's row in `settings`, then its row of that package's sources).
     package_writers := [[[JetDriverBuildSettingWriter]]]{}
-    package_reads := [[JetDriverBuildHostRead]]{}
-    source_inputs := [[BuildGraphInputDigest]]{}
+    package_sources := [[JetDriverBuildHostSource]]{}
+    package_inputs := [[BuildGraphInputDigest]]{}
     subjects := name_table_sized(load.source_units.len() * 2 + 2)
     owners := [Int]{-1}
+    host_packages := [Int]{-1}
+    host_sources := [Int]{-1}
     // The modules each source unit loaded as.
     unit_modules := [[Int]]{}
     loop _ in load.source_units -> unit_modules.push([Int]{})
@@ -299,7 +302,7 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
         at: module_row.source_unit_index
         if at >= 0 && at < unit_modules.len() -> unit_modules[at].push(index)
     }
-    loop package in load.packages {
+    loop (package_index, package) in load.packages {
         inputs := [BuildGraphInputDigest]{}
         setting_writers := [[JetDriverBuildSettingWriter]]{}
         loop setting in package.settings {
@@ -319,44 +322,49 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
             setting_writers.push(rows.move())
         }
         package_writers.push(setting_writers.move())
-        reads := [JetDriverBuildHostRead]{}
+        owner: if inputs.len() == 0 -> -1 else -> package_inputs.len()
+        sources := [JetDriverBuildHostSource]{}
         loop (unit_index, unit) in load.source_units {
             if unit.package_identity != package.identity || unit.source_origin != SemaSourceOrigin.Snapshot || jet_driver_unit_is_core(unit) {
                 next
             }
             subject: jet_driver_build_source_subject(request, root, unit) ?? next
-            // copy: each source of the package starts from the package's own setting inputs.
-            unit_inputs := inputs.copy()
+            reads := [JetDriverBuildHostRead]{}
             source: jet_driver_source_unit_text(request, unit) ?? ""
             if source.contains("#build.host.") {
                 text: diagnostic_source_text(source)
                 loop module_index in unit_modules[unit_index] {
-                    loop read in sema_gate_host_reads(subject, load.modules[module_index].program) {
+                    found: sema_gate_host_reads(subject, load.modules[module_index].program)
+                    loop read in found.move() {
                         value: jet_driver_host_fact_value(request, read.subject)
                         line: if read.span == .Val(span) -> diagnostic_source_line(text, span.start) else -> 0
-                        reads.push(JetDriverBuildHostRead{file: subject.copy(), line: line, fact: read.subject.copy(), value: value.copy()})
-                        name: "host:{read.subject}={value}"
-                        known := false
-                        loop input in unit_inputs {
-                            if input.name == name -> known = true
-                        }
-                        if !known -> unit_inputs.push(BuildGraphInputDigest{name: name, digest: sha256_hex("{read.subject}={value}")})
+                        reads.push(JetDriverBuildHostRead{line: line, fact: read.subject.move(), value: value})
                     }
                 }
             }
-            if unit_inputs.len() == 0 -> next
+            if owner < 0 && reads.len() == 0 -> next
             id: name_index(name_intern(subjects, subject))
-            if id == owners.len() -> owners.push(source_inputs.len()) else {
-                owners[id] = source_inputs.len()
+            if id == owners.len() {
+                owners.push(-1)
+                host_packages.push(-1)
+                host_sources.push(-1)
             }
-            source_inputs.push(unit_inputs.move())
+            owners[id] = owner
+            host_packages[id] = -1
+            host_sources[id] = -1
+            if reads.len() > 0 {
+                host_packages[id] = package_index
+                host_sources[id] = sources.len()
+                sources.push(JetDriverBuildHostSource{file: subject.move(), reads: reads.move()})
+            }
         }
-        package_reads.push(reads.move())
+        package_sources.push(sources.move())
+        if owner >= 0 -> package_inputs.push(inputs.move())
     }
     // Each package's name and its settings' names move into its receipt
     // rows, beside their writers and its sources' host reads.
     package_writers.reverse()
-    package_reads.reverse()
+    package_sources.reverse()
     loop package in load.packages.move() {
         writers := package_writers.pop() ?? break
         writers.reverse()
@@ -364,9 +372,9 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
         loop setting in package.settings.move() {
             rows.push(JetDriverBuildSetting{name: setting.name.move(), writers: writers.pop() ?? break})
         }
-        settings.push(JetDriverBuildPackageSettings{package: package.name.move(), settings: rows.move(), host_reads: package_reads.pop() ?? [JetDriverBuildHostRead]{}})
+        settings.push(JetDriverBuildPackageSettings{package: package.name.move(), settings: rows.move(), host_sources: package_sources.pop() ?? [JetDriverBuildHostSource]{}})
     }
-    if source_inputs.len() == 0 -> return {nodes: nodes.move(), settings: settings.move()}
+    if owners.len() == 1 -> return {nodes: nodes.move(), settings: settings.move()}
     // The row in `keyed` of each rekeyed node, by a pass-local id of the
     // input name its dependents give it (`check:<subject>`,
     // `compile:<output>`; -1 at id 0, the empty name).
@@ -375,10 +383,14 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
     keyed := [BuildGraphNode]{}
     loop node in nodes.move() {
         owner := -1
+        host := -1
+        host_source := -1
         if node.kind == "check" && name_find(subjects, node.subject) == .Val(found) {
             owner = owners[name_index(found)]
+            host = host_packages[name_index(found)]
+            host_source = host_sources[name_index(found)]
         }
-        changed := owner >= 0
+        changed := owner >= 0 || host >= 0
         loop input in node.input_digests {
             if name_find(names, input.name) != None -> changed = true
         }
@@ -388,7 +400,18 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
         }
         digests := node.input_digests.move()
         if owner >= 0 {
-            loop input in source_inputs[owner] -> digests.push(input.copy())
+            loop input in package_inputs[owner] -> digests.push(input.copy())
+        }
+        // A source that reads one host fact twice names it once.
+        if host >= 0 {
+            loop read in settings[host].host_sources[host_source].reads {
+                name: "host:{read.fact}={read.value}"
+                known := false
+                loop input in digests {
+                    if input.name == name -> known = true
+                }
+                if !known -> digests.push(BuildGraphInputDigest{name: name, digest: sha256_hex("{read.fact}={read.value}")})
+            }
         }
         loop index in 0..<digests.len() {
             if name_find(names, digests[index].name) == .Val(found) {

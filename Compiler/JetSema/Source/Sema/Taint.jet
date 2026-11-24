@@ -245,7 +245,7 @@ SemaTaintModuleScope: struct {
 // only when both paths agree.
 SemaTaintPlane: struct {
     impl SemaFlowPlane {
-        flow_join: fn(self, _binding: Int, one: SemaFlowFact, other: SemaFlowFact, _splits: &[SemaFlowSplit]) -> SemaFlowFact Never! { sema_taint_join(one, other) }
+        flow_join: fn(self, _binding: Int, one: &&SemaFlowFact, other: &&SemaFlowFact, _splits: &[SemaFlowSplit]) -> SemaFlowFact Never! { sema_taint_join(one, other) }
     }
 }
 
@@ -3084,9 +3084,10 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             }
             if else_body == .Val(body) -> sema_taint_walk_path(graph, state, before, body, paths)
             loop state.under.len() > under -> _ := state.under.pop()
-            open: if module_is_core(state.module_identity) -> [Span]{} else -> state.open_switches.copy()
+            // Core's own switches are all settled: none is open.
+            exhaustive: if module_is_core(state.module_identity) -> sema_flow_arms_exhaustive(arms, [Span]{}, span) else -> sema_flow_arms_exhaustive(arms, state.open_switches, span)
             splits := [SemaFlowSplit]{}
-            sema_flow_arms_meet(state.flow, before, paths, else_body != None, sema_flow_arms_exhaustive(arms, open, span), splits)
+            sema_flow_arms_meet(state.flow, before, paths, else_body != None, exhaustive, splits)
         }
         .CountedLoop(init, cond, step, body, _, _, _) -> {
             sema_taint_check_expr(graph, state, init.init)
@@ -3183,10 +3184,10 @@ sema_taint_walk_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
 
 // The taint plane's join (SemaFlowPlane): a binding on one path only keeps
 // its fact; one on both holds both tag sets, and its type when they agree.
-sema_taint_join: fn(one: SemaFlowFact, other: SemaFlowFact) -> SemaFlowFact Never! {
-    if !one.held -> return other.copy()
-    if !other.held -> return one.copy()
-    tags := one.many.copy()
+sema_taint_join: fn(one: &&SemaFlowFact, other: &&SemaFlowFact) -> SemaFlowFact Never! {
+    if !one.held -> return other.move()
+    if !other.held -> return one.move()
+    tags := one.many.move()
     sema_taint_union(tags, other.many)
     type_name := one.one
     if type_name == "" -> type_name = other.one
@@ -3196,7 +3197,7 @@ sema_taint_join: fn(one: SemaFlowFact, other: SemaFlowFact) -> SemaFlowFact Neve
 
 // The paths that fall through meet (sema_flow_meet); the taint join loses
 // no tag, so it reports no split.
-sema_taint_meet: fn(state: &SemaTaintFlowState, paths: [SemaFlowFacts]) Never! {
+sema_taint_meet: fn(state: &SemaTaintFlowState, paths: &&[SemaFlowFacts]) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_meet(state.flow, paths, splits)
 }

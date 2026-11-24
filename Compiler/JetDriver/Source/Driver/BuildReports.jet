@@ -213,8 +213,10 @@ jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], g
         loop row in package.settings {
             resolved.push(jet_driver_build_setting_json(package.package, row))
         }
-        loop read in package.host_reads {
-            reads.push("{{\"package\":{foundation_json_quote(package.package)},\"file\":{foundation_json_quote(read.file)},\"line\":{read.line},\"fact\":{foundation_json_quote(read.fact)},\"value\":{foundation_json_quote(read.value)}}}")
+        loop source in package.host_sources {
+            loop read in source.reads {
+                reads.push("{{\"package\":{foundation_json_quote(package.package)},\"file\":{foundation_json_quote(source.file)},\"line\":{read.line},\"fact\":{foundation_json_quote(read.fact)},\"value\":{foundation_json_quote(read.value)}}}")
+            }
         }
     }
     "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}],\"settings\":[{resolved.join(",")}],\"host_reads\":[{reads.join(",")}]}}\n"
@@ -239,13 +241,19 @@ JetDriverBuildKept: struct {
 JetDriverBuildPackageSettings: struct {
     package: String,
     settings: [JetDriverBuildSetting],
-    host_reads: [JetDriverBuildHostRead]{[JetDriverBuildHostRead]{}},
+    host_sources: [JetDriverBuildHostSource]{[JetDriverBuildHostSource]{}},
 }
 
-// One `#build.host.*` read: the source that wrote it (`file`, from the
-// entry root, and its `line`), the fact and the value the build read.
-JetDriverBuildHostRead: struct {
+// One source's `#build.host.*` reads: the source that wrote them (`file`,
+// from the entry root) and each read, in source order.
+JetDriverBuildHostSource: struct {
     file: String,
+    reads: [JetDriverBuildHostRead],
+}
+
+// One `#build.host.*` read: its `line` in its source, the fact and the
+// value the build read.
+JetDriverBuildHostRead: struct {
     line: Int,
     fact: String,
     value: String,

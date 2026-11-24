@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1651,
+  "total": 1652,
   "counts": {
     "Compiler": 806,
     "Core": 179,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 567,
+    "Tests": 568,
     "Tools": 28
   },
   "regions": [
@@ -8286,6 +8286,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Tests",
+      "file": "Tests/Cases/GateLedger/InspectGatesCountsEachKindSecurityFirst.fixture/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "count the unsafe region"
+    },
+    {
+      "package": "Tests",
       "file": "Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet",
       "line": 35,
       "column": 5,
@@ -11818,9 +11825,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 567 |
+| Tests | 568 |
 | Tools | 28 |
-| **total** | **1651** |
+| **total** | **1652** |
 
 ### Regions
 
@@ -12974,6 +12981,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 7:1 | "audited C boundary" |
 | Tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 10:1 | "audited C boundary" |
 | Tests | Tests/Cases/GateLedger/Fixtures/Gates/gates.jet | 2:5 | "test unsafe reason" |
+| Tests | Tests/Cases/GateLedger/InspectGatesCountsEachKindSecurityFirst.fixture/main.jet | 4:5 | "count the unsafe region" |
 | Tests | Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet | 35:5 | "the exit callback has no captured state" |
 | Tests | Tests/Cases/LanguageFeatures/CoreGroupImportNamesModuleTraitsAndTypes.fixture/main.jet | 46:5 | "the stack's kept block was claimed from its region, which unmaps it" |
 | Tests | Tests/Cases/LanguageFeatures/ImplMethodInheritsTraitEffectRowOnEveryTier.fixture/main.jet | 38:5 | "the case prints the checked text" |

@@ -22,10 +22,10 @@ use {
     scratch: cli_files.temp_dir("jet-host-facts") ?? panic("host facts scratch")
     path: scratch.path
     stat: cli_files.stat(path) ?? panic("host facts root identity")
-    identity: jet_cli_identity_key("directory", stat)
+    // Two keys of one directory, one for the root and one for the entry.
     entry: JetDriverAuthorizedSourceFile{path: "{path}/main.jet", relative_path: "main.jet", identity: "entry", source: "run: fn() {{ print(#build.host.os) }}\n"}
-    root: JetDriverAuthorizedSourceRoot{canonical_path: path, identity: identity.copy(), allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{entry}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}
-    snapshot: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{root}, entry_root_identity: identity, entry_path: "{path}/main.jet"}
+    root: JetDriverAuthorizedSourceRoot{canonical_path: path, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{entry}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}
+    snapshot: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{root}, entry_root_identity: jet_cli_identity_key("directory", stat), entry_path: "{path}/main.jet"}
     request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, None, .Program)
     assert(request.host_facts.host_arch == Val(cli_sys.arch()), "the request names the host's architecture")
     assert(request.host_facts.active_os == Val(cli_sys.name()), "the request names the host's OS")
