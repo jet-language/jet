@@ -2857,7 +2857,7 @@ sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: 
         }
         .Trait(definition) -> {
             ty: Type.Named{name: definition.name}
-            symbol: sema_registration_trait_symbol(module_id, module_identity, module_name, symbols, definition.name, definition.name_span, sema_registration_visibility(definition.is_pub, definition.is_package_pub))
+            symbol: sema_registration_trait_symbol(module_id, module_identity, module_name, symbols, definition.name, definition.name_span, sema_registration_item_visibility(module_id, definition.name, definition.is_pub, definition.is_package_pub))
             trait_methods: loop method in definition.methods -> sema_registration_trait_method(method, module_identity, module_name, symbol, symbols, fallback_source_file, fallback_source_origin, source_segments)
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Trait, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
         }
@@ -3164,7 +3164,7 @@ sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identi
         .Enum(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
         .Distinct(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
         .TypeAlias(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
-        .Trait(value) -> Val(sema_registration_trait_symbol(module_id, module_identity, module_name, symbols, value.name, value.name_span, sema_registration_visibility(value.is_pub, value.is_package_pub)))
+        .Trait(value) -> Val(sema_registration_trait_symbol(module_id, module_identity, module_name, symbols, value.name, value.name_span, sema_registration_item_visibility(module_id, value.name, value.is_pub, value.is_package_pub)))
         .Tag(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
         .UnitFamily(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.family, value.family_span, SymbolKind.Type, Val(Type.Named{name: value.family}), value.is_pub, value.is_package_pub))
         .Const(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Constant, value.ty, value.is_pub, value.is_package_pub))
