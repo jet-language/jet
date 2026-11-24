@@ -517,44 +517,58 @@ jet_driver_core_interface_fit: fn(reader: JetDriverCoreInterfaceReader, window: 
 JET_DRIVER_CORE_READY_BYTES_PER_THREAD: 16384
 
 // Where a ready parse a load reads sits in the interface file: `size`
-// bytes from byte `at`; a size of 0 when there is none to read.
+// bytes from byte `at`; a size of 0 when there is none to read. `owner` and
+// `slot` are the caller's: its row the parse fills and the table index the
+// parse is at, carried to the parse (JetDriverCoreReadyRead).
 JetDriverCoreReadyPlace: struct {
     at: Int,
     size: Int,
+    owner: Int,
+    slot: Int,
 }
 
 // Where the ready parse at `index` of the table `ready` sits in the
-// interface file; a size of 0 when there is no table or the unit's parses
-// leave that one out.
-jet_driver_core_ready_place: fn(ready: JetDriverCoreReady?, index: Int) -> JetDriverCoreReadyPlace Never! {
+// interface file, for the caller's row `owner`; a size of 0 when there is
+// no table or the unit's parses leave that one out.
+jet_driver_core_ready_place: fn(ready: JetDriverCoreReady?, index: Int, owner: Int) -> JetDriverCoreReadyPlace Never! {
     if ready == .Val(table) {
         if index < table.fragments.len() && table.fragments[index].size > 0 {
-            return JetDriverCoreReadyPlace{at: table.at + table.fragments[index].at, size: table.fragments[index].size}
+            return JetDriverCoreReadyPlace{at: table.at + table.fragments[index].at, size: table.fragments[index].size, owner: owner, slot: index}
         }
     }
-    JetDriverCoreReadyPlace{at: 0, size: 0}
+    JetDriverCoreReadyPlace{at: 0, size: 0, owner: owner, slot: index}
 }
 
 // The bytes of one ready parse a load read (jet_driver_core_ready_programs);
-// `found` is false when there was none to read or the read failed.
+// `found` is false when there was none to read or the read failed. `owner`
+// and `slot` are its place's.
 JetDriverCoreReadyRecord: struct {
     bytes: [U8],
     found: Bool,
+    owner: Int,
+    slot: Int,
+}
+
+// One ready parse a load read, with its place's `owner` and `slot`: None
+// for a place with no parse, when there is no reader, or for bytes that
+// don't read back as one whole program.
+JetDriverCoreReadyRead: struct {
+    owner: Int,
+    slot: Int,
+    part: JetDriverCoreReadyPart?,
 }
 
 // The ready parses at `places`, in their order: each read on this thread
 // from the interface file of `reader` through `window`
 // (jet_driver_core_interface_fit) and copied out of it, then decoded on the
 // admitted compiler threads, each part of the places (consecutive, even by
-// bytes) on its own thread with a reader of its own. None for a place with
-// no parse, when there is no reader, or for bytes that don't read back as
-// one whole program. A decode reads nothing but its own bytes, so the parts
-// are those of decoding each in turn; each thread's reader keeps one pool
-// of spellings (BodyCodecIn.spellings), so a spelling is one String per
-// thread that read it. A load reads its thousands of ready parses this way,
-// where decoding them in turn kept the load's thread busy and the others
-// idle.
-jet_driver_core_ready_programs: fn(reader: JetDriverCoreInterfaceReader?, window: ^JetDriverCoreInterfaceWindow, places: [JetDriverCoreReadyPlace], threads: CompilerThreads) -> [JetDriverCoreReadyPart?] {
+// bytes) on its own thread with a reader of its own. A decode reads nothing
+// but its own bytes, so the parts are those of decoding each in turn; each
+// thread's reader keeps one pool of spellings (BodyCodecIn.spellings), so a
+// spelling is one String per thread that read it. A load reads its
+// thousands of ready parses this way, where decoding them in turn kept the
+// load's thread busy and the others idle.
+jet_driver_core_ready_programs: fn(reader: JetDriverCoreInterfaceReader?, window: ^JetDriverCoreInterfaceWindow, places: [JetDriverCoreReadyPlace], threads: CompilerThreads) -> [JetDriverCoreReadyRead] {
     records := [JetDriverCoreReadyRecord]{}
     weights := [Int]{}
     work := 0
@@ -571,7 +585,7 @@ jet_driver_core_ready_programs: fn(reader: JetDriverCoreInterfaceReader?, window
         }
         weights.push(bytes.len())
         work += bytes.len()
-        records.push(JetDriverCoreReadyRecord{bytes: bytes.move(), found: found})
+        records.push(JetDriverCoreReadyRecord{bytes: bytes.move(), found: found, owner: place.owner, slot: place.slot})
     }
     workers: compiler_threads_admit(threads, records.len(), work, JET_DRIVER_CORE_READY_BYTES_PER_THREAD, 0, 0)
     if workers <= 1 -> return jet_driver_core_ready_part(records.move())
@@ -590,7 +604,7 @@ jet_driver_core_ready_programs: fn(reader: JetDriverCoreInterfaceReader?, window
         parts.push(rows.move())
     }
     decoded: jet_driver_core_ready_parts(parts)
-    programs := [JetDriverCoreReadyPart?]{}
+    programs := [JetDriverCoreReadyRead]{}
     loop part in decoded.move() {
         loop program in part.move() -> programs.push(program)
     }
@@ -601,8 +615,8 @@ jet_driver_core_ready_programs: fn(reader: JetDriverCoreInterfaceReader?, window
 // first), in part order: each part's on its own compiler thread, the last
 // part's on this one. Each decode runs on its thread alone, so no spawned
 // thread spawns.
-jet_driver_core_ready_parts: fn(parts: ^[[JetDriverCoreReadyRecord]]) -> [[JetDriverCoreReadyPart?]] {
-    decoded := [[JetDriverCoreReadyPart?]]{}
+jet_driver_core_ready_parts: fn(parts: ^[[JetDriverCoreReadyRecord]]) -> [[JetDriverCoreReadyRead]] {
+    decoded := [[JetDriverCoreReadyRead]]{}
     part: parts.pop() ?? return decoded
     if parts.len() == 0 {
         decoded.push(jet_driver_core_ready_part(part.move()))
@@ -619,12 +633,12 @@ jet_driver_core_ready_parts: fn(parts: ^[[JetDriverCoreReadyRecord]]) -> [[JetDr
 
 // One thread: the ready parses of `records`, in order, decoded with one
 // reader, each record's bytes gone once decoded.
-jet_driver_core_ready_part: fn(records: ^^[JetDriverCoreReadyRecord]) -> [JetDriverCoreReadyPart?] {
-    decoded := [JetDriverCoreReadyPart?]{}
+jet_driver_core_ready_part: fn(records: ^^[JetDriverCoreReadyRecord]) -> [JetDriverCoreReadyRead] {
+    decoded := [JetDriverCoreReadyRead]{}
     input := BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}
     loop record in records.move() {
         if !record.found {
-            decoded.push(None)
+            decoded.push(JetDriverCoreReadyRead{owner: record.owner, slot: record.slot, part: None})
             next
         }
         bytes: record.bytes
@@ -633,10 +647,10 @@ jet_driver_core_ready_part: fn(records: ^^[JetDriverCoreReadyRecord]) -> [JetDri
         input.failed = false
         program: body_codec_get_program(bytes, input)
         if input.failed || input.at != input.end {
-            decoded.push(None)
+            decoded.push(JetDriverCoreReadyRead{owner: record.owner, slot: record.slot, part: None})
             next
         }
-        decoded.push(Val(JetDriverCoreReadyPart{program: program, size: bytes.len()}))
+        decoded.push(JetDriverCoreReadyRead{owner: record.owner, slot: record.slot, part: Val(JetDriverCoreReadyPart{program: program, size: bytes.len()})})
     }
     decoded
 }
@@ -1419,23 +1433,23 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
         }
         if wanted_ends.len() == 0 -> next
         loop region in 0..<read.len() {
-            if read[region] -> places.push(jet_driver_core_ready_place(row.ready, region))
+            if read[region] -> places.push(jet_driver_core_ready_place(row.ready, region, plans.len()))
         }
         plans.push(JetDriverCoreRestorePlan{row: at, read: read.move(), wanted: wanted.move(), wanted_ends: wanted_ends.move(), stripped: stripped.move()})
     }
-    // The regions' ready parses in `places` order, popped in that order.
+    // The regions' ready parses in `places` order, each with its plan and
+    // region; popped in that order.
     reads_before: window.reads
     parts := jet_driver_core_ready_programs(request.core_interface, window, places, request.compiler_threads)
     done.fragment_reads = window.reads - reads_before
     parts.reverse()
-    loop plan in plans {
+    loop (owner, plan) in plans {
         row: lazy[plan.row]
         name: modules[row.loaded].module_name
         fresh := ast_program()
-        loop region in 0..<plan.read.len() {
-            if !plan.read[region] -> next
-            popped: parts.pop() ?? panic("a lazy Core module lost a ready parse")
-            part: popped.move() ?? return jet_driver_core_restore_missing(done, name, modules[row.loaded].program.items, plan.wanted[region])
+        loop parts.len() > 0 && parts[parts.len() - 1].owner == owner {
+            read: parts.pop() ?? break
+            part: read.part.move() ?? return jet_driver_core_restore_missing(done, name, modules[row.loaded].program.items, plan.wanted[read.slot])
             done.fragments += 1
             done.fragment_bytes += part.size
             jet_driver_core_restore_join(fresh, part.program.move(), plan.stripped)
