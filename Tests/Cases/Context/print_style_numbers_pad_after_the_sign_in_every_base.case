@@ -1,0 +1,18 @@
+# A print style's Int text pads with zeros after the sign to int_min_digits
+# in every base, past 64 bits too, and in fixed-width integers widened to
+# Int; its Float text rounds half away from zero at float_digits and keeps
+# the non-finite names; an inner block's style holds until it ends. Every
+# tier prints the same lines.
+fixture: PrintStyleNumbersPadAfterTheSignInEveryBase.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "-101\n000\n-001\n-110\n101\n-10\n10\n-ff\nfff\n0a\n7fffffffffffffff\n-8000000000000000\n10000000000000000\n11\n10\n-00042\n123456\n12345\n0.13\n2.67\n-0.00\ninf\n-inf\nNaN\n3\n3\n-3\n0\n[1 | 2 | 3]\nPair { 1, 0.5 }\nPair { a: 1, b: 0.5 }\n255\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "-101\n000\n-001\n-110\n101\n-10\n10\n-ff\nfff\n0a\n7fffffffffffffff\n-8000000000000000\n10000000000000000\n11\n10\n-00042\n123456\n12345\n0.13\n2.67\n-0.00\ninf\n-inf\nNaN\n3\n3\n-3\n0\n[1 | 2 | 3]\nPair { 1, 0.5 }\nPair { a: 1, b: 0.5 }\n255\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "-101\n000\n-001\n-110\n101\n-10\n10\n-ff\nfff\n0a\n7fffffffffffffff\n-8000000000000000\n10000000000000000\n11\n10\n-00042\n123456\n12345\n0.13\n2.67\n-0.00\ninf\n-inf\nNaN\n3\n3\n-3\n0\n[1 | 2 | 3]\nPair { 1, 0.5 }\nPair { a: 1, b: 0.5 }\n255\n"

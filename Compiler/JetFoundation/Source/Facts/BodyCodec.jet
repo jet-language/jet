@@ -3488,108 +3488,15 @@ body_codec_get_bodystrpart: fn(bytes: [U8], input: &BodyCodecIn) -> BodyStrPart 
 body_codec_put_tstrformat: fn(out: &BodyCodecOut, value: TStrFormat) Never! {
     if value == {
         .Display -> { body_codec_put_tag(out, 0) }
-        .Debug -> { body_codec_put_tag(out, 1) }
-        .Pretty -> { body_codec_put_tag(out, 2) }
-        .Fixed(p0) -> {
-            body_codec_put_tag(out, 3)
-            body_codec_put_int(out, p0)
-        }
-        .Grouped(p0) -> {
-            body_codec_put_tag(out, 4)
-            body_codec_put_int(out, p0)
-        }
-        .Hex(p0) -> {
-            body_codec_put_tag(out, 5)
-            body_codec_put_int(out, p0)
-        }
-        .Pad(p0, p1) -> {
-            body_codec_put_tag(out, 6)
-            body_codec_put_int(out, p0)
-            body_codec_put_string(out, p1)
-        }
-        .PadLeft(p0, p1) -> {
-            body_codec_put_tag(out, 7)
-            body_codec_put_int(out, p0)
-            body_codec_put_string(out, p1)
-        }
-        .Sci(p0) -> {
-            body_codec_put_tag(out, 8)
-            body_codec_put_int(out, p0)
-        }
-        .Percent(p0) -> {
-            body_codec_put_tag(out, 9)
-            body_codec_put_int(out, p0)
-        }
-        .Bin -> { body_codec_put_tag(out, 10) }
-        .Oct -> { body_codec_put_tag(out, 11) }
-        .Unit(p0) -> {
-            body_codec_put_tag(out, 12)
-            body_codec_put_tunitformat(out, p0)
-        }
-        .Number -> body_codec_put_tag(out, 13)
+        .Debug -> body_codec_put_tag(out, 1)
     }
 }
 
 body_codec_get_tstrformat: fn(bytes: [U8], input: &BodyCodecIn) -> TStrFormat Never! {
-    position: body_codec_get_tag(bytes, input, 14, 0)
+    position: body_codec_get_tag(bytes, input, 2, 0)
     if position == {
         1 -> TStrFormat.Debug
-        2 -> TStrFormat.Pretty
-        3 -> {
-            f0: body_codec_get_int(bytes, input)
-            TStrFormat.Fixed{digits: f0}
-        }
-        4 -> {
-            f0: body_codec_get_int(bytes, input)
-            TStrFormat.Grouped{digits: f0}
-        }
-        5 -> {
-            f0: body_codec_get_int(bytes, input)
-            TStrFormat.Hex{digits: f0}
-        }
-        6 -> {
-            f0: body_codec_get_int(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            TStrFormat.Pad{width: f0, fill: f1}
-        }
-        7 -> {
-            f0: body_codec_get_int(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            TStrFormat.PadLeft{width: f0, fill: f1}
-        }
-        8 -> {
-            f0: body_codec_get_int(bytes, input)
-            TStrFormat.Sci{digits: f0}
-        }
-        9 -> {
-            f0: body_codec_get_int(bytes, input)
-            TStrFormat.Percent{digits: f0}
-        }
-        10 -> TStrFormat.Bin
-        11 -> TStrFormat.Oct
-        12 -> {
-            f0: body_codec_get_tunitformat(bytes, input)
-            TStrFormat.Unit{format: f0}
-        }
-        13 -> TStrFormat.Number
         else -> TStrFormat.Display
-    }
-}
-
-body_codec_put_tunitformat: fn(out: &BodyCodecOut, value: TUnitFormat) Never! {
-    if value == {
-        .Symbol -> { body_codec_put_tag(out, 0) }
-        .Name -> { body_codec_put_tag(out, 1) }
-        .Bare -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_tunitformat: fn(bytes: [U8], input: &BodyCodecIn) -> TUnitFormat Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> TUnitFormat.Name
-        2 -> TUnitFormat.Bare
-        else -> TUnitFormat.Symbol
     }
 }
 

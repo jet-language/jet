@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
-    jet_foundation.[TShapeFormatName, symbol_key_leaf, symbol_key_names]
+    jet_foundation.[StrFormat, TShapeFormatName, str_format_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -1825,9 +1825,9 @@ ir_unit_type: fn(ty: Type) -> Bool Never! {
 
 // How a value renders: as `{value}` (Display), as `show` (Show), as
 // `{value:Debug}` (Debug), or as `print` shows it (Print): Show under the
-// task's print style (ir_print_style_row), which sets the Int and Float
-// text, the list and tuple separator and whether struct and variant labels
-// show.
+// print style a `#Context(print: …)` block set (ir_print_style_find), which
+// sets the Int and Float text, the list and tuple separator and whether
+// struct and variant labels show.
 IRRender: enum {
     Display,
     Show,
@@ -1937,7 +1937,7 @@ ir_float32_bits: fn(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
 // jet_rt_string_builder_push_int and the rest), with no String of its own:
 // the text ir_render makes of it. "" when it renders any other way: another
 // type (a unit type's magnitude among them), a selected implementation, a
-// Char's Debug quotes or a print-style helper (ir_print_style_scalar).
+// Char's Debug quotes or a print style's text (ir_print_style_scalar).
 ir_render_scalar_route: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slot: Int, mode: IRRender) -> String Never! {
     if slot < 0 -> return ""
     builtin: if ir_untag(ty) == {
@@ -1947,14 +1947,9 @@ ir_render_scalar_route: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, sl
     if !builtin || ir_render_impl_row(m, p, b, slot, mode) != None -> return ""
     kind: ir_kind_of(m, b, slot)
     row: m.types[b.f.slot_type[slot]]
-    if mode == .Print {
-        helper: if kind == {
-            .Int -> "__print_int"
-            .Word -> if row.signed || row.size < 8 -> "__print_int" else -> ""
-            .Float -> "__print_float"
-            .Char | .Bool | .Float32 | .Unit | .String | .Pointer | .Aggregate -> ""
-        }
-        if helper != "" && ir_print_style_row(p, helper) >= 0 -> return ""
+    // A print style restyles an Int, a signed or narrow integer and a Float.
+    if mode == .Print && p.print_style != None {
+        if kind == .Int || kind == .Float || (kind == .Word && (row.signed || row.size < 8)) -> return ""
     }
     if kind == {
         .Int -> "jet_rt_string_builder_push_int"
@@ -4411,13 +4406,22 @@ ir_render_push_value_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, build
     ir_render_push(m, p, b, builder, value, mode, mode == .Debug, span)
 }
 
-// `Name { a: 1, b: "x" }` (Debug redacts; under Print the print style
-// decides whether the labels show: `Name { 1, "x" }`).
+// `Name { a: 1, b: "x" }` (Debug redacts; under Print the print style's
+// field_names decides whether the labels show: `Name { 1, "x" }`).
 ir_render_record: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, base: Int, name: String, members: [IRMember], mode: IRRender, span: Span) Never! {
     ir_push_static(m, b, builder, "{ir_render_name(name)} {{")
-    style_row: if mode == .Print && members.len() > 0 -> ir_print_style_row(p, "__print_field_names") else -> -1
-    bool_row: ir_type_row(m, Type.Bool) ?? 0
-    names: if style_row >= 0 -> ir_print_style_call(m, p, b, style_row, [Int]{}, bool_row, span) else -> -1
+    names := -1
+    if mode == .Print && members.len() > 0 {
+        if ir_print_style_find(m, p, b) == Val(style) {
+            bool_row: ir_type_row(m, Type.Bool) ?? 0
+            names = ir_temp(m, b, bool_row)
+            ir_emit(b.f, IROp.Const, names, 1, -1, -1, b.line)
+            ir_open_if(b.f, style.present, b.line)
+            shown: ir_print_style_field(m, p, b, style, "field_names", span)
+            if shown >= 0 -> ir_emit(b.f, IROp.Copy, names, shown, -1, -1, b.line)
+            ir_end(b.f, b.line)
+        }
+    }
     if ir_failed(b) {
         return
     }
@@ -4532,66 +4536,288 @@ ir_render_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
     ir_push_static(m, b, builder, "]")
 }
 
-// The text between two list or tuple elements: under Print the print
-// style's (Term.jet __print_separator), else ", ".
+// The text between two list or tuple elements: under Print the
+// list_separator of the print style a `#Context(print: …)` block set, else
+// ", ".
 ir_render_push_separator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, mode: IRRender, span: Span) Never! {
-    row: if mode == .Print -> ir_print_style_row(p, "__print_separator") else -> -1
-    if row < 0 -> return ir_push_static(m, b, builder, ", ")
-    string_row: ir_string_row(m)
-    text: ir_print_style_call(m, p, b, row, [Int]{}, string_row, span)
-    if ir_failed(b) || text < 0 {
-        return
-    }
-    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
-    ir_release(m, b, text)
+    if mode != .Print -> return ir_push_static(m, b, builder, ", ")
+    style: ir_print_style_find(m, p, b) ?? return ir_push_static(m, b, builder, ", ")
+    ir_open_if(b.f, style.present, b.line)
+    separator: ir_print_style_field(m, p, b, style, "list_separator", span)
+    if separator >= 0 -> _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, separator}, -1)
+    ir_else(b.f, b.line)
+    ir_push_static(m, b, builder, ", ")
+    ir_end(b.f, b.line)
+}
+
+// The print style the program's `#Context(print: …)` blocks set
+// (IRProgram.print_style) as the running task reads it: `present` holds
+// where such a block set one for the task, and `node` is then the context
+// node holding it, laid out as type row `row` at byte 40
+// (ir_context_push_value). None when the program sets no print style:
+// Print renders as Show, with no lookup.
+IRPrintStyleFound: struct {
+    present: Int,
+    node: Int,
+    row: Int,
+}
+
+ir_print_style_find: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) -> IRPrintStyleFound? Never! {
+    site: p.print_style ?? return None
+    key: ir_print_style_key(p, site) ?? return None
+    row: ir_value_type(m, p, key.ty) ?? return None
+    pointer_row: ir_pointer_row(m)
+    word: ir_word_const(m, b, key.word)
+    node: ir_runtime(m, b, "jet_ctx_value_find", [Int]{word}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ne, node, zero)
+    Val(IRPrintStyleFound{present: present, node: node, row: row})
+}
+
+// The field `name` of the found print style `style`, borrowed in place;
+// read only where `style.present` holds.
+ir_print_style_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrintStyleFound, name: String, span: Span) -> Int Never! {
+    member: ir_member_of_row(m, p, style.row, name) ?? return ir_fail_slot(b, span, "print style field {name}")
+    view: ir_load_at(m, b, style.node, 40, style.row)
+    ir_member_value(m, b, view, member)
 }
 
 // The text `print` shows for the Int, fixed-width integer or Float in
-// `slot` under the task's print style (Term.jet __print_int /
-// __print_float); an integer other than a U64 widens to Int first. -2 when
-// the value is none of those or the program holds no print-style helper.
+// `slot`: where a `#Context(print: …)` block set the task's print style,
+// the text of Core's style format trait implementations
+// (ir_print_style_int, ir_print_style_float), else the plain text. An
+// integer other than a U64 widens to Int first. -2 when the value is none
+// of those or the program sets no print style.
 ir_print_style_scalar: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Int Never! {
     kind: ir_kind_of(m, b, slot)
     type_row: m.types[b.f.slot_type[slot]]
-    helper: if kind == {
-        .Int -> "__print_int"
-        .Word -> if type_row.signed || type_row.size < 8 -> "__print_int" else -> ""
-        .Float -> "__print_float"
-        .Char | .Bool | .Float32 | .Unit | .String | .Pointer | .Aggregate -> ""
-    }
-    if helper == "" -> return -2
-    row: ir_print_style_row(p, helper)
-    if row < 0 -> return -2
-    argument := slot
-    if kind == .Word {
-        int_row: ir_type_row(m, Type.Int) ?? return -2
-        argument = ir_numeric_cast(m, p, b, slot, int_row, span)
-        if ir_failed(b) || argument < 0 -> return -1
-    }
+    float: kind == .Float
+    integer: kind == .Int || (kind == .Word && (type_row.signed || type_row.size < 8))
+    if (!float && !integer) || p.print_style == None -> return -2
+    plain_symbol := "jet_rt_float_to_string"
+    if kind == .Int -> plain_symbol = "jet_rt_int_to_string"
+    if kind == .Word -> plain_symbol = if type_row.signed -> "jet_rt_i64_to_string" else -> "jet_rt_u64_to_string"
+    style: ir_print_style_find(m, p, b) ?? return -2
     string_row: ir_string_row(m)
-    text: ir_print_style_call(m, p, b, row, [Int]{argument}, string_row, span)
-    if argument != slot -> ir_release(m, b, argument)
+    text: ir_temp(m, b, string_row)
+    ir_open_if(b.f, style.present, b.line)
+    if float {
+        styled: ir_print_style_float(m, p, b, style, slot, span)
+        if ir_failed(b) || styled < 0 -> return -1
+        ir_store(m, p, b, text, styled)
+    } else {
+        argument := slot
+        if kind == .Word {
+            int_row: ir_type_row(m, Type.Int) ?? return -2
+            argument = ir_numeric_cast(m, p, b, slot, int_row, span)
+            if ir_failed(b) || argument < 0 -> return -1
+        }
+        styled: ir_print_style_int(m, p, b, style, argument, span)
+        if ir_failed(b) || styled < 0 -> return -1
+        ir_store(m, p, b, text, styled)
+        if argument != slot -> ir_release(m, b, argument)
+    }
+    ir_else(b.f, b.line)
+    plain: ir_runtime(m, b, plain_symbol, [Int]{slot}, string_row)
+    ir_store(m, p, b, text, plain)
+    ir_end(b.f, b.line)
+    b.fresh[text] = true
     text
 }
 
-// The function row of the Core/Term/Term.jet print-style helper `name`
-// (`__print_int`, `__print_float`, `__print_separator`,
-// `__print_field_names`), or -1 when the program holds none: without
-// core.term no block set a style, and Print renders as Show.
-ir_print_style_row: fn(p: IRProgram, name: String) -> Int Never! {
-    loop (index, function) in p.functions {
-        if function.name == name && ir_print_style_source(module_is_core(function.module_identity), function.source_file, function.kind, name) && ir_function_row(p, function.key) == (Val(index)) {
-            return index
+// The Int `value` under the found print style `style`: the text of Core's
+// format trait implementation for Int that its int_base case names
+// (ir_print_base_format), or the Int's own text for Decimal, zero-padded
+// after its sign to int_min_digits digits (ir_print_zero_pad). A fresh
+// String.
+ir_print_style_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrintStyleFound, value: Int, span: Span) -> Int Never! {
+    base: ir_print_style_field(m, p, b, style, "int_base", span)
+    width: ir_print_style_field(m, p, b, style, "int_min_digits", span)
+    if ir_failed(b) || base < 0 || width < 0 -> return -1
+    enum_row: ir_enum_def(m, p, b.f.slot_type[base]) ?? return ir_fail_slot(b, span, "print style int_base")
+    tag: ir_enum_tag_of(m, b, base)
+    string_row: ir_string_row(m)
+    text: ir_temp(m, b, string_row)
+    // The Hex text comes unpadded, like the others: one pad serves every base.
+    no_digits: ir_temp_like(m, b, value)
+    ir_emit(b.f, IROp.Const, no_digits, 0, -1, -1, b.line)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    opened := 0
+    if p.types[enum_row].kind == .Enum(variants, _) {
+        loop (index, variant) in variants {
+            format: ir_print_base_format(symbol_key_leaf(variant.name)) ?? next
+            row: ir_print_style_impl(p, format, Type.Int)
+            if row < 0 -> return ir_fail_slot(b, span, "print style without the {variant.name} format implementation of Int")
+            index_slot: ir_temp_like(m, b, tag)
+            ir_emit(b.f, IROp.Const, index_slot, index, -1, -1, b.line)
+            test: ir_temp(m, b, bool_row)
+            ir_emit(b.f, IROp.Eq, test, tag, index_slot, -1, b.line)
+            ir_open_if(b.f, test, b.line)
+            // HexFormat.hex takes the digit count; BinFormat.bin and OctFormat.oct none.
+            args: if format == .Hex(_) -> [Int]{value, no_digits} else -> [Int]{value}
+            made: ir_print_style_call(m, p, b, row, args, string_row, span)
+            if ir_failed(b) || made < 0 -> return -1
+            ir_store(m, p, b, text, made)
+            ir_else(b.f, b.line)
+            opened += 1
+        }
+    }
+    decimal: ir_runtime(m, b, "jet_rt_int_to_string", [Int]{value}, string_row)
+    ir_store(m, p, b, text, decimal)
+    loop _ in 0..<opened -> ir_end(b.f, b.line)
+    b.fresh[text] = true
+    ir_print_zero_pad(m, b, text, width, span)
+}
+
+// The Float `value` under the found print style `style`: with float_digits
+// set, the text of Core's FixedFormat implementation for Float at that many
+// places, else the plain text. A fresh String.
+ir_print_style_float: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrintStyleFound, value: Int, span: Span) -> Int Never! {
+    row: ir_print_style_impl(p, StrFormat.Fixed{digits: 0}, Type.Float)
+    if row < 0 -> return ir_fail_slot(b, span, "print style without the FixedFormat implementation of Float")
+    digits: ir_print_style_field(m, p, b, style, "float_digits", span)
+    if ir_failed(b) || digits < 0 -> return -1
+    int_row: ir_type_row(m, Type.Int) ?? return ir_fail_slot(b, span, "print style float_digits")
+    string_row: ir_string_row(m)
+    text: ir_temp(m, b, string_row)
+    some: ir_option_is_some(m, b, digits)
+    ir_open_if(b.f, some, b.line)
+    places: ir_option_payload(m, b, digits, int_row)
+    made: ir_print_style_call(m, p, b, row, [Int]{value, places}, string_row, span)
+    if ir_failed(b) || made < 0 -> return -1
+    ir_store(m, p, b, text, made)
+    ir_else(b.f, b.line)
+    plain: ir_runtime(m, b, "jet_rt_float_to_string", [Int]{value}, string_row)
+    ir_store(m, p, b, text, plain)
+    ir_end(b.f, b.line)
+    b.fresh[text] = true
+    text
+}
+
+// `text` (a fresh String it consumes) with zeros after its leading `-`
+// until its digits number the Int `width`. The sign is read off the text,
+// never by negating, so the most negative value pads like any other. A
+// fresh String.
+ir_print_zero_pad: fn(m: &IRModule, b: &IRBuilder, text: Int, width: Int, span: Span) -> Int Never! {
+    word_row: ir_word_row(m)
+    pointer_row: ir_pointer_row(m)
+    string_row: ir_string_row(m)
+    byte_row: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? return ir_fail_slot(b, span, "print style padding")
+    wanted: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{width}, word_row)
+    data: ir_runtime(m, b, "jet_rt_string_data", [Int]{text}, pointer_row)
+    length: ir_runtime(m, b, "jet_rt_string_byte_len", [Int]{text}, word_row)
+    first: ir_load_at(m, b, data, 0, byte_row)
+    minus: ir_temp_like(m, b, first)
+    ir_emit(b.f, IROp.Const, minus, 45, -1, -1, b.line)
+    negative: ir_bool_op(m, b, IROp.Eq, first, minus)
+    sign: ir_word_const(m, b, 0)
+    builder: ir_text_builder(m, b)
+    ir_open_if(b.f, negative, b.line)
+    ir_emit(b.f, IROp.Const, sign, 1, -1, -1, b.line)
+    ir_push_static(m, b, builder, "-")
+    ir_end(b.f, b.line)
+    digits: ir_word_op(m, b, IROp.Sub, length, sign)
+    missing: ir_word_op(m, b, IROp.Sub, wanted, digits)
+    exit: ir_open(b.f, IROp.Block, b.line)
+    _: ir_open(b.f, IROp.Loop, b.line)
+    zero: ir_word_const(m, b, 0)
+    more: ir_bool_op(m, b, IROp.Gt, missing, zero)
+    ir_exit_unless(m, b, more, exit)
+    ir_push_static(m, b, builder, "0")
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Sub, missing, missing, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    // The digits start after the sign: an address offset, never Int
+    // arithmetic on the text's address.
+    ir_open_if(b.f, negative, b.line)
+    after_sign: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.Offset, after_sign, data, 1, -1, b.line)
+    _: ir_runtime(m, b, "jet_rt_string_builder_push_static", [Int]{builder, after_sign, digits}, -1)
+    ir_else(b.f, b.line)
+    _: ir_runtime(m, b, "jet_rt_string_builder_push_static", [Int]{builder, data, digits}, -1)
+    ir_end(b.f, b.line)
+    ir_release(m, b, text)
+    ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+}
+
+// The format whose Core trait implementation for Int shows an Int in print
+// base `base` (a term.PrintBase case name): BinFormat, OctFormat or
+// HexFormat; None for Decimal, the Int's own text. Each is one of
+// IR_PRINT_STYLE_FORMATS, which a `#Context(print: …)` block roots.
+ir_print_base_format: fn(base: String) -> StrFormat? Never! {
+    if base == {
+        "Binary" -> Val(StrFormat.Bin)
+        "Octal" -> Val(StrFormat.Oct)
+        "Hex" -> Val(StrFormat.Hex{digits: 0})
+        else -> None
+    }
+}
+
+// The formats whose Core trait implementations print's styled text calls:
+// an Int's for each print base (ir_print_base_format), a Float's FixedFormat
+// for its places (ir_print_style_float).
+IR_PRINT_STYLE_FORMATS: [StrFormat]{StrFormat.Bin, StrFormat.Oct, StrFormat.Hex{digits: 0}, StrFormat.Fixed{digits: 0}}
+
+// The type whose Core implementation of `format` print's styled text calls.
+ir_print_style_owner: fn(format: StrFormat) -> Type Never! {
+    if format == .Fixed(_) -> Type.Float else -> Type.Int
+}
+
+// Whether `function` is Core's implementation for `owner` of `format`'s
+// trait (`Hex`: core.text.fmt HexFormat.hex), by its method name and owner
+// type.
+ir_print_style_impl_of: fn(function: FnBody, format: StrFormat, owner: Type) -> Bool Never! {
+    style: str_format_style(format) ?? return false
+    if function.name != style.method || !module_is_core(function.module_identity) -> return false
+    implemented: if function.kind == {
+        .TraitMethod(_, _, owner_type, _, _) -> ir_untag(owner_type) == owner
+        .Method(_, owner_type) -> ir_untag(owner_type) == owner
+        .TopLevel -> false
+    }
+    implemented
+}
+
+// Whether `function` is one of the Core format implementations print's
+// styled text calls, which a `#Context(print: …)` block roots (CoreReach.jet
+// ir_core_reach_one_stmt_keys).
+ir_print_style_impl_used: fn(function: FnBody) -> Bool Never! {
+    loop format in IR_PRINT_STYLE_FORMATS {
+        if ir_print_style_impl_of(function, format, ir_print_style_owner(format)) -> return true
+    }
+    false
+}
+
+// Whether `name` is the method of a format trait print's styled text calls:
+// lowering selects Core's implementations of it by owner type
+// (CoreReach.jet ir_core_method_lowered_by_owner).
+ir_print_style_method: fn(name: String) -> Bool Never! {
+    loop format in IR_PRINT_STYLE_FORMATS {
+        if (str_format_style(format) ?? next).method == name -> return true
+    }
+    false
+}
+
+// The function row of Core's implementation for `owner` of `format`'s trait
+// among the bound implementations, or -1 when none is lowered.
+ir_print_style_impl: fn(p: IRProgram, format: StrFormat, owner: Type) -> Int Never! {
+    style: str_format_style(format) ?? return -1
+    slot: ir_trait_method_slot(p.trait_methods, "{style.trait_name}|{style.method}")
+    if slot == 0 -> return -1
+    loop row in p.trait_methods.rows[slot] {
+        if ir_print_style_impl_of(p.functions[row], format, owner) && ir_function_row(p, p.functions[row].key) == (Val(row)) {
+            return row
         }
     }
     -1
 }
 
-// The call of print-style helper row `row` with `args`, its result typed
-// `result_row`: a fresh String, or the Bool of `__print_field_names`.
+// The call of Core style implementation row `row` with `args` (the
+// receiver first), its result typed `result_row`: a fresh String.
 ir_print_style_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, args: [Int], result_row: Int, span: Span) -> Int Never! {
     callee: ir_function_id(m, p, p.functions[row].key, [Type]{}) ?? return ir_fail_slot(b, span, "call of {p.functions[row].name}")
-    result: if result_row == ir_string_row(m) -> ir_fresh_temp(m, b, result_row) else -> ir_temp(m, b, result_row)
+    result: ir_fresh_temp(m, b, result_row)
     start: ir_args(b.f, args)
     ir_emit(b.f, IROp.Call, result, callee, start, args.len(), b.line)
     ir_stop_check(m, b)

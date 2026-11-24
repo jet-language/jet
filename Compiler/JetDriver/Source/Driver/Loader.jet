@@ -161,6 +161,7 @@ use {
         sema_module_meta_value_reads,
         sema_module_meta_carries,
         sema_module_meta_field_lines,
+        sema_context_field_companion,
         sema_context_field_module,
         sema_unknown_module_alias,
     ]
@@ -4672,6 +4673,10 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                 module_name: sema_context_field_module(SEMA_CONTEXT_CORE_FIELDS[at]) ?? next
                 if !demand.source_modules.contains(module_name) {
                     demand.source_modules.push(module_name)
+                }
+                companion: sema_context_field_companion(SEMA_CONTEXT_CORE_FIELDS[at]) ?? next
+                if !demand.source_modules.contains(companion) {
+                    demand.source_modules.push(companion)
                 }
             }
             if name == names.field_error_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && name_index(tokens[index + 2].decoded) == names.field_error_under_name {

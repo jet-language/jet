@@ -1,0 +1,8 @@
+Error: Jet.ValueTypeMismatch: `Point` can't use `:Hex(n)`
+  --> Tests/UI/E0112_style_selector_needs_trait_impl.jet:8:13
+    |
+  8 |     print("{point:Hex(4)}")
+    |             ^^^^^
+ Why: `:Hex(n)` calls `hex` of `HexFormat`, which Point doesn't implement
+ Fix: Implement it, `impl Point.HexFormat { hex: fn(self, digits: Int) -> String { … } }`, or use bare interpolation for this value
+More: jet-lang.dev/e/Jet.ValueTypeMismatch

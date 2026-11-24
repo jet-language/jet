@@ -4028,49 +4028,6 @@ ir_string_part: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPar
     if parts[index] == {
         .Literal(text) -> pieces.push(IRStringPiece{text: text, slot: -1, route: ""})
         .Interpolation(value, format) -> {
-            // A computed selector number prints through the part before it.
-            if format == .Number -> return true
-            count: ir_string_count(parts, index)
-            // `{x:Fixed(n)}` / `{x:Grouped(n)}` of a Float: the
-            // core.text.fmt kernel the reference lowers it to
-            // (jet_fmt_decimal / jet_fmt_grouped, host i64 precision).
-            kernel: if format == {
-                .Fixed(_) -> "jet_fmt_decimal"
-                .Grouped(_) -> "jet_fmt_grouped"
-                .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> ""
-            }
-            precision: if format == {
-                .Fixed(digits) | .Grouped(digits) -> digits
-                .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> 0
-            }
-            if kernel != "" && ir_untag(ir_ty(m, p, b, value)) == .Float {
-                slot: ir_expr(m, p, b, value)
-                if ir_failed(b) -> return false
-                // The kernels treat a negative precision as zero.
-                digits: if count >= 0 -> ir_expr(m, p, b, count) else -> ir_word_const(m, b, precision)
-                if ir_failed(b) || digits < 0 -> return false
-                string_row: ir_string_row(m)
-                text: ir_runtime(m, b, kernel, [Int]{slot, digits}, string_row)
-                pieces.push(IRStringPiece{text: "", slot: text, route: ""})
-                releases.push(text)
-                releases.push(slot)
-                return true
-            }
-            // Every other selector is its Core/Text/Fmt.jet helper.
-            if format != .Display && format != .Debug {
-                text: ir_string_format(m, p, b, value, format, count, span)
-                if ir_failed(b) || text < 0 -> return false
-                pieces.push(IRStringPiece{text: "", slot: text, route: ""})
-                releases.push(text)
-                // `:Unit(name)` follows the magnitude with the generated
-                // unit type name.
-                if format == .Unit(.Name) {
-                    if ir_untag(ir_ty(m, p, b, value)) == .Named(unit_type) {
-                        pieces.push(IRStringPiece{text: " {ir_short_name(unit_type)}", slot: -1, route: ""})
-                    }
-                }
-                return true
-            }
             mode: if format == .Debug -> IRRender.Debug else -> IRRender.Display
             slot: ir_expr(m, p, b, value)
             if ir_failed(b) -> return false
@@ -4121,15 +4078,6 @@ ir_sink_call: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], polle
     }
     start: ir_args(b.f, args)
     ir_emit(b.f, IROp.CallRuntime, -1, ir_intern_name(m, symbol), start, args.len(), b.line)
-}
-
-// The Int node of the computed selector number of the part at `index`: the
-// TStrFormat.Number part after it, else -1.
-ir_string_count: fn(parts: [BodyStrPart], index: Int) -> Int Never! {
-    if index + 1 < parts.len() {
-        if parts[index + 1] == .Interpolation(count, .Number) -> return count
-    }
-    -1
 }
 
 // `s = "{s}…"` on a String the variable still owns: the rest of the text is

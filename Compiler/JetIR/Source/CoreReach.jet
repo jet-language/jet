@@ -24,7 +24,6 @@ use {
         compiler_threads_failure_text,
         compiler_threads_partition,
         compiler_transfer_rows,
-        TStrFormat,
         TTryConvert,
         core_identity_in_module,
         foundation_byte_text,
@@ -49,26 +48,6 @@ ir_core_reach_generated_codec: fn(function: FnBody) -> Bool Never! {
     function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode" || function.name == "__read" || function.name == "encode_stored" || function.name == "decode_stored")
 }
 
-// Source-owned selector policy. Both reachability and expression lowering
-// use this map, so the exact helper emitted by a selector is rooted.
-ir_string_format_member: fn(ty: Type, format: TStrFormat) -> String? Never! {
-    integer: ir_string_format_integer(ty)
-    if format == {
-        .Display | .Debug | .Number -> None
-        .Pretty -> Val("pretty")
-        .Fixed(_) -> Val(if integer -> "fixed_int" else -> "decimal")
-        .Grouped(_) -> Val(if integer -> "grouped_int_fixed" else -> "grouped")
-        .Hex(_) -> Val(if integer -> "hex" else -> "hex_decimal")
-        .Bin -> Val(if integer -> "bin" else -> "bin_decimal")
-        .Oct -> Val(if integer -> "oct" else -> "oct_decimal")
-        .Sci(_) -> Val("sci")
-        .Percent(_) -> Val("percent")
-        .Pad(_, _) -> Val("pad")
-        .PadLeft(_, _) -> Val("pad_left")
-        .Unit(_) -> Val("quantity")
-    }
-}
-
 // Whether a checked source path names the Core file `relative` (`Core/...`).
 // A Core unit outside the entry root keeps its canonical or `<corelib>/`
 // prefixed path (`jet_driver_display_path`), so `relative` is its suffix.
@@ -76,27 +55,12 @@ ir_core_source_path: fn(path: String, relative: String) -> Bool Never! {
     path == relative || path.ends_with("/{relative}")
 }
 
-// Whether a function with these header fields is a Core/Text/Fmt.jet
-// selector helper (ir_string_format_member). `core`: whether its module is
-// a Core module (module_is_core).
-ir_string_format_source: fn(core: Bool, source_file: String, kind: TFuncKind) -> Bool Never! {
-    core && ir_core_source_path(source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(kind)
-}
-
-// Whether a function with these header fields is one of the core.term
-// print-style helpers `print` calls by name (BuildTypes.jet
-// ir_print_style_row): a top-level `__print_` function of Core/Term/Term.jet.
-ir_print_style_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    core && ir_core_source_path(source_file, "Core/Term/Term.jet") && ir_core_reach_is_top_level(kind) && name.starts_with("__print_")
-}
-
-// A `#Context(print: …)` block roots the print-style helpers: only a program
-// that sets a style prints through them, and any other prints as Show.
+// A `#Context(print: …)` block roots the Core format trait implementations
+// print's styled Int and Float text calls (BuildTypes.jet
+// ir_print_style_impl_used): only a program that sets a style calls them.
 ir_print_style_keys: fn(functions: [FnBody], keys: &[String]) Never! {
     loop function in functions {
-        if ir_print_style_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) {
-            ir_core_reach_add(keys, function.key)
-        }
+        if ir_print_style_impl_used(function) -> ir_core_reach_add(keys, function.key)
     }
 }
 
@@ -165,15 +129,13 @@ ir_precise_source_function: fn(core: Bool, source_file: String, name: String) ->
 }
 
 // Whether a top-level Core function with these header fields is one lowering
-// keeps by name, with no keyed call in a kept caller's checked body: a
-// Fmt.jet selector helper, an Encoding.jet decode helper, a core.term
-// print-style helper, a precise-operation source helper or a core.process
-// line reader (ir_process_line_reader). A compile that
-// lowers checks each up front under Core demand (driver
+// keeps by name, with no keyed call in a kept caller's checked body: an
+// Encoding.jet decode helper, a precise-operation source helper or a
+// core.process line reader (ir_process_line_reader). A compile that lowers
+// checks each up front under Core demand (driver
 // jet_driver_core_lowering_roots), since no checked body names it.
 ir_core_lowered_by_name: fn(core: Bool, source_file: String, name: String) -> Bool Never! {
-    top: TFuncKind.TopLevel
-    if ir_string_format_source(core, source_file, top) || ir_codec_decode_source(core, source_file, top, name) || ir_print_style_source(core, source_file, top, name) || ir_precise_source_function(core, source_file, name) {
+    if ir_codec_decode_source(core, source_file, TFuncKind.TopLevel, name) || ir_precise_source_function(core, source_file, name) {
         return true
     }
     ir_core_process_source(core, source_file) && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
@@ -195,14 +157,16 @@ ir_process_line_reader: fn(owner: String) -> String Never! {
 // selects by its owner type, with no keyed call in a kept caller's checked
 // body: the renderers and the comparison Build.jet's owner tables take
 // (`display`, `show`, `debug`, `compare`, `close`), a line reader
-// (ir_line_reader_key) and an encoding reader's `next`
-// (ir_encoding_reader_next_key). A compile that lowers checks each up front
-// under Core demand (driver jet_driver_core_lowering_roots). `debug` is the
-// user Debug implementation ir_render_debug_impl selects for `{value:Debug}`;
-// unrooted, a Core type's own `impl Debug` is pruned and the value renders in
-// the derived struct form instead.
+// (ir_line_reader_key), an encoding reader's `next`
+// (ir_encoding_reader_next_key) and the format trait methods print's styled
+// text calls (BuildTypes.jet ir_print_style_method). A compile that lowers
+// checks each up front under Core demand (driver
+// jet_driver_core_lowering_roots). `debug` is the user Debug implementation
+// ir_render_debug_impl selects for `{value:Debug}`; unrooted, a Core type's
+// own `impl Debug` is pruned and the value renders in the derived struct
+// form instead.
 ir_core_method_lowered_by_owner: fn(name: String) -> Bool Never! {
-    name == "display" || name == "show" || name == "debug" || name == "compare" || name == "close" || name == "read_line" || name == "next"
+    name == "display" || name == "show" || name == "debug" || name == "compare" || name == "close" || name == "read_line" || name == "next" || ir_print_style_method(name)
 }
 
 // The `__Decoding` reads of Core/Encoding/Encoding.jet that lowering selects
@@ -403,17 +367,6 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> { ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, symbol)) }
-        // Interpolation selectors call their source formatter by name with no
-        // keyed call.
-        .StrLit(parts) -> {
-            loop part in parts {
-                if part == .Interpolation(value, format) {
-                    member: ir_string_format_member(body_type(interner, tree, value), format) ?? next
-                    key: ir_core_reach_source_key(source_keys, member) ?? next
-                    ir_core_reach_add(keys, key)
-                }
-            }
-        }
         // `tree.decode<T>()` of a container and `FieldError.under` call their
         // Core decode helper by name; a helper's own `decode<Item>` reaches
         // the others, so a decode site roots them all.
@@ -446,7 +399,7 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
         // by key, with no call node.
         .Try(_, conversion, _) -> { ir_named_conversion_key(conversion, keys) }
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
 }
 
@@ -834,7 +787,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
             }
             core: module_is_core(function.module_identity)
-            if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
+            if ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
                 ir_core_reach_source_set(source_keys, function.name, function.key)
             }
             rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)
@@ -857,7 +810,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 candidate_count += 1
                 name_column_set_first(by_key.keys, by_key.rows, function.key, index)
                 core: module_is_core(function.module_identity)
-                if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
+                if ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
                     ir_core_reach_source_set(source_keys, function.name, function.key)
                 }
                 rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)

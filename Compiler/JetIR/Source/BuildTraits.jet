@@ -213,10 +213,47 @@ IRBodyScanBoxed: struct {
     short: String,
 }
 
+// Where the program sets a print style (IRProgram.print_style): guard
+// `guard` of the `#Context(print: …)` block at statement `stmt` of function
+// row `fn_row`. Every such guard sets core.term's one print-style key to a
+// term.PrintStyle, so the first found stands for all.
+IRPrintStyle: struct {
+    fn_row: Int,
+    stmt: Int,
+    guard: Int,
+}
+
+// The context key word (BuildTransact.jet ir_context_key_word) and the value
+// type of the print-style guard `site` locates.
+IRPrintStyleKey: struct {
+    word: Int,
+    ty: Type,
+}
+
+ir_print_style_key: fn(p: IRProgram, site: IRPrintStyle) -> IRPrintStyleKey? Never! {
+    if p.functions[site.fn_row].tree.stmts[site.stmt] == .ContextBlock(guards, _, _) {
+        guard: guards[site.guard]
+        return Val(IRPrintStyleKey{word: ir_context_key_word(guard.key), ty: body_type(p.interner, p.functions[site.fn_row].tree, guard.value)})
+    }
+    None
+}
+
 // One function's spawn sites and generic trait-box candidates collected in a
-// single pass over `function.tree.nodes`. `check_boxed` is true for
-// non-generic bodies (where trait boxing candidates are valid).
-ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, interner: Interner, spawns: &[IRBodyScanSpawn], boxed: &[IRBodyScanBoxed]) Never! {
+// single pass over `function.tree.nodes`, and its first print-style guard
+// into `print` while that holds none. `check_boxed` is true for non-generic
+// bodies (where trait boxing candidates are valid).
+ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, interner: Interner, spawns: &[IRBodyScanSpawn], boxed: &[IRBodyScanBoxed], print: &IRPrintStyle?) Never! {
+    if print == None {
+        loop (stmt, statement) in function.tree.stmts {
+            if statement == .ContextBlock(guards, _, _) {
+                loop (at, guard) in guards {
+                    if guard.field == "print" && guard.key != "" && print == None {
+                        print = Val(IRPrintStyle{fn_row: fn_row, stmt: stmt, guard: at})
+                    }
+                }
+            }
+        }
+    }
     loop node in function.tree.nodes {
         if node.kind == {
             .CoreClosureCall(kind) -> {

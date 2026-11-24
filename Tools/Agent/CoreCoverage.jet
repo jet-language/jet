@@ -933,8 +933,16 @@ initial_aliases: fn(table: Table, context: String) -> [String:String] Never! {
             aliases[head.copy()] = "{table.units[index]}.{head}"
         }
     }
+    // A doctest names its own module's copy of a family size: `I8` in a
+    // core.text.fmt doctest is core.text.fmt.I8, whose `hex` the
+    // module's `impl Signed.HexFormat` gives it.
     loop (size, owner) in table.sizes {
-        if !aliases.has_key(size) -> aliases[size.copy()] = owner.copy()
+        own: "{context}.{size}"
+        if context != "" && table.types.has_key(own) {
+            aliases[size.copy()] = own
+        } else if !aliases.has_key(size) {
+            aliases[size.copy()] = owner.copy()
+        }
     }
     aliases
 }
@@ -2063,6 +2071,18 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
         found.push(table.ids[call.index].copy())
     }
     assert_eq(found, [String]{"core.math.Signed.rounded"})
+}
+
+#Test("a doctest names its own module's copy of a family size") {
+    rows := public_functions("Core/Math/Math.jet", "impl Signed.Roundable {{ rounded: fn(self) -> Self Never! {{ self }} }}")
+    rows.extend(public_functions("Core/Text/Fmt.jet", "impl Signed.HexFormat {{ hex: fn(self, digits: Int) -> String Never! {{ \"\" }} }}"))
+    table: with_family_sizes(table_of(rows), "I8: Signed<8>\nI16: Signed<16>\n")
+    source: "run: fn() {{ print(I8{{3}}.hex(2)) }}"
+    found := [String]{}
+    loop call in call_sites(source, table, initial_aliases(table, "core.text.fmt")) {
+        found.push(table.ids[call.index].copy())
+    }
+    assert_eq(found, [String]{"core.text.fmt.Signed.hex"})
 }
 
 #Test("module layout matches Core module keys, including app and nested roots") {

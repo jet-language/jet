@@ -1,5 +1,5 @@
-// Typed expression lowering helpers: string format routes, precise builtin
-// source helpers, and checked numeric bounds.
+// Typed expression lowering helpers: precise builtin source helpers and
+// checked numeric bounds.
 use {
     math: core.math
     jet_foundation.[
@@ -7,18 +7,6 @@ use {
         Type,
         type_name,
     ]
-}
-
-// Whether a String format selector of type `ty` is integer-valued: such a
-// selector takes the integer kernel.
-ir_string_format_integer: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Int | .IntN(_, _) -> true
-        .InlineRange(base, _, _) -> ir_string_format_integer(base)
-        .Named(name) -> name == "Int"
-        .Tagged(_, inner) -> ir_string_format_integer(inner)
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
 }
 
 ir_precise_source_helper: fn(owner: String, operation: String) -> String? Never! {

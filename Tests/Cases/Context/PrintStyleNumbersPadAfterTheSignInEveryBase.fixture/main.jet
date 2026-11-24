@@ -1,0 +1,58 @@
+use math: core.math
+use term: core.term
+
+Pair: struct {
+    a: Int,
+    b: Float,
+}
+
+run: fn() {
+    #Context(print: term.PrintStyle{int_base: .Binary, int_min_digits: 3}) {
+        print(-5)
+        print(0)
+        print(-1)
+        print(I32{-6})
+        print(U8{5})
+    }
+    #Context(print: term.PrintStyle{int_base: .Octal}) {
+        print(-8)
+        print(8)
+    }
+    #Context(print: term.PrintStyle{int_base: .Hex, int_min_digits: 2}) {
+        print(-255)
+        print(4095)
+        print(10)
+        print(9223372036854775807)
+        print(-9223372036854775807 - 1)
+        print(9223372036854775807 * 2 + 2)
+        #Context(print: term.PrintStyle{int_base: .Octal}) {
+            print(9)
+        }
+        print(16)
+    }
+    #Context(print: term.PrintStyle{int_min_digits: 5}) {
+        print(-42)
+        print(123456)
+        print(12345)
+    }
+    #Context(print: term.PrintStyle{float_digits: Val(2)}) {
+        print(Float{0.125})
+        print(Float{2.675})
+        print(Float{-0.001})
+        print(math.INFINITY)
+        print(-math.INFINITY)
+        print(math.NAN)
+        print(3)
+    }
+    #Context(print: term.PrintStyle{float_digits: Val(0)}) {
+        print(Float{2.5})
+        print(Float{-2.5})
+        print(Float{0.4})
+    }
+    #Context(print: term.PrintStyle{list_separator: " | ", field_names: false}) {
+        print([1, 2, 3])
+        print(Pair{a: 1, b: Float{0.5}})
+    }
+    print(Pair{a: 1, b: Float{0.5}})
+    print(255)
+}

@@ -397,14 +397,20 @@ sema_expression_is_float_measurement: fn(ty: Type, environment: SemaScopeEnviron
 }
 
 sema_expression_measurement_source_call: fn(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
-    source_identity: sema_call_core_module_identity(environment, program, "core.units") ?? return None
+    // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
+    type_args: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
+    sema_expression_core_source_call("core.units", function, values, result_type, type_args, span, environment, program)
+}
+
+// The call of Core source module `module_name`'s function `function`, which
+// the module where the call is checked has loaded.
+sema_expression_core_source_call: fn(module_name: String, function: String, values: [TExpr], result_type: Type, type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+    source_identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
     if program.registration_graph == .Val(graph) {
         source_index: sema_registration_module_index(graph, source_identity) ?? return None
         callee: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
         callee_id: sema_registration_callable_id(graph, callee.symbol.id) ?? return None
         arguments: loop value in values -> TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-        // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
-        type_args: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
         return Val(sema_tree_node(result_type, TExprKind.Call{callee: callee_id, type_args: type_args, args: arguments}, span))
     }
     None

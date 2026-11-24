@@ -340,6 +340,36 @@ UnitFormat: enum {
     Bare,
 }
 
+// The trait call a style selector is: selector `Hex` is trait `HexFormat`
+// of core.text.fmt, and `{value:Hex(n)}` calls `value.hex(n)` (the
+// selector name in lower case), its number as the argument. A type that
+// implements the trait takes the selector. `digits` is the selector's
+// written number, None for a selector that takes none.
+StrFormatStyle: struct {
+    selector: String,
+    trait_name: String,
+    method: String,
+    digits: Int?,
+}
+
+// The trait call `format` is, or None for a selector with its own meaning.
+str_format_style: fn(format: StrFormat) -> StrFormatStyle? Never! {
+    if format == {
+        .Fixed(n) -> Val(str_format_style_named("Fixed", Val(n)))
+        .Grouped(n) -> Val(str_format_style_named("Grouped", Val(n)))
+        .Hex(n) -> Val(str_format_style_named("Hex", Val(n)))
+        .Sci(n) -> Val(str_format_style_named("Sci", Val(n)))
+        .Percent(n) -> Val(str_format_style_named("Percent", Val(n)))
+        .Bin -> Val(str_format_style_named("Bin", None))
+        .Oct -> Val(str_format_style_named("Oct", None))
+        .Display | .Debug | .Pretty | .Pad(_, _) | .PadLeft(_, _) | .Unit(_) | .Count -> None
+    }
+}
+
+str_format_style_named: fn(selector: String, digits: Int?) -> StrFormatStyle Never! {
+    StrFormatStyle{selector: selector, trait_name: "{selector}Format", method: selector.lower(), digits: digits}
+}
+
 // A lambda parameter; `convention` is its written mark (`(buf: &[Int])`
 // writes, `(job: &&Job)` takes), Read when it has none.
 LambdaParam: struct {
