@@ -7732,14 +7732,14 @@ their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
 moving public validation into Jet does not widen the authority contract.
 TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
 writes it with the stream's own `write_bytes`, then shuts down the write half.
-TCP option access and UDP bind enter their Jet public functions before the
-corresponding reserved `__set_*`, `__nodelay`, `__ttl`, and `__udp_bind*`
-leaves. Raw leaves retain existing native error mapping, borrow/move
-conventions, and interpreter-route availability.
-UDP address, timeout, send, and receive operations and Unix listen, accept,
-read, byte-write, shutdown, and close also enter Jet source first. Their
-reserved raw leaves preserve exactly the public operation's existing effect
-row and supported interpreter/native tiers.
+TCP listen, accept, connect, address and option access, and UDP bind,
+address, send, and receive enter their Jet public functions, which call the
+matching `jet.runtime.net` leaves (`tcp_listen`, `set_nodelay`, `udp_bind`,
+and so on). Each leaf declares the public operation's effect row and keeps the
+existing native error mapping and borrow/move conventions.
+Unix listen, accept, read, byte-write, shutdown, and close also enter Jet
+source first. Their reserved raw leaves preserve exactly the public
+operation's existing effect row and supported interpreter/native tiers.
 The HTTP client is Jet end to end: `get`, `post`, `request`, and `send` build
 an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
 and decode the status line, headers, chunked/length framing, and gzip into an

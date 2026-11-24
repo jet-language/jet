@@ -364,21 +364,18 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.crypto.vault commit_import_signing &&VaultWrite<SigningKey>,&&MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
     core.crypto.vault commit_import_x25519 &&VaultWrite<X25519SecretKey>,&&MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
     core.net gethostname - String
-    core.net tcp_listen|__tcp_listen String Result<TCPListener,NetError>
+    core.net tcp_listen String Result<TCPListener,NetError>
     core.net ip_addr String Result<IPAddr,NetError>
     core.net ip_to_string IPAddr String
     core.net ip_is_ipv4 IPAddr Bool
     core.net socket_addr_parse String Result<SocketAddr,NetError>
     core.net socket_host|socket_to_string SocketAddr String
     core.net socket_port SocketAddr Int
-    core.net tcp_listen_addr|__tcp_listen_addr SocketAddr Result<TCPListener,NetError>
-    core.net tcp_accept|__tcp_accept TCPListener Result<TCPStream,NetError>
-    core.net __tcp_fd TCPStream Int
-    core.net tcp_connect|__tcp_connect String Result<TCPStream,NetError>
-    core.net tcp_connect_addr|__tcp_connect_addr SocketAddr Result<TCPStream,NetError>
-    core.net __tcp_connect_timeout SocketAddr,Int Result<TCPStream,NetError>
+    core.net tcp_listen_addr SocketAddr Result<TCPListener,NetError>
+    core.net tcp_accept TCPListener Result<TCPStream,NetError>
+    core.net tcp_connect String Result<TCPStream,NetError>
+    core.net tcp_connect_addr SocketAddr Result<TCPStream,NetError>
     core.net tcp_connect_happy String,Int Result<TCPStream,NetError>
-    core.net __tcp_connect_happy String,Int,Int Result<TCPStream,NetError>
     core.net tcp_read &TCPStream Result<String,NetError>
     core.net tcp_write &TCPStream,String Result<Unit,NetError>
     core.net tcp_read_bytes &TCPStream,Int Result<[u8],NetError>
@@ -394,24 +391,22 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net error_address|error_name NetError String?
     core.net error_os_code NetError Int?
     core.net tcp_local_addr|tcp_peer_addr TCPStream Result<String,NetError>
-    core.net tcp_local_socket_addr|tcp_peer_socket_addr|__tcp_local_socket_addr|__tcp_peer_socket_addr TCPStream Result<SocketAddr,NetError>
-    core.net listener_local_socket_addr|__listener_local_socket_addr TCPListener Result<SocketAddr,NetError>
-    core.net __set_timeout|__set_read_timeout|__set_write_timeout &TCPStream,Int Result<Unit,NetError>
-    core.net nodelay|__nodelay TCPStream Result<Bool,NetError>
-    core.net set_nodelay|__set_nodelay &TCPStream,Bool Result<Unit,NetError>
-    core.net ttl|__ttl TCPStream Result<Int,NetError>
-    core.net set_ttl|__set_ttl &TCPStream,Int Result<Unit,NetError>
+    core.net tcp_local_socket_addr|tcp_peer_socket_addr TCPStream Result<SocketAddr,NetError>
+    core.net listener_local_socket_addr TCPListener Result<SocketAddr,NetError>
+    core.net nodelay TCPStream Result<Bool,NetError>
+    core.net set_nodelay &TCPStream,Bool Result<Unit,NetError>
+    core.net ttl TCPStream Result<Int,NetError>
+    core.net set_ttl &TCPStream,Int Result<Unit,NetError>
     core.net socket_type TCPStream String
     core.net sendfile &TCPStream,String Result<Int,NetError>
     core.net tcp_reply &&TCPStream,String,String Result<Unit,NetError>
-    core.net udp_bind|__udp_bind String Result<UDPSocket,NetError>
-    core.net udp_bind_addr|__udp_bind_addr SocketAddr Result<UDPSocket,NetError>
-    core.net udp_local_addr|__udp_local_addr UDPSocket Result<SocketAddr,NetError>
-    core.net __udp_set_timeout UDPSocket,Int Result<Unit,NetError>
-    core.net udp_send_to|__udp_send_to UDPSocket,String,SocketAddr Result<Int,NetError>
-    core.net udp_recv_from|__udp_recv_from UDPSocket,Int Result<UDPPacket,NetError>
-    core.net udp_send_bytes_to|__udp_send_bytes_to UDPSocket,[u8],SocketAddr Result<Int,NetError>
-    core.net udp_receive|__udp_receive UDPSocket,Int Result<UDPPacket,NetError>
+    core.net udp_bind String Result<UDPSocket,NetError>
+    core.net udp_bind_addr SocketAddr Result<UDPSocket,NetError>
+    core.net udp_local_addr UDPSocket Result<SocketAddr,NetError>
+    core.net udp_send_to UDPSocket,String,SocketAddr Result<Int,NetError>
+    core.net udp_recv_from UDPSocket,Int Result<UDPPacket,NetError>
+    core.net udp_send_bytes_to UDPSocket,[u8],SocketAddr Result<Int,NetError>
+    core.net udp_receive UDPSocket,Int Result<UDPPacket,NetError>
     core.net udp_packet_data UDPPacket String
     core.net udp_packet_addr UDPPacket SocketAddr
     core.net udp_packet_bytes UDPPacket [u8]

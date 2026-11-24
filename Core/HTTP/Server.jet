@@ -8,6 +8,7 @@ use {
     core.encoding.[Dyn]
     core.prelude.[SourceLocation]
     rt: jet.runtime.time
+    net_rt: jet.runtime.net
 }
 
 // core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
@@ -1761,7 +1762,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
                 bytes: response_wire(received.method, answer) ?? error_wire(503)
                 answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
             } else {
-                fd: if stream.tcp == .Val(plain) -> core.net.__tcp_fd(plain) else -> -1
+                fd: if stream.tcp == .Val(plain) -> net_rt.tcp_fd(plain) else -> -1
                 cell: http.upgrade_cell(fd)
                 request := received
                 request.__upgrade = Val(cell)
