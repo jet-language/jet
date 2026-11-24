@@ -3606,7 +3606,7 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
                         next
                     }
                     loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
-                        if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() > 0) {
+                        if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(graph.modules[owner_index].impls[implementation_index].methods[function_index])) {
                             return true
                         }
                     }
@@ -3633,13 +3633,20 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
             methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
             loop method_index in 0..<methods.len() {
                 function: methods[method_index]
-                if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) {
+                if function.symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(function)) {
                     return true
                 }
             }
         }
     }
     false
+}
+
+// Whether `function` takes `self`: a static method's first parameter is an
+// ordinary one (`Dyn.decode(tree)` from `impl Dyn.Decode`), which a receiver
+// call never reaches.
+sema_expr_function_takes_self: fn(function: SemaRegistrationFunction) -> Bool Never! {
+    function.parameters.len() > 0 && function.parameters[0].name == "self"
 }
 
 // The receiver type's own method `method`, declared in its body, in an

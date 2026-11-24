@@ -135,6 +135,8 @@ use {
         owned_trait_keyed_by_argument,
         sema_reserved_type_name,
         checked_test_artifact_key,
+        symbol_builtin,
+        symbol_builtin_declared,
         symbol_find,
         symbol_intern,
         symbol_is_local,
@@ -2560,9 +2562,11 @@ sema_registration_impl_trait_name_slot: fn(graph: SemaRegistrationGraph, trait_n
     None
 }
 
+// An owned trait its module declares (OwnedTrait.declared_in) takes the trait's
+// builtin id, under the key it would mint (symbol_builtin_declared).
 sema_registration_named_symbol: fn(module_id: ModuleID, module_identity: String, symbols: &SymbolTable, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
     Symbol{
-        id: symbol_mint(symbols, kind, module_identity, "", name),
+        id: symbol_builtin_declared(kind, module_identity, name) ?? symbol_mint(symbols, kind, module_identity, "", name),
         kind: kind,
         name: name,
         module_identity: module_id,
@@ -2696,7 +2700,10 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
 }
 
 sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: String, owner: Symbol, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaRegistrationTraitMethod {
-    owner_key: symbol_table_key(symbols, owner.id)
+    // An owned trait's declaration holds the trait's builtin id
+    // (sema_registration_named_symbol), outside the module's own range, which
+    // is all a prepared module's table holds; its key is the declared one.
+    owner_key: if symbol_builtin_declared(SymbolKind.Trait, module_identity, owner.name) != None -> symbol_key_text(SymbolKind.Trait, module_identity, "", owner.name) else -> symbol_table_key(symbols, owner.id)
     id: symbol_mint(symbols, SymbolKind.Function, module_identity, owner_key, method.name)
     key: symbol_table_key(symbols, id)
     // A protocol ABI trait's own method signature is raw at dispatch, as in
@@ -2968,10 +2975,22 @@ sema_registration_error_supplier_diagnostic: fn(detail: String) -> Diagnostic {
     sema_error_optional("E0003", None, detail, "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance")
 }
 
-sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_identity: String, symbols: &SymbolTable, reference: TraitRef) -> SemaRegistrationNominal {
+// The row a codec trait (Encode, Decode) resolves to by name in a module
+// that declares none (sema_registration_lookup_name_hashed): the owned trait,
+// under its builtin id, which core.encoding's declaration takes too.
+sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_identity: String, reference: TraitRef) -> SemaRegistrationNominal {
     span: Span{start: 0, end: 0}
     ty: Type.Named{name: reference.name}
-    symbol: sema_registration_named_symbol(module_id, module_identity, symbols, reference.name, span, SymbolKind.Trait, None, true, false)
+    symbol: Symbol{
+        id: symbol_builtin(SymbolKind.Trait, reference.name) ?? panic("the codec trait `{reference.name}` is not an owned trait"),
+        kind: SymbolKind.Trait,
+        name: reference.name,
+        module_identity: module_id,
+        owner: None,
+        span: span,
+        ty: None,
+        visibility: sema_registration_visibility(true, false),
+    }
     SemaRegistrationNominal{
         symbol: symbol,
         kind: SemaRegistrationNominalKind.Trait,
@@ -6263,7 +6282,7 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
         module_index: sema_registration_compiler_builtin_module(graph, reference.name) ?? next
         module_identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
         first_nominal: graph.modules[module_index].nominals.len()
-        nominal: sema_registration_compiler_owned_codec_trait(graph.modules[module_index].module_identity, module_identity, graph.symbols, reference)
+        nominal: sema_registration_compiler_owned_codec_trait(graph.modules[module_index].module_identity, module_identity, reference)
         graph.modules[module_index].nominals.push(nominal)
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
         sema_registration_set_compiler_builtin(graph, reference.name, SemaRegistrationRowRef{module_index: module_index, row: first_nominal})

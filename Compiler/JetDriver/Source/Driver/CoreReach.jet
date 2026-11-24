@@ -118,7 +118,8 @@ jet_driver_unit_no_words: fn() -> JetDriverUnitWords Never! {
 
 // One implementation of a trait for a Core type: the modules and names of
 // its type and its trait. A compiler-owned trait (Compiler/Prelude/Traits.jet)
-// has the module "", and so does a builtin type.
+// has the module that declares it (OwnedTrait.declared_in: `core.encoding`
+// for `Decode`), or "" when only the compiler does; a builtin type has "".
 JetDriverCoreImplRow: struct {
     type_module: String,
     type_name: String,
@@ -136,7 +137,7 @@ jet_driver_core_impl_reached: fn(row: JetDriverCoreImplRow, reached: NameTable) 
     if row.type_module != "" && !jet_driver_reach_holds(reached, row.type_module) && !jet_driver_reach_holds(reached, "{row.type_module}.{row.type_name}") {
         return false
     }
-    if row.trait_module == "" {
+    if owned_trait(row.trait_name) == .Val(owned) && owned.declared_in == row.trait_module {
         return !owned_trait_codec(row.trait_name) || jet_driver_reach_holds(reached, row.trait_name)
     }
     jet_driver_reach_holds(reached, row.trait_module) || jet_driver_reach_holds(reached, "{row.trait_module}.{row.trait_name}")
@@ -1233,6 +1234,7 @@ jet_driver_reach_impl: fn(reach: &JetDriverReach, module_name: String, type_name
         if owned.auto_derive_family == .Val(family) {
             triggers.push(jet_driver_reach_word(reach, family))
         }
+        trait_module = owned.declared_in.move()
     } else {
         parts: written.partition(".")
         trait_module = module_name.copy()
