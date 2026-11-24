@@ -17,6 +17,7 @@ use {
         SemaComptimeItemRequest,
         SemaComptimeItemSource,
         SemaComptimeItemValue,
+        SemaComptimeKeySet,
         SemaComptimeValueSites,
         SemaComptimeScopes,
         SemaForeignProviderInput,
@@ -86,6 +87,10 @@ use {
         sema_comptime_available_version,
         sema_comptime_body_work_flush,
         sema_comptime_checked_text_source,
+        sema_comptime_key_set_add,
+        sema_comptime_key_set_has,
+        sema_comptime_key_set_index,
+        sema_comptime_key_set_pair,
         sema_comptime_dependency_cycle_diagnostic,
         sema_comptime_environment,
         sema_comptime_environment_publish_body_values,
@@ -300,12 +305,9 @@ use {
         type_syntax,
         name_column,
         name_column_get,
-        name_column_get_hashed,
         name_column_set,
-        name_column_set_hashed,
         name_column_value,
         name_column_table,
-        name_text_hash,
         Name,
         NameTable,
         name_count,
@@ -1107,11 +1109,10 @@ JetDriverComptimeRunIndex: struct {
     owners: [Int]{name_column()},
     owners_built: Bool,
     // Each function any closure or prefetch of the run named, by its node
-    // id: `node_names` interns `module\nkey`, `node_ids` holds the node id at
-    // that name's id, and `nodes`, `checked_at`, `waiting_at` and the
-    // `prefetched` rows hold one row per node id.
-    node_names: NameTable{name_column_table()},
-    node_ids: [Int]{name_column()},
+    // id: its pair of `node_keys` (its module and key), and `nodes`,
+    // `checked_at`, `waiting_at` and the `prefetched` rows hold one row per
+    // node id.
+    node_keys: SemaComptimeKeySet{SemaComptimeKeySet{}},
     nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}},
     // The first row of each node's function in the run's checked
     // functions, or -1.
@@ -1534,11 +1535,8 @@ jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: ^JetD
 // `module_identity`, added unsettled, unchecked and not waiting the first
 // time the run names it.
 jet_driver_comptime_node_id: fn(index: ^JetDriverComptimeRunIndex, module_identity: ModuleID, function_key: String) -> Int Never! {
-    key: "{module_identity.id}\n{function_key}"
-    hash: name_text_hash(key)
-    if name_column_get_hashed(index.node_names, index.node_ids, key, hash) == .Val(found) -> return found
-    id: index.nodes.len()
-    name_column_set_hashed(index.node_names, index.node_ids, key, hash, id)
+    id: sema_comptime_key_set_index(index.node_keys, module_identity, function_key)
+    if id < index.nodes.len() -> return id
     index.nodes.push(JetDriverComptimeClosureNode{})
     index.checked_at.push(-1)
     index.waiting_at.push(-1)
@@ -2346,12 +2344,12 @@ JetDriverComptimeStaging: struct {
 }
 
 // A comptime item that checked completely and waits for its value: it
-// evaluates `request`, whose checked function closure is `function_keys`
-// (`module\nkey`, in closure order) of its batch's functions.
+// evaluates `request`, whose checked function closure is `function_rows`
+// (in closure order) of its batch's functions.
 JetDriverComptimeEntry: struct {
     source: SemaComptimeItemSource,
     request: SemaComptimeItemRequest,
-    function_keys: [String],
+    function_rows: [Int],
     // Whether the build computes its constant for the entries after it,
     // which read it by calling its item function (TConstantDef.item_function):
     // its type landed as it joined (jet_driver_comptime_type_land).
@@ -2362,11 +2360,10 @@ JetDriverComptimeEntry: struct {
 JetDriverComptimeBatch: struct {
     entries: [JetDriverComptimeEntry],
     // The union of the entries' checked closures, each function once, in
-    // the order the entries first name them; `function_rows` holds each
-    // function's position at its `module\nkey`'s id in `function_rows_keys`.
+    // the order the entries first name them; each function's row is its
+    // pair of `function_keys` (its module and key).
     functions: [FnBody],
-    function_rows_keys: NameTable{name_column_table()},
-    function_rows: [Int]{name_column()},
+    function_keys: SemaComptimeKeySet{SemaComptimeKeySet{}},
     // The source key of every entry: an item check that waits on one of
     // them reads a value the batch still holds back. `key_computed` holds 1
     // at a computed entry's id in `keys` (JetDriverComptimeEntry.computed),
@@ -2655,31 +2652,31 @@ jet_driver_comptime_computed_waits: fn(batch: JetDriverComptimeBatch, checked: S
     jet_driver_comptime_batch_computes(batch, checked.waiting_dependencies)
 }
 
-// The waits of each pending item (`module\nkey`) whose last check, with its
-// closure, reported nothing: until one of those keys has a value, checking
-// it again gives the same waits (it names no other unvalued constant), so
-// the run reuses them instead of checking it once per pass; a dependency
-// chain declared in reverse order would otherwise check every waiting item
-// on every pass.
+// The waits of each pending item whose last check, with its closure,
+// reported nothing: until one of those keys has a value, checking it again
+// gives the same waits (it names no other unvalued constant), so the run
+// reuses them instead of checking it once per pass; a dependency chain
+// declared in reverse order would otherwise check every waiting item on
+// every pass.
 JetDriverComptimeSettledWaits: struct {
-    keys: NameTable{name_table_sized(2)},
-    // Each item's row of `waits` at its key's id in `keys`; -1 once its
-    // waits no longer stand.
-    rows: [Int]{name_column()},
-    waits: [[String]],
+    items: SemaComptimeKeySet{SemaComptimeKeySet{}},
+    // Each item's waits at its pair of `items`; None once they no longer
+    // stand.
+    waits: [[String]?]{[[String]?]{}},
 }
 
-jet_driver_comptime_settled_put: fn(settled: ^JetDriverComptimeSettledWaits, key: String, waits: ^^[String]) Never! {
-    if name_column_get(settled.keys, settled.rows, key) == .Val(row) {
-        settled.waits[row] = waits.move()
+jet_driver_comptime_settled_put: fn(settled: ^JetDriverComptimeSettledWaits, module_identity: ModuleID, key: String, waits: ^^[String]) Never! {
+    pair: sema_comptime_key_set_index(settled.items, module_identity, key)
+    if pair == settled.waits.len() {
+        settled.waits.push(Val(waits.move()))
         return
     }
-    name_column_set(settled.keys, settled.rows, key, settled.waits.len())
-    settled.waits.push(waits.move())
+    settled.waits[pair] = Val(waits.move())
 }
 
-jet_driver_comptime_settled_drop: fn(settled: ^JetDriverComptimeSettledWaits, key: String) Never! {
-    if name_column_get(settled.keys, settled.rows, key) != None -> name_column_set(settled.keys, settled.rows, key, -1)
+jet_driver_comptime_settled_drop: fn(settled: ^JetDriverComptimeSettledWaits, module_identity: ModuleID, key: String) Never! {
+    pair: sema_comptime_key_set_pair(settled.items, module_identity, key) ?? return
+    settled.waits[pair] = None
 }
 
 // Whether `batch` computes the constant `key` (JetDriverComptimeEntry.computed).
@@ -3060,21 +3057,18 @@ jet_driver_comptime_batch_add: fn(batch: ^JetDriverComptimeBatch, source: SemaCo
         }
         reversed.push(function)
     }
-    function_keys := [String]{}
+    function_rows := [Int]{}
     loop reversed.len() > 0 {
         function := reversed.pop() ?? {
             break
         }
-        key: "{function.module_identity.id}\n{function.key}"
-        if name_column_get(batch.function_rows_keys, batch.function_rows, key) == None {
-            name_column_set(batch.function_rows_keys, batch.function_rows, key, batch.functions.len())
-            batch.functions.push(function)
-        }
-        function_keys.push(key)
+        row: sema_comptime_key_set_index(batch.function_keys, function.module_identity, function.key)
+        if row == batch.functions.len() -> batch.functions.push(function)
+        function_rows.push(row)
     }
-    if !jet_driver_comptime_entry_bare(request, function_keys) -> batch.bare = false
+    if !jet_driver_comptime_entry_bare(request, function_rows) -> batch.bare = false
     name_column_set(batch.keys, batch.key_computed, source.key, if computed -> 1 else -> 0)
-    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys, computed: computed})
+    batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_rows: function_rows, computed: computed})
 }
 
 // The batch holding only entry `index` of `batch`, with that entry's own
@@ -3082,15 +3076,18 @@ jet_driver_comptime_batch_add: fn(batch: ^JetDriverComptimeBatch, source: SemaCo
 jet_driver_comptime_batch_single: fn(batch: JetDriverComptimeBatch, index: Int) -> JetDriverComptimeBatch Never! {
     single := jet_driver_comptime_batch_new()
     entry: batch.entries[index]
-    loop key in entry.function_keys {
-        row: name_column_get(batch.function_rows_keys, batch.function_rows, key) ?? next
-        name_column_set(single.function_rows_keys, single.function_rows, key, single.functions.len())
-        single.functions.push(batch.functions[row])
+    rows := [Int]{}
+    loop at in entry.function_rows {
+        row: sema_comptime_key_set_index(single.function_keys, batch.functions[at].module_identity, batch.functions[at].key)
+        if row == single.functions.len() -> single.functions.push(batch.functions[at])
+        rows.push(row)
     }
-    if !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
+    if !jet_driver_comptime_entry_bare(entry.request, rows) -> single.bare = false
     single.foreign = batch.foreign.copy()
     name_column_set(single.keys, single.key_computed, entry.source.key, 1)
-    single.entries.push(entry.copy())
+    copied := entry.copy()
+    copied.function_rows = rows
+    single.entries.push(copied)
     single
 }
 
@@ -3449,14 +3446,12 @@ jet_driver_comptime_batch_names: fn(batch: JetDriverComptimeBatch) -> String Nev
     names.join(", ")
 }
 
-// `known` holds the `module\nkey` of every source already pending or staged.
-jet_driver_comptime_checked_text_source_add: fn(sources: ^[SemaComptimeItemSource], known: ^NameTable, evaluation: SemaCheckedTextEvaluation) Never! {
+// `known` holds the module and key of every source already pending or staged.
+jet_driver_comptime_checked_text_source_add: fn(sources: ^[SemaComptimeItemSource], known: ^SemaComptimeKeySet, evaluation: SemaCheckedTextEvaluation) Never! {
     source := sema_comptime_checked_text_source(evaluation)
-    key: "{source.module_identity.id}\n{source.key}"
-    if name_find(known, key) != None {
+    if !sema_comptime_key_set_add(known, source.module_identity, source.key) {
         return
     }
-    _ := name_intern(known, key)
     sources.push(source)
 }
 
@@ -3477,10 +3472,11 @@ jet_driver_merge_checked_text_functions: fn(graph: ^SemaGraphResult, table: Modu
         slot: module_index(graph_module.module_identity)
         if module_rows[slot] == -1 -> module_rows[slot] = index
     }
-    // `row\nkey` of every function a row holds, read once per row the first
-    // time a staged function names it: a staged function its module already
-    // holds (checked by the body pass, or staged before it) is skipped.
-    held := name_table_sized(2)
+    // The key of every function a row holds, under the row's module, read
+    // once per row the first time a staged function names it: a staged
+    // function its module already holds (checked by the body pass, or
+    // staged before it) is skipped.
+    held := SemaComptimeKeySet{}
     keyed := (loop _ in 0..<graph.modules.len() -> false)
     loop checked in functions {
         function: checked.function ?? return Val("staged function `{checked.function_key}` of `{module_text(table, checked.module_identity)}` has no checked body")
@@ -3489,10 +3485,10 @@ jet_driver_merge_checked_text_functions: fn(graph: ^SemaGraphResult, table: Modu
             return Val("staged function `{function.key}` names module `{module_text(table, checked.module_identity)}`, which the checked graph does not hold")
         }
         if !keyed[row] {
-            loop existing in graph.modules[row].functions -> _ := name_intern(held, "{row}\n{existing.key}")
+            loop existing in graph.modules[row].functions -> _ := sema_comptime_key_set_add(held, checked.module_identity, existing.key)
             keyed[row] = true
         }
-        if name_find(held, "{row}\n{function.key}") != None -> next
+        if sema_comptime_key_set_has(held, checked.module_identity, function.key) -> next
         if !checked.complete && !(checked.obligations_pending && module_is_core(checked.module_identity)) {
             reasons := ""
             loop reason in checked.incomplete_reasons {
@@ -3506,7 +3502,7 @@ jet_driver_merge_checked_text_functions: fn(graph: ^SemaGraphResult, table: Modu
         if !sema_comptime_append_checked_function_to_module(checked, graph.modules[row]) {
             return Val("staged function `{function.key}` could not join module `{module_text(table, checked.module_identity)}`")
         }
-        _ := name_intern(held, "{row}\n{function.key}")
+        _ := sema_comptime_key_set_add(held, checked.module_identity, function.key)
         loop fact in checked.call_facts -> graph.call_facts.push(fact.copy())
         loop request in checked.calls -> graph.comptime_requests.push(request.copy())
     }
@@ -3685,9 +3681,9 @@ jet_driver_comptime_run: fn(
     checked_functions := initial_functions.copy()
     trace := jet_driver_empty_compile_trace()
     pending := sources
-    // The `module\nkey` of every source pending or staged in this run.
-    known_sources := name_column_table(sources.len())
-    loop source in sources -> _ := name_intern(known_sources, "{source.module_identity.id}\n{source.key}")
+    // The module and key of every source pending or staged in this run.
+    known_sources := SemaComptimeKeySet{}
+    loop source in sources -> _ := sema_comptime_key_set_add(known_sources, source.module_identity, source.key)
     // The module scope every item and function check of the run checks in.
     comptime_scopes := sema_comptime_scopes_init(sema_host_hook_access(request.eval_config.host_hooks))
     resolved_count := values.len()
@@ -3741,7 +3737,7 @@ jet_driver_comptime_run: fn(
     // (in the batch or later in the pass) waits on that site, keeping its
     // other function checks (jet_driver_comptime_site_waits).
     batch := jet_driver_comptime_batch_new()
-    settled_waits := JetDriverComptimeSettledWaits{waits: [[String]]{}}
+    settled_waits := JetDriverComptimeSettledWaits{}
     loop pending.len() > 0 {
         next_pending := [SemaComptimeItemSource]{}
         wait_rows := [JetDriverComptimeWaitRow]{}
@@ -3818,11 +3814,10 @@ jet_driver_comptime_run: fn(
                     }
                     resolved_count = values.len()
                 }
-                source_key: "{source.module_identity.id}\n{source.key}"
                 // Its waits stand until one of them lands, unless the batch
                 // computes them all, which it may read in the batch's program.
-                if name_column_get(settled_waits.keys, settled_waits.rows, source_key) == .Val(settled_row) {
-                    previous_waits: settled_waits.waits[settled_row]
+                settled_pair: sema_comptime_key_set_pair(settled_waits.items, source.module_identity, source.key) ?? -1
+                if settled_pair >= 0 && settled_waits.waits[settled_pair] == .Val(previous_waits) {
                     if !jet_driver_comptime_any_available(available, previous_waits) && !jet_driver_comptime_batch_computes(batch, previous_waits) {
                         wait_rows.push(
                             JetDriverComptimeWaitRow{
@@ -3902,8 +3897,8 @@ jet_driver_comptime_run: fn(
                 }
                 if checked_item.waiting_dependencies.len() > 0 {
                     if checked_item.diagnostics.len() == 0 {
-                        jet_driver_comptime_settled_put(settled_waits, source_key, checked_item.waiting_dependencies)
-                    } else { jet_driver_comptime_settled_drop(settled_waits, source_key) }
+                        jet_driver_comptime_settled_put(settled_waits, source.module_identity, source.key, checked_item.waiting_dependencies)
+                    } else { jet_driver_comptime_settled_drop(settled_waits, source.module_identity, source.key) }
                     wait_rows.push(
                         JetDriverComptimeWaitRow{
                             key: source.key,
@@ -4161,8 +4156,8 @@ jet_driver_comptime_run: fn(
                     // A wait on a body site is checked again next pass: a
                     // site's value never joins the available constants.
                     if checked_item.diagnostics.len() == 0 && diagnostics.len() == item_diagnostic_start && !closure.site_waits {
-                        jet_driver_comptime_settled_put(settled_waits, source_key, dependencies.copy())
-                    } else { jet_driver_comptime_settled_drop(settled_waits, source_key) }
+                        jet_driver_comptime_settled_put(settled_waits, source.module_identity, source.key, dependencies.copy())
+                    } else { jet_driver_comptime_settled_drop(settled_waits, source.module_identity, source.key) }
                     wait_rows.push(
                         JetDriverComptimeWaitRow{
                             key: source.key,
@@ -4194,9 +4189,7 @@ jet_driver_comptime_run: fn(
                     loop site in checked_functions[function_index].comptime_body_sources {
                         if !site.local_value || site.local_binding -> next
                         ahead: sema_comptime_local_value_ahead_site(site)
-                        ahead_key: "{ahead.module_identity.id}\n{ahead.key}"
-                        if name_find(known_sources, ahead_key) != None -> next
-                        _ := name_intern(known_sources, ahead_key)
+                        if !sema_comptime_key_set_add(known_sources, ahead.module_identity, ahead.key) -> next
                         next_pending.push(ahead)
                         made_progress = true
                     }
@@ -4437,8 +4430,8 @@ jet_driver_comptime_reach_stmt: fn(reach: ^JetDriverComptimeReach, tree: BodyTre
 // G: whether an evaluated entry may build with no declaration rows: it names
 // no staged constant, its checked closure is empty and its checked body (and expected
 // type) reaches nothing.
-jet_driver_comptime_entry_bare: fn(request: SemaComptimeItemRequest, function_keys: [String]) -> Bool Never! {
-    if request.dependencies.len() > 0 || function_keys.len() > 0 -> return false
+jet_driver_comptime_entry_bare: fn(request: SemaComptimeItemRequest, function_rows: [Int]) -> Bool Never! {
+    if request.dependencies.len() > 0 || function_rows.len() > 0 -> return false
     reach := JetDriverComptimeReach{everything: false, functions: [String]{}}
     if request.expected_type == .Val(expected) -> jet_driver_comptime_reach_type(reach, expected)
     jet_driver_comptime_reach_expr(reach, request.expression.tree, request.expression.root)

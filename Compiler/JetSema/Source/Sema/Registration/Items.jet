@@ -1122,11 +1122,12 @@ SemaRegistrationGraph: struct {
     // of one of their modules makes run natively; any other package's are
     // refused (E3411).
     comptime_host_packages: [String]{[String]{}},
-    // `#run use` (ComptimeUse.jet): "{module}\n{target}" -> the
-    // `#run ` prefix of the import that brings `target` into `module`
-    // for compile-time code only, so a runtime read of a value of its types
-    // is reported with the edit that drops the prefix.
-    comptime_use_targets: [String:Span]{[String:Span]{}},
+    // `#run use` (ComptimeUse.jet): the slot of a module and a target
+    // (sema_comptime_use_slot) -> the `#run ` prefix of the import that
+    // brings `target` into `module` for compile-time code only, so a
+    // runtime read of a value of its types is reported with the edit that
+    // drops the prefix.
+    comptime_use_targets: [Int:Span]{[Int:Span]{}},
     // User modules only compile-time code uses, however they are imported;
     // the driver leaves their functions out of the shipped program.
     comptime_only_modules: [ModuleID]{[ModuleID]{}},
@@ -5472,9 +5473,11 @@ sema_registration_serde_union_shapes: fn(items: [Item], ty: Type, span: Span, di
 sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members: [Type], span: Span, diagnostics: ^[Diagnostic]) {
     union_shown: sema_type_show(union_ty)
     seen_shapes := [SerdeWireShape]{}
-    seen_members := [Type]{}
-    reported := [String]{}
-    loop member in members {
+    // The row in `members` of each seen shape's first member.
+    seen_members := [Int]{}
+    // The member pairs reported, first member's row in the high half.
+    reported := [Int]{}
+    loop (member_row, member) in members {
         visited := [String]{}
         resolved: jfmt_decode_shapes(items, member, visited)
         member_label: sema_registration_serde_label(member)
@@ -5492,11 +5495,11 @@ sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members
             }
             if previous < 0 {
                 seen_shapes.push(shape)
-                seen_members.push(member.copy())
+                seen_members.push(member_row)
                 next
             }
-            first_label: sema_registration_serde_label(seen_members[previous])
-            pair: "{first_label}\n{member_label}"
+            first_label: sema_registration_serde_label(members[seen_members[previous]])
+            pair: (seen_members[previous] << 32) | member_row
             if reported.contains(pair) -> next
             reported.push(pair)
             diagnostics.push(sema_error("E2415", span, "Union `{union_shown}` can't be decoded — `{first_label}` and `{member_label}` share wire shape `{sema_registration_serde_shape_name(shape)}`", "anonymous-union decode picks a member by wire shape; two members with the same shape would force an arbitrary order", "use a named enum with an explicit tag, or change the members so each has a distinct wire shape"))

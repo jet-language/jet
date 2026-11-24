@@ -83,7 +83,6 @@ use jet_foundation.[
     name_find,
     name_index,
     name_intern,
-    name_table,
     name_table_sized,
     name_text,
     TargetHardwareUse,
@@ -457,56 +456,57 @@ sema_local_splice_settle: fn(interner: Interner, body: ^FnBody, finalized: FnBod
     }
 }
 
-// Drops the landed sources from `sources` (`landed` holds their
-// `module\nkey`) into `aside`.
-sema_local_splice_unlanded: fn(sources: ^[SemaComptimeBodySource], landed: NameTable, aside: ^[SemaComptimeBodySource]) Never! {
+// Drops the landed sources from `sources` (`landed` holds their module and
+// key) into `aside`.
+sema_local_splice_unlanded: fn(sources: ^[SemaComptimeBodySource], landed: SemaComptimeKeySet, aside: ^[SemaComptimeBodySource]) Never! {
     held := compiler_take_rows<SemaComptimeBodySource>(sources)
     held.reverse()
     loop held.len() > 0 {
         source := held.pop() ?? break
-        if name_find(landed, "{source.module_identity.id}\n{source.key}") == None {
+        if !sema_comptime_key_set_has(landed, source.module_identity, source.key) {
             sources.push(source.move())
         } else { aside.push(source.move()) }
     }
 }
 
-// Whether `sources` less the landed ones (`landed` holds their
-// `module\nkey`) are `kept`, in order, compared in place.
-sema_local_splice_same_unlanded: fn(sources: [SemaComptimeBodySource], kept: [SemaComptimeBodySource], landed: NameTable) -> Bool Never! {
+// Whether `sources` less the landed ones (`landed` holds their module and
+// key) are `kept`, in order, compared in place.
+sema_local_splice_same_unlanded: fn(sources: [SemaComptimeBodySource], kept: [SemaComptimeBodySource], landed: SemaComptimeKeySet) -> Bool Never! {
     at := 0
     loop source in sources {
-        if name_find(landed, "{source.module_identity.id}\n{source.key}") != None -> next
+        if sema_comptime_key_set_has(landed, source.module_identity, source.key) -> next
         if at >= kept.len() || source != kept[at] -> return false
         at += 1
     }
     at == kept.len()
 }
 
-// The sites of `landed` (`module\nkey`) that leave the source rows of the
-// pass's check of the owner modules (`after`): the ones that got values.
-sema_local_splice_valued: fn(landed: NameTable, after: [SemaModuleBodyRows]) -> NameTable Never! {
-    remaining := name_table_sized(16)
+// The sites of `landed` that leave the source rows of the pass's check of
+// the owner modules (`after`): the ones that got values.
+sema_local_splice_valued: fn(landed: SemaComptimeKeySet, after: [SemaModuleBodyRows]) -> SemaComptimeKeySet Never! {
+    remaining := SemaComptimeKeySet{}
     loop rows in after {
         loop source in rows.comptime_body_sources {
-            _ := name_intern(remaining, "{source.module_identity.id}\n{source.key}")
+            _ := sema_comptime_key_set_add(remaining, source.module_identity, source.key)
         }
     }
-    valued := name_table_sized(name_count(landed) + 1)
-    loop id in 1..<name_count(landed) {
-        site: name_text(landed, Name{id: U32{id}})
-        if name_find(remaining, site) == None -> _ := name_intern(valued, site)
+    valued := SemaComptimeKeySet{}
+    loop pair in 0..<sema_comptime_key_set_len(landed) {
+        module_identity: sema_comptime_key_set_module(landed, pair)
+        key: sema_comptime_key_set_key(landed, pair)
+        if !sema_comptime_key_set_has(remaining, module_identity, key) -> _ := sema_comptime_key_set_add(valued, module_identity, key)
     }
     valued
 }
 
 // The sites of a local value splice (sema_local_splice_owners): `owners`
-// holds the owner function keys, `valued` the `module\nkey` of each landed
+// holds the owner function keys, `valued` the module and key of each landed
 // site that got a value (sema_local_splice_valued), and `computed` those of
 // them whose value is not a failure (sema_local_splice_computed).
 SemaLocalSpliceSites: struct {
     owners: NameTable,
-    valued: NameTable,
-    computed: NameTable,
+    valued: SemaComptimeKeySet,
+    computed: SemaComptimeKeySet,
 }
 
 // Why the two checks of the owner modules (`earlier` against the finalized
@@ -704,25 +704,24 @@ sema_local_splice_hold_bodies: fn(interner: Interner, finalized: [FnBody], sites
     None
 }
 
-// The sites of `landed` (`module\nkey`) whose value in `values` is not a
-// failure (sema_comptime_local_value_reason): the ones whose value replaces
-// the initializer.
-sema_local_splice_computed: fn(landed: NameTable, values: [SemaComptimeItemValue]) -> NameTable Never! {
-    computed := name_table_sized(name_count(landed) + 1)
+// The sites of `landed` whose value in `values` is not a failure
+// (sema_comptime_local_value_reason): the ones whose value replaces the
+// initializer.
+sema_local_splice_computed: fn(landed: SemaComptimeKeySet, values: [SemaComptimeItemValue]) -> SemaComptimeKeySet Never! {
+    computed := SemaComptimeKeySet{}
     loop value in values {
-        site: "{value.module_identity.id}\n{value.key}"
-        if name_find(landed, site) != None && sema_comptime_local_value_reason(value.value) == None {
-            _ := name_intern(computed, site)
+        if sema_comptime_key_set_has(landed, value.module_identity, value.key) && sema_comptime_local_value_reason(value.value) == None {
+            _ := sema_comptime_key_set_add(computed, value.module_identity, value.key)
         }
     }
     computed
 }
 
-// Whether a site of `rows` in `sites` (`module\nkey`) holds a call fact of
-// its owner whose span is strictly inside the site's.
-sema_local_splice_inner_call: fn(rows: SemaModuleBodyRows, sites: NameTable) -> Bool Never! {
+// Whether a site of `rows` in `sites` holds a call fact of its owner whose
+// span is strictly inside the site's.
+sema_local_splice_inner_call: fn(rows: SemaModuleBodyRows, sites: SemaComptimeKeySet) -> Bool Never! {
     loop source in rows.comptime_body_sources {
-        if name_find(sites, "{source.module_identity.id}\n{source.key}") == None -> next
+        if !sema_comptime_key_set_has(sites, source.module_identity, source.key) -> next
         loop fact in rows.call_facts {
             if fact.caller_key != source.function_key -> next
             if fact.span.start < source.span.start || fact.span.end > source.span.end -> next
@@ -798,25 +797,25 @@ sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModule
 }
 
 // What a local value splice hands back: the graph, whether the pass's values
-// landed, and the `module\nkey` of each landed site that got a value.
+// landed, and the module and key of each landed site that got a value.
 SemaLocalValueSplice: struct {
     graph: SemaRegistrationGraph,
     spliced: Bool,
-    valued: NameTable,
+    valued: SemaComptimeKeySet,
 }
 
 // A splice that does not land: the graph comes back, no site valued.
 sema_local_splice_none: fn(graph: ^^SemaRegistrationGraph) -> SemaLocalValueSplice {
-    SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: name_table()}
+    SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: SemaComptimeKeySet{}}
 }
 
-// The `module\nkey` of every site of `landed`; None when one is neither a
+// The module and key of every site of `landed`; None when one is neither a
 // local value nor an explicit `name: #run value` local (local_binding).
-sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> NameTable? Never! {
-    keys := name_table_sized(landed.len() + 1)
+sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> SemaComptimeKeySet? Never! {
+    keys := SemaComptimeKeySet{}
     loop source in landed {
         if !source.local_value && !source.local_binding -> return None
-        _ := name_intern(keys, "{source.module_identity.id}\n{source.key}")
+        _ := sema_comptime_key_set_add(keys, source.module_identity, source.key)
     }
     Val(keys)
 }
@@ -825,26 +824,26 @@ sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> NameTable
 // `values`. Its report stops the compile, and only a local value's failure
 // keeps its initializer as run-time code, so its pass finalizes again.
 sema_local_splice_binding_failed: fn(landed: [SemaComptimeItemSource], values: [SemaComptimeItemValue]) -> Bool Never! {
-    bindings := name_table_sized(8)
+    bindings := SemaComptimeKeySet{}
     loop source in landed {
-        if source.local_binding -> _ := name_intern(bindings, "{source.module_identity.id}\n{source.key}")
+        if source.local_binding -> _ := sema_comptime_key_set_add(bindings, source.module_identity, source.key)
     }
-    if name_count(bindings) <= 1 -> return false
+    if sema_comptime_key_set_len(bindings) == 0 -> return false
     loop value in values {
-        if name_find(bindings, "{value.module_identity.id}\n{value.key}") != None && sema_comptime_local_value_reason(value.value) != None {
+        if sema_comptime_key_set_has(bindings, value.module_identity, value.key) && sema_comptime_local_value_reason(value.value) != None {
             return true
         }
     }
     false
 }
 
-// Whether a value of `values` at a site of `landed` (by `module\nkey`) holds
-// a compiler value (sema_compiler_host_value_held). The compiler that made
-// it answers it, and a landed value would leave that compiler behind, so
-// its pass finalizes again.
-sema_local_splice_holds_host_value: fn(values: [SemaComptimeItemValue], landed: NameTable) -> Bool Never! {
+// Whether a value of `values` at a site of `landed` holds a compiler value
+// (sema_compiler_host_value_held). The compiler that made it answers it,
+// and a landed value would leave that compiler behind, so its pass
+// finalizes again.
+sema_local_splice_holds_host_value: fn(values: [SemaComptimeItemValue], landed: SemaComptimeKeySet) -> Bool Never! {
     loop value in values {
-        if name_find(landed, "{value.module_identity.id}\n{value.key}") != None && sema_compiler_host_value_held(value.ty) != None {
+        if sema_comptime_key_set_has(landed, value.module_identity, value.key) && sema_compiler_host_value_held(value.ty) != None {
             return true
         }
     }
@@ -948,18 +947,18 @@ sema_local_value_land: fn(
     if landed.len() == 0 -> return sema_local_splice_none(graph)
     landed_keys := sema_local_splice_landed_keys(landed) ?? return sema_local_splice_none(graph)
     if sema_local_splice_holds_host_value(values, landed_keys) {
-        sema_local_splice_refused(trace_sink, "host_value", name_count(landed_keys) - 1)
+        sema_local_splice_refused(trace_sink, "host_value", sema_comptime_key_set_len(landed_keys))
         return sema_local_splice_none(graph)
     }
     if sema_local_splice_binding_failed(landed, values) {
-        sema_local_splice_refused(trace_sink, "binding_failed", name_count(landed_keys) - 1)
+        sema_local_splice_refused(trace_sink, "binding_failed", sema_comptime_key_set_len(landed_keys))
         return sema_local_splice_none(graph)
     }
     sema_local_splice_owners(graph, trail, modules, landed_keys, into, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink, carried)
 }
 
-// Checks the owner functions of the landed sites (`landed`, by
-// `module\nkey`) in `modules` twice, with the earlier values and with the
+// Checks the owner functions of the landed sites (`landed`, by module and
+// key) in `modules` twice, with the earlier values and with the
 // pass's, and splices the second check's bodies into `modules` when
 // sema_local_splice_holds lets them stand there (`into`). Both checks take
 // the pass facts of `facts`, its one row, and leave them there; an empty
@@ -969,7 +968,7 @@ sema_local_splice_owners: fn(
     resolved: ^^SemaRegistrationGraph,
     trail: ^SemaGraphTrail,
     modules: ^[SemaGraphModuleResult],
-    landed: NameTable,
+    landed: SemaComptimeKeySet,
     into: SemaLocalSpliceInto,
     earlier_values: [SemaComptimeItemValue],
     earlier_functions: [SemaComptimeFunctionResult],
@@ -983,18 +982,17 @@ sema_local_splice_owners: fn(
     graph := resolved.move()
     owners := name_table_sized(16)
     owner_module := loop _ in modules -> false
-    found := name_table_sized(name_count(landed) + 1)
+    found := SemaComptimeKeySet{}
     loop module_index in 0..<modules.len() {
         loop source in modules[module_index].comptime_body_sources {
-            site: "{source.module_identity.id}\n{source.key}"
-            if name_find(landed, site) == None -> next
+            if !sema_comptime_key_set_has(landed, source.module_identity, source.key) -> next
             if source.function_key == "" -> return sema_local_splice_none(graph)
-            _ := name_intern(found, site)
+            _ := sema_comptime_key_set_add(found, source.module_identity, source.key)
             _ := name_intern(owners, source.function_key)
             owner_module[module_index] = true
         }
     }
-    if name_count(found) != name_count(landed) -> return sema_local_splice_none(graph)
+    if sema_comptime_key_set_len(found) != sema_comptime_key_set_len(landed) -> return sema_local_splice_none(graph)
     // The module rows of each module identity, and the function slots
     // (sema_local_splice_slots) of a module once a result names it.
     identity_rows := [U32:[Int]]{}

@@ -6,6 +6,7 @@ use jet_foundation.[
     module_index,
     Expr,
     CompilerTraceSink,
+    Name,
     Span,
     SymbolKind,
     TComptimeReport,
@@ -15,6 +16,7 @@ use jet_foundation.[
     name_index,
     name_intern,
     name_table_sized,
+    name_text,
 ]
 
 sema_comptime_body_destination_key: fn(function_key: String, source_span: Span, site_span: Span) -> String Never! {
@@ -71,6 +73,66 @@ sema_comptime_module_slot: fn(modules: [Int], module_identity: ModuleID) -> Int?
     position: module_index(module_identity)
     if position >= modules.len() || modules[position] < 0 -> return None
     Val(modules[position])
+}
+
+// A set of staged keys, each with the module it sits in. Each module's slot
+// sits at its ModuleID row (`modules`, sema_comptime_index_module_slot) and
+// holds that module's key table; `pair_slots`/`pair_keys` list each pair as
+// added, by slot and key id, so the set reads back in order. The two parts
+// of a pair stay apart: no lookup joins a module and a key into one text.
+SemaComptimeKeySet: struct {
+    modules: [Int]{[Int]{}},
+    slots: [SemaComptimeKeyRows]{[SemaComptimeKeyRows]{}},
+    // Each slot's ModuleID.
+    slot_modules: [U32]{[U32]{}},
+    pair_slots: [Int]{[Int]{}},
+    pair_keys: [Int]{[Int]{}},
+}
+
+// The pair of `key` of `module_identity` in `set`, its place in the order
+// added, adding it when new.
+sema_comptime_key_set_index: fn(set: ^SemaComptimeKeySet, module_identity: ModuleID, key: String) -> Int Never! {
+    slot: sema_comptime_index_module_slot(set.modules, set.slots, module_identity)
+    if slot == set.slot_modules.len() -> set.slot_modules.push(module_identity.id)
+    id: sema_comptime_key_id(set.slots[slot], key)
+    if set.slots[slot].rows[id] < 0 {
+        set.slots[slot].rows[id] = set.pair_slots.len()
+        set.pair_slots.push(slot)
+        set.pair_keys.push(id)
+    }
+    set.slots[slot].rows[id]
+}
+
+// Adds `key` of `module_identity` to `set`; false when the set held it.
+sema_comptime_key_set_add: fn(set: ^SemaComptimeKeySet, module_identity: ModuleID, key: String) -> Bool Never! {
+    count: set.pair_slots.len()
+    sema_comptime_key_set_index(set, module_identity, key) == count
+}
+
+// The pair of `key` of `module_identity` in `set`, if it holds one.
+sema_comptime_key_set_pair: fn(set: SemaComptimeKeySet, module_identity: ModuleID, key: String) -> Int? Never! {
+    slot: sema_comptime_module_slot(set.modules, module_identity) ?? return None
+    sema_comptime_key_row(set.slots[slot], key)
+}
+
+// Whether `set` holds `key` of `module_identity`.
+sema_comptime_key_set_has: fn(set: SemaComptimeKeySet, module_identity: ModuleID, key: String) -> Bool Never! {
+    sema_comptime_key_set_pair(set, module_identity, key) != None
+}
+
+// How many pairs `set` holds.
+sema_comptime_key_set_len: fn(set: SemaComptimeKeySet) -> Int Never! {
+    set.pair_slots.len()
+}
+
+// The module of pair `pair` of `set`, in the order added.
+sema_comptime_key_set_module: fn(set: SemaComptimeKeySet, pair: Int) -> ModuleID Never! {
+    ModuleID{id: set.slot_modules[set.pair_slots[pair]]}
+}
+
+// The key of pair `pair` of `set`, in the order added.
+sema_comptime_key_set_key: fn(set: SemaComptimeKeySet, pair: Int) -> String Never! {
+    name_text(set.slots[set.pair_slots[pair]].keys, Name{id: U32{set.pair_keys[pair]}})
 }
 
 sema_comptime_body_source_index: fn(context: ^SemaCheckContext, row: Int) Never! {
