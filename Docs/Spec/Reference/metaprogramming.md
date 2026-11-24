@@ -929,7 +929,19 @@ and unlabeled with neither, as in `step: fn(Int) -[]> String`) and the
 access a `&` or `&&` mark gives it (`Read` with none); a written function
 type has no defaults and no variadic parameters, while the type of a named
 function keeps that function's parameter names, defaults and variadic
-flags. A
+flags. Its `generic_bindings` list the type's arguments, one
+`GenericBindingInfo` each, in the same way for every constructed type: a
+declared generic names each argument by its type parameter
+(`Transform<Screen, World>` binds `From` to `Screen` and `To` to `World`),
+`[T]` binds `element`, `T?`, `Shared<T>` and a tagged type `inner`, `[K: V]`
+`key` and `value`, `T E!` `ok` and `err`, a tuple each field by its name
+(`0`, `1`, ... when positional), a union each member by position, a
+function type each parameter by its label (else its position) and then
+`result`, and a quantity `base`. A number argument is a size: its `type`
+is `Int` and its `size` the number, as a fixed list's `length`, the `bits`
+of `I32`, `U8`, `Float` and `F32`, and a ranged int's `lo` and `hi` beside
+its `base`. Any other binding's `size` is `None`. A declared type named
+without arguments, and a builtin scalar, bind nothing. A
 PreparedValue is a compile-time value with its type kept, one case per case
 of the compile-time value algebra: `.Int(Int)`, `.Float(Float)`,
 `.Bool(Bool)`, `.Char(Char)`, `.String(String)`, `.Enum(PreparedCase)` (the

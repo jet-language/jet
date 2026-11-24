@@ -1528,7 +1528,8 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 // identity (a Core type a corelib signature names reads `SourceLocation`);
 // its `signature` is a function type's CallableSignature, each type in it a
 // TypeId named the same way (sema_comptime_reflection_type_signature), and
-// None for any other type.
+// None for any other type; its `generic_bindings` list the type's arguments
+// (sema_comptime_reflection_type_bindings).
 // `caller` is the row of the module the type is written in, -1 for none.
 sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
     signature := sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
@@ -1537,7 +1538,90 @@ sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, 
         returned: if sema_comptime_reflection_success_type(ret) == .Val(success) -> sema_comptime_reflection_some(sema_comptime_reflection_type_id(graph, caller, success)) else -> sema_comptime_reflection_none(Type.Named{name: "TypeId"})
         signature = sema_comptime_reflection_type_signature(ty, types, returned)
     }
-    sema_comptime_reflection_type_id_signed(type_name(sema_comptime_reflection_named_type(graph, caller, ty, qualified: true)), type_name(sema_comptime_reflection_named_type(graph, caller, type_identity_unqualified_nominals(ty), qualified: false)), signature)
+    sema_comptime_reflection_type_id_signed(type_name(sema_comptime_reflection_named_type(graph, caller, ty, qualified: true)), type_name(sema_comptime_reflection_named_type(graph, caller, type_identity_unqualified_nominals(ty), qualified: false)), signature, sema_comptime_reflection_type_bindings(graph, caller, ty))
+}
+
+// The `generic_bindings` of type `ty` written in module row `caller`: every
+// constructed type lists its arguments the same way, as GenericBindingInfo
+// records in order. A declared generic (`Transform<Screen, World>`) names
+// each argument by its declaration's type parameter (`From`, `To`); `[T]`
+// lists `element`, `T?` and `Shared<T>` and a tagged type `inner`, `[K: V]`
+// `key` and `value`, `T E!` `ok` and `err`; a tuple each field by its name
+// (`0`, `1`, ... when positional), a union each member by position, a
+// function each parameter by its label (else its position) and then
+// `result`; a fixed list `element` and the size `length`; `IntN`, `Float` and
+// `Float32` the size `bits`; a ranged int `base` and the sizes `lo` and `hi`;
+// a quantity `base`. A size binding's `type` is Int's TypeId and its `size`
+// the number. A declared non-generic type and a builtin scalar list none.
+sema_comptime_reflection_type_bindings: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
+    TComptimeValue.List{
+        values: if ty == {
+            .Apply(name, args) -> {
+                params: sema_comptime_reflection_type_param_names(graph, caller, name)
+                loop (index, arg) in args -> sema_comptime_reflection_type_binding(graph, caller, if index < params.len() -> params[index] else -> "{index}", arg)
+            }
+            .List(element) -> [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "element", element)}
+            .Option(inner) | .Shared(inner) | .Tagged(_, inner) -> [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "inner", inner)}
+            .Map(key, _, value) -> [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "key", key), sema_comptime_reflection_type_binding(graph, caller, "value", value)}
+            .Result(ok, err) -> [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "ok", ok), sema_comptime_reflection_type_binding(graph, caller, "err", err)}
+            .Tuple(fields) -> loop (index, field) in fields -> sema_comptime_reflection_type_binding(graph, caller, if field.name == "" -> "{index}" else -> field.name, field.ty)
+            .Union(members) -> loop (index, member) in members -> sema_comptime_reflection_type_binding(graph, caller, "{index}", member)
+            .Fn(params, ret, _, contract, _, _) -> {
+                bindings := [TComptimeValue]{}
+                loop (index, param) in params {
+                    label: if contract == .Val(rows) && index < rows.len() && rows[index].label != "" -> rows[index].label else -> "{index}"
+                    bindings.push(sema_comptime_reflection_type_binding(graph, caller, label, param))
+                }
+                if ret == .Val(result) -> bindings.push(sema_comptime_reflection_type_binding(graph, caller, "result", result))
+                bindings
+            }
+            .FixedList(element, length) -> {
+                bindings := [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "element", element)}
+                if length == .Literal(_, count) -> bindings.push(sema_comptime_reflection_size_binding(graph, "length", count))
+                bindings
+            }
+            .IntN(_, bits) -> [TComptimeValue]{sema_comptime_reflection_size_binding(graph, "bits", bits)}
+            .Float -> [TComptimeValue]{sema_comptime_reflection_size_binding(graph, "bits", 64)}
+            .Float32 -> [TComptimeValue]{sema_comptime_reflection_size_binding(graph, "bits", 32)}
+            .InlineRange(base, lo, hi) -> [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "base", base), sema_comptime_reflection_size_binding(graph, "lo", lo), sema_comptime_reflection_size_binding(graph, "hi", hi)}
+            .Quantity(base, _) -> [TComptimeValue]{sema_comptime_reflection_type_binding(graph, caller, "base", base)}
+            .Int | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .Case(_, _) | .Measure(_) -> [TComptimeValue]{}
+        },
+    }
+}
+
+// The type parameter names of the generic declaration `name` written in
+// module row `caller`, in order; none when no registered declaration answers.
+sema_comptime_reflection_type_param_names: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> [String] {
+    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return [String]{}
+    loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
+}
+
+// The GenericBindingInfo binding `name` to type `ty`, which module row
+// `caller` writes: its `size` is None, unless `ty` is a number argument
+// (`Matrix<3>`), which binds Int with that size.
+sema_comptime_reflection_type_binding: fn(graph: SemaRegistrationGraph, caller: Int, name: String, ty: Type) -> TComptimeValue {
+    if ty == .Measure(measure) && measure == .Literal(_, size) -> return sema_comptime_reflection_size_binding(graph, name, size)
+    sema_comptime_reflection_binding_info(name, sema_comptime_reflection_type_id(graph, caller, ty), sema_comptime_reflection_none(Type.Int))
+}
+
+// The GenericBindingInfo of the number argument `name`: Int's TypeId with
+// `size` set.
+sema_comptime_reflection_size_binding: fn(graph: SemaRegistrationGraph, name: String, size: Int) -> TComptimeValue {
+    sema_comptime_reflection_binding_info(name, sema_comptime_reflection_type_id(graph, -1, Type.Int), sema_comptime_reflection_some(TComptimeValue.Int{value: size}))
+}
+
+// A GenericBindingInfo record of `name`, its TypeId `ty` and its `size` (an
+// `Int?` value).
+sema_comptime_reflection_binding_info: fn(name: String, ty: TComptimeValue, size: TComptimeValue) -> TComptimeValue {
+    sema_comptime_reflection_struct(
+        "GenericBindingInfo",
+        [SemaComptimeReflectionField]{
+            SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
+            SemaComptimeReflectionField{name: "type", value: ty},
+            SemaComptimeReflectionField{name: "size", value: size},
+        },
+    )
 }
 
 // A type's TypeId when a registration `graph` may be absent: with none, the
@@ -1556,7 +1640,8 @@ sema_comptime_reflection_written_type_id: fn(ty: Type) -> TComptimeValue {
 // The TypeId of one type spelled twice with no registration to qualify it:
 // `identity` names each declared type by its module, `name` is the type as
 // it prints. A function type's `signature` pairs the two spellings' parts
-// the same way; any other type's is None.
+// the same way; any other type's is None. With no registration to name a
+// declaration's type parameters, it lists no generic bindings.
 sema_comptime_reflection_type_id_of: fn(identity: Type, name: Type) -> TComptimeValue {
     signature := sema_comptime_reflection_none(Type.Named{name: "CallableSignature"})
     if identity == .Fn(identity_params, identity_ret, _, _, _, _) && name == .Fn(name_params, name_ret, _, _, _, _) && identity_params.len() == name_params.len() {
@@ -1567,24 +1652,27 @@ sema_comptime_reflection_type_id_of: fn(identity: Type, name: Type) -> TComptime
         }
         signature = sema_comptime_reflection_type_signature(identity, types, returned)
     }
-    sema_comptime_reflection_type_id_signed(type_name(identity), type_name(name), signature)
+    sema_comptime_reflection_type_id_signed(type_name(identity), type_name(name), signature, TComptimeValue.List{values: [TComptimeValue]{}})
 }
 
 // The TypeId record of an `identity` and the `name` it prints as, for a type
-// that is no function type: its `signature` is None.
+// that is no function type: its `signature` is None and it lists no generic
+// bindings.
 sema_comptime_reflection_type_id_record: fn(identity: String, name: String) -> TComptimeValue {
-    sema_comptime_reflection_type_id_signed(identity, name, sema_comptime_reflection_none(Type.Named{name: "CallableSignature"}))
+    sema_comptime_reflection_type_id_signed(identity, name, sema_comptime_reflection_none(Type.Named{name: "CallableSignature"}), TComptimeValue.List{values: [TComptimeValue]{}})
 }
 
-// The TypeId record of an `identity`, the `name` it prints as and its
-// `signature` value (a `CallableSignature?`).
-sema_comptime_reflection_type_id_signed: fn(identity: String, name: String, signature: TComptimeValue) -> TComptimeValue {
+// The TypeId record of an `identity`, the `name` it prints as, its
+// `signature` value (a `CallableSignature?`) and its `generic_bindings` (a
+// `[GenericBindingInfo]`).
+sema_comptime_reflection_type_id_signed: fn(identity: String, name: String, signature: TComptimeValue, bindings: TComptimeValue) -> TComptimeValue {
     sema_comptime_reflection_struct(
         "TypeId",
         [SemaComptimeReflectionField]{
             SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: identity}},
             SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
             SemaComptimeReflectionField{name: "signature", value: signature},
+            SemaComptimeReflectionField{name: "generic_bindings", value: bindings},
         },
     )
 }
@@ -2397,28 +2485,22 @@ sema_comptime_reflection_specialized_identity: fn(identity: String, bindings: [S
 // The TypeId a TypeInfo's `identity` is: the type `type_name` module row
 // `caller` declares, applied to the specialization `bindings` when it has
 // any, named as every TypeId names a type (sema_comptime_reflection_type_id),
-// so a field whose type it is reads the same TypeId.
+// so a field whose type it is reads the same TypeId. A specialization's
+// `generic_bindings` pair each type parameter with its argument.
 sema_comptime_reflection_declared_type_id: fn(graph: SemaRegistrationGraph, caller: Int, type_name: String, bindings: [SemaInferenceBinding]) -> TComptimeValue {
     if bindings.len() == 0 {
         return sema_comptime_reflection_type_id(graph, caller, Type.Named{name: type_name})
     }
     identity: Type.Apply{name: sema_comptime_reflection_qualified_name(graph, caller, type_name), args: loop binding in bindings -> sema_comptime_reflection_named_type(graph, caller, binding.ty, qualified: true)}
     written: Type.Apply{name: sema_comptime_reflection_shown_name(graph, caller, type_name), args: loop binding in bindings -> sema_comptime_reflection_named_type(graph, caller, type_identity_unqualified_nominals(binding.ty), qualified: false)}
-    sema_comptime_reflection_type_id_of(identity, written)
+    sema_comptime_reflection_with_field(sema_comptime_reflection_type_id_of(identity, written), "generic_bindings", sema_comptime_reflection_binding_infos(graph, caller, bindings))
 }
 
 // The GenericBindingInfo records of a specialization, in parameter order;
-// each argument's TypeId is named from the module row `caller`.
+// each argument's TypeId is named from the module row `caller`, and a number
+// argument binds Int with its size (sema_comptime_reflection_type_binding).
 sema_comptime_reflection_binding_infos: fn(registration: SemaRegistrationGraph, caller: Int, bindings: [SemaInferenceBinding]) -> TComptimeValue {
-    TComptimeValue.List{
-        values: loop binding in bindings -> sema_comptime_reflection_struct(
-            "GenericBindingInfo",
-            [SemaComptimeReflectionField]{
-                SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: binding.name}},
-                SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, binding.ty)},
-            },
-        ),
-    }
+    TComptimeValue.List{values: loop binding in bindings -> sema_comptime_reflection_type_binding(registration, caller, binding.name, binding.ty)}
 }
 
 // Record `info` with field `name` holding `value` instead.

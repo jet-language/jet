@@ -1,0 +1,71 @@
+// A rule reads the generic bindings of the Transform types it hears: the
+// first transform's `To` must be the second's `From`.
+Screen: struct {}
+
+World: struct {}
+
+View: struct {}
+
+Camera: struct {}
+
+Unbound: struct {
+    index: Int,
+
+    impl Diagnostic {
+        code: "space.Unbound",
+
+        what: fn(self) -> String { "argument {self.index} does not bind From and To" }
+
+        why: fn(self) -> String { "a Transform's TypeId lists its type parameters" }
+
+        fix: fn(self) -> String { "pass a Transform" }
+    }
+}
+
+Mismatch: struct {
+    left: String,
+    right: String,
+
+    impl Diagnostic {
+        code: "space.Mismatch",
+
+        what: fn(self) -> String { "`{self.left}` does not match `{self.right}`" }
+
+        why: fn(self) -> String { "a chain is valid only when the first transform ends where the second starts" }
+
+        fix: fn(self) -> String { "pass transforms whose middle spaces are the same" }
+    }
+}
+
+Spaces: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args.len() != 2 -> return
+            first: call.args[0].type.generic_bindings
+            second: call.args[1].type.generic_bindings
+            if first.len() != 2 || first[0].name != "From" || first[1].name != "To" -> return reject(Unbound{index: 0}, at: call.args[0])
+            if second.len() != 2 || second[0].name != "From" || second[1].name != "To" -> return reject(Unbound{index: 1}, at: call.args[1])
+            if first[1].type.identity != second[0].type.identity {
+                reject(Mismatch{left: first[1].type.name, right: second[0].type.name}, at: call.args[1])
+            }
+        }
+    }
+}
+
+#Spaces matching: fn(first: Transform<Screen, World>, second: Transform<World, View>) -> Int {
+    first.to_frame + second.from_frame
+}
+
+#Spaces crossed: fn(first: Transform<Screen, World>, second: Transform<View, Camera>) -> Int {
+    first.to_frame + second.from_frame
+}
+
+run: fn() {
+    screen_to_world: Transform<Screen, World>.affine(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1, 2)
+    world_to_view: Transform<World, View>.affine(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2, 3)
+    view_to_camera: Transform<View, Camera>.affine(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3, 4)
+    print(matching(screen_to_world, world_to_view))
+    print(crossed(screen_to_world, view_to_camera))
+}

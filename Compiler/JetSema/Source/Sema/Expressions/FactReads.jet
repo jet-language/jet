@@ -626,6 +626,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
         return if {
             field == "name" -> Val(string)
             field == "type" -> Val(sema_fact_named("TypeId"))
+            field == "size" && type_name == "GenericBindingInfo" -> Val(Type.Option{inner: Type.Int})
             else -> None
         }
     }
@@ -655,6 +656,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
         return if {
             field == "identity" || field == "name" -> Val(string)
             field == "signature" -> Val(sema_fact_optional("CallableSignature"))
+            field == "generic_bindings" -> Val(sema_fact_list_of("GenericBindingInfo"))
             else -> None
         }
     }

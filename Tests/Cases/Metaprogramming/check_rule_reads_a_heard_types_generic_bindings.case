@@ -1,0 +1,13 @@
+# A marker's `check` rule reads a heard argument's TypeId `generic_bindings`:
+# `Transform<Screen, World>` binds `From` to `Screen` and `To` to `World`, so
+# the rule can refuse a chain whose middle spaces differ.
+fixture: CheckRuleReadsAHeardTypesGenericBindings.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1
+stderr: ~ "space.Mismatch" # the rule refuses the chain whose spaces differ
+stderr: ~ "`World` does not match `View`" # read from the two bindings
+stderr: !~ "space.Unbound" # each heard Transform lists From and To
+stderr: !~ "`World` does not match `World`" # the matching chain passes
