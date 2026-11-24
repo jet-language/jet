@@ -6684,56 +6684,56 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 183,
+      "line": 322,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 189,
+      "line": 328,
       "column": 5,
       "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 197,
+      "line": 336,
       "column": 5,
       "reason": "read the native IP address discriminant"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 260,
+      "line": 399,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 267,
+      "line": 406,
       "column": 5,
       "reason": "read socket IP representation; formatting stays in Jet"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 273,
+      "line": 412,
       "column": 5,
       "reason": "read native socket port"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 287,
+      "line": 426,
       "column": 5,
       "reason": "read native IPv6 socket scope identifier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 480,
+      "line": 619,
       "column": 5,
       "reason": "read the native UDP packet's socket-address carrier"
     },
@@ -12752,14 +12752,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Mem/Mem.jet | 302:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
 | Core | Core/Mem/Mem.jet | 307:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
 | Core | Core/Mem/Mem.jet | 349:13 | "the block's bytes went back to the allocator that served them" |
-| Core | Core/Net/Net.jet | 183:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 189:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
-| Core | Core/Net/Net.jet | 197:5 | "read the native IP address discriminant" |
-| Core | Core/Net/Net.jet | 260:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
-| Core | Core/Net/Net.jet | 267:5 | "read socket IP representation; formatting stays in Jet" |
-| Core | Core/Net/Net.jet | 273:5 | "read native socket port" |
-| Core | Core/Net/Net.jet | 287:5 | "read native IPv6 socket scope identifier" |
-| Core | Core/Net/Net.jet | 480:5 | "read the native UDP packet's socket-address carrier" |
+| Core | Core/Net/Net.jet | 322:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 328:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
+| Core | Core/Net/Net.jet | 336:5 | "read the native IP address discriminant" |
+| Core | Core/Net/Net.jet | 399:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 406:5 | "read socket IP representation; formatting stays in Jet" |
+| Core | Core/Net/Net.jet | 412:5 | "read native socket port" |
+| Core | Core/Net/Net.jet | 426:5 | "read native IPv6 socket scope identifier" |
+| Core | Core/Net/Net.jet | 619:5 | "read the native UDP packet's socket-address carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3653:1 | "`key` and `iv` are a vector record's, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3656:5 | "a vector record's key and nonce, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3662:1 | "`key` and `iv` are a vector record's, used for that record only" |

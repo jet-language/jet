@@ -45,6 +45,9 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
         .Err(err) -> print("tcp limit 0: {err}")
     }
     print("tcp at end: {client.read_into(tcp_buffer, 8) ?? panic("tcp read at end")}")
+    _: client.peer_addr() ?? panic("peer address")
+    _: client.local_addr() ?? panic("local address")
+    client.shutdown(.Write) ?? panic("tcp shutdown")
     client.close() ?? panic("close")
     tcp_task.join() ?? panic("tcp server")
 
@@ -55,16 +58,15 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     unix_task: task {
         unix_tx.send("ready") ?? panic("unix ready")
         peer := net.unix_accept(unix_listener) ?? panic("unix accept")
-        net.unix_write_all_bytes(peer, C_PAYLOAD.bytes()) ?? panic("unix write")
+        peer.set_timeout(5s) ?? panic("unix timeout")
+        _: peer.ready(.Write, deadline: 5s) ?? panic("unix writable")
+        peer.write_bytes(C_PAYLOAD.bytes(), deadline: 5s) ?? panic("unix write")
         net.unix_close(peer) ?? panic("unix close")
     }
     _ready: unix_rx.receive() ?? panic("unix ready")
     unix_client := net.unix_connect(path) ?? panic("unix connect")
     unix_buffer := "unix> ".bytes()
-    loop {
-        count: unix_client.read_into(unix_buffer, 16, deadline: 5s) ?? panic("unix read_into")
-        if count == 0 -> break
-    }
+    read_until_end(unix_client, unix_buffer)
     print(String.from_bytes(unix_buffer) ?? "?")
     net.unix_close(unix_client) ?? panic("unix close")
     unix_task.join() ?? panic("unix server")
@@ -119,4 +121,13 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
         }
     }
     files.remove(file_path) ?? panic("remove file")
+}
+
+// Appends what `stream` sends to `buffer` until the peer closes, sixteen
+// bytes a read, each waiting at most five seconds.
+read_until_end: fn(stream: &net.UnixStream, buffer: &[U8]) {
+    loop {
+        count: stream.read_into(buffer, 16, deadline: 5s) ?? panic("unix read_into")
+        if count == 0 -> break
+    }
 }

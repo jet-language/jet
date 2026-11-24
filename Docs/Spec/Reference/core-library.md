@@ -2048,6 +2048,13 @@ fragments, missing hosts, and other schemes before the provider handshake.
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `WsError!` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage WsError!` | Receive a text, binary, or close message. |
 | `conn.close(code, reason)` | `WsError!` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
+| `message.is_text()` / `message.is_binary()` / `message.is_close()` | `Bool` | Which kind of message `recv` returned. |
+| `message.text()` / `message.bytes()` | `String WsError!` / `[U8] WsError!` | A text message's text or a binary message's bytes; `WsError.Protocol` for any other kind. |
+
+`WsConn` and `WsMessage` are Core structs over a runtime handle. Their
+methods call `jet.runtime.net`, as `core.net`'s `TCPListener`, `TCPStream`,
+`UDPSocket`, `UnixListener` and `UnixStream` do. A `WsConn`, `TCPStream`
+or `UnixStream` moves; it is not copied.
 
 `WsError` distinguishes invalid URLs, invalid handshakes, protocol/size
 failures, timeout, cancellation, closed connections, and unsupported targets.
