@@ -175,6 +175,9 @@ Table: struct {
     tails: [String:String],
     units: [String],
     names: [String],
+    // Each number size a family's methods reach (`I8`), and its owner type in
+    // the module of those methods (`core.math.I8`): with_family_sizes.
+    sizes: [String:String],
 }
 
 Call: struct {
@@ -817,7 +820,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
 
 // Call resolution's view of the inventory.
 table_of: fn(functions: [Function]) -> Table Never! {
-    table := Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}}
+    table := Table{ids: [String]{}, by_id: [String:Int]{}, returns: [String]{}, types: [String:Bool]{}, tails: [String:String]{}, units: [String]{}, names: [String]{}, sizes: [String:String]{}}
     loop index in 0..<functions.len() {
         row: functions[index]
         table.ids.push(row.id.copy())
@@ -834,6 +837,44 @@ table_of: fn(functions: [Function]) -> Table Never! {
         }
     }
     table
+}
+
+// `table` with each method of a number family (`impl Signed.Roundable` in
+// core.math gives `Signed.rounded`) also the method of each of the family's
+// sizes, so `I8{3}.rounded(mode)` calls core.math.Signed.rounded. A family's
+// sizes are the aliases `NAME: Family<sizes>` at the margin of `prelude`
+// (Core/Prelude/Prelude.jet).
+with_family_sizes: fn(table: Table, prelude: String) -> Table Never! {
+    families := [String:[String]]{}
+    loop line in prelude.split("\n") {
+        if line.starts_with(" ") || !line.ends_with(">") -> next
+        name: line.partition(": ").head
+        written: line.partition(": ").tail
+        family: written.partition("<").head
+        if name == line || family == written || !is_identifier(name) || !is_identifier(family) -> next
+        numbers := true
+        loop part in written.partition("<").tail.partition(">").head.split(", ") {
+            if (Int.parse(part) ?? -1) < 0 -> numbers = false
+        }
+        if !numbers -> next
+        sizes := families.get(family) ?? [String]{}
+        sizes.push(name.copy())
+        families[family.copy()] = sizes
+    }
+    out := table.copy()
+    loop index in 0..<table.ids.len() {
+        name: table.names[index]
+        family: first_part(name)
+        if family == name || !families.has_key(family) -> next
+        method: name.partition(".").tail
+        loop size in families[family] {
+            owner: "{table.units[index]}.{size}"
+            if !out.by_id.has_key("{owner}.{method}") -> out.by_id["{owner}.{method}"] = index
+            out.types[owner.copy()] = true
+            if !out.sizes.has_key(size) -> out.sizes[size.copy()] = owner.copy()
+        }
+    }
+    out
 }
 
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
@@ -856,6 +897,9 @@ initial_aliases: fn(table: Table, context: String) -> [String:String] Never! {
         if head != table.names[index] && BUILTIN_SCALARS.contains(head) && !aliases.has_key(head) {
             aliases[head.copy()] = "{table.units[index]}.{head}"
         }
+    }
+    loop (size, owner) in table.sizes {
+        if !aliases.has_key(size) -> aliases[size.copy()] = owner.copy()
     }
     aliases
 }
@@ -1449,12 +1493,17 @@ census: fn(root: String) -[FS]> Report CoverageError! {
         paths.push(path.copy())
         sources.push(source.copy())
     }
-    table: table_of(functions)
+    inventory: table_of(functions)
     unique := 0
-    loop _ in table.by_id -> unique += 1
+    loop _ in inventory.by_id -> unique += 1
     if functions.len() == 0 || unique != functions.len() {
         return Err(fail("Core census is empty or contains duplicate public function identities"))
     }
+    prelude := ""
+    loop index in 0..<paths.len() {
+        if paths[index] == "Core/Prelude/Prelude.jet" -> prelude = sources[index].copy()
+    }
+    table: with_family_sizes(inventory, prelude)
     bare: bare_spellings(root)
     seen := [String:Bool]{}
     loop index in 0..<paths.len() {
@@ -1889,6 +1938,16 @@ ids: fn(source: String, context: String) -> [String] Never! {
 }
 
 function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.id.copy() }) }
+
+#Test("a number family's methods are the methods of each of its sizes") {
+    rows: public_functions("Core/Math/Math.jet", "impl Signed.Roundable {{ rounded: fn(self) -> Self Never! {{ self }} }}")
+    table: with_family_sizes(table_of(rows), "Signed: struct<bits: Int> {{\n    raw: builtin.Word<bits>,\n}}\n\nI8: Signed<8>\nI16: Signed<16>\nBox: Pair<Int>\n")
+    found := [String]{}
+    loop call in call_sites("run: fn() {{ print(I16{{3}}.rounded()) }}", table, initial_aliases(table, "")) {
+        found.push(table.ids[call.index].copy())
+    }
+    assert_eq(found, [String]{"core.math.Signed.rounded"})
+}
 
 #Test("module layout matches Core module keys, including app and nested roots") {
     assert_eq(module_name("Core/Text/Text.jet"), "core.text")

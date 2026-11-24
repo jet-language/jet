@@ -942,7 +942,7 @@ sema_type_graph_resolve_named: fn(graph: SemaRegistrationGraph, name: String, ca
 // A size name (`U8`) nothing the caller sees binds is Core's alias of it
 // (`U8: Unsigned<8>` in core.prelude), resolved like any alias. The parser
 // leaves a written size name as a name only in a file that binds that name
-// somewhere (parser_bound_size_names); everywhere else it reads the alias's
+// somewhere (parser_bound_size_rows); everywhere else it reads the alias's
 // type at once.
 sema_type_graph_resolve_size_name: fn(graph: SemaRegistrationGraph, name: String) -> Type Never! {
     fallback: foundation_size_alias(name) ?? return Type.Named{name: name}
@@ -1602,7 +1602,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
     }
 }
 
-// D-CORE-NUMFAMILY1: a Core number family (`Signed`, `Unsigned`, `IEEE`,
+// A Core number family (`Signed`, `Unsigned`, `IEEE`,
 // declared once in core.prelude) applied to a standard size is that size's
 // type: `Unsigned<8>` is U8 and `IEEE<11, 52>` is F64. `row` is the nominal
 // the written head resolved to by ordinary lookup, so a type the caller

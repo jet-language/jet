@@ -295,21 +295,22 @@ sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue]
     items = expanded
 }
 
-// D-CORE-NUMFAMILY1: an impl of a number family (`impl Signed.Roundable`)
+// An impl of a number family (`impl Signed.Roundable`)
 // is the family's one definition. It expands here, before registration sees
 // the items, to one impl per standard size the Prelude names
-// (FOUNDATION_SIZE_ALIASES: `impl I8.Roundable` … `impl I64.Roundable`),
-// each with `Self` written as its size. A module that declares or imports a
-// type of the family's name keeps its own. A list with no family impl is
-// left untouched (not copied).
-sema_derive_expand_family_impls: fn(items: &[Item], imports: [ImportDecl], diagnostics: &[Diagnostic]) {
+// (FOUNDATION_SIZE_ALIASES: `impl I8.Roundable` … `impl I64.Roundable`):
+// the definition, moved out of the list and written for `Self`, is the
+// template each size expands with `Self` bound to its name. A module that
+// declares or imports a type of the family's name keeps its own. A list with
+// no family impl comes back as it was.
+sema_derive_expand_family_impls: fn(items: &&[Item], imports: [ImportDecl], diagnostics: &[Diagnostic]) -> [Item] {
     has_family: loop item in items {
         if item == .Impl(definition) && foundation_number_family(definition.type_name) {
             break true
         }
     } ?? false
     if !has_family {
-        return
+        return items.move()
     }
     taken := [String]{}
     loop declaration in imports {
@@ -320,23 +321,25 @@ sema_derive_expand_family_impls: fn(items: &[Item], imports: [ImportDecl], diagn
         taken.push(sema_registration_root_name(item))
     }
     expanded := [Item]{}
-    loop item in items {
+    loop item in items.move() {
         if item == .Impl(definition) && foundation_number_family(definition.type_name) && !taken.contains(definition.type_name) {
+            template := definition
+            family: template.type_name
+            template.type_name = "Self"
+            body: [DeriveBodyItem]{DeriveBodyItem.Item{value: Item.Impl{value: template}}}
             loop alias in FOUNDATION_SIZE_ALIASES {
-                if alias.family != definition.type_name -> next
+                if alias.family != family -> next
                 // F64 is Float, so its impl is written for `Float`.
-                size: type_name(foundation_family_type(alias.family, alias.sizes) ?? next)
-                sized := definition.copy()
-                sized.type_name = size.copy()
-                scope: [NamedCtValue]{NamedCtValue{name: "Self", value: CtValue.Str{value: size}}}
-                generated: sema_derive_expand_template_body([DeriveBodyItem]{DeriveBodyItem.Item{value: Item.Impl{value: sized}}}, scope, diagnostics) ?? next
+                size: foundation_family_type(alias.family, alias.sizes) ?? next
+                scope: [NamedCtValue]{NamedCtValue{name: "Self", value: CtValue.Str{value: type_name(size)}}}
+                generated: sema_derive_expand_template_body(body, scope, diagnostics) ?? next
                 loop generated_item in generated -> expanded.push(generated_item)
             }
             next
         }
-        expanded.push(item.copy())
+        expanded.push(item)
     }
-    items = expanded
+    expanded
 }
 
 SEMA_FAMILY_IMPLS_TRAIT: "Halve: trait {{\n    halved: fn(self) -> Self Never!,\n}}\n\n"
@@ -348,9 +351,8 @@ sema_family_impls_expanded: fn(source: String) -> [Item] {
     if sema_has_error_since(parsed.diagnostics, 0) {
         panic("the source does not parse: {parsed.diagnostics:Debug}")
     }
-    items := parsed.program.items.move()
     diagnostics := [Diagnostic]{}
-    sema_derive_expand_family_impls(items, parsed.program.imports, diagnostics)
+    items: sema_derive_expand_family_impls(parsed.program.items.move(), parsed.program.imports, diagnostics)
     if diagnostics.len() > 0 -> panic("the expansion reported {diagnostics:Debug}")
     items
 }

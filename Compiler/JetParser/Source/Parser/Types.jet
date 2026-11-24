@@ -10,6 +10,7 @@ use {
         EffectRowEntry,
         FunctionCallMetadata,
         FunctionDefaultRef,
+        Item,
         Measure,
         MeasureRule,
         ParamZone,
@@ -467,21 +468,27 @@ parser_build_fact_type_path: fn(name: String) -> Bool Never! {
 
 // The type a written name means in this file: a size name (`U8`) is the
 // compiler's own type its Core alias names, unless the file binds that name
-// itself (`bound_size_names`), where it stays a name Sema resolves in scope.
+// itself (`bound_size_rows`), where it stays a name Sema resolves in scope.
 parser_named_type: fn(state: &JetParserState, name: String) -> Type Never! {
-    if state.bound_size_names.len() > 0 && state.bound_size_names.contains(name) -> return Type.Named{name: name}
+    if state.bound_size_rows != 0 {
+        loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
+            if FOUNDATION_SIZE_ALIASES[row].name == name && (state.bound_size_rows & (1 << row)) != 0 {
+                return Type.Named{name: name}
+            }
+        }
+    }
     foundation_named_type(name)
 }
 
-// The size names (FOUNDATION_SIZE_ALIASES) `tokens` binds for itself:
-// declared (`U8: struct {…}`, read as `struct U8` once its colon head is
-// rotated), imported (`use mod.[U8]`, `use U8: mod.Byte`) or taken as a type
-// parameter (`fn<U8>`, `Name<U8>: …`). Core's own alias line
-// (`U8: Unsigned<8>`) binds nothing new. A wider answer than the file's own
-// bindings only leaves a size name for Sema, which resolves it through the
-// same alias.
-parser_bound_size_names: fn(tokens: [Token], tables: TokenTables) -> [String] Never! {
-    bound := [String]{}
+// The size names (FOUNDATION_SIZE_ALIASES) `tokens` binds for itself, as a
+// mask with bit `row` set for the alias row it binds: declared
+// (`U8: struct {…}`, read as `struct U8` once its colon head is rotated),
+// imported (`use mod.[U8]`, `use U8: mod.Byte`) or taken as a type parameter
+// (`fn<U8>`, `Name<U8>: …`). Core's own alias line (`U8: Unsigned<8>`)
+// binds nothing new. A wider answer than the file's own bindings only leaves
+// a size name for Sema, which resolves it through the same alias.
+parser_bound_size_rows: fn(tokens: [Token], tables: TokenTables) -> Int Never! {
+    bound := 0
     ids := [Int]{}
     rows := [Int]{}
     loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
@@ -503,7 +510,7 @@ parser_bound_size_names: fn(tokens: [Token], tables: TokenTables) -> [String] Ne
             next
         }
         if kind == TOKEN_LT {
-            parser_size_params(tokens, index, ids, rows, bound)
+            bound = bound | parser_size_params(tokens, index, ids, rows)
             next
         }
         if kind != TOKEN_IDENT -> next
@@ -513,14 +520,10 @@ parser_bound_size_names: fn(tokens: [Token], tables: TokenTables) -> [String] Ne
         after: if after_at < tokens.len() -> tokens[after_at].kind else -> TOKEN_EOF
         declared: after == TOKEN_COLON && !parser_size_alias_line(tokens, tables, after_at, FOUNDATION_SIZE_ALIASES[rows[found]].family, FOUNDATION_SIZE_ALIASES[rows[found]].sizes)
         if declared || parser_size_declaring(before) || (member_list && (before == TOKEN_LBRACKET || before == TOKEN_COMMA)) {
-            parser_size_bind(bound, FOUNDATION_SIZE_ALIASES[rows[found]].name)
+            bound = bound | (1 << rows[found])
         }
     }
     bound
-}
-
-parser_size_bind: fn(bound: &[String], name: String) Never! {
-    if !bound.contains(name) -> bound.push(name.copy())
 }
 
 // A keyword whose declaration names what follows it (`struct U8`) or opens
@@ -567,19 +570,20 @@ parser_size_alias_line: fn(tokens: [Token], tables: TokenTables, colon: Int, fam
 }
 
 // The size names the angle list opening at `open` takes as its type
-// parameters, when it is a parameter list: after a declaring keyword
-// (`fn<U8>`, `struct<…>`), after the name a rotated head declares
-// (`fn name<U8>`), or before the colon of an alias (`Name<U8>: …`).
-parser_size_params: fn(tokens: [Token], open: Int, ids: [Int], rows: [Int], bound: &[String]) Never! {
+// parameters, as a mask of their alias rows (0 when it is no parameter
+// list): after a declaring keyword (`fn<U8>`, `struct<…>`), after the name a
+// rotated head declares (`fn name<U8>`), or before the colon of an alias
+// (`Name<U8>: …`).
+parser_size_params: fn(tokens: [Token], open: Int, ids: [Int], rows: [Int]) -> Int Never! {
     before_at := open - 1
     loop before_at >= 0 && parser_is_trivia(tokens[before_at].kind) {
         before_at -= 1
     }
-    if before_at < 0 -> return
+    if before_at < 0 -> return 0
     before: tokens[before_at].kind
     declared: parser_size_declaring(before) || (before == TOKEN_IDENT && parser_size_declaring(parser_size_code_before(tokens, before_at)))
-    if !declared && before != TOKEN_IDENT -> return
-    names := [Int]{}
+    if !declared && before != TOKEN_IDENT -> return 0
+    names := 0
     depth := 1
     previous := TOKEN_LT
     at := open + 1
@@ -589,23 +593,41 @@ parser_size_params: fn(tokens: [Token], open: Int, ids: [Int], rows: [Int], boun
             at += 1
             next
         }
-        if kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_SEMI || kind == TOKEN_EOF -> return
+        if kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_SEMI || kind == TOKEN_EOF -> return 0
         if kind == TOKEN_LT -> depth += 1
         if kind == TOKEN_GT -> depth -= 1
         if kind == TOKEN_SHR -> depth -= 2
         if depth <= 0 -> break
         if depth == 1 && kind == TOKEN_IDENT && (previous == TOKEN_LT || previous == TOKEN_COMMA) {
-            if ids.index_of(name_index(tokens[at].text)) == .Val(found) -> names.push(rows[found])
+            if ids.index_of(name_index(tokens[at].text)) == .Val(found) -> names = names | (1 << rows[found])
         }
         previous = kind
         at += 1
     }
-    if depth > 0 -> return
+    if depth > 0 -> return 0
     if !declared {
         after: parser_size_code_after(tokens, at)
-        if after >= tokens.len() || tokens[after].kind != TOKEN_COLON -> return
+        if after >= tokens.len() || tokens[after].kind != TOKEN_COLON -> return 0
     }
-    loop row in names -> parser_size_bind(bound, FOUNDATION_SIZE_ALIASES[row].name)
+    names
+}
+
+// The type of the first parameter of `source`'s function `name`.
+parser_size_test_param_type: fn(source: String, name: String) -> Type {
+    parsed: parse_source(source.bytes())
+    loop item in parsed.program.items {
+        if item == .Func(function) && function.name == name -> return function.params[0].ty
+    }
+    panic("`{name}` is not a function of the source")
+}
+
+#Test("a size name the file binds stays a name; every other size name is its type") {
+    declared: "U8: struct {{\n    v: Int,\n}}\n\nf: fn(x: U8) -> Int {{ x.v }}\n\ng: fn(x: I8) -> I8 {{ x }}\n"
+    assert(parser_size_test_param_type(declared, "f") == Type.Named{name: "U8"})
+    assert(parser_size_test_param_type(declared, "g") == Type.IntN{signed: true, bits: 8})
+    parameter: "f: fn<U16>(x: U16) -> U16 {{ x }}\n\ng: fn(x: U8) -> U8 {{ x }}\n"
+    assert(parser_size_test_param_type(parameter, "f") == Type.Named{name: "U16"})
+    assert(parser_size_test_param_type(parameter, "g") == Type.IntN{signed: false, bits: 8})
 }
 
 parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedType {

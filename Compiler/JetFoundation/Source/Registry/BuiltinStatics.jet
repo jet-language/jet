@@ -190,14 +190,15 @@ BUILTIN_STATIC_ROWS: #run { [BuiltinStaticRow]{
 // (FOUNDATION_SIZE_ALIASES, `U8: Unsigned<8>`). A size's facts are its
 // family's: a Signed or Unsigned size is a fixed whole number of its bits,
 // an IEEE size a float of one sign bit plus its exponent and fraction bits.
-BUILTIN_NUMERIC_KINDS: #run builtin_numeric_family_kinds()
+BUILTIN_NUMERIC_KINDS: #run builtin_numeric_family_kinds(embed_file("toolchain:Core/Prelude/Prelude.jet"))
 
-builtin_numeric_family_kinds: fn() -> [BuiltinNumericKind] Never! {
+// The kinds of the sizes `prelude` names, each row owned by this loop.
+builtin_numeric_family_kinds: fn(prelude: String) -> [BuiltinNumericKind] Never! {
     kinds := [BuiltinNumericKind]{
         {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
         {name: "Float", ty: Type.Float, rust: "f64", integer: false, fixed: false, signed: true, bits: 64},
     }
-    loop alias in FOUNDATION_SIZE_ALIASES {
+    loop alias in foundation_size_alias_rows(prelude) {
         ty: foundation_family_type(alias.family, alias.sizes) ?? panic("`{alias.name}` names no family size")
         integer: alias.family != "IEEE"
         signed: alias.family != "Unsigned"
@@ -207,7 +208,7 @@ builtin_numeric_family_kinds: fn() -> [BuiltinNumericKind] Never! {
             signed -> "i"
             else -> "u"
         }
-        kinds.push(BuiltinNumericKind{name: alias.name.copy(), ty: ty, rust: "{word}{bits}", integer: integer, fixed: integer, signed: signed, bits: bits})
+        kinds.push(BuiltinNumericKind{name: alias.name, ty: ty, rust: "{word}{bits}", integer: integer, fixed: integer, signed: signed, bits: bits})
     }
     kinds
 }
@@ -223,14 +224,14 @@ builtin_numeric_family_kinds: fn() -> [BuiltinNumericKind] Never! {
 // `T{x}` is the one conversion, and an integer head takes a Float by
 // `Int{f}`. A distinct numeric type keeps every row of its base
 // (`UserID.from_int`).
-BUILTIN_NUMERIC_SOURCES: #run builtin_numeric_family_sources()
+BUILTIN_NUMERIC_SOURCES: #run builtin_numeric_family_sources(embed_file("toolchain:Core/Prelude/Prelude.jet"))
 
-builtin_numeric_family_sources: fn() -> [BuiltinNumericSource] Never! {
+builtin_numeric_family_sources: fn(prelude: String) -> [BuiltinNumericSource] Never! {
     sources := [BuiltinNumericSource]{{method: "from_int", source: "Int"}}
-    loop alias in FOUNDATION_SIZE_ALIASES {
+    loop alias in foundation_size_alias_rows(prelude) {
         ty: foundation_family_type(alias.family, alias.sizes) ?? panic("`{alias.name}` names no family size")
         if type_name(ty) != alias.name -> next
-        sources.push(BuiltinNumericSource{method: "from_{alias.name.lower()}", source: alias.name.copy()})
+        sources.push(BuiltinNumericSource{method: "from_{alias.name.lower()}", source: type_name(ty)})
     }
     sources.push(BuiltinNumericSource{method: "from_float", source: "Float"})
     sources.push(BuiltinNumericSource{method: "from_decimal", source: "Decimal"})
@@ -239,9 +240,11 @@ builtin_numeric_family_sources: fn() -> [BuiltinNumericSource] Never! {
 }
 
 #Test("each family size converts by its own name, with its family's host word") {
-    methods := [String]{}
-    loop row in BUILTIN_NUMERIC_SOURCES -> methods.push(row.method.copy())
-    assert_eq(methods.join(" "), "from_int from_i8 from_i16 from_i32 from_i64 from_u8 from_u16 from_u32 from_u64 from_f32 from_float from_decimal from_fraction")
+    methods := ""
+    loop row in BUILTIN_NUMERIC_SOURCES {
+        methods = if methods == "" -> "{row.method}" else -> "{methods} {row.method}"
+    }
+    assert_eq(methods, "from_int from_i8 from_i16 from_i32 from_i64 from_u8 from_u16 from_u32 from_u64 from_f32 from_float from_decimal from_fraction")
     words := [String]{}
     loop kind in BUILTIN_NUMERIC_KINDS -> words.push("{kind.name}:{kind.rust}:{kind.bits}")
     assert_eq(words.join(" "), "Int:i64:64 Float:f64:64 I8:i8:8 I16:i16:16 I32:i32:32 I64:i64:64 U8:u8:8 U16:u16:16 U32:u32:32 U64:u64:64 F32:f32:32 F64:f64:64")
