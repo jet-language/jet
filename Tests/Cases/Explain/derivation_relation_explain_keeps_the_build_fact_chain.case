@@ -1,0 +1,21 @@
+# A build fact's writer chain is a record of the build-fact producer. The text
+# is the chain as before, in the order the contribution law ranked its
+# writers; `--json` keeps its fields and adds the record as `derivation`,
+# whose payload keeps that order.
+copy: {root}/Examples/Modules/Packages/TypedSettings typed_settings
+step: jet explain "#build.settings.tls" run.jet --profile=release --set tls=true
+cwd: typed_settings
+env: NO_COLOR=1
+exit: 0
+stdout: = ../CLIPartsSurface/explain_build_setting.txt
+step: jet explain "#build.settings.tls" run.jet --profile=release --set tls=true --json
+cwd: typed_settings
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $.code = "Build.Settings.tls" # today's fields stay
+json: stdout doc $.derivation.subject = "Build.Settings.tls"
+json: stdout doc $.derivation.producer = "jet-driver"
+json: stdout doc $.derivation.rule = "build-fact-chain"
+json: stdout doc $.derivation.claim = "Build.Settings.tls = true"
+json: stdout doc $.derivation.payload.writers #= 3 # every writer, in rank order
+json: stdout doc $.derivation.payload.writers[2] ~ "[effective] command line" # the effective writer stays last

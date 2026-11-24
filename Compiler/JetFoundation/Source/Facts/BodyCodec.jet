@@ -4821,13 +4821,25 @@ body_codec_put_derivationpayload: fn(out: &BodyCodecOut, value: DerivationPayloa
             body_codec_put_tag(out, 0)
             body_codec_put_frameschedule(out, p0)
         }
+        .BuildFactChain(p0) -> {
+            body_codec_put_tag(out, 1)
+            body_codec_put_list_string(out, p0)
+        }
     }
 }
 
 body_codec_get_derivationpayload: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationPayload Never! {
-    body_codec_skip_tag(bytes, input, 1)
-    f0: body_codec_get_frameschedule(bytes, input)
-    DerivationPayload.FrameSchedule{schedule: f0}
+    position: body_codec_get_tag(bytes, input, 2, 0)
+    if position == {
+        1 -> {
+            f0: body_codec_get_list_string(bytes, input)
+            DerivationPayload.BuildFactChain{writers: f0}
+        }
+        else -> {
+            f0: body_codec_get_frameschedule(bytes, input)
+            DerivationPayload.FrameSchedule{schedule: f0}
+        }
+    }
 }
 
 body_codec_put_tcapturefacts: fn(out: &BodyCodecOut, value: TCaptureFacts) Never! {

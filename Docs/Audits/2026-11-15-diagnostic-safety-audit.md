@@ -525,10 +525,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:135 | refresh the view after the next stop |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:345 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:345 | the string's owner lives as long as the view, or the string is copied |
-| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2102 | the entry resolves |
-| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2103 | the module graph resolves |
-| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2104 | the Core closure resolves |
-| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2105 | every applicable tier lowers |
+| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2103 | the entry resolves |
+| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2104 | the module graph resolves |
+| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2105 | the Core closure resolves |
+| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2106 | every applicable tier lowers |
 | E2393 | ImportWithoutProject | Compiler/JetCLI/Source/CLI/Entry.jet:1666 | the file sits in a package or workspace |
 | E2401 | InvalidDelegationTarget | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3917 | the field implements the trait |
 | E2402 | MissingErrorConversion | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1181 | declare the conversion |
@@ -678,7 +678,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:211 | a producer makes the file |
 | E3516 | GenerationRoundLimit | Compiler/JetBuildSession/Source/Session.jet:493 | a shorter chain of generating steps |
 | E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:617 | one build entry per package |
-| E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:405 | one writer per layer |
+| E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:420 | one writer per layer |
 | E3530 | ReservedBuildRuleCode | Compiler/JetEval/Source/BuildServices.jet:117 | a code outside the compiler's shape |
 | E3540 | DuplicateCommandOverride | Compiler/JetCLI/Source/CLI/Entry.jet:942 | one override per command |
 | E3611 | CorruptProofArtifact | Compiler/JetCLI/Source/CLI/ProveReport.jet:1864 | produce the artifact again |

@@ -111,6 +111,12 @@ evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord Evid
     payload: if payload_marker == {
         0 -> None
         1 -> Val(DerivationPayload.FrameSchedule{schedule: evidence_decode_frame_schedule(evidence_get_string(cursor))})
+        2 -> {
+            writers := [String]{}
+            writer_count: evidence_get_len(cursor)
+            loop _ in 0..<writer_count -> writers.push(evidence_get_string(cursor))
+            Val(DerivationPayload.BuildFactChain{writers: writers})
+        }
         else -> {
             return Err(evidence_codec_error("unknown derivation payload marker {payload_marker}"))
         }

@@ -2,9 +2,11 @@
 use jet_foundation.[
     DerivationDisposition,
     DerivationMethod,
+    DerivationPayload,
     DerivationRecord,
     derivation_identity,
     derivation_record,
+    derivation_record_with_payload,
     derivation_store_add,
     derivation_store_chain,
     derivation_store_decode,
@@ -59,4 +61,16 @@ derivation_store_premise: fn() -> DerivationRecord Never! {
         .Err(_) -> true
     }
     derivation_store_require(truncated, "truncated bytes are refused")
+}
+
+#Test("a build fact's writer chain round-trips in its rank order") {
+    store := derivation_store_new()
+    writers: [String]{"[shadowed] declaration / package true at package.jet:settings.tls (default):0..0", "[effective] command line / package false at command line:--set tls=false:0..0"}
+    record: derivation_record("Build.Settings.tls", "Build.Settings.tls = false", "jet-driver", DerivationMethod.StaticDerivation, "build-fact-chain", [String]{"command line:--set tls=false", "declaration:package.jet:settings.tls (default)"}, derivation_identity("", "release", "", "x86_64-unknown-linux-gnu"))
+    _: derivation_store_add(store, derivation_record_with_payload(record, DerivationPayload.BuildFactChain{writers: writers})) ?? panic("add the build fact")
+    bytes: derivation_store_encode(store) ?? panic("encode")
+    decoded: derivation_store_decode(bytes, U64.MAX) ?? panic("decode")
+    derivation_store_require(decoded.records == store.records, "the build fact round-trips losslessly")
+    kept: if decoded.records[0].payload == .Val(payload) && payload == .BuildFactChain(chain) -> chain else -> [String]{}
+    derivation_store_require(kept.len() == 2 && kept[1].starts_with("[effective]"), "the writers keep their rank order")
 }

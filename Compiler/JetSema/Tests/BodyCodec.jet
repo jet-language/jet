@@ -643,16 +643,17 @@ body_codec_file: fn(captures: &&SemaCoreCaptures) -> [U8] {
 // type `interner` holds at N.
 body_codec_types_spelled: fn(text: String, interner: Interner) -> String {
     parts: text.split("TypeID {{ id: ").to_list()
-    spelled := [String]{parts[0].copy()}
+    spelled := ""
+    spelled += parts[0]
     loop index in 1..<parts.len() {
         part: parts[index]
         close: part.find(" }}")
         if close < 0 -> panic("BodyCodec: a TypeID rendering with no close")
         id: Int.parse(part.slice(0..<close)) ?? panic("BodyCodec: a TypeID rendering with no number")
-        spelled.push("{type_syntax(interner, TypeID{id: U32{id}}):Debug}")
-        spelled.push(part.slice(close + 2..<part.len()))
+        spelled += "{type_syntax(interner, TypeID{id: U32{id}}):Debug}"
+        spelled += part.slice(close + 2..<part.len())
     }
-    spelled.join("")
+    spelled
 }
 
 // Checks `main` (body_codec_check of `package`, `core`) as the Core
@@ -698,8 +699,8 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     }
     // Each check interns its types in its own order, so the functions compare
     // by the types their ids name, not by the ids.
-    text_types: if captured.registration_graph == .Val(graph) -> graph.interner.copy() else -> panic("BodyCodec: the check from text kept no registration graph")
-    loaded_types: if loaded.registration_graph == .Val(graph) -> graph.interner.copy() else -> panic("BodyCodec: the loading check kept no registration graph")
+    text_graph: captured.registration_graph ?? panic("BodyCodec: the check from text kept no registration graph")
+    loaded_graph: loaded.registration_graph ?? panic("BodyCodec: the loading check kept no registration graph")
     loop (position, text) in captured.modules {
         if position >= loaded.modules.len() -> break
         row: loaded.modules[position]
@@ -709,7 +710,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
                 failures.push("{function.key}: checked from text, not loaded")
             }
         }
-        if body_codec_types_spelled("{row.functions:Debug}", loaded_types) != body_codec_types_spelled("{text.functions:Debug}", text_types) {
+        if body_codec_types_spelled("{row.functions:Debug}", loaded_graph.interner) != body_codec_types_spelled("{text.functions:Debug}", text_graph.interner) {
             failures.push("{name}: the loaded functions differ from the checked ones")
         }
         if "{row.diagnostics:Debug}" != "{text.diagnostics:Debug}" {

@@ -3,7 +3,7 @@
 // <fact>` resolves and prints the whole chain through the one contribution
 // law (pkg_fact_resolve).
 use {
-    jet_foundation.[COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span]
+    jet_foundation.[COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, DerivationMethod, DerivationPayload, DerivationRecord, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span, derivation_identity, derivation_record, derivation_record_with_payload]
     jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, SourceScope, pkg_fact_resolve]
     jet_sema.[SemaBuildFacts, SemaBuildSetting, SemaSettingContribution]
 }
@@ -354,26 +354,26 @@ jet_driver_setting_text_fits: fn(ty: String, text: String) -> Bool Never! {
     }
 }
 
-// `jet explain <fact>`: the resolved writer chain of one build fact, or the
+// `jet explain <fact>`: the derivation record of one build fact, or the
 // diagnostics that stopped it.
 JetDriverBuildFactExplanation: struct {
-    fact: EffectiveFact?,
+    derivation: DerivationRecord?,
     diagnostics: [Diagnostic],
 }
 
 // The writer chain of build fact `key` (`Build.Package.Name`,
 // `Build.Settings.tls`, ...) for `request`: the same writers the compile's
 // build snapshot folds (jet_driver_build_facts), resolved through the
-// contribution law.
+// contribution law and recorded as the build-fact producer's derivation.
 jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String) -> JetDriverBuildFactExplanation {
     load := jet_driver_load_reach(request, false)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
-        return JetDriverBuildFactExplanation{fact: None, diagnostics: load.diagnostics}
+        return JetDriverBuildFactExplanation{derivation: None, diagnostics: load.diagnostics}
     }
     refusals: jet_driver_setting_writer_diagnostics(load, request)
-    if refusals.len() > 0 -> return JetDriverBuildFactExplanation{fact: None, diagnostics: refusals}
+    if refusals.len() > 0 -> return JetDriverBuildFactExplanation{derivation: None, diagnostics: refusals}
     diagnostics := [Diagnostic]{}
-    target: jet_driver_selected_target_machine(request, diagnostics) ?? return JetDriverBuildFactExplanation{fact: None, diagnostics: diagnostics}
+    target: jet_driver_selected_target_machine(request, diagnostics) ?? return JetDriverBuildFactExplanation{derivation: None, diagnostics: diagnostics}
     facts: jet_driver_build_facts(load, request, target)
     package: jet_driver_entry_package(load)
     contributions := [FactContribution]{}
@@ -387,13 +387,28 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
         }
         if contributions.len() == 0 {
             undeclared: jet_driver_diagnostic_without_span("E0302", "`#build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
-            return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{undeclared}}
+            return JetDriverBuildFactExplanation{derivation: None, diagnostics: [Diagnostic]{undeclared}}
         }
     } else { contributions = jet_driver_fixed_fact_writers(key, facts, load, package, request) }
     if pkg_fact_resolve(FactKey.new(key), contributions) == {
-        .Ok(resolved) -> return JetDriverBuildFactExplanation{fact: resolved, diagnostics: [Diagnostic]{}}
-        .Err(error) -> return JetDriverBuildFactExplanation{fact: None, diagnostics: [Diagnostic]{jet_driver_fact_error_diagnostic(error)}}
+        .Ok(resolved) -> {
+            derivation: if resolved == .Val(fact) -> Val(jet_driver_build_fact_derivation(fact, request.profile, target.triple)) else -> None
+            return JetDriverBuildFactExplanation{derivation: derivation, diagnostics: [Diagnostic]{}}
+        }
+        .Err(error) -> return JetDriverBuildFactExplanation{derivation: None, diagnostics: [Diagnostic]{jet_driver_fact_error_diagnostic(error)}}
     }
+}
+
+// A resolved writer chain as the build-fact producer's record: its subject
+// the fact, its claim the folded value, its premises each writer by layer and
+// source, and its payload every writer's line in the order the contribution
+// law ranked it, which the sorted premises cannot keep.
+jet_driver_build_fact_derivation: fn(fact: EffectiveFact, profile: String, triple: String) -> DerivationRecord Never! {
+    lines: fact.explain().split("\n").to_list()
+    writers: loop index in 1..<lines.len() -> lines[index].removeprefix("  ")
+    premises: loop contribution in fact.provenance -> "{contribution.layer.name()}:{contribution.source}"
+    record: derivation_record(fact.key.name, lines[0], "jet-driver", DerivationMethod.StaticDerivation, "build-fact-chain", premises, derivation_identity("", profile, "", triple))
+    derivation_record_with_payload(record, DerivationPayload.BuildFactChain{writers: writers})
 }
 
 // The report of a build-fact chain the contribution law refuses. Build-fact

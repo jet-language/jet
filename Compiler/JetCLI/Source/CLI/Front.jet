@@ -2637,8 +2637,11 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
 // file (BuildFactExplain.jet); `marker` sites and a policy with a source file
 // are load-only source queries; `--web-graph <file>` reports the application
 // graph of the checked entry and `--routes <file>` every row of its App's
-// route table (WebGraph.jet). Any other query names a package:
-// the Jetpack engine explains its Hangar record or last realization attempt.
+// route table (WebGraph.jet). A record subject (a declaration path or an
+// `on_frame` callback of a module of the entry's project) prints its
+// derivation chain from the checked program (DerivationExplain.jet). Any
+// other query names a package: the Jetpack engine explains its Hangar
+// record or last realization attempt.
 // The `--reload` view stays refused; `--cost <file>` lists the typed cost
 // sites of its checked program (Lint.jet jet_cli_explain_cost). `log
 // [<file|dir>]` lists every source of the core.log level filter
@@ -2712,6 +2715,10 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
         return JetCLIPlan.DiagnosticTypeExplain{name: query, file: if args.len() > 2 -> args[2] else -> ".", color: color, json: json}
     }
     if jet_cli_explain_syntax(query, verbose, color, json) == .Val(plan) -> return plan
+    named: if args.len() > 2 -> Val(args[2]) else -> None
+    if jet_cli_derivation_entry(query, named) == .Val(entry) {
+        return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "explain-derivation", file: entry, subject: Val(query), json: json, color: color, threads: threads, notice: "", project: false}}
+    }
     JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: "explain", argv: jet_cli_command_words(jet_argv, "explain")}}
 }
 

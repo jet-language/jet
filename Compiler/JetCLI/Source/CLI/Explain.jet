@@ -1,15 +1,25 @@
 // `print_explanation` and `run_explain`. Diagnostic essays reuse the existing
 // Foundation registry/renderer.
 use {
-    jet_foundation.[ASTTables, DiagnosticExplanation, Func, TraitImplBlock, ast_expr, ast_stmt, diagnostic_explanation, diagnostic_explanation_render, foundation_byte_text]
-    jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverSourceQueryResult, jet_driver_explain_code]
+    jet_foundation.[ASTTables, DerivationRecord, DiagnosticExplanation, Func, TraitImplBlock, ast_expr, ast_stmt, derivation_record_json, diagnostic_explanation, diagnostic_explanation_render, foundation_byte_text]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverSourceQueryResult, JetDriverVerbOutput, jet_driver_explain_code]
 }
 
 jet_cli_explanation_output: fn(explanation: DiagnosticExplanation, color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if !json -> return jet_cli_renderable(diagnostic_explanation_render(explanation, color), false)
+    jet_cli_derived_explanation_output(explanation, None, color, json)
+}
+
+// An explanation read from a derivation record: the text is the
+// explanation's; `--json` adds the record whole as `derivation`.
+jet_cli_derived_explanation_output: fn(explanation: DiagnosticExplanation, derivation: DerivationRecord?, color: Bool, json: Bool) -> JetCLIPlan Never! {
+    JetCLIPlan.Done{output: jet_cli_derived_explanation_verb(explanation, derivation, color, json)}
+}
+
+jet_cli_derived_explanation_verb: fn(explanation: DiagnosticExplanation, derivation: DerivationRecord?, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    if !json -> return JetDriverVerbOutput{stdout: diagnostic_explanation_render(explanation, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // A retired or reserved row runs in no stage: its stage is null.
     stage: if explanation.stage == "" -> None else -> Val(explanation.stage)
-    fields: [JetCLIStatusField]{
+    fields := [JetCLIStatusField]{
         jet_cli_status_field("code", jet_cli_status_text(explanation.code)),
         jet_cli_status_field("stage", jet_cli_status_optional_text(stage)),
         jet_cli_status_field("what", jet_cli_status_text(explanation.what ?? explanation.meaning)),
@@ -17,7 +27,10 @@ jet_cli_explanation_output: fn(explanation: DiagnosticExplanation, color: Bool, 
         jet_cli_status_field("fix", jet_cli_status_optional_text(explanation.fix)),
         jet_cli_status_field("example", jet_cli_status_optional_text(explanation.example)),
     }
-    jet_cli_done("{jet_cli_status_render("explain", true, fields)}\n", "", 0)
+    if derivation == .Val(record) {
+        fields.push(jet_cli_status_field("derivation", JetCLIStatusValue.Float{text: derivation_record_json(record)}))
+    }
+    JetDriverVerbOutput{stdout: "{jet_cli_status_render("explain", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // None means this is not a diagnostic-registry query: the caller continues
