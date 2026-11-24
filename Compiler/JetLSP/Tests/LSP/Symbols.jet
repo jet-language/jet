@@ -117,6 +117,33 @@ lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
     assert_eq(lsp_test_error_code(server, "textDocument/semanticTokens/range", malformed), -32602)
 }
 
+#Test("a semantic tokens delta answers the edit from its kept result, and the full tokens for any other id") {
+    server := lsp_test_main_server()
+    doc: lsp_test_text_document(LSP_TEST_MAIN_URI)
+    first: lsp_test_result(server, "textDocument/semanticTokens/full", "{{{doc}}}")
+    assert_eq(lsp_test_text(first, "resultId"), "1")
+    before: lsp_test_token_data(first)
+    same: lsp_test_result(server, "textDocument/semanticTokens/full/delta", "{{{doc},\"previousResultId\":\"1\"}}")
+    assert_eq(lsp_test_text(same, "resultId"), "2")
+    assert_eq(lsp_test_rows(lsp_test_field(same, "edits")).len(), 0)
+    // `add(1, add(2, 3))` on line 5 becomes `add(10, add(2, 3))`.
+    _ := lsp_test_change(server.diagnostic_state, LSP_TEST_MAIN_URI, 2, "[{{\"range\":{{\"start\":{{\"line\":5,\"character\":9}},\"end\":{{\"line\":5,\"character\":9}}}},\"text\":\"0\"}}]")
+    changed: lsp_test_result(server, "textDocument/semanticTokens/full/delta", "{{{doc},\"previousResultId\":\"2\"}}")
+    assert_eq(lsp_test_text(changed, "resultId"), "3")
+    assert(lsp_member(changed, "data") == None, "a delta on the kept result sends no full tokens")
+    edits: lsp_test_rows(lsp_test_field(changed, "edits"))
+    assert_eq(edits.len(), 1)
+    start: lsp_test_int(edits[0], "start")
+    applied := before.slice(0, start)
+    loop value in lsp_test_rows(lsp_test_field(edits[0], "data")) -> applied.push(foundation_json_integer(value) ?? -1)
+    loop value in before.slice(start + lsp_test_int(edits[0], "deleteCount"), before.len()) -> applied.push(value)
+    assert_eq(applied, lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{doc}}}")))
+    // An id the server no longer keeps answers the full tokens.
+    stale: lsp_test_result(server, "textDocument/semanticTokens/full/delta", "{{{doc},\"previousResultId\":\"1\"}}")
+    assert_eq(lsp_test_token_data(stale), applied)
+    assert(lsp_member(stale, "edits") == None, "a stale delta sends no edits")
+}
+
 lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     labels := [String]{}
     loop item in lsp_test_rows(lsp_test_field(result, "items")) {

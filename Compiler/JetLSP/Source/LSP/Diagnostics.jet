@@ -251,11 +251,12 @@ lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, checked: 
     lsp_publish_diagnostics(target, "", None, checked.diagnostics, checked.reports, indices)
 }
 
-// didClose drops the document and marks the open documents that read it
-// dirty, then clears each URI only this root's publication held. The state
-// changes even when a clear's write fails.
+// didClose drops the document and its kept semantic tokens and marks the
+// open documents that read it dirty, then clears each URI only this root's
+// publication held. The state changes even when a clear's write fails.
 lsp_close_document: fn(server: &LSPServer, uri: String, stdout: &lsp_diag_term.Stdout) -[IO]> IOError! {
     _ := server.published.remove(uri)
+    _ := server.semantic_results.remove(uri)
     lsp_close_document_state(server.diagnostic_state, uri, stdout) ?? return Err(err)
 }
 

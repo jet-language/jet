@@ -2,11 +2,12 @@
 // checked index classifies each name by what it names, marks the declarations
 // and marks a name a call writes through as a modification; a marked block's
 // `lsp.semantic_tokens` hooks classify its body. Types and modifiers index
-// `LSP_SEMANTIC_TOKEN_TYPES` and `LSP_SEMANTIC_TOKEN_MODIFIERS`.
+// `LSP_SEMANTIC_TOKEN_TYPES` and `LSP_SEMANTIC_TOKEN_MODIFIERS`. A full
+// answer is kept per document so a delta request answers only the change.
 use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverToolStageItem]
-    jet_foundation.[AccessConvention, Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS]
+    jet_foundation.[AccessConvention, Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_quote]
     jet_lexer.[Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE]
     jet_semindex.[SemKind]
 }
@@ -190,16 +191,75 @@ lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolSt
     data
 }
 
-lsp_semantic_tokens_json: fn(data: [Int]) -> String Never! {
-    rows := [String]{}
-    loop value in data -> rows.push("{value}")
-    "{{\"data\":[{rows.join(",")}]}}"
+// The tokens last answered in full for one document, named by `id`.
+LSPSemanticResult: struct {
+    id: String,
+    data: [Int],
 }
 
-lsp_semantic_tokens_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
-    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+lsp_semantic_ints: fn(data: [Int]) -> String Never! {
+    rows := [String]{}
+    loop value in data -> rows.push("{value}")
+    "[{rows.join(",")}]"
+}
+
+lsp_semantic_tokens_json: fn(data: [Int]) -> String Never! {
+    "{{\"data\":{lsp_semantic_ints(data)}}}"
+}
+
+lsp_semantic_full_data: fn(server: LSPServer, view: LSPView) -> [Int] {
     hooked: server.stage_items(view, TOOL_STAGE_LSP_SEMANTIC_TOKENS)
-    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: 0, end: view.doc.text.count_bytes()}, hooked)))
+    lsp_semantic_token_data(view, Span{start: 0, end: view.doc.text.count_bytes()}, hooked)
+}
+
+// Keeps `data` as the document's last full answer under a new result id.
+lsp_semantic_keep: fn(server: &LSPServer, uri: String, data: &&[Int]) -> String Never! {
+    server.semantic_serial += 1
+    server.semantic_results[uri] = LSPSemanticResult{id: "{server.semantic_serial}", data: data.move()}
+    "{server.semantic_serial}"
+}
+
+// The one edit from `before` to `after`: the integers between their common
+// head and common tail; no edit when they are equal.
+lsp_semantic_tokens_edits: fn(before: [Int], after: [Int]) -> String Never! {
+    head := 0
+    loop head < before.len() && head < after.len() && before[head] == after[head] {
+        head += 1
+    }
+    if head == before.len() && head == after.len() -> return "[]"
+    tail := 0
+    loop tail < before.len() - head && tail < after.len() - head && before[before.len() - 1 - tail] == after[after.len() - 1 - tail] {
+        tail += 1
+    }
+    inserted := [Int]{}
+    loop index in head..<after.len() - tail -> inserted.push(after[index])
+    "[{{\"start\":{head},\"deleteCount\":{before.len() - head - tail},\"data\":{lsp_semantic_ints(inserted)}}}]"
+}
+
+// A full answer carries a result id and is kept, so a later `full/delta`
+// naming that id gets only the edit to the current tokens.
+lsp_semantic_tokens_response: fn(server: &LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    data: lsp_semantic_full_data(server, view)
+    tokens: lsp_semantic_ints(data)
+    result_id: lsp_semantic_keep(server, view.uri, data.move())
+    lsp_response(id, "{{\"resultId\":{foundation_json_quote(result_id)},\"data\":{tokens}}}")
+}
+
+// A delta naming the document's kept result answers the edit from it; one
+// naming any other id, as after a restart, answers the full tokens. Either
+// way the current tokens are kept under a new id.
+lsp_semantic_tokens_delta_response: fn(server: &LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    previous_id: lsp_text_member(params ?? return lsp_response(id, "null"), "previousResultId") ?? ""
+    data: lsp_semantic_full_data(server, view)
+    body := String?{None}
+    if server.semantic_results.get(view.uri) == .Val(previous) {
+        if previous.id == previous_id -> body = Val("\"edits\":{lsp_semantic_tokens_edits(previous.data, data)}")
+    }
+    answer: body ?? "\"data\":{lsp_semantic_ints(data)}"
+    result_id: lsp_semantic_keep(server, view.uri, data.move())
+    lsp_response(id, "{{\"resultId\":{foundation_json_quote(result_id)},{answer}}}")
 }
 
 lsp_semantic_tokens_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
