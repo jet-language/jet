@@ -118,14 +118,21 @@ PATH_CASE_LEXICON: #run path_case_lexicon(embed_file("toolchain:{PATH_CASE_LEXIC
 // What the tree holds, as the classes read it: its files (`tracked`), the
 // folders holding a `.jet` file at any depth, and the folders holding a
 // project manifest, a `module.jet` or a `Cargo.toml`, and the folders the
-// cases' `fixture:` lines name.
+// cases' `fixture:` lines name. Each column marks a path it holds with 1, at
+// the path's id in `paths`.
 PathCaseFacts: struct {
-    tracked: [String:Bool],
-    jet_folders: [String:Bool],
-    projects: [String:Bool],
-    modules: [String:Bool],
-    crates: [String:Bool],
-    fixture_roots: [String:Bool],
+    paths: NameTable{name_column_table()},
+    tracked: [Int]{name_column()},
+    jet_folders: [Int]{name_column()},
+    projects: [Int]{name_column()},
+    modules: [Int]{name_column()},
+    crates: [Int]{name_column()},
+    fixture_roots: [Int]{name_column()},
+}
+
+// Whether `column` of a NameTable `paths` marks `path`.
+path_case_holds: fn(paths: NameTable, column: [Int], path: String) -> Bool Never! {
+    name_column_get(paths, column, path) != None
 }
 
 // A folder or file name that breaks the rule: its path from the repository
@@ -452,13 +459,13 @@ path_case_tool_owned: fn(segments: [String]) -> Bool {
     false
 }
 
-// Whether the folder `segments` lies strictly below one of `roots` that has at
-// least `shortest` segments.
-path_case_below: fn(segments: [String], roots: [String:Bool], shortest: Int) -> Bool {
+// Whether the folder `segments` lies strictly below one of the roots `roots`
+// marks (a column of `paths`) that has at least `shortest` segments.
+path_case_below: fn(segments: [String], paths: NameTable, roots: [Int], shortest: Int) -> Bool {
     prefix := ""
     loop index in 0..<segments.len() - 1 {
         prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
-        if index + 1 >= shortest && roots.get(prefix) != None -> return true
+        if index + 1 >= shortest && path_case_holds(paths, roots, prefix) -> return true
     }
     false
 }
@@ -493,13 +500,13 @@ path_case_parent: fn(folder: String) -> String {
 path_case_class_keeps: fn(kind: PathCaseClass, folder: String, segments: [String], facts: PathCaseFacts) -> Bool {
     name: segments[segments.len() - 1]
     keeps: if kind == {
-        .ModuleFolder -> name == name.to_lower() && facts.tracked.get("{folder}.jet") != None
-        .CargoFolder -> PATH_CASE_CARGO_NAMES.contains(name) && facts.crates.get(path_case_parent(folder)) != None
-        .CaseFixture -> path_case_below(segments, facts.fixture_roots, 1)
+        .ModuleFolder -> name == name.to_lower() && path_case_holds(facts.paths, facts.tracked, "{folder}.jet")
+        .CargoFolder -> PATH_CASE_CARGO_NAMES.contains(name) && path_case_holds(facts.paths, facts.crates, path_case_parent(folder))
+        .CaseFixture -> path_case_below(segments, facts.paths, facts.fixture_roots, 1)
         .FixtureFolder -> path_case_fixture_folder(segments)
         .FixturesTree -> path_case_fixtures_tree(segments)
-        .TestProject -> segments.len() > 1 && segments[0] == "Tests" && segments[1] != "Guards" && path_case_below(segments, facts.projects, 3)
-        .GoldenData -> folder.starts_with("Tests/Run/") && facts.jet_folders.get(folder) == None
+        .TestProject -> segments.len() > 1 && segments[0] == "Tests" && segments[1] != "Guards" && path_case_below(segments, facts.paths, facts.projects, 3)
+        .GoldenData -> folder.starts_with("Tests/Run/") && !path_case_holds(facts.paths, facts.jet_folders, folder)
     }
     keeps
 }
@@ -545,33 +552,28 @@ path_case_fixture_root: fn(line: String) -> String? {
 }
 
 path_case_facts: fn(tracked: [String], fixture_roots: [String]) -> PathCaseFacts {
-    paths := [String:Bool]{}
-    jet_folders := [String:Bool]{}
-    projects := [String:Bool]{}
-    modules := [String:Bool]{}
-    crates := [String:Bool]{}
-    roots := [String:Bool]{}
+    facts := PathCaseFacts{}
     loop path in tracked {
-        paths[path] = true
+        name_column_set(facts.paths, facts.tracked, path, 1)
         segments: path.split("/").to_list()
         if segments.len() < 2 -> next
         leaf: segments[segments.len() - 1]
         parent: path_case_parent(path)
         if leaf == {
-            "run.jet" | "package.jet" | "workspace.jet" -> { projects[parent] = true }
-            "module.jet" -> { modules[parent] = true }
-            "Cargo.toml" -> { crates[parent] = true }
+            "run.jet" | "package.jet" | "workspace.jet" -> { name_column_set(facts.paths, facts.projects, parent, 1) }
+            "module.jet" -> { name_column_set(facts.paths, facts.modules, parent, 1) }
+            "Cargo.toml" -> { name_column_set(facts.paths, facts.crates, parent, 1) }
             else -> {}
         }
         if !path.ends_with(".jet") -> next
         prefix := ""
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
-            jet_folders[prefix] = true
+            name_column_set(facts.paths, facts.jet_folders, prefix, 1)
         }
     }
-    loop root in fixture_roots -> roots[root] = true
-    PathCaseFacts{tracked: paths, jet_folders: jet_folders, projects: projects, modules: modules, crates: crates, fixture_roots: roots}
+    loop root in fixture_roots -> name_column_set(facts.paths, facts.fixture_roots, root, 1)
+    facts
 }
 
 // What is wrong with a folder the rule checks (one no class keeps), if
@@ -580,7 +582,7 @@ path_case_facts: fn(tracked: [String], fixture_roots: [String]) -> PathCaseFacts
 // and a `.suffix` (`Name.fixture`) is a tool suffix that stays lowercase.
 path_case_folder_check: fn(folder: String, facts: PathCaseFacts) -> PathCaseFinding? {
     name: path_case_leaf(folder)
-    if facts.modules.get(folder) != None {
+    if path_case_holds(facts.paths, facts.modules, folder) {
         if path_case_snake(name) -> return None
         return Val(PathCaseFinding{path: folder, name: name, spelled: sema_casing_canonical(name, .Snake), problem: "directory module `{name}` is named like its `name: module` declaration, in snake_case"})
     }
@@ -605,15 +607,16 @@ path_case_file_check: fn(path: String) -> PathCaseFinding? {
 
 // Every folder above the files `tracked` names, once each, sorted.
 path_case_folders: fn(tracked: [String]) -> [String] {
-    seen := [String:Bool]{}
+    seen := name_column_table()
+    marks := name_column()
     folders := [String]{}
     loop path in tracked {
         segments: path.split("/").to_list()
         prefix := ""
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
-            if seen.get(prefix) != None -> next
-            seen[prefix] = true
+            if path_case_holds(seen, marks, prefix) -> next
+            name_column_set(seen, marks, prefix, 1)
             folders.push(prefix.copy())
         }
     }
@@ -627,17 +630,18 @@ path_case_folders: fn(tracked: [String]) -> [String] {
 path_case_findings: fn(tracked: [String], fixture_roots: [String]) -> [PathCaseFinding] {
     facts: path_case_facts(tracked, fixture_roots)
     findings := [PathCaseFinding]{}
-    kept := [String:Bool]{}
+    folders := name_column_table()
+    kept := name_column()
     loop folder in path_case_folders(tracked) {
         if path_case_kept(folder, facts) {
-            kept[folder] = true
+            name_column_set(folders, kept, folder, 1)
             next
         }
         if path_case_folder_check(folder, facts) == .Val(finding) -> findings.push(finding)
     }
     files := [String]{}
     loop path in tracked {
-        if path.contains("/") && kept.get(path_case_parent(path)) != None -> next
+        if path.contains("/") && path_case_holds(folders, kept, path_case_parent(path)) -> next
         files.push(path.copy())
     }
     files.sort()
@@ -695,8 +699,12 @@ path_case_listing: fn(root: String, folder: String) -[FS]> PathCaseListing Never
 // file outside every repository has none.
 path_case_disk_findings: fn(paths: [String]) -[FS]> [PathCasePlaced] Never! {
     placed := [PathCasePlaced]{}
-    seen := [String:Bool]{}
-    listings := [String:PathCaseListing]{}
+    // Each folder and file already reported on, and each folder's listing,
+    // a row of `listings`, by absolute path at its id in `named`.
+    named := name_column_table()
+    seen := name_column()
+    listed := name_column()
+    listings := [PathCaseListing]{}
     loop path in paths {
         root: path_case_repository(path) ?? next
         relative: path_case_slice(path, root.bytes().len() + 1, path.bytes().len())
@@ -706,11 +714,14 @@ path_case_disk_findings: fn(paths: [String]) -[FS]> [PathCasePlaced] Never! {
         folder := ""
         loop index in 0..<segments.len() {
             key: "{root}/{folder}"
-            if listings.get(key) == None -> listings[key] = path_case_listing(root, folder)
-            if listings.get(key) == .Val(listing) {
-                loop file in listing.files -> tracked.push(file.copy())
-                loop fixture in listing.fixture_roots -> fixture_roots.push(fixture.copy())
+            row := name_column_get(named, listed, key) ?? -1
+            if row < 0 {
+                row = listings.len()
+                listings.push(path_case_listing(root, folder))
+                name_column_set(named, listed, key, row)
             }
+            loop file in listings[row].files -> tracked.push(file.copy())
+            loop fixture in listings[row].fixture_roots -> fixture_roots.push(fixture.copy())
             if index + 1 < segments.len() {
                 folder = if folder == "" -> segments[index] else -> "{folder}/{segments[index]}"
             }
@@ -721,14 +732,14 @@ path_case_disk_findings: fn(paths: [String]) -[FS]> [PathCasePlaced] Never! {
         loop index in 0..<segments.len() - 1 {
             prefix = if index == 0 -> segments[0] else -> "{prefix}/{segments[index]}"
             kept = path_case_kept(prefix, facts)
-            if kept || seen.get("{root}/{prefix}") != None -> next
-            seen["{root}/{prefix}"] = true
+            if kept || path_case_holds(named, seen, "{root}/{prefix}") -> next
+            name_column_set(named, seen, "{root}/{prefix}", 1)
             if path_case_folder_check(prefix, facts) == .Val(finding) {
                 placed.push(PathCasePlaced{named: "{root}/{prefix}", file: path.copy(), finding: finding})
             }
         }
-        if kept || seen.get(path) != None -> next
-        seen[path] = true
+        if kept || path_case_holds(named, seen, path) -> next
+        name_column_set(named, seen, path, 1)
         if path_case_file_check(relative) == .Val(finding) {
             placed.push(PathCasePlaced{named: path.copy(), file: path.copy(), finding: finding})
         }

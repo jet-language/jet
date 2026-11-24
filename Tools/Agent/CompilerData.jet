@@ -7,9 +7,11 @@
 // A payload enum is an enum declaration with a variant that carries a
 // payload: each of its values is a counted heap box. Counts are of the
 // source text, comments included, so a count falls only when the code
-// changes. A count never rises: `--check` refuses a file above its row, and
-// a file below its row until the row is lowered; `--write` lowers the rows
-// to the counts and refuses a rise.
+// changes; a string or character literal is skipped, since what it spells
+// is text the compiler writes for another program, not compiler data. A
+// count never rises: `--check` refuses a file above its row, and a file
+// below its row until the row is lowered; `--write` lowers the rows to the
+// counts and refuses a rise.
 //
 // Usage (from the repository root):
 //   jet Tools/Agent/CompilerData.jet [--check]   compare the tree with the ledger
@@ -362,10 +364,46 @@ compiler_data_payload_enums: fn(text: String) -> Int {
     count
 }
 
+// The bytes `start..<end` of `bytes` as text.
+compiler_data_piece: fn(bytes: [U8], start: Int, end: Int) -> String {
+    if start >= end -> return ""
+    String.from_bytes(bytes[start..(end - 1)]) ?? ""
+}
+
+// The source of `text` between its string and character literals, piece by
+// piece; comments stay in the pieces.
+compiler_data_code_pieces: fn(text: String) -> [String] {
+    bytes: text.bytes()
+    pieces := [String]{}
+    start := 0
+    cursor := 0
+    loop cursor < bytes.len() {
+        value: compiler_data_at(bytes, cursor)
+        after: compiler_data_at(bytes, cursor + 1)
+        if value == 47 && (after == 47 || after == 42) {
+            cursor = compiler_data_token(bytes, cursor).start
+            next
+        }
+        if value == 34 || value == 96 || value == 39 {
+            pieces.push(compiler_data_piece(bytes, start, cursor))
+            cursor = if value == 34 -> compiler_data_string_end(bytes, cursor) else if value == 96 -> compiler_data_raw_end(bytes, cursor) else -> compiler_data_char_end(bytes, cursor)
+            start = cursor
+            next
+        }
+        cursor += 1
+    }
+    pieces.push(compiler_data_piece(bytes, start, bytes.len()))
+    pieces
+}
+
 compiler_data_counts: fn(text: String) -> CompilerDataCounts {
     text_keys := 0
-    loop needle in COMPILER_DATA_TEXT_KEYS -> text_keys += compiler_data_occurrences(text, needle)
-    CompilerDataCounts{text_keys: text_keys, shared: compiler_data_occurrences(text, COMPILER_DATA_SHARED), payload_enums: compiler_data_payload_enums(text)}
+    shared := 0
+    loop piece in compiler_data_code_pieces(text) {
+        loop needle in COMPILER_DATA_TEXT_KEYS -> text_keys += compiler_data_occurrences(piece, needle)
+        shared += compiler_data_occurrences(piece, COMPILER_DATA_SHARED)
+    }
+    CompilerDataCounts{text_keys: text_keys, shared: shared, payload_enums: compiler_data_payload_enums(text)}
 }
 
 compiler_data_empty: fn(counts: CompilerDataCounts) -> Bool {
@@ -520,6 +558,14 @@ run: fn() {
     assert_eq(counts.text_keys, 2)
     assert_eq(counts.shared, 1)
     assert_eq(counts.payload_enums, 1)
+}
+
+// A literal's text is another program's; a comment's text still counts.
+#Test("the census skips what string and character literals spell") {
+    text: "GEN: \"seen := [String: Int] Set<String> Shared<X>\"\nQ: '\"'\nRAW: `Tally<String>`\n// a Shared<Y> cell, \"quoted\"\nkept: [String:Int]\n"
+    counts: compiler_data_counts(text)
+    assert_eq(counts.text_keys, 1)
+    assert_eq(counts.shared, 1)
 }
 
 // An enum counts the same however it is laid out.
