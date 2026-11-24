@@ -8,6 +8,7 @@
 // the template assembler (InlineAsm.jet) do not read the table;
 // Compiler/JetBackend/Tests/X64Decode.jet decodes the bytes they write back
 // to their own names.
+use jet_foundation.[build_time_refused]
 
 // How an instruction leaves: on to the next (Plain), by a jmp, a call, a
 // jcc, a loop or jrcxz (Loop, whose rel8 has no long form), a return, or
@@ -1576,14 +1577,14 @@ x64_decode_words: fn(text: String) -> [String] Never! {
 // The value of hex digits `text`, or the build stops naming `row`.
 x64_decode_hex_parse: fn(text: String, row: String) -> Int Never! {
     value := 0
-    if text == "" -> panic("X64_DECODE_TABLE: an empty number in `{row}`")
+    if text == "" -> build_time_refused("X64_DECODE_TABLE: an empty number in `{row}`")
     loop byte in text.bytes() {
         digit: Int{byte}
         value = value * 16 + if {
             digit >= 48 && digit <= 57 -> digit - 48
             digit >= 97 && digit <= 102 -> digit - 87
             digit >= 65 && digit <= 70 -> digit - 55
-            else -> panic("X64_DECODE_TABLE: `{text}` is not hex in `{row}`")
+            else -> build_time_refused("X64_DECODE_TABLE: `{text}` is not hex in `{row}`")
         }
     }
     value
@@ -1605,7 +1606,7 @@ x64_decode_spaces: fn(word: String, row: String) -> [Int] Never! {
         word == "VE1" -> [Int]{4, 7}
         word == "VE2" -> [Int]{5, 8}
         word == "VE3" -> [Int]{6, 9}
-        else -> panic("X64_DECODE_TABLE: unknown space `{word}` in `{row}`")
+        else -> build_time_refused("X64_DECODE_TABLE: unknown space `{word}` in `{row}`")
     }
 }
 
@@ -1624,12 +1625,12 @@ x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
         if text == "" || text.starts_with("#") -> next
         halves: text.split(" | ").to_list()
         if halves.len() != 2 {
-            panic("X64_DECODE_TABLE: a row reads `SPACE OPCODE [CONDITIONS] | NAME [OPERANDS]`, not `{text}`")
+            build_time_refused("X64_DECODE_TABLE: a row reads `SPACE OPCODE [CONDITIONS] | NAME [OPERANDS]`, not `{text}`")
         }
         left: x64_decode_words(halves[0])
         right: x64_decode_words(halves[1])
         if left.len() < 2 || right.len() < 1 || right.len() > 2 {
-            panic("X64_DECODE_TABLE: a row reads `SPACE OPCODE [CONDITIONS] | NAME [OPERANDS]`, not `{text}`")
+            build_time_refused("X64_DECODE_TABLE: a row reads `SPACE OPCODE [CONDITIONS] | NAME [OPERANDS]`, not `{text}`")
         }
         bounds: left[1].split("-").to_list()
         first: x64_decode_hex_parse(bounds[0], text)
@@ -1667,10 +1668,10 @@ x64_decode_rows: fn(table: String) -> [X64DecodeRow] Never! {
                 word.starts_with("=") -> {
                     row.modrm = x64_decode_hex_parse(word.slice(1, word.len()), text)
                 }
-                else -> panic("X64_DECODE_TABLE: unknown condition `{word}` in `{text}`")
+                else -> build_time_refused("X64_DECODE_TABLE: unknown condition `{word}` in `{text}`")
             }
         }
-        if row.reg > 7 -> panic("X64_DECODE_TABLE: ModRM.reg past 7 in `{text}`")
+        if row.reg > 7 -> build_time_refused("X64_DECODE_TABLE: ModRM.reg past 7 in `{text}`")
         // An st(i) operand is a register form.
         if row.operands.contains("Fi") -> row.mode = 3
         loop space in x64_decode_spaces(left[0], text) {

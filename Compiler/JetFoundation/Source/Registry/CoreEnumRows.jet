@@ -45,7 +45,7 @@ core_enum_case_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
             if leaf.generic_arity > 0 || leaf.variants.len() == 0 -> next
             variants: leaf.variants.join("|")
             if seen.get(leaf.name) == .Val(earlier) && earlier != variants {
-                panic("{CORE_DECLARATIONS_CORE_PATH}:{entry.line}: Core enum leaf {leaf.name} has different variants in {entry.name}")
+                build_time_refused("{CORE_DECLARATIONS_CORE_PATH}:{entry.line}: Core enum leaf {leaf.name} has different variants in {entry.name}")
             }
             seen[leaf.name] = variants
             rows.push(CoreModuleTypeExport{name: leaf.name.copy(), kind: CoreLeafKind.Enum{variants: leaf.variants.copy()}})

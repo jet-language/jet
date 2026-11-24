@@ -26,6 +26,7 @@ use {
         Program,
         StructDef,
         Type,
+        build_time_refused,
     ]
     jet_parser.[
         parse_generated_source,
@@ -65,7 +66,7 @@ sema_cli_roles: fn(entry: String, args: String) -> [SemaCLIRole] {
     roles := sema_cli_roles_called(entry)
     sema_cli_role_fillers(args, roles)
     missing: sema_cli_roles_missing(roles)
-    if missing != "" -> panic(sema_cli_roles_refusal(missing))
+    if missing != "" -> build_time_refused(sema_cli_roles_refusal(missing))
     roles
 }
 

@@ -85,7 +85,7 @@ foundation_number_family_rows: fn(text: String) -> [String] {
             families.push(line.slice(0..<colon))
         }
     }
-    if families.len() == 0 -> panic("the text declares no number family `Name: struct<…> {{ raw: builtin.Word<…> }}`")
+    if families.len() == 0 -> build_time_refused("the text declares no number family `Name: struct<…> {{ raw: builtin.Word<…> }}`")
     families
 }
 
@@ -156,15 +156,15 @@ foundation_size_alias_rows: fn(text: String) -> [FoundationSizeAlias] {
         if !families.contains(family) -> next
         sizes := [Int]{}
         loop part in written.slice(open + 1..<written.len()).split(", ").to_list() {
-            sizes.push(Int.parse(part) ?? panic("`{line}`: a size alias names its family at number sizes"))
+            sizes.push(Int.parse(part) ?? build_time_refused("`{line}`: a size alias names its family at number sizes"))
         }
-        if foundation_family_type(family, sizes) == None -> panic("`{line}`: no family has that size")
+        if foundation_family_type(family, sizes) == None -> build_time_refused("`{line}`: no family has that size")
         loop row in rows {
-            if row.name == name -> panic("`{name}` is declared as a size alias twice")
+            if row.name == name -> build_time_refused("`{name}` is declared as a size alias twice")
         }
         rows.push(FoundationSizeAlias{name: name, family: family, sizes: sizes})
     }
-    if rows.len() == 0 -> panic("the text declares no size alias `NAME: Family<sizes>`")
+    if rows.len() == 0 -> build_time_refused("the text declares no size alias `NAME: Family<sizes>`")
     rows
 }
 
@@ -1005,7 +1005,7 @@ type_names_view_checked: fn(view_name: String, view: [String], vocabulary: [Stri
         if !vocabulary.contains(name) -> strays.push(name.copy())
     }
     if strays.len() > 0 {
-        panic("{view_name} names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
+        build_time_refused("{view_name} names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
     }
     view.len()
 }

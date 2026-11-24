@@ -29,11 +29,11 @@ GATE_KIND_COUNT: #run gate_kind_count(embed_file("GateLedger.jet"), embed_file("
 // The number of GateKind cases in `text` (this file), once each is a case
 // of `PolicyKey` in `statements`; else the build stops naming the strays.
 gate_kind_count: fn(text: String, statements: String) -> Int {
-    kinds: effect_vocabulary_enum_cases(text, "GateKind") ?? panic("GateLedger.jet declares no `GateKind: enum {{ … }}`")
-    keys: effect_vocabulary_enum_cases(statements, "PolicyKey") ?? panic("AST/Statements.jet declares no `PolicyKey: enum {{ … }}`")
+    kinds: effect_vocabulary_enum_cases(text, "GateKind") ?? build_time_refused("GateLedger.jet declares no `GateKind: enum {{ … }}`")
+    keys: effect_vocabulary_enum_cases(statements, "PolicyKey") ?? build_time_refused("AST/Statements.jet declares no `PolicyKey: enum {{ … }}`")
     strays: effect_vocabulary_strays(kinds, keys)
     if strays.len() > 0 {
-        panic("GateLedger.jet: GateKind names kinds that `PolicyKey` in AST/Statements.jet does not declare: {strays.join(", ")}")
+        build_time_refused("GateLedger.jet: GateKind names kinds that `PolicyKey` in AST/Statements.jet does not declare: {strays.join(", ")}")
     }
     kinds.len()
 }

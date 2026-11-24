@@ -13,6 +13,7 @@ use jet_foundation.[
     TCompilerBuiltin,
     TCoreBuiltinOwner,
     TDeclarationOwnership,
+    build_time_refused,
     module_is_none,
     module_none,
     symbol_builtin,
@@ -26,7 +27,7 @@ sema_registration_core_builtin_receiver_name: fn() -> String Never! { "Receiver"
 sema_registration_core_builtin_sender_name: fn() -> String Never! { "Sender" }
 
 sema_registration_core_builtin_owner_fact: fn(name: String) -> SemaRegistrationCoreBuiltinOwnerFact Never! {
-    symbol: symbol_builtin(SymbolKind.Type, name) ?? panic("`{name}` is not a builtin owner type")
+    symbol: symbol_builtin(SymbolKind.Type, name) ?? build_time_refused("`{name}` is not a builtin owner type")
     SemaRegistrationCoreBuiltinOwnerFact{
         symbol: symbol,
         module_identity: module_none(),

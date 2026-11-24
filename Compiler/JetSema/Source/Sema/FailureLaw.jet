@@ -4,6 +4,7 @@ use {
     jet_foundation.[
         AST_NODE_GENERATED,
         AccessConvention,
+        build_time_refused,
         module_is_none,
         module_none,
         AppliedRuleApplication,
@@ -125,10 +126,10 @@ SEMA_COMPILER_ERROR_TYPES_CHECKED: #run sema_compiler_error_types_checked(SEMA_C
 sema_compiler_error_types_checked: fn(owned: [String]) -> Int {
     loop name in owned {
         if CORE_ERROR_TYPES.contains(name) {
-            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which Core.rows error_types already lists")
+            build_time_refused("SEMA_COMPILER_ERROR_TYPES names {name}, which Core.rows error_types already lists")
         }
         if !ir_host_value_name(name) && ir_runtime_handle_row(name) == None && !sema_compiler_error_record(name) {
-            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle or record is")
+            build_time_refused("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle or record is")
         }
     }
     owned.len()

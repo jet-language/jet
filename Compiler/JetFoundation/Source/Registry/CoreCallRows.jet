@@ -117,7 +117,7 @@ core_call_rows: fn(declared: CoreDeclarations, extensions: [CoreCallRecord]) -> 
     loop row in extensions {
         key: core_call_key(row)
         if owners.get(key) == .Val(owner) {
-            panic("{CORE_CALL_EXTENSIONS_PATH}: row `{key}` repeats a {owner} row; drop the extension row")
+            build_time_refused("{CORE_CALL_EXTENSIONS_PATH}: row `{key}` repeats a {owner} row; drop the extension row")
         }
         owners[key] = CORE_CALL_EXTENSIONS_PATH
         rows.push(row.copy())
