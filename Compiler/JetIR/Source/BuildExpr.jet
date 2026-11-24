@@ -3,7 +3,7 @@
 // closures, constants and program stops (Build.jet holds the shared state).
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
-    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, name_column_get, name_column_set, number_argument_value, symbol_key_names, symbol_none]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, core_identity_is, function_param_writes, ir_host_value_name, name_column_get, name_column_set, number_argument_value, symbol_key_names, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
     jet_sema.[sema_type_def_instance_type]
@@ -2629,10 +2629,13 @@ ir_expr_slot_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, 
                 host_owner := ir_host_value_row(m, p, receiver_row)
                 // A reflection record laid out as a compiler-owned struct
                 // (FunctionInfo, EffectInfo, TypeInfo, ...) still has its
-                // methods answered by the compiler.
+                // methods answered by the compiler, and so do the `Build`
+                // calls the checker shapes itself (options, `generate`,
+                // `contribute`).
                 if host_owner == None {
                     if ir_untag(host_receiver_ty) == .Named(record) {
                         if ir_host_value_name(record) -> host_owner = Val(record.copy())
+                        if core_identity_is(record, "core.build", "Build") -> host_owner = Val("Build")
                     }
                 }
                 if host_owner == .Val(owner) {
@@ -3263,7 +3266,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
         .TaskJoin | .TaskDetach -> true
-        .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynToText | .DynEqualUnordered | .SerdeEncode(_) | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
+        .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynToText | .DynEqualUnordered | .SerdeEncode(_) | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
     }
     if dedicated -> return ir_fail_slot(b, span, "handle method {ir_handle_op_name(operation)}")
     // to_text and equal_unordered on a Dyn cross the encoding.dyn data route
@@ -3271,7 +3274,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     data_symbol: if operation == {
         .DynToText | .JSONToText -> "jet_dyn_to_text"
         .DynEqualUnordered | .JSONEqualUnordered -> "jet_dyn_equal_unordered"
-        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> ""
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> ""
     }
     if data_symbol != "" {
         operands := [Int]{}
@@ -3287,8 +3290,8 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         }
         return ir_route(m, p, b, data_symbol, operands, mask, ty, span)
     }
-    // A precise method calls its core.math source helper when the program
-    // holds it, else its runtime route (ir_precise_values).
+    // A precise method core.math runs no function of its own for (Sema's
+    // sema_precise_bind) is its runtime route (ir_precise_values).
     if operation == .PreciseMethod(type_name, method) {
         slots := [Int]{}
         subject: ir_expr(m, p, b, receiver)
@@ -3313,7 +3316,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     }
     static_call: if operation == {
         .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) | .GameBackendHeadless -> true
-        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
+        .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> false
     }
     inputs := [Int]{}
     if !static_call {
@@ -4028,49 +4031,6 @@ ir_string_part: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPar
     if parts[index] == {
         .Literal(text) -> pieces.push(IRStringPiece{text: text, slot: -1, route: ""})
         .Interpolation(value, format) -> {
-            // A computed selector number prints through the part before it.
-            if format == .Number -> return true
-            count: ir_string_count(parts, index)
-            // `{x:Fixed(n)}` / `{x:Grouped(n)}` of a Float: the
-            // core.text.fmt kernel the reference lowers it to
-            // (jet_fmt_decimal / jet_fmt_grouped, host i64 precision).
-            kernel: if format == {
-                .Fixed(_) -> "jet_fmt_decimal"
-                .Grouped(_) -> "jet_fmt_grouped"
-                .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> ""
-            }
-            precision: if format == {
-                .Fixed(digits) | .Grouped(digits) -> digits
-                .Display | .Debug | .Pretty | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Number -> 0
-            }
-            if kernel != "" && ir_untag(ir_ty(m, p, b, value)) == .Float {
-                slot: ir_expr(m, p, b, value)
-                if ir_failed(b) -> return false
-                // The kernels treat a negative precision as zero.
-                digits: if count >= 0 -> ir_expr(m, p, b, count) else -> ir_word_const(m, b, precision)
-                if ir_failed(b) || digits < 0 -> return false
-                string_row: ir_string_row(m)
-                text: ir_runtime(m, b, kernel, [Int]{slot, digits}, string_row)
-                pieces.push(IRStringPiece{text: "", slot: text, route: ""})
-                releases.push(text)
-                releases.push(slot)
-                return true
-            }
-            // Every other selector is its Core/Text/Fmt.jet helper.
-            if format != .Display && format != .Debug {
-                text: ir_string_format(m, p, b, value, format, count, span)
-                if ir_failed(b) || text < 0 -> return false
-                pieces.push(IRStringPiece{text: "", slot: text, route: ""})
-                releases.push(text)
-                // `:Unit(name)` follows the magnitude with the generated
-                // unit type name.
-                if format == .Unit(.Name) {
-                    if ir_untag(ir_ty(m, p, b, value)) == .Named(unit_type) {
-                        pieces.push(IRStringPiece{text: " {ir_short_name(unit_type)}", slot: -1, route: ""})
-                    }
-                }
-                return true
-            }
             mode: if format == .Debug -> IRRender.Debug else -> IRRender.Display
             slot: ir_expr(m, p, b, value)
             if ir_failed(b) -> return false
@@ -4121,15 +4081,6 @@ ir_sink_call: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], polle
     }
     start: ir_args(b.f, args)
     ir_emit(b.f, IROp.CallRuntime, -1, ir_intern_name(m, symbol), start, args.len(), b.line)
-}
-
-// The Int node of the computed selector number of the part at `index`: the
-// TStrFormat.Number part after it, else -1.
-ir_string_count: fn(parts: [BodyStrPart], index: Int) -> Int Never! {
-    if index + 1 < parts.len() {
-        if parts[index + 1] == .Interpolation(count, .Number) -> return count
-    }
-    -1
 }
 
 // `s = "{s}…"` on a String the variable still owns: the rest of the text is
@@ -4856,32 +4807,24 @@ ir_absent_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, present: Bool, lhs
     Val(absent)
 }
 
-// A precise numeric builtin (`Fraction`/`Decimal`/`Complex` arithmetic and
-// conversions) calls its core.math source helper; when the program holds no
-// core.math (the type is then its runtime handle) it is the
-// `jet_<type>_<function>` route, its constructors taking their arguments by
-// value. A Fraction division (`Int / Int` is `quotient`) stops first on a
-// zero divisor, at its own line (ir_precise_division).
+// A precise numeric builtin core.math runs no function of its own for
+// (Sema's sema_precise_bind made each other one a direct call): a typed
+// `abs` calls the Core function filling its jet_builtins role, and the rest
+// are the `jet_<type>_<function>` route, its constructors taking their
+// arguments by value. A Fraction division (`Int / Int` is `quotient`) stops
+// first on a zero divisor, at its own line, then runs its role's Core
+// function or route (ir_precise_division).
 ir_precise_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, args: [Int], span: Span) -> Int Never! {
     if type_name == "Fraction" && (function == "quotient" || function == "div") && args.len() == 2 {
         return ir_precise_division(m, p, b, ty, function, args[0], args[1], span)
     }
-    row: ir_precise_helper_row(p, type_name, function) ?? -1
-    if row < 0 {
-        slots := [Int]{}
-        loop argument in args {
-            slot: ir_expr(m, p, b, argument)
-            if ir_failed(b) -> return -1
-            slots.push(slot)
-        }
-        return ir_precise_route(m, p, b, ty, type_name, function, slots, span)
-    }
-    call_args := [BodyCallArg]{}
+    slots := [Int]{}
     loop argument in args {
-        // copy: `argument` is an element of read parameter `args`, which keeps the original; the call argument owns this one
-        call_args.push(BodyCallArg{value: argument.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
+        slot: ir_expr(m, p, b, argument)
+        if ir_failed(b) -> return -1
+        slots.push(slot)
     }
-    ir_call(m, p, b, p.functions[row].key, [Type]{}, -1, [IRWriteBack]{}, call_args, span)
+    ir_precise_values(m, p, b, ty, type_name, function, slots, span)
 }
 
 // The `jet_<type>_<function>` route of a precise builtin on evaluated
@@ -4902,8 +4845,8 @@ ir_precise_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_n
     ir_route(m, p, b, "jet_{type_key}_{function}", slots, borrowed, ty, span)
 }
 
-// A precise builtin on evaluated `slots`: its core.math source helper when
-// the program holds it, else its route.
+// A precise builtin on evaluated `slots`: the Core function filling its
+// jet_builtins role when the program holds it, else its route.
 ir_precise_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_name: String, function: String, slots: [Int], span: Span) -> Int Never! {
     if ir_precise_helper_row(p, type_name, function) == .Val(row) {
         return ir_call_row_values(m, p, b, row, slots, span)
@@ -4911,16 +4854,12 @@ ir_precise_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, type_
     ir_precise_route(m, p, b, ty, type_name, function, slots, span)
 }
 
-// The function row of the core.math source helper a precise operation runs:
-// the Core function that fills its jet_builtins role (ir_core_role_row),
-// else the helper of its registered name (ir_precise_source_helper); None
-// when the program holds neither.
+// The function row of the Core function that fills the jet_builtins role a
+// precise operation runs (ir_core_role_row); None when the operation has no
+// role or the program holds no such function.
 ir_precise_helper_row: fn(p: IRProgram, type_name: String, function: String) -> Int? Never! {
-    if ir_precise_source_role(type_name, function) == .Val(role) {
-        if ir_core_role_row(p, role) == .Val(row) -> return Val(row)
-    }
-    helper: ir_precise_source_helper(type_name, function) ?? return None
-    ir_function_row(p, "function:<corelib>/core.math.{helper}")
+    role: ir_precise_source_role(type_name, function) ?? return None
+    ir_core_role_row(p, role)
 }
 
 // A Fraction division: `Int / Int` (`quotient`, the Fraction of the two

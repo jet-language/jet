@@ -7,11 +7,11 @@ build: fn(b: Build) -[Exec, FS]> {
         root: b.run("root", b.found(shell), ["Exec", "FS"])
         root.arg("-c")
         root.arg("printf made > \"$0\"")
-        root.output(".jet/build/notes.txt")
+        _: root.output(".jet/build/notes.txt")
         nested: b.run("nested", b.found(shell), ["Exec", "FS"])
         nested.arg("-c")
         nested.arg("printf made > \"$0\"")
-        nested.output("tool/.jet/build/notes.txt")
+        _: nested.output("tool/.jet/build/notes.txt")
         app: b.add_executable("app", ["main.jet"], [root, nested])
         b.default(app)
     }

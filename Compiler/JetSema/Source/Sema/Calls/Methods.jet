@@ -490,12 +490,8 @@ sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: 
 sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     hook: sema_call_try_type_param_hook_method(receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if hook.handled -> return hook
-    build: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if build.handled -> return build
     compiler: sema_call_try_compiler_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if compiler.handled -> return compiler
-    step: sema_call_try_build_step_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if step.handled -> return step
     dev: sema_call_try_dev_context_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if dev.handled -> return dev
     task_control: sema_taskgroup_check_task_control(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

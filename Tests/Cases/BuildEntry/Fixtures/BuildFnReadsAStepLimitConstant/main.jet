@@ -1,0 +1,20 @@
+// `build: fn` reads a constant whose work needs more than the default
+// step limit, so the constant raises its own.
+total: fn(count: Int) -> Int {
+    sum := 0
+    loop i in 0..<count -> sum += i
+    sum
+}
+
+#StepLimit(20000000)
+TOTAL: #run total(11000000)
+
+build: fn(b: Build) {
+    if TOTAL <= 0 -> return
+    app: b.add_executable("app", ["main.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    print("total={TOTAL}")
+}

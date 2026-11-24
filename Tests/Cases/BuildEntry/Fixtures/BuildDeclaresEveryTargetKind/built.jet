@@ -1,0 +1,10 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the compiler the toolchain tree builds") {
+        app: b.add_executable("app", ["built.jet"], [])
+        tool: b.run("tool", b.jet_built_from(app), ["FS"])
+        tool.arg("version")
+        b.default(app)
+    }
+}
+
+run: fn() {}

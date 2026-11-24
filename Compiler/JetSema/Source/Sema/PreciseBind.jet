@@ -1,0 +1,112 @@
+// An exact number's operations run core.math's own source. A checked precise
+// operation on a Decimal, Fraction or Complex (`a + b`, `d.to_float()`, a
+// literal's constructor, a Complex magnitude) names the type and the
+// operation; core.math declares the function that runs it as
+// `__{type}_{operation}` (`Decimal` `add` is `__decimal_add`). Once a body is
+// checked, each such operation whose function core.math declares becomes a
+// direct call of it, so Core demand, reachability and lowering follow it as
+// any other call. The rest stay the operation, which JetIR lowers: a Fraction
+// `/`, whose zero divisor stops at the operator's own line before Core runs
+// (ir_precise_division), and, in a program without core.math, every one,
+// through its runtime route (ir_precise_route).
+use jet_foundation.[BodyCallArg, BodyHandleOp, BodyTree, NodeKind, SymbolID, Type, module_is_core]
+
+// The core.math precise type (`Decimal`, `Fraction`, `Complex`) one of whose
+// operations the core.math function `name` runs (`__decimal_add` runs
+// Decimal's `add`), or None. Only a value of that type reaches it.
+sema_precise_family_owner: fn(name: String) -> String? Never! {
+    loop owner in ["Decimal", "Fraction", "Complex"] {
+        if name.starts_with(sema_precise_function_prefix(owner)) -> return Val(owner)
+    }
+    None
+}
+
+// The name every core.math function running an operation of precise type
+// `owner` starts with.
+sema_precise_function_prefix: fn(owner: String) -> String Never! {
+    "__{owner.lower()}_"
+}
+
+// A checked precise operation: the core.math function that would run it and
+// the nodes it passes, in order (a method's receiver first).
+SemaPreciseOperation: struct {
+    function: String,
+    args: [Int],
+}
+
+// Rewrites each precise operation of the finished body `tree` whose
+// core.math function exists into a direct call of that function.
+sema_precise_bind: fn(tree: &BodyTree, program: SemaProgramTables) Never! {
+    if program.registration_graph == .Val(graph) {
+        // Found on the first precise operation: most bodies hold none.
+        math := -2
+        loop index in 0..<tree.nodes.len() {
+            operation: sema_precise_operation(tree.nodes[index].kind) ?? next
+            if math == -2 -> math = sema_precise_math_module(graph) ?? -1
+            if math < 0 -> return
+            export: sema_registration_direct_symbol(graph.modules[math], operation.function) ?? next
+            callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
+            args := [BodyCallArg]{}
+            loop argument in operation.args {
+                args.push(BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
+            }
+            tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
+        }
+    }
+}
+
+// The registration row of the loaded core.math module, or None.
+sema_precise_math_module: fn(graph: SemaRegistrationGraph) -> Int? Never! {
+    loop index in 0..<graph.modules.len() {
+        if graph.modules[index].module_name == "core.math" && module_is_core(graph.modules[index].module_identity) {
+            return Val(index)
+        }
+    }
+    None
+}
+
+// The precise operation node `kind` holds, or None for any other node.
+sema_precise_operation: fn(kind: NodeKind) -> SemaPreciseOperation? Never! {
+    if kind == .PreciseBuiltin(type_name, function, args) {
+        return sema_precise_operation_of(type_name, function, -1, args)
+    }
+    if kind == .MathBuiltin(type_name, function, args) {
+        if type_name == "Complex" -> return sema_precise_operation_of(type_name, function, -1, args)
+        return None
+    }
+    if kind == .HandleMethod(receiver, operation, args) {
+        if operation == .PreciseMethod(type_name, method) {
+            return sema_precise_operation_of(type_name, method, receiver, args)
+        }
+    }
+    None
+}
+
+// The operation `function` of precise type `type_name` on `receiver` (a
+// method's; -1 for none) and then `args`. A Fraction `div` stays the
+// operation: JetIR tests its divisor first.
+sema_precise_operation_of: fn(type_name: String, function: String, receiver: Int, args: [Int]) -> SemaPreciseOperation? Never! {
+    if type_name != "Decimal" && type_name != "Fraction" && type_name != "Complex" -> return None
+    if type_name == "Fraction" && function == "div" -> return None
+    values := [Int]{}
+    if receiver >= 0 -> values.push(receiver)
+    loop argument in args -> values.push(argument)
+    Val(SemaPreciseOperation{function: "{sema_precise_function_prefix(type_name)}{function}", args: values})
+}
+
+#Test("a precise operation runs the core.math function of its type's prefix") {
+    assert_eq(sema_precise_family_owner("__decimal_add"), Val("Decimal"))
+    assert_eq(sema_precise_family_owner("__fraction_try_int"), Val("Fraction"))
+    assert_eq(sema_precise_family_owner("__complex_abs"), Val("Complex"))
+    assert_eq(sema_precise_family_owner("decimal"), None)
+    operation: sema_precise_operation(NodeKind.PreciseBuiltin{type_name: "Decimal", function: "add", args: [Int]{3, 4}}) ?? panic("Decimal add is a precise operation")
+    assert_eq(operation.function, "__decimal_add")
+    assert_eq(operation.args, [Int]{3, 4})
+    method: sema_precise_operation(NodeKind.HandleMethod{receiver: 1, operation: BodyHandleOp.PreciseMethod{type_name: "Decimal", method: "to_float"}, args: [Int]{}}) ?? panic("Decimal to_float is a precise method")
+    assert_eq(method.function, "__decimal_to_float")
+    assert_eq(method.args, [Int]{1})
+    assert_eq(sema_precise_operation(NodeKind.MathBuiltin{type_name: "F32", function: "abs", args: [Int]{2}}), None)
+    sum: sema_precise_operation(NodeKind.PreciseBuiltin{type_name: "Fraction", function: "add", args: [Int]{5, 6}}) ?? panic("Fraction add is a precise operation")
+    assert_eq(sum.function, "__fraction_add")
+    assert_eq(sema_precise_operation(NodeKind.PreciseBuiltin{type_name: "Fraction", function: "div", args: [Int]{5, 6}}), None)
+}

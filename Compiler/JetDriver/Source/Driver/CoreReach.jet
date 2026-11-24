@@ -45,7 +45,7 @@
 // size of the library.
 use {
     jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
-    jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
+    jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -82,7 +82,7 @@ use {
         token_synthetic,
     ]
     jet_parser.[parse_lexed_with_source_threads]
-    jet_sema.[sema_call_core_f32_source, sema_source_word_byte]
+    jet_sema.[sema_call_core_f32_source, sema_precise_family_owner, sema_source_word_byte]
 }
 
 // What one parsed unit's source spells (jet_driver_unit_words). `words`
@@ -118,7 +118,8 @@ jet_driver_unit_no_words: fn() -> JetDriverUnitWords Never! {
 
 // One implementation of a trait for a Core type: the modules and names of
 // its type and its trait. A compiler-owned trait (Compiler/Prelude/Traits.jet)
-// has the module "", and so does a builtin type.
+// has the module that declares it (OwnedTrait.declared_in: `core.encoding`
+// for `Decode`), or "" when only the compiler does; a builtin type has "".
 JetDriverCoreImplRow: struct {
     type_module: String,
     type_name: String,
@@ -136,7 +137,7 @@ jet_driver_core_impl_reached: fn(row: JetDriverCoreImplRow, reached: NameTable) 
     if row.type_module != "" && !jet_driver_reach_holds(reached, row.type_module) && !jet_driver_reach_holds(reached, "{row.type_module}.{row.type_name}") {
         return false
     }
-    if row.trait_module == "" {
+    if owned_trait(row.trait_name) == .Val(owned) && owned.declared_in == row.trait_module {
         return !owned_trait_codec(row.trait_name) || jet_driver_reach_holds(reached, row.trait_name)
     }
     jet_driver_reach_holds(reached, row.trait_module) || jet_driver_reach_holds(reached, "{row.trait_module}.{row.trait_name}")
@@ -524,6 +525,8 @@ JET_DRIVER_SOURCE_ROUTES: [String]{
     "core.term.eprint",
     "core.term.print",
     "core.testing.snap",
+    "core.text.fmt.pretty",
+    "core.text.fmt.quantity",
     "core.ui.button",
     "core.ui.text_input",
 }
@@ -785,8 +788,8 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
 
 // Whether the compiler calls `name` of the routes' module by a name no
 // program need spell: a route row or a function lowering keeps by name
-// (ir_core_lowered_by_name: `x.abs()` on a Float runs `fabs`, a Fmt.jet
-// selector helper), and in a module that isn't routed every `__` name.
+// (ir_core_lowered_by_name: an Encoding.jet decode helper, a core.process
+// line reader), and in a module that isn't routed every `__` name.
 jet_driver_core_route: fn(routes: JetDriverCoreRoutes, name: String) -> Bool Never! {
     if !routes.routed && name.starts_with("__") -> return true
     routes.names.get(name) != None || ir_core_lowered_by_name(true, routes.path, name)
@@ -802,12 +805,12 @@ jet_driver_core_f32_member: fn(routes: JetDriverCoreRoutes, name: String) -> Str
     Val(member)
 }
 
-// The type whose precise family (ir_precise_source_family_owner) holds
-// `name` in a routed module: `Fraction` for `__fraction_add`, which lowering
-// runs for any Fraction value.
+// The type whose precise family (sema_precise_family_owner) holds `name` in
+// a routed module: `Fraction` for `__fraction_try_int`, which a checked
+// Fraction operation calls (sema_precise_bind).
 jet_driver_core_family_owner: fn(routes: JetDriverCoreRoutes, name: String) -> String? Never! {
     if !routes.routed -> return None
-    ir_precise_source_family_owner(name)
+    sema_precise_family_owner(name)
 }
 
 jet_driver_reach_item_name: fn(item: Item) -> String Never! {
@@ -1231,6 +1234,7 @@ jet_driver_reach_impl: fn(reach: &JetDriverReach, module_name: String, type_name
         if owned.auto_derive_family == .Val(family) {
             triggers.push(jet_driver_reach_word(reach, family))
         }
+        trait_module = owned.declared_in.move()
     } else {
         parts: written.partition(".")
         trait_module = module_name.copy()

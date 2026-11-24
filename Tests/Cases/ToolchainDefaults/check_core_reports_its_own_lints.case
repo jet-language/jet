@@ -1,0 +1,25 @@
+# Docs/Spec/Reference/cli.md: `jet check Core` reports Core's own lints, and a program that
+# only uses Core reports none of them. The probe program calls `log.bool`, whose Core signature
+# carries a lint (a public function's positional `Bool`), so the program's check reaches Core code
+# that holds a lint and drops it. The tree adds a float equality (L0502) to core.log that only the
+# every-body check reaches, so `jet check Core` has a lint of its own to print. That check also
+# demands the codec bodies the compiler generates for Core types (core.db's DBError codec): a lint
+# there names Core source, never the check's scratch entry. Core's lints print as warnings, so
+# the check still ends with no errors.
+env: NO_COLOR=1
+requires: os:unix
+fixture: CheckCoreLints.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+concat: tree/Core/Log/Log.jet tree/Core/Log/Log.jet lint.txt
+step: jet check tree/app/probe.jet
+env: JET_TOOLCHAIN_ROOT={work}/tree
+exit: 0
+stdout+stderr: ~ "has no problems" # the program reports none of Core's lints
+stdout+stderr: !~ "Warning" # not even the ones on the Core code its call reaches
+step: jet check tree/Core
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout+stderr: ~ "has no errors" # Core's lints are warnings
+stdout+stderr: ~ "Comparing floats" # Core's own lint
+stdout+stderr: !~ "jet-check-core" # no lint against the check's scratch entry

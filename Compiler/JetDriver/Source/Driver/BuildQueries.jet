@@ -20,6 +20,7 @@ use {
         build_plan_selection,
         build_plan_selected_generated,
         build_session_abort,
+        build_session_add_source,
         build_session_append_unique,
         build_session_call,
         build_session_package_dir,
@@ -1005,13 +1006,16 @@ jet_driver_build_promise_notes: fn(diagnostics: &[Diagnostic], session: BuildSes
 }
 
 // The build file's display path and source, which the session counts each
-// generated module's and each step's place in (build_session_set_source).
-// `build_path` is the build file's physical path.
+// generated module's and each step's place in (build_session_set_source),
+// and every loaded module's, where a `core.build` method's `at` names the
+// call (build_session_add_source). `build_path` is the build file's
+// physical path.
 jet_driver_build_set_source: fn(session: &BuildSession, modules: [JetDriverSourceQueryModule], build_path: String) Never! {
     loop loaded in modules {
         if loaded.physical_path == build_path {
             build_session_set_source(session, loaded.path, loaded.source)
-            return
+        } else {
+            build_session_add_source(session, loaded.path, loaded.source)
         }
     }
 }

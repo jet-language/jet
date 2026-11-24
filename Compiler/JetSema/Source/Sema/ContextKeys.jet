@@ -72,6 +72,14 @@ sema_context_field_module: fn(name: String) -> String? Never! {
     }
 }
 
+// The Core module the loader also loads where the context field `name` is
+// spelled, beside the field's own (sema_context_field_module): a print
+// style's Int and Float text is that of core.text.fmt's format trait
+// implementations (JetIR BuildTypes.jet ir_print_style_scalar).
+sema_context_field_companion: fn(name: String) -> String? Never! {
+    if name == "print" -> Val("core.text.fmt") else -> None
+}
+
 // The value a Core-carried context field has where no `#Context` block set
 // it: a `#ContextKey` constant, or a function of the module read as a value.
 SemaContextDefault: enum {

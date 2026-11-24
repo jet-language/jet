@@ -1,0 +1,27 @@
+# `build: fn` declares a target of each kind core.build's `Build` names, and
+# a made file's `path()` is its package-relative path. `b.source_key()` and
+# `b.jet_built_from(target)` need the build to sit in a Jet toolchain tree,
+# and `b.plugin` runs only inside `#Impure`.
+fixture: Fixtures/BuildDeclaresEveryTargetKind
+env: NO_COLOR=1
+step: jet inspect build main.jet
+exit: 0
+stdout: ~ "target\tchecks\tTest" # add_test
+stdout: ~ "target\tassets\tAssetBundle" # add_asset_bundle
+stdout: ~ "target\tdocs\tDoc" # add_doc
+stdout: ~ "target\tinstall\tInstall" # add_install
+stdout: ~ "target\tpack\tPackage" # add_package
+stdout: ~ "target\tpublish\tPublish" # add_publish
+step: jet inspect build main.jet --json
+exit: 0
+stdout: ~ "--named=made.txt" # the made file's path, passed as the step's argument
+step: jet inspect build keyed.jet
+exit: nonzero
+stderr: ~ "`b.source_key` can't hash the toolchain tree" # no toolchain tree holds the build
+stderr: ~ "is in no Jet toolchain tree" # why it has no source key
+step: jet inspect build built.jet
+exit: nonzero
+stderr: ~ "`b.jet_built_from` can't hash the toolchain tree" # nor for the compiler it would build
+step: jet inspect build plugin.jet
+exit: nonzero
+stderr: ~ "`b.plugin` touches the ambient world and must be inside `#Impure(\"reason\")`" # a plugin call outside the gate

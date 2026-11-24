@@ -13113,6 +13113,60 @@ DuplicateCommandOverride: struct {
     }
 }
 
+OutputSettingUndeclared: struct {
+    key: String,
+
+    impl Diagnostic {
+        code: "E3541",
+        safety_class: .Soundness,
+        safety_reason: "No declared setting takes the value, so the output's code could never read it.",
+        expert_path: "none: an output sets only the settings its package declares",
+        stage: [.Sema],
+        meaning: "A build output's options set a setting the package does not declare",
+        detail: true,
+
+        what: fn(self) -> String {
+            "This output's options set `{self.key}`, which the package does not declare."
+        }
+
+        why: fn(self) -> String {
+            "An output's `options: {{settings: ...}}` gives its own values to the settings `package.jet` declares, and code reads them as `#build.settings.<key>`."
+        }
+
+        fix: fn(self) -> String {
+            "Declare `{self.key}: Type = default` in the `settings: {{ … }}` block of `package.jet`, or drop it from the output's options."
+        }
+    }
+}
+
+OutputSettingWrongType: struct {
+    key: String,
+    declared: String,
+    given: String,
+
+    impl Diagnostic {
+        code: "E3542",
+        safety_class: .Soundness,
+        safety_reason: "Code reads the setting as its declared type, so a value of another type has no meaning there.",
+        expert_path: "none: an output's value has the setting's declared type",
+        stage: [.Sema],
+        meaning: "A build output's options give a setting a value of another type than the one it declares",
+        detail: true,
+
+        what: fn(self) -> String {
+            "Setting `{self.key}` is declared `{self.declared}`, but this output gives it a `{self.given}`."
+        }
+
+        why: fn(self) -> String {
+            "Code reads `#build.settings.{self.key}` as its declared type, whichever output it is built into."
+        }
+
+        fix: fn(self) -> String {
+            "Give `{self.key}` a value of type `{self.declared}`."
+        }
+    }
+}
+
 GeneratedModuleShadows: struct {
     name: String,
     path: String,

@@ -781,8 +781,9 @@ jet.runtime interface with the `calls` records.
 
 `jet check Core`, aimed at that toolchain's `Core/` directory, checks the whole
 Core library: one compile imports every public Core module and checks every
-function body, whether a program calls it or not. A lint in Core source is not
-reported, nor one in a codec body the compiler generates for a Core type. Any
+function body, whether a program calls it or not. It reports Core's own lints,
+each at its Core source, one in a codec body the compiler generates for a Core
+type included; a compile of any other program drops a lint in Core source. Any
 other `jet check` loads and checks only the Core declarations its program can
 name; `JET_KEEP_GOING=1` loads and checks every declaration of each Core module
 the program imports. `jet check --style` adds the opt-in style lints (L0535).

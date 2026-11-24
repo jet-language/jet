@@ -10,7 +10,12 @@
 // `column: String{"…"}` facts, `Name: type` associated types and
 // `name: fn(…)` requirements ending `Never!` or `Error!`. A requirement ending
 // `Error! {` is a default: its body runs to the `}` at its own indent, and
-// its row carries the whole method as written.
+// its row carries the whole method as written. A trait with a
+// `declared_in: String{"core.encoding"}` fact is declared by that Core
+// module: the stub here holds its facts, and its members are read from the
+// module's `Name: trait {` block (its source per Compiler/Prelude/Core.rows),
+// in the same shape. Until the module declares the trait, the members the
+// stub writes stand in; once it does, the stub may write none.
 // Usage: jet Tools/Agent/OwnedTraitRows.jet [--check|--write]
 // --check fails when a copy differs from what the declarations give it;
 // --write rewrites the copies.
@@ -21,6 +26,9 @@ use {
 }
 
 SOURCE_PATH: "Compiler/Prelude/Traits.jet"
+
+// Core.rows, whose `source_module` rows give each Core module's source.
+CORE_ROWS_PATH: "Compiler/Prelude/Core.rows"
 
 // The prelude that declares `CheckedText: trait` for readers.
 PRELUDE_PATH: "Compiler/Prelude/Core/prelude.jet"
@@ -58,7 +66,10 @@ METHOD_NAME: Regex{"^[a-z][a-z0-9_]*$"}
 
 FLAG_COLUMNS: [String]{"local", "bare_bound", "raw_return", "any_receiver", "commutative", "codec", "conversion", "derived", "checked_text", "auto_derive", "bundle", "through_elements"}
 
-TEXT_COLUMNS: [String]{"operators", "auto_derive_family", "requires", "shares"}
+TEXT_COLUMNS: [String]{"operators", "auto_derive_family", "requires", "shares", "declared_in"}
+
+// The column that names the Core module declaring the trait.
+DECLARED_IN_COLUMN: "declared_in"
 
 // The column that names a family marker.
 FAMILY_COLUMN: "auto_derive_family"
@@ -547,6 +558,9 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
         rendered: loop law in source.laws -> "OwnedLaw{{name: \"{law.name}\", source: \"{jet_text(law.source)}\"}}"
         fields.push("laws: [OwnedLaw]{{{rendered.join(", ")}}}")
     }
+    if fact(source, DECLARED_IN_COLUMN) == .Val(module_name) {
+        fields.push("declared_in: \"{module_name}\"")
+    }
     // A row stays on one line unless its contract spans lines; then, as
     // `jet fmt` writes it, each field has a line of its own.
     if !contract.contains("\n") -> return Ok("    OwnedTrait{{{fields.join(", ")}}},")
@@ -579,12 +593,37 @@ check_table: fn(traits: [TraitSource]) OwnedTraitRowsError! {
     }
 }
 
-render_rows: fn(source_text: String, checked_text_declared: Bool) -> String OwnedTraitRowsError! {
+// `source` with the members its Core module's declaration gives it
+// (`declared_in`), as read into `homes`; any other trait as it is, and so is
+// a `declared_in` trait its module does not declare yet whose stub writes the
+// members.
+homed: fn(source: TraitSource, homes: [TraitSource]) -> TraitSource OwnedTraitRowsError! {
+    module_name: fact(source, DECLARED_IN_COLUMN) ?? return Ok(source)
+    context: "line {source.line}: trait {source.name}"
+    stub_members: source.methods.len() > 0 || source.associated.len() > 0 || source.laws.len() > 0
+    loop home in homes {
+        if home.name != source.name -> next
+        if stub_members {
+            return Err(rows_fail("{context}: `declared_in` takes its members from the declaration in {module_name}"))
+        }
+        if home.facts.len() > 0 {
+            return Err(rows_fail("{context}: the declaration in {module_name} writes a fact column; facts stay in {SOURCE_PATH}"))
+        }
+        return Ok(TraitSource{name: source.name, line: source.line, literal: source.literal, facts: source.facts, associated: home.associated, methods: home.methods, laws: home.laws})
+    }
+    if stub_members -> return Ok(source)
+    Err(rows_fail("{context}: {module_name} declares no `{source.name}: trait`"))
+}
+
+// `homes` holds the declaration of each trait with a `declared_in`
+// (home_traits).
+render_rows: fn(source_text: String, checked_text_declared: Bool, homes: [TraitSource]) -> String OwnedTraitRowsError! {
     traits: read_traits(source_text) ?? return Err(err)
     check_table(traits) ?? return Err(err)
     rows := [String]{}
     loop source in traits {
-        rows.push(render_row(source, traits, checked_text_declared) ?? return Err(err))
+        written: homed(source, homes) ?? return Err(err)
+        rows.push(render_row(written, traits, checked_text_declared) ?? return Err(err))
     }
     Ok("// Source: {SOURCE_PATH}\n// Source SHA-256: {crypto.sha256(source_text).hex()}\n{GENERATED_BY}\n// Every trait the compiler owns, in declaration order; OwnedTraits.jet\n// holds the row shape and the questions its readers ask.\nOWNED_TRAITS: [OwnedTrait]{{\n{rows.join("\n")}\n}}\n")
 }
@@ -656,10 +695,75 @@ read_text: fn(path: String) -[FS]> String OwnedTraitRowsError! {
     files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
 }
 
+// The `Name: trait {` block of `source_text`, from its opening line through
+// the `}` that closes it, or "" when the source declares no such trait.
+trait_block: fn(source_text: String, name: String) -> String Never! {
+    opening: "{name}: trait {{"
+    block := [String]{}
+    loop line in source_text.split("\n").to_list() {
+        if block.len() == 0 {
+            if line == opening -> block.push(line.copy())
+            next
+        }
+        block.push(line.copy())
+        if line == "}}" -> return "{block.join("\n")}\n"
+    }
+    ""
+}
+
+// The trait `stub` as its Core module declares it in `block`, read from
+// `path`. A `raw_return` trait's declaration writes a requirement as its
+// impls do (`encode: fn(self) -> Dyn`), with no failure carrier, which a row
+// spells `Never!`.
+home_trait: fn(stub: TraitSource, block: String, path: String) -> TraitSource OwnedTraitRowsError! {
+    raw: flag(stub, "raw_return")
+    lines := [String]{}
+    loop line in block.split("\n").to_list() {
+        bare: raw && METHOD_OPEN.match(line.trim()) != None && line.ends_with(",") && !line.ends_with("!,")
+        lines.push(if bare -> "{line.remove_suffix(",")} Never!," else -> line.copy())
+    }
+    declared_traits: read_traits(lines.join("\n")) ?? return Err(rows_fail("{path}: {err.message.remove_prefix("owned trait rows: ")}"))
+    Ok(declared_traits[0])
+}
+
+// The source path Core.rows gives the Core module `module_name`.
+core_source_path: fn(core_rows: String, module_name: String) -> String OwnedTraitRowsError! {
+    head: "source_module {module_name} path "
+    loop line in core_rows.split("\n").to_list() {
+        if line.starts_with(head) -> return Ok(line.remove_prefix(head).partition(" ").head.copy())
+    }
+    Err(rows_fail("{CORE_ROWS_PATH} has no `source_module {module_name}` row"))
+}
+
+// The declaration of each trait of `source_text` with a `declared_in`, read
+// from that Core module's source. A trait the module does not declare yet
+// has none when its stub writes the members (homed).
+home_traits: fn(source_text: String) -[FS]> [TraitSource] OwnedTraitRowsError! {
+    traits: read_traits(source_text) ?? return Err(err)
+    homes := [TraitSource]{}
+    core_rows := ""
+    loop source in traits {
+        module_name: fact(source, DECLARED_IN_COLUMN) ?? next
+        if core_rows == "" -> core_rows = read_text(CORE_ROWS_PATH) ?? return Err(err)
+        path: core_source_path(core_rows, module_name) ?? return Err(err)
+        module_text: read_text(path) ?? return Err(err)
+        block: trait_block(module_text, source.name)
+        if block == "" {
+            if source.methods.len() > 0 || source.associated.len() > 0 || source.laws.len() > 0 {
+                next
+            }
+            return Err(rows_fail("trait {source.name}: {path} declares no `{source.name}: trait`"))
+        }
+        homes.push(home_trait(source, block, path) ?? return Err(err))
+    }
+    Ok(homes)
+}
+
 generated_files: fn() -[FS]> [TextFile] OwnedTraitRowsError! {
     source_text: read_text(SOURCE_PATH) ?? return Err(err)
     prelude: read_text(PRELUDE_PATH) ?? return Err(err)
-    rows: render_rows(source_text, prelude.contains(CHECKED_TEXT_DECLARATION)) ?? return Err(err)
+    homes: home_traits(source_text) ?? return Err(err)
+    rows: render_rows(source_text, prelude.contains(CHECKED_TEXT_DECLARATION), homes) ?? return Err(err)
     dictionary: read_text(DICTIONARY_PATH) ?? return Err(err)
     block: render_dictionary_rows(source_text) ?? return Err(err)
     next_dictionary: replace_dictionary_block(dictionary, block) ?? return Err(err)
@@ -693,8 +797,8 @@ owned_trait_rows_main: fn(args: [String]) -[FS]> String OwnedTraitRowsError! {
 run: fn() { print(owned_trait_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
 // The error text render_rows reports for `source`, or "" when it accepts it.
-rows_error: fn(source: String) -> String Never! {
-    if render_rows(source, true) == {
+rows_error: fn(source: String, homes: [TraitSource]{[TraitSource]{}}) -> String Never! {
+    if render_rows(source, true, homes) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
@@ -707,7 +811,7 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}},\n    op
 }
 
 #Test("a declaration renders its contract, types and facts") {
-    rendered: render_rows(MINIMAL_TRAITS, true) ?? panic("the minimal traits did not render: {err.message}")
+    rendered: render_rows(MINIMAL_TRAITS, true, [TraitSource]{}) ?? panic("the minimal traits did not render: {err.message}")
     assert(rendered.contains("OwnedTrait{{name: \"Add\", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Operator{{hook: \"add\", result: None}}, operators: [String]{{\"+\"}}, commutative: false, requires: [String]{{}},"))
     assert(rendered.contains("OwnedMethod{{name: \"query\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"sql\", access: AccessConvention.Read, ty: Type.Named{{name: \"SQL\"}}}}}}, returns: Val(Type.Result{{ok: Type.List{{element: Type.Map{{key: Type.String, key_span: None, value: Type.Named{{name: \"DBValue\"}}}}}}, err: Type.Named{{name: \"DBError\"}}}})}}"))
     assert(rendered.contains("OwnedMethod{{name: \"fill\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"buffer\", access: AccessConvention.Write, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}, OwnedParam{{name: \"limit\", access: AccessConvention.Read, ty: Type.Int}}}}, returns: Val(Type.Result{{ok: Type.Int, err: Type.Named{{name: \"IOError\"}}}})}}"))
@@ -722,12 +826,39 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}},\n    op
 SINK_TRAIT: "Sink: trait {{\n    put: fn(&self, bytes: [U8]) IOError!,\n    say: fn(&self, text: String) IOError! {{\n        self.put(\"{{text}}\".bytes())\n    }}\n}}\n"
 
 #Test("a default carries its method as written, and calls no default") {
-    rendered: render_rows(SINK_TRAIT, true) ?? panic("the sink trait did not render: {err.message}")
+    rendered: render_rows(SINK_TRAIT, true, [TraitSource]{}) ?? panic("the sink trait did not render: {err.message}")
     assert(rendered.contains("OwnedMethod{{name: \"put\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"bytes\", access: AccessConvention.Read, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}}}, returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}})}},"))
     assert(rendered.contains("returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}}), default_source: Val(\"say: fn(&self, text: String) IOError! {{{{\\n    self.put(\\\"{{{{text}}}}\\\".bytes())\\n}}}}\")}},"))
     assert(rows_error(SINK_TRAIT.replace("self.put(", "self.say(")).contains("the default `say` calls `say`, which has a default"))
     assert(rows_error(SINK_TRAIT.replace("        self.put", "    self.put")).contains("a default body sits one level in"))
     assert(rows_error(SINK_TRAIT.replace("    }}\n}}\n", "")).contains("the default `say` is not closed"))
+}
+
+HOMED_TRAIT: "Decode: trait {{\n    codec: Bool{{true}},\n    declared_in: String{{\"core.encoding\"}},\n}}\n"
+
+HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n\nOther: trait {{\n}}\n"
+
+#Test("a trait a Core module declares takes its members from that declaration") {
+    block: trait_block(HOME_SOURCE, "Decode")
+    assert_eq(block, "Decode: trait {{\n    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n")
+    homes: read_traits(block) ?? panic(err.message)
+    rendered: render_rows(HOMED_TRAIT, true, homes) ?? panic("the homed trait did not render: {err.message}")
+    assert(rendered.contains("contract: OwnedContract.Codec{{verb: \"decode\"}},"))
+    assert(rendered.contains("through_elements: false, declared_in: \"core.encoding\"}},"))
+    assert(rows_error(HOMED_TRAIT).contains("core.encoding declares no `Decode: trait`"))
+    assert(rows_error(HOMED_TRAIT.replace("}}\n", "    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n"), homes).contains("takes its members from the declaration in core.encoding"))
+    // Until core.encoding declares it, the stub's own members stand in.
+    assert_eq(rows_error(HOMED_TRAIT.replace("}}\n", "    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n")), "")
+    assert(rows_error(HOMED_TRAIT, read_traits(block.replace("    decode", "    codec: Bool{{true}},\n    decode")) ?? panic(err.message)).contains("facts stay in"))
+    assert_eq(trait_block(HOME_SOURCE, "Encode"), "")
+    assert_eq(core_source_path("module core.encoding exports {{ Dyn }}\nsource_module core.encoding path Core/Encoding/Encoding.jet alias core_encoding\n", "core.encoding") ?? panic(err.message), "Core/Encoding/Encoding.jet")
+    stub: read_traits("Encode: trait {{\n    raw_return: Bool{{true}},\n    declared_in: String{{\"core.encoding\"}},\n}}\n") ?? panic(err.message)
+    encode_block: "Encode: trait {{\n    encode: fn(self) -> Dyn,\n}}\n"
+    encode: home_trait(stub[0], encode_block, "Encoding.jet") ?? panic(err.message)
+    assert_eq(encode.methods[0].returns, "Dyn")
+    assert_eq(encode.methods[0].error, "Never")
+    refused: read_traits(HOMED_TRAIT) ?? panic(err.message)
+    assert(home_trait(refused[0], encode_block, "Encoding.jet") == .Err(_))
 }
 
 #Test("a declaration that breaks the source rules is refused") {

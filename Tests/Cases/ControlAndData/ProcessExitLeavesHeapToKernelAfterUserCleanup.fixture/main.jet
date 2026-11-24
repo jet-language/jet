@@ -25,8 +25,13 @@ Key: struct {
     }
 }
 
+room: fn(count: Int) -> [U8] AllocError! { List.try_with_capacity(count) }
+
+// The buffer is sized up front, so it is one mapping that never grows: a
+// growing buffer frees each smaller mapping it leaves, and those frees would
+// show as munmap calls before the exit.
 fill: fn() -> [U8] {
-    bytes := [U8]{}
+    bytes := room(67108864) ?? panic("no room for 64 MiB")
     loop at in 0..<67108864 -> bytes.push(U8{at & 255})
     bytes
 }

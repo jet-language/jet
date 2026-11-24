@@ -1566,11 +1566,13 @@ FrameCursor: struct {
                     }
                     // Keys and buttons held when the window loses the
                     // keyboard are released for it.
-                    .Focus(false) -> {
-                        guard.value.keys = [Key]{}
-                        guard.value.buttons = [UIPointerButton]{}
+                    .Focus(focused) -> {
+                        if !focused {
+                            guard.value.keys = [Key]{}
+                            guard.value.buttons = [UIPointerButton]{}
+                        }
                     }
-                    .Text(_) | .Compose(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Visible(_) | .Drop(_, _, _) -> {}
+                    .Text(_) | .Compose(_) | .Scroll(_, _) | .Resize(_, _) | .Visible(_) | .Drop(_, _, _) -> {}
                 }
             }
             frame: Frame{
@@ -2544,7 +2546,7 @@ priv internal: module {
             loop d in digits -> out.push(d)
         } else if place >= digits.len() {
             loop d in digits -> out.push(d)
-            loop index in digits.len()..<place -> out.push(U8{48})
+            loop _index in digits.len()..<place -> out.push(U8{48})
         } else {
             loop index in 0..<place -> out.push(digits[index])
             out.push(U8{46})

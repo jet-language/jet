@@ -91,12 +91,12 @@ JetEvalCompilerQueryHost: trait {
 }
 
 JetEvalConfig: struct {
-    // Budget for one compile-time call, its step limit: a native call has
-    // fuel /% 2000 milliseconds (IR/Native.jet). A binding's `#StepLimit(n)`
-    // sets it to n for its value. Build-time code keeps it: a `build: fn`
-    // or `dev: fn` run is one call, so the `meta.events` handlers a build
-    // runs spend the build's budget. A negative fuel has no limit: a program
-    // run, like a built binary.
+    // Budget for one compile-time call, its step limit: each loop iteration
+    // and each recursive body's entry is a step (IR/Native.jet). A
+    // binding's `#StepLimit(n)` sets it to n for its value. Build-time code
+    // keeps it: a `build: fn` or `dev: fn` run is one call, so the
+    // `meta.events` handlers a build runs spend the build's budget. A
+    // negative fuel has no limit: a program run, like a built binary.
     fuel: Int,
     max_call_depth: Int,
     max_collection_len: Int,

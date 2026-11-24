@@ -1,4 +1,5 @@
-// core.net.ws client/server echo over cleartext WebSocket.
+// core.net.ws client/server echo over cleartext WebSocket: a text message,
+// then a binary one, until the client closes.
 package: {
     name: "ws_echo"
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time] }
@@ -13,8 +14,14 @@ use {
 
 handle_ws: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock: ws.upgrade(req) ?? return Ok(http_server.response(400, "upgrade failed"))
-    message: sock.recv() ?? return Ok(http_server.response(400, "recv failed"))
-    if message.is_text() {
+    loop {
+        message: sock.recv() ?? return Ok(http_server.response(400, "recv failed"))
+        if message.is_close() -> break
+        if message.is_binary() {
+            data: message.bytes() ?? return Ok(http_server.response(400, "bytes failed"))
+            sock.send_bytes(data) ?? return Ok(http_server.response(500, "send failed"))
+            next
+        }
         text: message.text() ?? "bad"
         sock.send_text("echo:{text}") ?? return Ok(http_server.response(500, "send failed"))
     }
@@ -35,6 +42,11 @@ run: fn() (HTTPError | RangeError | TaskFailure | WsError)! {
     client.send_text("ping") ?? panic("send")
     reply: client.recv() ?? panic("receive")
     print(reply.text() ?? "missing")
+    sent: [U8]{1, 2, 3}
+    client.send_bytes(sent) ?? panic("send bytes")
+    echoed: client.recv() ?? panic("receive bytes")
+    if !echoed.is_binary() || (echoed.bytes() ?? panic("echoed bytes")) != sent -> panic("the binary echo differs")
+    client.close(1000, "") ?? panic("close")
     grace: 100ms
     server.shutdown(grace) ?? panic("shutdown")
     serving.join() ?? panic("server")

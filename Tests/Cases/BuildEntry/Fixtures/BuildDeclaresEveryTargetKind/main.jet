@@ -1,0 +1,19 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("declare one target of each kind") {
+        app: b.add_executable("app", ["main.jet"], [])
+        _: b.add_test("checks", ["main.jet"], [])
+        _: b.add_asset_bundle("assets", ["main.jet"], [])
+        _: b.add_doc("docs", ["main.jet"], [])
+        _: b.add_install("install", [], [], [app])
+        _: b.add_package("pack", [], [], [app])
+        _: b.add_publish("publish", [], [], [app])
+        note: b.run("note", b.jet(), ["FS"])
+        made: note.output("made.txt")
+        note.arg("--named={made.path()}")
+        b.default(app)
+    }
+}
+
+run: fn() {
+    print("ran")
+}

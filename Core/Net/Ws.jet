@@ -3,6 +3,7 @@ use {
     url: core.net.url
     http: core.http
     core.http.[HTTPRequest]
+    rt: jet.runtime.net
 }
 
 #Error
@@ -16,6 +17,46 @@ WsError: enum {
     UnsupportedTarget,
     MessageTooLarge(limit: Int),
     IO(operation: String),
+}
+
+/// A WebSocket connection. Every send and receive waits at most the
+/// connection's timeout (30 s unless set). Only `connect` and `upgrade` fill
+/// the `priv handle`.
+#[!Equatable, !Comparable, !Codable]
+WsConn: struct {
+    priv handle: Int,
+
+    /// Sends `text` as one text message.
+    send_text: fn(self, text: String) -[Net]> WsError! { rt.ws_send_text(self, text) }
+
+    /// Sends `bytes` as one binary message.
+    send_bytes: fn(self, bytes: [U8]) -[Net]> WsError! { rt.ws_send_binary(self, bytes) }
+
+    /// The next whole message; the peer's close frame is a message whose
+    /// `is_close()` holds.
+    recv: fn(self) -[Net]> WsMessage WsError! { rt.ws_recv(self) }
+
+    /// Sends a close frame with `code` (1000 when outside 1000 through 4999) and
+    /// `reason` (cut to 123 bytes), then shuts the connection.
+    close: fn(self, code: Int, reason: String) -[Net]> WsError! { rt.ws_close(self, code, reason) }
+}
+
+/// One received WebSocket message: text, binary, or the peer's close.
+#[!Comparable, !Codable]
+WsMessage: struct {
+    priv handle: Int,
+
+    is_text: fn(self) -> Bool { rt.ws_message_is_text(self) }
+
+    is_binary: fn(self) -> Bool { rt.ws_message_is_binary(self) }
+
+    is_close: fn(self) -> Bool { rt.ws_message_is_close(self) }
+
+    /// A text message's text; `WsError.Protocol` for any other kind.
+    text: fn(self) -> String WsError! { rt.ws_message_text(self) }
+
+    /// A binary message's bytes; `WsError.Protocol` for any other kind.
+    bytes: fn(self) -> [U8] WsError! { rt.ws_message_bytes(self) }
 }
 
 // The provider owns socket I/O, entropy, and frame codec. Jet validates the

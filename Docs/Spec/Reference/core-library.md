@@ -322,18 +322,27 @@ answering it, with the handle the host made as its first parameter:
 
 ```jet
 #Import(jet.build, symbol: "Build.source_key")
-source_key: fn(b: Build) -> String Never!
+source_key: fn(b: Build, at: SourceLocation) -> String Never!
 ```
 
 `#Import(jet.compiler, symbol: "…")` names a compiler query and
 `#Import(jet.build, symbol: "…")` a build operation. Core's public methods on
 its compiler and build types call these imports; the provider owns which
-symbols exist and the phase each runs in. A service import outside Core is
-**E1806**, one without a non-empty `symbol:` or with a body is **E3212**, and
-a call to one outside Core from code that runs when the program does (not
-`build: fn`, a `#run` operand or other compile-time code) is **E0956**. A
-running program that reaches one through Core stops there: no compiler
-answers it.
+symbols exist and the phase each runs in. `core.build`'s `Build`,
+`BuildPlan`, `BuildTarget`, `BuildToolchain`, `BuildProbe`,
+`BuildSigningIdentity`, `BuildStepHandle` and `BuildFile` are Core structs
+whose methods are checked by their declarations, as any Core method is: a
+wrong argument is the ordinary call diagnostic. Each method takes
+`at: SourceLocation{#caller}` and hands it to its import after the handle, so
+the build host reports a refused call at the line that made it.
+`b.probe(name, kind, value, toolchain)` takes a `compile_check` probe's source
+as `code:` and its reproducibility as `reproducibility:`, and
+`.timeout(limit)` takes a `Duration` of whole milliseconds, 1ms or more. A
+service import outside Core is **E1806**, one without a non-empty `symbol:` or
+with a body is **E3212**, and a call to one outside Core from code that runs
+when the program does (not `build: fn`, a `#run` operand or other
+compile-time code) is **E0956**. A running program that reaches one through
+Core stops there: no compiler answers it.
 
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
@@ -2048,6 +2057,13 @@ fragments, missing hosts, and other schemes before the provider handshake.
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `WsError!` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage WsError!` | Receive a text, binary, or close message. |
 | `conn.close(code, reason)` | `WsError!` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
+| `message.is_text()` / `message.is_binary()` / `message.is_close()` | `Bool` | Which kind of message `recv` returned. |
+| `message.text()` / `message.bytes()` | `String WsError!` / `[U8] WsError!` | A text message's text or a binary message's bytes; `WsError.Protocol` for any other kind. |
+
+`WsConn` and `WsMessage` are Core structs over a runtime handle. Their
+methods call `jet.runtime.net`, as `core.net`'s `TCPListener`, `TCPStream`,
+`UDPSocket`, `UnixListener` and `UnixStream` do. A `WsConn`, `TCPStream`
+or `UnixStream` moves; it is not copied.
 
 `WsError` distinguishes invalid URLs, invalid handshakes, protocol/size
 failures, timeout, cancellation, closed connections, and unsupported targets.
@@ -7342,8 +7358,10 @@ On x86-64 a value of four or eight bytes is written with `movnti`; narrower
 values and aggregates use an ordinary store. A function that streams fences
 those writes (`sfence`) before each call and at its return, so callers,
 callees and other threads see them in program order. Pad hot fields to the
-cache line with `#Layout(c, align(#build.cpu.cache_line))`; the fact is 64 on
-every target until Jet selects CPUs (D-CACHE-CONTROL1).
+cache line with `#Layout(c, align(#build.cpu.cache_line))`. The fact reads the
+targeted CPU's line, 128 bytes on Apple Arm and 64 elsewhere, while the layout
+marker is folded before a target is selected and aligns to the generic 64-byte
+line (D-CACHE-CONTROL1).
 
 **Regions, blocks and the allocator trait (D-ALLOC-TRAIT1).** A user-written
 allocator implements `mem.Allocator` over memory from a `mem.Region`, with no

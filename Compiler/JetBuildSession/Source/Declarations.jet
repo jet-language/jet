@@ -1,4 +1,4 @@
-use jet_foundation.[build_option_duration_ms]
+use jet_foundation.[BuildSettingOverride]
 
 // `b.run(name, tool, caps)`: a step that runs `tool`, a BuildFile. Its
 // arguments come one call at a time (build_session_step_call); a found
@@ -382,8 +382,12 @@ build_session_step_call: fn(state: &BuildSessionState, method: String, args: [Bu
             return unit
         }
         "timeout" -> {
-            text: build_session_text(args, 1) ?? return build_session_fail(state, "`.timeout` takes a Time literal")
-            step.timeout_ms = Val(build_option_duration_ms(text) ?? return build_session_fail(state, "step `{step.name}`'s time limit `{text}` must be a positive Time literal, whole milliseconds or more"))
+            // The limit's nanoseconds (Duration.ns).
+            ns: if args.len() > 1 && args[1] == .Int(value) -> value else -> return build_session_fail(state, "`.timeout` takes a Duration")
+            if ns < 1_000_000 || ns % 1_000_000 != 0 {
+                return build_session_fail(state, "step `{step.name}`'s time limit must be a positive Duration of whole milliseconds, 1ms or more")
+            }
+            step.timeout_ms = Val(ns /% 1_000_000)
             state.actions[id] = step
             return unit
         }
@@ -413,9 +417,14 @@ build_session_kept: fn(args: [BuildSessionValue]) -> Bool Never! {
     false
 }
 
+// An output: its name, sources and steps, then its dependencies, probes,
+// toolchain and signing identity, each `()` when the call leaves it out,
+// then one (key, value) pair per setting its `options: {settings: ...}`
+// gives (sema_call_build_output), as the setting text the package's
+// settings fold reads.
 build_session_add_target: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
-    if args.len() < 3 || args.len() > 7 {
-        return build_session_fail(state, "`b.{method}` accepts three through seven arguments")
+    if args.len() < 3 || (args.len() > 7 && args.len() % 2 == 0) {
+        return build_session_fail(state, "`b.{method}` accepts three through seven arguments, then a key and value per setting")
     }
     kind: if method == {
         "add_executable" -> "executable"
@@ -436,17 +445,38 @@ build_session_add_target: fn(state: &BuildSessionState, method: String, args: [B
     deps := [Int]{}
     probes := [Int]{}
     toolchain := 0
-    signing: if args.len() >= 7 -> Val(build_session_handle(state, args[6], "BuildSigningIdentity") ?? return build_session_fail(state, "target signing identity does not belong to this build")) else -> None
+    signing: if args.len() >= 7 && args[6] != .Unit -> Val(build_session_handle(state, args[6], "BuildSigningIdentity") ?? return build_session_fail(state, "target signing identity does not belong to this build")) else -> None
     if args.len() >= 4 {
         deps = build_session_handles(state, args, 3, "BuildTarget") ?? return build_session_fail(state, "target dependencies do not belong to this build")
     }
     if args.len() >= 5 {
         probes = build_session_handles(state, args, 4, "BuildProbe") ?? return build_session_fail(state, "target probes do not belong to this build")
     }
-    if args.len() >= 6 {
+    if args.len() >= 6 && args[5] != .Unit {
         toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "target toolchain does not belong to this build")
     }
-    build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None, start: state.start, end: state.end})
+    settings := [BuildSettingOverride]{}
+    loop at in 7..<args.len() {
+        if (at - 7) % 2 == 1 -> next
+        key: build_session_text(args, at) ?? return build_session_fail(state, "a setting of `b.{method}` must be named by text")
+        value: build_session_setting_text(args[at + 1]) ?? return build_session_fail(state, "setting `{key}` of `b.{method}` must be a Bool, Int, Char, String or enum case")
+        settings.push(BuildSettingOverride{name: key, value: value})
+    }
+    build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None, start: state.start, end: state.end, settings: settings})
+}
+
+// A setting's value as the text the package's settings fold reads, as it
+// reads a profile's (JetSema sema_fact_build_setting_literal): quoted text
+// and characters with `\` escapes, a bare Bool or Int, and `.Case`.
+build_session_setting_text: fn(value: BuildSessionValue) -> String? Never! {
+    if value == {
+        .Text(text) -> Val("\"{text.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        .Bool(flag) -> Val(if flag -> "true" else -> "false")
+        .Int(number) -> Val("{number}")
+        .Char(ch) -> Val(if ch == '\\' || ch == '\'' -> "'\\{ch}'" else -> "'{ch}'")
+        .Enum(variant) -> Val(".{variant}")
+        .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> None
+    }
 }
 
 build_session_insert_target: fn(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {

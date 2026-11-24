@@ -45,6 +45,7 @@ use {
         x64_cvtss2sd,
         x64_cvttsd2si,
         x64_cvttss2si,
+        x64_dec_rip,
         x64_div,
         x64_float_load,
         x64_float_op,
@@ -768,6 +769,13 @@ add_cf_stencils: fn(s: &[StencilSpec]) Never! {
     add_stencil(s, "o0_st_armed_poll", true, [String]{}, c10.bytes, [StencilHole]{
         StencilHole{at: h10a, kind: HOLE_ZERO32, param: ""},
         StencilHole{at: h10b, kind: HOLE_ZERO32, param: ""},
+    })
+    c15 := x64_code()
+    h15a: x64_dec_rip(c15)
+    h15b: x64_jcc_rel32(c15, X64Cond.S)
+    add_stencil(s, "o0_st_step_spend", true, [String]{}, c15.bytes, [StencilHole]{
+        StencilHole{at: h15a, kind: HOLE_ZERO32, param: ""},
+        StencilHole{at: h15b, kind: HOLE_ZERO32, param: ""},
     })
     c11 := x64_code()
     x64_mov_gs_abs(c11, X64_RAX, 0)

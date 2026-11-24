@@ -52,6 +52,7 @@ use {
         QuantityKind,
         Span,
         StrFormat,
+        StrFormatStyle,
         StrPart,
         Stmt,
         Symbol,
@@ -70,14 +71,12 @@ use {
         TStrFormat,
         TTypedGoal,
         TUnaryOp,
-        TUnitFormat,
         TUnitRoundingMode,
         TraitImplBlock,
         Type,
         TupleField,
         TypeTupleField,
         UnOp,
-        UnitFormat,
         UnitRatio,
         ast_comptime_value_type,
         AST_EMPTY_CALL_ARG_FLAGS,
@@ -105,6 +104,8 @@ use {
         type_name,
         type_structural_family,
         type_structural_head_names,
+        str_format_style,
+        symbol_key_leaf,
         type_union_member_tag_in,
         measure_literal_value,
         SwitchArm,
@@ -1169,33 +1170,6 @@ sema_expr_op_mismatch: fn(op: BinOp, lhs: Type, rhs: Type, span: Span) -> Diagno
         return sema_error("E0109", span, "{label} can't compare or combine {sema_type_show(lhs)} and {sema_type_show(rhs)}", "{label} is not defined for {sema_type_show(lhs)}", "use an operation supported by {sema_type_show(lhs)}, or call a named method")
     }
     sema_error("E0109", span, "{label} can't compare or combine {sema_type_show(lhs)} and {sema_type_show(rhs)}", "the operator has no built-in rule and no user-defined `impl Type.Trait` hook for this operand pair", "use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair")
-}
-
-sema_expr_tree_unit_format: fn(format: UnitFormat) -> TUnitFormat Never! {
-    if format == {
-        .Symbol -> TUnitFormat.Symbol
-        .Name -> TUnitFormat.Name
-        .Bare -> TUnitFormat.Bare
-    }
-}
-
-sema_expr_string_format: fn(format: StrFormat) -> TStrFormat Never! {
-    if format == {
-        .Display -> TStrFormat.Display
-        .Debug -> TStrFormat.Debug
-        .Pretty -> TStrFormat.Pretty
-        .Fixed(digits) -> TStrFormat.Fixed{digits: digits}
-        .Grouped(digits) -> TStrFormat.Grouped{digits: digits}
-        .Hex(digits) -> TStrFormat.Hex{digits: digits}
-        .Pad(width, fill) -> TStrFormat.Pad{width: width, fill: fill}
-        .PadLeft(width, fill) -> TStrFormat.PadLeft{width: width, fill: fill}
-        .Sci(digits) -> TStrFormat.Sci{digits: digits}
-        .Percent(digits) -> TStrFormat.Percent{digits: digits}
-        .Bin -> TStrFormat.Bin
-        .Oct -> TStrFormat.Oct
-        .Unit(unit_format) -> TStrFormat.Unit{format: sema_expr_tree_unit_format(unit_format)}
-        .Count -> TStrFormat.Number
-    }
 }
 
 sema_expr_byte_text: fn(value: U8) -> String Never! {
@@ -2870,50 +2844,17 @@ sema_expr_negative_integer: fn(value: Int, width: IntegerWidth?, expected: Type?
     sema_expr_expected(bounded, expected, environment, program, diagnostics)
 }
 
-// Interpolation check: each numeric or text selector names the one value family
-// its Core/Text/Fmt.jet formatter takes, and any other value is E0112 at the
-// interpolated value. Every integer width meets the integer formatters as an
-// exact `Int`, and padding takes a scalar's Display text.
+// Interpolation check of a selector with its own meaning: padding takes a
+// String or a scalar's Display text, and `:Unit(…)` a quantity or a
+// `#UnitFamily` value; any other value is E0112 at the interpolated value. A
+// style selector is a trait call instead (sema_expr_check_format_style).
 sema_expr_check_format_selector: fn(checked: TExpr, format: StrFormat, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     ty: checked.ty
     shown: sema_type_show(ty)
-    integer: sema_expr_is_integer(ty)
     if format == {
-        .Fixed(_) -> {
-            if ty == Type.Float || integer -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Fixed(n)`", "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or integer values", "pass a `Float` or an integer, or use bare interpolation for this value"))
-        }
-        .Grouped(_) -> {
-            if ty == Type.Float || integer -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Grouped(n)`", "grouped interpolation uses `core.text.fmt.grouped`, which formats `Float` or integer values", "pass a `Float` or an integer, or use bare interpolation for this value"))
-        }
-        .Hex(_) -> {
-            if integer -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Hex(n)`", "hex interpolation uses `core.text.fmt.hex`, which formats integer values", "pass an integer, or use bare interpolation for this value"))
-        }
-        .Sci(_) -> {
-            if ty == Type.Float -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Sci(n)`", "scientific interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value"))
-        }
-        .Percent(_) -> {
-            if ty == Type.Float -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Percent(n)`", "percent interpolation formats Float values", "pass a `Float`, or use bare interpolation for this value"))
-        }
-        .Bin -> {
-            if integer -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Bin`", "binary interpolation formats integer values", "pass an integer, or use bare interpolation for this value"))
-        }
-        .Oct -> {
-            if integer -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Oct`", "octal interpolation formats integer values", "pass an integer, or use bare interpolation for this value"))
-        }
         .Pad(_, _) | .PadLeft(_, _) -> {
-            if ty == Type.String || ty == Type.Float || integer -> return true
-            selector: if format == {
-                .Pad(_, _) -> "Pad"
-                .Display | .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Count -> "PadLeft"
-            }
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:{selector}(n)`", "padding interpolation formats String, integer, or Float values", "pass a `String`, an integer, or a `Float`, or use bare interpolation for this value"))
+            if ty == Type.String || ty == Type.Float || sema_expr_is_integer(ty) -> return true
+            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `{sema_expr_selector_label(format)}`", "padding interpolation formats String, integer, or Float values", "pass a `String`, an integer, or a `Float`, or use bare interpolation for this value"))
         }
         .Unit(_) -> {
             if sema_expr_scalable_unit_type(ty, environment, program) -> return true
@@ -2922,33 +2863,109 @@ sema_expr_check_format_selector: fn(checked: TExpr, format: StrFormat, environme
             }
             diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
         }
-        .Display | .Debug | .Pretty | .Count -> return true
+        .Display | .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Count -> return true
     }
     false
 }
 
-// A computed selector number (StrFormat.Count) is an
-// Int, else E0112 at the number. The selector's helpers treat a negative
-// number as zero.
-sema_expr_check_selector_count: fn(checked: TExpr, parts: [StrPart], index: Int, diagnostics: &[Diagnostic]) -> Bool {
-    if checked.ty == Type.Int -> return true
-    selector := "selector"
-    if index > 0 {
-        if parts[index - 1] == .Interp(_, format) {
-            selector = if format == {
-                .Fixed(_) -> ":Fixed(n)"
-                .Grouped(_) -> ":Grouped(n)"
-                .Hex(_) -> ":Hex(n)"
-                .Pad(_, _) -> ":Pad(n)"
-                .PadLeft(_, _) -> ":PadLeft(n)"
-                .Sci(_) -> ":Sci(n)"
-                .Percent(_) -> ":Percent(n)"
-                .Display | .Debug | .Pretty | .Bin | .Oct | .Unit(_) | .Count -> "selector"
-            }
+// A selector as a message writes it: `:Pad(n)`, `:Bin`.
+sema_expr_selector_label: fn(format: StrFormat) -> String Never! {
+    if format == {
+        .Fixed(_) -> ":Fixed(n)"
+        .Grouped(_) -> ":Grouped(n)"
+        .Hex(_) -> ":Hex(n)"
+        .Pad(_, _) -> ":Pad(n)"
+        .PadLeft(_, _) -> ":PadLeft(n)"
+        .Sci(_) -> ":Sci(n)"
+        .Percent(_) -> ":Percent(n)"
+        .Bin -> ":Bin"
+        .Oct -> ":Oct"
+        .Unit(_) -> ":Unit(…)"
+        .Debug -> ":Debug"
+        .Pretty -> ":Pretty"
+        .Display | .Count -> "selector"
+    }
+}
+
+// The number computed after the selector of part `index` (`width` in
+// `{x:Pad(width)}`), if the selector has one.
+sema_expr_selector_count: fn(parts: [StrPart], index: Int) -> Expr? {
+    if index + 1 >= parts.len() -> return None
+    if parts[index + 1] == .Interp(count, StrFormat.Count) -> return Val(count)
+    None
+}
+
+// A computed selector number (`{x:Pad(width)}`) is an Int, else E0112 at
+// the number. The formatters treat a negative number as zero.
+sema_expr_check_selector_count: fn(ty: Type, span: Span, format: StrFormat, diagnostics: &[Diagnostic]) -> Bool {
+    if ty == Type.Int -> return true
+    diagnostics.push(sema_error("E0112", span, "the number of `{sema_expr_selector_label(format)}` is {sema_type_show(ty)}, not Int", "a selector number is an Int, written as a literal or computed at run time", "pass an Int, such as `:Pad(width)` with `width: Int`"))
+    false
+}
+
+// `{value:Hex(n)}` is `value.hex(n)` of core.text.fmt's HexFormat, and each
+// style selector its own trait's method the same way: an ordinary trait
+// call, so a generic bound, an effect and a failure work as in any call. The
+// value's type implements the trait, else E0112 names the impl to write; a
+// fact tag or an integer range calls its base's impl. `count` is the number
+// computed after the selector, which runs after the value.
+sema_expr_check_format_style: fn(value: Expr, checked: TExpr, format: StrFormat, style: StrFormatStyle, count: Expr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    base: sema_expr_numeric_base(checked.ty)
+    if program.registration_graph == .Val(graph) {
+        implemented: sema_type_bound_satisfied_at(graph, base, style.trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
+        if !implemented {
+            label: sema_expr_selector_label(format)
+            parameters: if style.digits == None -> "self" else -> "self, digits: Int"
+            fix: if sema_expression_impl_allowed(base, environment, program, scopes) -> "implement it, `impl {type_name(base)}.{style.trait_name} {{ {style.method}: fn({parameters}) -> String {{ … }} }}`, or use bare interpolation for this value" else -> "use bare interpolation for this value, or convert it to a type that implements `{style.trait_name}`"
+            diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't use `{label}`", "`{label}` calls `{style.method}` of `{style.trait_name}`, which {type_name(base)} doesn't implement", fix))
+            return None
         }
     }
-    diagnostics.push(sema_error("E0112", checked.span, "the number of `{selector}` is {sema_type_show(checked.ty)}, not Int", "a selector number is an Int, written as a literal or computed at run time", "pass an Int, such as `:Pad(width)` with `width: Int`"))
-    false
+    args := [CallArg]{}
+    if style.digits == .Val(digits) {
+        if count == .Val(computed) {
+            probe_diagnostics := [Diagnostic]{}
+            if sema_probe_expression(computed, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) == .Val(probed) {
+                if !sema_expr_check_selector_count(probed.ty, probed.span, format, diagnostics) -> return None
+            }
+        }
+        number: count ?? Expr.Int{value: digits, span: checked.span, width: None, raw: None, id: AST_NODE_GENERATED}
+        args.push(sema_call_http_core_synthetic_arg(number, expr_span(number)))
+    }
+    line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+    receiver: if type_identity_equal(base, checked.ty) -> checked else -> sema_expr_numeric_conversion(checked, base, checked.span, line) ?? return None
+    call: sema_expr_check_declared_method(value, receiver, style.method, style.method, checked.span, [Type]{}, [Type]{}, args, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    // The selector is a call root: a user implementation whose failure row
+    // is inferred propagates its failure as any call does, so the text is
+    // the String it returns, never its Result carrier.
+    sema_expression_auto_propagate(value, call, None, environment, program, scopes, context, diagnostics)
+}
+
+// `{value:Pad(n)}`, `:PadLeft(n)`, `:Pretty` and `:Unit(…)`: the call of
+// the core.text.fmt formatter that renders the value (`pad`, `pad_left`,
+// `pretty`, `quantity`). Padding takes a String as it is and any other
+// value's Display text, Pretty the Debug text, and a unit its magnitude as a
+// Float; `width` is the computed number, else the selector's own.
+sema_expr_format_call: fn(checked: &&TExpr, format: StrFormat, width: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+    span: checked.span
+    if format == {
+        .Pad(written, fill) | .PadLeft(written, fill) -> {
+            function: if format == .Pad(_, _) -> "pad" else -> "pad_left"
+            text: if checked.ty == Type.String -> checked.move() else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: checked.move(), format: TStrFormat.Display}}}, span)
+            number: width ?? sema_tree_node(Type.Int, TExprKind.IntLit{value: written, width: None}, span)
+            filler: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: fill}}}, span)
+            sema_expression_core_source_call("core.text.fmt", function, [TExpr]{text, number, filler}, Type.String, [Type]{}, span, environment, program)
+        }
+        .Pretty -> {
+            debug: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: checked.move(), format: TStrFormat.Debug}}}, span)
+            sema_expression_core_source_call("core.text.fmt", "pretty", [TExpr]{debug}, Type.String, [Type]{}, span, environment, program)
+        }
+        .Unit(_) -> {
+            magnitude: sema_tree_node(Type.Float, TExprKind.NumericMethod{receiver: checked.move(), operation: TNumericOp.CastAs{dst_rust: "f64"}}, span)
+            sema_expression_core_source_call("core.text.fmt", "quantity", [TExpr]{magnitude}, Type.String, [Type]{}, span, environment, program)
+        }
+        .Display | .Debug | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Count -> None
+    }
 }
 
 sema_expr_call_callee: fn(program: SemaProgramTables, value: TExpr) -> SymbolID? {
@@ -3589,7 +3606,7 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
                         next
                     }
                     loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
-                        if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() > 0) {
+                        if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(graph.modules[owner_index].impls[implementation_index].methods[function_index])) {
                             return true
                         }
                     }
@@ -3609,20 +3626,27 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
                 }
             }
         }
-        if !source_declaration && !sema_network_handle_known_method(receiver_name, method) {
+        if !source_declaration {
             return false
         }
         loop nominal_row in sema_registration_nominal_rows_named(graph, receiver_name) {
             methods: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
             loop method_index in 0..<methods.len() {
                 function: methods[method_index]
-                if function.symbol.name == method && (!needs_receiver || function.parameters.len() > 0) {
+                if function.symbol.name == method && (!needs_receiver || sema_expr_function_takes_self(function)) {
                     return true
                 }
             }
         }
     }
     false
+}
+
+// Whether `function` takes `self`: a static method's first parameter is an
+// ordinary one (`Dyn.decode(tree)` from `impl Dyn.Decode`), which a receiver
+// call never reaches.
+sema_expr_function_takes_self: fn(function: SemaRegistrationFunction) -> Bool Never! {
+    function.parameters.len() > 0 && function.parameters[0].name == "self"
 }
 
 // The receiver type's own method `method`, declared in its body, in an
@@ -4509,8 +4533,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if time.handled -> return time
     app := sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if app.handled -> return app
-    network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if network.handled -> return network
     reflection := sema_call_try_reflection_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reflection.handled -> return reflection
     compiler_value := sema_call_try_compiler_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -4986,6 +5008,11 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
         graph_method := sema_call_app_graph_method(receiver, receiver_value, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if graph_method.handled -> return graph_method.value
     }
+    // core.build's `Build` declares its methods, but the checker shapes a
+    // build option, `b.generate`, `b.contribute` and an output's `options:`,
+    // and holds `b.compiler` to the root build, ahead of the declared check.
+    build: sema_call_try_build_context_method(receiver, receiver_value, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if build.handled -> return build.value
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
@@ -5383,10 +5410,8 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 }
                 checked: checked_value ?? return None
                 if format == StrFormat.Count {
-                    if !sema_expr_check_selector_count(checked, parts, index, diagnostics) {
-                        return None
-                    }
-                    tree_parts.push(TStrPart.Interpolation{value: checked, format: TStrFormat.Number})
+                    // The number of a selector whose value didn't check; a
+                    // checked selector takes its number with it.
                     index += 1
                     next
                 }
@@ -5425,8 +5450,38 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 if !debug_family && format != StrFormat.Display && !sema_expr_check_format_selector(checked, format, environment, program, diagnostics) {
                     return None
                 }
+                count: sema_expr_selector_count(parts, index)
+                if count != None -> index += 1
+                if str_format_style(format) == .Val(style) {
+                    call: sema_expr_check_format_style(value, checked, format, style, count, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                    tree_parts.push(TStrPart.Interpolation{value: call, format: TStrFormat.Display})
+                    index += 1
+                    next
+                }
+                if format == {
+                    .Pad(_, _) | .PadLeft(_, _) | .Pretty | .Unit(_) -> {
+                        width := TExpr?{None}
+                        if count == .Val(computed) {
+                            counted: sema_check_expression(computed, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                            if !sema_expr_check_selector_count(counted.ty, counted.span, format, diagnostics) -> return None
+                            width = Val(counted)
+                        }
+                        // `:Unit(name)` writes the unit's type name after the number.
+                        unit_name := ""
+                        if format == .Unit(.Name) {
+                            if sema_expr_unwrap_tag(checked.ty) == .Named(unit_type) -> unit_name = " {symbol_key_leaf(unit_type)}"
+                        }
+                        call: sema_expr_format_call(checked, format, width, environment, program) ?? return None
+                        tree_parts.push(TStrPart.Interpolation{value: call, format: TStrFormat.Display})
+                        if unit_name != "" -> tree_parts.push(TStrPart.Literal{text: unit_name})
+                        index += 1
+                        next
+                    }
+                    .Display | .Debug | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Count -> {}
+                }
                 formatted: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return None else -> checked
-                tree_parts.push(TStrPart.Interpolation{value: formatted, format: sema_expr_string_format(format)})
+                selected: if format == StrFormat.Debug -> TStrFormat.Debug else -> TStrFormat.Display
+                tree_parts.push(TStrPart.Interpolation{value: formatted, format: selected})
             }
         }
         index += 1

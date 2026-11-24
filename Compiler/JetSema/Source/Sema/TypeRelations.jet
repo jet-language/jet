@@ -1183,7 +1183,6 @@ SEMA_TYPE_NAMEABLE_HANDLES: [String]{
     "TextWidthAmbiguous",
     "TextWidthControls",
     "VVar",
-    "WsMessage",
 }
 
 SEMA_TYPE_NAMEABLE_HANDLES_CHECKED: #run sema_type_nameable_handles_checked(SEMA_TYPE_NAMEABLE_HANDLES)
@@ -2760,10 +2759,11 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
             }
             .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
-        // An eligible type with no authored `Debug` has the derived one.
+        // An eligible type with no authored `Debug` has the derived one,
+        // unless a field it holds has none.
         if bound_name == "Debug" {
             if sema_registration_module_index(graph, nominal.symbol.module_identity) == .Val(module_index) {
-                if sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug {
+                if sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug && !sema_comparability_rendering_blocked(graph, nominal.symbol.module_identity, item, "Debug") {
                     return Val(true)
                 }
             }

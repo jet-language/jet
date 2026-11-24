@@ -439,7 +439,8 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     abis.sort_by(fn(left: IRExportABI, right: IRExportABI) { left.symbol <=> right.symbol })
     // The process-ending flag the inline block release reads (X64Select.jet
     // ir_x64_block_release), the armed word a loop's stop poll reads
-    // (X64Select.jet ir_x64_stop_point), the zones word a zone site tests
+    // (X64Select.jet ir_x64_stop_point), the step word a counted turn spends
+    // (IR_X64_COMPTIME_STEPS_STORAGE), the zones word a zone site tests
     // (X64Select.jet ir_x64_zone_site), the task registry's root and the
     // allocator's root the debugger reads (X64_OBSERVE_ROOT_SYMBOL,
     // X64_ALLOC_ROOT_SYMBOL) and the words the debugger writes around an
@@ -449,6 +450,8 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     if ending >= 0 -> data.push(X64DataExport{data: ending, symbol: IR_X64_PROCESS_ENDING_SYMBOL})
     armed: ir_lifecycle_guard(m, p, IR_X64_CHECKS_ARMED_STORAGE)
     if armed >= 0 -> data.push(X64DataExport{data: armed, symbol: IR_X64_CHECKS_ARMED_SYMBOL})
+    steps: ir_lifecycle_guard(m, p, IR_X64_COMPTIME_STEPS_STORAGE)
+    if steps >= 0 -> data.push(X64DataExport{data: steps, symbol: IR_X64_COMPTIME_STEPS_SYMBOL})
     zones: ir_lifecycle_guard(m, p, IR_X64_PERF_ZONES_STORAGE)
     if zones >= 0 -> data.push(X64DataExport{data: zones, symbol: IR_X64_PERF_ZONES_SYMBOL})
     observed: ir_lifecycle_guard(m, p, IR_OBSERVE_ROOT_STORAGE)

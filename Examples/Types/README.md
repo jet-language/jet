@@ -76,6 +76,7 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 - [BuiltinTargets](Traits/BuiltinTargets.jet) — `impl Int.Named`: a trait the module declares, implemented for built-in types.
 - [DisplayDebug](Traits/DisplayDebug.jet) — Display vs Debug interpolation + #Redact
 - [ExternalMethods](Traits/ExternalMethods.jet)
+- [LanguageFormTraits](Traits/LanguageFormTraits.jet) — A user type implements a language form's trait, and the form calls it.
 - [TagsAndTraits](Traits/TagsAndTraits.jet) — Methods → trait; no methods → tag.
 - [TraitConstants](Traits/TraitConstants.jet) — Trait constants: a trait declares `name: Type` (with a default as `name: Type{value}`), each implementation gives `name: value`, and code reads `Type.name`…
 - [Traits](Traits/Traits.jet)

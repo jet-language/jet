@@ -1,0 +1,61 @@
+// A user type implements a language form's trait, and the form calls it.
+// Each interpolation style selector is its core.text.fmt trait's method:
+// `{value:Hex(4)}` is `value.hex(4)`, so a type with the impl takes the
+// selector, and so does a generic value bounded by the trait.
+Gauge: struct {
+    level: Int,
+
+    impl HexFormat {
+        hex: fn(self, digits: Int) -> String { "hex<{self.level:Hex(digits)}>" }
+    }
+
+    impl BinFormat {
+        bin: fn(self) -> String { "bin<{self.level:Bin}>" }
+    }
+
+    impl OctFormat {
+        oct: fn(self) -> String { "oct<{self.level:Oct}>" }
+    }
+
+    impl FixedFormat {
+        fixed: fn(self, digits: Int) -> String { "fixed<{self.level:Fixed(digits)}>" }
+    }
+
+    impl GroupedFormat {
+        grouped: fn(self, digits: Int) -> String {
+            scaled: self.level * 1000
+            "grouped<{scaled:Grouped(digits)}>"
+        }
+    }
+
+    impl SciFormat {
+        sci: fn(self, digits: Int) -> String {
+            large: Float{self.level} * 1000000.0
+            "sci<{large:Sci(digits)}>"
+        }
+    }
+
+    impl PercentFormat {
+        percent: fn(self, digits: Int) -> String {
+            share: Float{self.level} / 1000.0
+            "percent<{share:Percent(digits)}>"
+        }
+    }
+}
+
+// A generic value bounded by the trait takes the selector too.
+in_hex: fn<T: HexFormat>(value: T) -> String { "{value:Hex(2)}" }
+
+run: fn() {
+    gauge: Gauge{level: 255}
+    print("{gauge:Hex(4)} {gauge:Bin} {gauge:Oct}")
+    print("{gauge:Fixed(2)} {gauge:Grouped(1)}")
+    print("{gauge:Sci(3)} {gauge:Percent(1)}")
+    // A computed number is the method's argument, run after the value.
+    width: 6
+    print("{gauge:Hex(width)} {gauge:Fixed(width - 5)}")
+    print("{in_hex(gauge)} {in_hex(10)}")
+    // The Core impls format the built-in numbers as before.
+    half: Float{5} / 2.0
+    print("{255:Hex(4)} {5:Bin} {8:Oct} {1234567:Grouped(0)} {half:Fixed(3)} {half:Percent(1)}")
+}

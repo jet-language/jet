@@ -496,6 +496,12 @@ JetDriverCompileRequest: struct {
     // The `--set name=value` writers, the command-line layer of that fold
     // (BuildFactChain.jet).
     setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}},
+    // The `build: fn` output this compile builds ("" for none) and the
+    // values its `options: {settings: ...}` gives the entry package's
+    // settings: the output layer of that fold, over the profile and beneath
+    // the build's pins and `--set`.
+    output: String{""},
+    output_settings: [BuildSettingOverride]{[BuildSettingOverride]{}},
     // The `--deep-checks` request (BuildOptions.deep_checks): the deep checks
     // this compile keeps. Every scope must keep one, or the compile fails
     // (Pipeline.jet jet_driver_deep_checks). Off for a compile no

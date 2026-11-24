@@ -11,8 +11,9 @@
 //   runtime values into the child (Host.jet) before it RETURNs;
 // - runtime stops come back as STOPs carrying their texts, and a seccomp
 //   filter turns every host effect into a REFUSED report.
-// Evaluation limits stay: fuel is a time budget per call (the child is
-// killed when it runs out), call depth is the child's stack.
+// Evaluation limits stay: fuel is a count of steps per call (each loop
+// iteration and each recursive body's entry spends one, inline in the
+// batch's code), call depth is the child's stack.
 //
 // One session holds two children: the comptime child, whose effects are
 // refused, and the runtime child of fn build, fn dev and `jet eval`, which
@@ -53,6 +54,7 @@ use {
         X64_COMPTIME_STOP_MESSAGE,
         X64_COMPTIME_STOP_REQUIRE,
         X64_COMPTIME_STOP_SHIFT,
+        X64_COMPTIME_STOP_STEPS,
         X64_COMPTIME_STOP_TODO,
         X64_COMPTIME_TEXT,
         X64_COMPTIME_WRITE,
@@ -98,10 +100,6 @@ JET_EVAL_NATIVE_USER_END: 140737488355328
 
 // The most bytes one value read may span.
 JET_EVAL_NATIVE_READ_MAX: 4294967296
-
-// Units of fuel per millisecond of a comptime call: the default fuel is a
-// five-second budget.
-JET_EVAL_NATIVE_FUEL_PER_MS: 2000
 
 // A native call passes its cell and at most four parameter words.
 JET_EVAL_NATIVE_MAX_PARAMS: 4
@@ -203,9 +201,8 @@ JetEvalIRState: struct {
     struct_row_index: [Int:Int]{[Int:Int]{}},
     struct_members_cache: [[IRMember]]{[[IRMember]]{}},
     struct_name_cache: [String]{[String]{}},
-    budget: Int,
-    // config.fuel: the call's step limit, named when the call runs out of it
-    // (jet_eval_ir_out_of_fuel); negative for none.
+    // config.fuel: the call's step limit, the CALL's last operand, named when
+    // the call runs out of it (jet_eval_ir_out_of_fuel); negative for none.
     step_limit: Int,
     stdout: String,
     stderr: String,
@@ -364,7 +361,7 @@ jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession,
         c.stub = bound.executable.move()
     }
     x64_comptime_close(c.child)
-    spawned := x64_comptime_spawn(c.stub, stdout, -1)
+    spawned := x64_comptime_spawn(c.stub, stdout)
     if spawned.failure != "" {
         c.failure = spawned.failure
         x64_comptime_close(spawned)
@@ -545,6 +542,8 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         }
     }
     code.fast_o0 = true
+    // Each turn poll spends a step of the CALL's limit.
+    code.step_count = true
     prepared: ir_x64_program(ir_x64_compile_module(code, threads))
     if prepared.errors.len() > 0 {
         program.failure = "the batch doesn't compile to x86-64: {prepared.errors.join("; ")}"
@@ -783,7 +782,6 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
         child: X64ComptimeChild{},
         pages: [[U8]]{},
         page_rows: [Int:Int]{},
-        budget: if config.fuel < 0 -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
         step_limit: config.fuel,
         stdout: "",
         stderr: "",
@@ -844,8 +842,6 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
     s.stderr = "{s.stderr}{String.from_bytes_lossy(s.child.stderr)}"
     s.child.stdout = [U8]{}
     s.child.stderr = [U8]{}
-    s.child.budget = -1
-    s.child.exhausted = false
     permit.value.child = s.child.copy()
     // Standard error no runtime stop read back is the evaluated code's own
     // output, an effect a comptime evaluation refuses.
@@ -869,8 +865,11 @@ jet_eval_native_call: fn(s: &JetEvalIRState, program: JetEvalNativeProgram, item
     cell: jet_eval_native_alloc(s, program.sizes[item], 8) ?? return None
     operands := [Int]{program.entries[item], cell}
     operands.extend(words)
-    s.child.budget = s.budget
-    s.child.exhausted = false
+    // The entry's System V words are padded to five arguments, so the step
+    // limit is the frame's last operand (JetRuntime ComptimeServe.jet
+    // comptime_serve_steps).
+    loop operands.len() < 6 -> operands.push(0)
+    operands.push(if s.step_limit < 0 -> 9223372036854775807 else -> s.step_limit)
     // A stop above an admitted block left the child admitting: each call
     // starts as its item admits.
     if !jet_eval_native_admit(s) || !jet_eval_native_command(s, X64_COMPTIME_CALL, operands, [U8]{}) {
@@ -878,7 +877,6 @@ jet_eval_native_call: fn(s: &JetEvalIRState, program: JetEvalNativeProgram, item
         return None
     }
     if !jet_eval_native_serve(s) -> return None
-    s.child.budget = -1
     row: program.results[item]
     if row < 0 -> return Val(TComptimeValue.Unit)
     types := program.types.guard_edit()
@@ -938,17 +936,13 @@ jet_eval_native_serve: fn(s: &JetEvalIRState) -> Bool {
     }
 }
 
-// The call's child ended before its DONE: out of fuel, out of stack, a
-// runtime exit (a stop's report on standard error, or a program's exit), or
-// a signal from outside jet (jet_eval_native_outside_signal), which is no
-// defect of jet's and no failure of the code: the build stops with E3007,
-// whose command ends with 128 plus the signal.
+// The call's child ended before its DONE: out of stack, a runtime exit (a
+// stop's report on standard error, or a program's exit), or a signal from
+// outside jet (jet_eval_native_outside_signal), which is no defect of jet's
+// and no failure of the code: the build stops with E3007, whose command
+// ends with 128 plus the signal.
 jet_eval_native_ended: fn(s: &JetEvalIRState) {
     if jet_eval_ir_failed(s) {
-        return
-    }
-    if s.child.exhausted {
-        _ := jet_eval_ir_out_of_fuel(s)
         return
     }
     failure: s.child.failure.copy()
@@ -990,8 +984,8 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
 // kill (SIGKILL, also the kernel's when memory runs out) or a request to
 // stop (SIGTERM). A signal a process raises on itself, as a fault's SIGSEGV
 // or an abort's SIGABRT, is none of these and stays a defect. The compiler
-// ends its child only with SIGKILL, and then records why first (fuel, a
-// failed wait, a host route without an answer), so an unexplained one came
+// ends its child only with SIGKILL, and then records why first (a failed
+// wait, a host route without an answer), so an unexplained one came
 // from outside.
 jet_eval_native_outside_signal: fn(signal: Int) -> String? Never! {
     if signal == {
@@ -1055,6 +1049,10 @@ jet_eval_native_overflow_name: fn(s: &JetEvalIRState, program: JetEvalNativeProg
 // A runtime stop (JetRuntime Trap.jet) of kind `kind` and its words; the
 // child keeps serving above the stopped frames.
 jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d: Int) {
+    if kind == X64_COMPTIME_STOP_STEPS {
+        _ := jet_eval_ir_out_of_fuel(s)
+        return
+    }
     if kind == X64_COMPTIME_STOP_MESSAGE {
         message: jet_eval_ir_bytes(s, a, b) ?? return
         jet_eval_ir_source_fail(s, String.from_bytes_lossy(message))
@@ -1444,10 +1442,6 @@ jet_eval_native_ask: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payload:
 
 // The child ended while the compiler worked on its memory.
 jet_eval_native_lost: fn(s: &JetEvalIRState, during: String) {
-    if s.child.exhausted {
-        _ := jet_eval_ir_out_of_fuel(s)
-        return
-    }
     report: String.from_bytes_lossy(s.child.stderr).trim()
     detail: if report == "" -> "" else -> ": {report}"
     status: s.child.status
@@ -1491,10 +1485,6 @@ jet_eval_native_page: fn(s: &JetEvalIRState, page: Int) -> Int? {
 
 // A READ the child died on: the page is not its memory.
 jet_eval_native_unreadable: fn(s: &JetEvalIRState, page: Int) {
-    if s.child.exhausted {
-        _ := jet_eval_ir_out_of_fuel(s)
-        return
-    }
     jet_eval_ir_problem(s, "the compiler read the child's memory through a word that is not an address (page {page})")
 }
 

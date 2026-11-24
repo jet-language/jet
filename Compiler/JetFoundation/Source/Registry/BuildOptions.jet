@@ -248,6 +248,12 @@ BuildSettingOverride: struct {
 // executable. `record` is the NAME of `jet run --record=NAME`, "" when none
 // is given: the program links the observation start, as an observed one
 // does, and its run writes the replay `.jet/replays/NAME.jetproof-replay`.
+// `output` names the `build: fn` output this compile builds, "" for none, and
+// `output_settings` are the values that output's `options: {settings: ...}`
+// gives the package's declared settings, over the profile and beneath the
+// build's pins and `--set`. `output_triple` is the triple of the output's
+// own toolchain, whose machine its `#build.target.*` and `#build.cpu.*`
+// facts read; "" keeps the build machine's.
 BuildOptions: struct {
     command: String,
     profile: String,
@@ -264,6 +270,9 @@ BuildOptions: struct {
     compiler_events: Bool{false},
     library: Bool{false},
     record: String{""},
+    output: String{""},
+    output_settings: [BuildSettingOverride]{[BuildSettingOverride]{}},
+    output_triple: String{""},
 }
 
 // The deep checks one compile keeps (`--deep-checks` of run, dev, test, build,
@@ -744,6 +753,8 @@ build_options_identity: fn(options: BuildOptions) -> String Never! {
         parts.push("{choice.name}={choice.value}")
     }
     loop setting in options.settings -> parts.push("set.{setting.name}={setting.value}")
+    loop setting in options.output_settings -> parts.push("output.{setting.name}={setting.value}")
+    if options.output_triple != "" -> parts.push("triple={options.output_triple}")
     if options.observe || options.record != "" -> parts.push("observe")
     if options.log != "" -> parts.push("log={options.log}")
     deep: deep_checks_key(options.deep_checks)

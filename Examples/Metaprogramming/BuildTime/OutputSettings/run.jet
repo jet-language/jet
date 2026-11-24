@@ -1,0 +1,13 @@
+// One `build: fn` builds this source as two outputs, each giving the
+// settings `package.jet` declares its own values: `particles_lite` keeps 500
+// particles and `particles_full` 2000 with trails. Each output's code reads
+// its own values through `#build.settings.<key>`, folded when that output is
+// built. A setting an output leaves out keeps the package's default.
+build: fn(b: Build) {
+    _: b.add_executable("particles_lite", ["run.jet"], [], options: { settings: { max_particles: 500, label: "lite" } })
+    _: b.add_executable("particles_full", ["run.jet"], [], options: { settings: { max_particles: 2000, label: "full", trails: true } })
+}
+
+run: fn() {
+    print("{#build.settings.label}: {#build.settings.max_particles} particles, trails {#build.settings.trails}")
+}

@@ -29,6 +29,8 @@ use jet_foundation.[
     core_enum_payload_variants,
     core_enum_variant_payload,
     module_is_core,
+    module_text,
+    symbol_key_leaf,
 ]
 
 // One comparability query. A recursive type (`Expr: enum { Neg(inner: Expr) }`)
@@ -142,14 +144,15 @@ sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: Se
     false
 }
 
-// An auto-derived `Equatable` or `Printable` (`trait_name`) is blocked when
-// some field reaches, through auto-derived types without a generated block, a
-// declared type of the program that neither derives nor implements it
-// (`#!Equatable`, or a dependency whose package denies auto_derive), or for
-// `Equatable` a runtime handle registered without `eq` (`WsConn`). A revisited
-// type (a nominal row the walk reached before, `visited`) adds no
-// obligation; any other name that resolves to no declared item leaves the
-// decision to its registered implementation.
+// An auto-derived `Equatable`, `Printable` or `Debug` (`trait_name`) is
+// blocked when some field reaches, through auto-derived types without a
+// generated block, a declared type of the program that neither derives nor
+// implements it (`#!Equatable`, or a dependency whose package denies
+// auto_derive), or a runtime handle registered without that rendering or
+// comparison (`FileReader`). A revisited type (a nominal row the walk
+// reached before, `visited`) adds no obligation; any other name that
+// resolves to no declared item leaves the decision to its registered
+// implementation.
 sema_comparability_auto_blocked: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, trait_name: String, visited: &[[Bool]]) -> Bool Never! {
     if sema_comparability_generated_block(item, trait_name) -> return false
     if item == {
@@ -198,39 +201,63 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
             }
             false
         }
-        .Named(name) -> {
-            resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return trait_name == "Equatable" && sema_comparability_handle_without_eq(name)
-            if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
-            // A Core type shows through the library's own display.
-            if trait_name == "Printable" && module_is_core(resolved.target_module_identity) {
-                return false
-            }
-            row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
-            if !sema_comparability_first_visit(visited, row.module_index, row.row) -> return false
-            // Matched in place: a pattern on the indexed path copies the whole item.
-            nominal: graph.modules[row.module_index].nominals[row.row]
-            if nominal.source == .SourceAST(field_item) {
-                // A plain alias compares as the type it names.
-                if field_item == .TypeAlias(definition) {
-                    if definition.choices.len() == 0 {
-                        return sema_comparability_auto_blocked_type(graph, resolved.target_module_identity, definition.target, trait_name, visited)
-                    }
+        .Named(name) -> sema_comparability_auto_blocked_named(graph, module_identity, ty, name, trait_name, visited)
+        // A generic type renders by its own selection, then each argument in
+        // turn. Equality on one keeps its registered rule
+        // (sema_comparability_equatable_arguments).
+        .Apply(name, args) -> {
+            if trait_name == "Equatable" -> return false
+            if sema_comparability_auto_blocked_named(graph, module_identity, ty, name, trait_name, visited) -> return true
+            loop argument in args {
+                if sema_comparability_auto_blocked_type(graph, module_identity, argument, trait_name, visited) {
+                    return true
                 }
-                if sema_comparability_generated_block(field_item, trait_name) -> return false
-                if !sema_comparability_auto_selected(sema_type_metadata_auto_derives(field_item, graph.modules[row.module_index].declared_trait_impls), trait_name) {
-                    // A distinct or unit type shows by its own rule
-                    // (sema_expression_displayable), not by a derive.
-                    if trait_name == "Printable" && !sema_comparability_struct_or_enum(field_item) {
-                        return false
-                    }
-                    return sema_type_bound_satisfied(graph, ty, trait_name, module_identity) != (Val(true))
-                }
-                return sema_comparability_auto_blocked(graph, resolved.target_module_identity, field_item, trait_name, visited)
             }
             false
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
+}
+
+// sema_comparability_auto_blocked_type for a nominal `ty` spelled `name`.
+sema_comparability_auto_blocked_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, name: String, trait_name: String, visited: &[[Bool]]) -> Bool Never! {
+    // A name the graph doesn't hold (a `FileReader` field where the program
+    // loads no core.files) answers by the runtime handle a Core declaration
+    // of that name registers.
+    resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? {
+        if trait_name == "Equatable" -> return sema_comparability_handle_without_eq(name)
+        return sema_comparability_core_handle_unrendered(graph, module_identity, ty, sema_comparability_core_handle_row(name) ?? return false, trait_name)
+    }
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+    // A Core type renders through the library's own forms, except a runtime
+    // handle registered under its declaration key that has none.
+    if trait_name != "Equatable" && module_is_core(resolved.target_module_identity) {
+        key: "{module_text(graph.module_table, resolved.target_module_identity)}.{sema_resolved_name(graph, resolved)}"
+        return sema_comparability_core_handle_unrendered(graph, module_identity, ty, ir_runtime_handle_row(key) ?? return false, trait_name)
+    }
+    row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+    if !sema_comparability_first_visit(visited, row.module_index, row.row) -> return false
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(field_item) {
+        // A plain alias compares as the type it names.
+        if field_item == .TypeAlias(definition) {
+            if definition.choices.len() == 0 {
+                return sema_comparability_auto_blocked_type(graph, resolved.target_module_identity, definition.target, trait_name, visited)
+            }
+        }
+        if sema_comparability_generated_block(field_item, trait_name) -> return false
+        if !sema_comparability_auto_selected(sema_type_metadata_auto_derives(field_item, graph.modules[row.module_index].declared_trait_impls), trait_name) {
+            // A distinct or unit type renders by its own rule
+            // (sema_expression_displayable), not by a derive.
+            if trait_name != "Equatable" && !sema_comparability_struct_or_enum(field_item) {
+                return false
+            }
+            return sema_type_bound_satisfied(graph, ty, trait_name, module_identity) != (Val(true))
+        }
+        return sema_comparability_auto_blocked(graph, resolved.target_module_identity, field_item, trait_name, visited)
+    }
+    false
 }
 
 // Marks nominal `row` of module `module_index` reached (`visited` holds, per
@@ -243,10 +270,11 @@ sema_comparability_first_visit: fn(visited: &[[Bool]], module_index: Int, row: I
     true
 }
 
-// The structural auto-derive selection for `trait_name`, `Equatable` or
-// `Printable` (sema_comparability_auto_blocked).
+// The structural auto-derive selection for `trait_name`, `Equatable`,
+// `Printable` or `Debug` (sema_comparability_auto_blocked).
 sema_comparability_auto_selected: fn(auto: SemaTypeMetadataAutoDerives, trait_name: String) -> Bool Never! {
     if trait_name == "Printable" -> return auto.printable
+    if trait_name == "Debug" -> return auto.debug
     auto.equatable
 }
 
@@ -257,11 +285,12 @@ sema_comparability_struct_or_enum: fn(item: Item) -> Bool Never! {
     }
 }
 
-// Whether a field blocks the structural `Printable` of `item`, declared in
-// `module_identity`: an auto-derive holds only when every field qualifies.
-sema_comparability_printable_blocked: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item) -> Bool Never! {
+// Whether a field blocks the structural `Printable` or `Debug`
+// (`trait_name`) of `item`, declared in `module_identity`: an auto-derive
+// holds only when every field qualifies.
+sema_comparability_rendering_blocked: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, trait_name: String) -> Bool Never! {
     visited := [[Bool]]{}
-    sema_comparability_auto_blocked(graph, module_identity, item, "Printable", visited)
+    sema_comparability_auto_blocked(graph, module_identity, item, trait_name, visited)
 }
 
 // A runtime handle whose registration has no `jet_rt_handle_eq_<runtime>`
@@ -270,6 +299,36 @@ sema_comparability_printable_blocked: fn(graph: SemaRegistrationGraph, module_id
 sema_comparability_handle_without_eq: fn(name: String) -> Bool Never! {
     row: ir_runtime_handle_row(name) ?? return false
     !IR_RUNTIME_HANDLES[row].eq
+}
+
+// The Core runtime handle (`FileReader`) at IR_RUNTIME_HANDLES row `row`, a
+// row keyed by its Core declaration, that no tier renders for `trait_name`,
+// `Printable` or `Debug`: its registration has no such form and the library
+// neither shows it nor implements the trait. Nothing holding one derives it.
+// A Core declaration a bare table row also names (`UIAccessibility`) renders
+// as its declared shape.
+sema_comparability_core_handle_unrendered: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, row: Int, trait_name: String) -> Bool Never! {
+    handle: IR_RUNTIME_HANDLES[row]
+    name: handle.jet_name
+    leaf: symbol_key_leaf(name)
+    if trait_name == "Debug" {
+        if handle.debug -> return false
+    } else {
+        if handle.display || handle.show -> return false
+        if sema_call_reflection_synthetic_printable(name) -> return false
+        if sema_type_bound_satisfied(graph, ty, "Display", module_identity) == (Val(true)) -> return false
+    }
+    if sema_call_reflection_core_shown(name) || sema_derive_builtin_supports(leaf, trait_name) -> return false
+    sema_type_bound_satisfied(graph, ty, trait_name, module_identity) != (Val(true))
+}
+
+// The IR_RUNTIME_HANDLES row keyed by the Core declaration named `name`
+// (`<corelib>/core.files.FileReader` for `FileReader`).
+sema_comparability_core_handle_row: fn(name: String) -> Int? Never! {
+    loop row in 0..<IR_RUNTIME_HANDLES.len() {
+        if IR_RUNTIME_HANDLES[row].jet_name.starts_with("<corelib>/") && symbol_key_leaf(IR_RUNTIME_HANDLES[row].jet_name) == name -> return Val(row)
+    }
+    None
 }
 
 sema_comparability_generated_block: fn(item: Item, trait_name: String) -> Bool Never! {

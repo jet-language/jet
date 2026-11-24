@@ -450,6 +450,7 @@ __DecodeSource: trait {
 // which decodes the value at the cursor as a tree. Each route returns what
 // this body returns for the same input. The generic parameters are not
 // spelled `T` (see json.__decode_typed).
+#Allow(Jet.StaticOnlyStruct, "JetIR lowers `__Decoding.read` and its siblings by this type name (ir_decoding_read)")
 __Decoding: struct {
     read: fn<Target: Decode, Source: __DecodeSource>(reader: &Source) -> Target [FieldError]! {
         value: reader.capture().decode<Target>() ?? return Err(err)

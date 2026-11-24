@@ -180,8 +180,10 @@ It is a budget, not an effect, so raising it needs no grant; the limit is
 part of the binding's source, so a changed limit computes the value again. A
 limit that is not a whole number above 0 is E0930
 ([`comptime_step_limit_zero_is_refused.jet`](../../../Tests/UI/comptime_step_limit_zero_is_refused.jet)).
-A step is measured as time: the evaluator gives n steps n / 2000
-milliseconds.
+A step is one iteration of a loop or one entry into a recursive function's
+body; a built-in operation, such as `count` on a `String`, spends no step of
+its own. Steps are counted, never timed, so a limit gives the same result on
+every machine and under any load.
 
 Compile-time work runs in a process of its own, which ends with the `jet`
 that started it however that `jet` ends, a kill included
@@ -381,6 +383,11 @@ graph operations: `b.add_executable`,
 `b.run(name, tool, caps)` registers a typed step; `b.probe(name, kind, value)`
 registers a typed `find_program`, `find_folder`, `pkg_config` or `header`
 probe; and `b.generate(name) { ... }` registers an additive generated module.
+A target call may end with `toolchain: t` and
+`options: { settings: { key: value } }`, which give that output its own
+values for the package's declared settings and, on its own toolchain, that
+triple's `#build.target.*` and `#build.cpu.*` facts
+([`OutputSettings`](../../../Examples/Metaprogramming/BuildTime/OutputSettings/run.jet)).
 `b.plan()` or `b.default(target)` hands the graph to the driver. The
 [programmable builds](../spec.md#programmable-builds) section of the spec owns
 each operation's rules, including the generated-module diagnostics.

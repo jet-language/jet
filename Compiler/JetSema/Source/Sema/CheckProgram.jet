@@ -678,6 +678,7 @@ sema_publish_expression: fn(value: TExpr, program: SemaProgramTables, context: &
     body_flat_resolve_types(flat, syntax, program, context)
     if lends -> context.arena.arena_syntax = syntax.move()
     tree := flat.tree.move()
+    sema_precise_bind(tree, program)
     // The expression's own symbol keys leave with it (body_flat_function).
     tree.symbols = context.arena.tree.symbols.copy()
     body_tree_finish(tree)
@@ -13891,7 +13892,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     }
     reported := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) {
+        if !sema_core_lint_dropped(diagnostic, own_check: final_graph.core_own_check) && !sema_lint_allowed(diagnostic, allowances) {
             reported.push(diagnostic)
         }
     }
@@ -13941,9 +13942,12 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     result.move()
 }
 
-// A lint reported against embedded Core library source (`<corelib>/…`).
-sema_core_source_lint: fn(diagnostic: Diagnostic) -> Bool Never! {
-    if diagnostic.severity != DIAGNOSTIC_LINT -> return false
+// A lint reported against embedded Core library source (`<corelib>/…`),
+// which a program that only embeds Core drops. `jet check Core`
+// (`own_check`, SemaRegistrationGraph.core_own_check) reports Core's lints:
+// they are its own.
+sema_core_lint_dropped: fn(diagnostic: Diagnostic, own_check: Bool{false}) -> Bool Never! {
+    if own_check || diagnostic.severity != DIAGNOSTIC_LINT -> return false
     path := diagnostic.source_path ?? ""
     if path == "" && diagnostic.origin == .Val(origin) -> path = origin.path
     path == "<corelib>" || path.starts_with("<corelib>/")

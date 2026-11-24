@@ -2864,8 +2864,18 @@ patch_in_loop: fn(p: &IRPatchEmitter, f: IRFunction) -> Bool Never! {
     false
 }
 
-patch_emit_armed_poll: fn(p: &IRPatchEmitter, fast: IRX64FastModule, at: Int, edge_id: Int, armed: Bool) Never! {
+// The stencil twin of X64Select.jet ir_x64_armed_poll: with `counted` the
+// hot path first spends one step of the runtime's step word and enters the
+// slow path once the word is below zero.
+patch_emit_armed_poll: fn(p: &IRPatchEmitter, fast: IRX64FastModule, at: Int, edge_id: Int, armed: Bool, counted: Bool{false}) Never! {
     s_start: p.cold_sites.len()
+    if counted {
+        patch_ensure(p, 13)
+        b: p.pos
+        p.pos = o0_st_step_spend(p.code, b)
+        patch_reloc_rt_data_id(p, fast, b + 3, O0_RT_COMPTIME_STEPS)
+        p.cold_sites.push(b + 9)
+    }
     if armed {
         patch_ensure(p, 20)
         b: p.pos
@@ -2971,16 +2981,30 @@ patch_stop_point: fn(p: &IRPatchEmitter, fast: IRX64FastModule, m: IRModule, f: 
         b: p.pos
         p.pos = o0_st_stop_jne_edx(p.code, b)
         hot_site = b + 4
-        if f.a[at] == turn -> patch_emit_armed_poll(p, fast, at, edge_id, true)
+        if f.a[at] == turn {
+            patch_emit_armed_poll(p, fast, at, edge_id, true, counted: m.step_count)
+        }
     } else if routed || (f.a[at] == turn && (at == 0 || f.op[at - 1] == .Loop)) || !ir_opt_polls_checks_call(m, f, poll, trap, turn, at) {
         falls: routed && p.colds.len() > traps
         if falls -> p.colds[traps].falls = true
-        patch_emit_armed_poll(p, fast, at, edge_id, !falls || f.a[at] == turn)
+        patch_emit_armed_poll(p, fast, at, edge_id, !falls || f.a[at] == turn, counted: m.step_count && f.a[at] == turn)
     } else {
+        // A turn that counts steps spends one first; once the word is below
+        // zero it calls the turn poll past the quiet tests, and the poll
+        // enters its routine (X64Select.jet ir_x64_stop_poll).
+        spent := -1
+        if m.step_count && f.a[at] == turn {
+            patch_ensure(p, 13)
+            b: p.pos
+            p.pos = o0_st_step_spend(p.code, b)
+            patch_reloc_rt_data_id(p, fast, b + 3, O0_RT_COMPTIME_STEPS)
+            spent = b + 9
+        }
         has_quiet: patch_in_loop(p, f) || f.stack_check
         if has_quiet {
             patch_emit_stop_quiet(p, ir_stop_attention(m.functions[f.a[at]].key))
         }
+        if spent >= 0 -> patch_rel32(p.code, spent, p.pos)
         patch_call_out(p, f, x64_reloc_function(0, f.a[at]), false, -1)
         patch_ensure(p, 10)
         p.pos = o0_st_test_rax_rax(p.code, p.pos)

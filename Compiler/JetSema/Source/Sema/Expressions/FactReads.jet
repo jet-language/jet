@@ -8,7 +8,6 @@
 // rows of `CheckerCoreLib.core_struct_field`.
 use jet_foundation.[
     AST_NODE_GENERATED,
-    COMPILER_BUILD_CPU_CACHE_LINE_GENERIC,
     Diagnostic,
     EnumLitArg,
     Expr,
@@ -854,8 +853,8 @@ sema_fact_build_rooted: fn(base: Expr) -> Bool Never! {
 // The registered build-fact paths (Rust `Registry.build_fact_read`) and the
 // typed value each one takes from the snapshot (Rust `BuildFactSnapshot.value`).
 // `#build.target.*` reads the facts of the machine the build targets, the
-// ones `core.target` declares for each machine; `#build.host.*` reads the
-// machine running the build.
+// ones `core.target` declares for each machine, and `#build.cpu.*` that
+// machine's CPU; `#build.host.*` reads the machine running the build.
 sema_fact_build_value: fn(path: String, facts: SemaBuildFacts, machine: TargetMachine) -> SemaFactReadValue? {
     if {
         path == "#package.name" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.package_name}})
@@ -866,13 +865,13 @@ sema_fact_build_value: fn(path: String, facts: SemaBuildFacts, machine: TargetMa
         path == "#build.stamp.dirty" -> Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: facts.stamp_dirty}})
         path == "#build.stamp.toolchain" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_toolchain}})
         path == "#build.stamp.at" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_at}})
-        path == "#build.cpu.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: COMPILER_BUILD_CPU_CACHE_LINE_GENERIC}})
+        path == "#build.cpu.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_cache_line(machine.triple)}})
+        path == "#build.cpu.features" || path == "#build.target.cpu_features" -> Val(SemaFactReadValue{ty: Type.List{element: Type.String}, value: TComptimeValue.List{values: loop feature in jet_target_layout_cpu_features(machine.triple) -> TComptimeValue.String{value: feature}}})
         path == "#build.host.os" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.host_os}})
         path == "#build.host.arch" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.host_arch}})
         path == "#build.target.triple" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: machine.triple}})
         path == "#build.target.layout.pointer_bits" || path == "#build.target.layout.word_bits" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_pointer_size(machine.triple) * 8}})
         path == "#build.target.layout.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_cache_line(machine.triple)}})
-        path == "#build.target.cpu_features" -> Val(SemaFactReadValue{ty: Type.List{element: Type.String}, value: TComptimeValue.List{values: loop feature in jet_target_layout_cpu_features(machine.triple) -> TComptimeValue.String{value: feature}}})
         else -> None
     }
 }

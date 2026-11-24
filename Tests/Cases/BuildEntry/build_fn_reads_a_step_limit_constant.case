@@ -1,0 +1,22 @@
+# `build: fn` reads a constant computed while building. Its `#StepLimit(n)`
+# lets the work run past the default limit, and the build and the program
+# both read the value. A constant whose work runs past its own limit has no
+# value: the build reports the step limit at the constant, not an internal
+# compiler error.
+fixture: Fixtures/BuildFnReadsAStepLimitConstant
+env: NO_COLOR=1
+artifact: app
+step: jet build main.jet
+exit: 0
+step: built
+stdout: = "total=60499994500000\n"
+step: jet build --profile=release main.jet
+exit: 0
+step: built
+stdout: = "total=60499994500000\n"
+step: jet build over.jet
+exit: 1
+stderr: ~ "Jet.ComptimeFuelExhausted" # the constant ran out of steps
+stderr: ~ "past its step limit of 1000 steps" # its own limit, not the default
+stderr: ~ "over.jet:9" # reported at the constant
+stderr: !~ "Internal compiler error" # the build reading it is no compiler bug

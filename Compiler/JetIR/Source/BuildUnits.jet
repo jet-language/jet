@@ -37,12 +37,11 @@ ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argumen
 }
 
 // An explicit conversion (`Dest.from_<unit>(x)` or its `_rounded` form):
-// its Core/Math/Math.jet helper proves the converted value exact with
-// rational arithmetic, failing with the conversion's String reason. The
-// helper's `Float String!` result is this node's Result of the unit.
+// the Core function filling its jet_builtins role proves the converted value
+// exact with rational arithmetic, failing with the conversion's String
+// reason. Its `Float String!` result is this node's Result of the unit.
 ir_unit_convert_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
-    helper: ir_unit_conversion_helper(rounding != None)
-    row: ir_function_row(p, "function:<corelib>/core.math.{helper}") ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
+    row: ir_core_role_row(p, ir_unit_conversion_role(rounding != None)) ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
     value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
     values := [Int]{value}
@@ -71,9 +70,9 @@ ir_unit_convert_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
     ir_adapt(m, p, b, result, want, span)
 }
 
-// The Core/Math/Math.jet helper of a fallible unit conversion.
-ir_unit_conversion_helper: fn(rounded: Bool) -> String Never! {
-    if rounded -> "__unit_conversion_rounded" else -> "__unit_conversion_exact"
+// The jet_builtins role of a fallible unit conversion's Core function.
+ir_unit_conversion_role: fn(rounded: Bool) -> String Never! {
+    if rounded -> "UnitConversionRounded" else -> "UnitConversionExact"
 }
 
 // A String constant of static `text`.

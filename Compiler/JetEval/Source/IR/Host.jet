@@ -119,7 +119,11 @@ jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int,
     }
     fallible: dst_row >= 0 && ir_untag(ir_row_ty(types.value, layouts.value[0], dst_row)) == .Result(_, _)
     file: jet_eval_ir_text(s, args[4]) ?? return None
-    answer: jet_eval_ir_host_answer(s, parts[0], parts[1], member, values, fallible, args[1] != 0, Span{start: args[2], end: args[3]}, file) ?? return None
+    // A call is impure when it is written inside `#Impure` or runs under one:
+    // a core.build method's import runs in the Core body the user's
+    // `#Impure` block called.
+    impure: args[1] != 0 || s.impure_sites > 0
+    answer: jet_eval_ir_host_answer(s, parts[0], parts[1], member, values, fallible, impure, Span{start: args[2], end: args[3]}, file) ?? return None
     if dst_row < 0 -> return Val(0)
     jet_eval_ir_host_store(types.value, layouts.value[0], s, answer, dst_row, area)
 }

@@ -7779,6 +7779,20 @@ reads those rows: `#build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
 [`Examples/Metaprogramming/BuildTime/BuildContribution`](../../Examples/Metaprogramming/BuildTime/BuildContribution/run.jet).
 
+One `build: fn` can build the same source as several outputs, each with its
+own values for the settings the root package declares:
+`b.add_executable("lite", ["main.jet"], [], options: { settings: { max_particles: 500 } })`.
+The `options:` and `toolchain:` labels follow a `b.add_*` call's positional
+arguments. Each executable output's code reads
+its own values through `#build.settings.<key>`, folded when that output is
+built, and a value an output gives is an input of its compile key. A key the
+package does not declare is E3541; a value of another type than the declared
+one is E3542. An output on its own toolchain (`b.toolchain(name, triple)`)
+reads that triple's machine through `#build.target.*` and `#build.cpu.*`, not
+the machine running the build. Examples:
+[`Examples/Metaprogramming/BuildTime/OutputSettings`](../../Examples/Metaprogramming/BuildTime/OutputSettings/run.jet),
+[`Tests/Cases/Cross/build_output_facts_follow_its_toolchain.case`](../../Tests/Cases/Cross/build_output_facts_follow_its_toolchain.case).
+
 A dependency's settings are its options, given a value in the package that
 uses it (D-DEP-FEATURES1, ratified). Each package reads only its own settings:
 `#build.settings.loud` in `tool` is tool's `loud`, and a root setting of the
@@ -7793,11 +7807,12 @@ name, `tool.loud`, wherever the root writes its own: a build profile
 `build: fn`, and `--set tool.loud=false`. A qualified name the dependency does
 not declare is E0302, which lists what it declares.
 
-A setting has one value for the whole build, chosen on six rungs, lowest
-first: the dependency's declared default, the entries other dependencies
-write for it, the root's own entry, the root's selected profile, its
-`build: fn`, and `--set`. The most explicit rung that writes the setting
-decides. Two dependency entries that disagree are E3521, naming both lines,
+A setting has one value for each output of the build, chosen on seven rungs,
+lowest first: the dependency's declared default, the entries other
+dependencies write for it, the root's own entry, the root's selected profile,
+the output's own `options:`, its `build: fn`, and `--set`. The most explicit
+rung that writes the setting decides. Two dependency entries that disagree are
+E3521, naming both lines,
 unless a higher rung decides; with no value from the root, every build fails
 until the root writes one. Two values on any other rung, such as a profile
 that writes one setting twice, are E3521 whatever rung is above them. Code

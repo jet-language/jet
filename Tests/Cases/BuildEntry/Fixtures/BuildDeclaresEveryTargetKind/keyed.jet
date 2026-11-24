@@ -1,0 +1,10 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("name the toolchain tree's source key") {
+        app: b.add_executable("app", ["keyed.jet"], [])
+        note: b.run("note", b.jet(), ["FS"])
+        note.arg("--key={b.source_key()}")
+        b.default(app)
+    }
+}
+
+run: fn() {}

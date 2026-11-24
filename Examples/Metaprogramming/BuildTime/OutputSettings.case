@@ -1,0 +1,35 @@
+# `jet build` builds both outputs `build: fn` declares, at each optimize
+# level (O0, O1, and O2 through `--release`), and each artifact prints the
+# setting values its own `options: {settings: ...}` gave it. `jet run` builds
+# no output, so it reads the package's defaults. Each `jet build` step checks
+# that `particles_full` exists; the steps after it run both outputs.
+artifact: particles_full
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step build_o0: jet build -O0 run.jet
+exit: 0
+step lite_o0: {work}/.jet/build/particles_lite
+exit: 0
+stdout: = "lite: 500 particles, trails false\n" # the lite output's own values, its trails the default
+step full_o0: {work}/.jet/build/particles_full
+exit: 0
+stdout: = OutputSettings.out
+step build_o1: jet build -O1 run.jet
+exit: 0
+step lite_o1: {work}/.jet/build/particles_lite
+exit: 0
+stdout: = "lite: 500 particles, trails false\n"
+step full_o1: {work}/.jet/build/particles_full
+exit: 0
+stdout: = OutputSettings.out
+step build_o2: jet build --release run.jet
+exit: 0
+step lite_o2: {work}/.jet/build/particles_lite
+exit: 0
+stdout: = "lite: 500 particles, trails false\n"
+step full_o2: {work}/.jet/build/particles_full
+exit: 0
+stdout: = OutputSettings.out
+step plain: jet run run.jet
+exit: 0
+stdout: = "default: 100 particles, trails false\n" # no output's options, so the declared defaults

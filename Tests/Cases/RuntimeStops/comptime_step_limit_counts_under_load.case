@@ -1,0 +1,13 @@
+# Compile-time code's step limit counts steps, never time: with every core
+# busy, a thousand-iteration loop still fits a limit of 1010 steps, and the
+# same loop still runs past a limit of 990 steps, stopping with E0952.
+# load.sh starts a spinning shell per core, checks under.jet and over.jet,
+# then kills the spinners.
+requires: os-name:linux
+fixture: Fixtures/ComptimeStepLimitUnderLoad
+env: NO_COLOR=1
+step: sh load.sh
+exit: 0
+stdout: ~ "under: 0\n" # the loop fits its limit however loaded the host is
+stdout: ~ "over: 1\n" # the same loop past a lower limit stops the check
+stdout: ~ "ran past its step limit of 990 steps" # E0952 names the limit it spent

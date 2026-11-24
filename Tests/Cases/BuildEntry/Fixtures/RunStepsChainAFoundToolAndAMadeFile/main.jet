@@ -9,7 +9,7 @@ build: fn(b: Build) -[Exec, FS]> {
         // `sh tool.sh --out=made.txt`: runs after `gen`, which makes tool.sh.
         made: b.run("made", b.found(shell), ["Exec", "FS"])
         made.file(script)
-        made.output("made.txt", flag: "--out=")
+        _: made.output("made.txt", flag: "--out=")
         made.timeout(10s)
         app: b.add_executable("app", ["main.jet"], [gen, made])
         b.default(app)

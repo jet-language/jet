@@ -3133,9 +3133,10 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
     derives := [String]{}
     // Rust reference lowering lower_struct/lower_enum: the declaration's
     // structural auto-derive selection (`TypeMetadata`) supplies the
-    // auto-Printable fact, which a field that is not printable blocks
-    // (sema_comparability_printable_blocked), and the automatic Debug derive.
+    // auto-Printable fact and the automatic Debug derive, which a field that
+    // is not printable or debuggable blocks (sema_comparability_rendering_blocked).
     auto_derives: sema_type_metadata_auto_derives(definition, module_row.declared_trait_impls)
+    auto_debug: auto_derives.debug && !sema_comparability_rendering_blocked(graph, module_row.module_identity, definition, "Debug")
     auto_printable := false
     auto_derive_default := false
     published_schema := false
@@ -3147,8 +3148,8 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
     kind := TTypeDefKind?{None}
     if definition == {
         .Struct(value) -> {
-            derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
-            auto_printable = auto_derives.printable && !sema_comparability_printable_blocked(graph, module_row.module_identity, definition)
+            derives = sema_checked_type_derive_names(value.derives, definition, auto_debug)
+            auto_printable = auto_derives.printable && !sema_comparability_rendering_blocked(graph, module_row.module_identity, definition, "Printable")
             auto_derive_default = value.auto_derive_default
             published_schema = value.is_published_schema
             single_use = value.is_single_use
@@ -3169,8 +3170,8 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(graph, definition, nominal.methods)})
         }
         .Enum(value) -> {
-            derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
-            auto_printable = auto_derives.printable && !sema_comparability_printable_blocked(graph, module_row.module_identity, definition)
+            derives = sema_checked_type_derive_names(value.derives, definition, auto_debug)
+            auto_printable = auto_derives.printable && !sema_comparability_rendering_blocked(graph, module_row.module_identity, definition, "Printable")
             auto_derive_default = value.auto_derive_default
             single_use = value.is_single_use
             must_use = value.is_must_use

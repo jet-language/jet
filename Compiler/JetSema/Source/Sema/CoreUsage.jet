@@ -480,10 +480,9 @@ sema_core_note_usage: fn(used: &[String], spans: &[SemaCoreUsageSpan], usage: St
     }
 }
 
-// The public `core.text.fmt` member an interpolation selector lowers through.
-// An integer value takes a private helper beside it (`fixed_int`, `hex`'s
-// width form), which comes with the same source module. Display and Debug
-// render through the typed route and name no member.
+// A public `core.text.fmt` member of the module an interpolation selector
+// needs: a style trait's Core impls and the formatters sema calls live there.
+// Display and Debug render through the typed route and need none.
 sema_core_format_selector_member: fn(format: StrFormat) -> String? Never! {
     if format == {
         .Display | .Debug | .Count -> None
@@ -1359,9 +1358,9 @@ sema_core_collect_expr: fn(expr: Expr, tables: ASTTables, imports: [SemaCoreImpo
                 if part == {
                     .Interp(value, format) -> {
                         sema_core_note_usage(used, spans, "core.text.fmt.interpolation", Val(expr_span(value)))
-                        // A selector lowers to its `Core/Text/Fmt.jet` formatter by name
-                        // (ir_string_format_member), so no call here names it:
-                        // the selector's public member brings that source module in.
+                        // A selector's trait impl or formatter lives in
+                        // `Core/Text/Fmt.jet`, which no name here spells: the
+                        // selector's public member brings that source module in.
                         if sema_core_format_selector_member(format) == .Val(member) {
                             sema_core_note_usage(used, spans, "core.text.fmt.{member}", Val(expr_span(value)))
                         }

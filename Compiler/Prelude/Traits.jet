@@ -32,6 +32,9 @@
 //   requires          the traits every type with this one also has
 //   shares            the trait whose impl on the same type binds the
 //                     associated types these methods use
+//   declared_in       the Core module whose declaration of the trait gives
+//                     its methods; the facts stay here. Until that module
+//                     declares the trait, the methods written here stand in
 //
 // `Literal: module` holds the literal capabilities, named `Literal.Int` and
 // `Literal.Float`; each one's `from_literal` parameter is the literal's source,
@@ -146,6 +149,7 @@ Encode: trait {
     codec: Bool{true},
     auto_derive_family: String{"Codable"},
     through_elements: Bool{true},
+    declared_in: String{"core.encoding"},
     encode: fn(self) -> Dyn Never!,
 }
 
@@ -157,6 +161,7 @@ Decode: trait {
     codec: Bool{true},
     auto_derive_family: String{"Codable"},
     through_elements: Bool{true},
+    declared_in: String{"core.encoding"},
     decode: fn(tree: Dyn) -> Self [FieldError]!,
 }
 

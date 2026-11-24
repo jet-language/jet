@@ -889,10 +889,10 @@ sema_call_core_bind_arguments: fn(record: CoreCallRecord, signature: Type, args:
 
 // `("core.math", "abs")`: `abs` takes Int, Float, F32, I64 and Complex,
 // returning the argument type (Float for Complex). The Int form stays the
-// routed source `abs`; any other argument is the MathBuiltin `abs`, which
-// lowers to its Core/Math source helper (`fabs`, the Core function that fills
-// role `AbsF32` or `AbsI64`, the Complex magnitude). Anything else is not
-// handled here.
+// routed source `abs`; any other argument is the MathBuiltin `abs`. A Float,
+// F32 or I64 one lowers to the Core function filling role `AbsFloat`,
+// `AbsF32` or `AbsI64`, and a Complex one runs core.math's `__complex_abs`
+// (sema_precise_bind). Anything else is not handled here.
 sema_call_try_core_math_abs: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     if module_name != "core.math" || member != "abs" || args.len() != 1 || type_args.len() != 0 || args[0].label != None {
@@ -1182,11 +1182,11 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
             source == Type.Float32 -> {
                 widened = sema_expr_numeric_conversion(args[0].copy(), Type.Float, span, 0)
             }
-            nominal == "Fraction" || nominal.ends_with(".Fraction") -> {
-                widened = sema_call_core_source("core.math", "__fraction_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, diagnostics)
-            }
-            nominal == "Decimal" || nominal.ends_with(".Decimal") -> {
-                widened = sema_call_core_source("core.math", "__decimal_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, diagnostics)
+            nominal == "Fraction" || nominal.ends_with(".Fraction") || nominal == "Decimal" || nominal.ends_with(".Decimal") -> {
+                // An exact number's Float is its precise `to_float`, which
+                // runs core.math's own function (sema_precise_bind).
+                exact: if nominal == "Fraction" || nominal.ends_with(".Fraction") -> "Fraction" else -> "Decimal"
+                widened = Val(sema_tree_node(Type.Float, TExprKind.PreciseBuiltin{type_name: exact, function: "to_float", args: [TExpr]{args[0].copy()}}, span))
             }
             else -> widened = None
         }
@@ -1230,7 +1230,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
 // A call of the `module_name` source function `member` on checked arguments,
 // typed `result` (sqrt's Float root, the exact types' crossing to Float, the
 // F32-width math calls, and the Tensor bracket windows). `registered`
-// resolves a module-private member such as `__fraction_to_float`.
+// resolves a module-private member such as `__decimal_to_float`.
 sema_call_core_source: fn(module_name: String, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
     target: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, diagnostics) ?? return None

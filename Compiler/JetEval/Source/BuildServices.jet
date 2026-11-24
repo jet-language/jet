@@ -5,6 +5,7 @@ use {
     jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, comptime_char_text, diagnostic_from_registry, diagnostic_registry_row]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection, build_session_plan_report]
+    jet_ir.[ir_short_name]
 }
 
 jet_eval_build_field: fn(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
@@ -26,15 +27,20 @@ jet_eval_build_context_value: fn(session: Int, program: TComptimeValue) -> TComp
     }
 }
 
+// The session of a core.build `Build` value, which the evaluator reads by its
+// declaration's name, `Build`.
 jet_eval_build_context_id: fn(data: TComptimeValue) -> Int? Never! {
     if data == .Struct(name, _) {
-        if name == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) {
+        if ir_short_name(name) == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) {
             return Val(id)
         }
     }
     None
 }
 
+// A value a build call sends the session. An absent optional argument (a
+// clean None) is `Unit`, and a core.build handle is its kind, the leaf of its
+// declaration's name (`BuildFile`), with its session and index.
 jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Never! {
     if data == {
         .Unit -> return Val(BuildSessionValue.Unit)
@@ -72,10 +78,13 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
             session: jet_eval_build_field(data, "session") ?? return None
             id: jet_eval_build_field(data, "id") ?? return None
             if session == .Int(owner) && id == .Int(index) {
-                return Val(BuildSessionValue.Handle{type_name: name, session: owner, id: index})
+                return Val(BuildSessionValue.Handle{type_name: ir_short_name(name), session: owner, id: index})
             }
         }
-        .Float(_, _) | .BigInt(_) | .Map(_) | .Failed(_) | .Function(_) -> {}
+        .Failed(report) -> {
+            if report == .Clean(_) -> return Val(BuildSessionValue.Unit)
+        }
+        .Float(_, _) | .BigInt(_) | .Map(_) | .Function(_) -> {}
     }
     None
 }

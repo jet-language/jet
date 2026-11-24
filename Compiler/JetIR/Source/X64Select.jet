@@ -95,6 +95,7 @@ use {
         x64_cvtss2sd,
         x64_cvttsd2si,
         x64_cvttss2si,
+        x64_dec_rip,
         x64_div,
         x64_dwarf_register,
         x64_emit_row_text,
@@ -1926,6 +1927,14 @@ IR_X64_PROCESS_ENDING_SYMBOL: "jet_rt_process_ending"
 IR_X64_CHECKS_ARMED_STORAGE: "scheduler_checks_armed"
 
 IR_X64_CHECKS_ARMED_SYMBOL: "jet_rt_checks_armed"
+
+// The runtime's step word for compile-time code (JetRuntime ComptimeServe.jet
+// comptime_serve_steps), which each CALL sets to the call's step limit, and
+// its data symbol (BuildLibrary.jet ir_build_library). A turn poll of a
+// module that counts steps (IRModule.step_count) spends one.
+IR_X64_COMPTIME_STEPS_STORAGE: "comptime_serve_steps"
+
+IR_X64_COMPTIME_STEPS_SYMBOL: "jet_rt_comptime_steps"
 
 // The runtime's zones word (JetRuntime PerfSamples.jet perf_zones_on) and
 // its data symbol (BuildLibrary.jet ir_build_library): nonzero while a
@@ -4550,7 +4559,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
             site = x64_jcc_rel32(e.code, X64Cond.NE)
-            if f.a[at] == turn -> ir_x64_armed_poll(e, at, branch, true)
+            if f.a[at] == turn -> ir_x64_armed_poll(e, at, branch, true, counted: m.step_count)
         } else if f.a[at] != trap && (routed || !ir_opt_polls_checks_call(m, f, poll, trap, turn, at)) {
             // A poll that checks no call can observe only what another task
             // asked for, which arms the runtime's word first: the hot path
@@ -4562,14 +4571,24 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             // stop poll keeps no hot code; a turn keeps its armed word.
             falls: routed && e.colds.len() > traps
             if falls -> e.colds[traps].falls = true
-            ir_x64_armed_poll(e, at, branch, !falls || f.a[at] == turn)
+            ir_x64_armed_poll(e, at, branch, !falls || f.a[at] == turn, counted: m.step_count && f.a[at] == turn)
         } else {
             // In a loop or a body on a call cycle, any other poll's own tests
             // of the task control run inline first, so while no stop is asked
-            // for the hot path calls nothing.
+            // for the hot path calls nothing. A turn that counts steps spends
+            // one first; once the word is below zero it calls the turn poll
+            // past those tests, and the poll enters its routine
+            // (ir_x64_stop_poll).
+            counted: m.step_count && f.a[at] == turn
+            if counted {
+                word: x64_dec_rip(e.code)
+                e.relocs.push(x64_reloc_runtime_data(word, IR_X64_COMPTIME_STEPS_SYMBOL))
+            }
             if ir_x64_in_loop(e, f) || f.stack_check {
+                spent: if counted -> x64_jcc_rel32(e.code, X64Cond.S) else -> -1
                 tests := ir_x64_stop_quiet(e.code, ir_stop_attention(m.functions[f.a[at]].key))
                 loop enter in tests.enter -> ir_x64_patch(e, enter, e.code.bytes.len())
+                if spent >= 0 -> ir_x64_patch(e, spent, e.code.bytes.len())
                 skips = tests.quiet.move()
             }
             ir_x64_call(e, m, f, al, x64_reloc_function(0, f.a[at]), -1, f.args, f.b[at], f.c[at], -1, 0)
@@ -4639,9 +4658,18 @@ ir_x64_cold_if: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloca
 // hot path loads the runtime's armed word, tests it and branches to the
 // poll's slow path (IRX64ColdKind.Poll), which calls the poll and takes
 // the edge or comes back here; without, only a slow path that falls into it
-// enters it.
-ir_x64_armed_poll: fn(e: &IRX64Emitter, at: Int, branch: Int, armed: Bool) Never! {
+// enters it. With `counted` (a turn of a module that counts steps,
+// IRModule.step_count) the hot path first spends one step of the runtime's
+// step word and branches to the slow path once the word is below zero: the
+// turn's routine then stops the call (JetRuntime Scheduler.jet
+// jet_rt_session_turn).
+ir_x64_armed_poll: fn(e: &IRX64Emitter, at: Int, branch: Int, armed: Bool, counted: Bool{false}) Never! {
     cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{})
+    if counted {
+        word: x64_dec_rip(e.code)
+        e.relocs.push(x64_reloc_runtime_data(word, IR_X64_COMPTIME_STEPS_SYMBOL))
+        cold.sites.push(x64_jcc_rel32(e.code, X64Cond.S))
+    }
     if armed {
         flag: x64_load_rip(e.code, X64_RAX)
         e.relocs.push(x64_reloc_runtime_data(flag, IR_X64_CHECKS_ARMED_SYMBOL))
@@ -5621,7 +5649,9 @@ ir_x64_select_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, name
 // A stop poll, an `#FFI(asm)` leaf or a body.
 ir_x64_select_row: fn(m: IRModule, tables: IRX64FunctionTables, row: Int, poll: Int{-2}, trap: Int{-2}, turn: Int{-2}, zone_plot: Int{-2}, zone_frame: Int{-2}) -> IRX64FunctionResult Never! {
     key: m.functions[row].key
-    if ir_stop_key(key) -> return ir_x64_stop_poll(m.functions[row], row)
+    if ir_stop_key(key) {
+        return ir_x64_stop_poll(m.functions[row], row, counted: m.step_count && key == IR_STOP_TURN_KEY)
+    }
     if m.functions[row].asm == .Val(leaf) {
         return ir_x64_asm_function(m, m.functions[row], leaf, row, tables)
     }
@@ -5682,10 +5712,25 @@ IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 //   mov [rsp + 224 + 8k], r for the k-th of rcx, rdx, rsi, rdi, r8-r11;
 //   call the routine; the loads back; add rsp, 296;
 //   test rax, rax; setne al; movzx eax, al; done: ret
-ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
+// With `counted` (the turn of a module that counts steps,
+// IRModule.step_count) it first reads the runtime's step word and enters
+// the routine once the word is below zero, before the thread's tests: a
+// compile-time call that spent its steps stops there (JetRuntime
+// Scheduler.jet jet_rt_session_turn) on any thread, attached or not, and
+// with no stop asked for.
+ir_x64_stop_poll: fn(f: IRFunction, row: Int, counted: Bool{false}) -> IRX64FunctionResult Never! {
     code := x64_code()
+    relocs := [X64Reloc]{}
+    spent := -1
+    if counted {
+        word: x64_load_rip(code, X64_RAX)
+        relocs.push(x64_reloc_runtime_data(word, IR_X64_COMPTIME_STEPS_SYMBOL))
+        x64_test_rr(code, X64_RAX, X64_RAX)
+        spent = x64_jcc_rel32(code, X64Cond.S)
+    }
     tests := ir_x64_stop_quiet(code, ir_stop_attention(f.key))
     loop site in tests.enter -> x64_patch_rel32(code.bytes, site, code.bytes.len())
+    if spent >= 0 -> x64_patch_rel32(code.bytes, spent, code.bytes.len())
     // The fourteen xmm registers and the eight general ones below an 8-byte
     // pad keep rsp 16-byte aligned at the call.
     kept: IR_X64_POLL_KEEPS
@@ -5711,7 +5756,7 @@ ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     dwarf_cfa_def_cfa_offset(cfi, 8 + frame)
     dwarf_cfa_advance(cfi, framed, restored)
     dwarf_cfa_def_cfa_offset(cfi, 8)
-    relocs := [X64Reloc]{x64_reloc_runtime(status_at, ir_stop_routine(f.key))}
+    relocs.push(x64_reloc_runtime(status_at, ir_stop_routine(f.key)))
     name: if f.symbol != "" -> f.symbol else -> f.key
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: relocs.move(), align: X64_FUNCTION_ALIGN},

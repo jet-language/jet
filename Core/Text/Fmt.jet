@@ -58,6 +58,183 @@ decimal: fn(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
 
 percent: fn(n: Float, frac: Int) -> String Never! { "{grouped(n * 100.0, frac)}%" }
 
+// The numeric interpolation styles. `{value:Hex(n)}` is `value.hex(n)`, and
+// each other style calls its own method the same way: the value first, then
+// the selector's number. A type implements only the styles it supports, and
+// Core's numbers implement theirs below. A method may fail, as building text
+// can; an implementation that can't narrows its contract to `Never!`.
+
+/// `{value:Hex(n)}`: hexadecimal digits, zero-padded to at least `digits`.
+///
+/// ```jet
+/// Int{255}.hex(4) == "00ff" // => true
+/// I8{-5}.hex(2) == "-05" // => true
+/// I64{255}.hex(0) == "ff" // => true
+/// U8{255}.hex(4) == "00ff" // => true
+/// U32{4096}.hex(0) == "1000" // => true
+/// ```
+HexFormat: trait {
+    hex: fn(self, digits: Int) -> String,
+}
+
+/// `{value:Bin}`: binary digits.
+///
+/// ```jet
+/// Int{5}.bin() == "101" // => true
+/// I16{-5}.bin() == "-101" // => true
+/// I32{8}.bin() == "1000" // => true
+/// U8{5}.bin() == "101" // => true
+/// U64{2}.bin() == "10" // => true
+/// ```
+BinFormat: trait {
+    bin: fn(self) -> String,
+}
+
+/// `{value:Oct}`: octal digits.
+///
+/// ```jet
+/// Int{8}.oct() == "10" // => true
+/// I8{8}.oct() == "10" // => true
+/// I64{-64}.oct() == "-100" // => true
+/// U16{64}.oct() == "100" // => true
+/// U32{7}.oct() == "7" // => true
+/// ```
+OctFormat: trait {
+    oct: fn(self) -> String,
+}
+
+/// `{value:Fixed(n)}`: decimal text with `digits` places after the point.
+///
+/// ```jet
+/// Int{1234}.fixed(2) == "1234.00" // => true
+/// I16{-12}.fixed(1) == "-12.0" // => true
+/// I32{1234}.fixed(0) == "1234" // => true
+/// U8{12}.fixed(2) == "12.00" // => true
+/// U64{7}.fixed(0) == "7" // => true
+/// Float{0.125}.fixed(2) == "0.13" // => true
+/// F32{1.5}.fixed(1) == "1.5" // => true
+/// ```
+FixedFormat: trait {
+    fixed: fn(self, digits: Int) -> String,
+}
+
+/// `{value:Grouped(n)}`: `fixed` text with the whole digits grouped by commas
+/// in threes.
+///
+/// ```jet
+/// Int{1234}.grouped(1) == "1,234.0" // => true
+/// I32{-1234567}.grouped(0) == "-1,234,567" // => true
+/// I64{1234}.grouped(2) == "1,234.00" // => true
+/// U16{65535}.grouped(0) == "65,535" // => true
+/// U32{1000}.grouped(1) == "1,000.0" // => true
+/// Float{12345.625}.grouped(2) == "12,345.63" // => true
+/// F32{1024.5}.grouped(1) == "1,024.5" // => true
+/// ```
+GroupedFormat: trait {
+    grouped: fn(self, digits: Int) -> String,
+}
+
+/// `{value:Sci(n)}`: scientific text with `digits` mantissa places.
+///
+/// ```jet
+/// Float{2.5}.sci(0) == "3e0" // => true
+/// F32{1.25}.sci(1) == "1.3e0" // => true
+/// ```
+SciFormat: trait {
+    sci: fn(self, digits: Int) -> String,
+}
+
+/// `{value:Percent(n)}`: the value times 100 as grouped text with `digits`
+/// places, then `%`.
+///
+/// ```jet
+/// Float{0.25}.percent(0) == "25%" // => true
+/// F32{0.5}.percent(1) == "50.0%" // => true
+/// ```
+PercentFormat: trait {
+    percent: fn(self, digits: Int) -> String,
+}
+
+// Every integer formats as its exact Int and reads a negative count as zero.
+// Int is not a size of the Signed family, so it has its own implementations;
+// each size of the Signed and Unsigned families takes its family's.
+impl Int.HexFormat {
+    hex: fn(self, digits: Int) -> String Never! { __radix_signed_width(self, 16, digits) }
+}
+
+impl Int.BinFormat {
+    bin: fn(self) -> String Never! { __radix_signed_width(self, 2, 0) }
+}
+
+impl Int.OctFormat {
+    oct: fn(self) -> String Never! { __radix_signed_width(self, 8, 0) }
+}
+
+impl Int.FixedFormat {
+    fixed: fn(self, digits: Int) -> String Never! { exact_int_decimal(self, digits, false) }
+}
+
+impl Int.GroupedFormat {
+    grouped: fn(self, digits: Int) -> String Never! { exact_int_decimal(self, digits, true) }
+}
+
+impl Signed.HexFormat {
+    hex: fn(self, digits: Int) -> String Never! { __radix_signed_width(Int{self}, 16, digits) }
+}
+
+impl Signed.BinFormat {
+    bin: fn(self) -> String Never! { __radix_signed_width(Int{self}, 2, 0) }
+}
+
+impl Signed.OctFormat {
+    oct: fn(self) -> String Never! { __radix_signed_width(Int{self}, 8, 0) }
+}
+
+impl Signed.FixedFormat {
+    fixed: fn(self, digits: Int) -> String Never! { exact_int_decimal(Int{self}, digits, false) }
+}
+
+impl Signed.GroupedFormat {
+    grouped: fn(self, digits: Int) -> String Never! { exact_int_decimal(Int{self}, digits, true) }
+}
+
+impl Unsigned.HexFormat {
+    hex: fn(self, digits: Int) -> String Never! { __radix_signed_width(Int{self}, 16, digits) }
+}
+
+impl Unsigned.BinFormat {
+    bin: fn(self) -> String Never! { __radix_signed_width(Int{self}, 2, 0) }
+}
+
+impl Unsigned.OctFormat {
+    oct: fn(self) -> String Never! { __radix_signed_width(Int{self}, 8, 0) }
+}
+
+impl Unsigned.FixedFormat {
+    fixed: fn(self, digits: Int) -> String Never! { exact_int_decimal(Int{self}, digits, false) }
+}
+
+impl Unsigned.GroupedFormat {
+    grouped: fn(self, digits: Int) -> String Never! { exact_int_decimal(Int{self}, digits, true) }
+}
+
+// Each size of the IEEE family (Float, F32) formats as its Float.
+impl IEEE.FixedFormat {
+    fixed: fn(self, digits: Int) -> String Never! { float_fixed(Float{self}, digits) }
+}
+
+impl IEEE.GroupedFormat {
+    grouped: fn(self, digits: Int) -> String Never! { group_decimal(float_fixed(Float{self}, digits)) }
+}
+
+impl IEEE.SciFormat {
+    sci: fn(self, digits: Int) -> String Never! { sci(Float{self}, digits) }
+}
+
+impl IEEE.PercentFormat {
+    percent: fn(self, digits: Int) -> String Never! { percent(Float{self}, digits) }
+}
+
 // Compiler interpolation helpers reuse the source-owned formatting policy.
 // Ported from aa45bf8fc Core/Text/Runtime/kernel_fmt.jet; no C ABI adapter.
 quantity: fn(n: Float) -> String Never! {
@@ -329,8 +506,7 @@ grouped_int: fn(n: Int) -> String Never! {
     "{sign}{grouped_digits(radix(abs_int(n), 10))}"
 }
 
-// `n` in `base`, its digits zero-padded to `width` after the sign; also the
-// Int formatting of core.term's print style (Term.jet __print_int).
+// `n` in `base`, its digits zero-padded to `width` after the sign.
 __radix_signed_width: fn(n: Int, base: Int, width: Int) -> String Never! {
     sign: if n < 0 -> "-" else -> ""
     "{sign}{pad_left(radix(abs_int(n), base), width, "0")}"

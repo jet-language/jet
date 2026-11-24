@@ -19,23 +19,33 @@
 // typed signature in the compiler's host signature table are the whole
 // operation. This file declares the records those operations return.
 
-// The roles a Core function fills for the compiler: `abs` on an F32 (AbsF32)
-// and on an I64 (AbsI64), `pow` on a Float (PowFloat) and on an F32 (PowF32),
-// the text input that keeps an `on_drop:` handler's slot (TextInputDrop),
-// the one that keeps an `on_change:` handler's slot (TextInputChange), and
+// The roles a Core function fills for the compiler: `abs` on a Float
+// (AbsFloat), an F32 (AbsF32) and an I64 (AbsI64), `pow` on a Float
+// (PowFloat) and an F32 (PowF32), the zero test of a Fraction divisor
+// (FractionIsZero) and the Fraction an Int `/` (FractionFromParts) and a
+// Fraction `/` (FractionDiv) make once that test passes, a fallible unit
+// conversion's exact check (UnitConversionExact) and its rounded one
+// (UnitConversionRounded), the text inputs keeping an `on_drop:`
+// (TextInputDrop) and an `on_change:` (TextInputChange) handler's slot, and
 // the constructors of a declared point, an `Event<T>` (EventPoint), a
-// `Hook<T, R>` (HookPoint) and a `DecisionHook<T, E>` (DecisionPoint), whose
-// call is a module binding's identity rather than an allocation. A role's
-// name ends in `Point` exactly when it is a point constructor's.
+// `Hook<T, R>` (HookPoint) and a `DecisionHook<T, E>` (DecisionPoint), each
+// call a binding's identity rather than an allocation. A role's name ends in
+// `Point` exactly when it is a point constructor's.
 // The compiler runs the one Core function that fills a role and never names
 // it, so the function can be private and keep any name. Each role is filled
 // exactly once (E1014 for a second filler; E1015 when `jet check Core` finds
 // one unfilled). Tests/UI/core_role_* put a probe after `RoleKind: enum {`.
 RoleKind: enum {
+    AbsFloat,
     AbsF32,
     AbsI64,
     PowFloat,
     PowF32,
+    FractionIsZero,
+    FractionFromParts,
+    FractionDiv,
+    UnitConversionExact,
+    UnitConversionRounded,
     TextInputDrop,
     TextInputChange,
     EventPoint,

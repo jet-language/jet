@@ -10,7 +10,7 @@
 // value code lives here.
 //
 // Frames are eight little-endian words: kind, then up to seven operands.
-// Commands: 1 CALL(address, a0..a4) -> DONE(result); 2 READ(address,
+// Commands: 1 CALL(address, a0..a4, steps) -> DONE(result); 2 READ(address,
 // length) -> the raw bytes; 3 WRITE(address, length) + bytes; 4 ALLOC(size,
 // align) -> DONE(pointer); 5 TEXT(length) + bytes -> DONE(String);
 // 6 INT(length) + decimal bytes -> DONE(Int); 7 RETURN(word) answers the
@@ -38,6 +38,14 @@ comptime_serving: fn() -> Bool { comptime_serve_root != I64{0} }
 comptime_serve_cookie := I64{0}
 
 comptime_serve_admitted := I64{0}
+
+// The steps the running CALL has left (its seventh operand). Each turn poll
+// of compile-time code (a loop's iteration, a recursive body's entry)
+// spends one inline (JetIR X64Select.jet ir_x64_armed_poll); once the word
+// is below zero the turn's routine stops the call
+// (comptime_serve_out_of_steps). A step is counted, never timed, so a
+// program's limit gives the same answer on every machine.
+comptime_serve_steps := I64{0}
 
 comptime_serve_move: fn(fd: I64, number: I64, address: I64, count: I64) {
     at := I64{0}
@@ -132,7 +140,11 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
         if (kind == I64{1}) {
             // The compiler calls an entry of this image's table, or a runtime
             // export it resolved, on the word arguments that entry's System V
-            // signature takes.
+            // signature takes, with the call's step limit.
+            steps: trap_word(wrapping(frame + I64{56}))
+            #Unsafe("the step word is set on the image's only serving thread, before the call that spends it") {
+                comptime_serve_steps = steps
+            }
             result: coll_call5(a, b, c, d, e, f)
             // The call runs as jet_rt_main's entry (the serve entry's root):
             // a stop it published there rather than served (process.exit,
@@ -360,5 +372,20 @@ comptime_serve_refuse: fn(refused: I64) {
 
 // The stop kind a refused effect reaches the stop door with. It never leaves
 // the child: the compiler's stop kinds (JetBackend Image/ComptimeWire.jet)
-// are 1 through 5.
+// are 1 through 5 and COMPTIME_STOP_STEPS.
 COMPTIME_STOP_REFUSED: I64{6}
+
+// The stop kind of a call that spent its step limit (JetBackend
+// ComptimeWire.jet X64_COMPTIME_STOP_STEPS); the compiler reports it as the
+// limit's error.
+COMPTIME_STOP_STEPS: I64{7}
+
+// While the image serves the compiler, stops the running call, which spent
+// its steps (comptime_serve_steps), as a STOP of COMPTIME_STOP_STEPS; the
+// child serves on. Otherwise returns.
+comptime_serve_out_of_steps: fn() {
+    if !comptime_serving() {
+        return
+    }
+    trap_stop(COMPTIME_STOP_STEPS, I64{0}, I64{0}, I64{0}, I64{0})
+}

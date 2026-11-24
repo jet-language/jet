@@ -575,6 +575,10 @@ IRProgram: struct {
     // implementation for the generic owner (`impl Box.Shape`) serves each one
     // a trait value may hold.
     trait_boxed: IRTraitBoxed{IRTraitBoxed{}},
+    // Where a `#Context(print: …)` block sets a print style (BuildTraits.jet
+    // IRPrintStyle), None when none does: Print then renders as Show, with
+    // no style lookup (BuildTypes.jet ir_print_style_find).
+    print_style: IRPrintStyle?{None},
     // The checked source files' bytes and line starts by row, and each
     // path's row at its id in `source_rows_keys`: a source location reads
     // the file in place.
@@ -1171,7 +1175,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, thre
         }
         p.quiet_points = quiet.move()
         p.decode_helpers = decode.move()
-        ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed)
+        ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed, scanned.print)
         return
     }
     rows: ir_first_function_rows(owned)
@@ -1545,15 +1549,17 @@ IR_BODY_SCAN_MIN_NODES_PER_THREAD: 40000
 IRBodyScanPart: struct {
     spawns: [IRBodyScanSpawn],
     boxed: [IRBodyScanBoxed],
+    print: IRPrintStyle?{None},
 }
 
 ir_body_scan_range: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, start: Int, end: Int) -> IRBodyScanPart Never! {
     spawns := [IRBodyScanSpawn]{}
     boxed := [IRBodyScanBoxed]{}
+    print := IRPrintStyle?{None}
     loop row in start..<end {
-        ir_scan_function_nodes(row, functions[row], check_boxed[row], interner, spawns, boxed)
+        ir_scan_function_nodes(row, functions[row], check_boxed[row], interner, spawns, boxed, print)
     }
-    IRBodyScanPart{spawns: spawns.move(), boxed: boxed.move()}
+    IRBodyScanPart{spawns: spawns.move(), boxed: boxed.move(), print: print}
 }
 
 ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, bounds: [Int], part: Int) -> [IRBodyScanPart] {
@@ -1593,9 +1599,10 @@ ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], interner: Int
     workers: compiler_threads_admit(threads, count, total, IR_BODY_SCAN_MIN_NODES_PER_THREAD, 0, 0)
     spawns := [IRBodyScanSpawn]{}
     candidates := [IRBodyScanBoxed]{}
+    print := IRPrintStyle?{None}
     if workers <= 1 {
         loop row in 0..<count {
-            ir_scan_function_nodes(row, functions[row], check_boxed[row], interner, spawns, candidates)
+            ir_scan_function_nodes(row, functions[row], check_boxed[row], interner, spawns, candidates, print)
         }
     } else {
         bounds: compiler_threads_partition(weights, workers)
@@ -1603,15 +1610,17 @@ ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], interner: Int
         loop part in parts.move() {
             loop s in part.spawns -> spawns.push(s)
             loop c in part.boxed.move() -> candidates.push(c)
+            if print == None -> print = part.print
         }
     }
-    IRBodyScanPart{spawns: spawns.move(), boxed: candidates.move()}
+    IRBodyScanPart{spawns: spawns.move(), boxed: candidates.move(), print: print}
 }
 
 // The spawn sites of each file (p.spawn_sites): the reports number a file's
 // spawn sites 0, 1, ... in source order, keyed by the spawned body's span
 // start (the checker's site is the `task` word, which a `task.all` shares).
-ir_program_scan_bodies_apply: fn(p: &IRProgram, spawns: [IRBodyScanSpawn], candidates: &&[IRBodyScanBoxed]) Never! {
+// `print` is where a block sets a print style (p.print_style).
+ir_program_scan_bodies_apply: fn(p: &IRProgram, spawns: [IRBodyScanSpawn], candidates: &&[IRBodyScanBoxed], print: IRPrintStyle?) Never! {
     files := name_column_table()
     starts := [[Int]]{[Int]{}}
     loop s in spawns {
@@ -1637,6 +1646,7 @@ ir_program_scan_bodies_apply: fn(p: &IRProgram, spawns: [IRBodyScanSpawn], candi
     seen := name_table_sized(8)
     loop c in candidates.move() { ir_trait_boxed_put_short(p, boxed, seen, c.concrete, c.short) }
     p.trait_boxed = boxed
+    p.print_style = print
 }
 
 // Single-pass (parallel across `threads` for large modules) scan of every
@@ -1649,7 +1659,7 @@ ir_program_scan_bodies: fn(p: &IRProgram, threads: CompilerThreads) Never! {
         check_boxed.push(p.functions[index].generic_params.len() == 0 && ir_owner_binders(p, p.functions[index]).len() == 0)
     }
     scanned := ir_body_scan_collect(p.functions, check_boxed, p.interner, threads)
-    ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed)
+    ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed, scanned.print)
 }
 
 // `definition` takes over `p`'s constant rows of its key and its symbol key

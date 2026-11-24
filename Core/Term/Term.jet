@@ -183,10 +183,11 @@ Key: enum {
 // sign; a Float with `float_digits` decimals rounded half away from zero,
 // or in its ordinary form when None; list and tuple elements joined by
 // `list_separator`; and the labels of a generated struct or variant
-// rendering shown when `field_names`. Core/Text/Fmt.jet's radix and decimal
-// formatting makes the text. A prepared String, interpolation, Debug,
-// `to_string` and `eprint` are unchanged, and the text of a Display or
-// Printable implementation is its own.
+// rendering shown when `field_names`. The number text is that of
+// core.text.fmt's format traits: an Int's BinFormat, OctFormat or
+// HexFormat, a Float's FixedFormat. A prepared String, interpolation,
+// Debug, `to_string` and `eprint` are unchanged, and the text of a Display
+// or Printable implementation is its own.
 PrintBase: enum {
     Binary,
     Octal,
@@ -206,97 +207,6 @@ PrintStyle: struct {
 // one, and the key such a block sets (sema ContextKeys.jet
 // sema_context_field_key).
 __print_style: PrintStyle{}
-
-priv print_radix_signed_width: fn(n: Int, base: Int, width: Int) -> String Never! {
-    sign: if n < 0 -> "-" else -> ""
-    magnitude: if n < 0 -> -n else -> n
-    digits := [U8]{}
-    if magnitude == 0 {
-        digits.push(U8{48})
-    } else {
-        x := magnitude
-        loop x > 0 {
-            d: x % base
-            if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
-            x /%= base
-        }
-        digits.reverse()
-    }
-    text: String.from_bytes(digits) ?? "0"
-    if digits.len() >= width -> return "{sign}{text}"
-    "{sign}{"0".repeat(width - digits.len())}{text}"
-}
-
-// The text `print` shows for an Int under the task's print style (JetIR
-// BuildTypes.jet ir_print_style_scalar calls it by name).
-__print_int: fn(n: Int) -> String Never! {
-    style: context.print
-    base: if style.int_base == {
-        .Binary -> 2
-        .Octal -> 8
-        .Decimal -> 10
-        .Hex -> 16
-    }
-    if base == 10 && style.int_min_digits <= 0 -> return "{n}"
-    print_radix_signed_width(n, base, style.int_min_digits)
-}
-
-priv print_float_fixed: fn(n: Float, frac: Int) -> String Never! {
-    if n != n || n - n != 0.0 -> return "{n}"
-    precision: if frac < 0 -> 0 else -> frac
-    if n == 0.0 {
-        if precision == 0 -> return "0"
-        return "0.{"0".repeat(precision)}"
-    }
-    sign: if n < 0.0 -> "-" else -> ""
-    x := if n < 0.0 -> -n else -> n
-    shift := 0
-    two52: Float{4503599627370496.0}
-    two53: Float{9007199254740992.0}
-    loop x >= two53 {
-        x /= two52
-        shift += 52
-    }
-    loop x < two52 {
-        x *= two52
-        shift -= 52
-    }
-    loop x >= two53 {
-        x /= 2.0
-        shift += 1
-    }
-    loop x < two52 {
-        x *= 2.0
-        shift -= 1
-    }
-    numerator := Int{x}
-    denominator := 1
-    if shift >= 0 -> numerator = numerator << shift else -> denominator = denominator << -shift
-    loop _ in 0..<precision -> numerator *= 10
-    rounded := numerator /% denominator
-    if (numerator % denominator) * 2 >= denominator -> rounded += 1
-    digits: "{rounded}"
-    if precision == 0 -> return "{sign}{digits}"
-    pad: precision + 1 - digits.bytes().len()
-    body: if pad > 0 -> "{"0".repeat(pad)}{digits}" else -> digits
-    raw: body.bytes()
-    split: raw.len() - precision
-    whole: String.from_bytes(raw[0..<split]) ?? "0"
-    tail: String.from_bytes(raw[split..<raw.len()]) ?? "0"
-    "{sign}{whole}.{tail}"
-}
-
-// The text `print` shows for a Float under the task's print style.
-__print_float: fn(n: Float) -> String Never! {
-    digits: context.print.float_digits ?? return "{n}"
-    print_float_fixed(n, digits)
-}
-
-// The text between the elements of a list or tuple `print` shows.
-__print_separator: fn() -> String Never! { context.print.list_separator }
-
-// Whether `print` shows the labels of a struct or variant it renders.
-__print_field_names: fn() -> Bool Never! { context.print.field_names }
 
 print: fn(text: String) -[IO, Time.Wait]> Never! {
     out := stdout()
@@ -395,7 +305,7 @@ confirm: fn(prompt: String) -[IO, Time.Wait]> Bool Never! {
 choose: fn(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(terminal_invalid("choose needs at least one item"))
     terminal_prompt(choose_menu(prompt, options), true)
-    loop attempt in 0..<11 {
+    loop _attempt in 0..<11 {
         terminal_prompt("> ", true)
         read: terminal_line()
         answer: read ?? return Err(terminal_invalid("the input stream closed before a choice arrived"))
