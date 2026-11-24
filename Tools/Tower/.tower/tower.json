@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 113950,
+    "rev": 113974,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34169,6 +34169,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "ContextOnStop o2 intermittent internal compiler error: new evidence. On the batch 38 stage-2 compiler (dev b872a051a81), 'jet test Compiler --profile golden --filter ContextOnStop' run alone hit the o2 ICE (exit 101) in 1 of 2 runs, with no suite load; o0 and o1 passed both times. The full batch 38 golden run also hit it. Because it reproduces in isolation, a recorded run under jet debug --record of the o2 build is now practical, replacing the earlier inference that only suite load triggers it. Next step: record repeated O2 builds until one fails, then read the ICE's fault and backtrace in the replay. The golden row stays an open defect; it is not a batch regression."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Defect (found by batch suites): Examples/Concurrency/ContextOnStop.jet at o2 fails now and then with an internal compiler error (exit 101). It failed on batch 30, passed on batch 31 and hit the ICE again on batch 34. On the batch 34 compiler, 'jet build -O2' passed 3/3 and 'jet run -O2' passed 5/5 with the golden output, so the failure depends on timing or load. An intermittent ICE is an I2 defect. Next step: reproduce it under suite load with 'jet debug --record' on the compiler, then fix the nondeterminism at its root."
+        },
+        {
           "at": "2026-11-20",
           "by": "Main",
           "text": "D-CONTEXT-THREAD1 posted: what context.thread reads in Jet code running outside the task pool (the Ctrl-C dispatcher running on_interrupt handlers, a realtime stream callback). The context-thread fix (Errors3202-context-thread-index.r2, landed p382 as 01d4c42a88) made pool indices dense from 1 and gives every other thread -1 as the interim; it found that every runtime helper thread drew from the carrier counter. The interim stands until the vote."
@@ -34455,8 +34465,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T23:12:01.541Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 22
     },
     {
@@ -76150,6 +76160,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T13:18:36.794Z"
+        },
+        {
+          "n": 41,
+          "text": "jet perf run loses its trace's syscall section under load. In the batch 38 full cases suite (dev b872a051a81, stage-2 compiler), Tests/Cases/BuildEntry/program_owned_main_print_writes_whole_buffers_at_every_level.case failed: the program printed all 3000 lines in order, but writes.py found 0 write syscalls in many-O0.jettrace (expected 2). Run alone, the same case passes 2 of 2. A trace taken under machine load must still record every syscall the program made, or say that it is incomplete and fail; it must never report a silently empty section. Done when the trace records the writes, or marks itself incomplete, with the machine under suite load.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:39:02.612Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "program_owned_main_print_writes_whole_buffers"
+          }
         }
       ],
       "refs": [],
@@ -76157,9 +76180,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-24T13:18:50.428Z",
+      "updated": "2026-11-24T23:39:02.612Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 40
+      "criteriaLastN": 41
     },
     {
       "id": "c0c3gh6u",
@@ -76434,6 +76457,71 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Salvage audit of the 8 removed g1facts trees, checked against dev b872a051a81. Nothing is unlanded. w6727, wc11, wc8, wcase, wfix, whover and wtip landed, some in later forms; their roles, code actions, LSP actions, derive paste refusal and PathCase move are all on dev. wc27 is superseded: its only distinctive change, the E2804 route-table move into Core StaticRoutes, landed and was deliberately reverted, because App never hears its rule. The salvage patches are deleted."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "F: 6999-F-fix-speed submitted and staged in batch 39. Before profile: 'jet fix Compiler/JetImpact' was killed after more than 900 s, against a 78 s dry run; JetSemIndex's effect-witness search took 36%, run twice per commit. The write now reuses the dry run's facts, checks the final state once, matches renames through sorted keys (a test compares them with the old pairwise scan) and bisects rollbacks. The after profile on the batch 39 compiler is pending. New F criterion: semindex_effects re-walks strongly connected call graphs once per path, because a failed witness search is memoized only when no cycle blocked it. Every full-index command (jet semindex, impact, explain-effects) pays this on large packages. Done when the search memoizes per strongly connected component, gives identical output to the current search on a recursive fixture, and a before/after jet perf of 'jet semindex Compiler/JetImpact' is recorded. Hygiene: dev commit 'Proof (J=…)' in batch 38 carries a scratch-mount path in its message body. It is pushed history and is not rewritten; commit messages from now on use $JET_SCRATCH_ROOT, and the landing check refuses such paths."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Repository hygiene, 17:40. (1) At 17:12 a worker's git command wrote core.worktree into the shared .git/config, pointing at that worker's scratch tree. For 25 minutes git in the master checkout and every worktree compared against that tree (dev showed 1364 phantom changes, and the batch 38 landing refused to run). Removed it; master and dev are clean. No refs, commits or files were lost; the only refs are dev, master and rust. Workers may no longer write git config or point GIT_DIR at the main repository. (2) 10 worktrees existed, the hard cap, against a limit of 6. The 8 stale g1facts trees from this morning's G1 lanes (no live process, last touched 05:11-11:42) were removed after saving each one's full diff against its base, reverse-apply checked, to $JET_SCRATCH_ROOT/orch/salvage/<tree>-<base>.patch: w6727 (32 files), wc11 (11), wc27 (1188, old-base sweep), wc8 (56), wcase (28), wfix (3), whover (23), wtip (29). Most of this work landed in later batches in another form; the G1 lane lead is checking each patch against dev, and whatever has not landed comes back as a submission or is dropped as superseded, recorded here. Worktrees now: master and dev."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "A criterion reopened: deleting the retired-with-Rust table in 6999-A-retired put 20 half-ported Rust-era cases (PENDING-GRAMMAR or PENDING-SAME-HEAD headers) back into the cases suite, and none of them passes natively. They are not batch regressions; they were absent from the batch 30 run. 5 are refused by the harness (assertion forms it no longer reads: stderr.from_or_all, exit membership without a partial reason). The other 15 fail: 9 WebBuild (html marker, web target inference, maps); 1 CLIPartsSurface (jet build --target=hosted is not built yet); 2 ReleaseGates (build output path); and one each in AllocatorFamilies (a fixed allocator source accepted where it must be rejected), FailureTierParity's contract matrix and RunEntry's typed entry snapshot. Criterion: each case is finished as a native case that passes, or its gap goes as a criterion on the card that owns the feature, with the case marked known-failing against that card. Evidence: batch 37's cases run against batch 30's (otherwise 0 new failures, 8 fixed). Batch 37 golden and ui: 0 new failures."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "F defect: 'jet fix' write hangs on compiler packages. jet_cli_commit_fix calls jet_cli_fix_semantic_ops, which recompiles the package twice for rename facts: past 15 minutes on JetImpact and past 50 on JetDriver, against about 80 seconds for the dry run. Criterion: the write reuses the dry run's edits and checks, and rollback trials are batched (apply all, check once, bisect on failure). The JetDriver write must finish in about the dry run's time, profiled with jet perf. Until then the sweep applies the exact dry-run diff and says so in each submission."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "E follow-up, refined: check_program's graphless snapshot mode has its own local resolution (method candidates in Methods.jet, defaults in Direct.jet and Static.jet, policies in CallablePolicies, module text in Scopes, computed fields, bound validation in Solver, E0305 in Patterns), and the Footprint and Links tests depend on it. For now G makes the graph non-Option and gates those branches behind an explicit tables mode (Program or Snapshot). End state: check_program registers a real one-module graph, and the local resolution paths are deleted, leaving one resolution mechanism."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "B status after batch 38 (sys-leaves-r2, term-testing, service): Core.rows has 220 dispatcher rows (from 278). Plan, largest gain first: files and ui adapters (11 rows); a build-time check of every jet.runtime leaf declaration against its C export (the root of the sys-order and spec double-drop defects); generating CoreHostSignatures, CorePlatformSignatures and CoreSurfaceInventory.rows from the checked Core program; then one patch adding every missing leaf, followed by row sweeps with value tests. Blocked: core.math (20 rows) needs a pure binding that comptime accepts, which is a new mechanism and so an owner decision; process __spec_parent_death needs take ownership on a leaf parameter."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Follow-up from G (Diagnostics.jet registry-contract stops): the registry generator should emit a typed edit kind per code (no edit channel, primary only, primary plus alternatives, safe auto-apply), so that a fix attached to a code whose row allows none cannot compile. For now G takes the keep-going form: the diagnostic stays, the edit is dropped, an internal registry-contract note is attached, and a snapshot guard fails on any such note."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "B regression, found by batch 36's suite and reverted at once (dev 37a3665fb68). B-sys-leaves moved core.sys onto jet.runtime.sys leaves, and on its compiler sys.stack_limit() fails in limit_read (Sys.jet:1390) with errno 16777216, which is the soft-limit value; batch 35 reads {soft: 16777216, hard: None}. The leaf's result row and the layout Core reads disagree, and every 'jet test' selection reads the stack limit, so the suite ran no rows. A second defect has the same root: moving process __spec_parent_death to its leaf makes CoreSurfaceLedger --check segfault (SIGSEGV in jet_rt_alloc_value_8 under JSON parse_number, 3/3, batch 35 compiler). The leaf borrows the spec while the C export returns that same pointer as owned, so the spec is dropped twice; that is an I1 violation in safe Jet. The repro is with G1Generation-2. Root: nothing checks that a jet.runtime leaf's declared signature (field layout, ownership of arguments and result) matches its C export. New criterion: check every leaf declaration against the export table at build time, and refuse a mismatch with a diagnostic. B-sys-leaves comes back as r2, with a run-time test of every moved call."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Batch 35 landed (dev 6629efdd17, s1 sha 9adbbf23ac9ed85c): G-utf8, G-takes, G-slots, G-moves-local, G-graph-finalize, G-comptime-carry and G-graph-tables (panic_ratchet 666 -> 595); B-source-typed-signature-rows; F-fix-dir ('jet fix <dir>' fixes every file of the package); the D closed-list collapses for access modes, struct layout, stage twins, guest scalar and visibility (baseline 932 -> 916, duplicates 293 -> 252); E-keys comptime-body, rule-tables and liveness. Preflight: guards 224/224, ratchets 22/24. Batch 34 suite: golden 4 new failures, which are CryptoErrorRun (a golden line shift from the batch 33 dead-row sweep, fixed in 90f3514e5fc) and an intermittent ContextOnStop o2 ICE (logged on #5025); ui 0 new, 8 fixed against batch 30."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Owner order: once every #6999 pillar (A-H) is done, the three agents move on. Two work through the epochs' goals in the board's epoch order. The third works through the cards closest to completion, ranked by estimated wall-clock time to finish, not by open-criteria count."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "E follow-up (found during G graph work): SemaProgramTables has a graphless mode that is real (Driver Schema.jet:116, CheckProgram.jet:2344 and 5 tests call sema_program_tables_init(None, ..)), and it shows up as 61 else branches and 99 '?? return <default>' fallbacks across 452 'registration_graph == .Val' reads. The fix is to split the type: checkers take tables that always have a graph, and graphless callers get their own narrower path. For now, G takes option (c): keep the Option and pass the graph in and out by value."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "15:00 state. Batch 34 landed (dev 36573ba77c, s1 sha 000dcba470c93b66): G-sweep-r1, G-arms, G-joins, G-census-r1/r2 and G-rows (panic_ratchet 1,062 -> 666), E-keys-name-pairs (43 pair keys become pair slots) and B-stale-signature-rows (730 table members with no call record). Preflight: guards 224/224; ratchets 22/24 (CoreCoverage: census receiver typing; HotText: regenerate with the batch 34 compiler). Batch 35 is ready (G-utf8, G-takes, G-slots, B-source-typed-signature-rows; panic_ratchet 612) and builds when batch 34's suite frees the slot. Rulings: a central panicking helper is allowed only for families with a one-line proof that needs nothing from the input (worker joins, handoff takes, worker slots); graph and packet moves are restructured to pass ownership; a lossy UTF-8 decode is allowed only where the comment names the construction. F: TypeIDSlice3-3 is making 'jet fix <dir>' fix every file (FixCommands.jet takes one file today), which enables the compiler-wide safe-class sweep."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "CoreCoverage's 6 dev rows have one root: the census does not resolve the receiver. Examples/Systems/Files/FilesMapViews.jet calls mapped.window(start, end) on a parameter typed 'mapped: MappedFile' and the row still reads untested. Tests/Run/Foundations/Distributed/run.jet calls .key_by(...) and .window(...) through a .with_event_time chain, also uncounted. The fix is in Tools/Agent/CoreCoverage.jet's receiver typing (parameter types, the prelude's bare spellings, and chained results of declared return types), not more tests. Tail item; it goes after the G and B sweeps."
         },
         {
@@ -76612,6 +76700,126 @@
               "Tests/Guards/tool_roots.jet"
             ]
           }
+        },
+        {
+          "n": 9,
+          "text": "B leaves: the 32 ProcessSpec/ProcessChild methods that sema routes by building process_spec_<method>/process_child_<method> row names in ProcessHandles.jet (22 spec builders, plan/run/run_checked/spawn, 6 child methods) become Jet declarations with ordinary callers. Then they leave Core.rows as jet.runtime leaves.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:21.308Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 10,
+          "text": "B leaves: the 26 rows whose symbol has no runtime C export (jet_std.* routes, jet_sys_env_*_raw x4, atexit/interrupt, jet_keep, core.tasks x4, core.event x6, __directory_fd, lock_owner, progress_iter, crypto __wipe/__secret_keep, both __list_directory, browser __ws_set_timeout, devtools __publish_payload) each get either a runtime export and a leaf, or a Jet body, and leave Core.rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:22.277Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 11,
+          "text": "B leaves: the interface renderer and binding lowering carry Move (consumed) parameters, so the 9 moved-parameter rows become leaves: files __mkdtemp_raw/__temp_dir_raw/__temp_file_raw; process __spec_fields/__spec_parent_death/__keep_open_raw/__signal_add; net __ip_from_bytes/__socket_from_parts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:23.189Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 12,
+          "text": "B leaves: binding routes cover generic handle results (ir_route_carrier_of answers .Apply beyond View: process __signal_receiver, watcher __event), the ProcessStdoutStream/ProcessStderrStream handles (registered in RuntimeHandles: __stdout_line_bytes/__stderr_line_bytes), and records the hand route carries as a word (rt __next_deadline). Those 5 rows leave Core.rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:24.561Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 13,
+          "text": "B leaves: binding routes cover fn-callback parameters (testing world, rt __callback), a generic parameter (prelude __receipt_attach), an error-tuple result (sys __dotenv_read) and a Never result (rt __coded_stop). Those 5 rows leave Core.rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:25.557Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 14,
+          "text": "B leaves: the 4 rows that sit beside a Jet body (term stdout/stderr, testing fake_clock, game run) each keep one implementation, with the decision recorded here. The other is deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:26.613Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 15,
+          "text": "B leaves: plugin load and crypto.vault current get their types from the signature tables, like every other row, or become leaves. http.client jet_http_build_resolve (build host only, no Core caller) is moved to the build host's own surface or deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:27.561Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 16,
+          "text": "B leaves: the 23 core.math rows (20 core.math, jet_builtins to_bits_f32/from_bits_f32, core.math.random seed) become leaves or Jet bodies once the owner decides the pure-binding route. They wait on that owner decision; no worker starts them before it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T23:34:28.534Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
         }
       ],
       "refs": [],
@@ -76619,9 +76827,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-24T19:31:02.533Z",
+      "updated": "2026-11-24T23:34:28.534Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 8
+      "criteriaLastN": 16
     }
   ],
   "decisions": [
@@ -141105,6 +141313,237 @@
   ],
   "events": [
     {
+      "at": "2026-11-24T23:39:02.612Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "39 criteria, soft limit 6: Dogfooding card collects every jet debug/perf friction as a criterion, per the standing owner order"
+    },
+    {
+      "at": "2026-11-24T23:39:02.612Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#41 jet perf run loses its trace's syscall section under load. I"
+    },
+    {
+      "at": "2026-11-24T23:34:28.534Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "16 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:28.534Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#16 B leaves: the 23 core.math rows (20 core.math, jet_builtins "
+    },
+    {
+      "at": "2026-11-24T23:34:27.561Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "15 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:27.561Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#15 B leaves: plugin load and crypto.vault current get their typ"
+    },
+    {
+      "at": "2026-11-24T23:34:26.613Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "14 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:26.613Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#14 B leaves: the 4 rows that sit beside a Jet body (term stdout"
+    },
+    {
+      "at": "2026-11-24T23:34:25.557Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "13 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:25.557Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#13 B leaves: binding routes cover fn-callback parameters (testi"
+    },
+    {
+      "at": "2026-11-24T23:34:24.561Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "12 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:24.561Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#12 B leaves: binding routes cover generic handle results (ir_ro"
+    },
+    {
+      "at": "2026-11-24T23:34:23.190Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "11 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:23.190Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#11 B leaves: the interface renderer and binding lowering carry "
+    },
+    {
+      "at": "2026-11-24T23:34:22.277Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "10 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:22.277Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#10 B leaves: the 26 rows whose symbol has no runtime C export ("
+    },
+    {
+      "at": "2026-11-24T23:34:21.308Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "9 criteria, soft limit 6: Owner-ordered umbrella card for cleanup streams A-H; these are stream B's remaining compiler-gap criteria from the 6999-B-leaves refused-class census"
+    },
+    {
+      "at": "2026-11-24T23:34:21.308Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#9 B leaves: the 32 ProcessSpec/ProcessChild methods that sema "
+    },
+    {
+      "at": "2026-11-24T23:12:01.541Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T23:03:07.917Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T22:57:20.963Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T22:42:42.735Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T22:20:46.095Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T22:15:47.222Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T21:54:12.679Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T21:41:52.928Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T21:28:39.180Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T21:13:58.391Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T20:33:43.364Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T20:26:46.332Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T20:23:24.249Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T20:05:58.457Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T19:52:55.353Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-24T19:31:02.533Z",
       "by": "Orchestrator",
       "action": "card.update",
@@ -144459,713 +144898,6 @@
       "action": "done.clear",
       "ref": null,
       "note": "2026-11-24T02:27:34.209Z"
-    },
-    {
-      "at": "2026-11-24T02:27:33.046Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05nyh21",
-      "note": "#6 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:31.971Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0cwk90x",
-      "note": "10 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:31.971Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0cwk90x",
-      "note": "#13 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:30.903Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c066t33h",
-      "note": "14 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:30.903Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c066t33h",
-      "note": "#15 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:29.380Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0ufrhm0",
-      "note": "21 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:29.380Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ufrhm0",
-      "note": "#21 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:27.830Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00gioxt",
-      "note": "7 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:27.830Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00gioxt",
-      "note": "#7 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:25.737Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0n7zpy3",
-      "note": "9 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:25.737Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0n7zpy3",
-      "note": "#9 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:23.778Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0etvk8s",
-      "note": "7 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:23.778Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0etvk8s",
-      "note": "#8 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:21.946Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0s1vode",
-      "note": "12 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:21.946Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0s1vode",
-      "note": "#12 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:27:19.936Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0y7zq8s",
-      "note": "20 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:19.936Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0y7zq8s",
-      "note": "#20 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:18.030Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0sttk1s",
-      "note": "13 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:18.030Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0sttk1s",
-      "note": "#13 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:16.033Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0itvqcw",
-      "note": "#3 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:14.002Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0mbiq9g",
-      "note": "13 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:14.002Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mbiq9g",
-      "note": "#14 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:12.102Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0tzvhij",
-      "note": "35 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:12.102Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0tzvhij",
-      "note": "#35 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:09.170Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0zutf08",
-      "note": "32 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:09.170Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zutf08",
-      "note": "#32 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:07.109Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zvan7c",
-      "note": "#5 The 6 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:04.964Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c09brw5t",
-      "note": "9 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:04.964Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c09brw5t",
-      "note": "#9 The 7 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:02.764Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0v54mn1",
-      "note": "15 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:02.764Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0v54mn1",
-      "note": "#15 The 7 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:27:00.751Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c05efrmn",
-      "note": "35 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:27:00.751Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#38 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:58.691Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c04wn01h",
-      "note": "12 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:58.691Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c04wn01h",
-      "note": "#12 The 8 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:55.335Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0vtg2ov",
-      "note": "14 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:55.335Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0vtg2ov",
-      "note": "#14 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:53.402Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ipkmlg",
-      "note": "#6 The 8 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:51.099Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0wowe4m",
-      "note": "8 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:51.099Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0wowe4m",
-      "note": "#9 The 3 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:48.804Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c031o59x",
-      "note": "39 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:48.804Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c031o59x",
-      "note": "#42 The 10 known-failing rows this card owns (rehomed by #6843 c"
-    },
-    {
-      "at": "2026-11-24T02:26:46.186Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0r1ln6j",
-      "note": "11 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:46.186Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0r1ln6j",
-      "note": "#11 The 9 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:44.452Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0c209zc",
-      "note": "17 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:44.452Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0c209zc",
-      "note": "#20 The 4 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:42.507Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0dp5efn",
-      "note": "25 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:42.507Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0dp5efn",
-      "note": "#25 The 5 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:40.613Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0oe96sn",
-      "note": "62 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:40.613Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0oe96sn",
-      "note": "#64 The 18 known-failing rows this card owns (rehomed by #6843 c"
-    },
-    {
-      "at": "2026-11-24T02:26:38.643Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00c8a58",
-      "note": "11 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:38.643Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00c8a58",
-      "note": "#11 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:26:36.626Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0ozqnbt",
-      "note": "18 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:36.626Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ozqnbt",
-      "note": "#18 The 7 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:34.702Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c05nw9a0",
-      "note": "19 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:34.702Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05nw9a0",
-      "note": "#19 The 13 known-failing rows this card owns (rehomed by #6843 c"
-    },
-    {
-      "at": "2026-11-24T02:26:32.194Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c00rqc09",
-      "note": "21 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:32.194Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00rqc09",
-      "note": "#22 The 22 known-failing rows this card owns (rehomed by #6843 c"
-    },
-    {
-      "at": "2026-11-24T02:26:29.901Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0jm0xjt",
-      "note": "49 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:29.901Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jm0xjt",
-      "note": "#171 The 23 known-failing rows this card owns (rehomed by #6843 c"
-    },
-    {
-      "at": "2026-11-24T02:26:27.537Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0itin1p",
-      "note": "10 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:27.537Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0itin1p",
-      "note": "#10 The 6 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:26.309Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0ejfsdq",
-      "note": "28 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:26.309Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ejfsdq",
-      "note": "#28 The 2 known-failing rows this card owns (rehomed by #6843 c7"
-    },
-    {
-      "at": "2026-11-24T02:26:25.186Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0bk3yid",
-      "note": "9 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:25.186Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0bk3yid",
-      "note": "#14 The 48 known-failing rows this card owns (rehomed by #6843 c"
-    },
-    {
-      "at": "2026-11-24T02:26:24.181Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0kwu568",
-      "note": "20 criteria, soft limit 6: Known-failing rows this card owns, rehomed by #6843 c7; one criterion groups them."
-    },
-    {
-      "at": "2026-11-24T02:26:24.181Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kwu568",
-      "note": "#20 The known-failing row this card owns (rehomed by #6843 c7) p"
-    },
-    {
-      "at": "2026-11-24T02:18:28.031Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mhdm27",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-24T02:11:36.818Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-24T02:11:35.370Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-24T02:11:34.384Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-24T02:11:33.355Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-24T02:11:32.207Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-24T02:11:31.079Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c0qtfr3u",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-24T02:11:28.745Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0qtfr3u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-24T02:11:27.569Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0qtfr3u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-24T02:11:26.598Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0qtfr3u",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-24T01:50:29.804Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0j3st66",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-24T01:46:10.387Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0blttm0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-24T01:46:09.458Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oymlrt",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-24T01:34:40.180Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0j3st66",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-24T01:34:11.214Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0wf4a3e",
-      "note": "#6 A Core library source file that the compile reads lazily and"
-    },
-    {
-      "at": "2026-11-24T01:34:10.318Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0wf4a3e",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-24T01:23:48.421Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c00w7rum",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T01:20:55.253Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02qdoro",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-24T01:20:54.425Z",
-      "by": "Orchestrator",
-      "action": "card.update",
-      "ref": "c02qdoro",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-24T01:17:50.572Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05p5u7s",
-      "note": "#3 Printing or interpolating a Float costs at most what Rust's "
-    },
-    {
-      "at": "2026-11-24T01:04:09.973Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0wcsfeo",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-24T01:03:48.737Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-24T01:03:47.885Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t5gnhs",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-24T01:03:47.030Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0t5gnhs",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-24T01:03:46.184Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-24T01:03:45.335Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-24T01:03:44.480Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-24T01:03:43.256Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-24T01:03:42.383Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-24T01:03:41.542Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oe96sn",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-24T00:58:12.362Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0oymlrt",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-24T00:57:07.383Z",
-      "by": "Orchestrator",
-      "action": "card.over-limit",
-      "ref": "c0e6znz4",
-      "note": "23 criteria, soft limit 6: Same review; reflection of a module-qualified type in comptime."
-    },
-    {
-      "at": "2026-11-24T00:57:07.383Z",
-      "by": "Orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e6znz4",
-      "note": "#24 A module-qualified type reflects in a top-level #run: geo.In"
     }
   ],
   "nextNum": 368,
