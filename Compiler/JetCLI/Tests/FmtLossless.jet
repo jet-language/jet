@@ -14,8 +14,9 @@
 // list; import grouping; a leading parameter sigil riding the type; `Unit` as
 // `()`; `Result<T, E>` as `T E!`; empty marker parentheses (`#X()` is `#X`);
 // dropped positional names in a function type; the `,` ending a wrapped loop
-// header; the choice between `-> statement` and a braced control body; and
-// `->` before a foreign declaration's return type. A dispatch arm's written
+// header; the choice between `-> statement` and a braced control body;
+// `->` before a foreign declaration's return type; and the write and take
+// marks `&` and `&&`, which fmt spells `^` and `^^`. A dispatch arm's written
 // braces stay as written.
 // No rule can reorder or drop an expression operand, operator, marker payload,
 // named tuple member, comment or string interpolation. Not ported: the `=>` arrow rules
@@ -39,6 +40,8 @@ use {
         TOKEN_AMP,
         TOKEN_AND_AND,
         TOKEN_BANG,
+        TOKEN_CARET,
+        TOKEN_CARET_CARET,
         TOKEN_BLOCK_COMMENT,
         TOKEN_OR_OR,
         TOKEN_CHAR,
@@ -160,6 +163,9 @@ FmtStep: struct {
 fl_no_step: fn() -> FmtStep { FmtStep{ok: false, original: 0, formatted: 0} }
 
 fl_tok: fn(tables: TokenTables, token: Token) -> FmtTok {
+    // Marks read in their older spelling, whichever one a source holds.
+    if token.kind == TOKEN_CARET -> return fl_synthetic(TOKEN_AMP, "&")
+    if token.kind == TOKEN_CARET_CARET -> return fl_synthetic(TOKEN_AND_AND, "&&")
     parts := [FmtPart]{}
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         loop part in token_string_parts(tables, token) -> parts.push(fl_part(tables, part))

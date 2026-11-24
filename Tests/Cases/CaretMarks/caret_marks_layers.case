@@ -1,0 +1,24 @@
+# Every mark position, nested and layered, runs the same in the caret
+# spelling and the older one.
+fixture: CaretMarks.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step caret: jet run Layers.jet
+cwd: caret
+exit: 0
+stdout: = caret_marks_layers.out
+
+step older: jet run Layers.jet
+cwd: older
+exit: 0
+stdout: = caret_marks_layers.out
+
+step caret_check: jet check Layers.jet
+cwd: caret
+exit: 0
+
+step caret_fmt: jet fmt --check Layers.jet
+cwd: caret
+exit: 0

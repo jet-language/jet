@@ -268,7 +268,7 @@ run: fn() {
 // A lambda whose body is one statement on its line keeps that line, so the
 // call around it stays on one line too.
 #Test("written_lambda_statement_keeps_its_line") {
-    source: "run: fn() {{\n    store.transaction(\"x\", fn(n: &Int) {{ n += 1 }})\n    store.each(fn(n) {{ total += n }})\n}}\n"
+    source: "run: fn() {{\n    store.transaction(\"x\", fn(n: ^Int) {{ n += 1 }})\n    store.each(fn(n) {{ total += n }})\n}}\n"
     assert_eq(fmt_core_stable(source), source)
 }
 
@@ -559,7 +559,7 @@ main: fn() {
     n = n + 2
 }
 `
-    formatted: `grow: fn(outer: &Outer, middle: &Inner, step: Vec2, n: Int) {
+    formatted: `grow: fn(outer: ^Outer, middle: ^Inner, step: Vec2, n: Int) {
     outer.inner.value = outer.inner.value + step
     outer.inner.total = outer.inner.total + Decimal("0.25")
     middle.value += step

@@ -7,6 +7,7 @@
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
+        AccessConvention,
         AppliedRuleApplication,
         BinOp,
         Binding,
@@ -274,6 +275,15 @@ jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
         .Compare -> "<=>"
         .And -> "&&"
         .Or -> "||"
+    }
+}
+
+// The mark of a written (`^`) or taken (`^^`) parameter, place or capture.
+jfmt_access_mark: fn(access: AccessConvention) -> String Never! {
+    if access == {
+        .Write -> "^"
+        .Move -> "^^"
+        .Read -> ""
     }
 }
 

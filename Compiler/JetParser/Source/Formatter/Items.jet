@@ -2057,15 +2057,11 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
         jfmt_write(f, " ")
     }
     // Capability is a sigil, never a word. The sigil rides the type
-    // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is unmarked.
-    sigil: if p.convention == {
-        .Write -> "&"
-        .Move -> "&&"
-        .Read -> ""
-    }
+    // (`name: ^Type`), or `self` for a receiver (`^self`). `Read` is unmarked.
+    sigil: jfmt_access_mark(p.convention)
     is_self_receiver: p.name == "self" && jfmt_type_name_is_empty(p.ty)
     if is_self_receiver {
-        // `&self` / `&&self`: the sigil attaches to `self`, no type printed.
+        // `^self` / `^^self`: the sigil attaches to `self`, no type printed.
         if sigil.len() > 0 -> jfmt_write(f, sigil)
         jfmt_write(f, p.name)
         // The receiver footprint `self.log` / `self.[log, hits]`.

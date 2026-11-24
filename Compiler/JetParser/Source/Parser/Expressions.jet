@@ -61,6 +61,8 @@ use {
         TOKEN_AT,
         TOKEN_BANG,
         TOKEN_BREAK,
+        TOKEN_CARET,
+        TOKEN_CARET_CARET,
         TOKEN_CHAR,
         TOKEN_COLON,
         TOKEN_COMMA,
@@ -379,10 +381,10 @@ parser_parse_operators: fn(state: &JetParserState, minimum: Int, depth: Int, all
     // into its subject (`if &slot == .Val(item) -> item.count += 1`); a `&`
     // that a pattern test does not follow is not a value. `&&` opens a take
     // mark on a receiver (parser_parse_take_mark).
-    marked_subject := parser_current_kind(state) == TOKEN_AMP
+    marked_subject := parser_write_mark(parser_current_kind(state))
     left := if {
         marked_subject -> parser_parse_marked_place(state, depth + 1, allow_struct_lit, true)
-        parser_current_kind(state) == TOKEN_AND_AND -> parser_parse_take_mark(state, depth + 1, allow_struct_lit, stop_before_comparison)
+        parser_take_mark(parser_current_kind(state)) -> parser_parse_take_mark(state, depth + 1, allow_struct_lit, stop_before_comparison)
         else -> {
             prefix: parser_parse_prefix(state, depth + 1, allow_struct_lit, stop_before_comparison)
             parser_parse_postfix(state, prefix, depth + 1, allow_struct_lit, false)
@@ -1603,9 +1605,9 @@ parser_parse_lambda_params: fn(state: &JetParserState, depth: Int) -> [LambdaPar
             // A written type may mark a written `&` or taken `&&` input, as a
             // function type's parameter does: `fn(buf: &[Int]) { … }`.
             mark_kind: parser_current_kind(state)
-            if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
+            if parser_write_mark(mark_kind) || parser_take_mark(mark_kind) {
                 parser_bump(state)
-                convention = if mark_kind == TOKEN_AMP -> AccessConvention.Write else -> AccessConvention.Move
+                convention = if parser_write_mark(mark_kind) -> AccessConvention.Write else -> AccessConvention.Move
             }
             parsed: parser_parse_type(state, depth + 1)
             ty = Val(parsed.ty)
@@ -1721,7 +1723,7 @@ parser_task_surface_ahead: fn(state: &JetParserState) -> Bool Never! {
     if next == TOKEN_LBRACE -> return true
     // `task &&name` takes a name written right after the mark; `task && ok`
     // stays a boolean operand.
-    if next == TOKEN_AND_AND {
+    if parser_take_mark(next) {
         mark: parser_lookahead(state, 1)
         taken: parser_lookahead(state, 2)
         return taken.kind == TOKEN_IDENT && mark.span.end == taken.span.start
@@ -1805,7 +1807,7 @@ parser_parse_task_surface: fn(state: &JetParserState, depth: Int) -> ParsedExpr 
     }
     // `task &&name { … }` consumes one enclosing binding.
     take_names := [NamedSpan]{}
-    if parser_current_kind(state) == TOKEN_AND_AND {
+    if parser_take_mark(parser_current_kind(state)) {
         mark: parser_bump(state)
         mark_text: parser_text(state, mark)
         taken: parser_expect_name(state, "after the task capture `{mark_text}`")
@@ -2391,6 +2393,18 @@ parser_report_mark_not_value: fn(state: &JetParserState, mark: Token) {
     parser_add_error(state, mark.span, "expected a value, found `{found}`", "a value can be a name, literal, collection, call, or parenthesized expression", "write an expression such as `x`, `42`, or `\"hello\"`")
 }
 
+// The write mark: `^` (`^T`, `^self`, `edit: ^xs[a..<b]`), and `&` while
+// sources still spell it so.
+parser_write_mark: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_CARET || kind == TOKEN_AMP
+}
+
+// The take mark: `^^` (`^^T`, `^^self`, `task ^^name`), and `&&` while
+// sources still spell it so.
+parser_take_mark: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_CARET_CARET || kind == TOKEN_AND_AND
+}
+
 // A call mark (`&` writes, `&&` takes) binds the maximal place after it: the
 // receiver of the first method call on that place (`&xs.push(4)`,
 // `&&self.buf.seal()`). The receiver becomes a written Place; sema checks it
@@ -2442,7 +2456,7 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }
             mark_kind: parser_current_kind(state)
-            if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
+            if parser_write_mark(mark_kind) || parser_take_mark(mark_kind) {
                 args.push(parser_parse_marked_argument(state, depth, argument_span, label.move(), spread))
             } else {
                 argument: parser_parse_expression(state, 1, depth + 1)
@@ -2469,7 +2483,7 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
 // "expected a value" report.
 parser_parse_marked_argument: fn(state: &JetParserState, depth: Int, argument_span: Span, label: CallLabel?, spread: Bool) -> CallArg {
     mark_token: parser_bump(state)
-    access: if mark_token.kind == TOKEN_AMP -> PlaceAccess.Write else -> PlaceAccess.Take
+    access: if parser_write_mark(mark_token.kind) -> PlaceAccess.Write else -> PlaceAccess.Take
     argument: parser_parse_expression(state, 1, depth + 1)
     if parser_mark_place(argument.expr) {
         return CallArg{convention: AccessConvention.Read, expr: argument.expr, span: argument_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: label, spread: spread, mark: Val(CallMark{access: access, span: mark_token.span})}

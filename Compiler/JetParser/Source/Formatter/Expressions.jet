@@ -4,6 +4,7 @@
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
+        AccessConvention,
         BinMatchPart,
         BinOp,
         ByteTextPart,
@@ -30,7 +31,6 @@ use {
         Type,
         TypedLitBody,
         LIST_TYPE_OWNER,
-        access_sigil,
         ast_loop_destructures,
         dimension_display_name,
         expr_source_start,
@@ -811,7 +811,7 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                         jfmt_write(f, ": ")
                     }
                     if call_metadata == .Val(metadata) && entry.index < metadata.conventions.len() {
-                        jfmt_write(f, access_sigil(metadata.conventions[entry.index]))
+                        jfmt_write(f, jfmt_access_mark(metadata.conventions[entry.index]))
                     }
                     jfmt_fmt_type(f, params[entry.index])
                 }
@@ -1677,9 +1677,9 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             // at their mark; a take sema builds is spelled `.move()` here.
             written_take: access == PlaceAccess.Take && id != AST_NODE_GENERATED && span.start < expr_source_start(inner)
             if access == {
-                .Write -> { jfmt_write(f, "&") }
+                .Write -> { jfmt_write(f, jfmt_access_mark(AccessConvention.Write)) }
                 .Take -> {
-                    if written_take -> jfmt_write(f, "&&")
+                    if written_take -> jfmt_write(f, jfmt_access_mark(AccessConvention.Move))
                 }
                 .Read -> {}
             }
@@ -2222,7 +2222,7 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
         if index > 0 -> jfmt_write(f, ", ")
         jfmt_write(f, param.name)
         if param.ty == .Val(ty) {
-            jfmt_write(f, ": {access_sigil(param.convention)}")
+            jfmt_write(f, ": {jfmt_access_mark(param.convention)}")
             jfmt_fmt_type(f, ty)
         }
     }
@@ -2650,7 +2650,7 @@ jfmt_fmt_task_surface_method: fn(f: &JetFmt, method: String, args: [CallArg]) ->
         if lambda.params.len() > 0 -> return false
         jfmt_write(f, "task ")
         loop taken in lambda.take_names {
-            jfmt_write(f, "&&")
+            jfmt_write(f, jfmt_access_mark(AccessConvention.Move))
             jfmt_write(f, taken.name)
             jfmt_write(f, " ")
         }
@@ -2832,7 +2832,7 @@ jfmt_fmt_call_arg: fn(f: &JetFmt, arg: CallArg) {
         jfmt_write(f, ": ")
     }
     if arg.mark == .Val(mark) {
-        jfmt_write(f, if mark.access == PlaceAccess.Take -> "&&" else -> "&")
+        jfmt_write(f, jfmt_access_mark(if mark.access == PlaceAccess.Take -> AccessConvention.Move else -> AccessConvention.Write))
     }
     jfmt_fmt_expr(f, arg.expr, JFMT_PREC_OR_FALLBACK)
 }

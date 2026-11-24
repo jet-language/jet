@@ -1,0 +1,83 @@
+// The write mark `^` and the take mark `^^` parse in every position the older
+// `&` and `&&` hold, nested and layered, and format to the same text.
+use jet_parser.[jet_format_source]
+
+caret_marks_same: fn(name: String, caret: String, older: String) Never! {
+    formatted: jet_format_source(caret, false)
+    if !formatted.ok -> panic("caret marks: {name}: the caret source does not format")
+    respelled: jet_format_source(older, false)
+    if !respelled.ok -> panic("caret marks: {name}: the older source does not format")
+    if formatted.text != respelled.text {
+        panic("caret marks: {name}: the spellings format apart:\n{formatted.text}\n---\n{respelled.text}")
+    }
+    if formatted.text.contains("&") -> panic("caret marks: {name}: an older mark survives:\n{formatted.text}")
+    again: jet_format_source(formatted.text, false)
+    if !again.ok || again.text != formatted.text -> panic("caret marks: {name}: fmt is not stable:\n{again.text}")
+}
+
+#Test("caret marks in signatures and receivers") {
+    caret_marks_same(
+        "signature",
+        "fill: fn(xs: ^[Int], ys: ^^[Int]) {{ xs.push(ys.len()) }}\n",
+        "fill: fn(xs: &[Int], ys: &&[Int]) {{ xs.push(ys.len()) }}\n",
+    )
+    caret_marks_same(
+        "leading parameter mark",
+        "fill: fn(^xs: [Int], ^^ys: [Int]) {{ xs.push(ys.len()) }}\n",
+        "fill: fn(&xs: [Int], &&ys: [Int]) {{ xs.push(ys.len()) }}\n",
+    )
+    caret_marks_same(
+        "receiver",
+        "Box: struct {{\n    items: [Int],\n    hits: Int,\n}}\n\nimpl Box {{\n    grow: fn(^self) {{ self.items.push(1) }}\n    close: fn(^^self) -> [Int] {{ self.items }}\n    bump: fn(^self.hits) {{ self.hits += 1 }}\n    both: fn(^self.[items, hits]) {{ self.hits += self.items.len() }}\n}}\n",
+        "Box: struct {{\n    items: [Int],\n    hits: Int,\n}}\n\nimpl Box {{\n    grow: fn(&self) {{ self.items.push(1) }}\n    close: fn(&&self) -> [Int] {{ self.items }}\n    bump: fn(&self.hits) {{ self.hits += 1 }}\n    both: fn(&self.[items, hits]) {{ self.hits += self.items.len() }}\n}}\n",
+    )
+}
+
+#Test("caret marks in function types") {
+    caret_marks_same(
+        "function type",
+        "apply: fn(f: fn(^[Int]) -> Int, g: ^^fn(^^[Int]), h: ^^(fn(^[Int]))?) {{}}\n",
+        "apply: fn(f: fn(&[Int]) -> Int, g: &&fn(&&[Int]), h: &&(fn(&[Int]))?) {{}}\n",
+    )
+    caret_marks_same(
+        "lambda parameter",
+        "run: fn() {{\n    push: fn(buf: ^[Int], rest: ^^[Int]) {{ buf.push(rest.len()) }}\n}}\n",
+        "run: fn() {{\n    push: fn(buf: &[Int], rest: &&[Int]) {{ buf.push(rest.len()) }}\n}}\n",
+    )
+}
+
+#Test("caret marks on places, windows and arguments") {
+    caret_marks_same(
+        "call arguments",
+        "run: fn(xs: ^[Int], ys: ^^[Int]) {{\n    fill(^xs, ^^ys)\n    fill(into: ^xs, from: ^^ys)\n    fill(^xs[0..<2], ^^ys)\n}}\n",
+        "run: fn(xs: &[Int], ys: &&[Int]) {{\n    fill(&xs, &&ys)\n    fill(into: &xs, from: &&ys)\n    fill(&xs[0..<2], &&ys)\n}}\n",
+    )
+    caret_marks_same(
+        "windows and element marks",
+        "run: fn(xs: ^[Int], a: Int, b: Int) {{\n    edit: ^xs[a..<b]\n    slot: ^xs[a]\n    inner: ^edit[0..<1]\n    slot = 2\n}}\n",
+        "run: fn(xs: &[Int], a: Int, b: Int) {{\n    edit: &xs[a..<b]\n    slot: &xs[a]\n    inner: &edit[0..<1]\n    slot = 2\n}}\n",
+    )
+    caret_marks_same(
+        "line start receiver",
+        "run: fn(buf: ^[Int]) {{\n    total := 1\n    ^buf.push(total)\n    ^^buf.clear()\n}}\n",
+        "run: fn(buf: &[Int]) {{\n    total := 1\n    &buf.push(total)\n    &&buf.clear()\n}}\n",
+    )
+    caret_marks_same(
+        "match subject",
+        "Shape: enum {{\n    Dot(Int),\n    Line(Int),\n}}\n\nrun: fn(shape: ^Shape) {{\n    if ^shape == {{\n        .Dot(size) -> size += 1\n        .Line(size) -> size += 2\n    }}\n}}\n",
+        "Shape: enum {{\n    Dot(Int),\n    Line(Int),\n}}\n\nrun: fn(shape: &Shape) {{\n    if &shape == {{\n        .Dot(size) -> size += 1\n        .Line(size) -> size += 2\n    }}\n}}\n",
+    )
+    caret_marks_same(
+        "task capture",
+        "run: fn(rows: [Int]) -> Int {{\n    done: task ^^rows {{ rows.len() }}\n    done.wait()\n}}\n",
+        "run: fn(rows: [Int]) -> Int {{\n    done: task &&rows {{ rows.len() }}\n    done.wait()\n}}\n",
+    )
+}
+
+#Test("bitwise and logical and keep their meaning") {
+    source: "run: fn(a: Int, b: Int, c: Bool) -> Bool {{ (a & b) == 0 && c }}\n"
+    formatted: jet_format_source(source, false)
+    if !formatted.ok || formatted.text.contains("^") {
+        panic("caret marks: an operator turned into a mark:\n{formatted.text}")
+    }
+}

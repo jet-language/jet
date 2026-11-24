@@ -1073,12 +1073,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 }
             }
             94 -> {
-                if byte_at(source, i + 1) == 61 {
-                    last_code = push_code(facts, TOKEN_CARET_EQ, start, start + 2, false)
-                    i += 2
-                } else {
-                    last_code = push_code(facts, TOKEN_CARET, start, start + 1, false)
-                    i += 1
+                if {
+                    byte_at(source, i + 1) == 94 -> {
+                        last_code = push_code(facts, TOKEN_CARET_CARET, start, start + 2, false)
+                        i += 2
+                    }
+                    byte_at(source, i + 1) == 61 -> {
+                        last_code = push_code(facts, TOKEN_CARET_EQ, start, start + 2, false)
+                        i += 2
+                    }
+                    else -> {
+                        last_code = push_code(facts, TOKEN_CARET, start, start + 1, false)
+                        i += 1
+                    }
                 }
             }
             126 -> {

@@ -758,7 +758,7 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    subject: if parser_current_kind(state) == TOKEN_AMP -> parser_parse_marked_place(state, 1, false, true) else -> parser_parse_expression_no_struct_lit_no_cmp(state, 1)
+    subject: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 1, false, true) else -> parser_parse_expression_no_struct_lit_no_cmp(state, 1)
     dispatch: parser_expression_form_dispatch_op(parser_current_kind(state))
     if dispatch == .Val(op) && parser_kind_at(state, 1) == TOKEN_LBRACE && !parser_expression_form_record_test_ahead(state) {
         parser_bump(state)
@@ -1324,7 +1324,7 @@ parser_parse_loop_after_keyword: fn(state: &JetParserState, start: Span, label: 
     if (first_kind == TOKEN_IDENT && (second_kind == TOKEN_SEMI || second_kind == TOKEN_COMMA || second_kind == TOKEN_KW_IN)) || first_kind == TOKEN_LPAREN || pattern_head {
         binding: parser_loop_source_binding(state)
         parser_loop_source_separator(state)
-        first: if parser_current_kind(state) == TOKEN_AMP -> parser_parse_marked_place(state, 1, false, false) else -> parser_parse_expression_no_struct_lit(state, 1)
+        first: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 1, false, false) else -> parser_parse_expression_no_struct_lit(state, 1)
         kind := ForKind.In{collection: first.expr, step: None}
         if first.expr == {
             .Range(range_start, range_end, exclusive, _, _) -> {
@@ -1768,7 +1768,7 @@ parser_parse_binding_statement: fn(state: &JetParserState) -> Stmt {
             return Stmt.Expr{expr: Expr.Unit{span: uninit_token.span, id: parser_node_id(state)}}
         }
     }
-    value: if parser_current_kind(state) == TOKEN_AMP -> parser_parse_marked_place(state, 0, true, false) else -> parser_parse_expression(state, 1, 0)
+    value: if parser_write_mark(parser_current_kind(state)) -> parser_parse_marked_place(state, 0, true, false) else -> parser_parse_expression(state, 1, 0)
     // `name: Layout{ … }` (Rust layout_ctor_binding): a typed-literal
     // constraint body is the layout statement over its elements.
     if parser_layout_elements(value.expr) == .Val(elements) {
@@ -1953,7 +1953,7 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
     named: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
     // A lambda value opens with `fn(`; a body's last line may be one.
     lambda: start.kind == TOKEN_KW_FN && parser_kind_at(state, 1) == TOKEN_LPAREN
-    if !named && !lambda && !parser_starts_expression(start.kind) && start.kind != TOKEN_AND_AND {
+    if !named && !lambda && !parser_starts_expression(start.kind) && !parser_take_mark(start.kind) {
         parser_report_not_a_statement(state, start)
         // Consume the offending token (as the `in` arm does): every statement
         // loop re-enters here at the same position otherwise, reporting it
@@ -1965,15 +1965,13 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
     // before a call on a place marks that call's receiver (`&xs.push(4)`,
     // `&&buf.seal()`, parser_receiver_mark); any other marked line is not a
     // statement. Its operand is consumed with it, so the line reports once.
-    if start.kind == TOKEN_AMP || start.kind == TOKEN_AND_AND || start.kind == TOKEN_CARET {
+    if parser_write_mark(start.kind) || parser_take_mark(start.kind) {
         parser_bump(state)
         operand: parser_parse_expression(state, 1, 0)
-        if start.kind != TOKEN_CARET {
-            access: if start.kind == TOKEN_AMP -> PlaceAccess.Write else -> PlaceAccess.Take
-            if parser_receiver_mark(state, operand.expr, access, start.span) == .Val(call) {
-                parser_finish_statement(state)
-                return Stmt.Expr{expr: call}
-            }
+        access: if parser_write_mark(start.kind) -> PlaceAccess.Write else -> PlaceAccess.Take
+        if parser_receiver_mark(state, operand.expr, access, start.span) == .Val(call) {
+            parser_finish_statement(state)
+            return Stmt.Expr{expr: call}
         }
         parser_report_not_a_statement(state, start)
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}

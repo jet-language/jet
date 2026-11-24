@@ -255,17 +255,23 @@ parser_state_marker_param_edit: fn(function: Func, owner: String, state: String,
             return None
         }
         start := end - 4
-        loop start > 0 && (Int{source[start - 1]}) == 38 -> start -= 1
+        loop start > 0 && parser_state_marker_mark_byte(source[start - 1]) -> start -= 1
         caps: foundation_byte_text(source, start, end - 4)
         return Val(TextEdit{span: Span{start: start, end: end}, new_text: "self: {caps}{owner}.{state}"})
     }
     start := param.ty_span.start
-    loop start < param.ty_span.end && (Int{source[start]} == 38 || parser_state_marker_blank(source[start])) {
+    loop start < param.ty_span.end && (parser_state_marker_mark_byte(source[start]) || parser_state_marker_blank(source[start])) {
         start += 1
     }
     written: foundation_byte_text(source, start, param.ty_span.end)
     if written != owner && written != "Self" -> return None
     Val(TextEdit{span: Span{start: start, end: param.ty_span.end}, new_text: "{owner}.{state}"})
+}
+
+// A byte of a written mark: `^` or `^^`, or the older `&` or `&&`.
+parser_state_marker_mark_byte: fn(byte: U8) -> Bool Never! {
+    code: Int{byte}
+    code == 94 || code == 38
 }
 
 // The result names the state it moves to: a result written from the owner's
