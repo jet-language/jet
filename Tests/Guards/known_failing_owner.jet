@@ -1,0 +1,156 @@
+// Guard: every row of the accepted-failing ledger (Tests/known-failing.tsv)
+// names exactly one owning card, in its card column, and that card is open on
+// the live Tower board: listed, not archived and not done. Closing a card a
+// row still names fails here, so the row moves to the card that owns the
+// remaining work first. The reason column names no card at all.
+//
+// The live board is the main checkout's. Merges into master keep master's
+// board, so a branch's own copy is stale. The board read is the first of:
+// TOWER_DATA (a data directory or a tower.json); the board of the checkout
+// that owns the git common directory (`git rev-parse --git-common-dir`, whose
+// parent is the main checkout for every worktree and the tree itself in a
+// plain clone); this tree's own board.
+use {
+    kfo_files: core.files
+    kfo_json: core.encoding.json
+    kfo_process: core.process
+}
+
+KFO_LEDGER: "Tests/known-failing.tsv"
+
+KFO_BOARD: "Tools/Tower/.tower/tower.json"
+
+kfo_field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+// The board path from TOWER_DATA, the git common directory and whether the
+// common directory's checkout holds a board, in the order the header names.
+kfo_board_choice: fn(data: String?, common_dir: String?, common_has_board: Bool) -> String {
+    if data == .Val(dir) {
+        if dir.ends_with(".json") -> return dir.copy()
+        return "{dir}/tower.json"
+    }
+    if common_has_board && common_dir == .Val(common) -> return kfo_common_board(common)
+    KFO_BOARD
+}
+
+// The board of the checkout that owns the git common directory `common`.
+kfo_common_board: fn(common: String) -> String {
+    "{kfo_files.dirname(common)}/{KFO_BOARD}"
+}
+
+// The absolute git common directory of this tree, or None outside git.
+kfo_common_dir: fn() -> String? {
+    ran: kfo_process.cmd([String]{"git", "rev-parse", "--path-format=absolute", "--git-common-dir"}).stdout(.Capture).stderr(.Capture).run() ?? return None
+    if ran.code != 0 -> return None
+    lines: kfo_process.stdout_lines(ran)
+    if lines.len() == 0 || lines[0].trim() == "" -> return None
+    Val(lines[0].trim())
+}
+
+kfo_board_path: fn() -> String {
+    common: kfo_common_dir()
+    present: if common == .Val(dir) -> kfo_files.is_file(kfo_common_board(dir)) else -> false
+    kfo_board_choice(kfo_process.env_nonempty("TOWER_DATA"), common, present)
+}
+
+// The number of every card on the board that is neither archived nor done.
+kfo_open_cards: fn(path: String) -> [Int] {
+    text: kfo_files.read(path) ?? panic("read the Tower board {path}: {err}")
+    board: kfo_json.parse(text) ?? panic("the Tower board {path} is not JSON: {err}")
+    open := [Int]{}
+    if kfo_field(board, "cards") == .Array(cards) {
+        loop card in cards {
+            if kfo_field(card, "archived") == .Bool(true) || kfo_field(card, "phase") == .Text("done") -> next
+            if kfo_field(card, "num") == .Int(num) -> open.push(num)
+            if kfo_field(card, "num") == .Number(lexeme) {
+                number: Int.parse(lexeme) ?? next
+                open.push(number)
+            }
+        }
+    }
+    open
+}
+
+// The card a card cell names: `#` and three to five digits, nothing else.
+kfo_card: fn(cell: String) -> Int? {
+    if !cell.starts_with("#") -> return None
+    digits: cell.slice(1, cell.len())
+    if digits.len() < 3 || digits.len() > 5 -> return None
+    loop scalar in digits.chars() {
+        ch: "{scalar}"
+        if ch < "0" || ch > "9" -> return None
+    }
+    number: Int.parse(digits) ?? return None
+    Val(number)
+}
+
+// Whether a reason names a card (`#` and three to five digits after a space,
+// `(`, `/` or `,`), the way a comment cites one.
+kfo_reason_cites: fn(reason: String) -> Bool {
+    if !reason.contains("#") -> return false
+    bytes: reason.bytes()
+    loop index in 0..<bytes.len() {
+        if card_cite_at(bytes, index) -> return true
+    }
+    false
+}
+
+// The problems of one ledger line, `where` naming it.
+kfo_row_problems: fn(line: String, where: String, open: [Int]) -> [String] {
+    cells: line.split("\t").to_list()
+    if cells.len() != 3 {
+        return [String]{"{where}: a row has three tab-separated cells (id, card, reason); this one has {cells.len()}"}
+    }
+    problems := [String]{}
+    if kfo_card(cells[1]) == .Val(num) {
+        if !open.contains(num) -> problems.push("{where}: {cells[0]} names #{num}, which is not open on the board; move the row to the open card that owns the remaining work")
+    } else {
+        problems.push("{where}: {cells[0]} names `{cells[1]}` where one card, `#N`, belongs")
+    }
+    if kfo_reason_cites(cells[2]) -> problems.push("{where}: {cells[0]}'s reason names a card; only the card column does")
+    problems
+}
+
+#Test("known_failing_owner") {
+    guards_enter_root()
+    board_path: kfo_board_path()
+    assert(kfo_files.is_file(board_path), "the Tower board {board_path} is missing")
+    open: kfo_open_cards(board_path)
+    assert(open.len() > 0, "the Tower board {board_path} lists no open card")
+    ledger: kfo_files.read(KFO_LEDGER) ?? panic("read {KFO_LEDGER}: {err}")
+    problems := [String]{}
+    loop (index, line) in ledger.lines() {
+        if line == "" || line.starts_with("#") -> next
+        loop problem in kfo_row_problems(line, "{KFO_LEDGER}:{index + 1}", open) -> problems.push(problem)
+    }
+    assert_eq(problems.join("\n"), "")
+
+    // One card per row, in the card column, and only an open one.
+    assert((kfo_card("#6843") ?? 0) == 6843)
+    assert(kfo_card("#68") == None, "two digits are no card")
+    assert(kfo_card("6843") == None, "a card cell starts with `#`")
+    assert(kfo_card("#6843 #6844") == None, "a row names one card")
+    assert(kfo_row_problems("a.case\t#6843\twhy", "t:1", [Int]{6843}).len() == 0)
+    assert(kfo_row_problems("a.case\t#6843\twhy", "t:1", [Int]{6844}).len() == 1, "a closed card is refused")
+    assert(kfo_row_problems("a.case\t#6843\twhy (#5554)", "t:1", [Int]{6843}).len() == 1, "the reason names no card")
+    assert(kfo_row_problems("a.case\t#6843", "t:1", [Int]{6843}).len() == 1, "a row has a reason")
+    assert(!kfo_reason_cites("`#Persist` keeps U8#128 and color #0a0b0c"))
+
+    // The live board: TOWER_DATA, else the main checkout's, else this tree's.
+    worktree_common: "/srv/jet/.git"
+    assert_eq(kfo_board_choice(None, Val(worktree_common), true), "/srv/jet/Tools/Tower/.tower/tower.json")
+    assert_eq(kfo_board_choice(Val("/data"), Val(worktree_common), true), "/data/tower.json")
+    assert_eq(kfo_board_choice(Val("/data/board.json"), Val(worktree_common), true), "/data/board.json")
+    assert_eq(kfo_board_choice(None, Val(worktree_common), false), KFO_BOARD)
+    assert_eq(kfo_board_choice(None, None, false), KFO_BOARD)
+    if kfo_process.env_nonempty("TOWER_DATA") == None && kfo_common_dir() == .Val(common) {
+        assert(board_path == kfo_common_board(common), "a worktree reads the main checkout's board, not {board_path}")
+    }
+}
