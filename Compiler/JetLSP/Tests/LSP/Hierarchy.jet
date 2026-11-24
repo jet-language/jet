@@ -1,0 +1,78 @@
+// The type hierarchy: a type's supertypes are the traits it implements, and a
+// trait's subtypes are the types that implement it.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[foundation_json_quote]
+    jet_lsp.[LSPServer]
+}
+
+LSP_TEST_HIERARCHY_URI: "file:///w/shapes.jet"
+
+// `Renderable` on line 0; `Button` on line 4 and `Panel` on line 13 implement
+// it, and `Label` on line 22 implements nothing.
+LSP_TEST_HIERARCHY: `Renderable: trait {
+    render: fn(self) -> String,
+}
+
+Button: struct {
+    label: String,
+    impl Renderable {
+        render: fn(self) -> String {
+            self.label
+        }
+    }
+}
+
+Panel: struct {
+    title: String,
+    impl Renderable {
+        render: fn(self) -> String {
+            self.title
+        }
+    }
+}
+
+Label: struct {
+    text: String,
+}
+`
+
+// The item `prepareTypeHierarchy` answers at the start of `line`.
+lsp_test_hierarchy_item: fn(server: &LSPServer, line: Int) -> Dyn {
+    items: lsp_test_rows(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, line, 0)))
+    assert_eq(items.len(), 1)
+    items[0]
+}
+
+// Each item as `name=kind`.
+lsp_test_hierarchy_names: fn(result: Dyn) -> [String] Never! {
+    names := [String]{}
+    loop item in lsp_test_rows(result) -> names.push("{lsp_test_text(item, "name")}={lsp_test_int(item, "kind")}")
+    names
+}
+
+// The params naming `item` by its identity, or by name alone.
+lsp_test_hierarchy_params: fn(item: Dyn, identity: Bool{true}) -> String Never! {
+    data: if identity -> ",\"data\":{{\"identity\":{foundation_json_quote(lsp_test_text(lsp_test_field(item, "data"), "identity"))}}}" else -> ""
+    "{{\"item\":{{\"name\":{foundation_json_quote(lsp_test_text(item, "name"))},\"kind\":{lsp_test_int(item, "kind")},\"uri\":{foundation_json_quote(lsp_test_text(item, "uri"))}{data}}}}}"
+}
+
+#Test("a type's supertypes are the traits it implements and a trait's subtypes the types implementing it") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_HIERARCHY_URI, LSP_TEST_HIERARCHY)
+    button: lsp_test_hierarchy_item(server, 4)
+    assert_eq(lsp_test_text(button, "name"), "Button")
+    assert_eq(lsp_test_int(button, "kind"), 23)
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/supertypes", lsp_test_hierarchy_params(button))), [String]{"Renderable=11"})
+    // An item a client built from the name alone finds the same type.
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/supertypes", lsp_test_hierarchy_params(button, identity: false))), [String]{"Renderable=11"})
+    renderable: lsp_test_hierarchy_item(server, 0)
+    assert_eq(lsp_test_int(renderable, "kind"), 11)
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/subtypes", lsp_test_hierarchy_params(renderable))), [String]{"Button=23", "Panel=23"})
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/supertypes", lsp_test_hierarchy_params(renderable))), [String]{})
+    label: lsp_test_hierarchy_item(server, 22)
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/supertypes", lsp_test_hierarchy_params(label))), [String]{})
+    assert_eq(lsp_test_hierarchy_names(lsp_test_result(server, "typeHierarchy/subtypes", lsp_test_hierarchy_params(label))), [String]{})
+    // A function is no type.
+    assert(lsp_test_result(server, "textDocument/prepareTypeHierarchy", lsp_test_at(LSP_TEST_HIERARCHY_URI, 7, 8)) == .Null, "a method has no type hierarchy")
+}

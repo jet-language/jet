@@ -1,28 +1,30 @@
 # Port of tests/lsp.rs:2940-3004; source bytes copied verbatim.
-# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
-# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+# `Button` implements `Renderable`: the type hierarchy shows `Renderable` as
+# its supertype and `Button` as the trait's subtype.
 session lsp content-length: jet self lsp
 send lsp: Messages/LSPTypeHierarchyTraitImpls/0.json
-recv lsp
-stdout: ~ "\"typeHierarchyProvider\": true" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.typeHierarchyProvider = true
 send lsp: Messages/LSPTypeHierarchyTraitImpls/1.json
 send lsp: Messages/LSPTypeHierarchyTraitImpls/2.json
 recv lsp
-stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "publishDiagnostics" # the open document's diagnostics arrive before any request is answered
 send lsp: Messages/LSPTypeHierarchyTraitImpls/3.json
-recv lsp
-stdout: ~ "\"name\":\"Button\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"kind\":23" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 2
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].name = "Button"
+json: stdout doc $.result[0].kind = 23
 send lsp: Messages/LSPTypeHierarchyTraitImpls/4.json
-recv lsp
-stdout: ~ "\"name\":\"Renderable\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"kind\":11" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 3
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].name = "Renderable"
+json: stdout doc $.result[0].kind = 11
 send lsp: Messages/LSPTypeHierarchyTraitImpls/5.json
-recv lsp
-stdout: ~ "\"name\":\"Button\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"kind\":23" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 4
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].name = "Button"
+json: stdout doc $.result[0].kind = 23
 send lsp: Messages/LSPTypeHierarchyTraitImpls/6.json
-recv lsp
-stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 99
 close lsp
 exit: any # Original transcript only waited; it did not assert process status.
