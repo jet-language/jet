@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6999,
-    "rev": 113912,
+    "rev": 113917,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58084,6 +58084,26 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "c13 Args decision revised (orchestrator): A replaced by A'. CLIEntry builds its role-to-helper table at compile time (#run over the #Builtin.Role markers in Core/Args/Args.jet). Compiler source spells only role names, and a missing filler fails the compiler build. Member lookup is unchanged, so user code naming a role stays an ordinary unknown member. Generated wrapper calls to priv helpers pass through the one existing generated-code visibility path."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c13 Args decision (orchestrator, under D-CORE-BUILTINS1=A): generated CLI entry text names the role, not the helper (e.g. __jet_cli_args.CLIValue(...)). In compiler-generated code only, member resolution maps a missing member of a Core module alias to that module's filler of the role of that name, through sema_core_role_function. User code naming a role gets the ordinary unknown-member error, which a UI case proves. A missing filler reports CoreRoleMissing. Args leaves the guard list."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c13 implementation decision (orchestrator, under D-CORE-BUILTINS1=A): Core helpers that generated code calls (Args __cli_*, Units __measurement_*, Data __query_*/__group_*, Compute __ad_*) are found by role, through #Builtin.Role markers (the compiler markers that the ratified jet_builtins module holds), not moved into jet_builtins. The ratified module holds only what the compiler alone can provide. The helpers become priv. Generated callers pass visibility through the one existing generated-code path (Items.jet, c14b). Each family leaves Core.rows, and the guard ceiling drops with each family patch."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c13 size (G1Facts-2 census, 2026-11-24): 268 compiler-known Core names sit outside jet_builtins (guard ceiling 268). Sema also builds names such as __{member}_f32 and __{owner}_* (Calls/Core.jet:1033, PreciseBind.jet:27), which appear only in Core.rows. Closing c13 means moving each family behind the door, with sema finding it by role, one family per patch, the largest first, after #6852 c8 (which moves the decode, lines and precise-math families)."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Staffing, 2026-11-24 (owner order: finish G1 now; all three agents on G1, LSP latency and non-G1 fixes parked). TypeIDSlice3-3: c36 (interned TypeId), then c6, then c24. G1Facts-2: D-DECL-FACTS1 review (for #6852 c1/c2), then c39, c14, c13, then #6852 c8/c9. G1Generation-2: #6998 steps A and B, the c37 split, c38, c5, c4. In batch 25 now: heard-args-r4 (c30, c31) and c29. Next as agents free up: c3, c7, c9, c18, c19, c21, c22, c33, c34."
         },
         {
@@ -58610,7 +58630,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T14:42:08.028Z",
+      "updated": "2026-11-24T15:33:05.960Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -58811,11 +58831,11 @@
         {
           "n": 9,
           "text": "A user type implements each of those traits and works with the language form: a format selector, decode, precise math and a line loop. It depends on the same ballot (Main's ballot list, 2026-11-15). Proof: `jet test Compiler --profile golden --filter Types/Traits/LanguageFormTraits` passes on o0, o1 and o2. (was #6151 c15)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:01.353Z"
+          "evidence": "dev bd645817ee, batch 25 compiler: jet test Compiler --profile golden --filter Types/Traits/LanguageFormTraits gives PASS 3 (o0, o1, o2), FAIL 0.",
+          "at": "2026-11-24T14:49:12.862Z"
         },
         {
           "n": 10,
@@ -58892,7 +58912,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T14:37:32.873Z",
+      "updated": "2026-11-24T14:49:12.862Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -140814,6 +140834,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T15:33:05.961Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T15:26:30.125Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T14:55:46.797Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T14:49:12.863Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T14:43:55.012Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-24T14:42:08.028Z",
       "by": "Orchestrator",
