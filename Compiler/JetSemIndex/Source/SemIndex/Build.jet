@@ -10,6 +10,7 @@ use {
     jet_driver.[JetDriverDocModule, jet_driver_doc_callee_key]
     jet_foundation.[
         ASTTables,
+        AccessConvention,
         ArithmeticPolicyFact,
         BindName,
         BindPattern,
@@ -259,6 +260,14 @@ semindex_params: fn(tables: ASTTables, params: [Param], source: String, skip_sel
     output
 }
 
+// The access of the `self` parameter, when `params` has one.
+semindex_receiver_access: fn(params: [Param]) -> AccessConvention? Never! {
+    loop parameter in params {
+        if parameter.name == "self" -> return Val(parameter.convention)
+    }
+    None
+}
+
 // sema `sema_callable_policy_argument_text`: the written spelling of one
 // `#Policy` argument.
 semindex_policy_argument: fn(tables: ASTTables, expr: ExprNode) -> String {
@@ -324,6 +333,7 @@ semindex_callable_kind: fn(tables: ASTTables, function: Func, source: String) ->
             policies: semindex_callable_policies(tables, function.markers),
             generic_parameters: Val(generic_names),
             generic_unavailable: None,
+            receiver: semindex_receiver_access(function.params),
         },
     }
 }
@@ -1132,6 +1142,7 @@ semindex_trait_callable: fn(tables: ASTTables, sig: TraitMethodSig, source: Stri
         policies: [CallablePolicy]{},
         generic_parameters: Val([String]{}),
         generic_unavailable: None,
+        receiver: semindex_receiver_access(sig.params),
     }
 }
 

@@ -1,12 +1,13 @@
 // Inlay hints: from the checked index, the type of each local, the parameter
-// each positional argument binds, and on a type each method an impl declares
+// each positional argument binds, the `&` or `&&` of each argument or
+// receiver a call writes or takes, and on a type each method an impl declares
 // outside its body; then the `lsp.inlay_hints` hooks of a marked block's
 // package label places in its body. A request's range keeps the hints inside
 // it, and a range past the end of the document stops at its end.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, failure_contract_shown_return, foundation_json_quote, type_name]
-    jet_lexer.[Lexed, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
+    jet_foundation.[AccessConvention, ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, Type, access_sigil, failure_contract_shown_return, foundation_json_quote, type_name]
+    jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
     jet_semindex.[SemCallable, SemDef, SemIndex]
 }
 
@@ -121,29 +122,143 @@ lsp_method_breadcrumb: fn(name: String, callable: SemCallable) -> String Never! 
     "{name}: fn({params.join(", ")}){arrow}{result}"
 }
 
-// Each call's positional arguments, named by the parameter they bind. A
-// labeled argument, a rest argument, and an argument that already spells
-// its parameter's name get none.
+// What a call shows at one argument or receiver, since calls carry no marks:
+// the parameter a positional argument binds (`name`, "" for none) and the
+// access the callee's signature takes it with. `at` is where its text starts;
+// `place` is its span when it is one name.
+LSPCallMark: struct {
+    at: Int,
+    name: String,
+    access: AccessConvention,
+    place: Span?,
+}
+
+// Each call's positional arguments named by the parameter they bind, and
+// marked `&` or `&&` when the callee writes or takes them, as is a method's
+// receiver. A labeled argument, a rest argument, and an argument that
+// already spells its parameter's name get no name.
 lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: &[LSPInlayHint]) Never! {
+    loop mark in lsp_call_marks(view, index) {
+        name: if mark.name == "" -> "" else -> "{mark.name}: "
+        hints.push(LSPInlayHint{at: mark.at, label: "{name}{access_sigil(mark.access)}", kind: Val(LSP_INLAY_HINT_PARAMETER)})
+    }
+}
+
+lsp_call_marks: fn(view: LSPView, index: SemIndex) -> [LSPCallMark] Never! {
+    marks := [LSPCallMark]{}
     tokens: view.lexed.tokens
     loop (position, token) in tokens {
         if token.kind != TOKEN_IDENT || position + 1 >= tokens.len() || tokens[position + 1].kind != TOKEN_LPAREN -> next
-        target: lsp_target_at(view, token.span.start) ?? next
-        def: lsp_definition_at(index, target) ?? next
-        if def.kind == .Function(callable) {
-            loop (argument, first) in lsp_call_arguments(view.lexed, position + 2) {
-                if argument >= callable.params.len() -> break
-                param: callable.params[argument]
-                if param.zone == ParamZone.LabelOnly || param.variadic -> break
-                if first + 1 < tokens.len() && tokens[first].kind == TOKEN_IDENT && tokens[first + 1].kind == TOKEN_COLON -> next
-                if tokens[first].kind == TOKEN_IDENT && token_text(view.lexed.tables, tokens[first]) == param.name {
-                    if first + 1 < tokens.len() && (tokens[first + 1].kind == TOKEN_COMMA || tokens[first + 1].kind == TOKEN_RPAREN) -> next
+        callable: lsp_call_callable(view, index, position) ?? next
+        if callable.receiver == .Val(access) {
+            if lsp_receiver_start(view, index, position) == .Val(start) {
+                place: if start == position - 2 -> Span?{Val(tokens[start].span)} else -> Span?{None}
+                if access != AccessConvention.Read -> marks.push(LSPCallMark{at: tokens[start].span.start, name: "", access: access, place: place})
+            }
+        }
+        lsp_argument_marks(view.lexed, callable, position + 2, marks)
+    }
+    marks
+}
+
+// The callable the call named at `position` runs: the function its name
+// resolves to, else the method of the type its one-name receiver was checked
+// to have, as the index resolves no method name.
+lsp_call_callable: fn(view: LSPView, index: SemIndex, position: Int) -> SemCallable? Never! {
+    tokens: view.lexed.tokens
+    if lsp_target_at(view, tokens[position].span.start) == .Val(target) {
+        def: lsp_definition_at(index, target) ?? return None
+        if def.kind == .Function(callable) -> return Val(callable)
+        return None
+    }
+    if position < 2 || tokens[position - 1].kind != TOKEN_DOT -> return None
+    receiver: lsp_target_at(view, tokens[position - 2].span.start) ?? return None
+    owner: lsp_type_owner(lsp_checked_type(lsp_definition_at(index, receiver) ?? return None) ?? return None)
+    method: token_text(view.lexed.tables, tokens[position])
+    loop member in index.members {
+        if member.owner != owner || member.name != method || member.kind != "method" -> next
+        loop definition in index.definitions {
+            if definition.def.identity != member.identity -> next
+            if definition.def.kind == .Function(callable) -> return Val(callable)
+        }
+    }
+    None
+}
+
+// The type a local or parameter was checked to have.
+lsp_checked_type: fn(def: SemDef) -> Type? Never! {
+    if def.kind == {
+        .Local(_, ty) -> ty
+        .Param(ty) -> Val(ty)
+        .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> None
+    }
+}
+
+lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, marks: &[LSPCallMark]) Never! {
+    tokens: lexed.tokens
+    params: callable.params
+    loop (argument, first) in lsp_call_arguments(lexed, first_token) {
+        if first + 1 < tokens.len() && tokens[first].kind == TOKEN_IDENT && tokens[first + 1].kind == TOKEN_COLON {
+            // A labeled argument binds the parameter its label names.
+            if first + 2 >= tokens.len() -> next
+            label: token_text(lexed.tables, tokens[first])
+            loop param in params {
+                if param.label == label {
+                    lsp_push_call_mark(marks, tokens, first + 2, "", param.access)
+                    break
                 }
-                hints.push(LSPInlayHint{at: tokens[first].span.start, label: "{param.name}: ", kind: Val(LSP_INLAY_HINT_PARAMETER)})
+            }
+            next
+        }
+        bound := argument
+        if bound >= params.len() {
+            // Each argument past the last parameter is its rest parameter's.
+            if params.len() == 0 || !params[params.len() - 1].variadic -> break
+            bound = params.len() - 1
+        }
+        param: params[bound]
+        if param.zone == ParamZone.LabelOnly -> break
+        spelled: tokens[first].kind == TOKEN_IDENT && lsp_lone_token(tokens, first) && token_text(lexed.tables, tokens[first]) == param.name
+        name: if param.variadic || spelled -> "" else -> param.name
+        lsp_push_call_mark(marks, tokens, first, name, param.access)
+    }
+}
+
+lsp_push_call_mark: fn(marks: &[LSPCallMark], tokens: [Token], first: Int, name: String, access: AccessConvention) Never! {
+    if name == "" && access == AccessConvention.Read -> return
+    place: if tokens[first].kind == TOKEN_IDENT && lsp_lone_token(tokens, first) -> Span?{Val(tokens[first].span)} else -> Span?{None}
+    marks.push(LSPCallMark{at: tokens[first].span.start, name: name, access: access, place: place})
+}
+
+// Whether the argument starting at `first` is that one token.
+lsp_lone_token: fn(tokens: [Token], first: Int) -> Bool Never! {
+    first + 1 < tokens.len() && (tokens[first + 1].kind == TOKEN_COMMA || tokens[first + 1].kind == TOKEN_RPAREN)
+}
+
+// The first token of the receiver of the method call named at `position`
+// (`buf.seal()`, `self.cart.seal()`). A receiver that is no dotted name has
+// none, nor has a module's function or a type's associated function.
+lsp_receiver_start: fn(view: LSPView, index: SemIndex, position: Int) -> Int? Never! {
+    tokens: view.lexed.tokens
+    if position < 2 || tokens[position - 1].kind != TOKEN_DOT || !lsp_name_kind(tokens[position - 2].kind) -> return None
+    start := position - 2
+    loop start >= 2 && tokens[start - 1].kind == TOKEN_DOT && lsp_name_kind(tokens[start - 2].kind) {
+        start -= 2
+    }
+    if start > 0 && tokens[start - 1].kind == TOKEN_DOT -> return None
+    if lsp_target_at(view, tokens[start].span.start) == .Val(target) {
+        if lsp_definition_at(index, target) == .Val(def) {
+            if def.kind == {
+                .Module | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) -> return None
+                .Function(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Param(_) | .Local(_, _) -> {}
             }
         }
     }
+    Val(start)
 }
+
+// Whether a token of `kind` is a name a receiver path is made of.
+lsp_name_kind: fn(kind: Int) -> Bool Never! { kind == TOKEN_IDENT || kind == TOKEN_SELF }
 
 // The first token of each argument of the call whose `(` precedes `first`;
 // an unclosed call has none.

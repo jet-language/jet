@@ -1,13 +1,13 @@
 // Semantic tokens: the lexer classifies keywords, literals and comments; the
-// checked index classifies each name by what it names and marks the
-// declarations; a marked block's `lsp.semantic_tokens` hooks classify its
-// body. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
-// `LSP_SEMANTIC_TOKEN_MODIFIERS`.
+// checked index classifies each name by what it names, marks the declarations
+// and marks a name a call writes through as a modification; a marked block's
+// `lsp.semantic_tokens` hooks classify its body. Types and modifiers index
+// `LSP_SEMANTIC_TOKEN_TYPES` and `LSP_SEMANTIC_TOKEN_MODIFIERS`.
 use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverToolStageItem]
-    jet_foundation.[Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS]
-    jet_lexer.[Token, TOKEN_IDENT, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE]
+    jet_foundation.[AccessConvention, Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS]
+    jet_lexer.[Token, TOKEN_IDENT, TOKEN_SELF, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE]
     jet_semindex.[SemKind]
 }
 
@@ -36,6 +36,8 @@ LSP_TOKEN_NAMESPACE: 11
 LSP_MODIFIER_DECLARATION: 1
 
 LSP_MODIFIER_READONLY: 2
+
+LSP_MODIFIER_MODIFICATION: 4
 
 // A name's class: its semantic token type and modifier bits.
 LSPNameClass: struct {
@@ -88,12 +90,22 @@ lsp_name_classes: fn(view: LSPView) -> [Int:LSPNameClass] Never! {
             classes[definition.def.def_span.end] = lsp_definition_class(definition.def.kind)
         }
     }
+    // An argument or receiver a call writes, so an editor can underline it. A
+    // written name is a place, so one the index left unresolved is a variable.
+    loop mark in lsp_call_marks(view, index) {
+        if mark.access != AccessConvention.Write -> next
+        place: mark.place ?? next
+        class: classes.get(place.end) ?? LSPNameClass{kind: LSP_TOKEN_VARIABLE, modifiers: 0}
+        classes[place.end] = LSPNameClass{kind: class.kind, modifiers: class.modifiers | LSP_MODIFIER_MODIFICATION}
+    }
     classes
 }
 
 lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? Never! {
     kind: token.kind
     if kind == TOKEN_IDENT -> return classes.get(token.span.end)
+    // `self` a call writes through is classed as that write.
+    if kind == TOKEN_SELF && classes.has_key(token.span.end) -> return classes.get(token.span.end)
     if (kind >= TOKEN_TRUE && kind <= TOKEN_RETURN) || (kind >= TOKEN_KW_FN && kind <= TOKEN_KW_MODULE) {
         return Val(LSPNameClass{kind: LSP_TOKEN_KEYWORD, modifiers: 0})
     }

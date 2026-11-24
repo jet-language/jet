@@ -1,7 +1,8 @@
 // Inlay hints from the checked index: parameter names at a call's positional
-// arguments and, on a type, the methods an impl declares outside its body.
-// The fixture checker resolves free calls and impl heads but infers no local
-// types, so local type hints are covered by the LSP cases.
+// arguments, the `&` and `&&` a callee's signature decides, and, on a type,
+// the methods an impl declares outside its body. The fixture checker resolves
+// free calls and impl heads but infers no local types, so local type hints and
+// method receivers are covered by the LSP cases.
 LSP_TEST_HINTS_URI: "file:///w/hints.jet"
 
 // Line 5 calls `clamp` with two positional arguments, one that spells its
@@ -29,6 +30,25 @@ impl Widget {
 }
 `
 
+LSP_TEST_MARKS_URI: "file:///w/marks.jet"
+
+// Line 10 calls `bump`, which writes its first argument; line 11 calls
+// `keep`, which takes its only one.
+LSP_TEST_MARKS: `bump: fn(count: &Int, by: Int) {
+    count += by
+}
+
+keep: fn(title: &&String) -> Int {
+    0
+}
+
+run: fn() -> Int {
+    score := 1
+    bump(score, 2)
+    keep("vault")
+}
+`
+
 // Each hint as `line:character label`.
 lsp_test_hints: fn(server: &LSPServer, uri: String, end_line: Int) -> [String] {
     range: "\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":{end_line},\"character\":0}}}}"
@@ -53,4 +73,25 @@ lsp_test_hints: fn(server: &LSPServer, uri: String, end_line: Int) -> [String] {
     server := lsp_test_server()
     lsp_test_open(server, LSP_TEST_BREADCRUMB_URI, LSP_TEST_BREADCRUMB)
     assert_eq(lsp_test_hints(server, LSP_TEST_BREADCRUMB_URI, 9), [String]{"0:6 + size: fn() -> Int"})
+}
+
+#Test("calls show the marks their signatures decide and a written name is a modification") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_MARKS_URI, LSP_TEST_MARKS)
+    assert_eq(lsp_test_hints(server, LSP_TEST_MARKS_URI, 13), [String]{"10:9 count: &", "10:16 by: ", "11:9 title: &&"})
+    data: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(LSP_TEST_MARKS_URI)}}}"))
+    // Each token on line 10 as `line:character:modifiers`; `modification` is
+    // bit 4.
+    tokens := [String]{}
+    line := 0
+    character := 0
+    at := 0
+    loop at + 4 < data.len() {
+        if data[at] > 0 -> character = 0
+        line += data[at]
+        character += data[at + 1]
+        if line == 10 -> tokens.push("{line}:{character}:{data[at + 4]}")
+        at += 5
+    }
+    assert_eq(tokens, [String]{"10:4:0", "10:9:4", "10:16:0"})
 }
