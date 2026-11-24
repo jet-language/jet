@@ -199,3 +199,37 @@ Claim states after the fixes:
 | C20 checklist | holds |
 
 Open findings for this ballot: none. Carried elsewhere: U1-U3 (concrete-head specialization and the `__decode_*` cutover, including the `[String: V]` map head) on the author's split ballot. Defects with criteria on their cards: #6727 c10 (q10/q13 trait-value regression and misdiagnosis) and #6852 c13 (q15b silent drop of a conditional impl under a name collision). The q07 fix title that drops `.Describe` is owed under requirement (b).
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| F1 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F2 | card | #6852 |
+| F3 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F4 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F5 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F6 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F7 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F8 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F9 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F10 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F11 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F12 | card | #6727 |
+| F13 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F14 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F15 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F16 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F17 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| F18 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| R1 | card | #6727 |
+| R2 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| R3 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| R4 | no-action | archived: fixed in the ballot text before posting (re-review rounds 1-3) |
+| U1 | card | #6852 |
+| U2 | card | #6852 |
+| U3 | card | #6852 |
+| U5 | card | #6852 |
+| q07 | card | #6852 |
+<!-- /audit-dispositions -->
