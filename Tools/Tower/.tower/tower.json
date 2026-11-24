@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113675,
+    "rev": 113700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30523,6 +30523,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c3 defect found on the batch 16 compiler: in cases MarkerDeclarations/marker_check_rules_hear_calls, jet check values/main.jet reports Jet.UnreadField for Account.user_name and Holder.item, fields reached only through a #Encoded marker's reflected parameters. Sent to its owner as 4624-marker-reflect-reads, proof cases --filter marker_check_rules_hear_calls."
+        },
+        {
           "at": "2026-11-18",
           "by": "Main",
           "text": "p297 landed member-liveness.r6 (cd0c8e0519); its suite lost 436 rows (L0106/L0107 tidy errors fail jet build o1/o2 across Examples/Tests, e.g. Basics/PrintLines Greeting.text read only by printing). Reverted on dev as 1fc15138cc. Returns as r7 with a whole-repo sweep and the printing-as-read decision."
@@ -30636,9 +30641,9 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-23T20:53:37.355Z",
+      "updated": "2026-11-24T04:24:26.694Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0yvgmgj",
@@ -31289,11 +31294,11 @@
         {
           "n": 13,
           "text": "The REPL classifies input with the parser, not substrings: Input.jet has no substring classification, and a string literal containing `name: value` or `core.log` is accepted as an expression.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:31.572Z",
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile cases --filter Repl/string_literal_input_is_expression -> PASS. Compiler/JetRepl/Source/Input.jet at dev ce3b8e7f59 keeps three prefix tests, none of which classifies Jet input: starts_with(\":\") (line 84, REPL commands), starts_with(\"?\") (line 101, docs lookup) and the trailing-\";\" output suppression (line 116). Expression versus statement goes through the parser. Landed as ff4bcec010.",
+          "at": "2026-11-24T04:18:12.244Z",
           "proof": {
             "profile": "cases",
             "filter": "Repl/string_literal_input_is_expression"
@@ -31316,7 +31321,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-07T09:50:33.240Z",
-      "updated": "2026-11-24T02:26:25.186Z",
+      "updated": "2026-11-24T04:18:12.244Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 14
     },
@@ -41375,11 +41380,11 @@
         {
           "n": 7,
           "text": "Layout is computed by one function: sema reflection's LayoutInfo and JetIR's type rows (ir_struct_size, ir_enum_box_size) read the same size, alignment and offsets (architecture review L4). Proof: `jet test Compiler --profile cases --filter reflection_layout_matches_ir` compares both for structs, enums, records and generics. (was #5073 c6)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:11:47.221Z"
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile cases --filter reflection_layout_matches_ir -> PASS. Landed as 7c9980b31f.",
+          "at": "2026-11-24T04:18:19.628Z"
         }
       ],
       "refs": [],
@@ -41387,7 +41392,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:00:23.863Z",
-      "updated": "2026-11-24T00:39:59.118Z",
+      "updated": "2026-11-24T04:18:19.628Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
@@ -42405,11 +42410,11 @@
         {
           "n": 6,
           "text": "E0514 for a never-reassigned binding inside a generic module body points at the binding, not at the module's instantiation site (the r3 regen found Generics/Complete body_items.jet:74 and Generics/Shadow main.jet:15 reported at `name: module<…>(…)`). Proof: a UI snapshot with a generic module body's `:=` binding.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T07:38:09.954Z"
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile ui --filter E0514_generic_module_body_points_at_binding -> PASS; the instance-site row generic_module_missing_static_function_reports_at_instance stays PASS. Landed as 8e1fec9774.",
+          "at": "2026-11-24T04:18:08.755Z"
         },
         {
           "n": 7,
@@ -42426,7 +42431,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-24T02:27:53.744Z",
+      "updated": "2026-11-24T04:18:08.755Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
@@ -51348,29 +51353,42 @@
         {
           "n": 7,
           "text": "A trait value passed where another trait it implements is expected compiles, with the inner key kept and no box inside a box, or is refused by sema with a registered diagnostic, on O0, O1 and O2. Today: an internal compiler error, exit 101, 'checked incomplete without a report' (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, q2_trait_to_trait). Proof: a cases row on each tier. Under B or C, where no Core Any exists, a trait value passed where another trait is expected is refused by sema with a registered diagnostic, also when the user writes impl lib.Shown.Back or every program implementer of Shown implements Back (m43, m46): Back never dispatches on a library value's inner key, so a library trait's user cannot add a method to its values (D-PRIM-ANY1 b8; review 11, probes fm/m43 and fm/m46).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T08:51:58.253Z"
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile cases --filter trait_value_as_another_trait_is_refused -> PASS (jet run -O0, -O1 and -O2 each exit 1 with Jet.TraitNotImplemented, no ICE); ui trait_value_passed_as_another_trait_is_e0905 -> PASS. Landed as a1f3e5f05a.",
+          "at": "2026-11-24T04:18:16.169Z"
         },
         {
           "n": 8,
           "text": "A closure put into a list of a trait it does not implement gets E0905 from sema, not an internal compiler error ('add … has no checked type', found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, q5_closure_trait). Proof: a UI snapshot of E0905 for that program.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T03:24:28.570Z"
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile ui --filter closure_in_trait_list_is_e0905 -> PASS. Landed as eed77ddb99.",
+          "at": "2026-11-24T04:18:17.711Z"
         },
         {
           "n": 9,
-          "text": "A Decimal value (a bare literal such as 2.5, which D-LITCARRIER1=D makes a Decimal) entering a trait value compiles on O0, O1 and O2: without an impl, sema gives E0112 as it does for Bool (x12), never an internal compiler error (today an ICE: x3, r4, r4b, r4c); with impl math.Decimal.Shown {}, it boxes and runs, where today checking passes and ir.build crashes with 'unlowered … type math.Decimal' (x1c). A typed Float{…} value already works (x6, r4e). Probes: $JET_SCRATCH_ROOT/lanes/AnyReview3/probes and $JET_SCRATCH_ROOT/lanes/AnyReview2/probes (D-PRIM-ANY1 reviews 2 and 3, p202 and p203). Proof: a cases row for each form on each tier plus the E0112 UI snapshot.",
+          "text": "A Decimal value (a bare literal such as 2.5, which D-LITCARRIER1=D makes a Decimal) entering a trait value compiles on O0, O1 and O2: without an impl, sema gives the same code as it does for Bool, E0905 (the code c8 gives a value lacking the trait's impl in a trait list), never an internal compiler error (today an ICE: x3, r4, r4b, r4c); with impl math.Decimal.Shown {}, it boxes and runs, where today checking passes and ir.build crashes with 'unlowered … type math.Decimal' (x1c). A typed Float{…} value already works (x6, r4e). Probes: $JET_SCRATCH_ROOT/lanes/AnyReview3/probes and $JET_SCRATCH_ROOT/lanes/AnyReview2/probes (D-PRIM-ANY1 reviews 2 and 3, p202 and p203). Proof: a cases row for the impl form on each tier plus the UI snapshot of the Decimal and Bool refusal.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): cases --filter decimal_trait_value -> PASS (with impl math.Decimal.Shown, a list and an argument on jet run -O0, -O1 and -O2 print the expected .out); ui trait_list_item_without_impl_is_e0905 -> PASS (Decimal and Bool both E0905 in one snapshot); ui decimal_bound_names_the_missing_impl -> PASS. Landed as 73c56c28da.",
+          "at": "2026-11-24T04:18:35.140Z"
+        },
+        {
+          "n": 10,
+          "text": "A trait value meets a bound of its own trait. Given impl Pair<T: Describe>.Describe, Pair<Describe>{a: 1}.describe() prints 'pair #1' (it did on the batch 14 compiler), and a [Describe] passed to fn<T: Describe>(xs: [T]) checks. Since 6727-c7 (batch 16) both give Jet.TraitNotImplemented '`q10_trait_value_arg.Describe` isn't `Describe`': the trait-value check compares a module-qualified trait name with the bare one. Probes $JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/review-probes/q10_trait_value_arg.jet and q13_nested_trait_in_list.jet.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T04:40:50.712Z"
+          "at": "2026-11-24T04:26:08.502Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "trait_value_meets_its_own_bound"
+          }
         }
       ],
       "refs": [],
@@ -51378,9 +51396,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-24T01:50:29.804Z",
+      "updated": "2026-11-24T04:26:08.502Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c03obxd3",
@@ -57230,6 +57248,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c6 not met: the guard exists and passes, but the criterion says closing a cited card is refused at the next lane check, and Tools/Agent/LaneCheck.jet runs no Tests/Guards (only Land.jet census does). Sent to G2Regressions: LaneCheck runs the known-failing owner check."
+        },
+        {
           "at": "2026-11-20",
           "by": "Main",
           "text": "Ballot D-AUTH-WITH1 posted for c2's last row (authority_with_outside_held_rights): A (recommended) refuses at check time when the rights are visible and otherwise has `with` return AuthorityError.NotHeld; B stops at the line (exit 70); C is a run-time stop only. The reviewer also found that the compiler's authority_covers ignores case while the runtime does not, and that a misspelled right is covered today; both are named in the ballot. The rest of c2 has landed or is queued (c2.r2 landed in p345; c2-rest.r3 is queued)."
@@ -57293,11 +57316,11 @@
         {
           "n": 6,
           "text": "Guard: a KNOWN-FAILING annotation (case, ui or golden) must cite exactly one card, and that card must be open on the board; closing a card whose number a KNOWN-FAILING row cites is refused by the guard at the next lane check. Lands once the rehoming above leaves it passing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T17:55:25.329Z",
+          "evidence": "dev eef41eee06 (6843-c6): Tools/Agent/KnownFailingOwner.jet is the one check; LaneCheck runs it as tree check known-failing-owner, and Tests/Guards/known_failing_owner.jet runs the same tool. jet test Tools/Agent/LaneCheck.jet --filter known-failing: 1 passed (a fixture row citing a done card is refused). jet test Tests/Guards --filter known_failing_owner passes on dev, with TOWER_DATA and with its default lookup (batch 14 compiler).",
+          "at": "2026-11-24T03:37:23.229Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -57310,11 +57333,11 @@
         {
           "n": 7,
           "text": "No known-failing row cites a done card. On p367 (dev 2498b9ffd0), 419 of the 689 KNOWN-FAILING rows (ui, golden and cases) cite cards closed with every criterion met: #6418 (135), #6317 (77), #6425 (54), #6419 (34), #3665 (32), #3590 (23), #4260 (20), #4917 (15), #5976 (6), #6630 (5), #3693 (4), #4723 (3), #3262 (2), #6897 (1), #6634 (1), #6448 (1), #6414 (1), #6277 (1), #6035 (1), #5989 (1), #4310 (1), #3720 (1). Each row is either fixed so it passes, or rehomed to the open card that owns its remaining work, with a criterion there naming it; a row whose test is wrong gets its expectation derived from source, never deleted to pass. Proof: the known_failing_owner guard (next criterion) passes, and the suite's KNOWN-FAILING count falls by every fixed row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-20T17:55:35.725Z",
+          "evidence": "On dev 7ff5df3a66, Tests/Guards/known_failing_owner.jet passes on the batch 14 compiler with the live board (TOWER_DATA) and with its default lookup. No row cites a done or missing card. The rows citing done cards were rehomed, not deleted; none was claimed fixed, so the KNOWN-FAILING count did not change.",
+          "at": "2026-11-24T03:31:42.603Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -57332,7 +57355,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-24T03:31:41.398Z",
+      "updated": "2026-11-24T03:37:23.229Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
@@ -57992,6 +58015,16 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Correction to the dead-tail log: on the batch 16 compiler, marker_check_rules_hear_calls now passes its tidy step (the dead-tail fix holds). It fails at its later step, jet check values/main.jet, with Jet.UnreadField for Account.user_name and Holder.item: fields reached only through a #Encoded marker's reflected parameters are not counted as read. That is a member-liveness defect on #4624's area, sent to its owner as 4624-marker-reflect-reads."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "6851-m2b-fix-dead-tail landed as 6eea5dd9bb: a dead last line types against the success side of a promised T? Err!, unit test DeadValueTails 'a bare None after a return'. Its claimed case proof does not hold: on the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59), cases MarkerDeclarations/marker_check_rules_hear_calls still FAILS (exit 1, expected 0); contract_rules_hear_failed_run_clauses PASS. Sent back to its author with the batch 17 detail."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Owner ruling 2026-11-24 on D-RULE-TYPEARGS1: the owner refuses to vote until the ballot engineers away every downside of its options, not merely discloses them. Named downsides of the interned-table option: (1) TypeId name prints leaf names (geo.Point prints Point); (2) fn build gets a per-snapshot frozen table; (3) rule dispatch about 46 us per heard call against the 1 us budget (c22). The ballot is reworked (TypeArgsReview2), reviewed fresh and adversarially (DerivReadReview, audit in Docs/Audits), updated on Tower, and only then put to the owner. Until then every piece of G1 work that does not depend on it proceeds; E2521's move waits."
         },
         {
@@ -58355,11 +58388,20 @@
         {
           "n": 27,
           "text": "An inline module whose name is a single letter (a: module { World: struct {} }) checks like any other name. Today the batch 14 compiler refuses it with Jet.InvalidStatement 'The Core module core.meta an inline module import reads is not in the declaration graph', while the same file with the module named left or ab passes. Proof: a cases row with inline modules a and b passes jet check and runs on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Orchestrator",
+          "verifiedBy": null,
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile cases --filter one_letter_inline_modules_check_and_run -> PASS (Modules/one_letter_inline_modules_check_and_run.case: jet check, then jet run on O0, O1 and O2). Landed as f3486a3637.",
+          "at": "2026-11-24T04:18:10.394Z"
+        },
+        {
+          "n": 28,
+          "text": "A dotted Core path that names no declaration is refused as a type: `fn(w: core.World, p: core.math.Point2)` checks today with only unused-parameter warnings (batch 14 compiler, 2026-11-24). It must report the existing unknown-type diagnostic at the path's span, exactly as an unknown package path does. Proof: a ui snapshot with both spellings, and a sweep of Core, Compiler, Tools, Tests and Examples showing no other such type spelling.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-24T02:37:23.768Z"
+          "at": "2026-11-24T03:55:59.528Z"
         }
       ],
       "refs": [],
@@ -58370,9 +58412,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T02:37:23.768Z",
+      "updated": "2026-11-24T04:23:56.540Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 27
+      "criteriaLastN": 28
     },
     {
       "id": "c0sdz4q0",
@@ -58392,6 +58434,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c8 math part, profiled with jet perf on the batch 16 compiler (G1Generation-2). A 1/3 program builds in 35.7 ms without core.math and 127.1 ms with it, +91 ms: load +19 (Math.jet parse, 417 bodies), sema +44 (core_demand 45 by-name roots and 178 jobs, 133 trait-impl bodies checked up front, 89 comptime constants), lower +22 (380 Core functions lowered for a program that needs 2). Root: ir_precise_source_target, ir_core_lowered_by_name and jet_driver_core_lowering_roots root every precise family member, the abs/pow role fillers and the unit helpers by name. Fix: bind '/' and the precise families through the public arithmetic trait impls, rooted by reachability. That removes the by-name roots, CoreReach's helper names and the load cost together. Assigned to G1Facts."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "c8 precise-math part: on the batch 16 compiler, binding '/' through core.math for every program raises a 3-line build from 38 ms to 130 ms. Loading core.math costs about 92 ms, which is a compile-speed defect in Core module loading. A module-identity lookup of the jet_fraction_* helpers would still name helpers, so it would not meet c8. The math part stays open until it binds through public trait impls with the load cost fixed at the root. Profile requested via jet perf."
+        },
         {
           "at": "2026-11-23",
           "by": "Orchestrator",
@@ -58578,6 +58630,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T02:27:44.713Z"
+        },
+        {
+          "n": 13,
+          "text": "An impl's generic parameter shadows a type of the same name in scope: with a struct named T declared, impl Pair<T: Describe>.Describe still declares describe for Pair, and Pair<T>{a: T{x: 3}}.describe() runs. Today the impl is silently dropped (Jet.UnknownFunction: `Pair` has no method `describe`) on the batch 14 and batch 16 compilers. Probe $JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/review-probes/q15b_param_named_like_type.jet (D-IMPL-COND1 heads; found by the D-IMPL-STRUCTBOUND1 adversarial review).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T04:26:09.459Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "impl_parameter_shadows_a_type_name"
+          }
         }
       ],
       "refs": [],
@@ -58588,9 +58653,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T02:27:44.713Z",
+      "updated": "2026-11-24T04:29:39.067Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c06r6neu",
@@ -58663,11 +58728,11 @@
         {
           "n": 3,
           "text": "Codec formats are a Core trait: `#Rename`'s format menu (Prelude/Markers.jet `Rename(json, cbor, csv, toml, yaml, xml, args, env, db, layout)`) reads the trait's impls, so a MessagePack package works with `#Rename(msgpack: \"…\")` and the data loaders.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:09.260Z",
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile golden --filter Packages/MsgpackRename -> 3/3 PASS (O0, O1, O2; first line 'x: msgpack key px'); ui serde_rename_unknown_format and serde_rename_not_string PASS. Landed as 835b9120f4.",
+          "at": "2026-11-24T04:18:14.146Z",
           "proof": {
             "profile": "golden",
             "filter": "Packages/MsgpackRename"
@@ -58741,7 +58806,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-23T21:22:24.107Z",
+      "updated": "2026-11-24T04:18:14.147Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -63905,11 +63970,11 @@
         {
           "n": 4,
           "text": "A field-less struct holding only static functions is a tidy error whose fix makes it a module, and a constructor that does not return its owner type is an error. Proof: `jet test Compiler --profile ui --filter static_only_struct` and `jet test Compiler --profile ui --filter constructor_wrong_owner`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:50:53.787Z"
+          "evidence": "On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59): jet test Compiler --profile ui --filter static_only_struct -> 2/2 PASS (static_only_struct.jet, static_only_struct_quiet.jet); --filter constructor_wrong_owner -> 2/2 PASS (constructor_wrong_owner.jet, constructor_wrong_owner_quiet.jet). Landed as ebe277bc92.",
+          "at": "2026-11-24T04:18:06.588Z"
         },
         {
           "n": 5,
@@ -63982,7 +64047,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-23T20:53:41.083Z",
+      "updated": "2026-11-24T04:18:06.588Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -64511,6 +64576,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "c15: 6899-c15 landed as 24b527e6ca. On the batch 16 compiler (tree a2a8d238fb; landed on dev ce3b8e7f59), cases JetDoc/fixture_outputs_match_stable_goldens and JetDoc/package_outputs_match_stable_goldens PASS and leave known-failing. Truthfulness/llm_digest_regenerates_byte_identically still fails: the marker table has no status column. c15 stays open until that third row passes."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Burn-down ranking (2026-11-24, by remaining workload; G2Regressions read the open criteria against dev 8a8ea0ee0b): weeks + BLOCKED. c2: CoreSurfaceLedger --check has no \"public functions without an example\" count yet (today it prints rows=12369 …), so the tool plus examples for every public Core fn are weeks of work. c6 is BLOCKED on #4944 (`jet add`): first_hour_cli_journey is KNOWN-FAILING E2104."
         },
         {
@@ -64684,7 +64754,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:55.122Z",
-      "updated": "2026-11-24T02:27:39.908Z",
+      "updated": "2026-11-24T04:18:36.109Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -135268,6 +135338,227 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-24T00:15:09.625Z"
+    },
+    {
+      "id": "D-IMPL-STRUCTBOUND1",
+      "cardId": "c0sdz4q0",
+      "group": "language",
+      "title": "Where an impl for a built-in shape writes the bounds on its item types",
+      "situation": "An impl is the block that gives a type the methods a trait asks for. Jet is adding impls for built-in shapes: every list `[T]`, every fixed array `[T#N]`, every optional `T?` and every map `[K: V]`. Some of these impls only make sense when the items qualify. A list can describe itself only when each of its items can. For a struct, Jet already writes this condition as `impl Pair<T: Describe>.Describe`. For a list, the obvious copy `impl [T: Describe].Describe` already means something else: a map from `T` keys to Describe values. You are asked where a built-in shape's impl writes what its item types must support. We recommend a short list right after the shape, `impl [T]<T: Describe>.Describe`, in the same place a struct's impl puts it.",
+      "gist": "How does an impl for every list, array, optional or map say what its item types must support?",
+      "lesson": "A trait names an ability, such as Describe. An impl gives one type that ability. A bound is a requirement on a type parameter, written `T: Describe`: only types with Describe meet it. A number parameter is written `N: Int`. A conditional impl applies only where its bounds hold, so `Pair<Int>` can describe itself while `Pair<String>` is refused.",
+      "explainer": "Think of a shop sign: \"gift wrapping for any box, if what is inside is not fragile\". Struct impls already put that condition right after the name of the box. The recommendation puts it in the same place for lists, arrays, optionals and maps. A reader never has to guess whether `T: Describe` is a condition or the inside of a map.",
+      "story": "Ana writes a Describe trait for her report tool and implements it for Int. She wants `[1, 2].describe()` to print `[#1, #2]`, and `[\"x\"].describe()` to be refused because String has no Describe. She writes `impl [T].Describe` and calls `item.describe()` inside it. The checker refuses the call with Jet.MissingGenericBound and names the head with its list, `impl [T]<T: Describe>.Describe`. Later she adds maps the same way: `impl [K: V]<K, V: Describe>.Describe`.",
+      "inWild": "// Rust: a list after `impl`, or a `where` clause; const N declares its kind.\nimpl<T: Describe> Describe for Vec<T> { … }\nimpl<T, const N: usize> Describe for [T; N] where T: Describe { … }\n// Swift: a `where` clause over the library's declared names.\nextension Array: Describe where Element: Describe { … }\n// Haskell: a context before the head; lower-case variables are fresh.\ninstance Describe a => Describe [a] where …\n// Scala 3: a given with a context bound.\ngiven [T: Describe]: Describe[List[T]] with …",
+      "detail": "Today. Checked on the batch compiler jet a0.0.46-dev built from dev ce3b8e7f59 with the probes p1-p5 in this directory and the reviewer's q-probes. `impl [T].Describe` stops at the parser with \"Expected a name after `impl`, found `[`\" (p1). `impl<T: Describe> [T].Describe` stops the same way at `<` (p2). A trailing `where` is refused with \"Expected `{` to open the `impl` body\" (p3). Each of the three also cascades a second error at the closing `}`.\n\n`[String: Describe]{\"a\": 1}` is a valid map of Describe values today and prints `#1` (p4). So `[T: Describe]` is already a type spelling. `impl Pair<T: Describe>.Describe` works (p5). `Pair<String>{a: \"x\"}.describe()` is refused with Jet.TraitNotImplemented: \"`describe` comes from a conditional impl that applies only where `T` is `Describe`, and here `T` is `String`\".\n\nScope. The ratified D-BUILTIN-METHOD1 lets an impl name a structural head: `[T]`, `[T#N]`, `T?` and `[K: V]`. Each head binds its parameters in its family's order, as a nominal conditional impl binds its type's declared parameters. PROPOSED: the unbounded heads are in an unlanded patch, land/6852-c8-structural-heads.patch (base ce3b8e7f59); no batch compiler prints its texts yet. That patch proposes three rules that every option below inherits.\n\nRule 1, binding. Every head position is a parameter. A head name that resolves to a type in scope makes a concrete head. It is refused with Jet.InvalidStatement: \"`impl [Point].Describe` names the type `Point` in its head\". The cost: declaring or importing a type named `T` turns `impl [T].X` into that error. The error is loud; it never becomes a silent blanket impl.\n\nRule 2, lexing. In `impl T?.Describe` the lexer reads `?.` as one optional-chain token. The impl-head parser splits it into the head's `?` and the trait's `.`.\n\nRule 3, shapes. Nested, repeated or concrete heads are refused with Jet.InvalidStatement: \"`impl [[T]].Describe` is not a structural head\". Its fix reads \"write the head over distinct names: `[T]`, `[T#N]`, `T?` or `[K: V]`\". Edits owed beyond the patch: `[T#4]` and `[T#T]` become `[T#N]`, and `[T: T]` becomes `[K: V]`. `[[T]]`, `[T]?` and `[K: [V]]` get no edit; the fix teaches the bounded head on the outer shape. Concrete heads (`[Int]`) and overlapping impls stay illegal.\n\nNot here. `Set<E>`, `Shared<T>`, `Task<T>`, `Receiver<T>`, `Sender<T>` and `Result<T, E>` keep nominal heads under D-BUILTIN-METHOD1. In every option their bounded form is today's argument form, `impl Set<E: Describe>.Describe`. Today q05 is refused only by Jet.ImplOnBuiltinType. `Option<T>` is the same type as `T?` (q18), so `impl Option<T: Describe>.Describe` is already the argument form for optionals. Each option says how it treats that spelling.\n\nNew work under every option (a): map keys. No generic `K` is a map key today; q09 and q09b give Jet.InvalidMapKeyType whatever its bound. Inside a `[K: V]` impl, `K` gets an implied key rule, as Swift implies `Key: Hashable`. Every receiver is already a map, so `K` is key-eligible. It supports what a key supports: equality, ordering, `self.keys()` and lookup in `self`. The same implied rule extends to `fn<K, V>(m: [K: V])`, so generic map functions and impls accept the same bodies.\n\nNew work (b): fix edits. Today's Jet.MissingGenericBound fix (\"Add `<T: Describe>` to the generic parameter list\", q06) carries no edit. Each option's refusal must carry an edit that writes that option's bounded head. The no-bound refusal in q07 has a title that drops `.Describe` (\"Write `impl Pair {`\"). Its header also contradicts conditional impls. Its structural copy must name the full head.\n\nNew work (c): the hardcoded conformance table `sema_type_builtin_bound_satisfied`. In it List, Option and FixedList recurse, and Map is Equatable when its key and value are. Once bounded heads land, its list, fixed-array, optional and map rows move to Core source impls in the chosen spelling. Under A the list Equatable row becomes `impl [T]<T: Equatable>.Equatable`, and the rows are deleted. Tuple rows stay in the kernel: tuples have no family head to write an impl on. Result moves with its nominal head.\n\nNew work (d): tooling. The tree-sitter `impl_block` (`_head_name`) accepts only a name. It, the VS Code tmLanguage, the Zed grammar and the editor-grammar guard case take the chosen head. `sema_type_conditional_impl_head` prints heads from the head text, and `sema_type_impl_conditions_met` matches only applied types; both read the structural head. The formatter's impl-head printer, LSP hover and definition, and the Spellings ledger row change too.\n\nKnown defects, owed criteria on their own cards whatever this ballot decides. With a type named `T` in scope, `impl Pair<T: Describe>.Describe` is accepted silently, and neither `Pair<Int>` nor `Pair<T>` gets `describe` (q15b).\n\nThe trait-value path fails today for the nominal analogue too. `Pair<Describe>{a: 1}.describe()` printed `pair #1` on batch14, but on batch16 it fails: \"`q10_trait_value_arg.Describe` isn't `Describe`\" (q10, a regression). `[Describe]{1, 2}` passed to `fn<T: Describe>(xs: [T])` fails with \"`q13_nested_trait_in_list.Describe` isn't `Describe`\" (q13). So the trait-value path through a bounded impl, nominal or structural, needs a criterion on the build card.\n\n`T` is not inferred from a `[Int#2]` argument to `fn<T, N: Int>(xs: [T#N])` (q02b). A generic caller of a fixed-array impl passes type arguments today.\n\nFixed arrays and lists. A `[Int#2]` passes where `[Int]` is wanted and has `.len()` (q12). Under every option, a user's `[T]` impl methods still do not reach a fixed array. Mitigation: a call that misses on a `[T#N]` while a `[T]` impl has the method gets a fix naming that impl and offering `impl [T#N]` beside it. Passing the array to a function that takes `[T]` keeps working as today.\n\nEvery option shows the same program: a Describe trait, an Int impl and bounded impls for all four shapes. Five calls follow, with the same results in each option. A sixth, refused call is a comment.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A bound list right after the shape, as struct impls write it",
+          "detail": "The impl names the shape, then lists its parameters with their bounds where `impl Pair<T: Describe>` puts them: `impl [T]<T: Describe>.Describe`. A fixed array lists `<T: Describe, N: Int>`. Unbounded heads stay `impl [T].Describe`. The names appear twice, once in the shape and once in the list.",
+          "technical": "Grammar: `impl` Head List? `.` Trait. Head is `[P]`, `[P#Q]`, `P?` or `[P: Q]` over distinct names. List is today's generic parameter list `<…>`, read by the reader `fn<…>` uses. It names every head parameter in head order: T for `[T]` and `T?`, T then `N: Int` for `[T#N]`, K then V for `[K: V]`.\n\nThe head declares the names and the list repeats them, as `Pair` declares `<A, B>` and `impl Pair<A: …, B>` repeats them. Each type name may carry bounds as in a function's list, including several (`T: [Describe, Encode]`). N is written `N: Int`, Jet's one number-parameter spelling.\n\nRefusals. Each is one Jet.InvalidStatement with an edit and no cascade. A list naming other parameters or a different order gets the head's names in order. A bare `N` gets `N: Int`. A list with no bound at all is removed, with the title \"Write `impl [T].Describe`\".\n\nOther options' habits get one refusal each. `impl<T: Describe> [T].Describe` gets the edit `impl [T]<T: Describe>.Describe`. A trailing `where T: Describe` gets an edit moving the bound into the list. A reads `impl [T: Describe].Describe` as a map head whose value names a trait. It refuses it with \"`[T: Describe]` is a map head; bound the items with `impl [T]<T: Describe>.Describe`\", with that edit.\n\n`impl Option<T: Describe>.Describe` is accepted as an alternate input for the same impl, and `jet fmt` prints it as `impl T?<T: Describe>.Describe`. That makes it a second accepted spelling for one impl, normalized on format.\n\nA body that calls a trait method on an unbounded parameter is Jet.MissingGenericBound, with an edit that writes the list. A call where the condition fails is Jet.TraitNotImplemented, worded for the shape (\"here `T` is `String`\"). `impl [T].Describe` beside `impl [T]<T: Describe>.Describe` is Jet.DuplicateTraitImpl, conditions or not. The structural copy reports it once; the nominal case today adds a cascade Jet.DuplicateDefinition (Tests/UI/conditional_impl_overlap.jet), which the same change removes.\n\nMechanism. The parser stores the list in ImplDef.type_params, as it does for `Pair<T: …>`. Registration checks it against the head's names and copies the bounds onto each method's impl conditions. The checker binds the head's parameters by matching the receiver's shape, then reads the conditions as it reads nominal ones. Nothing new runs at run time. Each element type gets its own instance.\n\nEdge cases. Nested shapes qualify through the same impl: `[[7]]` meets `T: Describe` because `[Int]` has Describe (q08 is the nominal analogue). Inside `fn<U: Describe>(items: [U])`, `items.describe()` meets the condition through U's declared bound. An empty value still calls the impl, because the bound is checked on the type (q03b).\n\nBeginner path: write `impl [T].Describe`, call `item.describe()`, accept the edit. Expert path: several bounds, bounds on K and V and generic callers. Trait values depend on the trait-value fix named in the detail (q10, q13).",
+          "code": "// PROPOSED (A): the bound list follows the shape, where `impl Pair<T: Describe>` puts it today.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T]<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N]<T: Describe, N: Int>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V]<K, V: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+        },
+        {
+          "key": "B",
+          "name": "A bound list right after `impl`",
+          "detail": "The list moves in front of the shape and declares the names once: `impl<T: Describe> [T].Describe`. It is familiar from Rust and Scala. But struct impls keep their list after the name, so Jet would have two places for the same thing unless the struct decision is reopened.",
+          "technical": "Grammar: `impl` List? Head `.` Trait. The list sits between `impl` and the head, as `fn<T>` puts its list after `fn`. The list declares the head's parameters with their bounds, `N: Int` included, and the head then uses them. A declared name is never mistaken for a type in scope. So the binding rule's collision cost disappears for bounded impls; unbounded heads keep the rule.\n\nStruct heads keep `impl Pair<T: Describe>.Describe`, and `Set`, `Shared`, `Task`, `Receiver`, `Sender` and `Result` keep the argument form. A bounded impl then has two places for its list, chosen by the head. Making the prefix the only place would reopen the ratified D-IMPL-COND1. It would rewrite that decision's seven test sites and its spec paragraph.\n\nRefusals, each one error with an edit and no cascade. `impl [T]<T: Describe>.Describe` gets `impl<T: Describe> [T].Describe`. A trailing `where` and `impl [T: Describe].Describe` both get the prefix list. The tree-sitter impl block already admits a prefix type-parameter list.",
+          "code": "// PROPOSED (B): the bound list follows `impl`, as `fn<T: Describe>` follows `fn`.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl<T: Describe> [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl<T: Describe, N: Int> [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl<T: Describe> T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl<K, V: Describe> [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+        },
+        {
+          "key": "C",
+          "name": "Bounds inside the shape when the name is a trait",
+          "detail": "The bound is written inside the shape, `impl [T: Describe].Describe`. It is short, but it is the spelling of a map type today, and optionals and maps need a bound inside parentheses.",
+          "technical": "Grammar: inside a structural head, `Name: Bound` is a bound when Bound names a trait. A fixed array writes `[T: Describe#N]`, with N a number by position, as in the unbounded head. An optional writes `(T: Describe)?`, and a map bounds its value as `[K: (V: Describe)]`. Parentheses already group types (`(Int | String)?`, `Int (A | B)!`); what is new is a bound inside them.\n\n`[T: Describe]` is already a valid map type of Describe values (p4). So the head's meaning depends on whether the name after `:` is a trait. `[T: Describe#N]` and `[K: (V: Describe)]` also nest a map-like spelling inside the head. Refusals: the A, B and D spellings each get one error whose edit writes the bound inside the shape.",
+          "code": "// PROPOSED (C): the bound sits inside the shape when the name after `:` is a trait.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T: Describe].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T: Describe#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl (T: Describe)?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: (V: Describe)].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+        },
+        {
+          "key": "D",
+          "name": "A `where` clause after the head",
+          "detail": "A new word lists the conditions after the head, `impl [T].Describe where T: Describe`. It reads like Swift, but it adds a keyword and is the trailing clause the owner already rejected for struct impls.",
+          "technical": "Grammar: `impl` Head `.` Trait `where` Conditions `{`, with Conditions a comma list of `Name: Bounds`. `where` becomes a contextual keyword in impl heads only. N stays a number by its `#` position and takes no condition.\n\nThe owner rejected the same trailing shape (`impl Pair.Describe when T: Priced`) in D-IMPL-COND1 as \"a second way to write a bound\". Struct heads keep `impl Pair<T: Describe>.Describe`, so a bounded impl has two spellings. `using field` delegation never meets `where`: structural heads have no fields to delegate through. Refusals: the A, B and C spellings each get one error whose edit writes the `where` clause.",
+          "code": "// PROPOSED (D): a new `where` clause after the head.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T].Describe where T: Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N].Describe where T: Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?.Describe where T: Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V].Describe where V: Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Parameters are declared in a list after `impl` before use, so a head name is never a type in scope; `const N: usize` declares a number's kind. Rust has two places for bounds, the list and `where`, and `where` can bound non-parameter types. Jet has neither const-kind syntax beyond `N: Int` nor non-parameter `where`. Source: Rust Reference, Implementations and Generics (doc.rust-lang.org/reference/items/implementations.html, /items/generics.html).",
+          "code": "impl<T: Describe> Describe for Vec<T> { … }\nimpl<T, const N: usize> Describe for [T; N] where T: Describe { … }"
+        },
+        {
+          "lang": "Swift",
+          "note": "The head is the family's nominal name and its parameter names (Element, Wrapped, Key, Value) are declared once by the library, so nothing repeats. Requirements the type states (`Key: Hashable`) are implied in the extension, the rule this ballot adopts for map keys. Swift also has same-type constraints (`where Element == Int`), which Jet does not. Source: SE-0143 Conditional conformances; The Swift Programming Language, Generics.",
+          "code": "extension Array: Describe where Element: Describe { … }"
+        },
+        {
+          "lang": "Haskell",
+          "note": "Head variables are fresh because they are lower-case, and Haskell 2010 requires an instance head to be a constructor over distinct variables: the rule the unbounded heads adopt. Jet types and parameters are both PascalCase, so Jet refuses a name that resolves to a type instead. Extensions add flexible and overlapping instances. Source: Haskell 2010 Report, section 4.3.2.",
+          "code": "instance Describe a => Describe [a] where …"
+        },
+        {
+          "lang": "Scala 3",
+          "note": "Parameters are declared before the head as in Rust, with a context bound as the short form and `using` as the long one; givens are scoped by import and can be prioritized. Source: Scala 3 Reference, Given Instances and Using Clauses (docs.scala-lang.org/scala3/reference/contextual/givens.html).",
+          "code": "given [T: Describe]: Describe[List[T]] with …"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the position Jet already uses for conditional impls: name the head, then list its parameters with their bounds. The owner chose that position over a trailing clause for structs, nothing in A's head can be read as a map, and no keyword is added. B's declared names are its real strength, but B makes the prefix a second place for impl bounds next to `Pair<T: …>`. No other language repeats the names after the shape; A does so to match Jet's own struct form.",
+        "gains": [
+          "The same position for impl bounds as struct impls: after the head.",
+          "No reading of `[T: Describe]` as a map, and no new keyword."
+        ],
+        "losses": [
+          {
+            "loss": "The names appear twice, as in `[T]<T: Describe>` and `[T#N]<T: Describe, N: Int>`; no other language repeats them.",
+            "mitigation": "The refusal of an unbounded call writes the list with an edit, and the head and list are checked against each other with an edit."
+          },
+          {
+            "loss": "Two forms remain: sigil heads take a trailing list, and `Pair`, `Set`, `Shared`, `Task`, `Receiver`, `Sender` and `Result` take the list as their arguments. `Option<T: …>` is accepted as an alternate input, a second spelling for one impl.",
+            "mitigation": "`jet fmt` prints `Option<T: …>` heads as `T?<T: …>`, so each family has one printed form."
+          },
+          {
+            "loss": "A type in scope named like a head parameter turns an impl into an error.",
+            "mitigation": "The refusal names the type and is loud; B would remove this only for bounded impls."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A second place for impl bounds beside `Pair<T: …>`, or reopening D-IMPL-COND1 to move every struct impl."
+          },
+          {
+            "key": "C",
+            "reason": "`[T: Describe]` already spells a map type, and optionals and maps need a bound inside parentheses."
+          },
+          {
+            "key": "D",
+            "reason": "A new keyword for the trailing-clause shape the owner rejected in D-IMPL-COND1 as a second way to write a bound."
+          }
+        ],
+        "tradeoff": "One bound position for every conditional impl, for writing the parameter names twice."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: StructBoundReview. Probes p1-p5 and q01-q21 reproduce on batch16, and every finding (F1-F18, R1-R4, U5) is fixed or named in the ballot; the concrete-head [U8] question moved to its own ballot."
+      },
+      "checkInstructions": "Run the probes p1-p5 in this directory and review-probes/q*.jet with the current batch compiler; the ballot's detail quotes their output. Attack A's edge cases first: the binding rule, `N: Int` in the list and the implied map-key rule. Then try nested shapes, generic callers with declared bounds, and overlap with an unbounded impl.",
+      "surface": {
+        "gist": "How does an impl for every list, array, optional or map say what its items must support?",
+        "lesson": "A bound like `T: Describe` lets only types with Describe in. Struct impls write it after the name: `impl Pair<T: Describe>.Describe`. Built-in shapes need the same, but `[T: Describe]` already means a map.",
+        "trio": {
+          "current": {
+            "note": "Today struct impls can be conditional, and built-in shapes cannot have impls at all.",
+            "code": "impl Pair<T: Describe>.Describe { … }   // works\nimpl [T].Describe { … }                 // refused at `[`"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust declares the parameters after `impl`, before the type.",
+            "code": "impl<T: Describe> Describe for Vec<T> { … }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Bound list after the shape",
+            "gist": "List the shape's parameters with bounds, where struct impls put them.",
+            "gains": [
+              "Same position as struct impls.",
+              "Never mistaken for a map."
+            ],
+            "losses": [
+              "The names appear twice."
+            ],
+            "proposed": {
+              "code": "impl [T]<T: Describe>.Describe { … }\nimpl [T#N]<T: Describe, N: Int>.Describe { … }\nimpl T?<T: Describe>.Describe { … }\nimpl [K: V]<K, V: Describe>.Describe { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Bound list after `impl`",
+            "gist": "Declare the parameters in front of the shape, as Rust does.",
+            "gains": [
+              "Each name is declared once.",
+              "Familiar from Rust and Scala."
+            ],
+            "losses": [
+              "Struct impls keep the other place."
+            ],
+            "proposed": {
+              "code": "impl<T: Describe> [T].Describe { … }\nimpl<T: Describe, N: Int> [T#N].Describe { … }\nimpl<T: Describe> T?.Describe { … }\nimpl<K, V: Describe> [K: V].Describe { … }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Bound inside the shape",
+            "gist": "Write the bound where the parameter appears.",
+            "gains": [
+              "Shortest for lists."
+            ],
+            "losses": [
+              "`[T: Describe]` already spells a map.",
+              "Optionals and maps need a bound inside parentheses."
+            ],
+            "proposed": {
+              "code": "impl [T: Describe].Describe { … }\nimpl [T: Describe#N].Describe { … }\nimpl (T: Describe)?.Describe { … }\nimpl [K: (V: Describe)].Describe { … }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "A `where` clause",
+            "gist": "List conditions after the head with a new word.",
+            "gains": [
+              "Reads like Swift."
+            ],
+            "losses": [
+              "A new keyword.",
+              "The trailing shape already rejected for struct impls."
+            ],
+            "proposed": {
+              "code": "impl [T].Describe where T: Describe { … }\nimpl [T#N].Describe where T: Describe { … }\nimpl T?.Describe where T: Describe { … }\nimpl [K: V].Describe where V: Describe { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The bound list sits where struct impls already put it. Nothing reads as a map, and no keyword is added.",
+          "gains": [
+            "One bound position for every conditional impl.",
+            "No map look-alike and no new keyword."
+          ],
+          "losses": [
+            {
+              "loss": "The names appear twice: `[T]<T: Describe>`.",
+              "mitigation": "The refusal's edit writes the list, and head and list are checked against each other."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second place for impl bounds."
+            },
+            {
+              "key": "C",
+              "reason": "Reads as a map type."
+            },
+            {
+              "key": "D",
+              "reason": "A new keyword for a shape already rejected."
+            }
+          ],
+          "tradeoff": "One bound position everywhere, for writing the names twice."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "StructBoundReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T04:29:39.066Z"
     }
   ],
   "questions": [
@@ -137614,6 +137905,209 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T04:29:39.067Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-IMPL-STRUCTBOUND1",
+      "note": "Where an impl for a built-in shape writes the bounds on its item types"
+    },
+    {
+      "at": "2026-11-24T04:26:09.459Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0sdz4q0",
+      "note": "13 criteria, soft limit 6: impl-head parameter resolution is the code this card's structural-heads work rewrites"
+    },
+    {
+      "at": "2026-11-24T04:26:09.459Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0sdz4q0",
+      "note": "#13 An impl's generic parameter shadows a type of the same name "
+    },
+    {
+      "at": "2026-11-24T04:26:08.502Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0j3st66",
+      "note": "9 criteria, soft limit 6: regression caused by this card's c7 work; it belongs here"
+    },
+    {
+      "at": "2026-11-24T04:26:08.502Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0j3st66",
+      "note": "#10 A trait value meets a bound of its own trait. Given impl Pai"
+    },
+    {
+      "at": "2026-11-24T04:24:26.694Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0eve9h3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T04:24:25.498Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-remove",
+      "ref": "c0eve9h3",
+      "note": "#9: added by mistake while probing the --over-limit flag; no content; was [open]: x"
+    },
+    {
+      "at": "2026-11-24T04:24:04.365Z",
+      "by": "agent",
+      "action": "card.over-limit",
+      "ref": "c0eve9h3",
+      "note": "9 criteria, soft limit 6: probe"
+    },
+    {
+      "at": "2026-11-24T04:24:04.365Z",
+      "by": "agent",
+      "action": "card.criteria-add",
+      "ref": "c0eve9h3",
+      "note": "#9 x"
+    },
+    {
+      "at": "2026-11-24T04:23:56.540Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T04:18:37.039Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T04:18:36.109Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0aha21c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T04:18:35.140Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0j3st66",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T04:18:33.999Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0j3st66",
+      "note": "#9: c8 moved a value lacking the trait's impl in a trait list from E0112 to E0905, so Bool now gives E0905 there too. The requirement, one code for Decimal and Bool and never an ICE, is unchanged; only the code number named in the text was stale.; was: A Decimal value (a bare literal such as 2.5, which D-LITCARRIER1=D makes a Decimal) entering a trait value compiles on O0, O1 and O2: without an impl, sema gives E0112 as it does for Bool (x12), never"
+    },
+    {
+      "at": "2026-11-24T04:18:19.628Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0do6acc",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T04:18:17.712Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0j3st66",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-24T04:18:16.170Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0j3st66",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T04:18:14.147Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06r6neu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T04:18:12.245Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0bk3yid",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-24T04:18:10.394Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-24T04:18:08.755Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01vsb2c",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T04:18:06.588Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T03:56:20.505Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T03:55:59.528Z",
+      "by": "agent",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "27 criteria, soft limit 6: a sema defect found while reviewing D-RULE-TYPEARGS1; #6851 owns Core path privilege"
+    },
+    {
+      "at": "2026-11-24T03:55:59.528Z",
+      "by": "agent",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#28 A dotted Core path that names no declaration is refused as a"
+    },
+    {
+      "at": "2026-11-24T03:54:36.831Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T03:37:23.230Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0in2dft",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T03:31:43.424Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0in2dft",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T03:31:42.603Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0in2dft",
+      "note": "#7"
+    },
     {
       "at": "2026-11-24T03:31:41.398Z",
       "by": "Orchestrator",
