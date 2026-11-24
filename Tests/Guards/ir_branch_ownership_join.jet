@@ -1,0 +1,219 @@
+use ir_branch_join_files: core.files
+
+// Ownership where the paths of a branch meet. A lowering that builds user
+// code on one path of an If (a statement, an expression, a condition or a
+// pattern test, any of which may move a variable) saves the ownership of the
+// variables bound before the If, and joins the paths where they meet: JetIR
+// Build.jet ir_meet_paths, ir_end_tested or ir_join_owned, or a restore
+// through ir_set_own_states. Without the join, a variable one path moved is
+// dropped twice, or never.
+//
+// The census reads every function of the IR builder. A builder of user code
+// is one of IR_BRANCH_JOIN_BUILDERS, or a function that takes the program
+// and a body node and calls a builder. A body node is a parameter of a Body
+// type, or an Int or [Int] parameter whose name starts with one of
+// IR_BRANCH_JOIN_NODE_PARAMS. A function that calls a builder between an
+// `ir_open_if` or `ir_open_condition` and its `ir_end` joins the paths with
+// one of IR_BRANCH_JOIN_HELPERS, or IR_BRANCH_JOIN_REVIEWED says why its
+// paths need no join.
+IR_BRANCH_JOIN_ROOT: "Compiler/JetIR/Source"
+
+IR_BRANCH_JOIN_BUILDERS: [String]{"ir_stmts", "ir_stmt", "ir_stmt_body", "ir_stmt_collecting", "ir_expr", "ir_expr_split", "ir_expr_slot"}
+
+IR_BRANCH_JOIN_HELPERS: [String]{"ir_meet_paths", "ir_end_tested", "ir_join_owned", "ir_set_own_states"}
+
+IR_BRANCH_JOIN_NODE_PARAMS: [String]{"expression", "statement", "body", "init", "fallback", "condition", "alternative", "argument", "receiver", "left", "right", "node", "expr", "operand", "links", "then_body", "else_body"}
+
+IRBranchJoinReviewed: struct {
+    function: String,
+    reason: String,
+}
+
+IR_BRANCH_JOIN_REVIEWED: [IRBranchJoinReviewed]{
+    IRBranchJoinReviewed{function: "ir_refutable_bind", reason: "the fallback of `pattern: init else {{ … }}` always leaves, and ir_stmts restores the ownership a block that leaves changed"},
+    IRBranchJoinReviewed{function: "ir_dyn_option_encode", reason: "the absent path builds `Dyn.Null`, which has no payload (BodyEnumPayload.Unit), so no user code runs there"},
+    IRBranchJoinReviewed{function: "ir_context_get", reason: "the absent path builds the `#ContextKey` constant's value, which reads and moves no variable"},
+}
+
+IRBranchJoinCall: struct {
+    name: String,
+    line: Int,
+}
+
+IRBranchJoinFunction: struct {
+    path: String,
+    line: Int,
+    name: String,
+    signature: String,
+    calls: [IRBranchJoinCall],
+}
+
+// The functions of the IR builder source `text` from the file at `path`. A
+// function starts at a top-level `ir_…: fn(` line and runs to the next
+// top-level line.
+ir_branch_join_functions: fn(path: String, text: String, out: &[IRBranchJoinFunction]) {
+    name := ""
+    start := 0
+    signature := ""
+    calls := [IRBranchJoinCall]{}
+    loop (index, line) in text.lines() {
+        bytes: line.bytes()
+        if bytes.len() > 0 && as_word_byte(Int{bytes[0]}) {
+            if name != "" -> out.push(IRBranchJoinFunction{path: path.copy(), line: start, name: name, signature: signature, calls: calls})
+            name = ""
+            signature = ""
+            calls = [IRBranchJoinCall]{}
+            if line.starts_with("ir_") && line.split_once(": fn(") == .Val(pair) {
+                name = pair.before
+                start = index + 1
+                signature = line.copy()
+            }
+            next
+        }
+        if name == "" -> next
+        mask := [Bool]{}
+        loop _ in 0..<bytes.len() -> mask.push(false)
+        as_jet_code(bytes, mask)
+        at := 0
+        loop at < bytes.len() {
+            if !mask[at] || !as_word_byte(Int{bytes[at]}) {
+                at += 1
+                next
+            }
+            first := at
+            loop at < bytes.len() && as_word_byte(Int{bytes[at]}) -> at += 1
+            if as_byte_at(bytes, at) != 40 || as_byte_at(bytes, first - 1) == 46 -> next
+            word: String.from_bytes(bytes.slice(first, at)) ?? ""
+            if word.starts_with("ir_") -> calls.push(IRBranchJoinCall{name: word, line: index + 1})
+        }
+    }
+    if name != "" -> out.push(IRBranchJoinFunction{path: path.copy(), line: start, name: name, signature: signature, calls: calls})
+}
+
+// Whether `signature` takes the program and a body node.
+ir_branch_join_takes_node: fn(signature: String) -> Bool Never! {
+    if !signature.contains("p: IRProgram") -> return false
+    parameters: signature.split_once("(") ?? return false
+    loop parameter in parameters.after.split(", ").to_list() {
+        parts: parameter.split_once(": ") ?? next
+        ty: parts.after.trim()
+        if ty.starts_with("Body") || ty.starts_with("[Body") -> return true
+        if !(ty.starts_with("Int") || ty.starts_with("[Int]")) -> next
+        loop prefix in IR_BRANCH_JOIN_NODE_PARAMS {
+            if parts.before.trim().starts_with(prefix) -> return true
+        }
+    }
+    false
+}
+
+// The builders of user code among `functions`.
+ir_branch_join_builders: fn(functions: [IRBranchJoinFunction]) -> [String:Bool] Never! {
+    builders := [String:Bool]{}
+    loop name in IR_BRANCH_JOIN_BUILDERS -> builders[name] = true
+    changed := true
+    loop changed {
+        changed = false
+        loop function in functions {
+            if builders.get(function.name) != None || !ir_branch_join_takes_node(function.signature) -> next
+            loop call in function.calls {
+                if builders.get(call.name) != None {
+                    builders[function.name] = true
+                    changed = true
+                    break
+                }
+            }
+        }
+    }
+    builders
+}
+
+// Each function that builds user code inside an If and joins no paths,
+// outside `reviewed`, and each row of `reviewed` that names no such function.
+ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBranchJoinReviewed]) -> [String] Never! {
+    builders: ir_branch_join_builders(functions)
+    problems := [String]{}
+    unjoined := [String:Bool]{}
+    loop function in functions {
+        opened := [Bool]{}
+        inside := [String]{}
+        joined := false
+        loop call in function.calls {
+            if {
+                call.name == "ir_open_if" || call.name == "ir_open_condition" -> opened.push(true)
+                call.name == "ir_open" -> opened.push(false)
+                call.name == "ir_end" && opened.len() > 0 -> _: opened.pop()
+                call.name == "ir_end" -> {}
+                IR_BRANCH_JOIN_HELPERS.contains(call.name) -> joined = true
+                opened.contains(true) && builders.get(call.name) != None -> inside.push("{call.name} at line {call.line}")
+            }
+        }
+        if joined || inside.is_empty() -> next
+        unjoined[function.name] = true
+        listed := false
+        loop row in reviewed {
+            if row.function == function.name -> listed = true
+        }
+        if !listed {
+            calls: inside.join(", ")
+            problems.push("{function.path}:{function.line}: {function.name} builds user code inside an If ({calls}) and never joins the ownership of the paths; save it before the If and join where they meet (ir_meet_paths), or list the function in IR_BRANCH_JOIN_REVIEWED with why its paths need no join")
+        }
+    }
+    loop row in reviewed {
+        if unjoined.get(row.function) == None {
+            problems.push("IR_BRANCH_JOIN_REVIEWED `{row.function}`: no function of that name builds user code inside an If without a join any more; delete the row")
+        }
+    }
+    problems.sort()
+    problems
+}
+
+#Test("the branch ownership census reports a branch that skips the join, and a stale row") {
+    source: [String]{
+        `ir_lowered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCond, span: Span) -> Int Never! {`,
+        `    ir_expr(m, p, b, 0)`,
+        `}`,
+        "",
+        `ir_joined: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {`,
+        `    before: ir_own_states(b, b.bindings.len())`,
+        `    ir_open_if(b.f, 1, b.line)`,
+        `    ir_stmts(m, p, b, body)`,
+        `    ir_end(b.f, b.line)`,
+        `    ir_meet_paths(m, b, 1, before, false, false)`,
+        `}`,
+        "",
+        `ir_skipped: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, test: Int) Never! {`,
+        `    ir_open_if(b.f, test, b.line)`,
+        `    ir_else(b.f, b.line) // ir_stmts(m, p, b, body) in a comment is no call`,
+        `    _: ir_lowered(m, p, b, BodyIfCond.Plain(0), span)`,
+        `    ir_end(b.f, b.line)`,
+        `    _: ir_expr(m, p, b, 0)`,
+        `}`,
+        "",
+        `ir_constant: fn(m: &IRModule, b: &IRBuilder, test: Int) Never! {`,
+        `    ir_open_if(b.f, test, b.line)`,
+        `    _: ir_runtime(m, b, "jet_x", [Int]{}, -1)`,
+        `    ir_end(b.f, b.line)`,
+        `}`,
+    }
+    functions := [IRBranchJoinFunction]{}
+    ir_branch_join_functions("JetIR/a.jet", source.join("\n"), functions)
+    assert_eq(functions.len(), 4)
+    problems: ir_branch_join_problems(functions, [IRBranchJoinReviewed]{IRBranchJoinReviewed{function: "ir_gone", reason: "x"}})
+    assert_eq(problems.len(), 2)
+    assert(problems[0] == "IR_BRANCH_JOIN_REVIEWED `ir_gone`: no function of that name builds user code inside an If without a join any more; delete the row")
+    assert(problems[1].starts_with("JetIR/a.jet:13: ir_skipped builds user code inside an If (ir_lowered at line 16) and never joins"))
+    assert_eq(ir_branch_join_problems(functions, [IRBranchJoinReviewed]{IRBranchJoinReviewed{function: "ir_skipped", reason: "x"}}).len(), 0)
+}
+
+#Test("every IR lowering that builds user code inside a branch joins the ownership of its paths") {
+    guards_enter_root()
+    functions := [IRBranchJoinFunction]{}
+    loop child in (ir_branch_join_files.list_dir(IR_BRANCH_JOIN_ROOT) ?? panic("list {IR_BRANCH_JOIN_ROOT}: {err}")) {
+        if !child.name.ends_with(".jet") -> next
+        path: "{IR_BRANCH_JOIN_ROOT}/{child.name}"
+        text: ir_branch_join_files.read(path) ?? panic("read {path}: {err}")
+        ir_branch_join_functions(path, text, functions)
+    }
+    assert(functions.len() > 1000, "the census read {functions.len()} IR functions under {IR_BRANCH_JOIN_ROOT}; the builder moved or its functions are no longer `ir_…: fn(` lines")
+    assert_eq(ir_branch_join_problems(functions, IR_BRANCH_JOIN_REVIEWED).join("\n"), "")
+}
