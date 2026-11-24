@@ -1560,9 +1560,10 @@ sema_function_check_passes: fn(func: Func, owner_key: String, function_kind: TFu
         retypes: sema_expr_number_accept_retypes(number_known, number_found)
         if !shares && !retypes {
             instance: if program.registration_graph == .Val(graph) -> sema_name_instance_span(graph, environment.module_identity, func.name) else -> None
-            if instance == .Val(line) {
+            if instance == .Val(owner) {
                 loop diagnostic in pass_diagnostics {
-                    diagnostics.push(sema_name_at_instance(diagnostic, line))
+                    placed: sema_name_at_instance(diagnostic, owner) ?? next
+                    diagnostics.push(placed)
                 }
             } else { diagnostics.extend(pass_diagnostics.move()) }
             call_facts.extend(pass_call_facts.move())

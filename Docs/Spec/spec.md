@@ -4124,10 +4124,14 @@ value-argument example is `Examples/Modules/FactValueArguments.jet`.
 An instance's member bodies are its template's text, checked once per
 instance. An error in one is reported at the instance line
 (`int_cache: cache<Int>(64)`), with the template text it came from as a
-label; inline-module and instance members are named by their source paths
-(`int_cache.key_of`), never by their generated identities. A type parameter
-bound to a built-in scalar names that scalar as a static-call owner, so
-`K.parse(text)` in an `Int` instance reads as `Int.parse(text)`.
+label. A report whose fix edits that text, such as **E0514** for a `:=`
+binding nothing writes, is reported at the text itself, because the edit
+changes it for every instance. If it is not an error, only the template's
+first instance in the module reports it. Inline-module and instance members
+are named by their source paths (`int_cache.key_of`), never by their
+generated identities. A type parameter bound to a built-in scalar names that
+scalar as a static-call owner, so `K.parse(text)` in an `Int` instance reads
+as `Int.parse(text)`.
 
 ## Composable configuration modules
 
