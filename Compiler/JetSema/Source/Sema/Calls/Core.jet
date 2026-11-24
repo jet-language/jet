@@ -864,25 +864,6 @@ sema_call_core_check_type_args: fn(module_name: String, member: String, expected
     false
 }
 
-// The caller supplies the exact typed signature. Shared Binder checks its labels,
-// zones, defaults and arity; no Core metadata is inferred from a member name.
-sema_call_core_bind_arguments: fn(record: CoreCallRecord, signature: Type, args: [CallArg], span: Span, diagnostics: ^[Diagnostic]) -> SemaCallBinding? {
-    process_run_boundary: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
-    if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
-        maximum := record.signature.max_arity
-        range: if maximum > record.signature.arity -> "between {record.signature.arity} and {maximum}" else -> "{record.signature.arity}"
-        diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
-        return None
-    }
-    if !sema_call_type_is_function(signature) {
-        diagnostics.push(sema_call_not_callable("{record.module_name}.{record.member}", signature, span))
-        return None
-    }
-    local_args := [CallArg]{}
-    loop arg in args -> local_args.push(arg.copy())
-    sema_call_bind_direct("{record.module_name}.{record.member}", signature, local_args, span, diagnostics)
-}
-
 // `("core.math", "abs")`: `abs` takes Int, Float, F32, I64 and Complex,
 // returning the argument type (Float for Complex). The Int form stays the
 // routed source `abs`; any other argument is the MathBuiltin `abs`. A Float,
@@ -1296,6 +1277,19 @@ sema_call_core_source_in: fn(identity: ModuleID, member: String, values: [TExpr]
         arguments.push(TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
     }
     Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: arguments}, span))
+}
+
+// A call of the `module_name` source function `member` on checked arguments,
+// typed by its Core declaration: its declared return with `type_args` for its
+// type parameters (web.form's `input` and `typed<Model>`).
+sema_call_core_source_declared: fn(module_name: String, member: String, type_args: [Type], values: [TExpr], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
+    identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
+    target: sema_call_core_source_target(environment, program, identity, member, type_args, span, false, diagnostics) ?? return None
+    result: sema_call_signature_return(target.signature) ?? return None
+    params: sema_call_params_from_type(target.signature) ?? return None
+    if params.len() != values.len() -> return None
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: type_args, args: sema_call_core_source_arguments(values, params, environment, program)}, span))
 }
 
 // The Core module and function a source-owned row's `member` names: the row's
