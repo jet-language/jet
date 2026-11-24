@@ -64,6 +64,7 @@ use {
         lint_auto_derive_name,
         owned_trait,
         CORE_LANGUAGE_ROOTS,
+        FIRST_PARTY_RESERVED,
         core_module_has_type,
         diagnostic_with_source_path,
         effect_scope_argument_valid,
@@ -200,23 +201,11 @@ use {
 // The one language edition (greenfield: one meaning, no edition-gated behavior).
 JET_DRIVER_EDITION: "2026"
 
-// S51: first-party short names reserved before packages land.
-JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
-    "core",
-    "jet",
-    "http",
-    "regex",
-    "csv",
-    "toml",
-    "crypto",
-    "archive",
-} }
-
-// Every root no local module may take as its alias or root: the first-party
-// names, then the roots of Core's languages (CORE_LANGUAGE_ROOTS). A
-// package's own languages join them per program
+// Every root no local module may take as its alias or root: the S51
+// first-party names (FIRST_PARTY_RESERVED), then the roots of Core's languages
+// (CORE_LANGUAGE_ROOTS). A package's own languages join them per program
 // (jet_driver_check_package_languages).
-JET_DRIVER_RESERVED_ROOTS: #run JET_DRIVER_FIRST_PARTY_RESERVED.concat(CORE_LANGUAGE_ROOTS)
+JET_DRIVER_RESERVED_ROOTS: #run FIRST_PARTY_RESERVED.concat(CORE_LANGUAGE_ROOTS)
 
 JetDriverFilePath: struct {
     path: String,
