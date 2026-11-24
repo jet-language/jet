@@ -739,6 +739,37 @@ x64_runtime_image_defines: fn(images: &[[U8]], gap_at: Int, gap: Int, names: [St
     found
 }
 
+// The address the runtime image gives its export `name`, looked up as a
+// bind looks up a program's import: in its export index, else in its global
+// symbols (the last that names it). The image is the one row of `images`,
+// read without its bytes [gap_at, gap_at + gap); it moves into a context
+// for the reads and back. None when the image is absent, can't be read or
+// defines no `name`.
+x64_runtime_image_export: fn(images: &[[U8]], gap_at: Int, gap: Int, name: String) -> Int? Never! {
+    if images.len() == 0 -> return None
+    image: images.remove(0, .Slot) ?? return None
+    c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
+    view: link_image_view(c, 1, gap_at, gap)
+    found := Int?{None}
+    if c.errors.len() == 0 {
+        if {
+            view.exports_slots > 0 -> {
+                k: link_image_export(c, view, name)
+                if k >= 0 -> found = Val(link_s64(c.bufs, 1, view.symtab_at + 24 * k + 8))
+            }
+            else -> {
+                loop k in view.first_global..<view.symtab_count {
+                    at: view.symtab_at + 24 * k
+                    if link_u16(c.bufs, 1, at + 6) == 0 -> next
+                    if link_cstr(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at)) == name -> found = Val(link_s64(c.bufs, 1, at + 8))
+                }
+            }
+        }
+    }
+    images.push(c.bufs.remove(1, .Slot) ?? [U8]{})
+    found
+}
+
 link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
     if bound.errors.len() > 0 {
         return X64ExecutableResult{bytes: [U8]{}, errors: bound.errors.move()}

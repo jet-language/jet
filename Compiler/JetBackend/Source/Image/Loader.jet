@@ -2943,6 +2943,25 @@ x64_trace_wait: fn(trace: X64Trace) -> X64TraceStop {
     X64TraceStop{thread: result, status: status}
 }
 
+// A thread of the traced program that has stopped or ended, and its wait
+// status, as x64_trace_wait reports it, asked without waiting: None while
+// every thread runs. `thread` is -errno when the wait failed (-ECHILD once
+// the helper traces nothing).
+x64_trace_wait_now: fn(trace: X64Trace) -> X64TraceStop? {
+    result := -OS_EINTR
+    status := 0
+    #Unsafe("the helper's wait4 writes one int status to the trace's scratch word") {
+        loop result == -OS_EINTR {
+            result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL | LOADER_WAIT_NOHANG, 0, 0, 0)
+        }
+        if result > 0 {
+            status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
+        }
+    }
+    if result == 0 -> return None
+    Val(X64TraceStop{thread: result, status: status})
+}
+
 // Wait for any thread of the traced program to stop or end, as
 // x64_trace_wait does, while watching the descriptor `input`: None when
 // the input has bytes to read (or has ended) first. The program is asked

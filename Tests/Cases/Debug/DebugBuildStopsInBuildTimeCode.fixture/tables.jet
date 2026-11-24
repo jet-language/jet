@@ -1,0 +1,57 @@
+// Build-time code `jet debug --build` stops in: a prep value, a prep fn
+// recipe, a marker body and the package's build. The case sets its
+// breakpoints by line, so the lines stay where they are.
+square: fn(n: Int) -> Int {
+    doubled: n * n
+    doubled
+}
+
+squares: fn(count: Int) -> [Int] {
+    table := [Int]{}
+    loop i in 0..<count -> table.push(square(i))
+    table
+}
+
+SQUARES: #run squares(8)
+
+Doubled: struct {
+    amount: Int,
+
+    impl Literal.Int {
+        #run from_literal: fn(value: Int) -> Doubled {
+            twice: value * 2
+            Doubled{amount: twice}
+        }
+    }
+}
+
+Tagged: struct {
+    style: String{"plain"},
+
+    impl Marker {
+        sites: [.Type],
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+            label: fn(self) -> String { "tagged {tname}" }
+        }
+    }
+}
+
+#Tagged
+Point: struct {
+    x: Int,
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["tables.jet"], [])
+    b.default(app)
+}
+
+amount_of: fn(value: Doubled) -> Int { value.amount }
+
+run: fn() {
+    print(SQUARES[7])
+    print(amount_of(21))
+    print(Point{x: 1}.label())
+}

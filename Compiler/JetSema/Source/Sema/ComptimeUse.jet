@@ -1040,9 +1040,7 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
 // comes from a module this module imports only with `#run use`: the
 // shipped program has no such module to hold it.
 sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
-    if scopes.comptime_execution_depth > 0 || (scopes.location_function ?? environment.function_name) == "build" {
-        return
-    }
+    if sema_scope_build_time(scopes, environment, program) -> return
     if program.registration_graph == .Val(graph) {
         if graph.comptime_use_targets.len() == 0 {
             return

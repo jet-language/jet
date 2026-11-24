@@ -74,7 +74,12 @@ lsp_location: fn(checked: LSPChecked, module_path: String, span: Span) -> LSPLoc
 }
 
 lsp_location_json: fn(location: LSPLocation) -> String Never! {
-    "{{\"uri\":{foundation_json_quote(location.uri)},\"range\":{lsp_range_json(lsp_byte_span_to_range(location.source, lsp_clamped_span(location.source, location.span)))}}}"
+    lsp_source_location_json(location.uri, location.source, location.span)
+}
+
+// `span` of the text `source` at `uri`, as an editor location.
+lsp_source_location_json: fn(uri: String, source: String, span: Span) -> String Never! {
+    "{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(lsp_byte_span_to_range(source, lsp_clamped_span(source, span)))}}}"
 }
 
 lsp_span_holds: fn(span: Span, offset: Int) -> Bool Never! {

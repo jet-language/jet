@@ -22,8 +22,8 @@
 // the same addresses (each batch has its own, above the last one).
 use {
     math: core.math
-    jet_foundation.[CompilerThreads, NameTable, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_table_sized]
-    jet_ir.[IRFunction, IRMember, IRModule, IROp, IRProgram, IRSlotKind, IRType, IRX64Program, ir_align8, ir_args, ir_emit, ir_function_bind, ir_function_new, ir_intern_name, ir_intern_text, ir_keyed_function, ir_module_new, ir_opt_inline_marked_module, ir_opt_report, ir_pointer_row, ir_row_ty, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object, ir_x64_program]
+    jet_foundation.[BuildDebugEvent, CompilerThreads, NameTable, Span, TComptimeValue, build_debug_ask, build_debug_on, build_debug_tell, build_debug_tracer, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_table_sized]
+    jet_ir.[IRFunction, IRMember, IRModule, IROp, IRProgram, IRSlotKind, IRType, IRX64Program, IR_X64_COMPTIME_STEPS_SYMBOL, ir_align8, ir_args, ir_emit, ir_function_bind, ir_function_new, ir_intern_name, ir_intern_text, ir_keyed_function, ir_module_new, ir_opt_inline_marked_module, ir_opt_report, ir_pointer_row, ir_row_ty, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_debug_program, ir_x64_object, ir_x64_program]
     jet_backend.[
         X64BindResult,
         X64ComptimeChild,
@@ -60,10 +60,12 @@ use {
         X64_COMPTIME_WRITE,
         os_page_round,
         x64_bind_functions_at,
+        x64_bind_functions_debug_at,
         x64_bind_runtime_image,
         x64_comptime_admit,
         x64_comptime_close,
         x64_comptime_code,
+        x64_comptime_facts,
         x64_comptime_frame,
         x64_comptime_function_at,
         x64_comptime_functions,
@@ -85,6 +87,7 @@ use {
         x64_executable_segments,
         x64_executable_whole,
         x64_runtime_image_defines,
+        x64_runtime_image_export,
     ]
 }
 
@@ -188,6 +191,11 @@ JetEvalNativeProgram: struct {
     // The listing of those functions the host is told of once the batch
     // loads (JetEvalNativeImageReader.loaded).
     listing: String{""},
+    // Under `jet debug --build` (JetFoundation BuildDebug.jet): the batch's
+    // debug facts (x64_comptime_facts) and the address of the child's step
+    // word, which the console reads at a stop; empty and 0 otherwise.
+    facts: [U8]{[U8]{}},
+    steps: Int{0},
 }
 
 // One call's state: the child (taken from the session for the call) and
@@ -311,15 +319,39 @@ jet_eval_native_bind_image: fn(image: &JetEvalNativeImage, object: &&[U8]) -> X6
 // `base`, straight from its functions (JetBackend Image/DirectBind.jet
 // x64_bind_functions_at), the image taken out of the cell and put back as
 // jet_eval_native_bind does. The batch gets no image part: the child runs
-// the image already. None when the image can't be read.
-jet_eval_native_bind_batch: fn(session: JetEvalNativeSession, built: &&IRX64Program, base: Int) -> X64BindResult? Never! {
+// the image already. With `debug` it binds with its debug facts
+// (x64_bind_functions_debug_at), whose loaded bytes are the same. None when
+// the image can't be read.
+jet_eval_native_bind_batch: fn(session: JetEvalNativeSession, built: &&IRX64Program, base: Int, debug: Bool{false}) -> X64BindResult? Never! {
     permit := session.image.guard_edit()
     jet_eval_native_image_read(permit.value)
     runtime: permit.value.bytes.pop() ?? return None
-    bound := x64_bind_functions_at("jet-comptime", built.program.move(), built.functions.move(), built.debug.move(), built.threads, runtime, base, permit.value.gap_at, permit.value.gap)
+    bound := if debug -> x64_bind_functions_debug_at("jet-comptime", built.program.move(), built.functions.move(), built.debug.move(), built.threads, runtime, base, permit.value.gap_at, permit.value.gap) else -> x64_bind_functions_at("jet-comptime", built.program.move(), built.functions.move(), built.debug.move(), built.threads, runtime, base, permit.value.gap_at, permit.value.gap)
     permit.value.bytes.push(bound.executable.image.move())
     bound.executable.image = [U8]{}
     Val(bound.move())
+}
+
+// The address of the child's step word (JetRuntime ComptimeServe.jet
+// comptime_serve_steps) in the session's runtime image; 0 when it has none.
+jet_eval_native_steps_word: fn(session: JetEvalNativeSession) -> Int Never! {
+    permit := session.image.guard_edit()
+    jet_eval_native_image_read(permit.value)
+    x64_runtime_image_export(permit.value.bytes, permit.value.gap_at, permit.value.gap, IR_X64_COMPTIME_STEPS_SYMBOL) ?? 0
+}
+
+// Tells the console of `jet debug --build` that child `pid` loaded
+// `program`, and waits while it places the breakpoints the batch's code
+// holds; nothing for a batch bound without debug facts.
+jet_eval_native_watch: fn(program: JetEvalNativeProgram, pid: Int) {
+    if program.facts.len() == 0 -> return
+    build_debug_ask(BuildDebugEvent{kind: .Loaded, pid: pid, facts: program.facts.copy(), steps: program.steps, what: jet_eval_native_what(program)})
+}
+
+// What a batch is to the console: a package's `build: fn` (its runtime
+// child) or compile-time code a build runs in the compiler's child.
+jet_eval_native_what: fn(program: JetEvalNativeProgram) -> String Never! {
+    if program.runtime_execution -> "build" else -> "prep"
 }
 
 jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
@@ -361,7 +393,7 @@ jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession,
         c.stub = bound.executable.move()
     }
     x64_comptime_close(c.child)
-    spawned := x64_comptime_spawn(c.stub, stdout)
+    spawned := x64_comptime_spawn(c.stub, stdout, build_debug_tracer())
     if spawned.failure != "" {
         c.failure = spawned.failure
         x64_comptime_close(spawned)
@@ -544,7 +576,11 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
     code.fast_o0 = true
     // Each turn poll spends a step of the CALL's limit.
     code.step_count = true
-    prepared: ir_x64_program(ir_x64_compile_module(code, threads))
+    // Under `jet debug --build` the batch is bound with its debug facts; its
+    // code is the code it has without them (jet_eval_native_bind_batch).
+    watched: build_debug_on()
+    compiled: ir_x64_compile_module(code, threads)
+    prepared: if watched -> ir_x64_debug_program(compiled.move()) else -> ir_x64_program(compiled.move())
     if prepared.errors.len() > 0 {
         program.failure = "the batch doesn't compile to x86-64: {prepared.errors.join("; ")}"
         program.entries = entries.move()
@@ -552,7 +588,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
     }
     // The batch binds to the session's image itself, not a copy, and only
     // its program part is put together: the child runs the image already.
-    bound: jet_eval_native_bind_batch(session.value, prepared.move(), permit.value.base) ?? {
+    bound: jet_eval_native_bind_batch(session.value, prepared.move(), permit.value.base, watched) ?? {
         program.failure = "no runtime image"
         program.missing = true
         program.entries = entries.move()
@@ -581,6 +617,10 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         return program
     }
     program.functions = x64_comptime_functions(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, symbols)
+    if watched {
+        program.facts = x64_comptime_facts(bound.executable)
+        program.steps = jet_eval_native_steps_word(session.value)
+    }
     listed := [String]{}
     loop function in program.functions {
         if labels[function.name] != "" {
@@ -597,6 +637,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         return program
     }
     jet_eval_native_loaded(session.value, permit.value.child.pid, program.listing)
+    jet_eval_native_watch(program, permit.value.child.pid)
     program.generation = permit.value.generation
     program
 }
@@ -832,9 +873,15 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
             return jet_eval_ir_result(s, None)
         }
         jet_eval_native_loaded(session.value, permit.value.child.pid, program.listing)
+        jet_eval_native_watch(program, permit.value.child.pid)
         program.generation = permit.value.generation
     }
     s.child = permit.value.child.copy()
+    // The console of `jet debug --build` names the call's limit and what
+    // runs at a stop inside it; the call itself is the same.
+    if program.facts.len() > 0 {
+        build_debug_tell(BuildDebugEvent{kind: .Calling, pid: s.child.pid, steps: program.steps, limit: if s.step_limit < 0 -> 9223372036854775807 else -> s.step_limit, what: jet_eval_native_what(program)})
+    }
     value: jet_eval_native_call(s, program, item, args)
     if s.overflow_at >= 0 -> jet_eval_native_overflow_name(s, program)
     x64_comptime_settle(s.child)
@@ -842,7 +889,9 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
     s.stderr = "{s.stderr}{String.from_bytes_lossy(s.child.stderr)}"
     s.child.stdout = [U8]{}
     s.child.stderr = [U8]{}
-    permit.value.child = s.child.copy()
+    // The child goes back to its cell, and the state keeps an empty one.
+    permit.value.child = s.child.move()
+    s.child = X64ComptimeChild{}
     // Standard error no runtime stop read back is the evaluated code's own
     // output, an effect a comptime evaluation refuses.
     if !s.runtime_execution && s.stderr != "" && !jet_eval_ir_failed(s) {

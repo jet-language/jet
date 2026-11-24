@@ -1,6 +1,10 @@
 # PORT tests/structural_merge.rs::structural_diff_add_remove_reorder_rename_edit_is_deterministic
 # PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
 fixture: StructuralDiffAddRemoveReorderRenameEditIsDeterministic.fixture
+# A rename is reported only from a recorded rename receipt, never inferred
+# from hand text (structural_diff_does_not_infer_a_rename_from_hand_text).
+mkdir: .jet/codemods
+write: .jet/codemods/recorded-rename.log.json receipt.txt
 step first: jet diff --structural {work}/before.jet {work}/after.jet --json
 exit: 0
 step second: jet diff --structural {work}/before.jet {work}/after.jet --json

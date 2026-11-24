@@ -91,9 +91,17 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
             }
             index: jet_cli_checked_semindex(result)
             absolute: jet_cli_report_path(jet_cli_report_cwd(), path)
+            // A fact's module path is its display path, relative to the entry
+            // root; the file's own module is the one whose canonical path is
+            // this file's.
+            real: cli_files.realpath(absolute) ?? return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("could not resolve `{path}`: {jet_cli_io_error_text(err)}", "pass a readable Jet source file")}
+            own := -1
+            loop (row, doc_module) in result.doc_modules {
+                if doc_module.physical_path == real -> own = row
+            }
             facts := [Int]{}
             loop (at, fact) in index.definition_facts {
-                if jet_cli_report_path(jet_cli_report_cwd(), fact.module_path) != absolute -> next
+                if own < 0 || result.doc_modules[own].path != fact.module_path -> next
                 if fact.span.start < 0 || fact.span.start > fact.span.end || fact.span.end > source.bytes().len() {
                     return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug")}
                 }
@@ -216,7 +224,7 @@ jet_cli_struct_diff: fn(before: JetCLIStructDocument, after: JetCLIStructDocumen
         if rename != None {
             changes.push(jet_cli_struct_change(2, "renamed", left, Val(right), rename))
         }
-        if left.fact.module_path != right.fact.module_path && (rename != None || signature || content) {
+        if before.path != after.path && (rename != None || signature || content) {
             changes.push(jet_cli_struct_change(3, "moved", left, Val(right), None))
         }
         if signature {

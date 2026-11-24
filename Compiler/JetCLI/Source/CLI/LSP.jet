@@ -14,7 +14,7 @@ use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverSourceDocument, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
     jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_headline]
-    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPProducer, lsp_serve, lsp_write_log]
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPDeclaredFile, LSPProducer, lsp_serve, lsp_write_log]
     jet_semindex.[SemDeclared, SemSymbol, semindex_build_symbols, semindex_declared, semindex_imports]
 }
 
@@ -70,7 +70,10 @@ JetCLILSPChecker: struct {
                     }
                     index: jet_cli_checked_semindex(result)
                     symbols: semindex_build_symbols(index, result.doc_modules)
-                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules), reports: reports, declared: jet_cli_lsp_declared(entry, result.doc_modules)}
+                    declared := [SemDeclared]{}
+                    declared_files := [LSPDeclaredFile]{}
+                    jet_cli_lsp_declared(entry, result.doc_modules, declared, declared_files)
+                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules), reports: reports, declared: declared, declared_files: declared_files}
                 }
             }
         }
@@ -155,17 +158,21 @@ jet_cli_lsp_reports: fn(entry: String, given: [JetDriverSourceDocument], slot: I
 
 // The functions of the Core modules the checked modules import by name, from
 // the Core sources a compile of `entry` reads: the module's own source,
-// without its private parts.
-jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule]) -> [SemDeclared] {
-    declared := [SemDeclared]{}
-    if !semindex_imports(modules, "core.") -> return declared
+// without its private parts. Core read from a toolchain tree also gives each
+// such source's file, where a definition of one of its functions goes.
+jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule], declared: &[SemDeclared], files: &[LSPDeclaredFile]) {
+    if !semindex_imports(modules, "core.") -> return
+    toolchain: jet_cli_named_toolchain(entry)
     if jet_cli_core_sources(entry) == .Loaded(rows) {
         loop row in rows {
             if row.owner != "" || row.runtime || !semindex_imports(modules, row.module_name) -> next
-            declared.extend(semindex_declared(row.module_name, row.source()))
+            source: row.source()
+            declared.extend(semindex_declared(row.module_name, source))
+            if toolchain == .Val(root) {
+                files.push(LSPDeclaredFile{module_name: row.module_name, path: jet_cli_authority_path(root, row.path), source: source})
+            }
         }
     }
-    declared
 }
 
 // The automatic choices the checked modules record, by module and line, as

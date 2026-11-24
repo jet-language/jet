@@ -875,10 +875,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
         index := ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
         ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
-        p.source_bytes = index.bytes.move()
-        p.source_lines = index.lines.move()
-        p.source_rows_keys = index.keys.move()
-        p.source_rows = index.rows.move()
+        ir_program_take_sources(p, index.move())
         return p
     }
     task.group ir_program_sources {
@@ -886,13 +883,19 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
         ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
         index := indexing.join() ?? panic(compiler_threads_failure_text(err))
-        p.source_bytes = index.bytes.move()
-        p.source_lines = index.lines.move()
-        p.source_rows_keys = index.keys.move()
-        p.source_rows = index.rows.move()
+        ir_program_take_sources(p, index.move())
         programs.push(p)
     }
     programs.pop() ?? panic("the program build lost its program")
+}
+
+// `p` reads its checked sources' text and lines from `index`
+// (ir_source_index): a line a statement starts on, a column, a line's text.
+ir_program_take_sources: fn(p: &IRProgram, index: &&IRSourceIndex) Never! {
+    p.source_bytes = index.bytes.move()
+    p.source_lines = index.lines.move()
+    p.source_rows_keys = index.keys.move()
+    p.source_rows = index.rows.move()
 }
 
 // Each function key of a checked function list and its first row there:

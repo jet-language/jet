@@ -1,0 +1,14 @@
+# A `shutdown` sent with `"params": null` takes no params, so it is answered
+# under its own id, and the `exit` that follows ends the server with status 0.
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":null}"
+recv lsp until $.id = 2 timeout 30s
+json: stdout doc $.result = null
+stdout: !~ "\"error\"" # the shutdown is answered, not refused
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":null}"
+wait lsp timeout 30s
+exit: 0

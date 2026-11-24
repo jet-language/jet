@@ -3,7 +3,6 @@
 // order; before each one, the documents edited since their last publication
 // are checked and republished, so a request reads current diagnostics.
 use {
-    core.encoding.[Dyn]
     lsp_loop_term: core.term
     jet_foundation.[foundation_byte_text]
 }
@@ -11,7 +10,9 @@ use {
 // The longest message body the server reads.
 LSP_MAX_MESSAGE_BYTES: 67108864
 
-// The next message body; None at the end of input.
+// The next message body; None at the end of input. A body can arrive in
+// several reads, so reading goes on until `Content-Length` bytes are in; only
+// an empty read, the end of input, cuts it short.
 lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
     header: lsp_loop_term.read_until("\r\n\r\n") ?? return Err(LSPRPCError{code: -32700, message: "could not read a message header: {err}"})
     if header == "" -> return Ok(None)
@@ -30,9 +31,11 @@ lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
     if length > LSP_MAX_MESSAGE_BYTES {
         return Err(LSPRPCError{code: -32700, message: "a message is longer than {LSP_MAX_MESSAGE_BYTES} bytes"})
     }
-    bytes: lsp_loop_term.take(length) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
-    if bytes.len() != length {
-        return Err(LSPRPCError{code: -32700, message: "input ended inside a message body"})
+    bytes := lsp_loop_term.take(length) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
+    loop bytes.len() < length {
+        rest: lsp_loop_term.take(length - bytes.len()) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
+        if rest.len() == 0 -> return Err(LSPRPCError{code: -32700, message: "input ended inside a message body"})
+        bytes.extend(rest)
     }
     Ok(Val(String.from_bytes(bytes) ?? return Err(LSPRPCError{code: -32700, message: "a message body is not UTF-8"})))
 }
@@ -68,7 +71,7 @@ lsp_serve_message: fn(server: &LSPServer, text: String, stdout: &lsp_loop_term.S
     message: if lsp_parse_rpc_message(text) == {
         .Ok(value) -> value
         .Err(problem) -> {
-            return lsp_write_message(stdout, lsp_error_response(Dyn.Null, problem.code, problem.message))
+            return lsp_write_message(stdout, lsp_error_response(lsp_refused_id(text), problem.code, problem.message))
         }
     }
     method: lsp_text_member(message, "method") ?? return

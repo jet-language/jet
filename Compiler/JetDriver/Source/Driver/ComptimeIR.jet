@@ -8,13 +8,14 @@ use {
     jet_foundation.[CompilerThreads, DeclTable, FnBody, Interner, ModuleTable, Span, StmtKind, SymbolKind, SymbolTable, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, interner_empty, module_text, symbol_key_text, symbol_table]
     jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
     jet_ir.[IRProgram, ir_comptime_item_function, ir_comptime_item_key, ir_program_declared]
-    jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_build_interner, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
+    jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_build_interner, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_ir_watched_sources, jet_eval_native_load, jet_eval_native_run]
 }
 
 // The declared IR program (ir_program_declared) over the type, impl and
 // constant rows of every module of a run's graph (jet_driver_comptime_stage).
 // It takes the run's symbol table at its first build
-// (jet_eval_ir_comptime_build_over).
+// (jet_eval_ir_comptime_build_over), and under `jet debug --build` the
+// build's sources (jet_eval_ir_watched_sources).
 jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram Never! {
     type_defs := [TTypeDef]{}
     impls := [TImplDef]{}
@@ -24,7 +25,9 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
         loop definition in checked.declarations.impls -> impls.push(definition.copy())
         loop definition in checked.declarations.constants -> constants.push(definition.copy())
     }
-    ir_program_declared(type_defs, impls, constants, [FnBody]{}, symbol_table(), interner_empty())
+    declared := ir_program_declared(type_defs, impls, constants, [FnBody]{}, symbol_table(), interner_empty())
+    jet_eval_ir_watched_sources(declared)
+    declared
 }
 
 // The IR of `batch`'s entries: the batch's checked closure and each entry's

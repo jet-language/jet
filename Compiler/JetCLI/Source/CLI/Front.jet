@@ -745,6 +745,9 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
             if argument == "--lang" || argument.starts_with("--lang=") -> external_fmt = true
         }
     }
+    // `jet debug --build` runs the build `jet build` runs with the same
+    // words, so it takes build's flags too (DebugBuild.jet).
+    also: if command == "debug" && jet_argv.contains("--build") -> "build" else -> command
     value_next := false
     loop argument in jet_argv {
         if value_next {
@@ -761,7 +764,7 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
             }
             if jet_cli_flag_spec(head) == .Val(spec) {
                 takers: jet_cli_flag_commands(spec.help) ?? next
-                if !jet_cli_flag_takes(spec, command) {
+                if !jet_cli_flag_takes(spec, command) && !jet_cli_flag_takes(spec, also) {
                     return Val(jet_cli_misplaced_flag(head, command, takers, color))
                 }
             }
@@ -769,7 +772,7 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
         }
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
         if jet_cli_flag_spec(head) == .Val(spec) {
-            if !jet_cli_flag_takes(spec, command) {
+            if !jet_cli_flag_takes(spec, command) && !jet_cli_flag_takes(spec, also) {
                 return Val(jet_cli_misplaced_flag(head, command, jet_cli_flag_commands(spec.help) ?? [String]{}, color))
             }
             if jet_cli_control_of_flag(head) != None {

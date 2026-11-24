@@ -53,7 +53,8 @@ lsp_invalid_request: fn() -> LSPRPCError Never! {
 
 // A JSON-RPC 2.0 message: an object whose `method` is a string, whose `id`
 // (when present) is a string, an integer or null, and whose `params` (when
-// present) is an array or object.
+// present) is an array or object. A null `params` reads as no params, as a
+// request that takes none (`shutdown`) is often sent that way.
 lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
     message: foundation_parse_protocol_json_with_limit(body, LSP_MAX_MESSAGE_BYTES) ?? return Err(LSPRPCError{code: -32700, message: "Parse error"})
     if !lsp_is_object(message) -> return Err(lsp_invalid_request())
@@ -68,13 +69,22 @@ lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
     }
     if lsp_member(message, "params") == .Val(params) {
         if params == {
-            .Array(_) | .Object(_) -> {}
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
+            .Null | .Array(_) | .Object(_) -> {}
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {
                 return Err(lsp_invalid_request())
             }
         }
     }
     Ok(message)
+}
+
+// The id of a message refused as invalid, when it is a readable string or
+// integer, so the refusal reaches the request that caused it; else null.
+lsp_refused_id: fn(body: String) -> Dyn Never! {
+    message: foundation_parse_protocol_json_with_limit(body, LSP_MAX_MESSAGE_BYTES) ?? return Dyn.Null
+    id: lsp_member(message, "id") ?? return Dyn.Null
+    if id == .Text(_) || foundation_json_integer(id) != None -> return id
+    Dyn.Null
 }
 
 lsp_serialize_id: fn(id: Dyn) -> String Never! {

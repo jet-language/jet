@@ -3185,7 +3185,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     target: sema_expr_comptime_target(environment, program, scopes, symbol) ?? return true
     // A `#run fn` runs while building: run-time code never calls it, or it
     // would run with the program.
-    if sema_expr_runtime_body_owner(environment, scopes) != None {
+    if sema_expr_runtime_body_owner(environment, program, scopes) != None {
         diagnostics.push(sema_comptime_method_runtime_call_diagnostic(target.path, span))
         return false
     }
@@ -4231,7 +4231,7 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     if sema_call_core_crypto_expert_gate(module_name, method, method_span, context, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if sema_call_core_vault_build_time_gate(module_name, method, method_span, scopes, environment.function_name, diagnostics) {
+    if sema_call_core_vault_build_time_gate(module_name, method, method_span, scopes, environment, program, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, context) {
@@ -5273,7 +5273,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
                     return None
                 }
                 if sema_compiler_host_value_held(prepared_ty) == .Val(held) {
-                    sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, diagnostics)
+                    sema_compiler_host_value_runtime_read(name, held, span, scopes, environment, program, diagnostics)
                 }
                 sema_comptime_use_value_read(name, prepared_ty, span, environment, program, scopes, diagnostics)
                 prepared: sema_fact_prepared_expr(known, prepared_ty, span, environment, program, context) ?? return None
@@ -5574,7 +5574,7 @@ sema_expr_check_ident_resolved: fn(name: String, span: Span, resolved_index: Int
     // module's types.
     if kind == SymbolKind.Constant && environment.function_name != "" {
         if sema_compiler_host_value_held(ty) == .Val(held) {
-            sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, diagnostics)
+            sema_compiler_host_value_runtime_read(name, held, span, scopes, environment, program, diagnostics)
         }
         sema_comptime_use_value_read(name, ty, span, environment, program, scopes, diagnostics)
     }
@@ -7471,7 +7471,7 @@ sema_expr_contextual_literal: fn(expr: Expr, expected: Type?, environment: SemaS
 // rather than running with the program. Code that already runs while
 // building calls the hook as it runs.
 sema_expr_check_literal_hook: fn(hooked: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    owner_key: sema_expr_runtime_body_owner(environment, scopes) ?? {
+    owner_key: sema_expr_runtime_body_owner(environment, program, scopes) ?? {
         return sema_check_expression(hooked, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     fact_start: context.call_facts.len()
@@ -7491,9 +7491,9 @@ sema_expr_check_literal_hook: fn(hooked: Expr, span: Span, expected: Type?, envi
 
 // The owner key of the function body being checked when its code runs with
 // the program; None in code that runs while building (a `#run` operand, a
-// `#run fn` or `build: fn` body, a module value) or outside every body.
-sema_expr_runtime_body_owner: fn(environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? Never! {
-    if sema_scope_build_time(scopes, environment.function_name) -> return None
+// `#run fn` or build entry body, a module value) or outside every body.
+sema_expr_runtime_body_owner: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? Never! {
+    if sema_scope_build_time(scopes, environment, program) -> return None
     owner_key: sema_scope_function_owner_key(scopes)
     if owner_key == "" || sema_comptime_item_owner(owner_key) -> return None
     Val(owner_key)

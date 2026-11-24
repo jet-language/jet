@@ -101,13 +101,17 @@ lsp_apply_content_change: fn(doc: &LSPDocument, change: Dyn) -> Bool Never! {
 // didOpen stores the document; didChange applies its edits in order to a copy,
 // so a rejected edit leaves the resident document and version intact. An
 // accepted change list, even an empty one, advances the version and marks the
-// document dirty. Returns the document's URI.
+// document dirty. A document opened in another language is not Jet and is not
+// kept, so it is never checked. Returns the document's URI.
 lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool{false}) -> String? Never! {
     document: lsp_param(params, "textDocument") ?? return None
     uri: lsp_text_member(document, "uri") ?? return None
     version: foundation_json_integer(lsp_member(document, "version") ?? return None) ?? return None
     if version < -2147483648 || version > 2147483647 -> return None
     if is_open {
+        if lsp_text_member(document, "languageId") == .Val(language) {
+            if language != "jet" -> return None
+        }
         text: lsp_text_member(document, "text") ?? return None
         state.docs[uri] = LSPDocument{path: lsp_uri_to_path(uri), text: text, version: version}
         return Val(uri)

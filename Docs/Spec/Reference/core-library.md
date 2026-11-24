@@ -364,6 +364,17 @@ the compiler provides. A Core module reaches them through
 imports it gets **E1013**, and reaches the same operations through Core's
 public modules.
 
+Its `RoleKind` enum is the closed list of roles, the jobs the compiler hands
+to a library declaration instead of naming one. `#Builtin.Role(.X)`, which
+only bundled Core writes, gives a declaration role `X`: a Core function
+(`abs` on an F32 fills `AbsF32`) or a compiler-owned trait of
+`Compiler/Prelude/Traits.jet` (`Add: trait` fills `Add`, the trait `+`
+calls). The markers are the list: `Tools/Agent/OwnedTraitRows.jet` writes
+`RoleKind` from them, one case per marker, and its `--check` refuses an
+enum that differs or a role two markers give. Each role is filled exactly
+once: a second filler is **E1014**, and `jet check Core` reports a role
+nothing fills as **E1015**.
+
 ### `core.compiler.lang` — language declarations
 
 `core.compiler.lang` publishes the closed compiler vocabulary used by typed

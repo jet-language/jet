@@ -54,6 +54,11 @@
 // `jet run --record=NAME` does: the same `.jet/replays/NAME.jetproof-replay`,
 // published once the program has ended, which `--replay=NAME` then replays
 // (jet_cli_debug_record_begin).
+//
+// `--build` debugs the build `jet build` runs with the same words instead
+// of a program: breakpoints in prep blocks, prep fn recipes, marker bodies
+// and `build: fn` package builds, behind the same console or `--dap`
+// (DebugBuild.jet).
 use {
     cli_files: core.files
     cli_process: core.process
@@ -70,8 +75,9 @@ use {
 // whose lines are commands, so a line meant for the program reads as one.
 JET_CLI_DEBUG_STDIN_NOTE: "The program doesn't read the console's input: `--stdin=FILE` gives it FILE as its standard input.\n"
 
-jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.C, FFI.Asm]> JetCLIPlan Never! {
     dap := false
+    build := false
     breaks := [NativeBreak]{}
     attach := -1
     replay_at := -1
@@ -95,6 +101,7 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         if flag == "--replay" || flag.starts_with("--replay=") -> replay_at = index
         if flag == "--stdin" || flag.starts_with("--stdin=") -> stdin_at = index
         if flag == "--dap" -> dap = true
+        if flag == "--build" -> build = true
         if flag != "--break" && !flag.starts_with("--break=") -> next
         spec: if flag == "--break" && index + 1 < jet_argv.len() -> jet_argv[index + 1] else -> flag.after("--break=")
         wanted: jet_cli_debug_break(spec) ?? return jet_cli_fail("E2104", "`--break {spec}` isn't a breakpoint jet understands", jet_cli_why("E2104"), "write the file and the line, as `--break main.jet:12`", color, JET_DRIVER_EXIT_USAGE)
@@ -135,6 +142,12 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
     program_args: passthrough ?? [String]{}
     if dap && program_args.len() > 0 {
         return jet_cli_fail("E2104", "the words after `--` are the console's program arguments, but `--dap` takes them from the editor", jet_cli_why("E2104"), "drop the words after `--`, and set `args` in the editor's launch configuration", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if build {
+        if attach >= 0 || replay != "" || record != "" || input != "" {
+            return jet_cli_fail("E2104", "`--build` debugs the build `jet build` runs, so it takes no `--attach`, `--replay`, `--record` or `--stdin`", jet_cli_why("E2104"), "drop those flags to debug the build, or drop `--build` to debug the program", color, JET_DRIVER_EXIT_USAGE)
+        }
+        return jet_cli_debug_the_build(jet_argv, passthrough, breaks, dos, dap)
     }
     if attach >= 0 {
         if dap || breaks.len() > 0 || program_args.len() > 0 {

@@ -188,6 +188,7 @@ use {
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
+        build_debug_keep_sources,
         authority_expert_only,
         effect_scope_read_paths,
         effect_value_base,
@@ -6277,6 +6278,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         }
     }
     load.generated_source_files.push(SourceFile{id: source_file_id(canonical_effect_module.source_file), path: canonical_effect_module.source_file, source: request.canonical_effects.source})
+    // Under `jet debug --build` the compile-time code this compile builds
+    // reads its statements' lines from these sources (BuildDebug.jet).
+    build_debug_keep_sources(load.source_files)
     foreign_provider_inputs := jet_driver_assemble_foreign_providers(request.authorized_sources, load)
     if !load.complete || jet_driver_has_errors(load.diagnostics) {
         failure: load.failed_stage ?? JetDriverStage.Load

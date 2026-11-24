@@ -499,7 +499,11 @@ kit_steps_parse: fn(source: String) -> KitPlan {
         }
         if key.starts_with("send ") || key.starts_with("signal ") {
             sending: key.starts_with("send ")
-            label: kit_steps_byte_slice(key, if sending -> 5 else -> 7, key.count_bytes()).trim().copy()
+            named: kit_steps_byte_slice(key, if sending -> 5 else -> 7, key.count_bytes()).trim()
+            // `send LABEL raw:` writes the value's bytes as they are, without
+            // the session's framing.
+            verbatim: sending && named.ends_with(" raw")
+            label: kit_steps_byte_slice(named, 0, if verbatim -> named.count_bytes() - 4 else -> named.count_bytes()).trim().copy()
             tokens: kit_steps_tokens(value) ?? []
             if tokens.len() != 1 || !kit_expect_named(pending, label) || kit_expect_named(joined, label) {
                 plan.error = "line {line_number}: send/signal needs one value and a live child"
@@ -516,7 +520,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
             }
-            plan.steps.push(KitStep{argv: [tokens[0].text], stdin: "", exit: "0", assertions: [], label: label, action: if sending -> "send" else -> "signal", literal_input: literal})
+            plan.steps.push(KitStep{argv: [tokens[0].text], stdin: "", exit: "0", assertions: [], label: label, action: if sending -> "send" else -> "signal", literal_input: literal, session_mode: if verbatim -> "raw" else -> ""})
             next
         }
         if key.starts_with("session ") {

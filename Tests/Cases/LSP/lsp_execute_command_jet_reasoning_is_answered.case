@@ -1,0 +1,23 @@
+# The VS Code extension's reasoning panel sends `workspace/executeCommand`
+# `jet.reasoning` with [uri, selection, expanded]. The server advertises the
+# command and answers the `jet.reasoning/v1` projection of the open
+# document's checked derivations, each record filed under one lens.
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+stdout: ~ "\"jet.reasoning\"" # the command is advertised
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"add: fn(left: Int, right: Int) -> Int { left + right }\\n\\nrun: fn() { print(add(1, 2)) }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/executeCommand\",\"params\":{\"command\":\"jet.reasoning\",\"arguments\":[\"file://{work}/main.jet\",\"\",true]}}"
+recv lsp until $.id = 2
+json: stdout doc $.result.kind = "jet.reasoning/v1"
+json: stdout doc $.result.selection = "all"
+json: stdout doc $.result.records #>= 1 # the checked definitions' derivations
+json: stdout doc $.result.lenses #= 9
+json: stdout doc $.result.limits.records_truncated = false
+stdout: !~ "-32601" # the command is not an unknown method
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0

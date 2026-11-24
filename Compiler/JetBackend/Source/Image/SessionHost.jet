@@ -46,9 +46,11 @@ X64ComptimeChild: struct {
 // x64_executable_load) in a child and receives its entries; `stdout` admits
 // the child's own standard output. An image this process can't load, as when
 // its own image holds the image's range (a compiler `jet run` runs), starts
-// from a file instead (x64_executable_spawn_file). A failure leaves `failure`
-// set.
-x64_comptime_spawn: fn(image: X64Executable, stdout: Bool) -> X64ComptimeChild {
+// from a file instead (x64_executable_spawn_file). A nonzero `tracer` (this
+// process's id, under `jet debug --build`) lets this process and its
+// helpers trace the child (x64_comptime_filter_child). A failure leaves
+// `failure` set.
+x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, tracer: Int{0}) -> X64ComptimeChild {
     child := X64ComptimeChild{}
     scratch: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(scratch) {
@@ -125,7 +127,7 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool) -> X64ComptimeChild {
         return child
     }
     loop index in 0..<count -> child.entries.push(x64_comptime_word(table, 8 * index))
-    if child.entries.len() == 0 || !x64_comptime_filter_child(child, stdout) {
+    if child.entries.len() == 0 || !x64_comptime_filter_child(child, stdout, tracer) {
         if child.failure == "" {
             child.failure = x64_comptime_end_text(child, "before it refused its effects")
         }
@@ -134,8 +136,10 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool) -> X64ComptimeChild {
     child
 }
 
-// Installs the child's seccomp filter and refusal handler (`stdout` admits stdout).
-x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
+// Installs the child's seccomp filter and refusal handler (`stdout` admits
+// stdout); a nonzero `tracer` is the process the child lets trace it
+// (PR_SET_PTRACER), set before the filter.
+x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool, tracer: Int{0}) -> Bool {
     loop child.cookie == 0 {
         filled := 0
         #Unsafe("getrandom fills the first word of our scratch page") {
@@ -151,11 +155,11 @@ x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool) -> Bool {
     }
     program: x64_comptime_filter(stdout, child.cookie)
     handler: child.entries[0]
-    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len(), child.cookie}), program) {
+    if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len(), child.cookie, tracer}), program) {
         return false
     }
     done: x64_comptime_receive(child) ?? return false
-    loop index in 1..<4 {
+    loop index in 1..<5 {
         result: x64_comptime_word(done, 8 * index)
         if result != 0 {
             child.failure = "the comptime child couldn't refuse its effects (step {index}: {-result})"
@@ -569,6 +573,44 @@ x64_comptime_code: fn(exe: X64Executable, from: Int) -> X64ComptimeCode Never! {
         if end > code.high -> code.high = end
     }
     code
+}
+
+// The debug facts of an executable bound with them
+// (DirectBind.jet x64_bind_functions_debug_at) as an ELF file a debugger
+// reads (JetDebug native_image_read): its ELF header then its program part
+// (`tail`), with every file offset moved to that layout, no program
+// headers, and the sections that lie in the image part, which the file
+// leaves out, made SHT_NOBITS. The loaded bytes are read from the program
+// part as x64_comptime_code reads them; a section's addresses are the ones
+// the child runs.
+x64_comptime_facts: fn(exe: X64Executable) -> [U8] Never! {
+    facts := x64_executable_header(exe)
+    facts.extend(exe.tail)
+    shift: exe.tail_at - 64
+    x64_comptime_facts_put(facts, 32, 8, 0)
+    x64_comptime_facts_put(facts, 56, 2, 0)
+    sections: x64_comptime_unsigned(facts, 40, 8) - shift
+    x64_comptime_facts_put(facts, 40, 8, sections)
+    header_size: x64_comptime_unsigned(facts, 58, 2)
+    count: x64_comptime_unsigned(facts, 60, 2)
+    loop section in 0..<count {
+        at: sections + section * header_size
+        if at < 64 || at + 64 > facts.len() -> break
+        offset: x64_comptime_unsigned(facts, at + 24, 8)
+        if {
+            offset >= exe.tail_at -> x64_comptime_facts_put(facts, at + 24, 8, offset - shift)
+            x64_comptime_unsigned(facts, at + 4, 4) != 0 -> {
+                // SHT_NOBITS: the section's bytes are the image's, not here.
+                x64_comptime_facts_put(facts, at + 4, 4, 8)
+                x64_comptime_facts_put(facts, at + 24, 8, 64)
+            }
+        }
+    }
+    facts
+}
+
+x64_comptime_facts_put: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
+    loop k in 0..<width -> bytes[at + k] = U8{(value >> (8 * k)) & 255}
 }
 
 // Loads `code` into the child: in one shared-memory round-trip when the batch

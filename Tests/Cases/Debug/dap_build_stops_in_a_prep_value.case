@@ -1,0 +1,46 @@
+# An editor debugs a build over `jet debug --build --dap`: `setBreakpoints`
+# before `configurationDone` waits for its code to load (unverified, with
+# why), `configurationDone` starts the build, and the prep value's
+# function pausing on its line is a `stopped` event whose `stackTrace`,
+# `scopes` and `variables` read the paused call. A step is refused: the
+# build's code stops only at breakpoints. After `continue` the build ends
+# as `jet build` does: `exited` with its code, then `terminated`. Line 11
+# of the fixture is the loop of `squares`, which `SQUARES: #run squares(8)`
+# runs while building. No other debugger is on PATH.
+fixture: DebugBuildStopsInBuildTimeCode.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+session dap content-length: jet debug --build --dap {work}/tables.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/tables.jet\"},\"breakpoints\":[{\"line\":11}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = false
+json: stdout doc $.body.breakpoints[0].message = "placed when its code loads"
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 120s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.body.stackFrames[0].line = 11
+capture: loop_frame stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:loop_frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+capture: loop_scope stdout doc $.body.scopes[0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{\"variablesReference\":{cap:loop_scope}}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.body.variables[?name="count"][0].value = "8"
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"next\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+json: stdout doc $.success = false
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/tables.jet\"},\"breakpoints\":[]}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap collect until ndjson $[?event="terminated"] #>= 1 timeout 120s
+stdout: ~ "\"event\":\"exited\",\"body\":{\"exitCode\":0}" # the build ended as `jet build` ends
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 11 timeout 30s every 100ms
+close dap
+exit: 0

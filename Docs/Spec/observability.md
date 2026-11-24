@@ -2134,6 +2134,63 @@ after `fix`, it is refused with E2237.
 Tests/Cases/Debug/replay_why_*.case are the worked examples.
 Tests/Cases/Debug/replay_threads_across_tiers_*.case are the worked examples.
 
+## Debugging the build
+
+`jet debug --build [<file.jet>]` runs the build `jet build` runs with the
+same words and flags (`build` in place of `debug`, without the debugger's
+own flags) behind the `(Jet)` console. Its breakpoints stop in the code
+that runs while building: a prep value or block (`NAME: #run expr`,
+`#run { … }`) and the functions it calls, a prep fn recipe (`#run fn`,
+such as a literal hook), a marker body (its `expand`) and the package's
+`build: fn`. Before `run` the console takes `break <file.jet>:<line>`
+(also `--break`) and `delete N`; nothing is loaded yet, so each
+breakpoint is placed when its code loads:
+
+```text
+(Jet) break tables.jet:11
+Breakpoint 1 at tables.jet:11, placed when its code loads
+(Jet) run
+Stopped at tables.jet:11 in squares (build time)
+  count = 8
+  i = 7
+  #0 squares tables.jet:11
+  #1 SQUARES tables.jet:15 (prep)
+  steps: 1,204 of 10,000,000
+(Jet) continue
+```
+
+A stop shows the paused call's locals, its call stack (the outermost frame
+names the kind of code: `prep`, `build` or `marker`) and the steps the
+call spent of its step limit; `bt`, `locals` and `steps` show them again,
+`break` and `delete` change the breakpoints, `continue` goes on, and `quit`
+stops watching while the build runs on to its end. The end of the
+console's input continues; `--do COMMAND` runs commands instead. The
+build's output follows the session's, and its exit code is the command's.
+A breakpoint no build-time code reached is named at the end.
+
+Prep code runs in the build's compile-time child; the debugger traces that
+child and reads its memory and its step word, and changes nothing the
+evaluator reads, so the build's results, its step limits (E0952 at the
+same count) and its output are the same with the debugger as without it,
+and a pause spends no steps
+([`debug_build_keeps_steps_and_results`](../../Tests/Cases/Debug/debug_build_keeps_steps_and_results.case)).
+A batch bound for the debugger carries its line table and its locals'
+places past its loaded bytes, so the code that runs is byte for byte the
+code that runs without it. A marker body runs in the compiler itself, so
+its stop shows its template's bindings and has no step limit. A signal
+the child gets while traced is passed back to it unchanged.
+
+`jet debug --build --dap` serves the same session to an editor:
+`setBreakpoints` answers a breakpoint whose code isn't loaded as
+unverified, `configurationDone` starts the build, a stop is a `stopped`
+event whose `stackTrace`, `scopes` and `variables` read it, and
+`continue` goes on; the build's code doesn't step. The end of the build is
+`exited` with its code, then `terminated`.
+[`debug_build_stops_in_every_build_time_place`](../../Tests/Cases/Debug/debug_build_stops_in_every_build_time_place.case)
+and
+[`dap_build_stops_in_a_prep_value`](../../Tests/Cases/Debug/dap_build_stops_in_a_prep_value.case)
+are the worked examples.
+
 ## Sync-order log
 
 A program's run records its synchronization order when `JET_RECORD` names a

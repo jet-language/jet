@@ -1,0 +1,28 @@
+# Go-to-definition on a call into Core reaches the function's declaration in
+# the Core source file the check read: `math.gcd` and `math.sqrt` under
+# `use core.math` land on their names in Core/Math/Math.jet. The ambient
+# `print` is a prelude operation with no source file, so it has no location.
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use core.math\\n\\nmain: fn() {\\n    print(math.gcd(12, 18))\\n    print(math.sqrt(2.0))\\n}\\n\"}}}"
+recv lsp until $.params.version = 1
+json: stdout doc $.params.diagnostics #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":16}}}"
+recv lsp until $.id = 2
+stdout: ~ "/Core/Math/Math.jet\",\"range\":" # the Core module's own file
+json: stdout doc $.result.range.start.character = 0
+json: stdout doc $.result.range.end.character = 3
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":4,\"character\":16}}}"
+recv lsp until $.id = 3
+stdout: ~ "/Core/Math/Math.jet\",\"range\":" # the Core module's own file
+json: stdout doc $.result.range.start.character = 0
+json: stdout doc $.result.range.end.character = 4
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":6}}}"
+recv lsp until $.id = 4
+json: stdout doc $.result = null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 5
+close lsp
+exit: any # the server's status after shutdown is not what this case shows

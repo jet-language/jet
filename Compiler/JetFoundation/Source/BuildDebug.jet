@@ -1,0 +1,162 @@
+// Build-time debugging: `jet debug --build` (JetCLI Debug.jet) runs the
+// build `jet build` runs, in its own process, behind its console. The
+// console opens the hook (build_debug_open) before the build starts and
+// closes it after; while it is open the build tells the console where its
+// compile-time code runs:
+//
+// - Loaded: a compile-time batch was loaded into the compile-time child
+//   `pid` (JetEval Native.jet), bound with its debug facts (`facts`, an ELF
+//   file: its line table, its locals' places and its frames) and with the
+//   child's step word at `steps`. The build waits for the answer, so the
+//   console places the batch's breakpoints before any of its code runs.
+// - Calling: the build is about to call into the child with the step limit
+//   `limit`; `what` is "prep" for compile-time code a build runs in the
+//   compiler's child (a prep block, a prep fn) and "build" for a package's
+//   `build: fn` run in the runtime child. The build does not wait.
+// - Template: a marker body is about to expand the item at `file`:`line`
+//   that a breakpoint waits on, with `locals`, the template's values in
+//   scope. Marker bodies expand inside the compiler (JetSema Derives.jet)
+//   under no step limit. The build waits for the answer.
+//
+// With the hook closed (every build but the console's) none of this runs:
+// build_debug_on is one read of a word, and the build binds, loads and calls
+// its code exactly as it does without a debugger. The console never runs
+// code in the child either; it reads the child's memory and step word, and
+// a pause spends no step, so the evaluator's behavior, step budget and
+// results are the same with or without it.
+BuildDebugKind: enum {
+    Loaded,
+    Calling,
+    Template,
+}
+
+// One value a marker body's scope names, as its debug text.
+BuildDebugLocal: struct {
+    name: String,
+    text: String,
+}
+
+// A line a breakpoint waits on: `file` as the console's user wrote it.
+BuildDebugLine: struct {
+    file: String,
+    line: Int,
+}
+
+BuildDebugEvent: struct {
+    kind: BuildDebugKind,
+    pid: Int{0},
+    facts: [U8]{[U8]{}},
+    steps: Int{0},
+    limit: Int{0},
+    what: String{""},
+    file: String{""},
+    line: Int{0},
+    rule: String{""},
+    locals: [BuildDebugLocal]{[BuildDebugLocal]{}},
+    reply: Sender<Bool>?{None},
+}
+
+// The open hook: where the build's events go (none while closed), the lines
+// breakpoints wait on, the console's process id, which the compile-time
+// child lets trace it (JetBackend x64_comptime_spawn), and the checked
+// sources of the build's compiles (build_debug_keep_sources).
+BuildDebugHook: struct {
+    events: [Sender<BuildDebugEvent>],
+    lines: [BuildDebugLine],
+    tracer: Int,
+    sources: [SourceFile],
+}
+
+BUILD_DEBUG: Shared{BuildDebugHook{events: [Sender<BuildDebugEvent>]{}, lines: [BuildDebugLine]{}, tracer: 0, sources: [SourceFile]{}}}
+
+// Opens the hook for the console of process `tracer`: the build's events
+// go to `events` until build_debug_close.
+build_debug_open: fn(events: Sender<BuildDebugEvent>, lines: [BuildDebugLine], tracer: Int) Never! {
+    held := BUILD_DEBUG.guard_edit()
+    held.value = BuildDebugHook{events: [Sender<BuildDebugEvent>]{events}, lines: lines, tracer: tracer, sources: [SourceFile]{}}
+}
+
+build_debug_close: fn() Never! {
+    held := BUILD_DEBUG.guard_edit()
+    held.value = BuildDebugHook{events: [Sender<BuildDebugEvent>]{}, lines: [BuildDebugLine]{}, tracer: 0, sources: [SourceFile]{}}
+}
+
+// Whether a console debugs this process's build.
+build_debug_on: fn() -> Bool Never! {
+    permit: BUILD_DEBUG.guard_read()
+    permit.value.events.len() > 0
+}
+
+// The process a compile-time child lets trace it: the console's, else 0.
+build_debug_tracer: fn() -> Int Never! {
+    permit: BUILD_DEBUG.guard_read()
+    permit.value.tracer
+}
+
+// The console's breakpoints now wait on `lines`.
+build_debug_set_lines: fn(lines: [BuildDebugLine]) Never! {
+    held := BUILD_DEBUG.guard_edit()
+    held.value.lines = lines
+}
+
+// Whether a breakpoint of the console waits on line `line` of the source
+// file `path`, read where the hook holds the lines.
+build_debug_waits: fn(path: String, line: Int) -> Bool Never! {
+    permit: BUILD_DEBUG.guard_read()
+    loop wanted in permit.value.lines {
+        if wanted.line == line && build_debug_names(wanted.file, path) -> return true
+    }
+    false
+}
+
+// Whether a breakpoint's file `wanted`, as the console's user wrote it,
+// names the source file `path`: the path, or its last components.
+build_debug_names: fn(wanted: String, path: String) -> Bool Never! {
+    path == wanted || path.ends_with("/{wanted}")
+}
+
+// Keeps the checked sources `files` of one of the build's compiles, each
+// path once, while the hook is open: compile-time code reads no source
+// text, so without them its statements carry no line and a breakpoint
+// finds only the lines an operator sets. The compile-time code the build
+// builds reads its lines from them (JetEval Values.jet
+// jet_eval_ir_watched_sources). Nothing while the hook is closed.
+build_debug_keep_sources: fn(files: [SourceFile]) Never! {
+    held := BUILD_DEBUG.guard_edit()
+    if held.value.events.len() == 0 -> return
+    loop file in files {
+        kept := false
+        loop source in held.value.sources {
+            if source.path == file.path -> kept = true
+        }
+        if !kept -> held.value.sources.push(SourceFile{id: file.id, path: file.path, source: file.source})
+    }
+}
+
+// Tells the console `event`, without waiting; nothing while the hook is
+// closed.
+build_debug_tell: fn(event: &&BuildDebugEvent) Never! {
+    _ := build_debug_send(event.move())
+}
+
+// Tells the console `event` and waits for its answer: once it has placed
+// what it places, or once the stop it shows is continued. Returns at once
+// while the hook is closed, or when the console is gone.
+build_debug_ask: fn(event: &&BuildDebugEvent) -[Time.Wait]> Never! {
+    { sender: reply, receiver: answer }: channel<Bool>(capacity: 1)
+    asked := event.move()
+    asked.reply = Val(reply)
+    if build_debug_send(asked.move()) -> _ := answer.receive() ?? false
+}
+
+// Whether the console took `event`; a console that is gone closes the hook,
+// and the build runs on unwatched.
+build_debug_send: fn(event: &&BuildDebugEvent) -> Bool Never! {
+    held := BUILD_DEBUG.guard_edit()
+    if held.value.events.len() == 0 -> return false
+    held.value.events[0].send(event.move()) ?? {
+        held.value.events.clear()
+        return false
+    }
+    true
+}

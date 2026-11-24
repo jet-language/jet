@@ -2882,11 +2882,29 @@ sema_scope_counted: fn(table: SemaScopeTable, compares: Int, found: &&Int?) -> I
 
 // Whether the body being checked runs only while the program builds: a
 // compile-time execution (a `#run` operand, a prepared value, a comptime
-// function) or the body of `build: fn`. `function_name` names the function
-// whose body this is; a body checked on a compiler thread keeps its name in
-// `location_function` instead.
-sema_scope_build_time: fn(table: SemaScopeTable, function_name: String) -> Bool Never! {
-    table.comptime_execution_depth > 0 || (table.location_function ?? function_name) == "build"
+// function) or the body of the build entry `build: fn(b: Build)`. Any other
+// function named `build` is ordinary code that runs with the program. The
+// body's function is `location_function` on a compiler thread, else the
+// environment's `function_name`.
+sema_scope_build_time: fn(table: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if table.comptime_execution_depth > 0 -> return true
+    if (table.location_function ?? environment.function_name) != "build" -> return false
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_scope_caller_index(environment, graph) ?? return false
+        loop item in graph.modules[module_index].program.items {
+            if item == .Func(function) && function.name == "build" -> return sema_function_is_build_entry(function)
+        }
+    }
+    false
+}
+
+// Whether `function` is the build entry `build: fn(b: Build)`, read as
+// written, as the Driver's build query selects it.
+sema_function_is_build_entry: fn(function: Func) -> Bool Never! {
+    if function.name != "build" || function.params.len() != 1 -> return false
+    if function.params[0].ty == .Named(name) -> return name == "Build"
+    false
 }
 
 sema_scope_resolve_in_positions: fn(table: SemaScopeTable, positions: [Int]) -> Int? Never! {

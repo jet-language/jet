@@ -1,0 +1,15 @@
+# A module-qualified type reflects in a top-level `#run`: `geo.Inner.reflect()`
+# of inline module `geo` and `shapes.Point.reflect()` of file module `shapes`
+# each give the type's TypeInfo, named by its source leaf with its fields,
+# instead of reading the module as a value; at O0, O1 and O2.
+fixture: AModuleQualifiedTypeReflectsInATopLevelRun.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = a_module_qualified_type_reflects_in_a_top_level_run.stdout.expected
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = a_module_qualified_type_reflects_in_a_top_level_run.stdout.expected
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = a_module_qualified_type_reflects_in_a_top_level_run.stdout.expected

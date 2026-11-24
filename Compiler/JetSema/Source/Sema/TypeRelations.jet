@@ -36,6 +36,8 @@ use jet_foundation.[
     core_bare_source_module,
     core_module_export,
     core_module_for_alias,
+    core_module_has_member,
+    core_module_has_type,
     core_root_type,
     core_type_modules,
     foundation_family_size_list,
@@ -1128,21 +1130,89 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
 }
 
 // Whether qualified type name `name`, `alias.leaf`, written in module row
-// `caller`, names nothing because no module called `alias` is in scope
-// there: the caller neither imports nor declares `alias`, and it is no Core
-// module's name. A spelling whose module is in scope is that module's to
-// resolve, and a capitalized head (`Self.Item`) is a type's, not a module's.
+// `caller`, names nothing. A capitalized head (`Self.Item`) is a type's, not
+// a module's, and a spelling that resolves names its declaration. Any other
+// spelling names nothing when no module called `alias` is in scope there
+// (the caller neither imports nor declares `alias`, and it is neither `core`
+// nor a Core module's name), or when its module is in scope but its last
+// word, a type name, resolves to no declaration: `core.World`,
+// `core.math.Point2` (a file names a Core type through the module it
+// imports, `math.Point2`; sema_type_core_path_import). A last word in lower
+// case is no type name and is left to its module, and a path to a
+// declaration its module keeps private (a `priv module` on the way, a `priv`
+// member, a Core name the module does not export) is that module's privacy
+// error, not a missing type. A type the Core module behind `alias` exports
+// names it (sema_type_qualified_core_type).
 sema_type_qualified_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, name: String, alias: String, leaf: String) -> Bool {
-    if alias == "" || leaf == "" || leaf.contains(".") || alias == "core" || sema_checked_module_uppercase(alias) {
+    if alias == "" || leaf == "" || sema_checked_module_uppercase(alias) {
         return false
     }
-    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || core_module_for_alias(alias) != None {
+    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) != None {
         return false
     }
+    if !sema_type_qualified_alias_in_scope(graph, caller, alias) -> return true
+    requester: graph.modules[caller].module_identity
+    if sema_registration_private_module_path(graph, requester, name) != None || sema_registration_private_member(graph, requester, alias, leaf) || sema_registration_core_private_qualified(graph, requester, alias, leaf) != None {
+        return false
+    }
+    if sema_type_qualified_core_type(graph, caller, alias, leaf) -> return false
+    last: if leaf.cut_last(".") == .Val(cut) -> cut.after else -> leaf
+    if !sema_checked_module_uppercase(last) -> return false
+    if sema_registration_unit_fact_for_type(graph, Type.Named{name: name}) != None -> return false
+    !sema_type_compiler_owned_name(name)
+}
+
+// Whether `alias.leaf`, written in module row `caller`, names a type the
+// Core module behind `alias` exports (`mem.Ptr` under `use core.mem`): the
+// Core module the caller imports as `alias`, found as a call through
+// `alias` finds it (sema_core_registration_import), else the one `alias` is
+// the short name of. The import is judged by its module's name: `use
+// core.mem` binds the identity `core.mem`, which is no `<corelib>/` source
+// identity, so module_is_core does not hold for it.
+sema_type_qualified_core_type: fn(graph: SemaRegistrationGraph, caller: Int, alias: String, leaf: String) -> Bool {
+    if sema_core_registration_import(graph.modules[caller], graph.module_table, alias) == .Val(imported) {
+        if imported.item != None -> return false
+        module_name := imported.module_name
+        if sema_registration_module_index_text(graph, imported.module_name) == .Val(index) -> module_name = graph.modules[index].module_name
+        return sema_core_import_is_core(module_name) && sema_type_core_module_declares_type(module_name, leaf)
+    }
+    if core_module_for_alias(alias) == .Val(module_name) -> return sema_type_core_module_declares_type(module_name, leaf)
+    false
+}
+
+// Whether Core module `module_name` exports type `leaf`: a type it declares,
+// or a type the compiler builds that it exports by name (`Ptr` in core.mem),
+// which is as much its declaration.
+sema_type_core_module_declares_type: fn(module_name: String, leaf: String) -> Bool {
+    core_module_has_type(module_name, leaf) || (core_module_has_member(module_name, leaf) && sema_type_compiler_owned_name(leaf))
+}
+
+// The import that names the type a Core path spells through `core`
+// (`core.math.Point2`) when its Core module exports it: the module
+// (`core.math`) and the spelling a file that imports it writes (`math.Point2`).
+SemaTypeCoreImport: struct {
+    module_name: String,
+    written: String,
+}
+
+sema_type_core_path_import: fn(name: String) -> SemaTypeCoreImport? {
+    path: name.cut_last(".") ?? return None
+    if !path.before.starts_with("core.") || !core_module_has_type(path.before, path.after) {
+        return None
+    }
+    module_word: path.before.cut_last(".") ?? return None
+    Val(SemaTypeCoreImport{module_name: path.before, written: "{module_word.after}.{path.after}"})
+}
+
+// Whether a module called `alias` is in scope in module row `caller`: `core`,
+// a Core module's name, an import's alias, or a name the caller declares or
+// imports.
+sema_type_qualified_alias_in_scope: fn(graph: SemaRegistrationGraph, caller: Int, alias: String) -> Bool {
+    if alias == "core" || core_module_for_alias(alias) != None -> return true
     loop import in graph.modules[caller].imports {
-        if import.declaration.alias == alias -> return false
+        if import.declaration.alias == alias -> return true
     }
-    sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, alias) == None
+    sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, alias) != None
 }
 
 // Whether `name` is a type the compiler owns that a program may write bare

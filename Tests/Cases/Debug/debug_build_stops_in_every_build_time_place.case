@@ -1,0 +1,29 @@
+# Claim: `jet debug --build` runs the build `jet build` runs behind the
+# `(Jet)` console, and a breakpoint in any of the four places code runs
+# while building pauses it there; each stop shows its locals, its call
+# stack and the steps its call spent: a prep value's function (line 11, in
+# `squares` under `SQUARES: #run squares(8)`), a prep fn recipe (line 22,
+# the `#run from_literal` hook), a marker body (line 35, `Tagged`'s
+# `expand`) and the package's `build: fn` (line 47). A breakpoint set
+# before `run` waits for its code to load. The end of the commands lets
+# each later stop go on, and the build ends as `jet build` does.
+fixture: DebugBuildStopsInBuildTimeCode.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug --build tables.jet --do 'break tables.jet:11' --do 'break tables.jet:22' --do 'break tables.jet:35' --do 'break tables.jet:47' --do run
+exit: 0
+stdout: ~ "Breakpoint 1 at tables.jet:11, placed when its code loads\n" # nothing is loaded before the build runs
+stdout: ~ "Stopped at tables.jet:11 in " # the prep value's function pauses on its line
+stdout: ~ "  count = 8\n" # its locals are read where it stopped
+stdout: ~ " (prep)\n" # the stack's outermost frame says it is prep code
+stdout: ~ "Stopped at tables.jet:22 in " # the prep fn recipe pauses where it doubles its literal
+stdout: ~ "  value = 21\n" # the literal the hook was handed
+stdout: ~ "Stopped at tables.jet:35 in " # the marker body pauses at its line while it expands
+stdout: ~ "  steps: none (a marker body has no step limit)\n" # a marker body runs in the compiler, with no step limit
+stdout: ~ "Stopped at tables.jet:47 in " # the package's build pauses on its line
+stdout: ~ " (build)\n" # the stack's outermost frame says it is the build
+stdout: ~ " of " # a stop in a child counts the steps its call spent of its limit
+stdout+stderr: !~ "was never placed" # every breakpoint found its code
+step: jet debug --build tables.jet --do 'break tables.jet:2' --do run
+exit: 0
+stdout: ~ "Breakpoint 1 at tables.jet:2 was never placed: no build-time code ran on that line\n" # a line no build-time code runs is said, and the build still ends

@@ -235,11 +235,7 @@ sema_liveness_ignored: fn(name: String) -> Bool Never! {
 }
 
 sema_liveness_is_root: fn(function: Func, is_entry: Bool) -> Bool Never! {
-    if function.name == "build" && function.params.len() == 1 {
-        if function.params[0].ty == .Named(name) {
-            if name == "Build" -> return true
-        }
-    }
+    if sema_function_is_build_entry(function) -> return true
     if function.name == "dev" && function.params.len() == 1 {
         if function.params[0].ty == .Named(name) {
             if name == "Dev" -> return true
