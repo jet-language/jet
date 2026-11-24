@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6998,
-    "rev": 113825,
+    "rev": 113850,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58403,11 +58403,11 @@
         {
           "n": 23,
           "text": "One type has one identity in one compile: a struct from module geo reflected as a field type and as a generic argument reports the same identity (today the field says identity=main.M3GeoPoint while the generic argument says geo.Point), as Docs/Spec/Reference/metaprogramming.md requires. Proof: a case under Tests/Cases/Reflection that reflects one imported type through a field, a generic argument and a direct reflect and prints identical identities on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T00:57:06.143Z"
+          "evidence": "`jet test Compiler --profile cases --filter Reflect/one_type_has_one_identity_in_one_compile` PASS 1/1 on tip23 (jet build Compiler from dev 45bbcdbd34) (the suite directory is Tests/Cases/Reflect).",
+          "at": "2026-11-24T12:55:38.003Z"
         },
         {
           "n": 24,
@@ -58536,11 +58536,11 @@
         {
           "n": 35,
           "text": "A package that declares `settings:` and calls `b.generate(...)` builds: today `jet build` fails with Jet.BuildPlanFailed \"Generated module `.jet/generated/<pkg>/<name>.jet` aliases another source\", even from the root build fn; dropping `settings:` makes it build. Proof: a golden under Examples/Metaprogramming/BuildTime with `settings:` plus `b.generate` passes on o0/o1/o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T10:42:55.323Z"
+          "evidence": "`jet test Compiler --profile golden --filter Metaprogramming/BuildTime/GenerateWithSettings` PASS 3/3 (o0, o1, o2) on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:38.892Z"
         },
         {
           "n": 36,
@@ -58578,7 +58578,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T12:25:32.463Z",
+      "updated": "2026-11-24T12:55:38.892Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 38
     },
@@ -58783,11 +58783,11 @@
         {
           "n": 10,
           "text": "core.build runs on the public compiler library: Driver/BuildAdapter.jet (lines 36-81) dispatches no Build or BuildPlan member-name strings, and JetBuildSession is deleted or becomes a public library package (census F16). Proof: BuildAdapter.jet's member-name list leaves Tests/Guards/closed_lists/baseline.tsv and `jet test Tests/Guards --filter closed_lists` passes. (was #6151 c38)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:52.157Z"
+          "evidence": "`jet test Tests/Guards --filter closed_lists` 9 passed, 0 failed on tip23 (jet build Compiler from dev 45bbcdbd34); BuildAdapter.jet has no row in Tests/Guards/closed_lists/baseline.tsv at dev 45bbcdbd34.",
+          "at": "2026-11-24T12:55:37.080Z"
         },
         {
           "n": 11,
@@ -58855,7 +58855,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T12:25:33.803Z",
+      "updated": "2026-11-24T12:55:37.080Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -58868,7 +58868,7 @@
       "track": "epoch",
       "epoch": "G1",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -58877,6 +58877,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "All criteria met; c4 proved on tip23 (dev 45bbcdbd34): StrFormat gone, golden Packages/FormatSelector 3/3."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -58948,11 +58953,11 @@
         {
           "n": 4,
           "text": "String format selectors get their meaning from a trait: StrFormat (AST/Expressions.jet) and its TStrFormat mirror are gone, and a package selector formats a hole with no compiler change. Proof: `git grep -n 'StrFormat' Compiler` prints nothing and `jet test Compiler --profile golden --filter Packages/FormatSelector` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:09.260Z"
+          "evidence": "`git grep -n StrFormat Compiler` prints nothing at dev 45bbcdbd34; `jet test Compiler --profile golden --filter Packages/FormatSelector` PASS 3/3 (o0, o1, o2) on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:36.205Z"
         },
         {
           "n": 5,
@@ -59013,9 +59018,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-24T11:34:15.374Z",
+      "updated": "2026-11-24T13:01:02.175Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 9
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-24T13:01:02.175Z"
     },
     {
       "id": "c0ho9o8j",
@@ -65176,11 +65182,11 @@
         {
           "n": 2,
           "text": "Typing `nums.app` on `nums: [Int]` returns an item labelled `push` whose filter text is `append` and whose edit inserts `push`; the same for `.length` and `.size` to `len` and `push_back` to `push`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:46.200Z",
+          "evidence": "on tip23 (jet build Compiler from dev 45bbcdbd34): `jet test Compiler/JetLSP/Tests --filter completion` 9 passed, 0 failed; `jet test Compiler/JetDriver/Tests --filter \"method idiom\"` 1 passed, 0 failed; `--profile cases --filter LSP/lsp_completion_foreign_words` PASS 1/1 (the push/append, len/length/size and push_back rows).",
+          "at": "2026-11-24T12:56:16.701Z",
           "proof": {
             "profile": "cases",
             "filter": "LSP/lsp_completion_foreign_words"
@@ -65189,20 +65195,20 @@
         {
           "n": 3,
           "text": "Accepting a foreign-word completion never writes the foreign word, and the result compiles with no diagnostic. Proof: `jet test Compiler --profile cases --filter LSP/lsp_completion_foreign_words` (apply step).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:47.143Z"
+          "evidence": "`jet test Compiler --profile cases --filter LSP/lsp_completion_foreign_words` PASS 1/1 on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:42.630Z"
         },
         {
           "n": 4,
           "text": "Completion reads the same registered rows as E0311, and a test fails if a row exists in one view and not the other.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:55:51.221Z",
+          "evidence": "on tip23 (jet build Compiler from dev 45bbcdbd34): `jet test Compiler/JetLSP/Tests --filter completion_rows_match_e0311` 1 passed, 0 failed: the test fails if a row exists in completion and not in E0311's view, or the reverse.",
+          "at": "2026-11-24T12:56:17.594Z",
           "proof": {
             "profile": "cmd",
             "args": [
@@ -65215,11 +65221,11 @@
         {
           "n": 5,
           "text": "Ordinary prefix completion is unchanged when no foreign row matches. Proof: `jet test Compiler --profile cases --filter LSP/lsp_completion_returns_items` and `--filter lsp/lsp_completion_returns_snippets_and_auto_imports` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:48.108Z"
+          "evidence": "`--filter LSP/lsp_completion_returns_items` PASS 1/1 and `--filter lsp_completion_returns_snippets_and_auto_imports` PASS on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:43.566Z"
         },
         {
           "n": 6,
@@ -65309,7 +65315,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:51.221Z",
-      "updated": "2026-11-24T10:07:52.167Z",
+      "updated": "2026-11-24T12:56:17.594Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 12
     },
@@ -65554,6 +65560,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T12:25:23.476Z"
+        },
+        {
+          "n": 21,
+          "text": "The server answers on files in large multi-module packages. On tip23 (dev 45bbcdbd34), didOpen of Compiler/JetFoundation/Data/Syntax/MathLayout.jet or Compiler/JetFoundation/Source/AST/Comptime.jet gets no publishDiagnostics, and textDocument/definition and shutdown go unanswered for over 300 s; `jet check Compiler/JetFoundation` takes 1.6 s. So every LSP feature hangs in the editor on compiler sources (owner report, Zed). Proof: a case under Tests/Cases/LSP opens a file in a large multi-module package and gets definition and hover answers within a stated bound, on a batch compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:01:09.818Z"
+        },
+        {
+          "n": 22,
+          "text": "Hover shows one signature in Jet syntax with the effective failure after the return type, and no separate `failure:` line (owner, 2026-11-24: Tools/Tower/Board.jet:116 shows `failure: Dyn Failure! (explicit Failure!)` under the signature, from JetSemIndex Build.jet:418). Hovering a method (`copy`, Board.jet:118, returns null) and a call (`compact(`, Board.jet:120, shows the type ArchiveKeep.Card) shows the callee's signature. Proof: a case under Tests/Cases/LSP asserts the hover text for a function, a method, a call and an inferred-failure function, on a batch compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:13:15.698Z"
+        },
+        {
+          "n": 23,
+          "text": "The LSP enforces Jet's casing (owner, 2026-11-24: TitleCase and all-caps acronyms). It publishes E0358 Jet.AcronymCasing on type-like names, with a quickfix that renames the symbol everywhere. It flags a document path whose folder or file segment breaks the rule of Tests/Guards/acronym_path_case.jet (same lexicon, same exemptions, one shared rule function), under a registered code with a UI snapshot and a RenameFile code action. Proof: cases under Tests/Cases/LSP for both diagnostics and both fixes, and the guard passes, on a batch compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:13:16.797Z"
+        },
+        {
+          "n": 24,
+          "text": "The server implements every LSP request and notification an editor uses for a typed language, or the card names each one left out and why (owner, 2026-11-24: fully featured). Proof: lsp_initialize_capabilities_have_named_test_coverage passes, with each advertised capability exercised by a named case, and an inventory in the card's handoff lists the spec methods with their status.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:13:17.861Z"
+        },
+        {
+          "n": 25,
+          "text": "workspace/symbol never stops the server. In Zed (rootUri = the repository) it exits 70 with `can't slice 11548 characters from 11545 to 11550`: semindex_type_refs (JetSemIndex Build.jet:553) slices source characters with byte offsets, so Compiler/JetImpact/Tests/Impact/Report.jet, which has non-ASCII text, overruns. The same bug cuts wrong type names after any non-ASCII character, so definition, references and rename miss them. lsp_saved_outline also runs a full semindex_build per saved file in the root. Proof: a JetLSP test resolves a type reference written after non-ASCII text and at the file's end, and workspace/symbol on this repository answers in under 1 s without exiting, on a batch compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:18:20.304Z"
         }
       ],
       "refs": [],
@@ -65564,9 +65615,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-24T12:25:34.746Z",
+      "updated": "2026-11-24T13:18:20.304Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 20
+      "criteriaLastN": 25
     },
     {
       "id": "c01q17ls",
@@ -65655,20 +65706,20 @@
         {
           "n": 6,
           "text": "Hover and inspect label foreign and generated origins and unknown analysis boundaries, so a reader never has to inspect compiler special cases. Proof: `jet test Compiler --profile cases --filter LSP/lsp_hover_marks_foreign_and_generated_origins`. (was #3186 c4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:11.593Z"
+          "evidence": "`jet test Compiler --profile cases --filter LSP/lsp_hover_marks_foreign_and_generated_origins` PASS 1/1 on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:44.544Z"
         },
         {
           "n": 7,
           "text": "Hover, signature help and the checked call record for ambient `print` and for `core.term.print` each report that function's own declared contract and declaration identity, and the editor agrees with the CLI for each, through real CLI and editor requests (spans, codes, fixes, URIs and invalidation included). Ambient `print` takes one or more Printable values; `core.term.print` takes one String (Docs/Spec/spec.md line 542, Core/Term/Term.jet:301). Proof: `jet test Compiler/JetLSP --filter print_hover_signature_call_record_agree` and `jet test Compiler --profile cases --filter LSP/lsp_print_contract_matches_cli`. (was #3186 c8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T05:53:29.190Z"
+          "evidence": "`jet test Compiler/JetLSP/Tests --filter print_hover_signature_call_record_agree` 1 passed, 0 failed, and `--profile cases --filter LSP/lsp_print_contract_matches_cli` PASS 1/1 on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:45.528Z"
         },
         {
           "n": 8,
@@ -65706,7 +65757,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:53.089Z",
-      "updated": "2026-11-24T09:22:39.469Z",
+      "updated": "2026-11-24T12:55:45.528Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 10
     },
@@ -67591,20 +67642,20 @@
         {
           "n": 9,
           "text": "A structural audit lists added, removed and changed declarations between two indexes (old Queries.jet:172 structural_audit, :217 semindex_structural_signature). Proof: `jet test Compiler --profile cases --filter Semindex/structural_audit`. (was #6630 c2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:44.656Z"
+          "evidence": "`jet test Compiler --profile cases --filter Semindex/structural_audit` PASS 2/2 on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:39.809Z"
         },
         {
           "n": 10,
           "text": "package_facts_for_entry, E1215, the overlay policy and the E1202 stale-lock check work (old Queries.jet:76,83, Open.jet:58-128), and SemIndexJSON.jet stops writing null for package facts. Proof: `jet test Compiler --profile cases --filter Semindex/package_facts_and_stale_lock`. (was #6630 c3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:45.583Z"
+          "evidence": "`jet test Compiler --profile cases --filter Semindex/package_facts_and_stale_lock` PASS 1/1 on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:40.717Z"
         },
         {
           "n": 11,
@@ -67636,11 +67687,11 @@
         {
           "n": 14,
           "text": "Semantic blame (old Receipts/SemanticOps.jet:265,281) is reachable from a jet command. Dropping it instead needs a ratified decision first. Proof: `jet test Compiler --profile cases --filter Semindex/semantic_blame`. (was #6630 c7)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:48.776Z"
+          "evidence": "`jet test Compiler --profile cases --filter Semindex/semantic_blame` PASS 1/1 on tip23 (jet build Compiler from dev 45bbcdbd34).",
+          "at": "2026-11-24T12:55:41.670Z"
         },
         {
           "n": 15,
@@ -67672,11 +67723,11 @@
         {
           "n": 18,
           "text": "The 7 known-failing rows this card owns (rehomed by #6843 c7) pass and leave Tests/known-failing.tsv: Review/comment_only_change_has_no_semantic_operation, Pkg/denied_import_boundary_fact_reaches_structure_inspection, Pkg/loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen, StructuralMerge/overlapping_edit_conflicts_without_writing_success_output, StructuralMerge/signature_classification_and_move_do_not_depend_on_body_or_basename, StructuralMerge/structural_diff_add_remove_reorder_rename_edit_is_deterministic, StructuralMerge/structural_diff_ignores_format_comments_and_reports_signature_and_move. Proof: each named test passes in its suite on a batch compiler, and no row of Tests/known-failing.tsv names this card for them.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T02:26:36.626Z"
+          "evidence": "All 7 named tests pass on tip23 (jet build Compiler from dev 45bbcdbd34): `--profile cases --filter Review/comment_only_change_has_no_semantic_operation` PASS 1/1; `--filter Pkg/` PASS 75, FAIL 0 (covers both Pkg tests); `--filter StructuralMerge/` PASS 17/17 (covers the four StructuralMerge tests). Tests/known-failing.tsv at dev 45bbcdbd34 names #6921 for none of the seven.",
+          "at": "2026-11-24T12:56:15.808Z"
         }
       ],
       "refs": [],
@@ -67687,7 +67738,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:43.573Z",
-      "updated": "2026-11-24T09:45:37.930Z",
+      "updated": "2026-11-24T12:56:15.808Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 18
     },
@@ -75482,7 +75533,7 @@
       "track": "epoch",
       "epoch": "G2",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -75491,6 +75542,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Reopened: four dogfooding frictions found 2026-11-24 while diagnosing the LSP workspace/symbol crash (c37-c40)."
+        },
         {
           "at": "2026-11-21",
           "by": "Main",
@@ -75951,6 +76007,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-23T18:58:58.404Z"
+        },
+        {
+          "n": 37,
+          "text": "jet debug names a program image's missing symbols with no fix for a copied compiler: ~/.local/share/jet-lsp/tip23/jet (a copy of a stage-1 jet) gives Jet.DebuggerUnavailable because jet.debug is not beside it. The copy that editors run cannot be debugged where it runs. Proof: a case shows that jet debug finds a copied image's symbols by build id (or that a documented install step places them), and debugs the copy.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:18:33.019Z"
+        },
+        {
+          "n": 38,
+          "text": "jet debug --do run fails with `Unknown command run`: the program starts paused at entry and only `continue` starts it. Every other debugger spells this run. jet debug --help never says the program starts paused. Proof: --help states the start state, and a case shows that `run` is accepted or rejected with a fix line naming continue.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:18:34.253Z"
+        },
+        {
+          "n": 39,
+          "text": "A panic inside a Core builtin reports `--> <core.builtin>:0` with no Jet frame. The LSP crash `can't slice 11548 characters from 11545 to 11550` needed jet debug to find semindex_type_refs Build.jet:553, though the Jet.Panic text promises the Jet file and line. Proof: a case panics inside String.slice and the report names the calling Jet file and line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:18:35.410Z"
+        },
+        {
+          "n": 40,
+          "text": "jet perf attach --help and jet perf view --help print only `Usage: attach` / `Usage: view`, and jet perf attach PID fails with Jet.DebugAttachFailed under ptrace_scope=1 with no fix naming the cause. Proof: both --help pages list their flags, and the attach failure names ptrace_scope and its fix, in UI snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T13:18:36.794Z"
         }
       ],
       "refs": [],
@@ -75958,10 +76050,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-20T00:56:36.847Z",
-      "updated": "2026-11-23T18:58:58.404Z",
+      "updated": "2026-11-24T13:18:50.428Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 36,
-      "completedAt": "2026-11-22T12:47:01.395Z"
+      "criteriaLastN": 40
     },
     {
       "id": "c0c3gh6u",
@@ -140612,6 +140703,244 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T13:18:50.428Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00ni11n",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-24T13:18:36.794Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "38 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
+    },
+    {
+      "at": "2026-11-24T13:18:36.794Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#40 jet perf attach --help and jet perf view --help print only `"
+    },
+    {
+      "at": "2026-11-24T13:18:35.410Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "37 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
+    },
+    {
+      "at": "2026-11-24T13:18:35.410Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#39 A panic inside a Core builtin reports `--> <core.builtin>:0`"
+    },
+    {
+      "at": "2026-11-24T13:18:34.253Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "36 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
+    },
+    {
+      "at": "2026-11-24T13:18:34.253Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#38 jet debug --do run fails with `Unknown command run`: the pro"
+    },
+    {
+      "at": "2026-11-24T13:18:33.019Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c00ni11n",
+      "note": "35 criteria, soft limit 6: dogfooding frictions found 2026-11-24 while diagnosing the LSP crash; they belong on the dogfooding card"
+    },
+    {
+      "at": "2026-11-24T13:18:33.019Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00ni11n",
+      "note": "#37 jet debug names a program image's missing symbols with no fi"
+    },
+    {
+      "at": "2026-11-24T13:18:20.305Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "24 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional; workspace/symbol kills the server"
+    },
+    {
+      "at": "2026-11-24T13:18:20.305Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#25 workspace/symbol never stops the server. In Zed (rootUri = t"
+    },
+    {
+      "at": "2026-11-24T13:13:17.861Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "23 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional and featured; regressions belong on the LSP card"
+    },
+    {
+      "at": "2026-11-24T13:13:17.861Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#24 The server implements every LSP request and notification an "
+    },
+    {
+      "at": "2026-11-24T13:13:16.797Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "22 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional and featured; regressions belong on the LSP card"
+    },
+    {
+      "at": "2026-11-24T13:13:16.797Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#23 The LSP enforces Jet's casing (owner, 2026-11-24: TitleCase "
+    },
+    {
+      "at": "2026-11-24T13:13:15.698Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "21 criteria, soft limit 6: owner instruction 2026-11-24: LSP fully functional and featured; regressions belong on the LSP card"
+    },
+    {
+      "at": "2026-11-24T13:13:15.698Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#22 Hover shows one signature in Jet syntax with the effective f"
+    },
+    {
+      "at": "2026-11-24T13:01:09.818Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "20 criteria, soft limit 6: owner-reported LSP regression; belongs on the LSP card per the regression rule"
+    },
+    {
+      "at": "2026-11-24T13:01:09.818Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#21 The server answers on files in large multi-module packages. "
+    },
+    {
+      "at": "2026-11-24T13:01:02.175Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c06r6neu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-24T12:56:17.594Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T12:56:16.701Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-24T12:56:15.808Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-24T12:55:45.528Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01q17ls",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T12:55:44.545Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01q17ls",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T12:55:43.566Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-24T12:55:42.630Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06tzcrf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T12:55:41.670Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-24T12:55:40.718Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-24T12:55:39.809Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-24T12:55:38.892Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-24T12:55:38.003Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-24T12:55:37.080Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-24T12:55:36.205Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06r6neu",
+      "note": "#4"
+    },
     {
       "at": "2026-11-24T12:53:55.434Z",
       "by": "agent",
