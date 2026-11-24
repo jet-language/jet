@@ -922,7 +922,7 @@ sema_comptime_use_type: fn(ty: Type, span: Span, scan: ^SemaComptimeUseScan) Nev
 // Per module, the modules it imports only with `#run use` -> the
 // prefix of one such import, which the fix deletes.
 sema_comptime_use_record_targets: fn(graph: ^SemaRegistrationGraph) Never! {
-    targets := [String:Span]{}
+    targets := [Int:Span]{}
     loop module_row in graph.modules {
         has_comptime := false
         loop import in module_row.imports {
@@ -941,10 +941,16 @@ sema_comptime_use_record_targets: fn(graph: ^SemaRegistrationGraph) Never! {
         loop import in module_row.imports {
             prefix: import.declaration.comptime_span ?? next
             if plain.has_key(import.target_module_identity.id) -> next
-            targets["{module_row.module_identity.id}\n{import.target_module_identity.id}"] = prefix
+            targets[sema_comptime_use_slot(module_row.module_identity, import.target_module_identity)] = prefix
         }
     }
     graph.comptime_use_targets = targets.move()
+}
+
+// A `#run use` import's slot (SemaRegistrationGraph.comptime_use_targets):
+// the importing module in the high half, the imported one in the low.
+sema_comptime_use_slot: fn(module_identity: ModuleID, target: ModuleID) -> Int Never! {
+    (Int{module_identity.id} << 32) | Int{target.id}
 }
 
 // The user modules only compile-time code reaches. The entry module, a
@@ -1052,7 +1058,7 @@ sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment
 
 sema_comptime_use_value_prefix: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> Span? {
     if sema_type_resolve_nominal_row(graph, ty, module_identity) == .Val(row) {
-        if graph.comptime_use_targets.get("{module_identity.id}\n{graph.modules[row.module_index].module_identity.id}") == .Val(prefix) {
+        if graph.comptime_use_targets.get(sema_comptime_use_slot(module_identity, graph.modules[row.module_index].module_identity)) == .Val(prefix) {
             return Val(prefix)
         }
     }

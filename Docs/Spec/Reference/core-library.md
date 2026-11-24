@@ -5306,7 +5306,9 @@ Point: struct { x: Int, y: Int }
 named: fn(field: FieldRef<Point, Int>) -> String Never! { field.name() }
 
 run: fn() {
+    p: Point{x: 3, y: 4}
     print(named(.y))   // y
+    print(p.x + p.y)   // 7
 }
 ```
 

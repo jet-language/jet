@@ -936,19 +936,18 @@ sema_comptime_checked_text_source: fn(evaluation: SemaCheckedTextEvaluation) -> 
     }
 }
 
-// The comptime sources one module contributes, with the `module\nkey` of
-// each interned in `keys`, so a repeated key is found without rescanning the
-// list. Their constant dependencies come from the run's item checks
+// The comptime sources one module contributes, with the module and key of
+// each in `keys`, so a repeated key is found without rescanning the list.
+// Their constant dependencies come from the run's item checks
 // (sema_check_comptime_item_in).
 SemaComptimeSourceList: struct {
     items: [SemaComptimeItemSource],
-    keys: NameTable,
+    keys: SemaComptimeKeySet{SemaComptimeKeySet{}},
 }
 
 // `key` is the value's text key; the list dedupes by module and key.
 sema_comptime_add_source: fn(sources: ^SemaComptimeSourceList, graph: SemaRegistrationGraph, module_identity: ModuleID, key: String, destination_key: String, name: String, kind: SemaComptimeItemKind, expression: Expr, expected_type: Type?) {
-    source_key: "{module_identity.id}\n{key}"
-    if name_find(sources.keys, source_key) != None {
+    if sema_comptime_key_set_has(sources.keys, module_identity, key) {
         return
     }
     module_index: sema_registration_module_index(graph, module_identity) ?? return
@@ -967,7 +966,7 @@ sema_comptime_add_source: fn(sources: ^SemaComptimeSourceList, graph: SemaRegist
         checked_text: None,
     }
     sources.items.push(source)
-    _ := name_intern(sources.keys, source_key)
+    _ := sema_comptime_key_set_add(sources.keys, module_identity, key)
 }
 
 sema_comptime_add_marker_source: fn(sources: ^SemaComptimeSourceList, graph: SemaRegistrationGraph, module_identity: ModuleID, owner_key: String, marker: Marker, expected_type: Type?) {
@@ -1167,7 +1166,7 @@ sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
 // The comptime sources of `source_module`, in declaration order, their
 // dependencies not yet named (the run's check of each names them).
 sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
-    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: name_table_sized(16)}
+    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}}
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
@@ -1329,18 +1328,16 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
         if has_checked_text -> break
     }
     if has_checked_text {
-        source_keys := name_table_sized(sources.len() * 2 + 2)
+        source_keys := SemaComptimeKeySet{}
         loop source in sources {
-            _ := name_intern(source_keys, "{source.module_identity.id}\n{source.key}")
+            _ := sema_comptime_key_set_add(source_keys, source.module_identity, source.key)
         }
         loop checked_module_index in 0..<modules.len() {
             checked_module: modules[checked_module_index]
             loop request in checked_module.comptime_requests {
                 evaluation: request.checked_text ?? next
                 source := sema_comptime_checked_text_source(evaluation)
-                source_key: "{source.module_identity.id}\n{source.key}"
-                if name_find(source_keys, source_key) != None -> next
-                _ := name_intern(source_keys, source_key)
+                if !sema_comptime_key_set_add(source_keys, source.module_identity, source.key) -> next
                 sources.push(source)
             }
         }

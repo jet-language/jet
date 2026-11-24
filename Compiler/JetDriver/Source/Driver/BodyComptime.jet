@@ -7,14 +7,12 @@ use {
         Diagnostic,
         FnBody,
         ModuleTable,
-        NameTable,
         compiler_take_rows,
         module_text,
         name_column_table,
         name_find,
         name_index,
         name_intern,
-        name_table_sized,
     ]
     jet_sema.[
         SemaComptimeBodySource,
@@ -24,6 +22,7 @@ use {
         SemaComptimeItemKind,
         SemaComptimeItemSource,
         SemaComptimeItemValue,
+        SemaComptimeKeySet,
         SemaCoreSeal,
         SemaFinalizeBodies,
         SemaFunctionMemoryPlan,
@@ -37,6 +36,8 @@ use {
         sema_call_rule_batches_land,
         sema_call_rules_held,
         sema_comptime_body_item_source,
+        sema_comptime_key_set_add,
+        sema_comptime_key_set_has,
         sema_comptime_function_diagnostics,
         sema_comptime_local_values_ahead,
         sema_comptime_graph_apply_values,
@@ -222,18 +223,16 @@ jet_driver_comptime_take_registration: fn(finished: ^^SemaRegistrationGraph?, pa
     partial.move() ?? panic("a comptime run lost its registration graph")
 }
 
-// `known` holds the `module\nkey` of every source already added.
+// `known` holds the module and key of every source already added.
 jet_driver_comptime_body_source_add: fn(
     sources: ^[SemaComptimeItemSource],
-    known: ^NameTable,
+    known: ^SemaComptimeKeySet,
     source: SemaComptimeBodySource,
 ) Never! {
     item := sema_comptime_body_item_source(source)
-    key: "{item.module_identity.id}\n{item.key}"
-    if name_find(known, key) != None {
+    if !sema_comptime_key_set_add(known, item.module_identity, item.key) {
         return
     }
-    _ := name_intern(known, key)
     sources.push(item)
 }
 
@@ -246,28 +245,26 @@ JetDriverBodySourceRow: struct {
 }
 
 // The body sources of `modules` that `values` holds no staged value for,
-// the first of each `module\nkey`, by place: a caller copies only the
+// the first of each module and key, by place: a caller copies only the
 // sources it goes on to take.
 jet_driver_pending_comptime_body_rows: fn(
     modules: [SemaGraphModuleResult],
     values: [SemaComptimeItemValue],
 ) -> [JetDriverBodySourceRow] Never! {
-    // The `module\nkey` of every staged body value, collected once rather
+    // The module and key of every staged body value, collected once rather
     // than rescanning every value per source.
-    present := name_column_table(values.len())
+    present := SemaComptimeKeySet{}
     loop value in values {
         if value.kind == SemaComptimeItemKind.BodyExpression {
-            _ := name_intern(present, "{value.module_identity.id}\n{value.key}")
+            _ := sema_comptime_key_set_add(present, value.module_identity, value.key)
         }
     }
     rows := [JetDriverBodySourceRow]{}
-    seen := name_table_sized(2)
+    seen := SemaComptimeKeySet{}
     loop (owner, graph_module) in modules {
         loop (row, source) in graph_module.comptime_body_sources {
-            key: "{source.module_identity.id}\n{source.key}"
-            if name_find(seen, key) != None -> next
-            _ := name_intern(seen, key)
-            if name_find(present, key) == None -> rows.push(JetDriverBodySourceRow{owner: owner, row: row})
+            if !sema_comptime_key_set_add(seen, source.module_identity, source.key) -> next
+            if !sema_comptime_key_set_has(present, source.module_identity, source.key) -> rows.push(JetDriverBodySourceRow{owner: owner, row: row})
         }
     }
     rows
@@ -294,18 +291,20 @@ jet_driver_comptime_rules_pending: fn(pending: [SemaComptimeBodySource]) -> Bool
     false
 }
 
-// The pending sources a compile without the runtime image keeps. jet-bare
-// checks every Core body in the runtime step with no image, so it runs no
-// compile-time code: a call a check rule hears keeps its ordinary checks
-// there, and each compile that can run the rule hears it. A call whose own
-// checks failed still waits on its rule, so its held errors are reported.
-jet_driver_comptime_unheard: fn(pending: [SemaComptimeBodySource]) -> [SemaComptimeBodySource] Never! {
-    kept := [SemaComptimeBodySource]{}
-    loop source in pending {
+// Drops from `pending` the sources a compile without the runtime image
+// leaves. jet-bare checks every Core body in the runtime step with no image,
+// so it runs no compile-time code: a call a check rule hears keeps its
+// ordinary checks there, and each compile that can run the rule hears it. A
+// call whose own checks failed still waits on its rule, so its held errors
+// are reported.
+jet_driver_comptime_unheard: fn(pending: ^[SemaComptimeBodySource]) Never! {
+    held := compiler_take_rows<SemaComptimeBodySource>(pending)
+    held.reverse()
+    loop held.len() > 0 {
+        source: held.pop() ?? break
         if source.rule != None && !source.rule_held -> next
-        kept.push(source.copy())
+        pending.push(source)
     }
-    kept
 }
 
 // Whether the body recheck or the checked-text validation evaluates over
@@ -406,7 +405,7 @@ jet_driver_comptime_body_pass: fn(
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
     jet_driver_trace_step_begin(request.trace_sink, "comptime.body.pending")
     pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
-    if request.eval_config.native == None -> pending = jet_driver_comptime_unheard(pending)
+    if request.eval_config.native == None -> jet_driver_comptime_unheard(pending)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.pending", pending.len())
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.bodies_pending", pending.len(), -1)
@@ -450,7 +449,7 @@ jet_driver_comptime_body_pass: fn(
     // sources (sema_call_rule_batches).
     held: sema_call_rules_held(pending)
     body_sources := [SemaComptimeItemSource]{}
-    known := name_column_table(pending.len())
+    known := SemaComptimeKeySet{}
     loop source in pending {
         if source.rule != None || rules_only -> next
         jet_driver_comptime_body_source_add(body_sources, known, source)
@@ -693,7 +692,7 @@ jet_driver_validate_checked_text: fn(
 ) -> JetDriverComptimeBodyResult {
     registration := graph.move()
     sources := [SemaComptimeItemSource]{}
-    known := name_table_sized(2)
+    known := SemaComptimeKeySet{}
     loop module_index in 0..<initial_graph.modules.len() {
         loop call in initial_graph.modules[module_index].comptime_requests {
             if call.checked_text == .Val(evaluation) {
@@ -827,7 +826,7 @@ jet_driver_land_local_values: fn(
 ) -> SemaRegistrationGraph {
     registration := graph.move()
     if landing.stopped -> return registration
-    tried := name_table_sized(2)
+    tried := SemaComptimeKeySet{}
     loop {
         // Every exit but the one with no site pending stops the landing.
         // The trace times the landing's steps on this thread
@@ -845,9 +844,8 @@ jet_driver_land_local_values: fn(
         // A site pending again ends the landing, so it ends.
         again := false
         loop at in rows {
-            site: "{bodies.modules[at.owner].comptime_body_sources[at.row].module_identity.id}\n{bodies.modules[at.owner].comptime_body_sources[at.row].key}"
-            if name_find(tried, site) != None -> again = true
-            _ := name_intern(tried, site)
+            site: bodies.modules[at.owner].comptime_body_sources[at.row]
+            if !sema_comptime_key_set_add(tried, site.module_identity, site.key) -> again = true
         }
         if again -> break
         // A site that is neither a local value nor a `name: #run value`
@@ -860,7 +858,7 @@ jet_driver_land_local_values: fn(
         ahead := sema_comptime_local_values_ahead(values, pending)
         body_sources := [SemaComptimeItemSource]{}
         run_sources := [SemaComptimeItemSource]{}
-        known := name_column_table(pending.len())
+        known := SemaComptimeKeySet{}
         loop index in 0..<pending.len() {
             added: body_sources.len()
             jet_driver_comptime_body_source_add(body_sources, known, pending[index])

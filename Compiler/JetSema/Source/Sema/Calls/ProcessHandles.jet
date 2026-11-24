@@ -266,7 +266,10 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     // tier runs.
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     leaf: if method == "terminal" && args.len() == 1 -> "terminal_with_policy" else -> method
-    record: core_call(CORE_BUILTINS_MODULE, "process_spec_{leaf}") ?? panic("ProcessSpec.{method} has no jet_builtins.process_spec_{leaf} host leaf")
+    record: core_call(CORE_BUILTINS_MODULE, "process_spec_{leaf}") ?? {
+        diagnostics.push(sema_error("E0003", span, "`ProcessSpec.{method}` has no host leaf `jet_builtins.process_spec_{leaf}`", "every ProcessSpec builder lowers onto its jet_builtins host leaf row", "restore the `process_spec_{leaf}` row in Compiler/Prelude/Core.rows"))
+        return rejected
+    }
     fallibility: sema_expression_failure_carrier(result)
     if !sema_call_core_record_effects_as(record, "ProcessSpec.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
         return rejected

@@ -751,24 +751,27 @@ sema_derive_expand_name: fn(expansion: ^SemaDeriveExpansion, name: String, span:
     value: sema_derive_scope_value(expansion, binding) ?? return name
     if value == {
         .Str(text) -> {
-            if sema_derive_paste_refused(expansion, text, span) -> return name.copy()
-            if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
-            return text
-        }
-        .Struct(_, _) -> {
-            if !explicit -> return name.copy()
-            // A case is spelled as its enum writes it, `Fire.Burn` for a
-            // grouped one.
-            spelled := sema_derive_reflected_name(value)
-            if sema_derive_is_variant(value) {
-                spelled = sema_derive_case_spelling(expansion, value)
-            }
-            if spelled == .Val(text) {
-                if sema_derive_paste_refused(expansion, text, span) -> return name.copy()
+            if !sema_derive_paste_refused(expansion, text, span) {
                 if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
                 return text
             }
-            sema_derive_fail(expansion, sema_error("E0956", span, "compile-time name `${binding}` has no text name", "a generated item name needs the reflected value's `name` field", "bind the name to a String value"))
+        }
+        .Struct(_, _) -> {
+            if explicit {
+                // A case is spelled as its enum writes it, `Fire.Burn` for a
+                // grouped one.
+                spelled := sema_derive_reflected_name(value)
+                if sema_derive_is_variant(value) {
+                    spelled = sema_derive_case_spelling(expansion, value)
+                }
+                if spelled == None {
+                    sema_derive_fail(expansion, sema_error("E0956", span, "compile-time name `${binding}` has no text name", "a generated item name needs the reflected value's `name` field", "bind the name to a String value"))
+                }
+                if spelled == .Val(text) && !sema_derive_paste_refused(expansion, text, span) {
+                    if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
+                    return text
+                }
+            }
         }
         .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
             if explicit {

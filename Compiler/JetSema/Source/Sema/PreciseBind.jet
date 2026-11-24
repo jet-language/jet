@@ -9,7 +9,7 @@
 // lowers: a Fraction `/`, whose zero divisor stops at the operator's own line
 // before Core runs (ir_precise_division), and, in a program without
 // core.math, every one, through its runtime route (ir_precise_route).
-use jet_foundation.[BodyCallArg, BodyHandleOp, BodyTree, NodeKind, SymbolID, Type, module_is_core, sema_casing_pascal_words, sema_casing_snake_words]
+use jet_foundation.[BodyCallArg, BodyHandleOp, BodyTree, NameTable, NodeKind, SymbolID, Type, module_is_core, name_column, name_column_get, name_column_set, name_column_table, sema_casing_pascal_words, sema_casing_snake_words]
 
 // The types whose checked operations run core.math functions.
 SEMA_PRECISE_TYPES: [String]{"Decimal", "Fraction", "Complex"}
@@ -45,22 +45,34 @@ SemaPreciseOperation: struct {
     args: [Int],
 }
 
+// The core.math functions that fill precise roles: each role
+// (sema_precise_role) keys, at its id in `roles`, the index of its function
+// in the module's `functions`.
+SemaPreciseFillers: struct {
+    roles: NameTable{name_column_table()},
+    rows: [Int]{name_column()},
+}
+
 // Rewrites each precise operation of the finished body `tree` whose role a
 // core.math function fills into a direct call of that function.
 sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
     if program.registration_graph == .Val(graph) {
-        // Found on the first precise operation: most bodies hold none.
-        math := -2
-        fillers := [String:String]{}
+        // Most bodies hold no precise operation: core.math is looked up at
+        // the first one.
+        first := -1
         loop index in 0..<tree.nodes.len() {
-            operation: sema_precise_operation(tree.nodes[index].kind) ?? next
-            if math == -2 {
-                math = sema_precise_math_module(graph) ?? -1
-                if math >= 0 -> fillers = sema_precise_fillers(graph, math)
+            if sema_precise_operation(tree.nodes[index].kind) != None {
+                first = index
+                break
             }
-            if math < 0 -> return
-            name: fillers.get(operation.role) ?? next
-            export: sema_registration_direct_symbol(graph.modules[math], name) ?? next
+        }
+        if first < 0 -> return
+        math: sema_precise_math_module(graph) ?? return
+        fillers: sema_precise_fillers(graph, math)
+        loop index in first..<tree.nodes.len() {
+            operation: sema_precise_operation(tree.nodes[index].kind) ?? next
+            row: name_column_get(fillers.roles, fillers.rows, operation.role) ?? next
+            export: sema_registration_direct_symbol(graph.modules[math], graph.modules[math].functions[row].declaration.name) ?? next
             callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
             args: loop argument in operation.args -> BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
@@ -68,15 +80,15 @@ sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
     }
 }
 
-// The name of each function of core.math (registration row `math`) that
-// fills a precise operation's role, by that role.
-sema_precise_fillers: fn(graph: SemaRegistrationGraph, math: Int) -> [String:String] Never! {
-    fillers := [String:String]{}
+// The functions of core.math (registration row `math`) that fill a precise
+// operation's role, by that role.
+sema_precise_fillers: fn(graph: SemaRegistrationGraph, math: Int) -> SemaPreciseFillers Never! {
+    fillers := SemaPreciseFillers{}
     module_row: graph.modules[math]
-    loop function in module_row.functions {
+    loop (index, function) in module_row.functions {
         if function.declaration.markers.len() == 0 -> next
         role: sema_core_role(function.declaration.markers, graph, module_row.module_identity)
-        if sema_precise_role_operation(role) != None -> fillers[role] = function.declaration.name.copy()
+        if sema_precise_role_operation(role) != None -> name_column_set(fillers.roles, fillers.rows, role, index)
     }
     fillers
 }

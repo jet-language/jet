@@ -252,11 +252,13 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     server := lsp_test_server()
     uri: "file:///w/docs.jet"
     lsp_test_open(server, uri, "/// Adds two numbers.\nadd: fn(left: Int, right: Int) -> Int {{ left + right }}\n\nrun: fn() -> Int {{\n    ad\n}}\n")
-    found := Dyn?{None}
-    loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 4, 6)), "items")) {
-        if lsp_test_text(item, "label") == "add" && lsp_test_int(item, "kind") == 3 -> found = Val(item.copy())
+    items: lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 4, 6)), "items"))
+    at := -1
+    loop (index, offered) in items {
+        if lsp_test_text(offered, "label") == "add" && lsp_test_int(offered, "kind") == 3 -> at = index
     }
-    item: found ?? panic("`add` is offered")
+    if at < 0 -> panic("`add` is offered")
+    item: items[at]
     assert(lsp_member(item, "documentation") == None, "the list carries no documentation")
     resolved: lsp_test_result(server, "completionItem/resolve", jet_error_json_encode_value(item))
     assert_eq(lsp_test_text(lsp_test_field(resolved, "documentation"), "value"), "Adds two numbers.")

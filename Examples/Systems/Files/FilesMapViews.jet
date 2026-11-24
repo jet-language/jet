@@ -22,6 +22,11 @@ header: fn(mapped: MappedFile, size: Int) -> View<U8>? {
     mapped.window_len(0, size) ?? return None
 }
 
+// The bytes `start..<end`, or None when the range is not inside the file.
+range: fn(mapped: MappedFile, start: Int, end: Int) -> View<U8>? {
+    mapped.window(start, end) ?? return None
+}
+
 // The same window as a Result with this program's own error.
 header_or: fn(mapped: MappedFile, size: Int) -> View<U8> Missing! {
     window: header(mapped, size) ?? return Err(Missing.Short)
@@ -70,6 +75,11 @@ run: fn() {
         .None -> print("option: none")
     }
     print("option past the end is None: {header(mapped, 99) == None}")
+    if range(mapped, 6, 10) == {
+        .Val(window) -> { print("range: {text(window)}") }
+        .None -> print("range: none")
+    }
+    print("range past the end is None: {range(mapped, 6, 99) == None}")
     if header_or(mapped, 3) == {
         .Ok(window) -> { print("result: {text(window)}") }
         .Err(_) -> print("result: short")

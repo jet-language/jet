@@ -620,22 +620,20 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
             references.push(reference)
         }
         declaration_span := Span{start: 0, end: 0}
-        if graph.modules[row.module_index].program.items[row.item_index] == .Const(definition) {
-            declaration_span = definition.name_span
-            // copy: `definition` is a read view of the graph item, and the slot is rewritten with
-            // `updated` on the next lines. Jet has no writable binding for an enum payload.
-            updated := definition.copy()
-            // copy: the resolved fact is stored twice: on the program item here and on the matching
-            // registered constant below.
-            updated.resolved_output = Val(row.fact.copy())
-            graph.modules[row.module_index].program.items[row.item_index] = Item.Const{value: updated.move()}
-        }
+        if graph.modules[row.module_index].program.items[row.item_index] == .Const(definition) -> declaration_span = definition.name_span
         loop constant_index in 0..<graph.modules[row.module_index].constants.len() {
-            // copy: the resolved fact is stored twice: on the program item above and on this
-            // registered constant.
+            // copy: the resolved fact is stored twice: on this registered
+            // constant and, moved, on the program item below.
             if graph.modules[row.module_index].constants[constant_index].declaration.name_span == declaration_span {
                 graph.modules[row.module_index].constants[constant_index].declaration.resolved_output = Val(row.fact.copy())
             }
+        }
+        if graph.modules[row.module_index].program.items[row.item_index] == .Const(definition) {
+            // copy: `definition` is a read view of the graph item, and the slot is rewritten with
+            // `updated` on the next lines. Jet has no writable binding for an enum payload.
+            updated := definition.copy()
+            updated.resolved_output = Val(row.fact.move())
+            graph.modules[row.module_index].program.items[row.item_index] = Item.Const{value: updated.move()}
         }
     }
     references.reverse()

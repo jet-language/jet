@@ -235,10 +235,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1644,
+  "total": 1643,
   "counts": {
     "Compiler": 807,
-    "Core": 170,
+    "Core": 169,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
@@ -1943,7 +1943,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2697,
+      "line": 2693,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -2951,14 +2951,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/DynCodec.jet",
-      "line": 137,
+      "line": 136,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/DynCodec.jet",
-      "line": 167,
+      "line": 166,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -3154,7 +3154,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/FilesPathOps.jet",
-      "line": 38,
+      "line": 37,
       "column": 5,
       "reason": "the terminated raw path and the 128-byte stat fact row are live for the syscall"
     },
@@ -3511,14 +3511,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostParallelism.jet",
-      "line": 562,
+      "line": 561,
       "column": 9,
       "reason": "the probe answer is fixed for the process; a racing probe stores the same word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostParallelism.jet",
-      "line": 577,
+      "line": 576,
       "column": 9,
       "reason": "xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)"
     },
@@ -3686,28 +3686,28 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 101,
+      "line": 100,
       "column": 5,
       "reason": "host argument registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 112,
+      "line": 111,
       "column": 5,
       "reason": "host argument registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 144,
+      "line": 143,
       "column": 5,
       "reason": "registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 191,
+      "line": 190,
       "column": 5,
       "reason": "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes"
     },
@@ -3854,7 +3854,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/NativeLayoutABI.jet",
-      "line": 98,
+      "line": 97,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -3917,28 +3917,28 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ObserveLive.jet",
-      "line": 184,
+      "line": 182,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ObserveLive.jet",
-      "line": 234,
+      "line": 232,
       "column": 9,
       "reason": "an idempotent install: every writer stores the same code address"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ObserveLive.jet",
-      "line": 403,
+      "line": 401,
       "column": 5,
       "reason": "the vetted Linux calls of Observe and the profiler take words alone or borrow native buffers only for their duration"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ObserveLive.jet",
-      "line": 708,
+      "line": 706,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -4568,14 +4568,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Reactive.jet",
-      "line": 41,
+      "line": 39,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Reactive.jet",
-      "line": 81,
+      "line": 79,
       "column": 5,
       "reason": "the observer id is a label nothing reads back; a racing creator can only repeat a label"
     },
@@ -4610,14 +4610,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 99,
+      "line": 98,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 369,
+      "line": 368,
       "column": 5,
       "reason": "the terminated raw path and the 128-byte stat fact row are live for the syscall"
     },
@@ -4841,35 +4841,35 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1753,
+      "line": 1752,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1805,
+      "line": 1804,
       "column": 5,
       "reason": "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2249,
+      "line": 2248,
       "column": 9,
       "reason": "x86 pause only hints that this thread is waiting in a spin loop"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2622,
+      "line": 2621,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 2691,
+      "line": 2690,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -5149,7 +5149,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Test.jet",
-      "line": 134,
+      "line": 133,
       "column": 9,
       "reason": "the OS leaf borrows at most eight initialized bytes from its own stack word"
     },
@@ -5324,14 +5324,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 21,
+      "line": 19,
       "column": 5,
       "reason": "audited runtime syscall: write borrows live text, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Trap.jet",
-      "line": 118,
+      "line": 116,
       "column": 9,
       "reason": "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes"
     },
@@ -5914,61 +5914,54 @@ file in a `Tests/` tree. The ratchet refuses either.
       "file": "Core/Crypto/Crypto.jet",
       "line": 280,
       "column": 5,
-      "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
+      "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
       "line": 286,
       "column": 5,
-      "reason": "vault key import: construct the typed recipient unlock request"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/Crypto.jet",
-      "line": 292,
-      "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 818,
+      "line": 812,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 845,
+      "line": 839,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1146,
+      "line": 1140,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1244,
+      "line": 1238,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1253,
+      "line": 1247,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1259,
+      "line": 1253,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -6262,14 +6255,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3395,
+      "line": 3392,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3779,
+      "line": 3776,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -6304,14 +6297,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/CSV.jet",
-      "line": 1142,
+      "line": 1141,
       "column": 9,
       "reason": "each completed UTF-8 scalar was validated before its original bytes entered this field"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/CSV.jet",
-      "line": 1306,
+      "line": 1305,
       "column": 25,
       "reason": "every byte of the field is below 128, so it is whole UTF-8"
     },
@@ -6346,84 +6339,84 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 462,
+      "line": 461,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 617,
+      "line": 616,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 622,
+      "line": 621,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 854,
+      "line": 853,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 864,
+      "line": 863,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1899,
+      "line": 1898,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1914,
+      "line": 1913,
       "column": 13,
       "reason": "every byte before the closing quote is printable ASCII, so it is whole UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2078,
+      "line": 2077,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2083,
+      "line": 2082,
       "column": 13,
       "reason": "project the native compiler-private Bytes carrier into its event"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2149,
+      "line": 2148,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2303,
+      "line": 2302,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2339,
+      "line": 2338,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
@@ -6451,7 +6444,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Data.jet",
-      "line": 277,
+      "line": 272,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
@@ -7529,7 +7522,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Jetpack",
       "file": "Jetpack/Foundation/Source/TreeHash.jet",
-      "line": 602,
+      "line": 601,
       "column": 9,
       "reason": "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler"
     },
@@ -7578,7 +7571,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Jetpack",
       "file": "Jetpack/Store/Tests/Seal.jet",
-      "line": 33,
+      "line": 32,
       "column": 5,
       "reason": "the store test owns the fixture file whose mtime it pins"
     },
@@ -11561,7 +11554,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Tools",
       "file": "Tools/Agent/Cache/Lanes.jet",
-      "line": 325,
+      "line": 324,
       "column": 21,
       "reason": "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc"
     },
@@ -11763,13 +11756,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 807 |
-| Core | 170 |
+| Core | 169 |
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 568 |
 | Tools | 28 |
-| **total** | **1644** |
+| **total** | **1643** |
 
 ### Regions
 
@@ -12017,7 +12010,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2779:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2789:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2891:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2697:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2693:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 213:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 245:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12161,8 +12154,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/CryptoAES.jet | 246:5 | "y and h hold one block, the range check keeps every block inside the length borrowed bytes, and the powers table holds four" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 23:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CryptoEntropy.jet | 69:5 | "Linux getrandom flags0 writes only the exclusively borrowed writable span and retains no address; kernel negative errno is preserved" |
-| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 137:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 167:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 136:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 166:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/EnvOverlay.jet | 40:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 63:5 | "the image's entry calls this before it starts any other thread" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 78:9 | "jet_rt_main calls this on the main thread before the entry runs" |
@@ -12190,7 +12183,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 476:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 527:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 692:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
-| Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 38:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 37:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 46:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Host.jet | 34:5 | "TCGETS writes its termios into the fresh mapping's scratch at 32 and retains no pointer" |
@@ -12241,8 +12234,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 104:5 | "the shard lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/HostNetPoller.jet | 140:9 | "events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer" |
 | Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 485:5 | "sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread" |
-| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 562:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
-| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 577:9 | "xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)" |
+| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 561:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
+| Compiler | Compiler/JetRuntime/Source/HostParallelism.jet | 576:9 | "xgetbv only reports the OS-enabled state, which CPUID.1:ECX has just shown the OS reports (OSXSAVE)" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 8:5 | "the audited caller supplies the Linux syscall's valid word arguments" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 36:1 | "a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments" |
 | Compiler | Compiler/JetRuntime/Source/HostProcess.jet | 213:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack and writes no old action" |
@@ -12266,10 +12259,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1028:5 | "getcwd writes at most 4097 bytes of the owned stack" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 1087:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 38:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 101:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 112:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 144:5 | "registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 191:5 | "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 100:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 111:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 143:5 | "registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 190:5 | "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 113:5 | "Host startup already initialized its process-lifetime mapping; the held lock owns ioctl scratch32..47 and FIRST raw lookup only borrows the immutable captured index" |
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 19:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostTiming.jet | 28:9 | "the probe answer is fixed for the process; a racing probe stores the same word" |
@@ -12290,7 +12283,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Main.jet | 328:5 | "only the main thread running jet_rt_main writes its root control" |
 | Compiler | Compiler/JetRuntime/Source/Main.jet | 355:5 | "the entry has returned and drained its workers; only the main thread runs here" |
 | Compiler | Compiler/JetRuntime/Source/MemRegistry.jet | 22:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 98:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/NativeLayoutABI.jet | 97:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/NativeLayoutText.jet | 65:5 | "runtime-init (jet_rt_layout_init) runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 431:5 | "private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer" |
 | Compiler | Compiler/JetRuntime/Source/NetUnix.jet | 551:13 | "the FD72 lock keeps the stream's descriptor live and unreused for the whole ppoll; the caller's Fd keeps the wake descriptor open; scratch lends the pollfds and timespec" |
@@ -12299,10 +12292,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 235:5 | "an idempotent flag: every writer stores the same 1" |
 | Compiler | Compiler/JetRuntime/Source/Observe.jet | 485:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 83:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 184:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 234:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 403:5 | "the vetted Linux calls of Observe and the profiler take words alone or borrow native buffers only for their duration" |
-| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 708:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 182:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 232:9 | "an idempotent install: every writer stores the same code address" |
+| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 401:5 | "the vetted Linux calls of Observe and the profiler take words alone or borrow native buffers only for their duration" |
+| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 706:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 711:5 | "the observation start runs before the timer whose handler reads these is armed" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 729:9 | "no timer is armed yet, so no handler reads these before they are set" |
 | Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 743:9 | "no timer is armed, so no handler reads the descriptor" |
@@ -12392,14 +12385,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 272:5 | "checked native Unit callback; its three raw arguments stay valid for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 280:5 | "checked code(box) address; the box stays live for the synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 286:5 | "checked code(box, argument) address; the box and argument stay live for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/Reactive.jet | 41:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Reactive.jet | 81:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
+| Compiler | Compiler/JetRuntime/Source/Reactive.jet | 39:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Reactive.jet | 79:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 245:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 180:5 | "the observation start runs on the main thread before any task" |
 | Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 215:5 | "the observation start runs on the main thread before any task" |
 | Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 259:5 | "the observation start runs on the main thread before any task" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 99:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 369:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 98:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 368:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 36:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 523:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 529:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
@@ -12431,11 +12424,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 894:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1051:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1394:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1753:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1805:5 | "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2249:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2622:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2691:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1752:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1804:5 | "openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2248:9 | "x86 pause only hints that this thread is waiting in a spin loop" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2621:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 2690:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 41:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 164:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
@@ -12475,7 +12468,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 26:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalProcessRoutes.jet | 58:9 | "TIOCSWINSZ borrows one initialized stack winsize word; the Child104 lock prevents close/recycling until ioctl returns" |
-| Compiler | Compiler/JetRuntime/Source/Test.jet | 134:9 | "the OS leaf borrows at most eight initialized bytes from its own stack word" |
+| Compiler | Compiler/JetRuntime/Source/Test.jet | 133:9 | "the OS leaf borrows at most eight initialized bytes from its own stack word" |
 | Compiler | Compiler/JetRuntime/Source/TestCapture.jet | 34:9 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TestContracts.jet | 30:5 | "the harness main opens contracts before any test, so before any other thread observes one" |
 | Compiler | Compiler/JetRuntime/Source/TestReads.jet | 41:5 | "runs during single-threaded startup before any other thread exists" |
@@ -12500,8 +12493,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 1044:13 | "tgkill names a live registered thread of this process" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 1082:9 | "a credential system call takes word arguments and retains no memory" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 1094:13 | "written under the registry mutex, before any handler can run" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 21:5 | "audited runtime syscall: write borrows live text, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 118:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 19:5 | "audited runtime syscall: write borrows live text, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 116:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
 | Compiler | Compiler/JetRuntime/Source/UIBackends.jet | 76:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/UIBackends.jet | 86:5 | "only an attached web build records, on its one thread" |
 | Compiler | Compiler/JetRuntime/Source/UIBackends.jet | 96:5 | "a web page's module runs on one thread" |
@@ -12584,15 +12577,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/Golden/compiler.jet | 32:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 228:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 273:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 280:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 818:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 845:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1146:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1244:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1253:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1259:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 280:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 812:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 839:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1140:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1238:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1247:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1253:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/Expert.jet | 289:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
 | Core | Core/Crypto/Expert.jet | 331:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
@@ -12634,34 +12626,34 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Crypto/Vault.jet | 388:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 397:5 | "vault recipient export provider boundary" |
 | Core | Core/DB/Query.jet | 173:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Data/Data.jet | 3395:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3779:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3392:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3776:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Encoding/CBOR.jet | 110:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/CBOR.jet | 178:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CBORStream.jet | 248:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CBORStream.jet | 357:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
-| Core | Core/Encoding/CSV.jet | 1142:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
-| Core | Core/Encoding/CSV.jet | 1306:25 | "every byte of the field is below 128, so it is whole UTF-8" |
+| Core | Core/Encoding/CSV.jet | 1141:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
+| Core | Core/Encoding/CSV.jet | 1305:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 617:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/JSON.jet | 1361:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/JSON.jet | 1366:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 24:5 | "the shared parser validated this exact numeric lexeme" |
-| Core | Core/Encoding/Stream.jet | 462:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| Core | Core/Encoding/Stream.jet | 617:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| Core | Core/Encoding/Stream.jet | 622:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| Core | Core/Encoding/Stream.jet | 854:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| Core | Core/Encoding/Stream.jet | 864:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/Encoding/Stream.jet | 1899:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/Encoding/Stream.jet | 1914:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
-| Core | Core/Encoding/Stream.jet | 2078:13 | "retain a validated number lexeme in the private event carrier" |
-| Core | Core/Encoding/Stream.jet | 2083:13 | "project the native compiler-private Bytes carrier into its event" |
-| Core | Core/Encoding/Stream.jet | 2149:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/Encoding/Stream.jet | 2303:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/Encoding/Stream.jet | 2339:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/Stream.jet | 461:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| Core | Core/Encoding/Stream.jet | 616:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| Core | Core/Encoding/Stream.jet | 621:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| Core | Core/Encoding/Stream.jet | 853:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| Core | Core/Encoding/Stream.jet | 863:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| Core | Core/Encoding/Stream.jet | 1898:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1913:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
+| Core | Core/Encoding/Stream.jet | 2077:13 | "retain a validated number lexeme in the private event carrier" |
+| Core | Core/Encoding/Stream.jet | 2082:13 | "project the native compiler-private Bytes carrier into its event" |
+| Core | Core/Encoding/Stream.jet | 2148:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 2302:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 2338:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
 | Core | Core/Encoding/XMLEngine.jet | 279:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/YAML.jet | 590:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Data.jet | 277:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Files/Data.jet | 272:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Files/Files.jet | 799:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 892:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 162:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
@@ -12815,14 +12807,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | Examples/Text/CheckedText/CheckedTextRuntimeHole.jet | 25:5 | "checked text example output" |
 | Examples | Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet | 24:5 | "checked text example output" |
 | Examples | Examples/Text/CheckedText/CheckedTextType.jet | 20:5 | "checked text example output" |
-| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 602:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
+| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 601:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
 | Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 183:5 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 75:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 139:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 165:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
 | Jetpack | Jetpack/Publication/Tests/Index.jet | 346:5 | "the test owns the planted lock file it ages" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 65:13 | "the test owns the journal file it just wrote" |
-| Jetpack | Jetpack/Store/Tests/Seal.jet | 33:5 | "the store test owns the fixture file whose mtime it pins" |
+| Jetpack | Jetpack/Store/Tests/Seal.jet | 32:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
 | Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | Tests | Tests/Cases/BackendIce/Fixtures/AsmRail/rail.jet | 44:5 | "call the leaf the build refuses" |
@@ -13391,7 +13383,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/UILint/inline_asm_reads_its_core_mem_gate.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Tests | Tests/UILint/inline_asm_reads_its_core_mem_gate.jet | 19:5 | "call the audited register-only assembly contract" |
 | Tests | Tests/UILint/raw_pointer_reads_its_core_mem_gate.jet | 10:5 | "the local cell is live for this raw read" |
-| Tools | Tools/Agent/Cache/Lanes.jet | 325:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
+| Tools | Tools/Agent/Cache/Lanes.jet | 324:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/Agent/Orchestrator/LaneCommit.jet | 224:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
 | Tools | Tools/CI/CompiledWorkloadPeerLauncher.jet | 655:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
 | Tools | Tools/CI/CompiledWorkloadPeerLauncher.jet | 669:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
@@ -13464,7 +13456,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Crypto/Jetc.jet", "function": "writer", "proof": "The gate (:271-273) copies the ephemeral Secret through expert.secret_bytes straight into X25519SecretKey.from_bytes, which takes the copy and accepts exactly 32 bytes (crypto.jet:244-247); :269 already checked that width, so the refusal path is unreachable. The copy then lives only in the zeroizing X25519SecretKey (Close wipes, crypto.jet:254-258) and the moved ephemeral Secret keeps its own Close. Only the derived public key (:274) and per-recipient wraps leave; the coordinator draws the four inputs fresh for each container (Core/Files/Sealed.jet:372-375)."},
   {"file": "Core/Files/Sealed.jet", "function": "migrate_v1", "proof": "The checker refuses a migrate_v1 call outside #Unsafe with E0510 (JetSema Sema/Calls/Core.jet:209-214), so every caller audits the raw key. The legacy buffer is bounded (≤1 GiB + 34, :144-150); expert.open_v1 authenticates before any plaintext exists (:155-157), and that plaintext sits in a JetcBytes buffer wiped at close; the staged v2 output is re-opened and verified (:402, :429-451) before publication."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_from_bytes", "proof": "The gate (:314-317) forwards the moved bytes to vault.__wrapped_from_bytes (vault.jet:182-186), which returns a WrappedVaultKey only after wrapped_metadata (vault.jet:487-) bounds the blob to 16..8192 bytes and checks the JVKW magic and header fields; failures become KeyWrapError. The carrier holds the wrapped (encrypted) container, never plaintext key material. The `__` name is reserved (E0067 outside Core), so users reach it only as the typed constructor WrappedVaultKey.from_bytes (BuiltinStatics.jet:145, 148)."},
-  {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_bytes", "proof": "vault.__wrapped_bytes (vault.jet:187) returns an owned copy of the carrier's `encoded` field: the same authenticated wrapped container that WrappedVaultKey.from_bytes validated or the vault export produced. No unwrapped key or Secret is read, and the carrier stays intact. The `__` name is reserved (E0067 outside Core), so only Core and compiler lowering call it."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_recipient", "proof": "vault.__key_unlock_recipient (vault.jet:203-205) builds KeyUnlock{kind: 1, secret: identity.bytes[0..<len]}: a read View of the caller's X25519SecretKey bytes, not a copy, so no second copy of the identity exists and the owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Recipient(identity) (BuiltinStatics.jet:146, 149)."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_passphrase", "proof": "vault.__key_unlock_passphrase (vault.jet:206-208) builds KeyUnlock{kind: 2, secret: passphrase.bytes[0..<len]}: a read View of the caller's Secret, not a copy, so the passphrase owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Passphrase(secret) (BuiltinStatics.jet:147, 150)."},
   {"file": "Core/Crypto/Crypto.jet", "function": "poly1305", "proof": "Not a core.crypto export (Core.rows:44), so its callers are crypto.jet's chacha_poly_seal (:2209) and chacha_poly_open (:2228). Both pass otk = chacha20_block(key, nonce, 0) (:2200, :2220), the RFC 8439 §2.6 one-time key, over the AEAD framing aad ∥ pad16 ∥ ct ∥ pad16 ∥ le64(aad) ∥ le64(ct); the 64-byte block covers the 32 key bytes fixedcrypto.poly1305 reads (expert_ct.jet:628). The key is therefore one-time per (key, nonce): xchacha_seal's callers use a random 24-byte nonce for the payload (:466, :506) and HKDF nonces under fresh ephemeral keys for wraps (:486-496, :1161-1174, :1190). open compares tags in constant time before decrypting (:2229)."},

@@ -62,52 +62,60 @@ sema_cli_call: fn(role: String) -> String Never! {
 // The roles `entry` calls through sema_cli_call, each with the function of
 // `args` that fills it; else the build stops naming the roles nothing fills.
 sema_cli_roles: fn(entry: String, args: String) -> [SemaCLIRole] {
-    called: sema_cli_roles_called(entry)
-    fillers: sema_cli_role_fillers(args)
-    missing: sema_cli_roles_missing(called, fillers)
-    if missing.len() > 0 -> panic(sema_cli_roles_refusal(missing))
-    roles: loop role in called -> SemaCLIRole{role: role.copy(), filler: fillers.get(role) ?? ""}
+    roles := sema_cli_roles_called(entry)
+    sema_cli_role_fillers(args, roles)
+    missing: sema_cli_roles_missing(roles)
+    if missing != "" -> panic(sema_cli_roles_refusal(missing))
     roles
 }
 
 // The roles `source` calls through sema_cli_call, each once, in the order
-// of their first call.
-sema_cli_roles_called: fn(source: String) -> [String] Never! {
-    called := [String]{}
+// of their first call, with no filler yet.
+sema_cli_roles_called: fn(source: String) -> [SemaCLIRole] Never! {
+    called := [SemaCLIRole]{}
     pieces: source.split("sema_cli_call(\"").to_list()
     loop index in 1..<pieces.len() {
         role: pieces[index].split_once("\"") ?? next
-        if !called.contains(role.before) -> called.push(role.before.copy())
+        if sema_cli_role_row(called, role.before) == None -> called.push(SemaCLIRole{role: role.before, filler: ""})
     }
     called
 }
 
-// Each `#Builtin.Role(.X) priv name: fn` declaration of `source`: the role
-// X to the function `name`.
-sema_cli_role_fillers: fn(source: String) -> [String:String] Never! {
-    fillers := [String:String]{}
+// The row of `role` in `roles`, or None.
+sema_cli_role_row: fn(roles: [SemaCLIRole], role: String) -> Int? Never! {
+    loop (index, entry) in roles {
+        if entry.role == role -> return Val(index)
+    }
+    None
+}
+
+// Fills each role of `roles` that a `#Builtin.Role(.X) priv name: fn`
+// declaration of `source` names: the role X with the function `name`.
+sema_cli_role_fillers: fn(source: String, roles: ^[SemaCLIRole]) Never! {
     marker: "#Builtin.Role(."
     loop line in source.split("\n") {
         if !line.starts_with(marker) -> next
         marked: line.slice(marker.len(), line.len()).split_once(") ") ?? next
         declared: sema_name_strip_prefix(marked.after, "priv ").split_once(": fn") ?? next
-        fillers[marked.before] = declared.before.copy()
+        at: sema_cli_role_row(roles, marked.before) ?? next
+        roles[at].filler = declared.before
     }
-    fillers
 }
 
-// The roles of `roles` that no function of `fillers` fills.
-sema_cli_roles_missing: fn(roles: [String], fillers: [String:String]) -> [String] Never! {
-    missing := [String]{}
-    loop role in roles {
-        if fillers.get(role) == None -> missing.push(role.copy())
+// The roles of `roles` that no function fills, joined with ", "; "" when
+// every role has its function.
+sema_cli_roles_missing: fn(roles: [SemaCLIRole]) -> String Never! {
+    missing := ""
+    loop entry in roles {
+        if entry.filler != "" -> next
+        missing = if missing == "" -> "{entry.role}" else -> "{missing}, {entry.role}"
     }
     missing
 }
 
 // The build's refusal when Core/Args/Args.jet fills none of `missing`.
-sema_cli_roles_refusal: fn(missing: [String]) -> String Never! {
-    "Core/Args/Args.jet has no function for the CLI roles the generated `#CLI` entry calls: {missing.join(", ")}. Mark the core.args function that does each with `#Builtin.Role(.X)`, and run `jet Tools/Agent/OwnedTraitRows.jet --write`"
+sema_cli_roles_refusal: fn(missing: String) -> String Never! {
+    "Core/Args/Args.jet has no function for the CLI roles the generated `#CLI` entry calls: {missing}. Mark the core.args function that does each with `#Builtin.Role(.X)`, and run `jet Tools/Agent/OwnedTraitRows.jet --write`"
 }
 
 // One typed entry of the entry file that has no wrapper yet: `wrapper` calls
