@@ -926,22 +926,19 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [St
     }
     shown_bindings: if unshown -> [JetCLIReplReport]{} else -> bindings
     // A Unit value (`print(...)`) has no `Display` and nothing to show: when
-    // only the value lines fail, the turn is built again without the echo's,
-    // and an echo of another type keeps the earlier build's problems.
+    // only the value lines fail, the turn is built again without the echo's.
+    // A value of another type with no `Display` (`data.query(rows)`) still
+    // runs and shows its type with no shown text.
     retry := false
     if built == .Failed(_, only_reports) -> retry = echoed && only_reports
+    echo_unshown := false
     if retry {
         bare: jet_cli_repl_source(session, "", "", true, true, statement, shown_bindings)
         rebuilt := jet_cli_repl_build(session, bare, bare.statements_at + prefix.count_bytes(), true)
         unit := true
-        if rebuilt == .Checked(binary, locals) {
-            unit = jet_cli_repl_is_unit(jet_cli_repl_local_type(locals, echo_name))
-            if !unit -> jet_cli_repl_discard(binary)
-        }
-        if unit {
-            built = rebuilt
-            echoed = false
-        }
+        if rebuilt == .Checked(_, locals) -> unit = jet_cli_repl_is_unit(jet_cli_repl_local_type(locals, echo_name))
+        built = rebuilt
+        if unit { echoed = false } else { echo_unshown = true }
     }
     if built == {
         .Refused(report) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{}, report: report}
@@ -949,7 +946,7 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [St
         .Checked(binary, locals) -> {
             echo_ty: if echoed -> jet_cli_repl_local_type(locals, echo_name) else -> Type?{None}
             shown := [JetCLIReplReport]{}
-            if echoed -> shown.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
+            if echoed && !echo_unshown -> shown.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
             // Under `unshown` this turn's bindings keep their types and no
             // shown text; otherwise each one's value line follows the echo's.
             unshown_bindings := [JetCLIReplReport]{}
@@ -965,11 +962,11 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [St
                 .Stopped(stdout, report) -> return JetCLIReplTurnResult.Failed{stdout: stdout, stderr: "", diagnostics: [Diagnostic]{}, report: report}
                 .Done(stdout, stderr, values) -> {
                     session.statements.push(statement)
-                    echo_shown := ""
+                    echo_shown := if echo_unshown -> JET_CLI_REPL_UNSHOWN else -> ""
                     loop value in values {
                         if value.index < 0 || value.index >= shown.len() -> next
                         report: shown[value.index]
-                        if echoed && value.index == 0 {
+                        if echoed && !echo_unshown && value.index == 0 {
                             echo_shown = value.shown
                             next
                         }
@@ -1139,12 +1136,14 @@ jet_cli_repl_load: fn(session: &JetCLIReplSession, path: String, run_entry: Bool
     if has_run && run_entry -> jet_cli_repl_out(jet_cli_repl_run_program(session, "run()"))
 }
 
-// `jet repl --project <dir>`: the project's sources become session items.
+// `jet repl --project <dir>`: the project's sources become session items;
+// its manifest and configuration files (`package.jet`, `env.jet`, ...) are
+// not sources.
 jet_cli_repl_load_dir: fn(session: &JetCLIReplSession, dir: String) -> Int {
     entries: repl_files.list_dir(dir) ?? return 0
     paths := [String]{}
     loop entry in entries {
-        if !entry.is_dir && entry.name.ends_with(".jet") && entry.name != "pkg.jet" {
+        if !entry.is_dir && entry.name.ends_with(".jet") && !JET_CLI_RESERVED_SOURCE_NAMES.contains(entry.name) {
             paths.push(entry.path)
         }
     }

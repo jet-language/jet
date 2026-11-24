@@ -1,8 +1,10 @@
-# tests/authority_manifest.rs::i9_repl_keeps_the_authority_project_meaning
-# Original source bytes unchanged; production CLI counterpart, PENDING-SAME-HEAD.
+# A REPL over the authority project loads its source (never its manifest)
+# and runs its `run` with the comptime value the other tiers print.
 fixture: I9ReplKeepsTheAuthorityProjectMeaning.fixture
 env: NO_COLOR=1
-step: jet repl
+step: jet repl --project .
 stdin: i9_repl_keeps_the_authority_project_meaning.stdin
 exit: 0
-stdout: ~ "authority" # original ed77c235f tests/authority_manifest.rs:461 contains predicate
+stdout: ~ "Project: loaded 1 source file(s)" # run.jet is the only source; package.jet is the manifest
+stdout: ~ "> authority" # the project's run prints its comptime ANSWER
+stderr: !~ "Error" # the manifest is never checked as session source

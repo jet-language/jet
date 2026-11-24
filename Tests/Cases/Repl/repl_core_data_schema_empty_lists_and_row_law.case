@@ -1,7 +1,6 @@
-# PORT tests/repl.rs:3425-3466; verbatim inputs and original predicate forms.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
-# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
-# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+# `data.schema` reads a row's columns from its checked type, so an empty list
+# still describes them; a scalar row, an exact number included, is one
+# `value` column; a struct with no fields has no columns.
 fixture: ReplCoreDataSchemaEmptyListsAndRowLaw.fixture
 # Takes about 20 s alone and over 60 s under full-kit load, so it has this timeout until its cost is cut.
 step: jet repl
@@ -10,10 +9,9 @@ env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplCoreDataSchemaEmptyListsAndRowLaw.fixture/input.txt
 exit: any # original library predicates did not assert process status
-stdout: !~ "Jet.ComptimeConstructNotSupported" # original predicate
-stderr: !~ "Jet.ComptimeConstructNotSupported" # original predicate
-stdout|stderr: ~ "DataColumn(name: team, type_name: String)" # original predicate
-stdout|stderr: ~ "DataColumn(name: minutes, type_name: Float)" # original predicate
-stdout|stderr: ~ "DataColumn(name: value, type_name: Float)" # original predicate
-stdout|stderr: ~ "[] : List" # original predicate
-stdout|stderr: ~ "DataColumn(name: value, type_name: Int)" # original predicate
+stderr: !~ "Error" # every turn is accepted
+stdout: ~ "name: team, type_name: String, nullable: false" # an empty row list keeps its columns
+stdout: ~ "name: minutes, type_name: Float, nullable: false" # a field's checked type
+stdout: ~ "[DataColumn { id: column-14003a0a1e31681e, name: value, type_name: Decimal, nullable: false }] : [DataColumn]" # a bare `1.0` is a Decimal scalar row; the id hashes `5:value:Decimal`
+stdout: ~ "[] : [DataColumn]" # a struct with no fields has no columns
+stdout: ~ "name: value, type_name: Int, nullable: false }] : [DataColumn]" # a generic row substitutes its argument

@@ -1,9 +1,10 @@
-# Original tests/comptime_sequence_parity.rs:244-251; original inputs and exact public subclaims.
-# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+# A whole-list write window `edit: &values` is the list itself, not a copy:
+# a push through it shows in the owner on the next turn.
 fixture: ReplNonSliceWritePlaceIsNotSilentlyCopied.fixture
 step: jet repl
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplNonSliceWritePlaceIsNotSilentlyCopied.fixture/input.txt
-exit: any # original library transcript did not assert process exit
-stdout+stderr: ~ "Jet.ComptimeConstructNotSupported" # original contains; needle absent from banner/prompts/input echoes
+exit: 0
+stdout: ~ "3 : Int" # the owner sees the push made through its window
+stderr: !~ "Error" # every turn is accepted
