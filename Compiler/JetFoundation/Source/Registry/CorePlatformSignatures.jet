@@ -290,10 +290,7 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.files __reader_line_bytes &FileReader Result<[u8],IOError>
     core.process __stdout_line_bytes ProcessStdoutStream Result<[u8],IOError>
     core.process __stderr_line_bytes ProcessStderrStream Result<[u8],IOError>
-    core.net __unix_connect_host String Result<UnixStream,NetError>
     core.net __unix_connect_deadline_host String,Duration Result<UnixStream,NetError>
-    core.net.ws __connect String Result<WsConn,WsError>
-    core.net.ws __upgrade Int,String Result<WsConn,WsError>
     core.net.ws __live_watch WsConn,String Unit
     core.files __temp_directory_raw - String
     core.files __temp_clock_raw - (clock_available:Bool,nanos:String)
@@ -412,19 +409,16 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net udp_packet_bytes UDPPacket [u8]
     core.net udp_packet_original_len UDPPacket Int
     core.net udp_packet_truncated UDPPacket Bool
-    core.net unix_listen|__unix_listen String Result<UnixListener,NetError>
-    core.net unix_accept|__unix_accept UnixListener Result<UnixStream,NetError>
+    core.net unix_listen String Result<UnixListener,NetError>
+    core.net unix_accept UnixListener Result<UnixStream,NetError>
     core.net unix_connect String Result<UnixStream,NetError>
-    core.net unix_read|__unix_read &UnixStream Result<String,NetError>
+    core.net unix_read &UnixStream Result<String,NetError>
     core.net unix_write &UnixStream,String Result<Unit,NetError>
     core.net unix_read_bytes &UnixStream,Int Result<[u8],NetError>
-    core.net unix_write_all_bytes|__unix_write_all_bytes &UnixStream,[u8] Result<Unit,NetError>
-    core.net __unix_send_fds_raw &UnixStream,[u8],[Int] Result<Unit,NetError>
-    core.net __unix_receive_fds_raw &UnixStream,Int Result<[u8],NetError>
-    core.net __unix_wait_raw &UnixStream,Int Result<Int,NetError>
+    core.net unix_write_all_bytes &UnixStream,[u8] Result<Unit,NetError>
     core.net __unix_wait_wake_raw &UnixStream,Int,Int Result<Int,NetError>
-    core.net unix_shutdown|__unix_shutdown &UnixStream,NetShutdown Result<Unit,NetError>
-    core.net unix_close|__unix_close &UnixStream Result<Unit,NetError>
+    core.net unix_shutdown &UnixStream,NetShutdown Result<Unit,NetError>
+    core.net unix_close &UnixStream Result<Unit,NetError>
     core.net dns_a|dns_aaaa String Result<[IPAddr],NetError>
     core.net dns_a_at|dns_aaaa_at String,String Result<[IPAddr],NetError>
     core.net dns_txt String Result<[String],NetError>
@@ -434,10 +428,6 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net getservbyport Int Result<String,NetError>
     core.net dns_srv String Result<[DNSSRV],NetError>
     core.net dns_srv_at String,String Result<[DNSSRV],NetError>
-    core.net __dns_a_lookup|__dns_aaaa_lookup String,Int Result<[IPAddr],String>
-    core.net __dns_a_at_lookup|__dns_aaaa_at_lookup String,String,Int Result<[IPAddr],String>
-    core.net __dns_srv_lookup String,Int Result<[DNSSRV],String>
-    core.net __dns_srv_at_lookup String,String,Int Result<[DNSSRV],String>
     core.net dns_srv_target DNSSRV String
     core.net dns_srv_port|dns_srv_priority|dns_srv_weight DNSSRV Int
     core.net tls_connect &&TCPStream,String Result<TLSStream,NetError>

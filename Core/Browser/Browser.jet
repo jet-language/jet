@@ -1092,7 +1092,7 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
 // The BiDi socket of a session a driver already created: no `session.status`
 // or `session.new`, and close ends it through the engine's driver session.
 priv connect_session: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
-    conn: if core.net.ws.__connect(endpoint) == {
+    conn: if net_rt.ws_connect(endpoint) == {
         .Ok(value) -> value
         .Err(error) -> {
             return Err(browser_ws_error(error))
@@ -1142,7 +1142,7 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 }
 
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
-    conn: if core.net.ws.__connect(endpoint) == {
+    conn: if net_rt.ws_connect(endpoint) == {
         .Ok(value) -> value
         .Err(error) -> {
             return Err(browser_ws_error(error))

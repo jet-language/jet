@@ -7732,18 +7732,20 @@ Effects follow the existing per-function Core rows, not a module-wide waiting
 annotation. TCP listen and address getters, socket options, UDP bind/options,
 and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
 connect, byte transfer, DNS, and the other listed waiting operations retain
-their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
-moving public validation into Jet does not widen the authority contract.
+their existing `Time.Wait` leaf, and moving public validation into Jet does
+not widen the authority contract.
 TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
 writes it with the stream's own `write_bytes`, then shuts down the write half.
-TCP listen, accept, connect, address and option access, and UDP bind,
-address, send, and receive enter their Jet public functions, which call the
-matching `jet.runtime.net` leaves (`tcp_listen`, `set_nodelay`, `udp_bind`,
-and so on). Each leaf declares the public operation's effect row and keeps the
-existing native error mapping and borrow/move conventions.
-Unix listen, accept, read, byte-write, shutdown, and close also enter Jet
-source first. Their reserved raw leaves preserve exactly the public
-operation's existing effect row and supported interpreter/native tiers.
+TCP listen, accept, connect, address and option access; UDP bind, address,
+send, and receive; Unix listen, accept, connect, read, byte-write, descriptor
+passing, wait, shutdown, and close; DNS A, AAAA, and SRV lookups; and the
+IP, socket-address, and UDP-packet getters all enter their Jet public
+functions, which call the matching `jet.runtime.net` leaves (`tcp_listen`,
+`unix_send_fds_raw`, `dns_a_lookup`, `socket_port`, and so on). Each leaf
+declares the public operation's effect row and keeps the existing native
+error mapping and borrow/move conventions. Building an IP or socket address
+from parsed parts, connecting a Unix stream by a deadline, and waiting on a
+Unix stream together with a wake descriptor still use reserved raw leaves.
 The HTTP client is Jet end to end: `get`, `post`, `request`, and `send` build
 an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
 and decode the status line, headers, chunked/length framing, and gzip into an

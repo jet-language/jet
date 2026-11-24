@@ -74,7 +74,7 @@ connect: fn(url_text: String) -[Net, Time.Wait]> WsConn WsError! {
     }
     fragment := parsed.fragment() ?? ""
     if fragment.bytes().len() > 0 -> return Err(WsError.InvalidURL)
-    core.net.ws.__connect(url.unparse(parsed))
+    rt.ws_connect(url.unparse(parsed))
 }
 
 upgrade: fn(request: HTTPRequest) -[Net, Time.Wait]> WsConn WsError! {
@@ -88,7 +88,7 @@ upgrade: fn(request: HTTPRequest) -[Net, Time.Wait]> WsConn WsError! {
     key: request.header("sec-websocket-key") ?? return Err(WsError.InvalidHandshake)
     if key.bytes().len() == 0 || key.bytes().len() > 256 -> return Err(WsError.InvalidHandshake)
     fd: http.upgrade_claim(request) ?? return Err(WsError.InvalidHandshake)
-    core.net.ws.__upgrade(fd, trim_ascii(key))
+    rt.ws_upgrade(fd, trim_ascii(key))
 }
 
 header_has_token: fn(value: String, wanted: String) -> Bool Never! {
