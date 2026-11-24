@@ -196,8 +196,8 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
             diagnostics.push(sema_error("E0764", argument.span, "`Build.{method}` takes positional arguments", "the build method contract does not declare labels or variadic slots", "remove the label or spread from this argument"))
             return failed
         }
-        values.push(value.copy())
         params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
+        values.push(value)
     }
     // `b.generate` sends its formatted items, then a (marker, value) pair per
     // build local the template splices; the locals are read like arguments.
@@ -1609,8 +1609,8 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
                 diagnostics.push(sema_type_mismatch(required, value.ty, argument.span, program))
                 return failed
             }
-            values.push(value.copy())
             params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
+            values.push(value)
             unlabeled := argument.copy()
             unlabeled.label = None
             ordinary.push(unlabeled)
