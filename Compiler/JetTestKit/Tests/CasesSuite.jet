@@ -47,13 +47,6 @@ cases_test_source: fn(root: String, name: String, text: String) {
     assert_eq(entries[1].suite, "cases")
     assert_eq(entries[1].project, "Tests/Cases/group")
     assert_eq(kit_cases_collect(root, "missing").len(), 0)
-    kit_exec_write(files.join(root, "Compiler/JetTestKit/retired-with-rust.tsv"), "# source-id and owner reason\nTests/Cases/group/a.case\tRetired with Rust: fixture compiler dependency.\nCompiler/JetBackend/Tests/Fragments.fixture/FrontFeed.jet\tRetired with Rust: differential oracle.\n")
-    assert_eq(kit_cases_retired(root), ["Tests/Cases/group/a.case"])
-    active: kit_cases_discover(context)
-    assert_eq(active.map(fn(entry) { entry.path }), ["Tests/Cases/deeper/group/b.case", "Tests/Cases/group/z.case"])
-    // The raw discovery still accounts for the retired authored file; only the
-    // canonical active corpus excludes the explicitly retired ID.
-    assert_eq(kit_cases_collect(root, "Tests/Cases").len(), 3)
     files.remove_all(root) ?? panic("remove discovery scratch")
 }
 

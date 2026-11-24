@@ -2626,13 +2626,10 @@ stderr with the hidden-cost summary line.
 "N reports found" count; a lint fixture keeps its lint acceptance, since the
 command exits 0.
 
-Pending user-Rust interoperability acceptance rows use `PRODUCT INTEROP RED:`
-in the existing case-disposition table. They remain in the active testkit corpus
-and block registry closure.
-Remove their pending rows only after the native acceptance verdicts pass.
-Retired Rust oracle/witness modes report nonzero `UNCOVERED` with
-`cardRequired=true`; native witnesses remain mandatory. Rust performance peers
-and historical fixture provenance are not Jet implementation dependencies.
+The case corpus keeps no retirement or pending table: every `.case` under
+`Tests/Cases` is active, and the user-Rust interoperability acceptance cases
+report their own verdicts like any other case. Rust performance peers and
+historical fixture provenance are not Jet implementation dependencies.
 
 ## Why Jet once transpiled to Rust (recorded rationale)
 

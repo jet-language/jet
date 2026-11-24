@@ -3,8 +3,8 @@
 // Usage (from the repository root):
 //   jet Tools/Agent/CompilerRegistries.jet manifest SHA [--out DIR]
 //       write DIR/manifest.json (and print it): every registry under
-//       Compiler/*/Tests, the testkit cases entry and the retired rows, all
-//       bound to the pinned source of SHA
+//       Compiler/*/Tests and the testkit cases entry, all bound to the pinned
+//       source of SHA
 //   jet Tools/Agent/CompilerRegistries.jet run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON] [--shard I/N]
 //       execute every listed entry (or the one-based shard I of N) and write
 //       the receipt (default JSON.receipt.json); exit 0 only when all PASS
@@ -37,8 +37,6 @@ TOOL: "/Tools/Agent/CompilerRegistries.jet"
 FLAGS: [String]{"--jet", "--manifest", "--receipt", "--out", "--runtime", "--shard"}
 
 SOURCE_LIST: "Compiler/JetRuntime/sources.list"
-
-RETIRED: "Compiler/JetTestKit/retired-with-rust.tsv"
 
 // The testkit cases entry: `jet test Compiler --profile registries`, every
 // case including the opt-in ones, its verdicts in JET_CI_EVIDENCE_DIR.
@@ -157,18 +155,10 @@ Registry: struct {
     mode: String,
 }
 
-Retirement: struct {
-    path: String,
-    reason: String,
-    sha256: String?,
-}
-
 Kit: struct {
     sources: [String],
     tree: Dyn,
     cases: [String],
-    retired_cases: [Dyn],
-    pending: Int,
     rust_tools: Int,
 }
 
@@ -572,34 +562,10 @@ texts: fn(items: [String]) -> Dyn Never! {
     Dyn.Array(items.map(fn(item) { Dyn.Text(item.copy()) }))
 }
 
-retirements: fn(repo: String) -[Env, Exec, FS, IO]> [Retirement] Never! {
-    text: files.read("{repo}/{RETIRED}") ?? return fail("`{RETIRED}` cannot be read: {err}")
-    rows := [Retirement]{}
-    loop line in text.split("\n") {
-        if line.trim() == "" || line.starts_with("#") -> next
-        cells: line.split("\t").to_list()
-        if cells.len() != 2 || cells[0] == "" || cells[1] == "" {
-            return fail("retired rows need an exact source ID and reason")
-        }
-        path: cells[0].copy()
-        sha: if files.exists("{repo}/{path}") -> Val(sha256_file(repo, path)) else -> None
-        rows.push(Retirement{path: path, reason: cells[1].copy(), sha256: sha})
-    }
-    rows
-}
-
-retirement_dyn: fn(row: Retirement, status: String) -> Dyn Never! {
-    entries := [String:Dyn]{"path": Dyn.Text(row.path.copy()), "reason": Dyn.Text(row.reason.copy())}
-    if row.sha256 == .Val(sha) -> entries["sha256"] = Dyn.Text(sha.copy())
-    if status != "" -> entries["status"] = Dyn.Text(status.copy())
-    Dyn.Object(entries.copy())
-}
-
-registry_rows: fn(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registry] Never! {
-    retired: retirements(repo).map(fn(row) { row.path.copy() })
+registry_rows: fn(census: [Census]) -> [Registry] Never! {
     rows := [Registry]{}
     loop row in census {
-        if row.role != "registry" || retired.contains(row.source) -> next
+        if row.role != "registry" -> next
         id: row.source.removeprefix("Compiler/").removesuffix(".jet")
         rows.push(Registry{row: row.copy(), id: id.copy(), mode: if row.names.len() > 0 -> "test" else -> "run"})
         if row.names.len() > 0 && row.entry {
@@ -610,26 +576,10 @@ registry_rows: fn(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registr
 }
 
 // The testkit cases entry's inputs: the Compiler manifest that declares its
-// `registries` profile and the retirement table; the corpus engine is part of
-// the jet under test.
+// `registries` profile; the corpus engine is part of the jet under test.
 testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
-    sources := [String]{"{KIT_PACKAGE}/package.jet"}
-    sources.push(RETIRED)
-    table: retirements(repo)
-    retired := [Dyn]{}
-    pending := [Dyn]{}
-    retired_ids := [String]{}
-    loop row in table {
-        if !row.path.starts_with("Tests/Cases/") -> next
-        if row.reason.starts_with("Retired with Rust:") {
-            retired.push(retirement_dyn(row, ""))
-            retired_ids.push(row.path.copy())
-        }
-        if row.reason.starts_with("PRODUCT INTEROP RED:") {
-            pending.push(retirement_dyn(row, "RED"))
-        }
-    }
-    cases: files_under(repo, "Tests/Cases", ".case").filter(fn(path) { !retired_ids.contains(path) })
+    sources: [String]{"{KIT_PACKAGE}/package.jet"}
+    cases: files_under(repo, "Tests/Cases", ".case")
     requirement: regex.compile("^(?:requires: tool:|when tool |step(?: [^:]+)?: )") ?? return fail("requirement pattern: {err}")
     rust: regex.compile("\\b(?:cargo|rustc|rustup)\\b") ?? return fail("Rust tool pattern: {err}")
     requirements := [Dyn]{}
@@ -651,12 +601,10 @@ testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
         [String:Dyn]{
             "sources": Dyn.Array(source_rows),
             "cases": Dyn.Array(case_rows.copy()),
-            "retiredCases": Dyn.Array(retired.copy()),
-            "pendingProductInterop": Dyn.Array(pending.copy()),
             "rustToolRequirements": Dyn.Array(requirements.copy()),
         },
     )
-    Kit{sources: sources.copy(), tree: tree, cases: cases, retired_cases: retired.copy(), pending: pending.len(), rust_tools: requirements.len()}
+    Kit{sources: sources.copy(), tree: tree, cases: cases, rust_tools: requirements.len()}
 }
 
 // --- imports of an assembled standalone registry ----------------------------
@@ -1974,7 +1922,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
     census: inventory(repo)
     manifests: Dyn.Array([Dyn]{Dyn.Object([String:Dyn]{"path": Dyn.Text(SOURCE_LIST), "sha256": Dyn.Text(sha256_file(repo, SOURCE_LIST))})})
     entries := [Dyn]{}
-    loop registry in registry_rows(repo, census) {
+    loop registry in registry_rows(census) {
         row: registry.row
         mode: registry.mode
         standalone: row.package == "JetRuntime" && mode == "test"
@@ -2073,16 +2021,15 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         "sources": texts(kit.sources),
         "caseNames": texts(kit.cases),
     }
-    if kit.pending > 0 || kit.rust_tools > 0 {
+    if kit.rust_tools > 0 {
         testkit["status"] = Dyn.Text("BLOCKED")
-        testkit["reason"] = Dyn.Text(if kit.pending > 0 -> "{kit.pending} mandatory user Rust product cases remain RED; see testkit.pendingProductInterop (not retired or excluded)" else -> "full testkit cases have {kit.rust_tools} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines")
+        testkit["reason"] = Dyn.Text("full testkit cases have {kit.rust_tools} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines")
     }
     entries.push(Dyn.Object(testkit.copy()))
     after: current_head(repo) ?? return fail(err.message)
     if options.head != after -> return fail("pinned source changed during assembly")
     proof: proof_path(repo)
     proof_tree: read_json(proof) ?? return fail(err.message)
-    compiler_retired: retirements(repo).filter(fn(row) { row.path.starts_with("Compiler/") }).map(fn(row) { retirement_dyn(row, "") })
     manifest: Dyn.Object(
         [String:Dyn]{
             "head": Dyn.Text(options.head.copy()),
@@ -2093,7 +2040,6 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
             "inventory": census_dyn(census),
             "testkit": kit.tree,
             "entries": Dyn.Array(entries.copy()),
-            "retiredWithRust": Dyn.Object([String:Dyn]{"testkitCases": Dyn.Array(kit.retired_cases.copy()), "compilerRegistries": Dyn.Array(compiler_retired)}),
         },
     )
     print(write_json("{out}/manifest.json", manifest))
@@ -2208,7 +2154,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
     }
     // Re-census: a forged or truncated entries array cannot turn omissions into PASS.
     current: inventory(repo)
-    required := registry_rows(repo, current).map(fn(row) { row.id.copy() })
+    required := registry_rows(current).map(fn(row) { row.id.copy() })
     required.push("testkit/cases")
     ids: entries.map(fn(entry) { text_field(entry, "id") })
     distinct := [String]{}

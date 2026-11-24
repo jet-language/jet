@@ -1,0 +1,12 @@
+// The native platform executable `jetpack use` realizes from the fixture store:
+// `--hold` keeps it alive for five seconds, `--help` prints its banner.
+use {
+    process: core.process
+    time: core.time
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() > 0 && args[0] == "--hold" -> time.sleep(5s)
+    if args.len() > 0 && args[0] == "--help" -> print("jetpack platform fixture")
+}
