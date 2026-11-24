@@ -1,14 +1,34 @@
 // Equal finite samples are an honest matched result,
-// not a universal proof.
+// not a universal proof. Implementations that differ name the first
+// differing case, and replaying its recorded input reproduces the difference.
 use testing: core.testing
 
 reference: fn(value: Dyn) -> Dyn { value.copy() }
 
 candidate: fn(value: Dyn) -> Dyn { value.copy() }
 
+twice: fn(value: Dyn) -> Dyn { value * 2 }
+
+// Agrees with `twice` on every case but 3.
+twice_but_three: fn(value: Dyn) -> Dyn {
+    if value == 3 -> return value * 3
+    value * 2
+}
+
 run: fn() {
     cases: [Dyn]{Dyn.Int(1), Dyn.Int(2)}
     comparison: testing.compare(cases, reference, candidate, "typed_equality")
     print(testing.status(comparison))
     print(testing.assert_equal(comparison))
+
+    differing: testing.compare([Dyn]{Dyn.Int(1), Dyn.Int(3), Dyn.Int(5)}, twice, twice_but_three, "typed_equality")
+    print(testing.status(differing))
+    print(testing.assert_equal(differing))
+    at: differing.first_difference
+    print(differing.case_ids[at])
+    print(differing.reason)
+    input: differing.inputs[at]
+    print("{input}: {differing.reference[at]} vs {differing.candidate[at]}")
+    print(twice(input) == differing.reference[at] && twice_but_three(input) == differing.candidate[at])
+    print(twice(input) == twice_but_three(input))
 }
