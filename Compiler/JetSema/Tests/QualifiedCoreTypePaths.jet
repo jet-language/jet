@@ -1,0 +1,84 @@
+// A dotted type path through a Core module the file imports names that
+// module's type (sema_type_qualified_core_type). `use core.mem` binds `mem`
+// to the identity `core.mem`, which is no `<corelib>/` source identity;
+// `use mem: core.mem` binds the loaded Core module. Through either,
+// `mem.Ptr` names the raw pointer the compiler builds and core.mem exports.
+use {
+    jet_foundation.[
+        Span,
+        compiler_threads_single,
+        effect_vocabulary_module,
+        jet_target_machine_hosted,
+        module_intern,
+        module_table,
+    ]
+    jet_parser.[parse_generated_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_sema.[
+        SemaBuildFacts,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_registration_module_index,
+        sema_registration_prepare_graph,
+        sema_type_written_name_unknown,
+    ]
+}
+
+// The package of the fixture's module.
+QUALIFIED_CORE_PACKAGE: "source-root:user"
+
+// For each of `names`, written as a type in a module whose imports are
+// `imports`, each landing on the Core module `target` (`core`, `core.mem`):
+// `known` or `unknown`, joined with `; `.
+qualified_core_written: fn(imports: &&String, target: String, names: [String]) -> String {
+    table := module_table()
+    main_id: module_intern(table, "user/main")
+    target_id: module_intern(table, "<corelib>/{target}")
+    main_parsed := parse_generated_source(imports.bytes())
+    // Each import edge owns its declaration, as the loader's do; a second
+    // parse gives them.
+    imports_parsed := parse_generated_source(imports.bytes())
+    target_parsed := parse_generated_source("".bytes())
+    if main_parsed.diagnostics.len() != 0 || imports_parsed.diagnostics.len() != 0 || target_parsed.diagnostics.len() != 0 {
+        panic("fixture did not parse")
+    }
+    edges := [SemaRegistrationImportEdge]{}
+    loop declaration in imports_parsed.program.imports.move() {
+        edges.push(SemaRegistrationImportEdge{source_module_identity: main_id, target_module_identity: target_id, target_package_identity: "core", foreign_binding: None, declaration: declaration})
+    }
+    main_segment: SemaSourceSegment{generated: Span{start: 0, end: imports.len()}, source_file: "user/main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    target_segment: SemaSourceSegment{generated: Span{start: 0, end: 0}, source_file: "<corelib>/{target}.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    main_input: SemaRegistrationModuleInput{package_identity: QUALIFIED_CORE_PACKAGE, module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "user/main.jet", source_segments: [SemaSourceSegment]{main_segment}, source_origin: SemaSourceOrigin.Snapshot, program: main_parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: imports.move()}
+    target_input: SemaRegistrationModuleInput{package_identity: "core", module_identity: target_id, module_name: target, core_source_alias: "", module_path: "{target}.jet", source_file: "<corelib>/{target}.jet", source_segments: [SemaSourceSegment]{target_segment}, source_origin: SemaSourceOrigin.Snapshot, program: target_parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: ""}
+    effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("canonical effect module declares no effects")
+    effects_id: effects.module_identity
+    facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main_input, target_input, effects}, edges, QUALIFIED_CORE_PACKAGE, main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}")
+    if !graph.complete {
+        reports: loop diagnostic in graph.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
+        return "incomplete graph: {reports.join("; ")}"
+    }
+    caller: sema_registration_module_index(graph, main_id) ?? panic("the fixture's module has no row")
+    rows := [String]{}
+    loop name in names {
+        rows.push(if sema_type_written_name_unknown(graph, caller, name, [String]{}) -> "{name} unknown" else -> "{name} known")
+    }
+    rows.join("; ")
+}
+
+#Test("a type core.mem exports names it through `use core.mem`, built by the compiler or declared") {
+    assert_eq(qualified_core_written("use core.mem\n", "core", [String]{"mem.Ptr", "mem.Region"}), "mem.Ptr known; mem.Region known")
+}
+
+#Test("a type core.mem exports names it through `use mem: core.mem`") {
+    assert_eq(qualified_core_written("use mem: core.mem\n", "core.mem", [String]{"mem.Ptr", "mem.Region"}), "mem.Ptr known; mem.Region known")
+}
+
+#Test("a capitalized name core.mem doesn't export names nothing through its import") {
+    assert_eq(qualified_core_written("use core.mem\n", "core", [String]{"mem.Nothing", "nosuch.Thing"}), "mem.Nothing unknown; nosuch.Thing unknown")
+    assert_eq(qualified_core_written("use mem: core.mem\n", "core.mem", [String]{"mem.Nothing"}), "mem.Nothing unknown")
+}
