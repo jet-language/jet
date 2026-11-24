@@ -7551,7 +7551,7 @@ reads it runs the probe first. A probe that finds no folder fails the build
 before any step runs (E3505), naming each folder it looked in and why it
 passed it over. Examples:
 [`Tests/Cases/BuildEntry/run_steps_read_a_found_folder.case`](../../Tests/Cases/BuildEntry/run_steps_read_a_found_folder.case),
-[`Tests/UI/build_find_folder_missing.jet`](../../Tests/UI/build_find_folder_missing.jet).
+[`Tests/UI/E3505_build_find_folder_missing.jet`](../../Tests/UI/E3505_build_find_folder_missing.jet).
 
 Calls on the step build its
 command line in order. `.input(path)` and `.output(path)` declare a file and
