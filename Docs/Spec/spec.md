@@ -865,7 +865,7 @@ A `#run` inside a larger value, such as a field of a literal or an argument,
 is E0391: bind it as `name: #run value` first and use the name.
 At file scope, `name := value` bindings remain runtime module globals; they do
 not require `#Persist`. `#Static NAME: value` requests a
-stable-address Rust static when the contract needs one, and `#Inline NAME:
+stable-address static when the contract needs one, and `#Inline NAME:
 value` copies the value into use sites (D-CONSTMARK1). Without a marker, an
 immutable constant whose value is a number, text, or a small record or enum
 case of those is copied into its use sites; any other value (a list, map, or
@@ -2826,7 +2826,7 @@ The ratified instances use the same grid:
 | error | checker column of every row | registered E-codes, `FieldError` values, and typed foreign errors name what failed and its repair path |
 
 The grid is a planning and proof obligation, not a runtime layer. Sema owns
-checks and facts; the Prelude owns runtime boundary meaning. Rust emission
+checks and facts; the Prelude owns runtime boundary meaning. Native
 and interpreter paths marshal the same typed result and fact semantics. A
 boundary with a runtime path must preserve the same cell through AOT, the
 default `jet run`, and interpreter execution.
@@ -5820,8 +5820,7 @@ dotted module path and name (`static:app.counter`), the kind-prefix scheme of
 the semantic index and `jet expand`; a snapshot with any other value id is
 refused. The public API is
 [`Core/Event/Event.jet`](../../Core/Event/Event.jet); the executable event
-example has no running test since the Rust-era `Canvas*.jet` transliterations
-were removed (#6650). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
+example has no running test yet (#6650). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 
 ## Terminal direct input
 
@@ -6726,8 +6725,8 @@ jet inspect expand --facts inline --json <file.jet>
 The registered lenses are `inline`, `memory`, `web`, `effects`, `layout`,
 `origin`, `reflect`, `derive`, `templates`, and `callable-signature`.
 
-- `inline` reports `#Inline` and `#Inline(Always)` contracts and their emitted
-  Rust attributes.
+- `inline` reports `#Inline` and `#Inline(Always)` contracts and the inlining
+  decisions lowering made for them.
 - `memory` reports transitive `Mem.*` denial facts, including bounded
   `Mem.Alloc(above: N)` facts.
 - `web` reports checked routes, actions, mounts, and policy.
@@ -6987,17 +6986,17 @@ errors, and unknown future graph fields cannot carry hidden semantics
 
 ## Public front-end toolkit
 
-The compiler toolkit is a read-only value facade over the front end. Rust tools
-use `jet::Compiler`; the public values are stable data, not AST handles or
-mutable compiler state. Version 1 provides:
+The compiler toolkit is a read-only value facade over the front end,
+`core.compiler`; the public values are stable data, not AST handles or
+mutable compiler state. It provides:
 
-- `lex_source(src)`: token views with stable kinds, byte ranges, and
+- `lex(source)`: token views with stable kinds, byte ranges, and
   line/column positions;
-- `parse_source(src)`: top-level syntax summaries and diagnostics;
-- `check_file(path)`: diagnostics, syntax summaries, and a semantic-index
-  snapshot when checking succeeds;
-- `source_map_from_generated_rust(rust)`: generated-Rust line markers mapped to
-  Jet source lines.
+- `parse(source)`: the compiler's syntax tree and diagnostics;
+- `check(tree)`: the checked program: diagnostics, syntax, and a
+  semantic-index snapshot when checking succeeds;
+- `source_map(source)`: the generated-to-source line map, as
+  `jet inspect compiler source-map` prints it.
 
 A compile-time `CompilerChecked` value retains source text, checked function and
 effect facts, optional semantic-index data, syntax, and diagnostics. The
@@ -8082,9 +8081,8 @@ credentials, URL queries, and fragments. Current package identity remains
 available through `#package.name` and `#package.version`, not as a
 repeated field in each view.
 
-Each operation returns a compile-time `Result`. The Rust facade reports
-`PackageReadError { code, message, file, cause }`; the Jet carrier is
-`CompilerPackageError` with the same four fields. Missing, malformed, changed,
+Each operation returns a compile-time `Result`. Its error carrier is
+`CompilerPackageError { code, message, file, cause }`. Missing, malformed, changed,
 or escaping files keep their logical file and typed cause; the cause carries
 actionability without absolute authority paths or secret material. Reads are
 restricted to the pinned package root and never become empty views.

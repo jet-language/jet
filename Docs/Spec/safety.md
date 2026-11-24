@@ -53,7 +53,7 @@ organization policy may forbid unsafe code; a lexical gate cannot raise that
 safety floor. Under a per-site policy, the gate chooses
 `obligations: .Track` or `.Skip` according to the governing policy.
 
-Generated Rust may contain `unsafe` only for an approved audited Jet gate or
+Generated code may contain unsafe operations only for an approved audited Jet gate or
 inside vetted runtime, standard-library, and memory-internal implementations.
 The generated code is not a new user escape hatch; the gate and sema proof are
 the source-level authority.
@@ -67,11 +67,10 @@ and checks admitted native **O0, O1 and O2** outputs. The Core programs exercise
 map replacement/removal/lookup, list growth/pop/copy isolation and strict UTF-8
 decoding, including invalid sequences. The golden slice includes successful
 memory, collections, strings, low-level, safety and concurrency examples.
-Native stdout, stderr and status must agree with the model or golden. This is
-independent of generated Rust; agreement at every tier also implies tier-to-tier
+Native stdout, stderr and status must agree with the model or golden.
+Agreement at every tier also implies tier-to-tier
 agreement on those observables. Each case also needs an independent post-sema
 check receipt; none exists yet (see below), so that leg reports a gap.
-Generated-Rust differential runs are supplemental, not Rust-free proof.
 
 The native artifact producer adds `native_safety.tiers.O0`, `.O1` and `.O2`
 to the admitted artifacts JSON. Each tier has `fuzz` and `golden` objects with
@@ -131,18 +130,17 @@ Current limits: the JetIR backend emits no ASan Load/Store checks, stack
 redzones/use-after-return, uninitialized-memory/UB or data-race checks.
 The gate explicitly lists these, sanitized native compiler self-build and
 mutation-control proofs for the IR checker's `alias.exclusive`, `view.valid` and
-`send.boundary` as missing. The current runtime/frontend still require Rust,
-no native O1/O2
+`send.boundary` as missing. No native O1/O2
 producer has been admitted, and no current runtime pack is recorded in the
 shared artifact registry. The standing gate can exercise the audit/model legs
 now and consume actual native outputs when admitted; it cannot manufacture
-Rust-free proof. The Rust-removal gate remains open until native tier producers,
+that proof. The gate remains open until native tier producers,
 the instrumented Jet runtime and the missing instrumentation/self-build proofs
 exist.
 
-## The post-Rust safety argument
+## The native safety argument
 
-The post-Rust safety argument requires two independent checks before code is
+The native safety argument requires two independent checks before code is
 generated. Sema owns every user-facing check (I3) and reports each violation as
 a registered diagnostic. The back end needs an independent second checker
 over JetIR, alongside its runtime instrumentation

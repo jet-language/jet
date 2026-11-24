@@ -102,9 +102,8 @@ so a frame's first recorded stop is the code its expectation is matched against.
 A successful
 `jet_rt_test_catch_for_scope` completes that expectation but retains the original
 scheduler stop while deeper frames unwind. `jet_rt_test_catch_boundary` clears it
-at the canonical expectation exit, before that frame's own cleanup: the Rust
-reference `MIRRust.rs:14998–15061` catches the block closure, then dispatches this
-exit after `catch_unwind` returns. Thus a deeper cleanup panic still sees pending
+at the canonical expectation exit, before that frame's own cleanup. Thus a
+deeper cleanup panic still sees pending
 and aborts, while a panic in the expectation's own cleanup is a fresh stop.
 A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
@@ -248,13 +247,6 @@ Core runtime source contracts use the ratified ownership and failure spellings:
   system clocks compare stored start and offset values. Comparing clocks never
   samples the host clock or invokes a time wait.
 
-The bootstrap Rust assembler embeds the SQL and bounded CSV-read kernels into
-the generated source; it does not retain paths relative to the Prelude tree.
-Its private String/byte carrier helpers come solely from `Core/ForeignBytes.rs`,
-including the borrowed-slice and iterator packing paths.
-Nested bootstrap host kernels explicitly import the generated Foundation facade;
-their physical C-ABI headers are projected from the same generated carrier
-declarations as the native-backend adapters, without importing optional wrappers.
 File-handle kernels have one owner in the CommonTypes dependency closure;
 selecting mapped-file operations must not emit a second copy.
 
@@ -289,7 +281,7 @@ special-function approximations in Jet. Its transcendental functions and
 Float power are correctly rounded Core source, and the runtime's exactly
 rounded operations are Jet code ported from musl 1.2.5, so its numeric host
 boundary is primitive bit casts alone. A classification or composite operation is
-not a native leaf merely because Rust exposes it as a scalar method.
+not a native leaf merely because a host language exposes it as a scalar method.
 
 The caller-owned RNG stream uses SplitMix64, distinct from the ambient
 generator. Its Jet value kernels retain explicit wrapping U64 transitions and
@@ -330,30 +322,6 @@ A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
 
-Prepared foreign bridges that depend on Foundation expose its complete owned
-source closure to the native build sandbox. This includes the `jet-unicode`
-path dependency at its canonical Cargo location. External inputs are discovered
-transitively from Rust `include!`, `include_str!`, and `include_bytes!` expressions,
-including literal `concat!` paths rooted at `CARGO_MANIFEST_DIR`; comments and
-string contents are not dependencies. Cargo-generated `OUT_DIR` inputs remain
-inside the build target. Missing includes or includes escaping the repository
-fail the preparation. The bridge identity fingerprints both crate trees and
-the sorted include closure, so changing or adding an included registry or
-Unicode table invalidates a previously prepared bridge.
-The Jet bridge and bootstrap Rust bridge derive the same closure rather than
-maintaining separate input lists. Linux projects only these external files at
-their original source root, then mounts the complete Foundation and Unicode
-crates; this does not authorize unrelated directories.
-External build-script hashing inputs are declared with `include_bytes!`, so
-the same closure includes their bytes before Cargo compiles or runs the script.
-Owned-crate source walks and generated-view reads remain inside their complete
-crate mounts; registry build inputs remain inside the admitted registry tree.
-Relocated runtime module text splices its canonical `include!` inputs into the
-generated source instead of resolving them beside the new bridge crate. The
-bridge identity fingerprints those spliced bytes as well as the root module.
-Embedded carrier references resolve to their actual bridge-owned module. Entry
-error formatting retains the shared Foundation Registry lookup, bound to that
-dependency rather than assuming a bridge-owned compiler Registry.
 Inline assembly keeps early clobbers on every host profile. A word-input push
 rail that exceeds the allocatable register budget marshals its inputs through
 one read-only stack carrier, consumed before the body can overwrite its
@@ -420,12 +388,10 @@ a valid nonzero layout writes exactly `memory allocation of N bytes failed\n`
 to stderr, with `N` rendered as unsigned decimal, then aborts the process
 (SIGABRT on the hosted native target). This fatal path uses stack storage and
 the shared raw-byte terminal writer: it neither allocates a diagnostic carrier
-nor invokes a Rust panic hook, task-stop publication, or backtrace rendering.
-The Rust-tier seed adapter preserves the same bytes and termination as the
-Jet-owned allocator; it does not inherit host-toolchain allocation-error policy.
+nor invokes a panic hook, task-stop publication, or backtrace rendering.
 
 Runtime C routes use canonical `Float` for a direct 64-bit floating argument or
-result, matching the Rust `f64` register carrier. The validator does not admit
+result, matching the C `double` register carrier. The validator does not admit
 convenience spellings or a 32-bit floating carrier. Pointer and indirect output
 slots remain `I64` or `U64` words even when their payload is a float; byte and
 boolean carriers retain their separate checks. This is carrier validation, not
@@ -509,14 +475,12 @@ bracket. A callback that returns with pending stop still permits the provider
 to free the payload allocation and descriptor and release the strong owners'
 implicit weak reservation before the caller propagates it. Reclamation on a
 pending stop is explicit, not unwind-dependent.
-The seed-only C fixture retains its separate
-two-argument Rust-provider declaration for comparison; it is not a native alias
-and retires at cutover. Native runtime fixtures pass explicit drop functions,
+Native runtime fixtures pass explicit drop functions,
 including two threads each racing 100,000 clone/drop pairs and a null-glue
 case that must not fall back to the descriptor callback.
 
-The Shared site publication witness uses the actual native providers, not a
-Rust seed implementation. The `SharedPublicationTests` registry row composes
+The Shared site publication witness uses the actual native providers. The
+`SharedPublicationTests` registry row composes
 the fragment after the production runtime, which enrolls the registry
 observer, lowers the unit to the fixture object, and links and runs
 `shared-publication-fixture.c` against the freshly composed native library. Two initializers
@@ -537,7 +501,7 @@ count at byte 0, retired-list link at 8, sign word (`0` or `1`) at 16, limb
 pointer at 24, limb count at 32, and limb capacity at 40. Limbs are 32-bit
 base-1,000,000,000 digits, least-significant first. Zero is nonnegative;
 arithmetic normalizes leading zero limbs and returns to the inline form when
-possible. No Rust `Vec` layout is part of this ABI.
+possible.
 
 Native tasks run to completion on fibers: each task gets a stack and TCB of
 its own, and the pool's carrier threads multiplex them. A cooperative wait
@@ -679,21 +643,17 @@ owner. At zero it calls the explicitly registered memory-only
 unhazarded nodes immediately, or links hazarded nodes through byte 8 and
 reclaims them when the last read guard clears. Atomic slots remove their owner
 before dropping it, and stale readers must revalidate the slot under a hazard.
-A second retirement list would be unsafe while Rust atomic consumers remain.
 The hazard-domain leaf dies when that domain ports to Jet. Native lowering
 must pair every owned boxed carrier with drop and copying with retain;
 the runtime export alone does not establish that compiler ownership glue.
 Private unpublished arithmetic workspaces use their unique-owner discard.
-Rust-tier seed/verification transport uses the identical C layout, with its
-allocator paired at construction and release; that registered transport dies
-at the Rust cutover, rather than defining a second numeric representation.
 `Atomic<Int>` (`AtomicInt.jet`) owns one exact publication per cell; `add`
 returns the independently owned previous exact value. Compare-exchange uses
 numeric equality while retaining the observed node through publication, not
 pointer equality. Fallible add leaves the cell unchanged on refusal and reports
 the physical failed native request in `AllocError.requested_bytes` with
-allocator `"exact-int"`; those byte counts reflect native node/limb layout, not
-Rust temporary-vector layout. An inline fast path allocates nothing and takes
+allocator `"exact-int"`; those byte counts reflect native node/limb layout. An
+inline fast path allocates nothing and takes
 no allocation fault probe. A spilling operation probes once even if its CAS
 retries, then separately allocates a node and limbs; a limb-capacity refusal
 frees the already allocated node.
@@ -734,14 +694,12 @@ the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
 Native sentry scopes and unsafe function gates save the canonical per-thread
 gate/fence state in caller-owned frame storage. Normal and stopped cleanup
 edges restore that state exactly once, including nested policy scopes; file
-and reason strings remain borrowed module literals at the ABI boundary. The
-temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
+and reason strings remain borrowed module literals at the ABI boundary.
 
-The seed `IOContext`, `IOError`, and `TaskFailure` record adapters use the same
-reviewed C headers as their native records, not Rust `Box` or enum layouts:
+The `IOContext`, `IOError`, and `TaskFailure` records use reviewed C headers:
 `IOContext` is 40 bytes and `TaskFailure` is 16 bytes (`tag`, owned nullable
-reason). Their generator and Rust projection retain the paired allocation,
-borrow, and release helpers.
+reason). Their generator retains the paired allocation, borrow, and release
+helpers.
 
 A `T? Never!` call has no outer failure alternative. Outcome matching consumes
 the checked empty-error carrier once and matches the optional success value;
@@ -863,9 +821,9 @@ surface. Cover normal behavior, boundaries, hostile inputs, typed errors,
 diagnostics, authority and effects, resource limits, determinism, concurrency or
 reentrancy where relevant, and cross-tier parity.
 
-Use semantic fixtures for first-pass comparison. A coherent surface may compare
-directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
-to the new Jet contract and compares semantic values and errors. Do not keep a
+Use semantic fixtures for first-pass comparison. A coherent surface compares
+directly with its documented behavior. A redesigned surface maps valid prior
+inputs to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
 `core.net.tls` has no native carriers or handles and binds no C.
