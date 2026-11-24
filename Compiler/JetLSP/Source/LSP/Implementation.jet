@@ -1,0 +1,218 @@
+// Implementations and type definitions from the checked index and the
+// checked modules' items.
+//
+// A trait's implementations are the impls of it, and a trait method's are
+// that method in each of them; a type's are the impls for it. An impl is a
+// top-level `impl` head or a trait block in a type's body; a derive writes
+// none the editor can show. Its head names the trait and the type as
+// written; each name is the declaration of that name in the impl's module,
+// else the only one of that name in the index.
+//
+// A value's type definition is the declaration of each named type its type
+// mentions, through an optional, a list, a map, a shared reference or a
+// result.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Item, Span, TraitImplBlock, Type]
+    jet_semindex.[SemDef, SemIndex]
+}
+
+// One impl head: the type it is for, the trait it implements, if any, and
+// the span of the name the editor shows for it (the trait's, else the type's).
+LSPImplSite: struct {
+    module_path: String,
+    type_name: String,
+    trait_name: String?,
+    span: Span,
+}
+
+lsp_impl_sites: fn(checked: LSPChecked) -> [LSPImplSite] Never! {
+    sites := [LSPImplSite]{}
+    loop module_ref in checked.modules -> lsp_collect_impl_sites(module_ref.path, module_ref.items, sites)
+    sites
+}
+
+lsp_collect_impl_sites: fn(module_path: String, items: [Item], sites: &[LSPImplSite]) Never! {
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> {
+                if implementation.is_generated_serde -> next
+                sites.push(LSPImplSite{module_path: module_path, type_name: implementation.type_name.copy(), trait_name: implementation.trait_name.copy(), span: implementation.trait_span ?? implementation.type_span})
+            }
+            .Struct(structure) -> lsp_collect_trait_blocks(module_path, structure.name, structure.trait_impls, sites)
+            .Enum(enumeration) -> lsp_collect_trait_blocks(module_path, enumeration.name, enumeration.trait_impls, sites)
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) -> lsp_collect_impl_sites(module_path, body, sites)
+            }
+            .GenericModule(generic) -> lsp_collect_impl_sites(module_path, generic.body, sites)
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+lsp_collect_trait_blocks: fn(module_path: String, owner: String, blocks: [TraitImplBlock], sites: &[LSPImplSite]) Never! {
+    loop block in blocks {
+        if block.compiler_generated -> next
+        sites.push(LSPImplSite{module_path: module_path, type_name: owner, trait_name: Val(block.trait_name.copy()), span: block.trait_span})
+    }
+}
+
+// Whether `def` is the declaration at `slot`.
+lsp_slot_is: fn(index: SemIndex, slot: Int?, def: SemDef) -> Bool Never! {
+    found: slot ?? return false
+    named: index.definitions[found].def
+    named.identity == def.identity && named.module_path == def.module_path
+}
+
+// The trait a trait method's requirement belongs to, when `def` is one.
+lsp_requirement_trait: fn(index: SemIndex, def: SemDef) -> Int? Never! {
+    loop member in index.members {
+        if member.origin != "trait_requirement" || member.identity != def.identity || member.module_path != def.module_path -> next
+        return lsp_named_type_slot(index, member.module_path, member.owner, traits: true)
+    }
+    None
+}
+
+// Each name span in `checked`'s modules implementing `def`.
+lsp_implementation_spans: fn(checked: LSPChecked, index: SemIndex, def: SemDef) -> [LSPTarget] Never! {
+    spans := [LSPTarget]{}
+    if {
+        lsp_hierarchy_trait_kind(def.kind) -> {
+            loop site in lsp_impl_sites(checked) {
+                trait_name: site.trait_name ?? next
+                if lsp_slot_is(index, lsp_named_type_slot(index, site.module_path, trait_name, traits: true), def) -> spans.push(LSPTarget{module_path: site.module_path, span: site.span})
+            }
+        }
+        lsp_hierarchy_type_kind(def.kind) -> {
+            loop site in lsp_impl_sites(checked) {
+                if lsp_slot_is(index, lsp_named_type_slot(index, site.module_path, site.type_name), def) -> spans.push(LSPTarget{module_path: site.module_path, span: site.span})
+            }
+        }
+        else -> {
+            trait_slot: lsp_requirement_trait(index, def) ?? return spans
+            loop member in index.members {
+                if member.origin != "trait_impl" || member.name != def.name -> next
+                named: lsp_named_type_slot(index, member.module_path, member.origin_trait, traits: true) ?? next
+                if named == trait_slot -> spans.push(LSPTarget{module_path: member.module_path, span: member.span})
+            }
+        }
+    }
+    spans
+}
+
+// Places the implementations of `def` in `checked` not yet seen. A span past
+// its module's text is generated code, with no place in the file.
+lsp_place_implementations: fn(checked: LSPChecked, def: SemDef, seen: &[String:Bool], found: &[LSPLocation]) Never! {
+    index: checked.index ?? return
+    loop target in lsp_implementation_spans(checked, index, def) {
+        location: lsp_location(checked, target.module_path, target.span) ?? next
+        if target.span.end > location.source.count_bytes() -> next
+        key: "{location.uri}:{target.span.start}"
+        if seen.has_key(key) -> next
+        seen[key] = true
+        found.push(location)
+    }
+}
+
+// The implementations `view`'s check finds, then those of each other open
+// document's check that read the same text of the declaring module, as
+// references are found.
+lsp_open_implementations: fn(server: LSPServer, view: LSPView, def: SemDef) -> [LSPLocation] {
+    found := [LSPLocation]{}
+    seen := [String:Bool]{}
+    lsp_place_implementations(view.checked, def, seen, found)
+    declaring: view.checked.modules[lsp_module_index(view.checked, def.module_path) ?? return found]
+    if declaring.physical_path == "" -> return found
+    uris := server.published.keys().to_list()
+    uris.sort()
+    loop uri in uris {
+        if uri == view.uri -> next
+        checked: server.published[uri]
+        index: checked.index ?? next
+        loop module_ref in checked.modules {
+            if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source -> next
+            if lsp_definition_at(index, LSPTarget{module_path: module_ref.path, span: def.def_span}) == .Val(same) -> lsp_place_implementations(checked, same, seen, found)
+            break
+        }
+    }
+    found
+}
+
+lsp_implementation_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
+    def: lsp_definition_at(index, target) ?? return lsp_response(id, "[]")
+    rows := [String]{}
+    loop location in lsp_open_implementations(server, at.view, def) -> rows.push(lsp_location_json(location))
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// The named types `ty` mentions, outermost first.
+lsp_type_names: fn(ty: Type, names: &[String]) Never! {
+    if ty == {
+        .Named(name) -> names.push(name.copy())
+        .Apply(name, args) -> {
+            names.push(name.copy())
+            loop arg in args -> lsp_type_names(arg, names)
+        }
+        .TraitObject(bounds) -> {
+            loop bound in bounds -> names.push(bound.copy())
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) -> lsp_type_names(inner, names)
+        .Map(key, _, value) -> {
+            lsp_type_names(key, names)
+            lsp_type_names(value, names)
+        }
+        .Result(ok, err) -> {
+            lsp_type_names(ok, names)
+            lsp_type_names(err, names)
+        }
+        .Union(members) -> {
+            loop member in members -> lsp_type_names(member, names)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> lsp_type_names(field.ty, names)
+        }
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
+    }
+}
+
+// The type names a declaration's value has: a binding's, a parameter's or a
+// field's type, a function's return type, a variant's enum, and a type
+// itself.
+lsp_value_type_names: fn(index: SemIndex, def: SemDef) -> [String] Never! {
+    names := [String]{}
+    if def.kind == {
+        .Local(_, ty) -> {
+            if ty == .Val(shown) -> lsp_type_names(shown, names)
+        }
+        .Param(ty) -> lsp_type_names(ty, names)
+        .Field(ty, _) -> lsp_type_names(ty, names)
+        .Function(callable) -> {
+            if callable.return_type == .Val(returned) -> lsp_type_names(returned, names)
+        }
+        .EnumVariant(parent) -> names.push(parent.copy())
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> names.push(def.name.copy())
+        .Module | .Tag | .Const -> {}
+    }
+    loop name in names -> index.display_paths.get(name) ?? name.copy()
+}
+
+// The declaration of each named type of the value at the cursor.
+lsp_type_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
+    def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
+    rows := [String]{}
+    seen := [Int]{}
+    loop name in lsp_value_type_names(index, def) {
+        slot: lsp_named_type_slot(index, def.module_path, name) ?? next
+        if seen.contains(slot) -> next
+        seen.push(slot)
+        declared: index.definitions[slot].def
+        rows.push(lsp_location_json(lsp_location(at.view.checked, declared.module_path, declared.def_span) ?? next))
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}

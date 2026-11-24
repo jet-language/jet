@@ -1,9 +1,11 @@
-// Hover, definition, references, highlights, rename and signature help over
-// the main fixture: `add` is declared on line 0 (characters 0-3) and called on
-// line 5 at characters 4-7 and 11-14.
+// Hover, definition, declaration, references, highlights, rename and
+// signature help over the main fixture: `add` is declared on line 0
+// (characters 0-3) and called on line 5 at characters 4-7 and 11-14. Then
+// implementations and type definitions over traits and the types
+// implementing them.
 use {
     core.encoding.[Dyn]
-    jet_lsp.[lsp_member]
+    jet_lsp.[LSPServer, lsp_member]
 }
 
 lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
@@ -189,4 +191,88 @@ keep: fn(value: Glyph) -> Glyph { value }
     assert(lsp_test_text(lsp_test_field(keyword, "contents"), "value").contains("Jet keyword."), "`fn` hovers as a keyword")
     assert(lsp_member(keyword, "range") == None, "a keyword hover has no name range")
     assert(lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_TEST_MAIN_URI, 3, 0)) == .Null, "a blank line has no hover")
+}
+
+#Test("declaration answers as definition does") {
+    server := lsp_test_main_server()
+    location: lsp_test_result(server, "textDocument/declaration", lsp_test_at(LSP_TEST_MAIN_URI, 5, 5))
+    assert_eq(lsp_test_text(location, "uri"), LSP_TEST_MAIN_URI)
+    assert_eq(lsp_test_range(lsp_test_field(location, "range")), "0:0-0:3")
+    assert(lsp_test_result(server, "textDocument/declaration", lsp_test_at(LSP_TEST_MAIN_URI, 3, 0)) == .Null, "a blank line has no declaration")
+}
+
+LSP_TEST_IMPLS_URI: "file:///w/impls.jet"
+
+// `Renderable` (line 0) requires `render` (line 1). `Button` (line 4)
+// implements it in its body on line 6, with `render` on line 7. `Panel`
+// (line 13) implements it in the head on line 18, with `render` on line 19,
+// and has its own impl on line 24. `frame` on line 30 takes and returns them.
+LSP_TEST_IMPLS: `Renderable: trait {
+    render: fn(self) -> String,
+}
+
+Button: struct {
+    label: String,
+    impl Renderable {
+        render: fn(self) -> String {
+            self.label
+        }
+    }
+}
+
+Panel: struct {
+    title: String,
+    corner: Button?,
+}
+
+impl Panel.Renderable {
+    render: fn(self) -> String {
+        self.title
+    }
+}
+
+impl Panel {
+    width: fn(self) -> Int {
+        1
+    }
+}
+
+frame: fn(panel: Panel, items: [Button]) -> Panel? {
+    None
+}
+`
+
+// The ranges a location request answers at `line`:`character`, sorted.
+lsp_test_located: fn(server: &LSPServer, method: String, line: Int, character: Int) -> [String] {
+    rows: lsp_test_rows(lsp_test_result(server, method, lsp_test_at(LSP_TEST_IMPLS_URI, line, character)))
+    loop row in rows -> assert_eq(lsp_test_text(row, "uri"), LSP_TEST_IMPLS_URI)
+    lsp_test_ranges(rows)
+}
+
+#Test("implementation goes from a trait to its impls, from a trait method to each impl's method, and from a type to its impls") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_IMPLS_URI, LSP_TEST_IMPLS)
+    // A trait block in a type's body and an `impl` head both implement it.
+    assert_eq(lsp_test_located(server, "textDocument/implementation", 0, 1), [String]{"18:11-18:21", "6:9-6:19"})
+    assert_eq(lsp_test_located(server, "textDocument/implementation", 1, 5), [String]{"19:4-19:10", "7:8-7:14"})
+    assert_eq(lsp_test_located(server, "textDocument/implementation", 13, 1), [String]{"18:11-18:21", "24:5-24:10"})
+    assert_eq(lsp_test_located(server, "textDocument/implementation", 4, 1), [String]{"6:9-6:19"})
+    // A use of the trait reaches the same impls.
+    assert_eq(lsp_test_located(server, "textDocument/implementation", 6, 10), [String]{"18:11-18:21", "6:9-6:19"})
+    // A function implements nothing and nothing implements it.
+    assert_eq(lsp_test_located(server, "textDocument/implementation", 30, 1), [String]{})
+}
+
+#Test("type definition goes from a value to the declaration of the type it has") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_IMPLS_URI, LSP_TEST_IMPLS)
+    // A parameter's type, a list parameter's item type, and a function's return type through an optional.
+    assert_eq(lsp_test_located(server, "textDocument/typeDefinition", 30, 11), [String]{"13:0-13:5"})
+    assert_eq(lsp_test_located(server, "textDocument/typeDefinition", 30, 25), [String]{"4:0-4:6"})
+    assert_eq(lsp_test_located(server, "textDocument/typeDefinition", 30, 1), [String]{"13:0-13:5"})
+    // A field's type, through an optional; a type is its own.
+    assert_eq(lsp_test_located(server, "textDocument/typeDefinition", 15, 5), [String]{"4:0-4:6"})
+    assert_eq(lsp_test_located(server, "textDocument/typeDefinition", 13, 1), [String]{"13:0-13:5"})
+    // A built-in type has no declaration.
+    assert_eq(lsp_test_located(server, "textDocument/typeDefinition", 14, 5), [String]{})
 }

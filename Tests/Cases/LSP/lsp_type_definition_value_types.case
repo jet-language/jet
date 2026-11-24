@@ -1,0 +1,34 @@
+# Type definition goes from a value to the declaration of its type: from the
+# binding `b` (line 24) and its use (line 25) to `Button` (line 4), whose type
+# the check infers; from the parameter `panel` (line 28) to `Panel` (line 13);
+# and from `show`, which returns `[Button]`, to `Button`.
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPTypeDefinitionValueTypes/0.json
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.typeDefinitionProvider = true
+send lsp: Messages/LSPTypeDefinitionValueTypes/1.json
+send lsp: Messages/LSPTypeDefinitionValueTypes/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # the open document's diagnostics arrive before any request is answered
+send lsp: Messages/LSPTypeDefinitionValueTypes/3.json
+recv lsp until $.id = 2
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].uri = "file:///tmp/lsp_type_definition_test.jet"
+json: stdout doc $.result[0].range.start.line = 4
+json: stdout doc $.result[0].range.start.character = 0
+send lsp: Messages/LSPTypeDefinitionValueTypes/4.json
+recv lsp until $.id = 3
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].range.start.line = 4
+send lsp: Messages/LSPTypeDefinitionValueTypes/5.json
+recv lsp until $.id = 4
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].range.start.line = 13
+send lsp: Messages/LSPTypeDefinitionValueTypes/6.json
+recv lsp until $.id = 5
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].range.start.line = 4
+send lsp: Messages/LSPTypeDefinitionValueTypes/7.json
+recv lsp until $.id = 99
+close lsp
+exit: any # the session ends at shutdown; the process status is not under test

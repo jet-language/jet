@@ -28,6 +28,9 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/signatureHelp" -> lsp_signature_help_response(server, params, id)
         "textDocument/hover" -> lsp_hover_response(server, params, id)
         "textDocument/definition" -> lsp_definition_response(server, params, id)
+        "textDocument/declaration" -> lsp_definition_response(server, params, id)
+        "textDocument/typeDefinition" -> lsp_type_definition_response(server, params, id)
+        "textDocument/implementation" -> lsp_implementation_response(server, params, id)
         "textDocument/references" -> lsp_references_response(server, params, id)
         "textDocument/documentHighlight" -> lsp_document_highlight_response(server, params, id)
         "textDocument/prepareRename" -> lsp_prepare_rename_response(server, params, id)
@@ -99,6 +102,10 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"signatureHelpProvider\":{{\"triggerCharacters\":[\"(\",\",\"]}}",
         "\"hoverProvider\":true",
         "\"definitionProvider\":true",
+        // A Jet name is declared where it is defined.
+        "\"declarationProvider\":true",
+        "\"typeDefinitionProvider\":true",
+        "\"implementationProvider\":true",
         "\"referencesProvider\":true",
         "\"documentHighlightProvider\":true",
         "\"renameProvider\":{{\"prepareProvider\":true}}",
