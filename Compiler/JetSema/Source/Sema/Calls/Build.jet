@@ -419,10 +419,7 @@ sema_build_code_value: fn(call: Call, expected: Type?, environment: SemaScopeEnv
     }
     // The pasted locals are read like a call's arguments; the host takes each
     // splice's marker, the name it pastes, then the local's value.
-    params := [SemaCallParam]{}
-    loop pasted in splices.values {
-        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(pasted.ty), variadic: false})
-    }
+    params: loop pasted in splices.values -> SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(pasted.ty), variadic: false}
     ownership: sema_ownership_check_call_arguments(check.state, "#code", params, splices.args, scopes, diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     args := [TExpr]{}
@@ -558,10 +555,7 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     // The session reads the code, then the scope's String.
     ordinary := [CallArg]{code_arg, scope_arg}
     values := [TExpr]{code_value, scope_value}
-    params := [SemaCallParam]{}
-    loop value in values {
-        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
-    }
+    params: loop value in values -> SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false}
     ownership: sema_ownership_check_method_call(check.state, "Compiler.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     // `meta.add` writes declarations, so it uses `Meta.Generate`: allowed

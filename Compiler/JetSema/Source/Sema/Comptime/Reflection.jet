@@ -2724,10 +2724,7 @@ sema_comptime_reflection_bound_signature: fn(registration: SemaRegistrationGraph
 
 // A named payload's fields as FieldInfo rows, in declaration order.
 sema_comptime_reflection_case_payload_fields: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, variant: Variant, fields: [VariantField], registry: SemaScopeMembersMarkerRegistry) -> [TComptimeValue] Never! {
-    result := [TComptimeValue]{}
-    loop (index, field) in fields {
-        result.push(sema_comptime_reflection_field_info(registration, caller, field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry, None, None))
-    }
+    result: loop (index, field) in fields -> sema_comptime_reflection_field_info(registration, caller, field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry, None, None)
     result
 }
 

@@ -834,10 +834,7 @@ link_bind_image: fn(name: String, program: ^^[U8], image: ^^[U8], gap_at: Int, g
         else -> {
             // Whether each global was undefined before binding; a name the
             // image's symbols repeat binds to the last of them.
-            imports := [Bool]{}
-            loop g in 0..<c.g_name.len() {
-                imports.push(c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0)
-            }
+            imports: loop g in 0..<c.g_name.len() -> c.g_kind[g] == LINK_G_NONE && c.g_alias[g] < 0
             loop k in view.first_global..<view.symtab_count {
                 at: view.symtab_at + 24 * k
                 if link_u16(c.bufs, 1, at + 6) == 0 -> next

@@ -250,10 +250,7 @@ compiler_event_value_json: fn(value: TComptimeValue) -> String Never! {
             "[{items.join(",")}]"
         }
         .Struct(_, fields) -> {
-            members := [String]{}
-            loop field in fields {
-                members.push("{foundation_json_quote(field.name)}:{compiler_event_value_json(field.value)}")
-            }
+            members: loop field in fields -> "{foundation_json_quote(field.name)}:{compiler_event_value_json(field.value)}"
             "{{{members.join(",")}}}"
         }
         .Enum(type_name, variant, args) -> if type_name.ends_with(".Effect") && args.len() == 0 -> foundation_json_quote(variant) else -> "null"

@@ -345,10 +345,7 @@ sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaS
         module_index: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: Val("frame schedule derivation requires registered module identity")}
         module_path := graph.modules[module_index].module_path
         schedule: built.schedule ?? FrameSchedule{operations: [FrameOperation]{}, dependencies: [FrameDependency]{}, transfers: [FrameTransfer]{}, reuse: [FrameReuse]{}, retentions: [FrameRetention]{}, conservative: [String]{}}
-        premises := [String]{}
-        loop operation in schedule.operations {
-            premises.push("{operation.name}@{operation.source_index}")
-        }
+        premises: loop operation in schedule.operations -> "{operation.name}@{operation.source_index}"
         identity := derivation_identity(module_path, "", "", source_bytes)
         record := derivation_record("{module_path}.on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", DerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
         record = derivation_record_with_payload(record, DerivationPayload.FrameSchedule{schedule: schedule})

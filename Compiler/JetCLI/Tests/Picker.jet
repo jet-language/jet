@@ -241,10 +241,7 @@ picker_test_same_keys: fn(got: [JetCLIPickerKey], want: [JetCLIPickerKey]) Never
         view: jet_cli_picker_text_view(page, 30, 7, 0)
         assert(picker_test_lines(view).len() == 7, view)
         picker_test_within(view, 30)
-        rows := [String]{}
-        loop row in jet_cli_picker_wrap(page, 30) {
-            rows.push(if row._hard_break -> "{row.text}\n" else -> "{row.text}")
-        }
+        rows: loop row in jet_cli_picker_wrap(page, 30) -> if row._hard_break -> "{row.text}\n" else -> "{row.text}"
         assert_eq(rows.join(""), page)
         bottom: jet_cli_picker_text_view(page, 30, 7, 1000000)
         assert(picker_test_lines(bottom).len() == 7, bottom)

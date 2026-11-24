@@ -479,10 +479,7 @@ sema_inline_mapped_name: fn(rewrite: SemaInlineRewrite, name: String) -> String 
 }
 
 sema_inline_mapped_names: fn(rewrite: SemaInlineRewrite, names: [NamedSpan]) -> [NamedSpan] Never! {
-    mapped := [NamedSpan]{}
-    loop entry in names {
-        mapped.push(NamedSpan{name: sema_inline_mapped_name(rewrite, entry.name), span: entry.span})
-    }
+    mapped: loop entry in names -> NamedSpan{name: sema_inline_mapped_name(rewrite, entry.name), span: entry.span}
     mapped
 }
 
@@ -763,10 +760,7 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
             Type.Apply{name: head, args: sema_inline_rewrite_types(rewrite, args)}
         }
         .Tuple(fields) -> {
-            mapped := [TypeTupleField]{}
-            loop field in fields {
-                mapped.push(TypeTupleField{name: field.name, ty: sema_inline_rewrite_type(rewrite, field.ty)})
-            }
+            mapped: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inline_rewrite_type(rewrite, field.ty)}
             Type.Tuple{fields: mapped}
         }
         .Union(members) -> Type.Union{members: sema_inline_rewrite_types(rewrite, members)}
@@ -885,18 +879,12 @@ sema_inline_rewrite_call_args: fn(rewrite: ^SemaInlineRewrite, args: [CallArg]) 
 }
 
 sema_inline_rewrite_fields: fn(rewrite: ^SemaInlineRewrite, fields: [ExprField]) -> [ExprField] Never! {
-    mapped := [ExprField]{}
-    loop field in fields {
-        mapped.push(ExprField{name: field.name, name_span: field.name_span, value: sema_inline_rewrite_expr(rewrite, field.value)})
-    }
+    mapped: loop field in fields -> ExprField{name: field.name, name_span: field.name_span, value: sema_inline_rewrite_expr(rewrite, field.value)}
     mapped
 }
 
 sema_inline_rewrite_pairs: fn(rewrite: ^SemaInlineRewrite, entries: [ExprPair]) -> [ExprPair] Never! {
-    mapped := [ExprPair]{}
-    loop entry in entries {
-        mapped.push(ExprPair{key: sema_inline_rewrite_expr(rewrite, entry.key), value: sema_inline_rewrite_expr(rewrite, entry.value)})
-    }
+    mapped: loop entry in entries -> ExprPair{key: sema_inline_rewrite_expr(rewrite, entry.key), value: sema_inline_rewrite_expr(rewrite, entry.value)}
     mapped
 }
 
@@ -1368,10 +1356,7 @@ sema_inline_rewrite_expr: fn(rewrite: ^SemaInlineRewrite, expression: Expr) -> E
             return Expr.If{cond: mapped_cond, then_body: mapped_then_body, then_value: mapped_then_value, else_body: mapped_else_body, else_value: mapped_else_value, span: span, id: node}
         }
         .TupleLit(fields, span, ty, node) -> {
-            mapped := [TupleField]{}
-            loop field in fields {
-                mapped.push(TupleField{name: field.name, value: sema_inline_rewrite_expr(rewrite, field.value)})
-            }
+            mapped: loop field in fields -> TupleField{name: field.name, value: sema_inline_rewrite_expr(rewrite, field.value)}
             return Expr.TupleLit{fields: mapped, span: span, ty: sema_inline_rewrite_optional_type(rewrite, ty), id: node}
         }
         .Lambda(lambda, node) -> return Expr.Lambda{lambda: sema_inline_rewrite_lambda(rewrite, lambda), id: node}
@@ -1380,10 +1365,7 @@ sema_inline_rewrite_expr: fn(rewrite: ^SemaInlineRewrite, expression: Expr) -> E
         .Paren(value, span, node) -> return Expr.Paren{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
         .Pipe(head, steps, span, node) -> {
             mapped_head: sema_inline_rewrite_expr(rewrite, head)
-            mapped := [PipeStep]{}
-            loop step in steps {
-                mapped.push(PipeStep{name: step.name, value: sema_inline_rewrite_expr(rewrite, step.value), reads: step.reads, span: step.span})
-            }
+            mapped: loop step in steps -> PipeStep{name: step.name, value: sema_inline_rewrite_expr(rewrite, step.value), reads: step.reads, span: step.span}
             return Expr.Pipe{head: mapped_head, steps: mapped, span: span, id: node}
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .TypeValue(_, _, _) -> {}
@@ -1595,10 +1577,7 @@ sema_inline_rewrite_stmt: fn(rewrite: ^SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         .ComptimeIf(cond, cond_span, then_body, else_body, span, selected_then) -> Stmt.ComptimeIf{cond: sema_inline_rewrite_expr(rewrite, cond), cond_span: cond_span, then_body: sema_inline_rewrite_stmts(rewrite, then_body), else_body: sema_inline_rewrite_optional_body(rewrite, else_body), span: span, selected_then: selected_then.copy()}
         .ComptimeBlock(body, is_template_loop, span) -> Stmt.ComptimeBlock{body: sema_inline_rewrite_stmts(rewrite, body), is_template_loop: is_template_loop, span: span}
         .ContextBlock(fields, body, span) -> {
-            mapped := [ContextField]{}
-            loop field in fields {
-                mapped.push(ContextField{name: field.name, value: sema_inline_rewrite_expr(rewrite, field.value), span: field.span})
-            }
+            mapped: loop field in fields -> ContextField{name: field.name, value: sema_inline_rewrite_expr(rewrite, field.value), span: field.span}
             Stmt.ContextBlock{fields: mapped, body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         }
         .Live(body, span) -> Stmt.Live{body: sema_inline_rewrite_stmts(rewrite, body), span: span}
@@ -1785,10 +1764,7 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
             .Unit -> VariantPayload.Unit
             .Single(ty, span) -> VariantPayload.Single{ty: sema_inline_rewrite_type(rewrite, ty), span: span}
             .Named(fields) -> {
-                mapped_fields := [VariantField]{}
-                loop field in fields {
-                    mapped_fields.push(VariantField{name: field.name, name_span: field.name_span, ty: sema_inline_rewrite_type(rewrite, field.ty), ty_span: field.ty_span})
-                }
+                mapped_fields: loop field in fields -> VariantField{name: field.name, name_span: field.name_span, ty: sema_inline_rewrite_type(rewrite, field.ty), ty_span: field.ty_span}
                 VariantPayload.Named{fields: mapped_fields}
             }
         }

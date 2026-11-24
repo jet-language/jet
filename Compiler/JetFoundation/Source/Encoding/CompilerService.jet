@@ -150,10 +150,7 @@ jet_config_data_value: fn(value: ^^CtValue) -> CtValue Never! {
             CtValue.List{values: items}
         }
         .Map(entries) -> {
-            items := [CtMapEntry]{}
-            loop entry in entries {
-                items.push(CtMapEntry{key: entry.key, value: jet_config_data_value(entry.value)})
-            }
+            items: loop entry in entries -> CtMapEntry{key: entry.key, value: jet_config_data_value(entry.value)}
             CtValue.Map{entries: items}
         }
         .Struct(type_name, fields) -> {

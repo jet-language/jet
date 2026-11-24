@@ -1541,10 +1541,7 @@ sema_expression_swizzle_read_expr: fn(base: Expr, slots: SemaSwizzleSlots, packe
     // A name is read in place; any other value is bound once, as a pipe binds
     // its head.
     name: if base == .Ident(local, _, _) -> "{local}" else -> pipe_value_name(span.start)
-    elements := [Expr]{}
-    loop index in 0..<count {
-        elements.push(sema_expression_swizzle_slot(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, slots, (packed >> (index * 2)) & 3, span))
-    }
+    elements: loop index in 0..<count -> sema_expression_swizzle_slot(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, slots, (packed >> (index * 2)) & 3, span)
     sema_expression_swizzle_bound(base, name, count, sema_expression_swizzle_literal(slots.element, elements, span), span)
 }
 

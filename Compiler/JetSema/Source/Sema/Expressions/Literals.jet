@@ -552,10 +552,7 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
 }
 
 sema_expression_member_spread_fields: fn(base: Expr, members: [ExprMember], span: Span) -> [Expr] Never! {
-    fields := [Expr]{}
-    loop member in members {
-        fields.push(Expr.Field{base: base, member: member.name, span: Span{start: span.start, end: member.span.end}, id: AST_NODE_GENERATED})
-    }
+    fields: loop member in members -> Expr.Field{base: base, member: member.name, span: Span{start: span.start, end: member.span.end}, id: AST_NODE_GENERATED}
     fields
 }
 

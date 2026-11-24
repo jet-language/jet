@@ -865,10 +865,7 @@ native_memory_value_rows: fn(session: ^NativeSession, view: NativeMemoryView, ty
     row := 0
     loop row < values {
         end: if row + NATIVE_MEMORY_ROW_VALUES < values -> row + NATIVE_MEMORY_ROW_VALUES else -> values
-        shown := [String]{}
-        loop value in row..<end {
-            shown.push(native_memory_shown(view, value * size, type_name, size))
-        }
+        shown: loop value in row..<end -> native_memory_shown(view, value * size, type_name, size)
         address: view.address + row * size
         labels: native_memory_row_labels(session, view, address, view.address + end * size)
         body: "{x64_hex(address)}  {shown.join("  ")}"

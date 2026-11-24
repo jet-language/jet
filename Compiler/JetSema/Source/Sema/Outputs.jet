@@ -257,10 +257,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     // Its members are lifted beside it under their dotted
                     // path, which no member-by-member hop spells.
                     last: path.members[path.members.len() - 1]
-                    modules := [String]{}
-                    loop position in index..<path.members.len() - 1 {
-                        modules.push(path.members[position].name.copy())
-                    }
+                    modules: loop position in index..<path.members.len() - 1 -> path.members[position].name.copy()
                     lifted: sema_inline_member_name(modules.join("."), last.name)
                     names: loop item in path.members -> item.name
                     member_path: names.join(".")

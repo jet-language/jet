@@ -116,10 +116,7 @@ sema_taskgroup_state_init: fn() -> SemaTaskGroupState Never! {
 sema_taskgroup_state_snapshot: fn(source: SemaTaskGroupState) -> SemaTaskGroupState Never! {
     stack := [SemaTaskGroupFrame]{}
     loop frame in source.stack {
-        pending := [SemaTaskGroupPendingSpawn]{}
-        loop spawn in frame.pending {
-            pending.push(SemaTaskGroupPendingSpawn{binding: spawn.binding, span: spawn.span})
-        }
+        pending: loop spawn in frame.pending -> SemaTaskGroupPendingSpawn{binding: spawn.binding, span: spawn.span}
         borrows := [SemaTaskGroupBorrow]{}
         loop borrow in frame.borrows {
             borrows.push(

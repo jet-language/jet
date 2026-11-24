@@ -163,10 +163,7 @@ ahead_compile_on: fn(path: String, source: String, verify: Bool, threads: Int) -
     request.recheck_verify = verify
     front: jet_driver_lowering_inputs(request, None)
     trace: ahead_files.read(path) ?? panic("cannot read the trace: {err}")
-    problems := [String]{}
-    loop diagnostic in front.compile.diagnostics {
-        problems.push("{diagnostic.code} {diagnostic.what}")
-    }
+    problems: loop diagnostic in front.compile.diagnostics -> "{diagnostic.code} {diagnostic.what}"
     assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "recheck_verify {verify}: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
     assert(trace.contains("counters.sema.local_values_spliced = "), "recheck_verify {verify}: the local values did not land:\n{trace}")
     assert(!trace.contains("counters.sema.local_values_refused"), "recheck_verify {verify}: a pass fell back to the full recheck:\n{trace}")

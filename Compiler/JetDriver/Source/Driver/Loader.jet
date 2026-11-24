@@ -4227,10 +4227,7 @@ jet_driver_inline_top_level_package_threads: fn(bytes: [U8], from: Int, threads:
     bounds.push(bytes.len())
     if bounds.len() <= 2 -> return jet_driver_inline_top_level_package(bytes, from)
     inputs: Shared{JetDriverInlineShared{bytes: bytes}}
-    parts := [Shared<JetDriverInlinePart>]{}
-    loop part in 0..<(bounds.len() - 1) {
-        parts.push(Shared{JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}}})
-    }
+    parts: loop part in 0..<(bounds.len() - 1) -> Shared{JetDriverInlinePart{start: bounds[part], end: bounds[part + 1], outputs: [JetDriverInlineScan]{}}}
     _ := jet_driver_inline_scan_parts(inputs, parts, 0)
     loop part in 0..<parts.len() {
         output := jet_driver_inline_part_take(parts[part])
@@ -4556,10 +4553,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     bare_alias := [[Int]]{}
     loop row in CORE_BARE_SOURCE_MODULES {
         bare.push(jet_driver_core_demand_name(tables, row.name))
-        aliases := [Int]{}
-        loop alias in jet_driver_core_bare_aliases(row.name) {
-            aliases.push(jet_driver_core_demand_name(tables, alias))
-        }
+        aliases: loop alias in jet_driver_core_bare_aliases(row.name) -> jet_driver_core_demand_name(tables, alias)
         bare_alias.push(aliases)
     }
     bare_rows := [Int]{}
@@ -4587,10 +4581,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     }
     typed_heads := [Int]{}
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
-    context_fields := [Int]{}
-    loop field in SEMA_CONTEXT_CORE_FIELDS {
-        context_fields.push(jet_driver_core_demand_name(tables, field))
-    }
+    context_fields: loop field in SEMA_CONTEXT_CORE_FIELDS -> jet_driver_core_demand_name(tables, field)
     prelude_failure_names := [Int]{jet_driver_core_demand_name(tables, "send")}
     loop at in JET_DRIVER_PRELUDE_FAILURE_METHODS {
         prelude_failure_names.push(jet_driver_core_demand_name(tables, BUILTIN_METHOD_ROWS[at].name))
@@ -4893,10 +4884,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: ^^Lexed, runs: [Int
     }
     names: jet_driver_core_demand_names(lexed.tables)
     inputs: Shared{JetDriverDemandShared{lexed: [Lexed]{lexed.move()}, names: names, collect_bare: collect_bare}}
-    parts := [Shared<JetDriverDemandPart>]{}
-    loop part in 0..<workers {
-        parts.push(Shared{JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}}})
-    }
+    parts: loop part in 0..<workers -> Shared{JetDriverDemandPart{start: part * run_count /% workers, end: (part + 1) * run_count /% workers, outputs: [JetDriverCoreIdentifierDemand]{}}}
     _ := jet_driver_demand_scan_parts(inputs, parts, runs, 0)
     loop part in parts {
         output := jet_driver_demand_part_take(part)

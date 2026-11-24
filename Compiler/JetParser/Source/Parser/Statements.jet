@@ -1770,10 +1770,7 @@ parser_parse_binding_statement: fn(state: ^JetParserState) -> Stmt {
         if mutable {
             parser_add_error_code(state, "E0003", name.span, "a `Layout{{ … }}` binding is immutable", "`Layout` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding", "write `{binding_name}: Layout{{ … }}`")
         }
-        body := [Stmt]{}
-        loop element in elements {
-            body.push(Stmt.Expr{expr: parser_desugar_layout_expr(state, binding_name, element)})
-        }
+        body: loop element in elements -> Stmt.Expr{expr: parser_desugar_layout_expr(state, binding_name, element)}
         parser_finish_statement(state)
         return Stmt.Layout{name: binding_name, name_span: name.span, body: body, span: parser_cover(name.span, value.span)}
     }

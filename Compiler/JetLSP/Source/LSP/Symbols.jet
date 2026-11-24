@@ -223,10 +223,7 @@ lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: ^[Strin
 
 lsp_folding_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String Never! {
     doc: lsp_open_document(server, params) ?? return lsp_response(id, "null")
-    rows := [String]{}
-    loop fold in lsp_compute_folding_ranges(doc.text, server.lex(doc)) {
-        rows.push(lsp_folding_range_json(fold))
-    }
+    rows: loop fold in lsp_compute_folding_ranges(doc.text, server.lex(doc)) -> lsp_folding_range_json(fold)
     lsp_response(id, "[{rows.join(",")}]")
 }
 

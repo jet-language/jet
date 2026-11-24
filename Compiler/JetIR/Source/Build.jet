@@ -3405,10 +3405,7 @@ IROwnState: struct {
 
 // The ownership of the variables bound before `count`.
 ir_own_states: fn(b: IRBuilder, count: Int) -> [IROwnState] Never! {
-    states := [IROwnState]{}
-    loop index in 0..<count {
-        states.push(IROwnState{owned: b.bindings[index].owned, live: b.bindings[index].live})
-    }
+    states: loop index in 0..<count -> IROwnState{owned: b.bindings[index].owned, live: b.bindings[index].live}
     states
 }
 

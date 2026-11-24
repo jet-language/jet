@@ -191,10 +191,7 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
         }
     }
 
-    tuple_fields := [TypeTupleField]{}
-    loop index in 0..<elements.len() {
-        tuple_fields.push(TypeTupleField{name: names[index], ty: output_elements[index]})
-    }
+    tuple_fields: loop index in 0..<elements.len() -> TypeTupleField{name: names[index], ty: output_elements[index]}
     tuple_ty := Type.Tuple{fields: tuple_fields}
     result_ty := Type.Apply{name: "Iter", args: [Type]{tuple_ty}}
     receiver := inputs[0]

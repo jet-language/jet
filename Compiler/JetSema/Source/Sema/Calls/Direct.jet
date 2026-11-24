@@ -432,10 +432,7 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
                     return SemaDirectSpecialCheck{handled: true, value: sema_check_expression(invocation, expected, environment, program, scopes, check, diagnostics)}
                 }
             }
-            components := [Type]{}
-            loop _ in 0..<sema_call_math_arity(call.name) {
-                components.push(sema_call_math_scalar_type(call.name))
-            }
+            components: loop _ in 0..<sema_call_math_arity(call.name) -> sema_call_math_scalar_type(call.name)
             sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, scopes, check, diagnostics)
         }
     }

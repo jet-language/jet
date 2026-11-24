@@ -1,0 +1,257 @@
+// Push-loop sweep: a list built by pushing one value per loop pass becomes
+// the collecting loop that says so.
+//
+//     names := [String]{}            names: loop param in params -> param.name
+//     loop param in params {    =>
+//         names.push(param.name)
+//     }
+//
+// Only that exact four-line shape is rewritten, and only when nothing later
+// in the same function changes the list (no method that edits it, no
+// assignment to it or into it, no `^` borrow, no move), the pushed value
+// needs no expected type (no `.Case`, no bare number) and carries no control
+// flow (`return`, `break`, `next`, `?`), the element type is neither an
+// option nor a union, which the collected value would not widen to, and the
+// loop header holds no braced literal, which the collecting form cannot read.
+// A generated file is left to its generator. A site the checker still
+// refuses is named in a skip file and left alone.
+//
+// Usage (from the repository root):
+//   jet Tools/Agent/PushLoopSweep.jet [--write] [--skip=FILE] [PATH...]
+// lists every site under PATH (default Compiler), and with --write rewrites
+// them. FILE holds `path<TAB>name<TAB>loop header` rows to leave alone.
+use {
+    files: core.files
+    process: core.process
+    regex: core.regex
+    term: core.term
+}
+
+DECLARATION: Regex{"^( *)([a-z_][A-Za-z0-9_]*) := \[(.+)\](..)$"}
+
+LOOP_OPEN: Regex{"^( *)loop (.+) (.)$"}
+
+#Error
+SweepError: struct {
+    message: String,
+}
+
+// One rewritable site: lines `index` to `index + 3` of its file.
+Site: struct {
+    index: Int,
+    indent: String,
+    name: String,
+    header: String,
+    value: String,
+}
+
+// The text of `line` after `prefix`, when it starts so.
+after: fn(line: String, prefix: String) -> String? Never! {
+    if !line.starts_with(prefix) -> return None
+    Val(line.partition(prefix).tail.copy())
+}
+
+// Whether `text` has as many closing parentheses, brackets and braces as
+// opening ones.
+balanced: fn(text: String) -> Bool Never! {
+    text.split("(").len() == text.split(")").len() && text.split("[").len() == text.split("]").len() && text.split("{{").len() == text.split("}}").len()
+}
+
+// Whether the collected value can stand alone: it needs no expected type and
+// leaves its loop pass only by finishing.
+plain_value: fn(value: String) -> Bool Never! {
+    if value == "" || value.starts_with(".") || !balanced(value) -> return false
+    number: Regex{"^-?[0-9][0-9_]*$"}
+    if number.is_match(value) -> return false
+    stops: Regex{"(?:^|[^A-Za-z0-9_])(?:return|break|next)(?:$|[^A-Za-z0-9_])|\?|\^"}
+    !stops.is_match(value)
+}
+
+// Whether a line of the function after the loop changes `name`.
+mutates: fn(line: String, name: String) -> Bool Never! {
+    edits: regex.compile("(?:^|[^A-Za-z0-9_.])\\^?\\^{name}(?:$|[^A-Za-z0-9_])|(?:^|[^A-Za-z0-9_.]){name}(?:\\.(?:push|push_front|insert|remove|pop|pop_front|sort|sort_by|sort_by_key|clear|extend|append|reverse|truncate|swap|set|dedup|retain|drain|resize|move)\\(|(?:\\[[^\\]]*\\])?(?:\\.[A-Za-z_][A-Za-z0-9_]*)*\\s*(?:[-+*/%]|\\|\\||&&)?=(?:[^=]|$)|\\[[^\\]]*\\](?:\\.[A-Za-z_][A-Za-z0-9_]*)*\\.(?:push|push_front|insert|remove|pop|pop_front|sort|sort_by|sort_by_key|clear|extend|append|reverse|truncate|swap|set|dedup|retain|drain|resize)\\()") ?? return true
+    edits.is_match(line)
+}
+
+// The site starting at line `index`, when the four lines there have the shape
+// and the rest of the function leaves the list alone.
+site_at: fn(lines: [String], index: Int) -> Site? Never! {
+    if index + 3 >= lines.len() -> return None
+    found: DECLARATION.matches(lines[index])
+    if found.len() != 1 || found[0].groups[3] != "{{}}" -> return None
+    indent: found[0].groups[0].copy()
+    name: found[0].groups[1].copy()
+    element: found[0].groups[2]
+    if element.contains("?") || element.contains("|") -> return None
+    opened: LOOP_OPEN.matches(lines[index + 1])
+    if opened.len() != 1 || opened[0].groups[0] != indent || opened[0].groups[2] != "{{" -> return None
+    header: opened[0].groups[1].copy()
+    if !header.contains(" in ") || header.contains("{{") || !balanced(header) -> return None
+    push: regex.compile("^{indent}    {name}\\.push\\((.*)\\)$") ?? return None
+    pushed: push.matches(lines[index + 2])
+    if pushed.len() != 1 -> return None
+    value: pushed[0].groups[0]
+    if !plain_value(value) -> return None
+    if lines[index + 3] != "{indent}}}" -> return None
+    loop rest in (index + 4)..<lines.len() {
+        if lines[rest] == "}}" -> break
+        if mutates(lines[rest], name) -> return None
+    }
+    Val(Site{index: index, indent: indent, name: name, header: header, value: value.copy()})
+}
+
+// Whether `source` is a generator's output, whose header says so; its
+// generator is changed instead.
+generated: fn(source: String) -> Bool Never! {
+    head := 0
+    loop line in source.split("\n") {
+        if line.contains("do not edit") -> return true
+        head += 1
+        if head >= 12 -> break
+    }
+    false
+}
+
+// The skip rows: `path<TAB>name<TAB>loop header`.
+skip_key: fn(path: String, site: Site) -> String Never! { "{path}\t{site.name}\t{site.header}" }
+
+// The sites of `source` not named in `skips`.
+sites_in: fn(path: String, source: String, skips: [String:Bool]) -> [Site] Never! {
+    lines: source.split("\n").to_list()
+    sites := [Site]{}
+    index := 0
+    loop {
+        if index >= lines.len() -> break
+        if site_at(lines, index) == .Val(site) {
+            if skips.get(skip_key(path, site)) == None {
+                sites.push(site.copy())
+                index += 4
+                next
+            }
+        }
+        index += 1
+    }
+    sites
+}
+
+// `source` with every site rewritten as its collecting loop.
+rewrite: fn(source: String, sites: [Site]) -> String Never! {
+    lines: source.split("\n").to_list()
+    out := [String]{}
+    index := 0
+    next_site := 0
+    loop {
+        if index >= lines.len() -> break
+        if next_site < sites.len() && sites[next_site].index == index {
+            site: sites[next_site]
+            out.push("{site.indent}{site.name}: loop {site.header} -> {site.value}")
+            index += 4
+            next_site += 1
+            next
+        }
+        out.push(lines[index].copy())
+        index += 1
+    }
+    out.join("\n")
+}
+
+tracked_sources: fn(roots: [String]) -[Exec, IO, Time.Wait]> [String] SweepError! {
+    argv := [String]{"git", "ls-files", "--"}
+    loop root in roots -> argv.push(root.copy())
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(SweepError{message: "cannot run git ls-files: {err}"})
+    if receipt.code != 0 -> return Err(SweepError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    paths := [String]{}
+    loop path in receipt.output.split("\n") {
+        if path.ends_with(".jet") -> paths.push(path.copy())
+    }
+    Ok(paths)
+}
+
+read_skips: fn(path: String) -[FS]> [String:Bool] SweepError! {
+    skips := [String:Bool]{}
+    if path == "" -> return Ok(skips)
+    text: files.read(path) ?? return Err(SweepError{message: "cannot read {path}: {err}"})
+    loop line in text.split("\n") {
+        if line.trim() != "" -> skips[line.copy()] = true
+    }
+    Ok(skips)
+}
+
+sweep_main: fn(write: Bool, skip_path: String, roots: [String]) -[Exec, FS, IO, Time.Wait]> Int SweepError! {
+    skips: read_skips(skip_path) ?? return Err(err)
+    total := 0
+    touched := 0
+    loop path in tracked_sources(roots) ?? return Err(err) {
+        source: files.read(path) ?? return Err(SweepError{message: "cannot read {path}: {err}"})
+        if generated(source) -> next
+        sites: sites_in(path, source, skips)
+        if sites.len() == 0 -> next
+        loop site in sites -> print("{path}:{site.index + 1}\t{site.name}\t{site.header}")
+        total += sites.len()
+        touched += 1
+        if write {
+            files.write(path, rewrite(source, sites)) ?? return Err(SweepError{message: "cannot write {path}: {err}"})
+        }
+    }
+    verb: if write -> "rewrote" else -> "found"
+    term.eprint("push-loop-sweep: {verb} {total} push loop(s) in {touched} file(s)")
+    Ok(0)
+}
+
+run: fn() {
+    write := false
+    skip_path := ""
+    roots := [String]{}
+    loop arg in process.args() {
+        if arg == "--write" {
+            write = true
+        } else if after(arg, "--skip=") == .Val(path) {
+            skip_path = path
+        } else if arg.starts_with("--") {
+            process.fail(64, "usage: jet Tools/Agent/PushLoopSweep.jet [--write] [--skip=FILE] [PATH...]")
+        } else {
+            roots.push(arg.copy())
+        }
+    }
+    if roots.len() == 0 -> roots.push("Compiler")
+    code: sweep_main(write, skip_path, roots) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
+}
+
+#Test("the four-line push loop becomes its collecting loop") {
+    source: "f: fn(params: [Param]) -> [String] {{\n    names := [String]{{}}\n    loop param in params {{\n        names.push(param.name)\n    }}\n    names\n}}\n"
+    sites: sites_in("a.jet", source, [String:Bool]{})
+    assert_eq(sites.len(), 1)
+    assert_eq(rewrite(source, sites), "f: fn(params: [Param]) -> [String] {{\n    names: loop param in params -> param.name\n    names\n}}\n")
+}
+
+#Test("a list changed later, a value needing its type, or a stop is left alone") {
+    later: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    names.push(\"x\")\n}}\n"
+    assert_eq(sites_in("a.jet", later, [String:Bool]{}).len(), 0)
+    sorted: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    names.sort()\n}}\n"
+    assert_eq(sites_in("a.jet", sorted, [String:Bool]{}).len(), 0)
+    case: "f: fn() {{\n    kinds := [Kind]{{}}\n    loop p in ps {{\n        kinds.push(.Plain)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", case, [String:Bool]{}).len(), 0)
+    stop: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name ?? return)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", stop, [String:Bool]{}).len(), 0)
+    optional: "f: fn() {{\n    names := [String?]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", optional, [String:Bool]{}).len(), 0)
+    borrowed: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n    fill(^names)\n}}\n"
+    assert_eq(sites_in("a.jet", borrowed, [String:Bool]{}).len(), 0)
+    indexed: "f: fn() {{\n    parts := [[Int]]{{}}\n    loop p in ps {{\n        parts.push([Int]{{}})\n    }}\n    parts[0].push(1)\n}}\n"
+    assert_eq(sites_in("a.jet", indexed, [String:Bool]{}).len(), 0)
+    braced: "f: fn() {{\n    names := [String]{{}}\n    loop p in ([[P]]{{a, b}}) {{\n        names.push(p.name)\n    }}\n}}\n"
+    assert_eq(sites_in("a.jet", braced, [String:Bool]{}).len(), 0)
+}
+
+#Test("a generated file is left to its generator") {
+    assert(generated("// This file is generated by Tools/Gen.jet; do not edit.\nf: fn() {{}}\n"))
+    assert(!generated("// A hand-written file.\nf: fn() {{}}\n"))
+}
+
+#Test("a skipped site stays") {
+    source: "f: fn() {{\n    names := [String]{{}}\n    loop p in ps {{\n        names.push(p.name)\n    }}\n}}\n"
+    skips := [String:Bool]{}
+    skips["a.jet\tnames\tp in ps"] = true
+    assert_eq(sites_in("a.jet", source, skips).len(), 0)
+}

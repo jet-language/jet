@@ -284,10 +284,7 @@ jet_cli_gc_render: fn(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String N
     }
     sites := [JetCLIStatusValue]{}
     loop site in trace.sites {
-        identities := [JetCLIStatusValue]{}
-        loop identity in site.identities {
-            identities.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("identity", jet_cli_status_int(identity.id)), jet_cli_status_field("retained", jet_cli_status_bool(identity.retained))}))
-        }
+        identities: loop identity in site.identities -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("identity", jet_cli_status_int(identity.id)), jet_cli_status_field("retained", jet_cli_status_bool(identity.retained))})
         sites.push(
             jet_cli_status_object(
                 [JetCLIStatusField]{

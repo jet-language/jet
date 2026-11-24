@@ -6697,10 +6697,7 @@ sema_ownership_state_fork: fn(state: SemaOwnershipState) -> SemaOwnershipFork Ne
 
 // What `state` added since `fork`, and its small facts now.
 sema_ownership_fork_path: fn(state: SemaOwnershipState, fork: SemaOwnershipFork) -> SemaOwnershipPath Never! {
-    declarations := [SemaOwnershipBindingFact]{}
-    loop row in fork.declarations..<state.declarations.len() {
-        declarations.push(state.declarations[row])
-    }
+    declarations: loop row in fork.declarations..<state.declarations.len() -> state.declarations[row]
     references := [SemaOwnershipReference]{}
     loop row in fork.references..<state.references.len() -> references.push(state.references[row])
     frozen := sema_ownership_frozen_rows()

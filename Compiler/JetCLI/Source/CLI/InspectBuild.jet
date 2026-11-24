@@ -476,10 +476,7 @@ jet_cli_build_steps_read: fn(graph: BuildPlanExecution, path: String) -> Bool Ne
 // The `[[comptime_inputs]]` rows of `generated`: each source's package-relative
 // path and the SHA-256 of its bytes.
 jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [ComptimeInput] Never! {
-    inputs := [ComptimeInput]{}
-    loop source_file in generated {
-        inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
-    }
+    inputs: loop source_file in generated -> ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"}
     inputs
 }
 

@@ -367,10 +367,7 @@ type_id_carrier_identity: fn(table: Interner, id: TypeID) -> String Never! {
         .Option -> "?{type_id_carrier_identity_grouped(table, type_a_type(table, id))}"
         .Result -> "{type_id_carrier_identity_grouped(table, type_a_type(table, id))} ! {type_id_carrier_identity_grouped(table, type_b_type(table, id))}"
         .Fn -> {
-            names := [String]{}
-            loop i in 0..<type_child_count(table, id) {
-                names.push(type_id_carrier_identity(table, type_child_type(table, id, i)))
-            }
+            names: loop i in 0..<type_child_count(table, id) -> type_id_carrier_identity(table, type_child_type(table, id, i))
             signature := "fn({names.join(", ")})"
             ret: type_a_type(table, id)
             if !type_is_none(ret) -> signature = "{signature} => {type_id_carrier_identity(table, ret)}"
@@ -378,10 +375,7 @@ type_id_carrier_identity: fn(table: Interner, id: TypeID) -> String Never! {
         }
         .Named -> type_id_named_text(table, id)
         .Apply -> {
-            names := [String]{}
-            loop i in 0..<type_child_count(table, id) {
-                names.push(type_id_carrier_identity(table, type_child_type(table, id, i)))
-            }
+            names: loop i in 0..<type_child_count(table, id) -> type_id_carrier_identity(table, type_child_type(table, id, i))
             "{type_id_named_text(table, id)}<{names.join(", ")}>"
         }
         .TraitObject -> {
@@ -390,10 +384,7 @@ type_id_carrier_identity: fn(table: Interner, id: TypeID) -> String Never! {
             bounds.join(" + ")
         }
         .Tuple -> {
-            names := [String]{}
-            loop i in 0..<type_id_tuple_count(table, id) {
-                names.push("{type_id_tuple_field_name(table, id, i)}: {type_id_carrier_identity(table, type_id_tuple_field_type(table, id, i))}")
-            }
+            names: loop i in 0..<type_id_tuple_count(table, id) -> "{type_id_tuple_field_name(table, id, i)}: {type_id_carrier_identity(table, type_id_tuple_field_type(table, id, i))}"
             "({names.join(", ")})"
         }
         .FixedList -> "[{type_id_carrier_identity(table, type_a_type(table, id))}#{type_fixed_length_identity(type_id_measure_value(table, id))}]"
@@ -403,10 +394,7 @@ type_id_carrier_identity: fn(table: Interner, id: TypeID) -> String Never! {
         }
         .InlineRange | .Tagged | .Quantity -> type_id_carrier_identity(table, type_a_type(table, id))
         .Union -> {
-            names := [String]{}
-            loop i in 0..<type_child_count(table, id) {
-                names.push(type_id_carrier_identity_grouped(table, type_child_type(table, id, i)))
-            }
+            names: loop i in 0..<type_child_count(table, id) -> type_id_carrier_identity_grouped(table, type_child_type(table, id, i))
             names.join(" | ")
         }
         .Case -> "{type_id_named_text(table, id)}({type_id_carrier_identity(table, type_b_type(table, id))})"
@@ -1268,10 +1256,7 @@ delta_sides_merge: fn<T: Equatable>(shared: TypeSides<T>, into: ^TypeSides<T>, f
 // where both deltas share the same immutable base `shared`.
 delta_merge_delta: fn(shared: Interner, into: ^InternerDelta, from: ^InternerDelta) -> InternerRemap Never! {
     marks: from.base
-    remapped_names := [Name]{}
-    loop idx in 1..<from.names.texts.len() {
-        remapped_names.push(delta_name_intern(shared, into, from.names.texts[idx]))
-    }
+    remapped_names: loop idx in 1..<from.names.texts.len() -> delta_name_intern(shared, into, from.names.texts[idx])
     remap := InternerRemap{marks: marks, names: remapped_names, types: [TypeID]{}}
     key_spans: delta_sides_merge(shared.key_spans, into.key_spans, from.key_spans, marks.key_spans)
     ranges: delta_sides_merge(shared.ranges, into.ranges, from.ranges, marks.ranges)

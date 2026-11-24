@@ -273,10 +273,7 @@ jet_driver_pending_comptime_body_rows: fn(
 
 // The body sources at `rows` of `modules` (jet_driver_pending_comptime_body_rows).
 jet_driver_comptime_body_sources_at: fn(modules: [SemaGraphModuleResult], rows: [JetDriverBodySourceRow]) -> [SemaComptimeBodySource] Never! {
-    sources := [SemaComptimeBodySource]{}
-    loop at in rows {
-        sources.push(modules[at.owner].comptime_body_sources[at.row].copy())
-    }
+    sources: loop at in rows -> modules[at.owner].comptime_body_sources[at.row].copy()
     sources
 }
 

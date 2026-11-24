@@ -143,10 +143,7 @@ jet_driver_setting_effective: fn(setting: JetDriverPackageSetting, writers: [Jet
         return SemaBuildSetting{name: setting.name, ty: setting.ty, value: setting.default, default: setting.default, contributions: [SemaSettingContribution]{}}
     }
     at: jet_driver_setting_selected(writers)
-    rows := [SemaSettingContribution]{}
-    loop (index, writer) in writers {
-        rows.push(SemaSettingContribution{value: writer.text, file: writer.file, span: writer.span, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at})
-    }
+    rows: loop (index, writer) in writers -> SemaSettingContribution{value: writer.text, file: writer.file, span: writer.span, kind: jet_driver_setting_contribution_kind(writer.contribution.layer), selected: index == at}
     SemaBuildSetting{name: setting.name, ty: setting.ty, value: writers[at].text, default: setting.default, contributions: rows}
 }
 
@@ -316,10 +313,7 @@ jet_driver_setting_writer_diagnostics: fn(load: JetDriverLoadResult, request: Je
     }
     loop package in load.packages {
         loop setting in package.settings {
-            contributions := [FactContribution]{}
-            loop writer in jet_driver_setting_writers(load, package, setting, request) {
-                contributions.push(writer.contribution)
-            }
+            contributions: loop writer in jet_driver_setting_writers(load, package, setting, request) -> writer.contribution
             if pkg_fact_resolve(FactKey.new("Build.Settings.{jet_driver_setting_name(load, package, setting)}"), contributions) == .Err(error) {
                 diagnostics.push(jet_driver_fact_error_diagnostic(error))
             }

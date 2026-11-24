@@ -519,10 +519,7 @@ ir_core_open: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
 // program's own calls through function values may reach, depend on the
 // program, so it is not sealed (IR_CORE_SEALED).
 ir_core_function_values: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
-    seeds := [Bool]{}
-    loop f in m.functions {
-        seeds.push(f.op.any(fn(op) { op == .CallIndirect || op == .FunctionAddress }))
-    }
+    seeds: loop f in m.functions -> f.op.any(fn(op) { op == .CallIndirect || op == .FunctionAddress })
     ir_core_spread(callers, seeds)
 }
 

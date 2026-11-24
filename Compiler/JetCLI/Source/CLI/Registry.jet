@@ -197,10 +197,7 @@ jet_cli_command_usage: fn(name: String) -> String Never! {
     }
     if jet_cli_moved_command(name) == .Val(moved) {
         group: JET_CLI_COMMANDS[moved.group]
-        lines := [String]{}
-        loop usage in group.actions[moved.action].usage.split("\n").to_list() {
-            lines.push("{JET_CLI_BINARY} {group.name} {usage}")
-        }
+        lines: loop usage in group.actions[moved.action].usage.split("\n").to_list() -> "{JET_CLI_BINARY} {group.name} {usage}"
         return lines.join("\n")
     }
     if jet_cli_command_index(name) == .Val(index) {

@@ -561,10 +561,7 @@ jet_cli_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Ne
     bytes: source.bytes()
     lexed: lex(bytes)
     tokens: jet_cli_significant_tokens(lexed.tokens)
-    starts := [Int]{}
-    loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, wanted) {
-        starts.push(tokens[index].span.start)
-    }
+    starts: loop index in jet_cli_top_level_function_heads(tokens, lexed.tables, wanted) -> tokens[index].span.start
     jet_cli_offset_lines(bytes, starts)
 }
 

@@ -2602,10 +2602,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
     }
     loop param in environment.generic_params {
         if param.name != type_name_value -> next
-        bound_names := [String]{}
-        loop bound in param.bounds {
-            bound_names.push("`{symbol_key_leaf(sema_program_symbol_key(program, bound))}`")
-        }
+        bound_names: loop bound in param.bounds -> "`{symbol_key_leaf(sema_program_symbol_key(program, bound))}`"
         if sema_variadic_bound_slot_parameter(type_name_value) == .Val(pack) {
             traits: if bound_names.len() == 0 -> "no trait" else -> bound_names.join(" + ")
             return sema_error("E0102", span, "an element of `{pack}` has no method `{method}`", "each element of `{pack}` is known only through its bounds ({traits}), and none of them provides `{method}`", "call a method from {traits}, or add a trait that defines `{method}` to `{pack}`'s bound list")

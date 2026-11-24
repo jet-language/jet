@@ -490,10 +490,7 @@ sema_marker_module_bindings_indexed: fn(inputs: [SemaRegistrationModuleInput], i
 SEMA_MARKER_MIN_BYTES_PER_THREAD: 131072
 
 sema_marker_module_bindings_range: fn(inputs: [SemaRegistrationModuleInput], input_by_id: [U32:Int], edges: [SemaRegistrationImportEdge], from: Int, to: Int) -> [[SemaMarkerModuleBinding]] {
-    out := [[SemaMarkerModuleBinding]]{}
-    loop index in from..<to {
-        out.push(sema_marker_module_bindings_indexed(inputs, input_by_id, edges, inputs[index]))
-    }
+    out: loop index in from..<to -> sema_marker_module_bindings_indexed(inputs, input_by_id, edges, inputs[index])
     out
 }
 

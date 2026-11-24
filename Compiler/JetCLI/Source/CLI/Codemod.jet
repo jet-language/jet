@@ -881,10 +881,7 @@ jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source
     }
     slots := [JetCLICodemodPatternSlot]{}
     loop slot in tree.slots {
-        children := [Int]{}
-        loop child in slot.children {
-            children.push(jet_cli_codemod_pattern_node(forest, child, source, captures, variadic, pattern))
-        }
+        children: loop child in slot.children -> jet_cli_codemod_pattern_node(forest, child, source, captures, variadic, pattern)
         slots.push(JetCLICodemodPatternSlot{name: slot.name.copy(), kind: slot.kind.copy(), children: children})
     }
     pattern.push(JetCLICodemodPatternNode{capture: None, variadic: false, class: tree.class.copy(), shape: tree.shape.copy(), signature: tree.signature.copy(), slots: slots})
@@ -1007,10 +1004,7 @@ jet_cli_codemod_match_children: fn(pattern: JetCLICodemodPattern, wanted: [Int],
             end := limit
             loop end >= ci {
                 text: if end == ci -> "" else -> foundation_byte_text(source.bytes(), forest.trees[candidates[ci]].span.start, forest.trees[candidates[end - 1]].span.end)
-                keys := [String]{}
-                loop position in ci..<end {
-                    keys.push(jet_cli_codemod_tree_key(forest, candidates[position]))
-                }
+                keys: loop position in ci..<end -> jet_cli_codemod_tree_key(forest, candidates[position])
                 checkpoint: captures.len()
                 if jet_cli_codemod_bind(name, text, keys.join("|"), captures) && jet_cli_codemod_match_children(pattern, wanted, pi + 1, forest, candidates, end, kind, source, captures) {
                     return true

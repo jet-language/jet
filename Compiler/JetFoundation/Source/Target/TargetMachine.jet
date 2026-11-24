@@ -445,10 +445,7 @@ jet_target_memory_access_name: fn(value: MemoryAccess) -> String Never! {
 }
 
 jet_target_memory_json: fn(regions: [MemoryRegion]) -> String Never! {
-    rows := [String]{}
-    loop region in regions {
-        rows.push("{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}")
-    }
+    rows: loop region in regions -> "{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}"
     "[{rows.join(",")}]"
 }
 
@@ -459,18 +456,12 @@ jet_target_hardware_json: fn(facts: TargetHardwareFacts) -> String Never! {
     }
     blocks := [String]{}
     loop block in facts.register_blocks {
-        registers := [String]{}
-        loop register in block.registers {
-            registers.push("{{\"name\":{jet_target_json_quote(register.name)},\"offset\":{register.offset},\"width\":{jet_target_json_quote(jet_target_register_width_name(register.width))},\"access\":{jet_target_json_quote(jet_target_register_access_name(register.access))},\"volatile\":{jet_target_bool_json(register.volatile)}}}")
-        }
+        registers: loop register in block.registers -> "{{\"name\":{jet_target_json_quote(register.name)},\"offset\":{register.offset},\"width\":{jet_target_json_quote(jet_target_register_width_name(register.width))},\"access\":{jet_target_json_quote(jet_target_register_access_name(register.access))},\"volatile\":{jet_target_bool_json(register.volatile)}}}"
         blocks.push("{{\"name\":{jet_target_json_quote(block.name)},\"base\":{block.base},\"size_bytes\":{block.size.bytes},\"registers\":[{registers.join(",")}]}}")
     }
     interrupts := [String]{}
     loop interrupt in facts.interrupts {
-        effects := [String]{}
-        loop effect_name in interrupt.forbidden_effects {
-            effects.push(jet_target_json_quote(effect_name))
-        }
+        effects: loop effect_name in interrupt.forbidden_effects -> jet_target_json_quote(effect_name)
         interrupts.push("{{\"name\":{jet_target_json_quote(interrupt.name)},\"vector\":{interrupt.vector},\"forbidden_effects\":[{effects.join(",")}],\"bounded\":{jet_target_bool_json(interrupt.bounded)}}}")
     }
     channels := [String]{}
@@ -530,10 +521,7 @@ jet_target_atomic_word_supported: fn(triple: String) -> Bool Never! {
 }
 
 jet_target_provider_facts_json: fn(machine: TargetMachine) -> String Never! {
-    facts := [String]{}
-    loop capability in TARGET_CAPABILITY_ALL {
-        facts.push("{{\"capability\":{jet_target_json_quote(jet_target_capability_name(capability))},\"fact\":{jet_target_capability_fact_json(machine, capability)}}}")
-    }
+    facts: loop capability in TARGET_CAPABILITY_ALL -> "{{\"capability\":{jet_target_json_quote(jet_target_capability_name(capability))},\"fact\":{jet_target_capability_fact_json(machine, capability)}}}"
     "[{facts.join(",")}]"
 }
 

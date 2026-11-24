@@ -746,10 +746,7 @@ sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, express
             dependencies: [String]{},
             checked_text: None,
         }
-        references := [SemaNameReferenceFact]{}
-        loop index in reference_start..<context.name_references.len() {
-            references.push(context.name_references[index])
-        }
+        references: loop index in reference_start..<context.name_references.len() -> context.name_references[index]
         source.dependencies = sema_comptime_dependencies_from_references(graph, references, values)
         return Val(source)
     }
@@ -804,10 +801,7 @@ sema_marker_rules_observe_argument: fn(marker: Marker, source_index: Int, expect
             }
         }
     }
-    requests := [SemaComptimeRequest]{}
-    loop index in request_start..<check.context.comptime_requests.len() {
-        requests.push(check.context.comptime_requests[index])
-    }
+    requests: loop index in request_start..<check.context.comptime_requests.len() -> check.context.comptime_requests[index]
     sema_check_context_rollback(check.context, probe_context_mark.move())
     sema_scope_rollback(scopes, probe_scope_mark)
     SemaMarkerRuleArgumentObservation{

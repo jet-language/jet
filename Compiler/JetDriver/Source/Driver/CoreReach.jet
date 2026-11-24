@@ -1776,10 +1776,7 @@ jet_driver_reach_parse_parts: fn(parts: ^[[JetDriverReachSource]]) -> [[JetDrive
 // One thread: the parses of the sources `sources`, in order, each
 // source's bytes gone once it has parsed.
 jet_driver_reach_parse_part: fn(sources: ^^[JetDriverReachSource]) -> [JetDriverReachParse] {
-    parsed := [JetDriverReachParse]{}
-    loop source in sources.move() {
-        parsed.push(jet_driver_reach_parse_source(source.bytes, source.hold, compiler_threads_single()))
-    }
+    parsed: loop source in sources.move() -> jet_driver_reach_parse_source(source.bytes, source.hold, compiler_threads_single())
     parsed
 }
 

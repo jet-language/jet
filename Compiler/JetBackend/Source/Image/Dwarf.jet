@@ -1042,10 +1042,7 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
     } else {
         bounds: compiler_threads_partition(weights, workers)
         inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, sizes: sizes, type_offsets: type_offsets, symbols: symbols, widths: widths}}
-        parts := [Shared<DwarfInfoPart>]{}
-        loop part in 0..<(bounds.len() - 1) {
-            parts.push(Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}})
-        }
+        parts: loop part in 0..<(bounds.len() - 1) -> Shared{DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}}}
         _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
         loop part in parts -> taken.push(dwarf_info_part_take(part))
     }

@@ -215,10 +215,7 @@ ast_comptime_key_type: fn(key: CtKey) -> Type Never! {
         .Bool(_) -> Type.Bool
         .Char(_) -> Type.Char
         .Tuple(fields) -> {
-            types := [TypeTupleField]{}
-            loop field in fields {
-                types.push(TypeTupleField{name: field.name, ty: ast_comptime_key_type(field.value)})
-            }
+            types: loop field in fields -> TypeTupleField{name: field.name, ty: ast_comptime_key_type(field.value)}
             Type.Tuple{fields: types}
         }
         .Struct(name, _) | .Enum(name, _) -> Type.Named{name: name}
@@ -602,10 +599,7 @@ ast_comptime_key_to_value: fn(key: CtKey) -> CtValue Never! {
 }
 
 ast_comptime_key_field_values: fn(fields: [NamedCtKey]) -> [NamedCtValue] Never! {
-    values := [NamedCtValue]{}
-    loop field in fields {
-        values.push(NamedCtValue{name: field.name, value: ast_comptime_key_to_value(field.value)})
-    }
+    values: loop field in fields -> NamedCtValue{name: field.name, value: ast_comptime_key_to_value(field.value)}
     values
 }
 

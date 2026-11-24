@@ -685,10 +685,7 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
     // now, with the outer arguments bound. An unknown nested target is left
     // to the instance body.
     nested_enums: sema_genmod_enums([Item]{}, nested_defs)
-    nested_templates := [SemaGenericModuleTemplate]{}
-    loop nested in nested_defs {
-        nested_templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested.copy(), params: sema_genmod_resolve_params(nested, nested_enums, check), values: values})
-    }
+    nested_templates: loop nested in nested_defs -> SemaGenericModuleTemplate{name: nested.name, definition: nested.copy(), params: sema_genmod_resolve_params(nested, nested_enums, check), values: values}
     nested_aliases := [ModuleAliasDef]{}
     loop item in definition.body {
         if item == .ModuleAlias(nested_alias) {
@@ -732,10 +729,7 @@ sema_genmod_check_code_module: fn(graph: SemaRegistrationGraph, body: [Item], ty
     }
     enums: sema_genmod_enums(body, nested_defs)
     values: sema_genmod_const_values(body, inherited, enums)
-    templates := [SemaGenericModuleTemplate]{}
-    loop nested in nested_defs {
-        templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested.copy(), params: sema_genmod_resolve_params(nested, enums, check), values: values})
-    }
+    templates: loop nested in nested_defs -> SemaGenericModuleTemplate{name: nested.name, definition: nested.copy(), params: sema_genmod_resolve_params(nested, enums, check), values: values}
     sema_genmod_check_aliases(graph, aliases, templates, values, enums, name_table_sized(2), false, check)
 }
 

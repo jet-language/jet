@@ -334,10 +334,7 @@ body_index_shared_read: fn(values: SemaComptimeBodyValues, size: Int) -> Int {
 }
 
 body_index_shared_size: fn(size: Int) {
-    rows := [SemaComptimeBodyValue]{}
-    loop index in 0..<size {
-        rows.push(body_index_value("shared.module", "shared.function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index))
-    }
+    rows: loop index in 0..<size -> body_index_value("shared.module", "shared.function", Span{start: index * 4, end: index * 4 + 2}, Span{start: index * 4 + 2, end: index * 4 + 3}, index)
     context := sema_check_context_init()
     work: Shared{SemaComptimeBodyWork{}}
     context.comptime_body_values = sema_comptime_body_values_freeze(rows, Val(work.copy()), true)

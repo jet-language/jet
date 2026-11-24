@@ -1187,10 +1187,7 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution, action_timeout_ms: In
         if runs_jet -> jet_toolchain = build.toolchain(JET_CLI_BUILD_JET_TOOLCHAIN, mounted.with_tool("jet", jet_path).declared_only())
         if passes_jet -> jet_file_toolchain = build.toolchain(JET_CLI_BUILD_JET_FILE_TOOLCHAIN, mounted)
     }
-    signing := [SigningIdentityHandle]{}
-    loop identity in graph.signing {
-        signing.push(build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance)))
-    }
+    signing: loop identity in graph.signing -> build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance))
     probes := [ProbeHandle]{}
     loop probe in graph.probes {
         spec: if probe.kind == {

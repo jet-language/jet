@@ -1148,15 +1148,9 @@ jet_driver_core_interface_read_words: fn(bytes: [U8], cursor: ^JetDriverCoreInte
     members: jet_driver_core_interface_strings(bytes, cursor)
     owners: jet_driver_core_interface_ints(bytes, cursor)
     names: jet_driver_core_interface_strings(bytes, cursor)
-    cascades := [Bool]{}
-    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) {
-        cascades.push(jet_driver_core_interface_flag(bytes, cursor))
-    }
+    cascades: loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) -> jet_driver_core_interface_flag(bytes, cursor)
     traits: jet_driver_core_interface_strings(bytes, cursor)
-    spells := [[Int]]{}
-    loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) {
-        spells.push(jet_driver_core_interface_ints(bytes, cursor))
-    }
+    spells: loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 4) -> jet_driver_core_interface_ints(bytes, cursor)
     held := [JetDriverReachDeclaration]{}
     loop _ in 0..<jet_driver_core_interface_count(bytes, cursor, 24) {
         position: jet_driver_core_interface_int(bytes, cursor)
@@ -1627,10 +1621,7 @@ jet_driver_core_restore_whole: fn(program: ^Program, fresh: ^^Program, row: JetD
 // declarations' rows kept after them. A rule with no target belongs to the
 // file, so the module's own parse gives it.
 jet_driver_core_restore_regions: fn(program: ^Program, fresh: ^^Program, row: JetDriverCoreLazyModule, ends: [Int], restored: [Bool]) {
-    own_spans := [Int]{}
-    loop index in 0..<row.block_spans {
-        own_spans.push(jet_driver_core_region(ends, program.block_spans[index].start))
-    }
+    own_spans: loop index in 0..<row.block_spans -> jet_driver_core_region(ends, program.block_spans[index].start)
     fresh_spans: loop span in fresh.block_spans -> jet_driver_core_region(ends, span.start)
     spans := [Span]{}
     loop pick in jet_driver_core_side_order(own_spans, restored, fresh_spans) {
@@ -1641,10 +1632,7 @@ jet_driver_core_restore_regions: fn(program: ^Program, fresh: ^^Program, row: Je
     }
     program.block_spans = spans.move()
 
-    own_arms := [Int]{}
-    loop index in 0..<row.else_arms {
-        own_arms.push(jet_driver_core_region(ends, program.else_arms[index].table.start))
-    }
+    own_arms: loop index in 0..<row.else_arms -> jet_driver_core_region(ends, program.else_arms[index].table.start)
     fresh_arms: loop arm in fresh.else_arms -> jet_driver_core_region(ends, arm.table.start)
     arms := [ElseArmSpan]{}
     loop pick in jet_driver_core_side_order(own_arms, restored, fresh_arms) {
@@ -1653,10 +1641,7 @@ jet_driver_core_restore_regions: fn(program: ^Program, fresh: ^^Program, row: Je
     loop index in row.else_arms..<program.else_arms.len() -> arms.push(program.else_arms[index])
     program.else_arms = arms.move()
 
-    own_sites := [Int]{}
-    loop index in 0..<row.debug_sites {
-        own_sites.push(jet_driver_core_region(ends, program.debug_sites[index].name_start))
-    }
+    own_sites: loop index in 0..<row.debug_sites -> jet_driver_core_region(ends, program.debug_sites[index].name_start)
     fresh_sites: loop site in fresh.debug_sites -> jet_driver_core_region(ends, site.name_start)
     sites := [DebugTraceSite]{}
     loop pick in jet_driver_core_side_order(own_sites, restored, fresh_sites) {
@@ -1699,10 +1684,7 @@ jet_driver_core_restore_rules: fn(own: [AppliedRuleApplication], fresh: ^^[Appli
             fresh_rows.push(rule)
         }
     }
-    rules := [AppliedRuleApplication]{}
-    loop pick in jet_driver_core_side_order(own_regions, restored, fresh_regions) {
-        rules.push(if pick >= 0 -> own[pick] else -> fresh_rows[-pick - 1])
-    }
+    rules: loop pick in jet_driver_core_side_order(own_regions, restored, fresh_regions) -> if pick >= 0 -> own[pick] else -> fresh_rows[-pick - 1]
     rules
 }
 

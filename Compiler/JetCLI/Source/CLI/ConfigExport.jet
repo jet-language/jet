@@ -589,10 +589,7 @@ jet_config_export_schema_type: fn(ty: Type, items: [Item], active: [String]) -> 
             jet_cli_status_object(fields)
         }
         .Union(members) -> {
-            variants := [JetCLIStatusValue]{}
-            loop member in members {
-                variants.push(jet_config_export_schema_type(member, items, active))
-            }
+            variants: loop member in members -> jet_config_export_schema_type(member, items, active)
             jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("oneOf", jet_cli_status_array(variants))})
         }
         .Named(name) | .Apply(name, _) -> jet_config_export_schema_named(name, items, active)
@@ -680,10 +677,7 @@ jet_config_export_schema_enum: fn(definition: EnumDef, items: [Item], active: [S
         if !(variant.payload == .Unit) -> all_unit = false
     }
     if all_unit {
-        labels := [String]{}
-        loop variant in definition.variants {
-            labels.push(sema_checked_variant_wire_name(variant, style))
-        }
+        labels: loop variant in definition.variants -> sema_checked_variant_wire_name(variant, style)
         return jet_cli_status_object(
             [JetCLIStatusField]{
                 jet_cli_status_field("title", jet_cli_status_text("{definition.name}")),
@@ -823,20 +817,14 @@ jet_config_export_pretty_json: fn(value: JetCLIStatusValue, depth: Int) -> Strin
             if items.len() == 0 -> return "[]"
             pad: jet_config_export_indent(depth + 1)
             close: jet_config_export_indent(depth)
-            parts := [String]{}
-            loop item in items {
-                parts.push("{pad}{jet_config_export_pretty_json(item, depth + 1)}")
-            }
+            parts: loop item in items -> "{pad}{jet_config_export_pretty_json(item, depth + 1)}"
             "[\n{parts.join(",\n")}\n{close}]"
         }
         .Object(fields) -> {
             if fields.len() == 0 -> return "{{}}"
             pad: jet_config_export_indent(depth + 1)
             close: jet_config_export_indent(depth)
-            parts := [String]{}
-            loop field in fields {
-                parts.push("{pad}{jet_cli_json_string(field.name)}: {jet_config_export_pretty_json(field.value, depth + 1)}")
-            }
+            parts: loop field in fields -> "{pad}{jet_cli_json_string(field.name)}: {jet_config_export_pretty_json(field.value, depth + 1)}"
             "{{\n{parts.join(",\n")}\n{close}}}"
         }
     }

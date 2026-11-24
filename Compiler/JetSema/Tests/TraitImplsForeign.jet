@@ -29,10 +29,7 @@ assert_trait_impls_gained: fn(app_source: String) {
     // program keeps its imports.
     imports_parsed := parse_source(app_source.bytes())
     app: trait_impls_input(table, "retain_app", "run", app_source)
-    edges := [SemaRegistrationImportEdge]{}
-    loop declaration in imports_parsed.program.imports.move() {
-        edges.push(SemaRegistrationImportEdge{source_module_identity: app.module_identity, target_module_identity: lib.module_identity, target_package_identity: "retain_lib", foreign_binding: None, declaration: declaration})
-    }
+    edges: loop declaration in imports_parsed.program.imports.move() -> SemaRegistrationImportEdge{source_module_identity: app.module_identity, target_module_identity: lib.module_identity, target_package_identity: "retain_lib", foreign_binding: None, declaration: declaration}
     inputs := [SemaRegistrationModuleInput]{lib, app}
     sema_trait_impls_foreign(inputs, edges, table)
     loop item in inputs[1].program.items {

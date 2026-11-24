@@ -1268,10 +1268,7 @@ sema_call_core_role_source: fn(role: String, values: [TExpr], result: Type, span
 sema_call_core_source_in: fn(identity: ModuleID, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     target: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, diagnostics) ?? return None
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
-    arguments := [TCallArg]{}
-    loop value in values {
-        arguments.push(TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
-    }
+    arguments: loop value in values -> TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: arguments}, span))
 }
 

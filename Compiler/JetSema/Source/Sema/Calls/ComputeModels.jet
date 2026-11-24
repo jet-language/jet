@@ -460,10 +460,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     gradient_names := (loop index in selected -> names[index])
     gradient_value: gradient_value_type ?? Type.Named{name: "Tensor"}
-    gradient_fields := [TypeTupleField]{}
-    loop name in gradient_names {
-        gradient_fields.push(TypeTupleField{name: name, ty: gradient_value.copy()})
-    }
+    gradient_fields: loop name in gradient_names -> TypeTupleField{name: name, ty: gradient_value.copy()}
     // The members are in the order the expanded transforms' tuple literals
     // write them.
     gradient_type := Type.Tuple{fields: gradient_fields}

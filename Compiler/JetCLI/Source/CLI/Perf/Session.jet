@@ -1480,10 +1480,7 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
         file: source ?? ""
         text: perf_files.read(file) ?? ""
         if jet_cli_build_options(argv, action, file, text, false, true) == .Selected(options, _) {
-            values := [CanonicalJSONField]{}
-            loop choice in options.values.move() {
-                values.push(CanonicalJSONField{key: choice.name.move(), value: CanonicalJSON.String(choice.value.move())})
-            }
+            values: loop choice in options.values.move() -> CanonicalJSONField{key: choice.name.move(), value: CanonicalJSON.String(choice.value.move())}
             resolved: canonical_json_object(values) ?? return Err(jet_cli_read_error(err.message))
             profile: jet_cli_profile_name(argv)
             named: if profile == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(profile)

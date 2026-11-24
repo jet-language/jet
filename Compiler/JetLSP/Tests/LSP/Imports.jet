@@ -214,10 +214,7 @@ lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String
         listed := false
         if lsp_member(offered, "isPreferred") == .Val(value) -> listed = value == Dyn.Bool(true)
         assert_eq(listed, preferred)
-        edits := [String]{}
-        loop edit in lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_field(action, "edit"), "changes"), uri)) {
-            edits.push("{lsp_test_range(lsp_test_field(edit, "range"))} {lsp_test_text(edit, "newText")}")
-        }
+        edits: loop edit in lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_field(action, "edit"), "changes"), uri)) -> "{lsp_test_range(lsp_test_field(edit, "range"))} {lsp_test_text(edit, "newText")}"
         shown.push("{lsp_test_text(action, "title")}|{lsp_test_text(action, "kind")}|{preferred}|{edits.join(";")}")
     }
     shown

@@ -253,10 +253,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
     if bounds.len() <= 2 {
         return [LexerChunkOutput]{lexer_lex_chunk_range(source, config_surface, allow_reserved_identifiers, 0, source.len())}
     }
-    parts := [Shared<LexerChunkPart>]{}
-    loop chunk in 0..<(bounds.len() - 1) {
-        parts.push(Shared{LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}}})
-    }
+    parts: loop chunk in 0..<(bounds.len() - 1) -> Shared{LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}}}
     _ := lexer_lex_chunk_parts(source, config_surface, allow_reserved_identifiers, parts, 0)
     all_clean := true
     chunk_count: parts.len()

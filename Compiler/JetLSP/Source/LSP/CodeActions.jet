@@ -88,10 +88,7 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
     start: lsp_clamped_offset_bytes(table, bytes, range.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
     end: lsp_clamped_offset_bytes(table, bytes, range.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
     only: lsp_member(lsp_param(params, "context") ?? Dyn.Null, "only")
-    rows := [String]{}
-    loop (index, action) in lsp_code_actions(server, view, start, end, only) {
-        rows.push(if server.code_action_resolve -> lsp_action_stub_json(view, action, start, end, only, index) else -> lsp_action_json(view, action, document_changes: server.document_changes))
-    }
+    rows: loop (index, action) in lsp_code_actions(server, view, start, end, only) -> if server.code_action_resolve -> lsp_action_stub_json(view, action, start, end, only, index) else -> lsp_action_json(view, action, document_changes: server.document_changes)
     lsp_response(id, "[{rows.join(",")}]")
 }
 

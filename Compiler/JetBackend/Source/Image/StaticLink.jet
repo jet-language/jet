@@ -3946,10 +3946,7 @@ link_crc32_multiply: fn(a: Int, b: Int) -> Int Never! {
 }
 
 #Test("the side file CRC-32 is the same on any number of threads") {
-    bytes := [U8]{}
-    loop i in 0..<(3 * LINK_CRC_MIN_BYTES_PER_THREAD + 4099) {
-        bytes.push(U8{(i * (i + 3) * 31 + 7) % 256})
-    }
+    bytes: loop i in 0..<(3 * LINK_CRC_MIN_BYTES_PER_THREAD + 4099) -> U8{(i * (i + 3) * 31 + 7) % 256}
     one: link_hex.crc32(bytes)
     assert(link_crc32(bytes, compiler_threads_single()) == one)
     assert(link_crc32(bytes, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}) == one)
@@ -4430,10 +4427,7 @@ link_apart_symbols: fn(out: ^[U8], at: Int, size: Int, entry: Int, index_of: [In
     assert(out.len() < image.len(), "the image shrinks")
     shoff: loader_u64(out, 40)
     names: loader_u64(out, shoff + loader_u16(out, 62) * 64 + 24)
-    found := [String]{}
-    loop k in 0..<loader_u16(out, 60) {
-        found.push(link_section_header_read(out, shoff + k * 64, names).name)
-    }
+    found: loop k in 0..<loader_u16(out, 60) -> link_section_header_read(out, shoff + k * 64, names).name
     assert_eq(found, [String]{"", ".text", ".rodata", ".debug_jetline", ".symtab", ".strtab", ".note.gnu.build-id", ".gnu_debuglink", ".shstrtab"})
     assert_eq(link_section_header_read(out, shoff + 2 * 64, names).offset, 0x1000)
     assert_eq(out[link_section_header_read(out, shoff + 3 * 64, names).offset], U8{9})
@@ -4452,10 +4446,7 @@ link_apart_symbols: fn(out: ^[U8], at: Int, size: Int, entry: Int, index_of: [In
     assert_eq(loader_u16(side, 56), 0)
     side_shoff: loader_u64(side, 40)
     side_names: loader_u64(side, side_shoff + loader_u16(side, 62) * 64 + 24)
-    side_found := [String]{}
-    loop k in 0..<loader_u16(side, 60) {
-        side_found.push(link_section_header_read(side, side_shoff + k * 64, side_names).name)
-    }
+    side_found: loop k in 0..<loader_u16(side, 60) -> link_section_header_read(side, side_shoff + k * 64, side_names).name
     assert_eq(side_found, [String]{"", ".note.gnu.build-id", ".debug_info", ".text", ".rodata", ".shstrtab"})
     info: link_section_header_read(side, side_shoff + 2 * 64, side_names)
     assert_eq(info.size, 0x200)

@@ -264,10 +264,7 @@ sema_eval_walk_for: fn(probes: SemaEvalProbes, module_identity: ModuleID, span: 
 // otherwise an expression. Each probe it answers checks its expressions here.
 sema_eval_probe_visit: fn(span: Span, statement: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck) {
     loop asked in sema_eval_walk_matches(check.context.eval_walk, program, span, statement) {
-        answers := [SemaEvalProbeAnswer]{}
-        loop (expression, value) in asked.expressions {
-            answers.push(sema_eval_probe_check(value, asked.row, expression, asked.exact, environment, program, scopes, check))
-        }
+        answers: loop (expression, value) in asked.expressions -> sema_eval_probe_check(value, asked.row, expression, asked.exact, environment, program, scopes, check)
         sema_eval_walk_store(check.context.eval_walk, asked.local, asked.exact, answers)
     }
 }

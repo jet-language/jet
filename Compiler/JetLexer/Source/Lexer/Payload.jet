@@ -491,10 +491,7 @@ shifted_diagnostic: fn(diagnostic: ^Diagnostic, offset: Int) Never! {
         .None -> None
     }
     if ^diagnostic.edit == .Val(edit) -> edit.span = shifted_span(edit.span, offset)
-    shifted_labels := [DiagnosticLabel]{}
-    loop label in diagnostic.labels {
-        shifted_labels.push(DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message})
-    }
+    shifted_labels: loop label in diagnostic.labels -> DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message}
     diagnostic.labels = shifted_labels
 }
 

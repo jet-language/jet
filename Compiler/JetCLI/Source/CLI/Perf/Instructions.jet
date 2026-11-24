@@ -520,10 +520,7 @@ jet_cli_perf_run_counted: fn(listed: JetCLIPerfListed, run: Int) -> JetCLIPerfCo
 // The events of `listed`'s sampled instruction `index`, per counter; none
 // counted for -1, an instruction no sample named.
 jet_cli_perf_listed_events: fn(listed: JetCLIPerfListed, index: Int) -> [Int] Never! {
-    events := [Int]{}
-    loop counter in 0..<listed.events.len() {
-        events.push(if index >= 0 && counter < listed.rows[index].events.len() -> listed.rows[index].events[counter] else -> 0)
-    }
+    events: loop counter in 0..<listed.events.len() -> if index >= 0 && counter < listed.rows[index].events.len() -> listed.rows[index].events[counter] else -> 0
     events
 }
 

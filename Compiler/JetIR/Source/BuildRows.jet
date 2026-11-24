@@ -516,10 +516,7 @@ ir_rows_comptime_fields: fn(m: ^IRModule, p: IRProgram, ty: Type, fields: [TComp
                 }
             } else { return None }
         }
-        out := [TComptimeField]{}
-        loop ci in 0..<info.col_members.len() {
-            out.push(TComptimeField{name: info.col_members[ci].name, value: TComptimeValue.List{values: columns[ci]}})
-        }
+        out: loop ci in 0..<info.col_members.len() -> TComptimeField{name: info.col_members[ci].name, value: TComptimeValue.List{values: columns[ci]}}
         return Val(out)
     }
     None

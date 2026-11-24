@@ -1159,10 +1159,7 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             if checked.incomplete_reasons.len() == 0 {
                 // A check that records no reason stopped on a report; name the
                 // reports it made so the stop is never silent.
-                reported := [String]{}
-                loop index in before..<diagnostics.len() {
-                    reported.push("{diagnostics[index].code} {diagnostics[index].what}")
-                }
+                reported: loop index in before..<diagnostics.len() -> "{diagnostics[index].code} {diagnostics[index].what}"
                 if reported.len() == 0 -> reasons.push("{label}: body checking is incomplete") else {
                     reasons.push("{label}: body checking stopped on {reported.join("; ")}")
                 }

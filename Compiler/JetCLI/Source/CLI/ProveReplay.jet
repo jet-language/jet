@@ -715,10 +715,7 @@ jet_cli_replay_net_frames: fn(payloads: ^[[U8]], kinds: ^[Int], read: JetCLIRepl
     kinds.push(JET_CLI_REPLAY_KIND_NET_REQUEST)
     id: jet_cli_replay_integer_field("request_id", request_id)
     if hop.stage >= 1 {
-        addresses := [CanonicalJSON]{}
-        loop address in hop.addresses {
-            addresses.push(CanonicalJSON.String(jet_cli_replay_ip_text(address)))
-        }
+        addresses: loop address in hop.addresses -> CanonicalJSON.String(jet_cli_replay_ip_text(address))
         payloads.push(
             canonical_json_bytes(
                 CanonicalJSON.Object(
@@ -732,10 +729,7 @@ jet_cli_replay_net_frames: fn(payloads: ^[[U8]], kinds: ^[Int], read: JetCLIRepl
         kinds.push(JET_CLI_REPLAY_KIND_NET_DNS)
     }
     if hop.answered {
-        headers := [CanonicalJSON]{}
-        loop (at, name) in hop.reply_names {
-            headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])}))
-        }
+        headers: loop (at, name) in hop.reply_names -> CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])})
         payloads.push(
             canonical_json_bytes(
                 CanonicalJSON.Object(

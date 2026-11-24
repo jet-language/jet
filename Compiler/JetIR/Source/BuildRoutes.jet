@@ -6509,10 +6509,7 @@ ir_reflect_cases: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value_ty: Type, 
         test: ir_temp(m, b, bool_row)
         ir_emit(b.f, IROp.Eq, test, discriminant, index_slot, -1, b.line)
         ir_open_if(b.f, test, b.line)
-        held := [IRReflectMember]{}
-        loop member in members {
-            held.push(IRReflectMember{ty: ir_row_ty(m, p, member.ty), read: ir_member_read(m, b, value, member)})
-        }
+        held: loop member in members -> IRReflectMember{ty: ir_row_ty(m, p, member.ty), read: ir_member_read(m, b, value, member)}
         cursor = ir_reflect_held_case(m, p, b, value_ty, record, held, args, cursor, span)
         if ir_failed(b) -> return cursor
         ir_else(b.f, b.line)

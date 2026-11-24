@@ -8522,10 +8522,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDri
     }
     manifest.authority.deny = root.authority_deny
     manifest.authority.grants = root.authority_grants
-    out := [Diagnostic]{}
-    loop diagnostic in pkg_effect_enforce(rows.entries, manifest) {
-        out.push(jet_driver_effect_budget_located(load, rows.program, rows.module_identities, diagnostic))
-    }
+    out: loop diagnostic in pkg_effect_enforce(rows.entries, manifest) -> jet_driver_effect_budget_located(load, rows.program, rows.module_identities, diagnostic)
     out
 }
 

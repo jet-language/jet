@@ -5509,10 +5509,7 @@ ir_pattern_test: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, sha
             row: ir_enum_def(m, p, subject_type) ?? return ir_fail_slot(b, span, "variant pattern on a non-enum subject")
             leaves: ir_group_leaves(p, row, variant)
             if leaves.len() > 0 {
-                alternatives := [BodyPatternShape]{}
-                loop leaf in leaves {
-                    alternatives.push(BodyPatternShape.Variant{variant: leaf, bindings: bindings, leading_dot: leading_dot, span: variant_span})
-                }
+                alternatives: loop leaf in leaves -> BodyPatternShape.Variant{variant: leaf, bindings: bindings, leading_dot: leading_dot, span: variant_span}
                 return ir_pattern_test(m, p, b, subject, BodyPatternShape.Or{alternatives: alternatives, span: variant_span}, span)
             }
             index: ir_variant_index(p, row, variant) ?? return ir_fail_slot(b, span, "variant pattern {variant} not in its enum")
@@ -9100,10 +9097,7 @@ ir_function_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, key: 
         a := ir_builder_new(m.functions[adapter].copy())
         a.line = p.functions[function_row].line
         _: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))
-        values := [Int]{}
-        loop (index, value_row) in value_rows {
-            values.push(ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, p.functions[function_row].params[index].local.name)))
-        }
+        values: loop (index, value_row) in value_rows -> ir_new_slot(a, value_row, IRSlotKind.Param, ir_intern_name(m, p.functions[function_row].params[index].local.name))
         a.f.result = result_row
         // The value's caller keeps its arguments: a move parameter of the
         // function gets its own copy, and a written one passes the address

@@ -100,10 +100,7 @@ run_locals_request: fn(path: String, source: String, threads: Int) -> JetDriverC
         request.recheck_verify = verify
         front: jet_driver_lowering_inputs(request, None)
         trace: run_locals_files.read(path) ?? panic("cannot read the trace: {err}")
-        problems := [String]{}
-        loop diagnostic in front.compile.diagnostics {
-            problems.push("{diagnostic.code} {diagnostic.what}")
-        }
+        problems: loop diagnostic in front.compile.diagnostics -> "{diagnostic.code} {diagnostic.what}"
         assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "recheck_verify {verify}: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
         assert(trace.contains("counters.sema.local_values_spliced = "), "recheck_verify {verify}: `big` and `word` did not land in `run`:\n{trace}")
         assert(!trace.contains("counters.sema.local_values_refused"), "recheck_verify {verify}: a pass fell back to the full recheck:\n{trace}")
@@ -123,10 +120,7 @@ run_locals_request: fn(path: String, source: String, threads: Int) -> JetDriverC
         run_locals_files.write(path, "") ?? panic("cannot start the trace: {err}")
         front: jet_driver_lowering_inputs(run_locals_request(path, RUN_LOCALS_REACH_SOURCE, threads), None)
         trace: run_locals_files.read(path) ?? panic("cannot read the trace: {err}")
-        problems := [String]{}
-        loop diagnostic in front.compile.diagnostics {
-            problems.push("{diagnostic.code} {diagnostic.what}")
-        }
+        problems: loop diagnostic in front.compile.diagnostics -> "{diagnostic.code} {diagnostic.what}"
         assert(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "{threads} threads: the program did not compile: {front.compile.internal_problem:Debug} {problems:Debug}")
         inputs: front.inputs ?? panic("{threads} threads: the program has no lowering inputs")
         if threads > 1 {

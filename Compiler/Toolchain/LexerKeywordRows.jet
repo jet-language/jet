@@ -205,10 +205,7 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     if rows.len() == 1 {
         row: rows[0]
         if offset == row.bytes.len() -> return "{row.tag}"
-        checks := [String]{}
-        loop index in offset..<row.bytes.len() {
-            checks.push("byte_at(source, start + {index}) == {row.bytes[index]}")
-        }
+        checks: loop index in offset..<row.bytes.len() -> "byte_at(source, start + {index}) == {row.bytes[index]}"
         return "if {checks.join(" && ")} -> {row.tag} else -> TOKEN_IDENT"
     }
     order := [Int]{}

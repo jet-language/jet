@@ -331,10 +331,7 @@ lsp_references_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     if at.view.checked.index == None -> return lsp_response(id, "null")
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
     declaration: lsp_bool_member(lsp_param(params, "context") ?? Dyn.Null, "includeDeclaration")
-    rows := [String]{}
-    loop placed in lsp_open_occurrences(server, at.view, target, declaration: declaration).placed {
-        rows.push(lsp_location_json(LSPLocation{uri: lsp_path_to_uri(placed.path), source: placed.source, span: placed.span}))
-    }
+    rows: loop placed in lsp_open_occurrences(server, at.view, target, declaration: declaration).placed -> lsp_location_json(LSPLocation{uri: lsp_path_to_uri(placed.path), source: placed.source, span: placed.span})
     lsp_response(id, "[{rows.join(",")}]")
 }
 

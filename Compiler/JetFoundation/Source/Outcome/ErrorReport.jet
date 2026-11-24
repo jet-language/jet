@@ -47,10 +47,7 @@ JetErrorDetails: struct {
     source_span: JetErrorSpan?{None},
 
     to_json: fn(self) -> String Never! {
-        fields := [String]{}
-        loop field in self.fields {
-            fields.push("{foundation_json_quote(field.name)}:{field.value}")
-        }
+        fields: loop field in self.fields -> "{foundation_json_quote(field.name)}:{field.value}"
         span: if self.source_span == {
             .Val(value) -> "{{\"start\":{value.start},\"end\":{value.end}}}"
             .None -> "null"
@@ -109,10 +106,7 @@ JetErrorReport: struct {
             fields.push("\"source_journey\":[{frames.join(",")}]")
         }
         if self.conversion_history.len() > 0 {
-            conversions := [String]{}
-            loop conversion in self.conversion_history {
-                conversions.push("{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}")
-            }
+            conversions: loop conversion in self.conversion_history -> "{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}"
             fields.push("\"conversion_history\":[{conversions.join(",")}]")
         }
         if self.details == .Val(details) -> fields.push("\"details\":{details.to_json()}")
@@ -225,10 +219,7 @@ jet_error_conversion_from_json: fn(value: Dyn) -> JetErrorConversion JetErrorRep
 
 jet_error_details_from_json: fn(value: Dyn) -> JetErrorDetails JetErrorReportError! {
     fields: jet_error_json_object(value, "details")
-    field_values := [JetErrorField]{}
-    loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") {
-        field_values.push(JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)})
-    }
+    field_values: loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") -> JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)}
     span_value: jet_error_json_field(fields, "source_span")
     source_span: if span_value == {
         .Null -> None
@@ -262,22 +253,13 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> return Err(jet_error_report_error("error report cause is not null, an object, or an array"))
     }
     typed_identity: jet_error_json_optional_text(fields, "typed_identity")
-    context := [JetErrorContextFrame]{}
-    loop context_value in jet_error_json_optional_array(fields, "context_frames") {
-        context.push(jet_error_context_from_json(context_value))
-    }
+    context: loop context_value in jet_error_json_optional_array(fields, "context_frames") -> jet_error_context_from_json(context_value)
     origin: if jet_error_json_lookup(fields, "origin") == {
         .Val(origin_value) -> Val(jet_error_journey_from_json(origin_value))
         .None -> None
     }
-    journey := [JetErrorJourneyFrame]{}
-    loop journey_value in jet_error_json_optional_array(fields, "source_journey") {
-        journey.push(jet_error_journey_from_json(journey_value))
-    }
-    conversions := [JetErrorConversion]{}
-    loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") {
-        conversions.push(jet_error_conversion_from_json(conversion_value))
-    }
+    journey: loop journey_value in jet_error_json_optional_array(fields, "source_journey") -> jet_error_journey_from_json(journey_value)
+    conversions: loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") -> jet_error_conversion_from_json(conversion_value)
     details: if jet_error_json_lookup(fields, "details") == {
         .Val(details_value) -> Val(jet_error_details_from_json(details_value))
         .None -> None
@@ -312,10 +294,7 @@ jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
             "[{encoded.join(",")}]"
         }
         .Object(fields) -> {
-            encoded := [String]{}
-            loop entry in fields {
-                encoded.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
-            }
+            encoded: loop entry in fields -> "{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}"
             "{{{encoded.join(",")}}}"
         }
     }

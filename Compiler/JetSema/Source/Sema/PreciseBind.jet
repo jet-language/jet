@@ -62,10 +62,7 @@ sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
             name: fillers.get(operation.role) ?? next
             export: sema_registration_direct_symbol(graph.modules[math], name) ?? next
             callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
-            args := [BodyCallArg]{}
-            loop argument in operation.args {
-                args.push(BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
-            }
+            args: loop argument in operation.args -> BodyCallArg{value: argument, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
         }
     }

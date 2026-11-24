@@ -2052,10 +2052,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
             Type.Apply{name: name, args: normalized_args}
         }
         .Tuple(fields) -> {
-            normalized_fields := [TypeTupleField]{}
-            loop field in fields {
-                normalized_fields.push(TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)})
-            }
+            normalized_fields: loop field in fields -> TypeTupleField{name: field.name, ty: type_with_effective_fn_returns(field.ty)}
             Type.Tuple{fields: normalized_fields}
         }
         // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
@@ -2064,10 +2061,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         // copy: `marker`, `inner` and `marker` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker`, `inner` and `marker`
         .Tagged(marker, inner) -> if marker == (TagMarker.Internal{internal_tag: InternalTag.CppCallbackABI}) -> Type.Tagged{marker: marker.copy(), inner: inner.copy()} else -> Type.Tagged{marker: marker.copy(), inner: type_with_effective_fn_returns(inner)}
         .Union(members) -> {
-            normalized_members := [Type]{}
-            loop member in members {
-                normalized_members.push(type_with_effective_fn_returns(member))
-            }
+            normalized_members: loop member in members -> type_with_effective_fn_returns(member)
             Type.Union{members: normalized_members}
         }
         .Case(name, payload) -> Type.Case{name: name, payload: type_with_effective_fn_returns(payload)}
@@ -2089,10 +2083,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
 type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
     if ty == {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
-            normalized_params := [Type]{}
-            loop param in params {
-                normalized_params.push(type_with_effective_parameter_fn_return(param))
-            }
+            normalized_params: loop param in params -> type_with_effective_parameter_fn_return(param)
             normalized_ret := ret.map(fn(value) { effective_callable_return(value) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }

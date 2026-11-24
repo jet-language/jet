@@ -470,10 +470,7 @@ jet_cli_reports_json: fn(base: JetCLIReportBase?, file: String, source: String, 
     clears: jet_cli_report_clear_counts(diagnostics)
     digest: jet_cli_report_batch_digest(diagnostics, source)
     sources := diagnostic_source_texts()
-    reports := [String]{}
-    loop (index, diagnostic) in diagnostics {
-        reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, digest, clears[index], sources))
-    }
+    reports: loop (index, diagnostic) in diagnostics -> jet_cli_report_json_with(diagnostic, base, report_file, source, digest, clears[index], sources)
     reports
 }
 

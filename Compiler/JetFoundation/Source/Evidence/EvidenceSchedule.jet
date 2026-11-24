@@ -133,10 +133,7 @@ evidence_schedule_completion: fn(value: Dyn) -> FrameCompletion EvidenceCodecErr
 
 evidence_schedule_operation: fn(value: Dyn) -> FrameOperation EvidenceCodecError! {
     fields: evidence_schedule_object(value, "frame operation")
-    accesses := [ResourceAccess]{}
-    loop access in evidence_schedule_array(evidence_schedule_field(fields, "accesses"), "operation accesses") {
-        accesses.push(evidence_schedule_access(access))
-    }
+    accesses: loop access in evidence_schedule_array(evidence_schedule_field(fields, "accesses"), "operation accesses") -> evidence_schedule_access(access)
     provider: if fields.get("completion_provider") == {
         .None -> None
         .Val(provider_value) -> evidence_schedule_optional(provider_value, "completion provider")

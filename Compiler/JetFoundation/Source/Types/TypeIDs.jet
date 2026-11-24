@@ -1000,27 +1000,18 @@ type_syntax: fn(table: Interner, id: TypeID) -> Type Never! {
         .Fn -> {
             // copy: the side row keeps the written form; this is a new one
             if side != 0 -> return table.functions.rows[side - 1].copy()
-            params := [Type]{}
-            loop index in 0..<type_child_count(table, id) {
-                params.push(type_syntax(table, type_child_type(table, id, index)))
-            }
+            params: loop index in 0..<type_child_count(table, id) -> type_syntax(table, type_child_type(table, id, index))
             result: type_a_type(table, id)
             ret: if type_is_none(result) -> Type?{None} else -> Val(type_syntax(table, result))
             Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         }
         .Named -> Type.Named{name: name_text(table.names, type_a_name(table, id))}
         .Apply -> {
-            args := [Type]{}
-            loop index in 0..<type_child_count(table, id) {
-                args.push(type_syntax(table, type_child_type(table, id, index)))
-            }
+            args: loop index in 0..<type_child_count(table, id) -> type_syntax(table, type_child_type(table, id, index))
             Type.Apply{name: name_text(table.names, type_a_name(table, id)), args: args}
         }
         .TraitObject -> {
-            bounds := [String]{}
-            loop index in 0..<type_child_count(table, id) {
-                bounds.push(name_text(table.names, Name{id: type_child(table, id, index)}))
-            }
+            bounds: loop index in 0..<type_child_count(table, id) -> name_text(table.names, Name{id: type_child(table, id, index)})
             Type.TraitObject{bounds: bounds}
         }
         .Tuple -> {
@@ -1039,10 +1030,7 @@ type_syntax: fn(table: Interner, id: TypeID) -> Type Never! {
         }
         .Tagged -> Type.Tagged{marker: table.tags.rows[side - 1], inner: type_syntax(table, type_a_type(table, id))}
         .Union -> {
-            members := [Type]{}
-            loop index in 0..<type_child_count(table, id) {
-                members.push(type_syntax(table, type_child_type(table, id, index)))
-            }
+            members: loop index in 0..<type_child_count(table, id) -> type_syntax(table, type_child_type(table, id, index))
             Type.Union{members: members}
         }
         .Case -> Type.Case{name: name_text(table.names, type_a_name(table, id)), payload: type_syntax(table, type_b_type(table, id))}
@@ -1662,27 +1650,18 @@ delta_type_syntax: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> Typ
         .Result -> Type.Result{ok: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)}), err: delta_type_syntax(shared, delta, TypeID{id: delta_type_b(shared, delta, id)})}
         .Fn -> {
             if side != 0 -> return delta_fn_row(shared, delta, U32{side})
-            params := [Type]{}
-            loop index in 0..<delta_type_child_count(shared, delta, id) {
-                params.push(delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)}))
-            }
+            params: loop index in 0..<delta_type_child_count(shared, delta, id) -> delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)})
             result: TypeID{id: delta_type_a(shared, delta, id)}
             ret: if type_is_none(result) -> Type?{None} else -> Val(delta_type_syntax(shared, delta, result))
             Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
         }
         .Named -> Type.Named{name: delta_name_text(shared, delta, Name{id: delta_type_a(shared, delta, id)})}
         .Apply -> {
-            args := [Type]{}
-            loop index in 0..<delta_type_child_count(shared, delta, id) {
-                args.push(delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)}))
-            }
+            args: loop index in 0..<delta_type_child_count(shared, delta, id) -> delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)})
             Type.Apply{name: delta_name_text(shared, delta, Name{id: delta_type_a(shared, delta, id)}), args: args}
         }
         .TraitObject -> {
-            bounds := [String]{}
-            loop index in 0..<delta_type_child_count(shared, delta, id) {
-                bounds.push(delta_name_text(shared, delta, Name{id: delta_type_child(shared, delta, id, index)}))
-            }
+            bounds: loop index in 0..<delta_type_child_count(shared, delta, id) -> delta_name_text(shared, delta, Name{id: delta_type_child(shared, delta, id, index)})
             Type.TraitObject{bounds: bounds}
         }
         .Tuple -> {
@@ -1704,10 +1683,7 @@ delta_type_syntax: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> Typ
         }
         .Tagged -> Type.Tagged{marker: delta_tag_row(shared, delta, U32{side}), inner: delta_type_syntax(shared, delta, TypeID{id: delta_type_a(shared, delta, id)})}
         .Union -> {
-            members := [Type]{}
-            loop index in 0..<delta_type_child_count(shared, delta, id) {
-                members.push(delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)}))
-            }
+            members: loop index in 0..<delta_type_child_count(shared, delta, id) -> delta_type_syntax(shared, delta, TypeID{id: delta_type_child(shared, delta, id, index)})
             Type.Union{members: members}
         }
         .Case -> Type.Case{name: delta_name_text(shared, delta, Name{id: delta_type_a(shared, delta, id)}), payload: delta_type_syntax(shared, delta, TypeID{id: delta_type_b(shared, delta, id)})}

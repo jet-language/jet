@@ -95,10 +95,7 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
 jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     permit: plan.storage.guard_read()
     graph: build_session_project(permit.value)
-    targets := [String]{}
-    loop target in graph.targets {
-        targets.push("{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)}}}")
-    }
+    targets: loop target in graph.targets -> "{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)}}}"
     actions := [String]{}
     loop action in graph.actions {
         real: permit.value.actions[action.id]

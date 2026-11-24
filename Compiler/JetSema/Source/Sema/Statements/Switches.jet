@@ -277,10 +277,7 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
 
 // Every arm head that tests the dispatch subject reads `replacement` instead.
 sema_stmt_rebind_switch_arms: fn(arms: [SwitchArm], subject_span: Span, replacement: Expr) -> [SwitchArm] {
-    rebound := [SwitchArm]{}
-    loop arm in arms {
-        rebound.push(SwitchArm{cond: sema_expression_if_replace_subject(arm.cond, subject_span, replacement), body: arm.body, span: arm.span, through: arm.through})
-    }
+    rebound: loop arm in arms -> SwitchArm{cond: sema_expression_if_replace_subject(arm.cond, subject_span, replacement), body: arm.body, span: arm.span, through: arm.through}
     rebound
 }
 

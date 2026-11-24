@@ -216,10 +216,7 @@ keep: fn(value: Glyph) -> Glyph { value }
     assert_eq(lsp_test_int(help, "activeParameter"), 1)
     signature: lsp_test_rows(lsp_test_field(help, "signatures"))[0]
     assert(lsp_test_text(signature, "label").contains("add"), "the signature names `add`")
-    parameters := [String]{}
-    loop parameter in lsp_test_rows(lsp_test_field(signature, "parameters")) {
-        parameters.push(lsp_test_text(parameter, "label"))
-    }
+    parameters: loop parameter in lsp_test_rows(lsp_test_field(signature, "parameters")) -> lsp_test_text(parameter, "label")
     assert_eq(parameters, [String]{"left: Int", "right: Int"})
     // Inside the inner call's parentheses its first parameter is active.
     inner: lsp_test_result(server, "textDocument/signatureHelp", lsp_test_at(LSP_TEST_MAIN_URI, 5, 15))

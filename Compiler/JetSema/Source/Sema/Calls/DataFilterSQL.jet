@@ -235,10 +235,7 @@ sema_data_filter_path: fn(expression: Expr, parameter: String) -> Bool Never! {
 
 // The values of `sql` as the text each `?` binds: `"{value}"`.
 sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
-    texts := [Expr]{}
-    loop value in sql.values {
-        texts.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value.copy(), format: None}}, span: span, id: AST_NODE_GENERATED})
-    }
+    texts: loop value in sql.values -> Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value.copy(), format: None}}, span: span, id: AST_NODE_GENERATED}
     Expr.ListLit{elements: texts, span: span, id: AST_NODE_GENERATED}
 }
 

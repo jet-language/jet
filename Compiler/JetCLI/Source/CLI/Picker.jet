@@ -619,10 +619,7 @@ jet_cli_picker_text_view: fn(text: String, width: Int, height: Int, scroll: Int)
     rows: jet_cli_picker_wrap(text, jet_cli_picker_wide(width))
     tall: jet_cli_picker_at_least(height, 1)
     start: jet_cli_picker_min(scroll, jet_cli_picker_floor(rows.len() - tall))
-    out := [String]{}
-    loop offset in 0..<tall {
-        out.push(if start + offset < rows.len() -> "{rows[start + offset].text}" else -> " ")
-    }
+    out: loop offset in 0..<tall -> if start + offset < rows.len() -> "{rows[start + offset].text}" else -> " "
     out.join("\n")
 }
 

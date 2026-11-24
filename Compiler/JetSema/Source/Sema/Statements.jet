@@ -1936,18 +1936,9 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
         dead_edges.push(check.context.failure_edges[edge_index])
     }
     dead_direct_source: check.context.failure_direct_source
-    dead_members := [Type]{}
-    loop member_index in dead_mark.failure_union_members..<check.context.failure_union_members.len() {
-        dead_members.push(check.context.failure_union_members[member_index])
-    }
-    dead_cases := [SemaFailureCase]{}
-    loop case_index in dead_mark.failure_union_cases..<check.context.failure_union_cases.len() {
-        dead_cases.push(check.context.failure_union_cases[case_index])
-    }
-    dead_union_edges := [String]{}
-    loop union_edge_index in dead_mark.failure_union_edges..<check.context.failure_union_edges.len() {
-        dead_union_edges.push(check.context.failure_union_edges[union_edge_index])
-    }
+    dead_members: loop member_index in dead_mark.failure_union_members..<check.context.failure_union_members.len() -> check.context.failure_union_members[member_index]
+    dead_cases: loop case_index in dead_mark.failure_union_cases..<check.context.failure_union_cases.len() -> check.context.failure_union_cases[case_index]
+    dead_union_edges: loop union_edge_index in dead_mark.failure_union_edges..<check.context.failure_union_edges.len() -> check.context.failure_union_edges[union_edge_index]
     dead_general: check.context.failure_union_general
     sema_check_context_rollback(check.context, dead_mark.move())
     sema_scope_rollback(scopes, dead_scope_mark)
@@ -2810,10 +2801,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     loop row in check.state.references.len()..<erased_state.references.len() {
                         check.state.used_ids[erased_state.references[row].def_id.id] = true
                     }
-                    erased_reasons := [String]{}
-                    loop reason_index in erased_mark.incomplete_reasons..<check.context.incomplete_reasons.len() {
-                        erased_reasons.push(check.context.incomplete_reasons[reason_index])
-                    }
+                    erased_reasons: loop reason_index in erased_mark.incomplete_reasons..<check.context.incomplete_reasons.len() -> check.context.incomplete_reasons[reason_index]
                     if {
                         kept && marker.name == MARKER_ON -> {
                             sema_check_context_rollback_keep_calls(check.context, erased_mark.move())

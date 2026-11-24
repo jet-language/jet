@@ -1805,9 +1805,6 @@ IR_LINT_HANDLE_VERBS: #run { [String]{"drop", "clone", "display", "show", "debug
 
 // The findings' text, one line per row: "pass\tfunction\trule\tmessage".
 ir_lint_text: fn(findings: [IRLintFinding]) -> String Never! {
-    lines := [String]{}
-    loop finding in findings {
-        lines.push("{finding.pass}\t{finding.function}\t{finding.rule}\t{finding.message}")
-    }
+    lines: loop finding in findings -> "{finding.pass}\t{finding.function}\t{finding.rule}\t{finding.message}"
     lines.join("\n")
 }

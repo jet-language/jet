@@ -357,10 +357,7 @@ SemaSingleUseDrain: struct {
 // order) `path` moves. A branch's path is read in place, so the check below
 // never copies a path to list it.
 sema_single_use_path_moves: fn(before: SemaOwnershipState, path: SemaOwnershipPath) -> [Bool] Never! {
-    moves := [Bool]{}
-    loop row in sema_ownership_single_use_rows(before) {
-        moves.push(sema_single_use_moved_in(path.moved, before.declarations[row]))
-    }
+    moves: loop row in sema_ownership_single_use_rows(before) -> sema_single_use_moved_in(path.moved, before.declarations[row])
     moves
 }
 
