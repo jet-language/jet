@@ -2455,7 +2455,7 @@ sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type,
             .Val(binding) -> binding.symbol.kind == SymbolKind.Parameter
             .None -> false
         }
-        fix: if is_param -> "take the list: `{name}: &&{sema_type_show(collection_type)}`, or collect the work in a canonical `task.all` or `task.group` block" else -> "move the list into a local this scope owns before the loop consumes its task handles"
+        fix: if is_param -> "take the list: `{name}: ^^{sema_type_show(collection_type)}`, or collect the work in a canonical `task.all` or `task.group` block" else -> "move the list into a local this scope owns before the loop consumes its task handles"
         return sema_error("E0120", expr_span(collection), "`{name}` was not moved here, so this loop can't take its handles", why, fix)
     }
     sema_error("E0120", expr_span(collection), "this loop can't take handles out of a field or index", why, "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs {{ … }}`")

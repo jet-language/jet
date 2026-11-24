@@ -4,24 +4,28 @@
 // footprint (`&self.[a, b]`), a function type's parameter (`fn(&&Words)`), a
 // lambda's parameter, a call argument (`grow(&xs)`), a receiver mark at the
 // start of a line (`&xs.push(4)`), a window (`edit: &xs[a..<b]`), a written
-// match subject (`if &shape == {…}`) and a task capture (`task &&name`).
+// match subject (`if &shape == {…}`), a task capture (`task &&name`), a
+// shared type (`p: &@Player`), a variadic pack (`parts: &&...String`) and a
+// mark that quoted Jet builds around an interpolation (`"{name}: &&{type}"`).
 // `&` and `&&` keep their operator meanings, so a sign is a mark when its
 // line before it is blank or ends in a keyword (`if`, `in`, `task`,
-// `return`, ...) or in a byte a mark follows (`(`, `,`, `:`, `=`, `[`, `{`,
-// `<`, `>`, a code span's backtick), and a name, `[` or `(` follows it at
-// once. Each rewrite keeps the sign's width (`&` to `^`, `&&` to `^^`), so
-// every offset and column stays where it was. The plan reads the lexer's
-// tokens: a Jet source's code, its plain and raw strings whole (the Jet they
-// quote) and the code spans of its comments; a string that quotes C or Rust
-// stays as written, unless it holds a Jet `extern rust` block, whose link
-// names are Rust paths. In a triple-quoted string (a table of rows), a sign
-// after a word and a space also starts an operand: a signature row's first
-// parameter (`core.files reader_line &FileReader [u8]`). A Markdown file's
-// ```jet fences are read whole and its prose by code spans; a case file's
-// comment lines are read by code spans and its other lines whole; any other
-// text, such as an expected output or a diagnostic snapshot, is read whole.
-// A run of three or more signs, an HTML entity (`&amp;`) and Rust's `&mut`
-// stay as written.
+// `return`, ...), in the operator `&&` or `||` (`ready && &xs == …`), in a
+// byte a mark follows (`(`, `,`, `:`, `=`, `[`, `{`, `<`, `>`, a code span's
+// backtick) or in a snapshot's source gutter (`  8 |`), and a name, `[`,
+// `(`, `@`, `...` or `{` follows it at once. Each rewrite keeps the sign's
+// width (`&` to `^`, `&&` to `^^`), so every offset and column stays where it
+// was. The plan reads the lexer's tokens: a Jet source's code, its plain and
+// raw strings whole (the Jet they quote) and the code spans of its comments;
+// a string that quotes C or Rust stays as written, unless it holds a Jet
+// `extern rust` block, whose link names are Rust paths. In a triple-quoted
+// string (a table of rows), a sign after a word and a space also starts an
+// operand: a signature row's first parameter
+// (`core.files reader_line &FileReader [u8]`). A Markdown file's ```jet
+// fences are read whole and its prose by code spans; a case file's comment
+// lines are read by code spans and its other lines whole; any other text,
+// such as an expected output or a diagnostic snapshot, is read whole. A run
+// of three or more signs, an HTML entity (`&amp;`, `&{name};`) and Rust's
+// `&mut` stay as written.
 use {
     jet_lexer.[lex_generated, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_STRING]
 }
@@ -138,10 +142,10 @@ mark_caret1_text: fn(bytes: ^[U8], lo: Int, hi: Int, spaced: Bool) -> Int {
     count
 }
 
-// Whether the sign of `width` at `at` is a mark: a name, `[` or `(` follows
-// it at once, and nothing before it on its line (back to `lo`) ends an
-// operand, a keyword aside. A sign alone in a code span (`&`) is a mark
-// unless its line speaks of operators.
+// Whether the sign of `width` at `at` is a mark: a name, `[`, `(`, `@`,
+// `...` or an interpolation's `{` follows it at once, and nothing before it
+// on its line (back to `lo`) ends an operand, a keyword aside. A sign alone
+// in a code span (`&`) is a mark unless its line speaks of operators.
 mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int, spaced: Bool) -> Bool {
     after: at + width
     if at > 0 && bytes[at - 1] == 96 && after < bytes.len() && bytes[after] == 96 {
@@ -149,7 +153,19 @@ mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int, spac
     }
     if after >= hi -> return false
     next_byte: bytes[after]
-    if next_byte == 91 || next_byte == 40 {
+    if next_byte == 91 || next_byte == 40 || next_byte == 64 {
+        return mark_caret1_starts_operand(bytes, at, lo, spaced)
+    }
+    // A variadic pack (`&&...String`); `&...;` is not Jet.
+    if next_byte == 46 {
+        return after + 3 < hi && bytes[after + 1] == 46 && bytes[after + 2] == 46 && mark_caret1_name_byte(bytes[after + 3]) && mark_caret1_starts_operand(bytes, at, lo, spaced)
+    }
+    // A type that quoted Jet interpolates (`&&{type}`); braces that end an
+    // entity (`&{name};`) are not Jet.
+    if next_byte == 123 {
+        close := after
+        loop close < hi && bytes[close] != 125 -> close += 1
+        if close + 1 < hi && bytes[close + 1] == 59 -> return false
         return mark_caret1_starts_operand(bytes, at, lo, spaced)
     }
     if !mark_caret1_name_byte(next_byte) || (next_byte >= 48 && next_byte <= 57) -> return false
@@ -163,7 +179,7 @@ mark_caret1_is_mark: fn(bytes: [U8], at: Int, width: Int, lo: Int, hi: Int, spac
 
 // The words of a line that names `&` or `&&` as an operator rather than as
 // a mark.
-MARK_CARET1_OPERATOR_WORDS: [String]{"`||`", "`|`", "`&~`", "`!`", "logical", "bit", "Bit", "operator", "condition", "short-circuit", "AND", "conjunction", "Bool", "chain"}
+MARK_CARET1_OPERATOR_WORDS: [String]{"`||`", "`|`", "`&~`", "`!`", "logical", "bit", "Bit", "operator", "condition", "comparison", "joined", "short-circuit", "AND", "conjunction", "Bool", "chain"}
 
 // Whether a sign alone in a code span at `at` is a mark: its line names no
 // operator.
@@ -177,7 +193,8 @@ mark_caret1_bare_mark: fn(bytes: [U8], at: Int) -> Bool {
 }
 
 // Whether a sign at `at` starts an operand: the line before it, back to
-// `lo` or a quoted line break (`\n`), is blank, or ends in a keyword or in a
+// `lo` or a quoted line break (`\n`), is blank, or ends in a keyword, in the
+// operator `&&` or `||`, in a snapshot's source gutter (`  8 |`) or in a
 // byte a mark follows: `(`, `,`, `:`, `=`, `[`, `{`, `<`, `>` (`->`) or the
 // backtick opening a code span. When `spaced`, a word with a space after it
 // also does, as a row's name before its first parameter. Any other byte,
@@ -200,7 +217,23 @@ mark_caret1_starts_operand: fn(bytes: [U8], at: Int, lo: Int, spaced: Bool) -> B
     if last == 61 && before > lo && !(bytes[before - 1] == 58 || bytes[before - 1] == 32 || bytes[before - 1] == 9) {
         return false
     }
+    if (last == 38 || last == 124) && before > lo && bytes[before - 1] == last -> return true
+    if last == 124 && mark_caret1_gutter(bytes, before, lo) -> return true
     last == 40 || last == 44 || last == 58 || last == 61 || last == 91 || last == 123 || last == 60 || last == 62 || last == 96
+}
+
+// Whether the bar at `bar` ends a snapshot's source gutter: only a line
+// number and spaces stand before it on its line.
+mark_caret1_gutter: fn(bytes: [U8], bar: Int, lo: Int) -> Bool {
+    at := bar - 1
+    loop at >= lo && bytes[at] == 32 -> at -= 1
+    digits := 0
+    loop at >= lo && bytes[at] >= 48 && bytes[at] <= 57 {
+        at -= 1
+        digits += 1
+    }
+    loop at >= lo && bytes[at] == 32 -> at -= 1
+    digits > 0 && (at < lo || bytes[at] == 10)
 }
 
 mark_caret1_name_byte: fn(byte: U8) -> Bool {

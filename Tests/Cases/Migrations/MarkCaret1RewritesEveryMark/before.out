@@ -83,3 +83,15 @@ run: fn() {
     foreign: "extern rust \"std\" {{\n    consume: fn(s: ^^String) -> String = \"std::convert::identity\"\n}}\n"
     print("{source} {quoted} {hint} {html} {rust} {c} {lines} {label} {plain} {rows} {foreign}")
 }
+
+heal: fn(p: ^@Player, n: Int) { p.hp = p.hp + n }
+
+join_owned: fn(parts: ^^...String) -> String { parts.join(",") }
+
+ready: fn(source: Int?, prepared: [Int]) -> Bool { source != None && ^prepared == [1] || ^prepared == [2] }
+
+// Every `&...;` is an entity.
+render: fn(name: String, s: String, piece: String) -> String {
+    entity: "&{name};"
+    "close: fn(handle: ^^{name}) {{}} {entity} {s}&{piece}"
+}

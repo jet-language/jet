@@ -287,7 +287,7 @@ sema_expression_zip_consume_receiver: fn(receiver: Expr, receiver_type: Type, me
             index: sema_scope_resolve_index(scopes, name) ?? return true
             binding := scopes.bindings[index]
             if binding.symbol.kind == SymbolKind.Parameter && !sema_ownership_type_is_copy(receiver_type) && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write) {
-                diagnostics.push(sema_error("E0120", receiver_span, "`{name}` was not moved here, so `.{method}()` can't take it", "this function has read access only and does not own the value", "call it on a copy, or take ownership: `{name}: &&{type_name(receiver_type)}`"))
+                diagnostics.push(sema_error("E0120", receiver_span, "`{name}` was not moved here, so `.{method}()` can't take it", "this function has read access only and does not own the value", "call it on a copy, or take ownership: `{name}: ^^{type_name(receiver_type)}`"))
                 return false
             }
             return sema_ownership_check_method_receiver(state, receiver, AccessConvention.Move, method, scopes, receiver_span, diagnostics)

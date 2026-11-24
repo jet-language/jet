@@ -613,7 +613,7 @@ sema_taskgroup_check_lambda_captures: fn(lambda: ^TLambda, span: Span, environme
             admitted: sema_taskgroup_admit_cell_borrow(capture, span, scopes, state, context, diagnostics)
             if admitted == (Val(false)) -> next
             if admitted == None {
-                diagnostics.push(sema_error("E1102", span, "`{capture.source}` cannot be shared into this task: it holds an Atomic cell that does not live long enough", "the task holds the cell by address, and a task outside a `task.group` can outlive the block that owns the cell", "spawn the task in a `task.group` the cell outlives, give the cell to the task with `task &&{capture.source}`, or share it with `Shared{{…}}`"))
+                diagnostics.push(sema_error("E1102", span, "`{capture.source}` cannot be shared into this task: it holds an Atomic cell that does not live long enough", "the task holds the cell by address, and a task outside a `task.group` can outlive the block that owns the cell", "spawn the task in a `task.group` the cell outlives, give the cell to the task with `task ^^{capture.source}`, or share it with `Shared{{…}}`"))
                 next
             }
             sema_taskgroup_note_detach_problem(context, true)
@@ -881,7 +881,7 @@ sema_taskgroup_check_scoped_loan_read: fn(context: ^SemaCheckContext, expression
         if held.access == AccessConvention.Write && sema_ownership_places_overlap(held.place, places[0]) {
             context.taskgroups.scoped_loan_read_reported = true
             read_name: sema_ownership_place_name(places[0])
-            diagnostics.push(sema_error("E1101", expr_span(expression), "`{read_name}` cannot be read while `{held.name}` is lent to a task in `{held.group}`", "`{held.name}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes", "read `{read_name}` after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
+            diagnostics.push(sema_error("E1101", expr_span(expression), "`{read_name}` cannot be read while `{held.name}` is lent to a task in `{held.group}`", "`{held.name}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes", "read `{read_name}` after the `{held.group}` block ends, give it away with `task ^^{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
             return
         }
     }

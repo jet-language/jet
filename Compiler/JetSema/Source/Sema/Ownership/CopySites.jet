@@ -566,7 +566,7 @@ sema_copy_site_refuse_borrowed_copy: fn(value: Expr, consumer: String, environme
 }
 
 sema_copy_site_borrowed_diagnostic: fn(site: SemaCopySite, consumer: String) -> Diagnostic {
-    sema_error("E0201", site.span, "`{site.name}` cannot be moved from borrowed storage", "`{site.name}` is a read or write parameter, so its caller keeps the value, and `{type_name(site.ty)}` can't be copied into {consumer}", "declare the parameter `{site.name}: &&{type_name(site.ty)}` so the caller hands the value over")
+    sema_error("E0201", site.span, "`{site.name}` cannot be moved from borrowed storage", "`{site.name}` is a read or write parameter, so its caller keeps the value, and `{type_name(site.ty)}` can't be copied into {consumer}", "declare the parameter `{site.name}: ^^{type_name(site.ty)}` so the caller hands the value over")
 }
 
 // A bare read or write parameter of a non-scalar type (Rust `is_scalar`, not
@@ -608,7 +608,7 @@ sema_copy_site_check_borrowed_return: fn(value: Expr, environment: SemaScopeEnvi
     if sema_copy_site_is_type_parameter(site.ty, context) {
         return
     }
-    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return {site.name}.copy()` — or take ownership: `{site.name}: &&{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, program, context, diagnostics)
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return {site.name}.copy()` — or take ownership: `{site.name}: ^^{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, program, context, diagnostics)
 }
 
 // An owned struct or variant field filled from `value`.

@@ -92,7 +92,7 @@ lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
 #Test("calls show the marks their signatures decide and a written name is a modification") {
     server := lsp_test_server()
     lsp_test_open(server, LSP_TEST_MARKS_URI, LSP_TEST_MARKS)
-    assert_eq(lsp_test_hints(server, LSP_TEST_MARKS_URI, 13), [String]{"10:9 count: &", "10:16 by: ", "11:9 title: &&"})
+    assert_eq(lsp_test_hints(server, LSP_TEST_MARKS_URI, 13), [String]{"10:9 count: ^", "10:16 by: ", "11:9 title: ^^"})
     data: lsp_test_token_data(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(LSP_TEST_MARKS_URI)}}}"))
     // Each token on line 10 as `line:character:modifiers`; `modification` is
     // bit 4.

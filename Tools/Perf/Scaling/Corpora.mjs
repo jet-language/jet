@@ -180,7 +180,7 @@ function implsTraits(n, r) {
         `    measure_${k}: fn(self) -> Int { (self.id * ${r.int(2, 97)} + ${r.int(1, 99)}) % ${M} }`,
         `    label_${k}: fn(self) -> String { "e${i}-c${k}-{self.name}" }`, '}', '');
     }
-    lines.push(`impl Entity${i} {`, `    bump: fn(&self) { self.id += ${r.int(1, 9)} }`, '    weight: fn(self) -> Int { self.id + self.name.len() }', '}', '',
+    lines.push(`impl Entity${i} {`, `    bump: fn(^self) { self.id += ${r.int(1, 9)} }`, '    weight: fn(self) -> Int { self.id + self.name.len() }', '}', '',
       `entity_${i}_use: fn(seed: Int) -> Int {`, `    entity := Entity${i}{id: seed % 101, name: "n{seed % 13}"}`, '    entity.bump()', '    total := entity.weight()');
     for (const k of chosen) lines.push(`    total = (total + capability_${k}_total([Capability${k}]{entity})) % ${M}`);
     lines.push('    total', '}');
