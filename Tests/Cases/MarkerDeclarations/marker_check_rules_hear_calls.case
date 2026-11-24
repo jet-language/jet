@@ -1,0 +1,71 @@
+# A marker's `check: fn(self, call: CompilerCall)` rule (D-CORE-CHECK1=A)
+# hears the calls of what it marks: a function's calls, a method's calls with
+# their receiver, and every method call on a marked type's values. An
+# `.Error` rejection replaces the call's own errors; a call the rule lets
+# through keeps them; a `.Tidy` rejection is a lint. The rule's reads of the
+# call's spans and argument types answer alike under check, run and build at
+# every tier (I9).
+fixture: MarkerCheckRulesHearCalls.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check heard/main.jet
+exit: 1 # three calls are rejected
+stderr: ~ "Error: logs.EmptyLog: This `log` call has no message" # at the name of `log()`
+stderr: ~ "Error: logs.NotText: A `Int` is not a log message" # at the argument of `log(42)`
+stderr: ~ "Error: logs.LongLog: This `log` call writes a long line" # at the whole call
+stderr: count "Error: " = 3 # each rejection replaces the call's own errors
+stderr: !~ "Jet.ArgumentCountMismatch" # `log()` reports no arity error
+stderr: ~ "3 problems found" # and nothing else is reported
+step: jet check kept/main.jet
+exit: 1 # the rule lets `log(42)` through
+stderr: !~ "logs.EmptyLog" # no rejection
+stderr: count "Error: Jet." = 1 # the call's own type error, after the rule's answer
+step: jet check method/main.jet
+exit: 1 # `withdraw()` is rejected
+stderr: ~ "Error: bank.NoAmount: This withdrawal names no amount" # the method's rule hears the call
+stderr: !~ "bank.NoReceiver" # with its receiver
+stderr: count "Error: " = 1 # in place of the arity error
+step: jet check typed/main.jet
+exit: 1 # `gauge.reset()` is rejected
+stderr: ~ "Error: gauge.NoReset: A gauge cannot be reset" # the type's rule hears the call
+stderr: !~ "Jet.UnknownMethod" # in place of the missing member's error
+stderr: count "Error: " = 1 # `gauge.read()` is let through
+step: jet check tidy/main.jet
+exit: 0 # a lint keeps the call
+stderr: ~ "voice.Shouting" # the lint is reported
+step: jet run tidy/main.jet
+exit: 0
+stdout: = "HI\n" # and the program runs
+step: jet check tiers/main.jet
+exit: 0 # spans and types read as the rule expects
+step: jet run -O0 tiers/main.jet
+exit: 0
+stdout: = "6 8\n"
+step: jet run -O1 tiers/main.jet
+exit: 0
+stdout: = "6 8\n"
+step: jet run -O2 tiers/main.jet
+exit: 0
+stdout: = "6 8\n"
+step: jet build -O2 tiers/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "6 8\n"
+step: jet check tiers_rejected/main.jet
+exit: 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers" # at `2.5`
+stderr: count "Error: " = 1 # in place of the type error
+step: jet run -O0 tiers_rejected/main.jet
+exit: 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
+stderr: count "Error: " = 1
+step: jet run -O2 tiers_rejected/main.jet
+exit: 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
+stderr: count "Error: " = 1
+step: jet build -O1 tiers_rejected/main.jet
+exit: 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
+stderr: count "Error: " = 1

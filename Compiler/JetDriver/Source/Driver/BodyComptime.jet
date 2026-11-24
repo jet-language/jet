@@ -32,6 +32,9 @@ use {
         SemaLocalSpliceInto,
         SemaPassFacts,
         SemaRegistrationGraph,
+        sema_call_rule_batches,
+        sema_call_rule_batches_land,
+        sema_call_rules_held,
         sema_comptime_body_item_source,
         sema_comptime_function_diagnostics,
         sema_comptime_local_values_ahead,
@@ -311,9 +314,15 @@ jet_driver_comptime_body_pass: fn(
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false), registration)
     }
     // JET_KEEP_GOING: pending bodies still run past reported errors, so the
-    // functions whose bodies need their values still lower.
+    // functions whose bodies need their values still lower. Calls that held
+    // their errors back for their rules' answers still run those rules,
+    // and only those: a rejection replaces the held errors.
+    rules_only := false
     if jet_driver_has_errors(current_graph.diagnostics) && !registration.keep_going {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false), registration)
+        if !sema_call_rules_held(pending) {
+            return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false), registration)
+        }
+        rules_only = true
     }
     pass: completed_passes + 1
     if pass > 256 {
@@ -328,9 +337,16 @@ jet_driver_comptime_body_pass: fn(
             registration,
         )
     }
+    // The calls each rule hears run as one batch item, after the other
+    // sources (sema_call_rule_batches).
+    held: sema_call_rules_held(pending)
     body_sources := [SemaComptimeItemSource]{}
     known := name_column_table(pending.len())
-    loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
+    loop source in pending {
+        if source.rule != None || rules_only -> next
+        jet_driver_comptime_body_source_add(body_sources, known, source)
+    }
+    batches := sema_call_rule_batches(registration, pending, pass, body_sources)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
     memory_plan := [SemaFunctionMemoryPlan]{}
     run := jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, diagnostics, memory_plan)
@@ -366,6 +382,13 @@ jet_driver_comptime_body_pass: fn(
     earlier_functions := functions.move()
     values = run.values.move()
     functions = run.functions.move()
+    rejected: sema_call_rule_batches_land(batches, values)
+    // A pass that ran only rules, none of which rejected a call or kept a
+    // call's errors waiting, changes no checked body: the graph stands.
+    if batches.len() > 0 && body_sources.len() == batches.len() && !held && !rejected && current_graph.complete {
+        sema_graph_trail_undo(registration, run.trail)
+        return jet_driver_comptime_body_pass(registration, stage, current_graph, values, functions, trace, load, request, diagnostics, pass)
+    }
     // A pass that landed only local values lands them in the bodies that
     // hold them (JetSema Comptime/LocalSplice.jet); under `recheck_verify`
     // the full recheck runs too, and the two results must agree.

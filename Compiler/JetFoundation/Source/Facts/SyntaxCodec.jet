@@ -5688,6 +5688,7 @@ body_codec_put_markerdecl: fn(out: &BodyCodecOut, value: MarkerDecl) Never! {
     body_codec_put_opt_list_effectrowentry(out, value.row)
     body_codec_put_opt_span(out, value.row_span)
     body_codec_put_bool(out, value.is_derive)
+    body_codec_put_opt_span(out, value.check)
     body_codec_put_span(out, value.span)
 }
 
@@ -5702,8 +5703,9 @@ body_codec_get_markerdecl: fn(bytes: [U8], input: &BodyCodecIn) -> MarkerDecl Ne
     f7: body_codec_get_opt_list_effectrowentry(bytes, input)
     f8: body_codec_get_opt_span(bytes, input)
     f9: body_codec_get_bool(bytes, input)
-    f10: body_codec_get_span(bytes, input)
-    MarkerDecl{name: f0, name_span: f1, is_pub: f2, is_package_pub: f3, group: f4, params: f5, body: f6, row: f7, row_span: f8, is_derive: f9, span: f10}
+    f10: body_codec_get_opt_span(bytes, input)
+    f11: body_codec_get_span(bytes, input)
+    MarkerDecl{name: f0, name_span: f1, is_pub: f2, is_package_pub: f3, group: f4, params: f5, body: f6, row: f7, row_span: f8, is_derive: f9, check: f10, span: f11}
 }
 
 body_codec_put_markerdeclparam: fn(out: &BodyCodecOut, value: MarkerDeclParam) Never! {

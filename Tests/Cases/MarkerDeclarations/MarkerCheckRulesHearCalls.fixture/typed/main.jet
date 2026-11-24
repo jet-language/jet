@@ -1,0 +1,35 @@
+// A rule on a type hears each method call on its values, a call of a member
+// the type lacks too: the rejection replaces the missing member's error.
+NoReset: struct {
+    impl Diagnostic {
+        code: "gauge.NoReset",
+
+        what: fn(self) -> String { "a gauge cannot be reset" }
+
+        why: fn(self) -> String { "a gauge's level only rises" }
+
+        fix: fn(self) -> String { "read the gauge instead" }
+    }
+}
+
+Sealed: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "reset" -> reject(NoReset{}, at: call.name)
+        }
+    }
+}
+
+#Sealed Gauge: struct {
+    level: Int,
+
+    read: fn(self) -> Int { self.level }
+}
+
+run: fn() {
+    gauge: Gauge{level: 2}
+    print("{gauge.read()}")
+    gauge.reset()
+}

@@ -570,6 +570,22 @@ body_codec_get_list_semacomptimepreparedlocal: fn(bytes: [U8], input: &BodyCodec
     values
 }
 
+body_codec_put_opt_semacomptimerulesite: fn(out: &BodyCodecOut, value: SemaComptimeRuleSite?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_semacomptimerulesite(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_semacomptimerulesite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeRuleSite? Never! {
+    if body_codec_get_bool(bytes, input) {
+        return Val(body_codec_get_semacomptimerulesite(bytes, input))
+    }
+    None
+}
+
 body_codec_put_semacomptimebodysource: fn(out: &BodyCodecOut, value: SemaComptimeBodySource) Never! {
     body_codec_put_moduleid(out, value.module_identity)
     body_codec_put_string(out, value.function_key)
@@ -586,6 +602,8 @@ body_codec_put_semacomptimebodysource: fn(out: &BodyCodecOut, value: SemaComptim
     body_codec_put_list_string(out, value.runtime_locals)
     body_codec_put_bool(out, value.local_value)
     body_codec_put_bool(out, value.local_binding)
+    body_codec_put_opt_semacomptimerulesite(out, value.rule)
+    body_codec_put_bool(out, value.rule_held)
 }
 
 body_codec_get_semacomptimebodysource: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeBodySource Never! {
@@ -604,7 +622,9 @@ body_codec_get_semacomptimebodysource: fn(bytes: [U8], input: &BodyCodecIn) -> S
     f12: body_codec_get_list_string(bytes, input)
     f13: body_codec_get_bool(bytes, input)
     f14: body_codec_get_bool(bytes, input)
-    SemaComptimeBodySource{module_identity: f0, function_key: f1, source_file: f2, key: f3, destination_key: f4, name: f5, expression: f6, expected_type: f7, span: f8, site_span: f9, prepared: f10, impure: f11, runtime_locals: f12, local_value: f13, local_binding: f14}
+    f15: body_codec_get_opt_semacomptimerulesite(bytes, input)
+    f16: body_codec_get_bool(bytes, input)
+    SemaComptimeBodySource{module_identity: f0, function_key: f1, source_file: f2, key: f3, destination_key: f4, name: f5, expression: f6, expected_type: f7, span: f8, site_span: f9, prepared: f10, impure: f11, runtime_locals: f12, local_value: f13, local_binding: f14, rule: f15, rule_held: f16}
 }
 
 body_codec_put_semacomptimepreparedlocal: fn(out: &BodyCodecOut, value: SemaComptimePreparedLocal) Never! {
@@ -620,6 +640,17 @@ body_codec_get_semacomptimepreparedlocal: fn(bytes: [U8], input: &BodyCodecIn) -
     f2: body_codec_get_tcomptimevalue(bytes, input)
     f3: body_codec_get_span(bytes, input)
     SemaComptimePreparedLocal{name: f0, ty: f1, value: f2, span: f3}
+}
+
+body_codec_put_semacomptimerulesite: fn(out: &BodyCodecOut, value: SemaComptimeRuleSite) Never! {
+    body_codec_put_moduleid(out, value.module_identity)
+    body_codec_put_string(out, value.marker)
+}
+
+body_codec_get_semacomptimerulesite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeRuleSite Never! {
+    f0: body_codec_get_moduleid(bytes, input)
+    f1: body_codec_get_string(bytes, input)
+    SemaComptimeRuleSite{module_identity: f0, marker: f1}
 }
 
 body_codec_put_list_semacomputecallfact: fn(out: &BodyCodecOut, values: [SemaComputeCallFact]) Never! {

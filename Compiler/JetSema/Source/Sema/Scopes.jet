@@ -635,6 +635,20 @@ SemaComptimeBodySource: struct {
     // An explicit `name: #run value` local: it reports what fails, and lands
     // like a local value (SemaComptimeItemSource.local_binding).
     local_binding: Bool{false},
+    // A marker's `check` rule heard at a call (Calls/CheckRules.jet): the
+    // driver runs every such site of one rule in one batch, never this
+    // source's own expression.
+    rule: SemaComptimeRuleSite?{None},
+    // The call's checks held their errors until the rule answers: a
+    // rejection replaces them.
+    rule_held: Bool{false},
+}
+
+// Which rule a heard call waits on: the `check` of `marker`, declared in the
+// module `module_identity`.
+SemaComptimeRuleSite: struct {
+    module_identity: ModuleID,
+    marker: String,
 }
 
 SemaComptimeBodyValue: struct {

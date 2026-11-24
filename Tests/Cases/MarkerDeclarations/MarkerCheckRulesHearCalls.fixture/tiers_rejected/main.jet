@@ -1,0 +1,26 @@
+// The rule's rejection of `scale(2.5)` is the one answer on every tier.
+Fraction: struct {
+    impl Diagnostic {
+        code: "tiers.Fraction",
+
+        what: fn(self) -> String { "`scale` scales whole numbers" }
+
+        why: fn(self) -> String { "the scaling rule hears each argument's type" }
+
+        fix: fn(self) -> String { "pass an Int" }
+    }
+}
+
+Measured: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args[0].type.name != "Int" -> reject(Fraction{}, at: call.args[0])
+        }
+    }
+}
+
+#Measured scale: fn(value: Int) -> Int { value * 2 }
+
+run: fn() { print("{scale(3)} {scale(2.5)}") }

@@ -125,16 +125,22 @@ vocabulary](vocabulary.md).
   `check: fn(self, call: CompilerCall) { … }` (D-CORE-CHECK1=A). While the
   compiler checks a program it runs the rule at each call of a function or
   method that carries the marker, and at each method call on a type that
-  carries it, before the call's arguments bind. `call` is a CompilerCall: its
-  written `name` (a CompilerName), its `args` in written order and its
-  `receiver`, each a CompilerArg with its `label`, `type` (a TypeId), `value`
-  (a `Dyn?`, None when only the run knows it), the `function` it names (a
-  `FunctionInfo?`) and its `span`. `reject(finding, at: part)` ends the rule
+  carries it, a call of a member the type lacks included. `call` is a
+  CompilerCall: its written `name` (a CompilerName), its `args` in written
+  order and its `receiver`, each a CompilerArg with its `label`, `type` (a
+  TypeId; `_` when the argument's own check fails), `value` and the
+  `function` it names (both None: the rule hears the call's shape) and its
+  `span`; the call's `span` runs from its name to its last argument.
+  `reject(finding, at: part)` ends the rule
   with a value whose type implements `Diagnostic`, raised at `part`'s span:
   the call, `call.name` or one argument, the call when `at:` is not written.
-  A rejection replaces that call's ordinary checks; a rule that rejects
-  nothing leaves the call to them. Rules run with one meaning under
-  `jet check`, `jet run`, `jet build` and the language server. A `check`
+  An `.Error` finding rejects the call, and the rejection replaces the
+  call's own errors; a `.Tidy` finding is a lint and a `.Report` finding
+  reports nothing, and neither rejects the call. A call the rule lets
+  through keeps its own checks. The calls one rule hears in a pass run as
+  one batch, so a rule costs one evaluation per pass plus its body per
+  call. Rules run with one meaning under `jet check`, `jet run` and
+  `jet build` at every tier. A `check`
   whose signature differs is E0907, a second one E0105.
   `expand` runs at each site its `sites` names, and `target` is the record a
   derive reads there: a struct's or enum's TypeInfo, a field's FieldInfo, an

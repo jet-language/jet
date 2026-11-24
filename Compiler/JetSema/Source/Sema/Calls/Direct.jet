@@ -2186,8 +2186,19 @@ sema_call_written_arg_for_slot: fn(slots: [Int], slot: Int) -> Int? Never! {
     None
 }
 
+// A direct call hears the `check` rules of its callee's markers before its
+// arguments bind (Calls/CheckRules.jet).
 sema_call_check_direct_target_owned: fn(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
-    sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics)
+    rules := [SemaCallRule]{}
+    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_callee(graph, target.symbol.id)
+    if rules.len() == 0 -> return sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, Val(target.symbol.id), call.name, call.name_span, call.args, None, call.name_span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if hearing.rejected -> return None
+    if !hearing.staged -> return sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, diagnostics)
+    held := [Diagnostic]{}
+    checked: sema_call_direct_checked_from_target(state, target, call, defaults, expected, environment, program, scopes, tail_store, context, held)
+    if sema_call_rules_hold(hearing, held, context, diagnostics) -> return None
+    checked
 }
 
 // The Rust direct_calls forms ahead of ordinary name resolution

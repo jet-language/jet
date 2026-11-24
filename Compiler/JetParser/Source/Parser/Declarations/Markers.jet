@@ -119,7 +119,7 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
             next
         }
         if token.kind == TOKEN_KW_FN && parser_value_at(state, 1) == "check" {
-            parser_parse_marker_check(state, value)
+            parser_parse_marker_check(state, value, declaration)
             next
         }
         if token.kind == TOKEN_KW_FN {
@@ -152,7 +152,7 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
 // to, and `reject(value, at: part)` in it ends the rule with that finding
 // (sema_call_check_marker_reject). The formatter prints it as written
 // (jfmt_fmt_marker_check).
-parser_parse_marker_check: fn(state: &JetParserState, value: &StructDef) {
+parser_parse_marker_check: fn(state: &JetParserState, value: &StructDef, declaration: &MarkerDecl) {
     method := parser_parse_type_method(state)
     signature: Span{start: method.span.start, end: method.name_span.end}
     shaped := method.params.len() == 2 && method.return_type == None && method.type_params.len() == 0 && method.declared_effects == None && !method.is_comptime
@@ -175,6 +175,7 @@ parser_parse_marker_check: fn(state: &JetParserState, value: &StructDef) {
     method.return_type = Val(Type.Option{inner: Type.Named{name: "CompilerRejection"}})
     method.body.push(Stmt.Expr{expr: Expr.EnumLit{type_name: "", variant: "None", variant_span: Val(end), args: [EnumLitArg]{}, leading_dot: false, span: end, id: parser_node_id(state)}})
     method.marker_check = true
+    declaration.check = Val(method.name_span)
     value.methods.push(method)
 }
 

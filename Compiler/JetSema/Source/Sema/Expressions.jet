@@ -4827,6 +4827,22 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         }
         receiver_value = sema_tree_node(link_inner, TExprKind.Deref{value: receiver_value}, receiver_value.span)
     }
+    // A method call on a struct or enum that carries a marker hears that
+    // marker's `check` rule before the method resolves (Calls/CheckRules.jet).
+    rules := [SemaCallRule]{}
+    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
+    if rules.len() == 0 -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver_value.ty), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if hearing.rejected -> return None
+    if !hearing.staged -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    held := [Diagnostic]{}
+    checked: sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, held)
+    if sema_call_rules_hold(hearing, held, context, diagnostics) -> return None
+    checked
+}
+
+// sema_expr_check_method_call once its receiver is checked.
+sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if method == "text" {
         sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, diagnostics)
     }
