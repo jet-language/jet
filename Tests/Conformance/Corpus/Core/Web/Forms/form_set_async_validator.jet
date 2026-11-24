@@ -1,0 +1,11 @@
+// core-conformance: core.web.forms.WebFormTyped.set_async_validator
+use api: core.web.forms
+
+checked: fn(form: &api.WebFormTyped) -> Bool Never! {
+    form.set_async_validator("jet", .Change, 0, fn(value) {}) == .Ok(_)
+}
+
+run: fn() {
+    form := api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    print(checked(form))
+}

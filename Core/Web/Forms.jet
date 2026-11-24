@@ -97,6 +97,48 @@ WebFormTyped: struct {
     form: WebForm,
     action: String,
     input: WebFormInput,
+
+    // Sets field `name` to `value`, as the browser would.
+    set: fn(&self, name: String, value: String) WebFormError! { typed_set(self, name, value) }
+
+    // Runs `validator` on field `name`'s value and marks the field's result;
+    // `timing` and `delay_ms` name when a browser would run it.
+    set_async_validator: fn<E>(&self, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
+        typed_set_async_validator(self, name, timing, delay_ms, validator)
+    }
+
+    // Calls `handler` with the form's decoded input.
+    set_action: fn<E>(self, handler: fn(WebFormDecodedInput) -> String E!) E! {
+        typed_set_action(self, handler)
+    }
+
+    // Leaves field `name`, which validates it.
+    blur: fn(&self, name: String) WebFormError! { typed_blur(self, name) }
+
+    // Moves the focus to field `name`.
+    focus: fn(&self, name: String) WebFormError! { typed_focus(self, name) }
+
+    // Decodes a script-free POST body against the model and encodes it back.
+    post: fn(self, body: String) -> String WebFormError! { typed_post(self, body) }
+
+    // Drops a pending submission and its form error.
+    cancel: fn(&self) Never! { typed_cancel(self) }
+
+    // Validates every field, then submits and renders the form.
+    submit: fn(&self) -> String WebFormError! { typed_submit(self) }
+
+    // The form as script-free HTML.
+    no_script: fn(&self) -> String WebFormError! { typed_no_script(self) }
+
+    // The form's status by name.
+    state: fn(self) -> String Never! { typed_state(self) }
+
+    lifecycle: fn(self) -> WebFormLifecycle Never! { typed_lifecycle(self) }
+
+    // The field errors by field name, and the form's own errors.
+    errors: fn(self) -> WebFormErrorState Never! { typed_errors(self) }
+
+    render: fn(self) -> String Never! { typed_html(self) }
 }
 
 #Error
@@ -115,6 +157,9 @@ WebFormValidationChain: struct {
     form: WebFormTyped,
     field: String,
     valid: Bool,
+
+    // `field:valid` or `field:invalid`.
+    render: fn(self) -> String Never! { typed_validation_render(self) }
 }
 
 WebFormValidation: struct {

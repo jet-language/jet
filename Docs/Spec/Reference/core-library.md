@@ -7226,8 +7226,13 @@ runs, so a setting computed by a call or read from a name is E2811.
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
-The high-level `web.form` value keeps its compiler-owned typed-model identity
-and `.set`/`.render` interface. Its model is a struct marked with the web
+`web.form(Model, action: handler)` derives the model's typed inputs at compile
+time and returns a `WebFormTyped`, whose methods core.web.forms declares. The
+ones that change the form (`set`, `set_async_validator`, `blur`, `focus`,
+`cancel`, `submit` and `no_script`) take `&self`, so a form that is filled in
+is bound with `:=`. `form.validate(.field, on:, with:)` names a model field
+with a leading-dot selector and returns a `WebFormValidationChain`, whose
+`render()` reports that field's result. Its model is a struct marked with the web
 module's `#Form` (`#Web.Form Checkout: struct { … }`); an unmarked model is
 E2474. The source `core.web.forms.typed` API remains
 separate for callers that explicitly supply `WebFormInput` and an action name.
