@@ -2427,13 +2427,15 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
 
 // A built-in type (`Int`, `[Int]`) has no nominal row: it meets a trait
 // outside the builtin family only through an impl written for it (`impl
-// Int.Named`), so without one the bound is unmet, not unknown. A builtin
-// family bound keeps its own rules, and any other type without a row stays
-// unknown.
+// Int.Named`), so without one the bound is unmet, not unknown. An exact
+// number literal's type (`Decimal`, `Fraction`) has no row where core.math
+// is not imported and is judged the same way. A builtin family bound keeps
+// its own rules, and any other type without a row stays unknown.
 sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
     builtin: if actual_resolved == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) -> true
-        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Named(name) -> name == "Decimal" || name == "Fraction"
+        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !builtin || sema_type_builtin_trait_symbol(bound_name) != None -> return None
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
@@ -2741,8 +2743,9 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
         return Val(sema_registration_quantity_bound_satisfied(graph, actual_resolved, bound_name))
     }
     // An exact number (a `3.5` literal is a Decimal) interpolates through its
-    // Core Display, so it is Renderable even where core.math declares no row.
-    if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") {
+    // Core Display, so it is Display, Printable and Renderable even where
+    // core.math is not imported and no row resolves.
+    if (bound_name == "Renderable" || bound_name == "Printable" || bound_name == "Display") && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None {
         return Val(true)
     }
     // A pool `ID<T>` is a compiler-owned slot and generation whose built-in

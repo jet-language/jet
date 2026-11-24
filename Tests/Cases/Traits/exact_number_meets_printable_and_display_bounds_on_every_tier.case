@@ -1,0 +1,17 @@
+# An exact number literal (a `Decimal`) at a `Printable` or `Display` bound
+# is accepted without importing core.math (#6839 c30). It is not refused with
+# "no trait named `Printable` is in scope", and it prints through its Core
+# Display on every tier.
+fixture: ExactNumberMeetsPrintableAndDisplayBoundsOnEveryTier.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "<2.5>\n<0.125>\n[2.5]\n<7>\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "<2.5>\n<0.125>\n[2.5]\n<7>\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "<2.5>\n<0.125>\n[2.5]\n<7>\n"
