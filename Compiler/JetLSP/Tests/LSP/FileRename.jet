@@ -1,0 +1,88 @@
+// `workspace/willRenameFiles`: before a `.jet` file or a folder moves, each
+// file import naming what moves is rewritten, open or saved, and a moved
+// file's own imports keep naming their files from its new place.
+use {
+    core.encoding.[Dyn]
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_lsp.[LSPChecked, LSPChecker, lsp_path_below, lsp_server]
+}
+
+// The saved workspace below `/w/app`: `main.jet` imports `parts/gear`.
+LSPFileRenameChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            LSPFixtureChecker{}.check(entry, overlays)
+        }
+
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            saved := [JetDriverSourceDocument]{}
+            if lsp_path_below("/w/app/main.jet", root) -> saved.push(JetDriverSourceDocument{path: "/w/app/main.jet", source: "use \"parts/gear\"\n"})
+            saved
+        }
+    }
+}
+
+// Each edit as `range newText`.
+lsp_test_file_edits: fn(rows: [Dyn]) -> [String] Never! {
+    edits := [String]{}
+    loop row in rows -> edits.push("{lsp_test_range(lsp_test_field(row, "range"))} {lsp_test_text(row, "newText")}")
+    edits
+}
+
+#Test("initialize advertises will-rename for .jet files and folders") {
+    server := lsp_test_server()
+    capabilities: lsp_test_field(lsp_test_result(server, "initialize", "{{}}"), "capabilities")
+    will_rename: lsp_test_field(lsp_test_field(lsp_test_field(capabilities, "workspace"), "fileOperations"), "willRename")
+    patterns := [String]{}
+    loop filter in lsp_test_rows(lsp_test_field(will_rename, "filters")) {
+        pattern: lsp_test_field(filter, "pattern")
+        patterns.push("{lsp_test_text(pattern, "glob")} {lsp_test_text(pattern, "matches")}")
+    }
+    assert_eq(patterns, [String]{"**/*.jet file", "** folder"})
+}
+
+#Test("renaming files rewrites the file imports that name them and a moved file's own imports") {
+    server := lsp_test_server()
+    lsp_test_open(server, "file:///w/main.jet", "use \"helper\"\nuse {{\n    store: \"./lib/store.jet\"\n    other: \"other\"\n}}\n")
+    lsp_test_open(server, "file:///w/lib/store.jet", "use \"deep/x\"\n")
+    files: "{{\"files\":[{{\"oldUri\":\"file:///w/helper.jet\",\"newUri\":\"file:///w/util/tools.jet\"}},{{\"oldUri\":\"file:///w/lib/store.jet\",\"newUri\":\"file:///w/store.jet\"}}]}}"
+    changes: lsp_test_field(lsp_test_result(server, "workspace/willRenameFiles", files), "changes")
+    assert_eq(lsp_test_member_count(changes), 2)
+    // The name `helper` took from its path stays, written as its alias.
+    assert_eq(lsp_test_file_edits(lsp_test_rows(lsp_test_field(changes, "file:///w/main.jet"))), [String]{"0:4-0:12 helper: \"util/tools\"", "2:11-2:28 \"./store.jet\""})
+    assert_eq(lsp_test_file_edits(lsp_test_rows(lsp_test_field(changes, "file:///w/lib/store.jet"))), [String]{"0:4-0:12 \"lib/deep/x\""})
+}
+
+#Test("moving a folder rewrites saved and open importers, bound to the versions they have") {
+    server := lsp_server(LSPFileRenameChecker{})
+    server.workspace_named = true
+    server.workspace_roots = [String]{"/w/app"}
+    server.document_changes = true
+    lsp_test_open(server, "file:///w/app/run.jet", "use {{\n    g: \"parts/gear.jet\"\n}}\n")
+    // Its import names a file outside the folder, which still lies one level up.
+    lsp_test_open(server, "file:///w/app/parts/gear.jet", "use \"../shared\"\n")
+    files: "{{\"files\":[{{\"oldUri\":\"file:///w/app/parts\",\"newUri\":\"file:///w/app/pieces\"}}]}}"
+    changed := [String]{}
+    loop change in lsp_test_rows(lsp_test_field(lsp_test_result(server, "workspace/willRenameFiles", files), "documentChanges")) {
+        document: lsp_test_field(change, "textDocument")
+        version: if lsp_test_field(document, "version") == .Null -> "saved" else -> "v{lsp_test_int(document, "version")}"
+        changed.push("{lsp_test_text(document, "uri")} {version} {lsp_test_file_edits(lsp_test_rows(lsp_test_field(change, "edits"))).join(";")}")
+    }
+    changed.sort()
+    assert_eq(changed, [String]{"file:///w/app/main.jet saved 0:4-0:16 \"pieces/gear\"", "file:///w/app/run.jet v1 1:7-1:23 \"pieces/gear.jet\""})
+}
+
+#Test("a rename no file import names changes nothing") {
+    server := lsp_test_main_server()
+    files: "{{\"files\":[{{\"oldUri\":\"file:///w/other.jet\",\"newUri\":\"file:///w/else.jet\"}}]}}"
+    assert(lsp_test_result(server, "workspace/willRenameFiles", files) == .Null, "no edits")
+}

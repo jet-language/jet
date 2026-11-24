@@ -97,6 +97,7 @@ LSP_TEST_PROVIDER_METHODS: [String]{
     "textDocument/onTypeFormatting",
     "textDocument/codeAction",
     "textDocument/completion",
+    "completionItem/resolve",
     "textDocument/signatureHelp",
     "textDocument/hover",
     "textDocument/definition",
@@ -124,6 +125,7 @@ LSP_TEST_PROVIDER_METHODS: [String]{
     "textDocument/prepareCallHierarchy",
     "callHierarchy/incomingCalls",
     "callHierarchy/outgoingCalls",
+    "workspace/willRenameFiles",
 }
 
 #Test("initialize speaks only LSP, and every advertised provider's request is answered") {
@@ -143,7 +145,6 @@ LSP_TEST_PROVIDER_METHODS: [String]{
 #Test("an unknown method is not found and shutdown is acknowledged") {
     server := lsp_test_server()
     assert_eq(lsp_test_error_code(server, "textDocument/moniker", "{{}}"), -32601)
-    assert_eq(lsp_test_error_code(server, "workspace/willRenameFiles", "{{}}"), -32601)
     assert(!server.shutdown, "no shutdown yet")
     assert(lsp_test_result(server, "shutdown", "{{}}") == .Null, "shutdown answers null")
     assert(server.shutdown, "shutdown is recorded")

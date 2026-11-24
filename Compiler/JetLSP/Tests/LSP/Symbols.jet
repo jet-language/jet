@@ -2,7 +2,7 @@
 // tokens, completion and code actions.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TextEdit, foundation_json_integer]
+    jet_foundation.[Span, TextEdit, foundation_json_integer, jet_error_json_encode_value]
     jet_parser.[parser_marker_placement_edits]
     jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member]
 }
@@ -249,6 +249,26 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN.replace("add(1, add(2, 3))", "add(1, 2)."))
     after_call: lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_TEST_MAIN_URI, 5, 14))
     assert_eq(lsp_test_rows(lsp_test_field(after_call, "items")).len(), 0)
+}
+
+#Test("a completion item gets its doc comment through completionItem/resolve") {
+    server := lsp_test_server()
+    uri: "file:///w/docs.jet"
+    lsp_test_open(server, uri, "/// Adds two numbers.\nadd: fn(left: Int, right: Int) -> Int {{ left + right }}\n\nrun: fn() -> Int {{\n    ad\n}}\n")
+    found := Dyn?{None}
+    loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 4, 6)), "items")) {
+        if lsp_test_text(item, "label") == "add" && lsp_test_int(item, "kind") == 3 -> found = Val(item.copy())
+    }
+    item: found ?? panic("`add` is offered")
+    assert(lsp_member(item, "documentation") == None, "the list carries no documentation")
+    resolved: lsp_test_result(server, "completionItem/resolve", jet_error_json_encode_value(item))
+    assert_eq(lsp_test_text(lsp_test_field(resolved, "documentation"), "value"), "Adds two numbers.")
+    assert_eq(lsp_test_text(resolved, "label"), "add")
+    assert_eq(lsp_test_text(resolved, "detail"), lsp_test_text(item, "detail"))
+    // An item that names no declaration comes back as it is.
+    plain: lsp_test_result(server, "completionItem/resolve", "{{\"label\":\"x\",\"kind\":1}}")
+    assert(lsp_member(plain, "documentation") == None, "nothing is added")
+    assert_eq(lsp_test_text(plain, "label"), "x")
 }
 
 #Test("completion offers the binding snippets at a statement's start in a block") {

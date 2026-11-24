@@ -25,6 +25,7 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/rangeFormatting" -> lsp_range_format_response(server, params, id)
         "textDocument/onTypeFormatting" -> lsp_on_type_format_response(server, params, id)
         "textDocument/completion" -> lsp_completion_response(server, params, id)
+        "completionItem/resolve" -> lsp_completion_resolve_response(server, params, id)
         "textDocument/signatureHelp" -> lsp_signature_help_response(server, params, id)
         "textDocument/hover" -> lsp_hover_response(server, params, id)
         "textDocument/definition" -> lsp_definition_response(server, params, id)
@@ -52,6 +53,7 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/prepareCallHierarchy" -> lsp_prepare_hierarchy_response(server, params, id, calls: true)
         "callHierarchy/incomingCalls" -> lsp_incoming_calls_response(server, params, id)
         "callHierarchy/outgoingCalls" -> lsp_outgoing_calls_response(server, params, id)
+        "workspace/willRenameFiles" -> lsp_will_rename_files_response(server, params, id)
         "resources/list" -> lsp_resources_list_response(server, id)
         "resources/read" -> lsp_resources_read_response(server, params, id)
         else -> lsp_error_response(id, -32601, "method not found: {method}")
@@ -98,7 +100,7 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"documentRangeFormattingProvider\":true",
         "\"documentOnTypeFormattingProvider\":{{\"firstTriggerCharacter\":\"\\n\",\"moreTriggerCharacter\":[\"}}\"]}}",
         "\"codeActionProvider\":{{\"codeActionKinds\":[\"quickfix\",\"refactor.rewrite\",\"source.organizeImports\"]}}",
-        "\"completionProvider\":{{\"triggerCharacters\":[\".\"],\"resolveProvider\":false}}",
+        "\"completionProvider\":{{\"triggerCharacters\":[\".\"],\"resolveProvider\":true}}",
         "\"signatureHelpProvider\":{{\"triggerCharacters\":[\"(\",\",\"]}}",
         "\"hoverProvider\":true",
         "\"definitionProvider\":true",
@@ -120,7 +122,9 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"inlayHintProvider\":true",
         "\"typeHierarchyProvider\":true",
         "\"callHierarchyProvider\":true",
-        "\"workspace\":{{\"workspaceFolders\":{{\"supported\":true,\"changeNotifications\":true}}}}",
+        // A `.jet` file or a folder about to be renamed or moved: the file
+        // imports naming what moves follow it.
+        "\"workspace\":{{\"workspaceFolders\":{{\"supported\":true,\"changeNotifications\":true}},\"fileOperations\":{{\"willRename\":{{\"filters\":[{{\"pattern\":{{\"glob\":\"**/*.jet\",\"matches\":\"file\"}}}},{{\"pattern\":{{\"glob\":\"**\",\"matches\":\"folder\"}}}}]}}}}}}",
     }
     lsp_response(id, "{{\"capabilities\":{{{capabilities.join(",")}}},\"serverInfo\":{{\"name\":\"jet\"}}}}")
 }

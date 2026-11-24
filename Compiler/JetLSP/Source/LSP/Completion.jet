@@ -8,7 +8,7 @@
 // of its marker's package come first.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, jet_error_json_encode_value, type_name]
     jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE]
     jet_semindex.[SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
     jet_sema.[SEMA_METHOD_IDIOMS, SemaMethodIdiom]
@@ -30,9 +30,45 @@ lsp_completion_item_kind: fn(kind: SemSymbolKind) -> Int Never! {
     }
 }
 
-lsp_completion_item_json: fn(symbol: SemSymbol) -> String Never! {
-    documentation: if symbol.summary == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(symbol.summary)}}}"
-    "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{documentation}}}"
+// A declaration's item names it in `data` when it has documentation, which
+// `completionItem/resolve` adds once the editor shows the item.
+lsp_completion_item_json: fn(symbol: SemSymbol, uri: String) -> String Never! {
+    data: if symbol.summary == "" -> "" else -> ",\"data\":{{\"uri\":{foundation_json_quote(uri)},\"identity\":{foundation_json_quote(symbol.identity)}}}"
+    "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{data}}}"
+}
+
+// `completionItem/resolve`: the item as sent, with the doc comment summary of
+// the declaration its `data` names as its documentation. An item that names
+// none, or a declaration the document's check no longer holds, comes back
+// as it is.
+lsp_completion_resolve_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    item: params ?? return lsp_error_response(id, -32602, "completionItem/resolve needs a completion item")
+    entries: if item == {
+        .Object(fields) -> fields
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
+            return lsp_error_response(id, -32602, "a completion item is an object")
+        }
+    }
+    summary: lsp_completion_summary(server, lsp_member(item, "data") ?? Dyn.Null)
+    if summary == "" -> return lsp_response(id, jet_error_json_encode_value(item))
+    rows := [String]{}
+    loop entry in entries {
+        if entry.key == "documentation" -> next
+        rows.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
+    }
+    rows.push("\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(summary)}}}")
+    lsp_response(id, "{{{rows.join(",")}}}")
+}
+
+// The summary of the declaration `data` names in its document's check, or "".
+lsp_completion_summary: fn(server: LSPServer, data: Dyn) -> String {
+    uri: lsp_text_member(data, "uri") ?? return ""
+    identity: lsp_text_member(data, "identity") ?? return ""
+    view: lsp_view_of(server, uri) ?? return ""
+    loop symbol in view.checked.symbols {
+        if symbol.identity == identity -> return symbol.summary.copy()
+    }
+    ""
 }
 
 // The binding snippets, as `label`, `detail` and snippet text.
@@ -282,7 +318,7 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
             incomplete = true
             break
         }
-        items.push(lsp_completion_item_json(symbol))
+        items.push(lsp_completion_item_json(symbol, view.uri))
     }
     // A foreign word completes only once a word is written, and only to a
     // method no item already offers.
