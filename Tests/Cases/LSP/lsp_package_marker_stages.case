@@ -22,8 +22,10 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/semanticToken
 recv lsp
 stdout: ~ "0,12,4,0,0" # `FROM`, a keyword 12 characters after `SELECT` on its line
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/inlayHint\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/app/main.jet\"},\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":7,\"character\":0}}}}"
-recv lsp
-stdout: ~ "{\"position\":{\"line\":5,\"character\":4},\"label\":\"rows of users\"}" # the hint hook's label at the block's end
+recv lsp until $.id = 5
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].position = {"line":5,"character":4}
+json: stdout doc $.result[0].label = "rows of users"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
 recv lsp
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{}}"

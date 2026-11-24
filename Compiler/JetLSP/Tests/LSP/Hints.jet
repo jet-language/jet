@@ -1,0 +1,56 @@
+// Inlay hints from the checked index: parameter names at a call's positional
+// arguments and, on a type, the methods an impl declares outside its body.
+// The fixture checker resolves free calls and impl heads but infers no local
+// types, so local type hints are covered by the LSP cases.
+LSP_TEST_HINTS_URI: "file:///w/hints.jet"
+
+// Line 5 calls `clamp` with two positional arguments, one that spells its
+// parameter's name, and a labeled one.
+LSP_TEST_HINTS: `clamp: fn(value: Int, low: Int, high: Int) -> Int {
+    value
+}
+
+run: fn(low: Int) -> Int {
+    clamp(12, low, high: 10) + clamp(1, 2, 3)
+}
+`
+
+LSP_TEST_BREADCRUMB_URI: "file:///w/widget.jet"
+
+// `size` is declared by an impl apart from `Widget`'s body on line 0.
+LSP_TEST_BREADCRUMB: `Widget: struct {
+    title: String
+}
+
+impl Widget {
+    size: fn(self) -> Int {
+        1
+    }
+}
+`
+
+// Each hint as `line:character label`.
+lsp_test_hints: fn(server: &LSPServer, uri: String, end_line: Int) -> [String] {
+    range: "\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":{end_line},\"character\":0}}}}"
+    hints := [String]{}
+    loop row in lsp_test_rows(lsp_test_result(server, "textDocument/inlayHint", "{{{lsp_test_text_document(uri)},{range}}}")) {
+        position: lsp_test_field(row, "position")
+        hints.push("{lsp_test_int(position, "line")}:{lsp_test_int(position, "character")} {lsp_test_text(row, "label")}")
+    }
+    hints
+}
+
+#Test("inlay hints name the parameter each positional argument binds") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_HINTS_URI, LSP_TEST_HINTS)
+    // The range runs past the document's last line and stops at its end.
+    assert_eq(lsp_test_hints(server, LSP_TEST_HINTS_URI, 40), [String]{"5:10 value: ", "5:37 value: ", "5:40 low: ", "5:43 high: "})
+    // A range over the first line holds none of them.
+    assert_eq(lsp_test_hints(server, LSP_TEST_HINTS_URI, 1), [String]{})
+}
+
+#Test("inlay hints show a type's methods declared in an impl apart from it") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_BREADCRUMB_URI, LSP_TEST_BREADCRUMB)
+    assert_eq(lsp_test_hints(server, LSP_TEST_BREADCRUMB_URI, 9), [String]{"0:6 + size: fn() -> Int"})
+}

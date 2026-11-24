@@ -1,8 +1,23 @@
-// Inlay hints: the `lsp.inlay_hints` hooks of a marked block's package label
-// places in its body; a request's range keeps the hints inside it.
+// Inlay hints: from the checked index, the type of each local, the parameter
+// each positional argument binds, and on a type each method an impl declares
+// outside its body; then the `lsp.inlay_hints` hooks of a marked block's
+// package label places in its body. A request's range keeps the hints inside
+// it, and a range past the end of the document stops at its end.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[TOOL_STAGE_LSP_INLAY_HINTS, foundation_json_quote]
+    jet_foundation.[ParamZone, Span, TOOL_STAGE_LSP_INLAY_HINTS, failure_contract_shown_return, foundation_byte_text, foundation_json_quote, type_name]
+    jet_lexer.[Lexed, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, token_text]
+    jet_semindex.[SemCallable, SemDef, SemIndex]
+}
+
+// InlayHintKind numbers of the protocol.
+LSP_INLAY_HINT_TYPE: 1
+LSP_INLAY_HINT_PARAMETER: 2
+
+LSPInlayHint: struct {
+    at: Int,
+    label: String,
+    kind: Int?,
 }
 
 lsp_inlay_hint_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
@@ -13,14 +28,151 @@ lsp_inlay_hint_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     end := bytes.len()
     if lsp_param(params, "range") == .Val(range) {
         requested: lsp_range_from_json(range) ?? return lsp_error_response(id, -32602, "range is malformed")
-        start = lsp_checked_offset_bytes(table, bytes, requested.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
-        end = lsp_checked_offset_bytes(table, bytes, requested.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
+        start = lsp_checked_offset_bytes(table, bytes, requested.start) ?? return lsp_response(id, "[]")
+        end = lsp_checked_offset_bytes(table, bytes, requested.end) ?? bytes.len()
     }
-    hints := [String]{}
-    loop row in server.stage_items(view, TOOL_STAGE_LSP_INLAY_HINTS) {
-        if row.at < start || row.at > end -> next
-        at: lsp_byte_offset_in_table(bytes, table, row.at)
-        hints.push("{{\"position\":{{\"line\":{at.line},\"character\":{at.character}}},\"label\":{foundation_json_quote(row.label)}}}")
+    hints := lsp_checked_inlay_hints(view)
+    staged: server.stage_items(view, TOOL_STAGE_LSP_INLAY_HINTS)
+    loop row in staged.move() {
+        hints.push(LSPInlayHint{at: row.at, label: row.label, kind: None})
     }
-    lsp_response(id, "[{hints.join(",")}]")
+    hints.sort_by(fn(left: LSPInlayHint, right: LSPInlayHint) { left.at <=> right.at })
+    rows := [String]{}
+    loop hint in hints {
+        if hint.at < start || hint.at > end -> next
+        at: lsp_byte_offset_in_table(bytes, table, hint.at)
+        kind: if hint.kind == .Val(value) -> ",\"kind\":{value}" else -> ""
+        rows.push("{{\"position\":{{\"line\":{at.line},\"character\":{at.character}}},\"label\":{foundation_json_quote(hint.label)}{kind},\"paddingLeft\":false,\"paddingRight\":false}}")
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// The hints the check of the document's current text supports.
+lsp_checked_inlay_hints: fn(view: LSPView) -> [LSPInlayHint] Never! {
+    hints := [LSPInlayHint]{}
+    index: view.checked.index ?? return hints
+    module_path: view.module_path ?? return hints
+    bytes: view.doc.text.bytes()
+    loop definition in index.definitions {
+        def: definition.def
+        if def.module_path != module_path -> next
+        // A definition a derive or marker generated has no written name here.
+        if def.def_span.end > bytes.len() || foundation_byte_text(bytes, def.def_span.start, def.def_span.end) != def.name -> next
+        if def.kind == {
+            .Local(_, ty) -> {
+                if ty == .Val(shown) -> hints.push(LSPInlayHint{at: def.def_span.end, label: ": {type_name(shown)}", kind: Val(LSP_INLAY_HINT_TYPE)})
+            }
+            .Struct(_, _) | .Enum(_, _) -> lsp_breadcrumb_hints(view.checked, index, def, hints)
+            .Module | .Function(_) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Param(_) -> {}
+        }
+    }
+    lsp_parameter_hints(view, index, hints)
+    hints
+}
+
+// On a type's name, each method an impl written outside the type's
+// declaration adds, with its checked signature, so a reader of the type sees
+// what was scattered. Methods a derive generated have no written name.
+lsp_breadcrumb_hints: fn(checked: LSPChecked, index: SemIndex, def: SemDef, hints: &[LSPInlayHint]) Never! {
+    declaration := Span?{None}
+    loop node in index.nodes {
+        if node.class != "item" || node.module_path != def.module_path -> next
+        if node.span.start > def.def_span.start || def.def_span.end > node.span.end -> next
+        if declaration == .Val(found) {
+            if node.span.end - node.span.start >= found.end - found.start -> next
+        }
+        declaration = Val(node.span)
+    }
+    loop member in index.members {
+        if member.owner != def.name || member.kind != "method" -> next
+        if member.origin != "inherent_impl" && member.origin != "trait_impl" -> next
+        if member.module_path == def.module_path && declaration == .Val(span) {
+            if span.start <= member.span.start && member.span.end <= span.end -> next
+        }
+        written: checked.modules[lsp_module_index(checked, member.module_path) ?? next].source.bytes()
+        if member.span.end > written.len() || foundation_byte_text(written, member.span.start, member.span.end) != member.name -> next
+        loop definition in index.definitions {
+            if definition.def.identity != member.identity -> next
+            if definition.def.kind == .Function(callable) {
+                hints.push(LSPInlayHint{at: def.def_span.end, label: "+ {lsp_method_breadcrumb(member.name, callable)}", kind: None})
+            }
+            break
+        }
+    }
+}
+
+// `name: fn(params) -[effects]> Result`: the checked effect row is shown
+// whole, so a method that performs none reads `-[]>`.
+lsp_method_breadcrumb: fn(name: String, callable: SemCallable) -> String Never! {
+    params := [String]{}
+    loop param in callable.params -> params.push("{param.name}: {type_name(param.ty)}")
+    arrow := " ->"
+    if callable.effects == .Val(rows) {
+        arrow = " -["
+        separator := ""
+        loop row in rows {
+            root: row.name.split(".").to_list()[0]
+            if root == "Panic" || root == "Mem" -> next
+            arrow = "{arrow}{separator}{row.name}"
+            separator = ", "
+        }
+        arrow = "{arrow}]>"
+    }
+    shown_return: if callable.failure_contract == .Val(contract) -> failure_contract_shown_return(contract) else -> callable.return_type
+    result: if shown_return == .Val(ty) -> " {type_name(ty)}" else -> " Unit"
+    "{name}: fn({params.join(", ")}){arrow}{result}"
+}
+
+// Each call's positional arguments, named by the parameter they bind. A
+// labeled argument, a rest argument, and an argument that already spells
+// its parameter's name get none.
+lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: &[LSPInlayHint]) Never! {
+    tokens: view.lexed.tokens
+    loop (position, token) in tokens {
+        if token.kind != TOKEN_IDENT || position + 1 >= tokens.len() || tokens[position + 1].kind != TOKEN_LPAREN -> next
+        target: lsp_target_at(view, token.span.start) ?? next
+        def: lsp_definition_at(index, target) ?? next
+        if def.kind == .Function(callable) {
+            loop (argument, first) in lsp_call_arguments(view.lexed, position + 2) {
+                if argument >= callable.params.len() -> break
+                param: callable.params[argument]
+                if param.zone == ParamZone.LabelOnly || param.variadic -> break
+                if first + 1 < tokens.len() && tokens[first].kind == TOKEN_IDENT && tokens[first + 1].kind == TOKEN_COLON -> next
+                if tokens[first].kind == TOKEN_IDENT && token_text(view.lexed.tables, tokens[first]) == param.name {
+                    if first + 1 < tokens.len() && (tokens[first + 1].kind == TOKEN_COMMA || tokens[first + 1].kind == TOKEN_RPAREN) -> next
+                }
+                hints.push(LSPInlayHint{at: tokens[first].span.start, label: "{param.name}: ", kind: Val(LSP_INLAY_HINT_PARAMETER)})
+            }
+        }
+    }
+}
+
+// The first token of each argument of the call whose `(` precedes `first`;
+// an unclosed call has none.
+lsp_call_arguments: fn(lexed: Lexed, first: Int) -> [Int] Never! {
+    tokens: lexed.tokens
+    starts := [Int]{}
+    depth := 0
+    expecting := true
+    cursor := first
+    loop cursor < tokens.len() {
+        kind: tokens[cursor].kind
+        if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
+            cursor += 1
+            next
+        }
+        if depth == 0 && kind == TOKEN_RPAREN -> return starts
+        if depth == 0 && expecting {
+            starts.push(cursor)
+            expecting = false
+        }
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            if depth == 0 -> return [Int]{}
+            depth -= 1
+        }
+        if kind == TOKEN_COMMA && depth == 0 -> expecting = true
+        cursor += 1
+    }
+    [Int]{}
 }
