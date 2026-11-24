@@ -636,19 +636,34 @@ SemaComptimeBodySource: struct {
     // like a local value (SemaComptimeItemSource.local_binding).
     local_binding: Bool{false},
     // A marker's `check` rule heard at a call (Calls/CheckRules.jet): the
-    // driver runs every such site of one rule in one batch, never this
-    // source's own expression.
+    // driver runs every such site of one rule in one batch, from the
+    // site's call row, never this source's own expression or prepared
+    // locals (a rule site has none).
     rule: SemaComptimeRuleSite?{None},
     // The call's checks held their errors until the rule answers: a
     // rejection replaces them.
     rule_held: Bool{false},
 }
 
-// Which rule a heard call waits on: the `check` of `marker`, declared in the
-// module `module_identity`.
+// Which rule a heard call waits on, the `check` of `marker` declared in the
+// module `module_identity` on the marker's `value`, and the call it hears.
 SemaComptimeRuleSite: struct {
     module_identity: ModuleID,
     marker: String,
+    value: TComptimeValue,
+    call: SemaCallRuleHeard,
+}
+
+// One heard call as its batch row (Calls/CheckRules.jet
+// SemaCallRuleColumns): `words` name the call's texts, argument types and
+// known argument values by index into its own `texts`, `types` and
+// `values`, which its batch renumbers into the batch's. The call's caller,
+// callee, module, file and name are its first five texts.
+SemaCallRuleHeard: struct {
+    words: [Int],
+    texts: [String],
+    types: [TComptimeValue],
+    values: [TComptimeValue],
 }
 
 SemaComptimeBodyValue: struct {

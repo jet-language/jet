@@ -7,7 +7,7 @@
 // in declaration order (an enum its variant's position first), and a get,
 // which reads them back in that order. The hand-written halves are in
 // JetFoundation Facts/BodyCodecRows.jet.
-use jet_foundation.[BodyCodecIn, BodyCodecOut, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, SharedLifetime, SymbolKind, SymbolLocalKeys, TEffectFacts, TargetDMAOperation, TargetDMAOperationFact, TargetDMAOwner, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetRegisterAccessFact, TargetRegisterOperation, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_int, body_codec_get_list_string, body_codec_get_list_tcapture, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_coremarkerapplication, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_opt_type, body_codec_get_registerwidth, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbollocalkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_int, body_codec_put_list_string, body_codec_put_list_tcapture, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_coremarkerapplication, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_opt_type, body_codec_put_registerwidth, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbollocalkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfunckind, body_codec_put_type]
+use jet_foundation.[BodyCodecIn, BodyCodecOut, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, SharedLifetime, SymbolKind, SymbolLocalKeys, TEffectFacts, TargetDMAOperation, TargetDMAOperationFact, TargetDMAOwner, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetRegisterAccessFact, TargetRegisterOperation, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_int, body_codec_get_list_int, body_codec_get_list_string, body_codec_get_list_tcapture, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_coremarkerapplication, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_opt_type, body_codec_get_registerwidth, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbollocalkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_int, body_codec_put_list_int, body_codec_put_list_string, body_codec_put_list_tcapture, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_coremarkerapplication, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_opt_type, body_codec_put_registerwidth, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbollocalkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfunckind, body_codec_put_type]
 
 body_codec_put_opt_semafunctionresult: fn(out: &BodyCodecOut, value: SemaFunctionResult?) Never! {
     if value == .Val(inner) {
@@ -645,12 +645,31 @@ body_codec_get_semacomptimepreparedlocal: fn(bytes: [U8], input: &BodyCodecIn) -
 body_codec_put_semacomptimerulesite: fn(out: &BodyCodecOut, value: SemaComptimeRuleSite) Never! {
     body_codec_put_moduleid(out, value.module_identity)
     body_codec_put_string(out, value.marker)
+    body_codec_put_tcomptimevalue(out, value.value)
+    body_codec_put_semacallruleheard(out, value.call)
 }
 
 body_codec_get_semacomptimerulesite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeRuleSite Never! {
     f0: body_codec_get_moduleid(bytes, input)
     f1: body_codec_get_string(bytes, input)
-    SemaComptimeRuleSite{module_identity: f0, marker: f1}
+    f2: body_codec_get_tcomptimevalue(bytes, input)
+    f3: body_codec_get_semacallruleheard(bytes, input)
+    SemaComptimeRuleSite{module_identity: f0, marker: f1, value: f2, call: f3}
+}
+
+body_codec_put_semacallruleheard: fn(out: &BodyCodecOut, value: SemaCallRuleHeard) Never! {
+    body_codec_put_list_int(out, value.words)
+    body_codec_put_list_string(out, value.texts)
+    body_codec_put_list_tcomptimevalue(out, value.types)
+    body_codec_put_list_tcomptimevalue(out, value.values)
+}
+
+body_codec_get_semacallruleheard: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallRuleHeard Never! {
+    f0: body_codec_get_list_int(bytes, input)
+    f1: body_codec_get_list_string(bytes, input)
+    f2: body_codec_get_list_tcomptimevalue(bytes, input)
+    f3: body_codec_get_list_tcomptimevalue(bytes, input)
+    SemaCallRuleHeard{words: f0, texts: f1, types: f2, values: f3}
 }
 
 body_codec_put_list_semacomputecallfact: fn(out: &BodyCodecOut, values: [SemaComputeCallFact]) Never! {

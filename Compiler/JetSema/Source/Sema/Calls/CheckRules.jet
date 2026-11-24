@@ -3,16 +3,15 @@
 // a method called on a type carrying it. The rule runs before the call's
 // arguments bind. Its answer, a `CompilerRejection?`, is a body comptime
 // value like any `#run` site's: the first check of a body stages the call
-// (SemaComptimeBodySource.rule) and the driver runs every staged call of
-// one rule in one batch (sema_call_rule_batches), so the calls travel as
-// one batch's prepared columns. A check that finds the answer landed reads
-// it: an `.Error` rejection is the call's one diagnostic and replaces its
-// ordinary checks; no rejection leaves the call to them.
+// (SemaComptimeBodySource.rule) as its row, and the driver runs every
+// staged call of one rule in one batch (sema_call_rule_batches), so the
+// calls travel as one batch's prepared columns. A check that finds the
+// answer landed reads it: an `.Error` rejection is the call's one
+// diagnostic and replaces its ordinary checks; no rejection leaves the
+// call to them.
 use {
     jet_foundation.[
-        AST_EMPTY_CALL_ARG_FLAGS,
         AST_NODE_GENERATED,
-        AccessConvention,
         BodyEnumPayload,
         CallArg,
         DIAGNOSTIC_ERROR,
@@ -46,10 +45,7 @@ use {
     jet_parser.[parse_generated_source]
 }
 
-// The prepared locals a heard call's own site declares, and the columns a
-// batch declares (SemaCallRuleColumns).
-SEMA_CALL_RULE_LOCAL: "__jet_rule"
-SEMA_CALL_RULE_CALL_LOCAL: "__jet_call"
+// The columns a batch declares (SemaCallRuleColumns).
 SEMA_CALL_RULE_RULES_LOCAL: "__jet_rules"
 SEMA_CALL_RULE_ROWS_LOCAL: "__jet_call_rows"
 SEMA_CALL_RULE_WORDS_LOCAL: "__jet_call_words"
@@ -188,17 +184,14 @@ sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: &&[Diagnostic], con
     false
 }
 
-// Stages one rule's site at a call: the rule's marker value and the call as
-// prepared locals, read by `__jet_rule.check(__jet_call)`.
-sema_call_rule_stage: fn(context: &SemaCheckContext, environment: SemaScopeEnvironment, owner: String, rule: SemaCallRule, call: TComptimeValue, site_span: Span) Never! {
+// Stages one rule's site at a call: the rule's marker value and the call's
+// row, which the driver's batch of the rule hears (sema_call_rule_batches).
+sema_call_rule_stage: fn(context: &SemaCheckContext, environment: SemaScopeEnvironment, owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
     destination_key: sema_comptime_body_destination_key(owner, rule.span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
     if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
         if sema_comptime_key_row(context.comptime_body_source_rows[slot], key) != None -> return
     }
-    rule_local: Expr.Ident{name: SEMA_CALL_RULE_LOCAL, span: rule.span, id: AST_NODE_GENERATED}
-    call_local: Expr.Ident{name: SEMA_CALL_RULE_CALL_LOCAL, span: site_span, id: AST_NODE_GENERATED}
-    heard: CallArg{convention: AccessConvention.Read, expr: call_local, span: site_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
     sema_comptime_body_source_append(context, SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: owner,
@@ -206,24 +199,22 @@ sema_call_rule_stage: fn(context: &SemaCheckContext, environment: SemaScopeEnvir
         key: key,
         destination_key: destination_key,
         name: "{rule.marker}.check",
-        expression: Expr.MethodCall{receiver: rule_local, method: "check", method_span: rule.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{heard}, id: AST_NODE_GENERATED},
+        expression: Expr.Unit{span: site_span, id: AST_NODE_GENERATED},
         expected_type: Type.Option{inner: Type.Named{name: "CompilerRejection"}},
         span: rule.span,
         site_span: site_span,
-        prepared: [SemaComptimePreparedLocal]{
-            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_LOCAL, ty: Type.Named{name: rule.marker}, value: rule.value, span: rule.span},
-            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_CALL_LOCAL, ty: Type.Named{name: "CompilerCall"}, value: call, span: site_span},
-        },
-        rule: Val(SemaComptimeRuleSite{module_identity: rule.module_identity, marker: rule.marker}),
+        prepared: [SemaComptimePreparedLocal]{},
+        rule: Val(SemaComptimeRuleSite{module_identity: rule.module_identity, marker: rule.marker, value: rule.value, call: call}),
     })
 }
 
-// The CompilerCall a rule hears: its caller and callee identities, module and
-// span (from the name to the last argument), the `name` it was written with,
-// its `args` in written order and its `receiver`. An argument's `type` is
-// the type its own check gives it (`_` when that check fails), and its
-// `value` the Dyn its value encodes to when the build knows that value
-// (sema_rule_value_dyn); the `function` it names is None.
+// The row of the CompilerCall a rule hears (SemaCallRuleHeard): its caller
+// and callee identities, module and span (from the name to the last
+// argument), the `name` it was written with, its `receiver` and its `args`
+// in written order. An argument's `type` is the type its own check gives it
+// (`_` when that check fails), and its `value` the Dyn its value encodes to
+// when the build knows that value (sema_rule_value_dyn); the `function` it
+// names is None.
 sema_rule_call_value: fn(
     callee: SymbolID?,
     name: String,
@@ -240,10 +231,10 @@ sema_rule_call_value: fn(
     state: &SemaOwnershipState,
     tail_store: &SemaStatementTailStore,
     context: &SemaCheckContext,
-) -> TComptimeValue {
+) -> SemaCallRuleHeard {
     file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-    caller := owner
-    callee_identity := name
+    caller := "{owner}"
+    callee_identity := "{name}"
     if program.registration_graph == .Val(graph) {
         caller = sema_rule_identity(graph, owner, context.rule_identities)
         if callee == .Val(id) {
@@ -251,7 +242,19 @@ sema_rule_call_value: fn(
             callee_identity = sema_rule_identity(graph, callee_key, context.rule_identities)
         }
     }
-    values := [TComptimeValue]{}
+    heard := SemaCallRuleHeard{
+        words: [Int]{0, 0, 1, 2, 3, span.start, span.end, 4, name_span.start, name_span.end, args.len(), 0},
+        texts: [String]{caller, callee_identity, "{environment.module_name}", file, "{name}"},
+        types: [TComptimeValue]{},
+        values: [TComptimeValue]{},
+    }
+    if {
+        receiver_type == .Val(ty) -> {
+            heard.words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] = 1
+            sema_rule_call_arg(heard, None, ty, receiver_known, receiver_span, environment, program)
+        }
+        else -> heard.words.extend([Int]{0, 0, 0, 0, 0})
+    }
     loop argument in args {
         probe_diagnostics := [Diagnostic]{}
         probed: sema_probe_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
@@ -262,21 +265,9 @@ sema_rule_call_value: fn(
         }
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
-        values.push(sema_rule_call_arg(label, ty, known, argument.span, file, environment, program))
+        sema_rule_call_arg(heard, label, ty, known, argument.span, environment, program)
     }
-    receiver: if receiver_type == .Val(ty) -> sema_comptime_reflection_some(sema_rule_call_arg(None, ty, receiver_known, receiver_span, file, environment, program)) else -> sema_comptime_reflection_none(Type.Named{name: "CompilerArg"})
-    TComptimeValue.Struct{
-        type_name: "CompilerCall",
-        fields: [TComptimeField]{
-            TComptimeField{name: "caller", value: sema_compiler_index_string(caller)},
-            TComptimeField{name: "callee", value: sema_compiler_index_string(callee_identity)},
-            TComptimeField{name: "module", value: sema_compiler_index_string(environment.module_name)},
-            TComptimeField{name: "span", value: sema_compiler_index_span(span, file)},
-            TComptimeField{name: "name", value: TComptimeValue.Struct{type_name: "CompilerName", fields: [TComptimeField]{TComptimeField{name: "text", value: sema_compiler_index_string(name)}, TComptimeField{name: "span", value: sema_compiler_index_span(name_span, file)}}}},
-            TComptimeField{name: "args", value: TComptimeValue.List{values: values}},
-            TComptimeField{name: "receiver", value: receiver},
-        },
-    }
+    heard
 }
 
 // The identities a body's heard calls name, by declaration key
@@ -300,23 +291,24 @@ sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: &SemaRu
     identity
 }
 
-// One CompilerArg of a heard call, whose value the build knows as `known`.
-sema_rule_call_arg: fn(label: String?, ty: Type, known: TComptimeValue?, span: Span, file: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue {
-    written: if label == .Val(text) -> sema_comptime_reflection_some(sema_compiler_index_string(text)) else -> sema_comptime_reflection_none(Type.String)
-    value := sema_comptime_reflection_none(Type.Named{name: "Dyn"})
+// Appends the words of one CompilerArg of a heard call, whose value the
+// build knows as `known`, to `heard`.
+sema_rule_call_arg: fn(heard: &SemaCallRuleHeard, label: &&String?, ty: Type, known: TComptimeValue?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) Never! {
+    written := 0
+    if label.move() == .Val(text) {
+        heard.texts.push(text.move())
+        written = heard.texts.len()
+    }
+    value := 0
     if known == .Val(computed) && program.registration_graph == .Val(graph) {
-        if sema_rule_value_dyn(graph, environment.module_row, ty, computed, 0) == .Val(tree) -> value = sema_comptime_reflection_some(tree)
+        dyn: sema_rule_value_dyn(graph, environment.module_row, ty, computed, 0)
+        if dyn.move() == .Val(tree) {
+            heard.values.push(tree.move())
+            value = heard.values.len()
+        }
     }
-    TComptimeValue.Struct{
-        type_name: "CompilerArg",
-        fields: [TComptimeField]{
-            TComptimeField{name: "label", value: written},
-            TComptimeField{name: "type", value: sema_comptime_reflection_type_id_in(program.registration_graph, environment.module_row, ty)},
-            TComptimeField{name: "value", value: value},
-            TComptimeField{name: "function", value: sema_comptime_reflection_none(Type.Named{name: "FunctionInfo"})},
-            TComptimeField{name: "span", value: sema_compiler_index_span(span, file)},
-        },
-    }
+    heard.types.push(sema_comptime_reflection_type_id_in(program.registration_graph, environment.module_row, ty))
+    heard.words.extend([Int]{written, heard.types.len() - 1, value, span.start, span.end})
 }
 
 // What the build knows of a heard call's argument or receiver `value`
@@ -740,12 +732,14 @@ sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: 
     false
 }
 
-// One run's calls of one rule, heard at once by the batch item keyed `key`
+// One run's calls of one rule, the `check` of `marker` declared in
+// `module_identity`, heard at once by the batch item keyed `key`
 // (sema_call_rule_batch_source), whose value answers each call in order;
 // `sites` are those calls' own sources, in that order, at their `rows` of
 // the pending sources.
 SemaCallRuleBatch: struct {
-    rule: SemaComptimeRuleSite,
+    module_identity: ModuleID,
+    marker: String,
     span: Span,
     key: String,
     sites: [SemaCallRuleBatchSite],
@@ -760,19 +754,17 @@ SemaCallRuleBatchSite: struct {
 
 // The batches the rule sites among `pending` make: one per rule (its
 // declaring module and marker), in the order the sites were met, each
-// appended to `sources` as one item. Each site's prepared values move into
-// its batch's columns; the other sources stay as they are.
+// appended to `sources` as one item. Each site's marker value and call row
+// move into its batch's columns; the other sources stay as they are.
 sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: &[SemaComptimeBodySource], pass: Int, sources: &[SemaComptimeItemSource]) -> [SemaCallRuleBatch] {
     batches := [SemaCallRuleBatch]{}
     loop index in 0..<pending.len() {
         site: pending[index].rule ?? next
-        if pending[index].prepared.len() != 2 -> next
         // A run holds few rules, so a batch is found by a scan.
         row := 0
-        loop row < batches.len() && (batches[row].rule.module_identity != site.module_identity || batches[row].rule.marker != site.marker) -> row += 1
+        loop row < batches.len() && (batches[row].module_identity != site.module_identity || batches[row].marker != site.marker) -> row += 1
         if row == batches.len() {
-            rule: SemaComptimeRuleSite{module_identity: site.module_identity, marker: "{site.marker}"}
-            batches.push(SemaCallRuleBatch{rule: rule, span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
+            batches.push(SemaCallRuleBatch{module_identity: site.module_identity, marker: "{site.marker}", span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
         }
         batches[row].rows.push(index)
         batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key})
@@ -780,7 +772,7 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: &[SemaComptime
     loop batch in batches {
         columns := SemaCallRuleColumns{rules: [TComptimeValue]{}, rows: [Int]{}, words: [Int]{}, names: name_column_table(batch.rows.len()), types: [TComptimeValue]{}, values: [TComptimeValue]{}}
         loop row in batch.rows {
-            sema_call_rule_columns_add(columns, pending[row].prepared[0].value.move(), pending[row].prepared[1].value.move())
+            sema_call_rule_columns_add(columns, pending[row].rule.move())
         }
         sources.push(sema_call_rule_batch_source(graph, batch, pass, columns))
     }
@@ -809,105 +801,48 @@ SemaCallRuleColumns: struct {
 // else its text's index plus one), type, known value (0 when the build does
 // not know it, else its index plus one), and span start and end; its span's
 // file is the call's.
+SEMA_CALL_RULE_COUNT_WORD: 10
+SEMA_CALL_RULE_HAS_RECEIVER_WORD: 11
 SEMA_CALL_RULE_RECEIVER_WORD: 12
 SEMA_CALL_RULE_ARGS_WORD: 17
 SEMA_CALL_RULE_ARG_WORDS: 5
 
-// Appends one staged call, the CompilerCall `call` (sema_rule_call_value)
-// heard by the marker value `rule`, as a row of `columns`.
-sema_call_rule_columns_add: fn(columns: &SemaCallRuleColumns, rule: &&TComptimeValue, call: &&TComptimeValue) Never! {
-    rule_index := 0
-    loop rule_index < columns.rules.len() && columns.rules[rule_index] != rule -> rule_index += 1
-    if rule_index == columns.rules.len() -> columns.rules.push(rule.move())
-    head := [Int]{rule_index, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    receiver := [Int]{0, 0, 0, 0, 0}
-    arguments := [Int]{}
-    fields := [TComptimeField]{}
-    if call.move() == .Struct(_, written) -> fields = written.move()
-    // Each field is popped (an owned move), so its arguments and receiver
-    // move into the columns.
-    loop fields.len() > 0 {
-        field := fields.pop() ?? break
-        if {
-            field.name == "caller" -> head[1] = sema_call_rule_columns_text(columns, field.value)
-            field.name == "callee" -> head[2] = sema_call_rule_columns_text(columns, field.value)
-            field.name == "module" -> head[3] = sema_call_rule_columns_text(columns, field.value)
-            field.name == "span" -> {
-                head[4] = sema_call_rule_columns_field_text(columns, field.value, "file")
-                span: sema_call_rule_span(field.value)
-                head[5] = span.start
-                head[6] = span.end
-            }
-            field.name == "name" -> {
-                head[7] = sema_call_rule_columns_field_text(columns, field.value, "text")
-                span: sema_call_rule_record_span(field.value, "span")
-                head[8] = span.start
-                head[9] = span.end
-            }
-            field.name == "args" -> {
-                if field.value.move() == .List(values) {
-                    written_args := values.move()
-                    head[10] = written_args.len()
-                    written_args.reverse()
-                    loop written_args.len() > 0 {
-                        arg := written_args.pop() ?? break
-                        sema_call_rule_columns_arg(columns, arg.move(), arguments)
-                    }
-                }
-            }
-            field.name == "receiver" -> {
-                if field.value.move() == .Present(value) {
-                    head[11] = 1
-                    receiver = [Int]{}
-                    sema_call_rule_columns_arg(columns, value.move(), receiver)
-                }
-            }
-            else -> {}
-        }
+// The words that name a text: caller, callee, module, file and name.
+SEMA_CALL_RULE_TEXT_WORDS: [Int]{1, 2, 3, 4, 7}
+
+// Moves one staged site's marker value and call row into `columns`,
+// renumbering the row's own text, type and value indices into the batch's.
+sema_call_rule_columns_add: fn(columns: &SemaCallRuleColumns, staged: &&SemaComptimeRuleSite?) Never! {
+    site: staged.move() ?? return
+    rule := 0
+    loop rule < columns.rules.len() && columns.rules[rule] != site.value -> rule += 1
+    if rule == columns.rules.len() -> columns.rules.push(site.value.move())
+    call := site.call.move()
+    texts: loop text in call.texts -> name_index(name_intern(columns.names, text))
+    // The call's types, popped (an owned move) from its last.
+    types := [Int]{}
+    loop call.types.len() > 0 {
+        ty: call.types.pop() ?? break
+        types.push(sema_call_rule_columns_type(columns, ty.move()))
     }
+    types.reverse()
+    values: columns.values.len()
+    columns.values.extend(call.values.move())
+    words := call.words.move()
+    words[0] = rule
+    loop at in SEMA_CALL_RULE_TEXT_WORDS -> words[at] = texts[words[at]]
+    if words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 1 -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_RECEIVER_WORD, texts, types, values)
+    loop arg in 0..<words[SEMA_CALL_RULE_COUNT_WORD] -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, texts, types, values)
     columns.rows.push(columns.words.len())
-    columns.words.extend(head.move())
-    columns.words.extend(receiver.move())
-    columns.words.extend(arguments.move())
+    columns.words.extend(words.move())
 }
 
-// Appends one CompilerArg's words (sema_rule_call_arg) to `words`.
-sema_call_rule_columns_arg: fn(columns: &SemaCallRuleColumns, arg: &&TComptimeValue, words: &[Int]) Never! {
-    label := 0
-    type_index := 0
-    value_index := 0
-    start := 0
-    end := 0
-    fields := [TComptimeField]{}
-    if arg.move() == .Struct(_, written) -> fields = written.move()
-    loop fields.len() > 0 {
-        field := fields.pop() ?? break
-        if {
-            field.name == "label" -> {
-                if field.value == .Present(text) -> label = sema_call_rule_columns_text(columns, text) + 1
-            }
-            field.name == "type" -> type_index = sema_call_rule_columns_type(columns, field.value.move())
-            field.name == "value" -> {
-                if field.value.move() == .Present(known) {
-                    columns.values.push(known.move())
-                    value_index = columns.values.len()
-                }
-            }
-            field.name == "span" -> {
-                span: sema_call_rule_span(field.value)
-                start = span.start
-                end = span.end
-            }
-            else -> {}
-        }
-    }
-    words.extend([Int]{label, type_index, value_index, start, end})
-}
-
-// The index of a text among the batch's texts.
-sema_call_rule_columns_text: fn(columns: &SemaCallRuleColumns, value: TComptimeValue) -> Int Never! {
-    if value == .String(text) -> return name_index(name_intern(columns.names, text))
-    0
+// Renumbers the argument words at `at` of a call row by its texts' and
+// types' batch indices, its values starting at `values` in the batch's.
+sema_call_rule_columns_arg: fn(words: &[Int], at: Int, texts: [Int], types: [Int], values: Int) Never! {
+    if words[at] > 0 -> words[at] = texts[words[at] - 1] + 1
+    words[at + 1] = types[words[at + 1]]
+    if words[at + 2] > 0 -> words[at + 2] = words[at + 2] + values
 }
 
 // The index of a TypeId among the batch's types: a batch's arguments have
@@ -920,55 +855,20 @@ sema_call_rule_columns_type: fn(columns: &SemaCallRuleColumns, ty: &&TComptimeVa
     columns.types.len() - 1
 }
 
-// The index of the text field `name` of the record `value` among the
-// batch's texts.
-sema_call_rule_columns_field_text: fn(columns: &SemaCallRuleColumns, value: TComptimeValue, name: String) -> Int Never! {
-    if value == .Struct(_, fields) {
-        loop field in fields {
-            if field.name == name -> return sema_call_rule_columns_text(columns, field.value)
-        }
-    }
-    0
-}
-
-// The start and end of the SourceSpan `value`.
-sema_call_rule_span: fn(value: TComptimeValue) -> Span Never! {
-    span := Span{start: 0, end: 0}
-    if value == .Struct(_, fields) {
-        loop field in fields {
-            if field.value == .Int(number) {
-                if field.name == "start" -> span.start = number
-                if field.name == "end" -> span.end = number
-            }
-        }
-    }
-    span
-}
-
-// The start and end of the SourceSpan field `name` of the record `value`.
-sema_call_rule_record_span: fn(value: TComptimeValue, name: String) -> Span Never! {
-    if value == .Struct(_, fields) {
-        loop field in fields {
-            if field.name == name -> return sema_call_rule_span(field.value)
-        }
-    }
-    Span{start: 0, end: 0}
-}
-
 // A rule's batch item, in the rule's own module, holding the batch's
 // columns as prepared locals.
 sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRuleBatch, pass: Int, columns: &&SemaCallRuleColumns) -> SemaComptimeItemSource {
     file := ""
-    if sema_registration_module_index(graph, batch.rule.module_identity) == .Val(row) -> file = "{graph.modules[row].source_file}"
-    marker: Type.Named{name: batch.rule.marker}
+    if sema_registration_module_index(graph, batch.module_identity) == .Val(row) -> file = "{graph.modules[row].source_file}"
+    marker: Type.Named{name: batch.marker}
     rows: TComptimeValue.List{values: loop offset in columns.rows -> TComptimeValue.Int{value: offset}}
     words: TComptimeValue.List{values: loop word in columns.words -> TComptimeValue.Int{value: word}}
     texts: TComptimeValue.List{values: loop text in columns.names.texts -> TComptimeValue.String{value: "{text}"}}
     SemaComptimeItemSource{
-        module_identity: batch.rule.module_identity,
+        module_identity: batch.module_identity,
         key: batch.key,
-        destination_key: "rules.{batch.rule.marker}.{pass}",
-        name: "{batch.rule.marker}.check",
+        destination_key: "rules.{batch.marker}.{pass}",
+        name: "{batch.marker}.check",
         source_file: file,
         kind: SemaComptimeItemKind.BodyExpression,
         expression: sema_call_rule_batch_expression(),
