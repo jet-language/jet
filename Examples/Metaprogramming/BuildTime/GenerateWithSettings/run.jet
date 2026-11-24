@@ -1,0 +1,17 @@
+// A package that declares settings generates a module in `build: fn` and
+// lists it among the executable's sources, as a package without settings
+// does; the program calls the generated function and reads the setting the
+// build contributed.
+build: fn(b: Build) {
+    b.contribute("greeting", "hello from build")
+    b.generate("banner") {
+        banner: fn() -> String { "generated module loaded" }
+    }
+    app: b.add_executable("generate_with_settings", ["run.jet", ".jet/generated/generate_with_settings/banner.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    print(banner())
+    print("greeting: {#build.settings.greeting}")
+}

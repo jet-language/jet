@@ -863,6 +863,11 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_g
     if settings == None && ((!load_generated && declared) || request.generated_modules.len() > 0) {
         return {request: request.move(), refusal: None}
     }
+    // The build generates its modules again as it runs, so the modules this
+    // request carries stay aside until it has run: loaded twice, a module
+    // would alias its own path (Loader.jet).
+    carried: request.generated_modules.move()
+    request.generated_modules = [JetDriverGeneratedModule]{}
     scope := JetDriverBuildQueryScope{next_session_id: 1}
     response := jet_driver_query_build_plan(request, scope)
     query := response.query.move()
@@ -871,6 +876,7 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_g
         return {request: response.request.move(), refusal: Val(failure)}
     }
     contributed := response.request.move()
+    contributed.generated_modules = carried.move()
     // The modules `build: fn` generates (`meta.add`, `meta.rewrite_body`)
     // load beside the sources of every compile of the package, so `jet run`
     // and `jet dev` run the program `jet build` builds, whether or not the
