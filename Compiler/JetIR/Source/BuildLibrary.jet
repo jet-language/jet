@@ -125,7 +125,7 @@ ir_intrinsics: fn() -> IRIntrinsics Never! {
 }
 
 // Makes function `key` the intrinsic `intrinsic`, in place of any it was.
-ir_intrinsics_put: fn(table: &IRIntrinsics, key: String, intrinsic: &&IRRuntimeIntrinsic) Never! {
+ir_intrinsics_put: fn(table: ^IRIntrinsics, key: String, intrinsic: ^^IRRuntimeIntrinsic) Never! {
     if name_column_get(table.keys, table.rows, key) == .Val(row) {
         table.values[row] = intrinsic.move()
         return
@@ -266,7 +266,7 @@ ir_runtime_intrinsic: fn(name: String) -> Bool Never! {
 // threads (ir_build_waves); the other inputs as ir_build_program's. A row
 // whose function does not satisfy the C export law is not an export.
 // `lifecycle_rows` are the lines of the lifecycle list (ir_lifecycle_rows).
-ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
+ir_build_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String], threads: CompilerThreads) -> IRLibraryResult Never! {
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     ir_foreign_index(p, foreign, decls)
     p.stop_points = false
@@ -917,7 +917,7 @@ ir_code_sources: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [IRCodeOrigin]
 // CallIndirect's callee) and the word each Store puts in a rail cell, by
 // their sources. `writes` is the function's ir_slot_writes and
 // `name_callees` the function a CallRuntime of each name row reaches.
-ir_code_flows: fn(m: IRModule, id: Int, writes: [[Int]], uses: [[[Int]]], name_callees: [Int], flows: &[IRCodeFlow]) Never! {
+ir_code_flows: fn(m: IRModule, id: Int, writes: [[Int]], uses: [[[Int]]], name_callees: [Int], flows: ^[IRCodeFlow]) Never! {
     f: m.functions[id]
     loop (at, op) in f.op {
         if op == .CallIndirect -> ir_code_flow(f, id, writes, f.a[at], IR_CODE_CALLED, flows) else if op == .Store && f.b[at] == 0 {
@@ -936,7 +936,7 @@ ir_code_flows: fn(m: IRModule, id: Int, writes: [[Int]], uses: [[[Int]]], name_c
     }
 }
 
-ir_code_flow: fn(f: IRFunction, id: Int, writes: [[Int]], slot: Int, role: Int, flows: &[IRCodeFlow]) Never! {
+ir_code_flow: fn(f: IRFunction, id: Int, writes: [[Int]], slot: Int, role: Int, flows: ^[IRCodeFlow]) Never! {
     loop source in ir_code_sources(f, writes, slot) {
         flows.push(IRCodeFlow{function: id, source: source, role: role})
     }
@@ -951,7 +951,7 @@ ir_code_flow: fn(f: IRFunction, id: Int, writes: [[Int]], slot: Int, role: Int, 
 // the hook exactly when it keeps one of them, once per
 // kept guard, so a guarded hook starts idempotently. Returns the first
 // problem, else "".
-ir_lifecycle_rows: fn(lines: [String], lifecycle: &IRLifecycles) -> String Never! {
+ir_lifecycle_rows: fn(lines: [String], lifecycle: ^IRLifecycles) -> String Never! {
     loop line in lines {
         text: line.trim()
         if text == "" || text.starts_with("#") -> next
@@ -1203,7 +1203,7 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
 // ir_core_list_append, ir_core_list_copy, ir_core_alloc_raw and
 // ir_core_free_raw, BuildExpr.jet ir_core_ptr_step and
 // ir_core_view_from_raw).
-ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
+ir_intrinsic_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
     if intrinsic == {
@@ -1244,7 +1244,7 @@ ir_intrinsic_nodes: fn(args: [BodyCallArg]) -> [Int] Never! {
 // Assets/FaultReport/), its six I64 arguments and I64 result in the C
 // argument and result registers. It never stops: the report is the last
 // thing a faulting process runs.
-ir_fault_report_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
+ir_fault_report_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
     if args.len() != IR_X64_ARGUMENT_REGISTERS.len() {
         return ir_fail_slot(b, span, "rt_fault_print reads six I64 values")
     }
@@ -1260,7 +1260,7 @@ ir_fault_report_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyC
     out
 }
 
-ir_static_text_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
+ir_static_text_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "rt_static_text is literal-only")
     parts: if ir_body_node(p, b, args[0].value).kind == {
         .StrLit(written) -> written
@@ -1280,7 +1280,7 @@ ir_static_text_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCa
     slot
 }
 
-ir_address_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
+ir_address_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, key: String, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
     if args.len() != 0 {
         return ir_fail_slot(b, span, "a runtime address intrinsic takes no arguments")
     }
@@ -1291,7 +1291,7 @@ ir_address_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args
 }
 
 // The bits of the one argument (of row `input`) as a value of row `output`.
-ir_bitcast: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], input: Int, output: Int, span: Span) -> Int Never! {
+ir_bitcast: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], input: Int, output: Int, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "a runtime bitcast reads one value")
     value: ir_value_as(m, p, b, args[0].value, input, span)
     if ir_failed(b) -> return -1
@@ -1300,7 +1300,7 @@ ir_bitcast: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], i
 
 // The bits of scalar slot `value` as a fresh value of row `output`: stored
 // in a frame word, loaded back in the other class.
-ir_reinterpret: fn(m: &IRModule, b: &IRBuilder, value: Int, output: Int) -> Int Never! {
+ir_reinterpret: fn(m: ^IRModule, b: ^IRBuilder, value: Int, output: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     area: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)

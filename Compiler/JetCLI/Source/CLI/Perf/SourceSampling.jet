@@ -886,7 +886,7 @@ jet_cli_perf_samples_files: fn(table: X64Jetline, source: String) -[FS]> JetCLIP
 // Reads each of the program's other sources (`paths`, JetCLIPerfFiles)
 // that a line of `sampled` is in, for the rows of its lines
 // (JetCLIPerfProgramSource).
-jet_cli_perf_samples_sources: fn(sampled: &JetCLIPerfSamples, paths: &&[String]) -[FS]> Never! {
+jet_cli_perf_samples_sources: fn(sampled: ^JetCLIPerfSamples, paths: ^^[String]) -[FS]> Never! {
     wanted := (loop _ in paths -> false)
     loop line in sampled.lines {
         if line.file >= 0 -> wanted[line.file] = true
@@ -1197,7 +1197,7 @@ jet_cli_perf_code_low: fn(image: [U8]) -> Int {
 // `window` (its window file's) count only the CPU-time samples stamped
 // within it, each standing for its interval, and its row, not a clock
 // record, gives what sampling cost and the records lost.
-jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], inlines: &&JetCLIPerfInlines, owned: [Bool], periods: &&[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int, files: &&[Int]{[Int]{}}, window: JetCLIPerfZonesWindow?{None}) -> JetCLIPerfSamples Never! {
+jet_cli_perf_samples_count: fn(table: ^^X64Jetline, functions: ^^[X64ImageFunction], inlines: ^^JetCLIPerfInlines, owned: [Bool], periods: ^^[U64], allocs: [Int:Int], names: [Int:String], words: [U8], code_low: Int, files: ^^[Int]{[Int]{}}, window: JetCLIPerfZonesWindow?{None}) -> JetCLIPerfSamples Never! {
     sampled := JetCLIPerfSamples{table: table, inlines: inlines, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, sampler: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, allocated: [JetCLIPerfAllocSite]{}, periods: periods, spawns: [JetCLIPerfSpawn]{}, waits: [JetCLIPerfWait]{}, wakes: [JetCLIPerfWake]{}, transfers: [JetCLIPerfIO]{}, heaps: [JetCLIPerfHeap]{}, experiments: [JetCLIPerfExperiment]{}, points: [Int:String]{}, idle: [Int]{}, timed: [JetCLIPerfTimed]{}, files: files, entries: x64_jetline_entry_runs(table.functions)}
     // One key per function, line, ownership and source.
     places := [String:Int]{}
@@ -1669,7 +1669,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
 }
 
 // One more sample of `lines[place]` in the helper image function `helper`.
-jet_cli_perf_helper_count: fn(lines: &[JetCLIPerfSampledLine], place: Int, helper: Int) Never! {
+jet_cli_perf_helper_count: fn(lines: ^[JetCLIPerfSampledLine], place: Int, helper: Int) Never! {
     loop index in 0..<lines[place].helpers.len() {
         if lines[place].helpers[index].function == helper {
             lines[place].helpers[index].count += U64{1}
@@ -1681,7 +1681,7 @@ jet_cli_perf_helper_count: fn(lines: &[JetCLIPerfSampledLine], place: Int, helpe
 
 // The entry of `sampled.pcs` for program counter `pc`, added with no
 // samples or events when it has none.
-jet_cli_perf_pc_entry: fn(sampled: &JetCLIPerfSamples, pc: Int) -> Int Never! {
+jet_cli_perf_pc_entry: fn(sampled: ^JetCLIPerfSamples, pc: Int) -> Int Never! {
     if sampled.pc_at.get(pc) == .Val(found) -> return found
     events := [U64]{}
     loop _ in sampled.periods -> events.push(U64{0})
@@ -1710,7 +1710,7 @@ jet_cli_perf_line_counted: fn(line: JetCLIPerfSampledLine, counter: Int) -> U64 
 // The entries in `sampled.lines` of the places link address `address`
 // stands for (jet_cli_perf_samples_frames), innermost first, each added at
 // first sight; none outside every Jet function.
-jet_cli_perf_samples_chain: fn(sampled: &JetCLIPerfSamples, places: &[String:Int], resolved: &[Int:[Int]], owned: [Bool], address: Int, caller: Bool) -> [Int] Never! {
+jet_cli_perf_samples_chain: fn(sampled: ^JetCLIPerfSamples, places: ^[String:Int], resolved: ^[Int:[Int]], owned: [Bool], address: Int, caller: Bool) -> [Int] Never! {
     key: if caller -> address * 2 + 1 else -> address * 2
     if resolved.has_key(key) -> return resolved[key]
     chain := [Int]{}
@@ -1843,7 +1843,7 @@ jet_cli_perf_samples_stack_frames: fn(sampled: JetCLIPerfSamples, owned: [Bool],
 // was left for, then each row: the host call's number, how many, their
 // nanoseconds and its calling stack's call sites, ending at a 0. A file
 // shorter than its header gives none.
-jet_cli_perf_system_read: fn(sampled: &JetCLIPerfSamples, owned: [Bool], threads: [U8], calls: [U8]) Never! {
+jet_cli_perf_system_read: fn(sampled: ^JetCLIPerfSamples, owned: [Bool], threads: [U8], calls: [U8]) Never! {
     if threads.len() >= 16 {
         width: link_debug_addr(threads, 0)
         claimed: link_debug_addr(threads, 8)
@@ -1957,7 +1957,7 @@ jet_cli_perf_bare_name: fn(name: String) -> String Never! {
 // time), `state` (`ended`, or `running` at the exit) and `spawned_at`, the
 // call sites of its spawning stack, innermost first
 // (jet_cli_perf_sites_json). None when the run kept no table.
-jet_cli_perf_threads_section: fn(threads: &&[JetCLIPerfThread], claimed: U64) -> TraceReceiptSection? Never! {
+jet_cli_perf_threads_section: fn(threads: ^^[JetCLIPerfThread], claimed: U64) -> TraceReceiptSection? Never! {
     if threads.len() == 0 -> return None
     rows := [CanonicalJSON]{}
     loop thread in threads.move() {
@@ -1992,7 +1992,7 @@ jet_cli_perf_threads_section: fn(threads: &&[JetCLIPerfThread], claimed: U64) ->
 // never returned, as a successful execve, counts with no time) and
 // `stack`, the calling stack's sites, innermost first
 // (jet_cli_perf_sites_json). None when the run kept no table.
-jet_cli_perf_syscalls_section: fn(calls: &&[JetCLIPerfSyscall], lost: U64) -> TraceReceiptSection? Never! {
+jet_cli_perf_syscalls_section: fn(calls: ^^[JetCLIPerfSyscall], lost: U64) -> TraceReceiptSection? Never! {
     if calls.len() == 0 -> return None
     rows := [CanonicalJSON]{}
     loop call in calls.move() {
@@ -2096,7 +2096,7 @@ JetCLIPerfLineHelper: struct {
 // Call sites as a receipt's rows: each its `function`, `file` (null for an
 // inlined function's line from another file), `line` and whether the line
 // is in the checked source (`own`).
-jet_cli_perf_sites_json: fn(sites: &&[JetCLIPerfSite]) -> CanonicalJSON Never! {
+jet_cli_perf_sites_json: fn(sites: ^^[JetCLIPerfSite]) -> CanonicalJSON Never! {
     CanonicalJSON.Array(
         loop site in sites.move() -> CanonicalJSON.Object(
             [CanonicalJSONField]{
@@ -2371,7 +2371,7 @@ jet_cli_perf_line_events: fn(sampled: JetCLIPerfSamples, place: JetCLIPerfSample
 // The memory lens's `profile`: the `counters` the run asked for, and in its
 // reason how each counter's samples count and why each one it lacks is
 // unavailable.
-jet_cli_perf_counters_profile: fn(profile: &TraceProfile, counters: &&[TraceCounter]) Never! {
+jet_cli_perf_counters_profile: fn(profile: ^TraceProfile, counters: ^^[TraceCounter]) Never! {
     notes := [String]{}
     loop counter in counters {
         if counter.period == .Val(period) {
@@ -2495,7 +2495,7 @@ jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu
     Ok(TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: limited, overhead_ns: None, overhead_runtime_ns: None, overhead_kernel_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
 }
 
-jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow) Never! {
+jet_cli_perf_window: fn(profile: ^TraceProfile, window: JetCLIPerfRuntimeWindow) Never! {
     profile.window_status = if window.exit -> "exit" else -> "live"
     profile.window_wall_ns = Val(window.elapsed_ns)
     profile.window_cpu_ns = window.cpu_ns
@@ -2523,7 +2523,7 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
 // span, the earliest opened and of those the longest, names its phase
 // (`capture.task_phases`).
 // The file is removed once read; a row cut short ends the read.
-jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
+jet_cli_perf_log_spans_read: fn(capture: ^JetCLIPerfCapture, path: String, source: String, origin_ns: Int, timed: [JetCLIPerfTimed]) -[FS]> Never! {
     bytes: perf_files.read_bytes(path) ?? [U8]{}
     perf_files.remove(path).drop("the session reads its log spans once")
     zones := [JetCLIPerfZoneTotal]{}
@@ -2865,7 +2865,7 @@ jet_cli_perf_spans_window: fn(bytes: [U8]) -> JetCLIPerfZonesWindow? Never! {
 // runtime id) keep their rows (jet_cli_perf_tasks_admitted) and the rest
 // count in the `tasks` receipt section (jet_cli_perf_tasks_section). Each
 // wait's name, addresses and stack move into its row.
-jet_cli_perf_waits_read: fn(capture: &JetCLIPerfCapture, waits: &&[JetCLIPerfWait], wakes: [JetCLIPerfWake], spawns: [JetCLIPerfSpawn], samples: [U64:U64], transfers: [JetCLIPerfIO], source: String, origin_ns: Int) Never! {
+jet_cli_perf_waits_read: fn(capture: ^JetCLIPerfCapture, waits: ^^[JetCLIPerfWait], wakes: [JetCLIPerfWake], spawns: [JetCLIPerfSpawn], samples: [U64:U64], transfers: [JetCLIPerfIO], source: String, origin_ns: Int) Never! {
     // Each spawned task's line by its runtime id, and its row when no
     // observation gave it one; a spawner's spawn came before its own.
     admitted: jet_cli_perf_tasks_admitted(capture.task_ids, TRACE_TASK_ROW_LIMIT - U64{capture.tasks.len()}, spawns, samples)
@@ -3161,7 +3161,7 @@ jet_cli_perf_socket_reaches: fn(address: String, bound: String) -> Bool Never! {
 // the bytes it moved or the errno that refused it, its target, and the
 // functions and lines of `source` on its stack. Each transfer's target and
 // stack move into its row.
-jet_cli_perf_io_read: fn(capture: &JetCLIPerfCapture, transfers: &&[JetCLIPerfIO], source: String, origin_ns: Int) Never! {
+jet_cli_perf_io_read: fn(capture: ^JetCLIPerfCapture, transfers: ^^[JetCLIPerfIO], source: String, origin_ns: Int) Never! {
     pending := transfers
     pending.reverse()
     loop pending.len() > 0 {

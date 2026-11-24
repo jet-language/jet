@@ -144,7 +144,7 @@ sema_policy_env_get: fn(env: [SemaPolicyBinding], name: String) -> SemaPolicySym
     sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
 }
 
-sema_policy_env_set: fn(env: &[SemaPolicyBinding], name: String, value: SemaPolicySym) Never! {
+sema_policy_env_set: fn(env: ^[SemaPolicyBinding], name: String, value: SemaPolicySym) Never! {
     at := env.len() - 1
     loop at >= 0 {
         if env[at].name == name {
@@ -156,7 +156,7 @@ sema_policy_env_set: fn(env: &[SemaPolicyBinding], name: String, value: SemaPoli
     env.push(SemaPolicyBinding{name: "{name}", value: value})
 }
 
-sema_policy_fail: fn(state: &SemaPolicyEvalState, reason: String) Never! {
+sema_policy_fail: fn(state: ^SemaPolicyEvalState, reason: String) Never! {
     if state.failed_reason == "" -> state.failed_reason = "{reason}"
 }
 
@@ -252,7 +252,7 @@ sema_policy_col_from_sym: fn(join_col: String, sym: SemaPolicySym) -> SemaPolicy
     None
 }
 
-sema_policy_eval_key_lookup: fn(table_name: String, key_expr: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+sema_policy_eval_key_lookup: fn(table_name: String, key_expr: Expr, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
     if key_expr == .Paren(inner, _, _) {
         return sema_policy_eval_key_lookup(table_name, inner, env, state, depth, environment, program)
     }
@@ -301,7 +301,7 @@ sema_policy_eval_key_lookup: fn(table_name: String, key_expr: Expr, env: &[SemaP
     sema_policy_sym_lookup(POLICY_SYM_LOOKUP, idx)
 }
 
-sema_policy_eval_binary: fn(op: BinOp, left_expr: Expr, right_expr: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+sema_policy_eval_binary: fn(op: BinOp, left_expr: Expr, right_expr: Expr, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
     left: sema_policy_eval_expr(left_expr, env, state, depth, environment, program)
     right: sema_policy_eval_expr(right_expr, env, state, depth, environment, program)
     if op == BinOp.Eq || op == BinOp.Ne {
@@ -362,7 +362,7 @@ sema_policy_eval_binary: fn(op: BinOp, left_expr: Expr, right_expr: Expr, env: &
     sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
 }
 
-sema_policy_eval_expr: fn(expr: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+sema_policy_eval_expr: fn(expr: Expr, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
     if expr == .Paren(inner, _, _) {
         return sema_policy_eval_expr(inner, env, state, depth, environment, program)
     }
@@ -527,7 +527,7 @@ sema_policy_eval_expr: fn(expr: Expr, env: &[SemaPolicyBinding], state: &SemaPol
     sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
 }
 
-sema_policy_eval_call_func: fn(func: Func, args: [jet_foundation.CallArg], caller_env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+sema_policy_eval_call_func: fn(func: Func, args: [jet_foundation.CallArg], caller_env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
     if func.params.len() != args.len() {
         sema_policy_fail(state, "calls `{func.name}()` with mismatched arity")
         return sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
@@ -584,7 +584,7 @@ sema_policy_clone_env: fn(env: [SemaPolicyBinding]) -> [SemaPolicyBinding] Never
     out
 }
 
-sema_policy_if_branch_stmts: fn(body: &&[Stmt], tail: Expr) -> [Stmt] Never! {
+sema_policy_if_branch_stmts: fn(body: ^^[Stmt], tail: Expr) -> [Stmt] Never! {
     out := body.move()
     out.push(Stmt.Expr{expr: tail})
     out
@@ -593,7 +593,7 @@ sema_policy_if_branch_stmts: fn(body: &&[Stmt], tail: Expr) -> [Stmt] Never! {
 // Evaluates a desugared value-producing `if subject == { .Arm -> ... }` chain
 // (`Expr.If` with `.PatternTest` conditions). Evaluates `subject` once so a
 // key lookup repeated in each desugared arm is recorded only once.
-sema_policy_eval_if_match: fn(root: Expr, subject: Expr, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
+sema_policy_eval_if_match: fn(root: Expr, subject: Expr, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicySym Never! {
     subj: sema_policy_eval_expr(subject, env, state, depth, environment, program)
     arms := [SwitchArm]{}
     else_body := [Stmt]?{None}
@@ -623,7 +623,7 @@ sema_policy_eval_if_match: fn(root: Expr, subject: Expr, env: &[SemaPolicyBindin
     sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
 }
 
-sema_policy_eval_who_switch: fn(arms: [SwitchArm], else_body: [Stmt]?, env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
+sema_policy_eval_who_switch: fn(arms: [SwitchArm], else_body: [Stmt]?, env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
     account_arm := -1
     account_name := ""
     anon_arm := -1
@@ -672,7 +672,7 @@ sema_policy_pat_first_bind: fn(bindings: [jet_foundation.PatSlot]) -> String Nev
     "_"
 }
 
-sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
+sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
     ok_arm := -1
     ok_bind := ""
     val_arm := -1
@@ -743,7 +743,7 @@ sema_policy_eval_lookup_switch: fn(lookup_index: Int, arms: [SwitchArm], env: &[
     SemaPolicyBlockResult{returned: false, value: sema_policy_sym_plain(POLICY_SYM_UNKNOWN)}
 }
 
-sema_policy_eval_stmts: fn(stmts: [Stmt], env: &[SemaPolicyBinding], state: &SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
+sema_policy_eval_stmts: fn(stmts: [Stmt], env: ^[SemaPolicyBinding], state: ^SemaPolicyEvalState, depth: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaPolicyBlockResult Never! {
     last := sema_policy_sym_plain(POLICY_SYM_UNKNOWN)
     loop i in 0..<stmts.len() {
         stmt: stmts[i]
@@ -822,7 +822,7 @@ sema_policy_eval_stmts: fn(stmts: [Stmt], env: &[SemaPolicyBinding], state: &Sem
     SemaPolicyBlockResult{returned: false, value: last}
 }
 
-sema_policy_collect_used_lookups: fn(sym: SemaPolicySym, out: &[Int]) -> Bool Never! {
+sema_policy_collect_used_lookups: fn(sym: SemaPolicySym, out: ^[Int]) -> Bool Never! {
     if sym.kind == POLICY_SYM_LOOKUP_EXISTS {
         if !out.contains(sym.lookup_index) -> out.push(sym.lookup_index)
         return true

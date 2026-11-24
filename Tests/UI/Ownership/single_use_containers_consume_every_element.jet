@@ -10,9 +10,9 @@ acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
 
 try_acquire: fn(name: String) -> Lease Err! { Ok(acquire(name)) }
 
-release: fn(lease: &&Lease) { print("released {lease.name}") }
+release: fn(lease: ^^Lease) { print("released {lease.name}") }
 
-unbox: fn(boxed: &&Box<Lease>) -> Lease { boxed.item.move() }
+unbox: fn(boxed: ^^Box<Lease>) -> Lease { boxed.item.move() }
 
 release_list: fn() {
     leases: [Lease]{acquire("list a"), acquire("list b")}

@@ -79,7 +79,7 @@ cli_import_nix_facts: fn(source_path: String, facts_json: String) -> ImportPlan 
 
 impl ImportPlan {
     // One `packages[index]` entry as a dependency with its provider facts.
-    import_nix_package: fn(&self, index: Int, value: Dyn, source_path: String, facts_json: String) Never! {
+    import_nix_package: fn(^self, index: Int, value: Dyn, source_path: String, facts_json: String) Never! {
         package: cli_import_nix_package(value) ?? {
             self.record_provider_finding(source_path, "Nix provider package entry {index} has no usable package identity; migration is unresolved")
             return
@@ -141,7 +141,7 @@ cli_import_nix_first_string: fn(object: [String:Dyn], keys: [String]) -> String?
 }
 
 // Carry a package report's source, facts, losses, and conflicts onto `target`.
-cli_import_merge_provider_projection: fn(target: &ProviderFacts, source: ProviderFacts, source_path: String) Never! {
+cli_import_merge_provider_projection: fn(target: ^ProviderFacts, source: ProviderFacts, source_path: String) Never! {
     if target.resolved_source == "" && source.resolved_source != "" {
         target.set_resolved_source(source.resolved_source)
     }
@@ -239,11 +239,11 @@ cli_import_cargo: fn(cargo_toml: String, cargo_lock: String) -> ImportPlan Never
 
 impl ImportPlan {
     // One Cargo dependency with its Cargo.lock identity and provider facts.
-    import_cargo_dependency: fn(&self, dep: String, section: CargoDependencySection, cargo_lock: String, native_document: String, root_facts: ProviderFacts) Never! {
+    import_cargo_dependency: fn(^self, dep: String, section: CargoDependencySection, cargo_lock: String, native_document: String, root_facts: ProviderFacts) Never! {
         versions: cli_import_lock_versions(cargo_lock, dep)
         locked: if versions.len() == 1 -> versions[0] else -> ""
         platform_selector: if section.platform == {
-            .Val(platform) -> "&platform={platform}"
+            .Val(platform) -> "^platform={platform}"
             .None -> ""
         }
         platform_ref: if section.platform == {
@@ -342,7 +342,7 @@ cli_import_npm: fn(package_json: String) -> ImportPlan Never! {
 
 impl ImportPlan {
     // One npm dependency request with its provider facts.
-    import_npm_dependency: fn(&self, name: String, value: Dyn, kind: NpmDependencyKind, package_json: String, root_facts: ProviderFacts) Never! {
+    import_npm_dependency: fn(^self, name: String, value: Dyn, kind: NpmDependencyKind, package_json: String, root_facts: ProviderFacts) Never! {
         field: kind.field()
         field_source: "package.json.{field}"
         requested: pkg_json_text(value)
@@ -385,7 +385,7 @@ impl ImportPlan {
 }
 
 // Normalize the root document, retain its shared facts, and return them.
-cli_import_retain_normalized_root: fn(plan: &ImportPlan, family: ProviderFamily, document: String, reference: String, source_path: String) -> ProviderFacts Never! {
+cli_import_retain_normalized_root: fn(plan: ^ImportPlan, family: ProviderFamily, document: String, reference: String, source_path: String) -> ProviderFacts Never! {
     report: provider_normalize_document(family, document)
     facts: report.shared_facts_for(reference)
     plan.retain_provider_facts_with_source(facts, source_path)
@@ -393,7 +393,7 @@ cli_import_retain_normalized_root: fn(plan: &ImportPlan, family: ProviderFamily,
 }
 
 // Copy the root's `prefix` facts onto one dependency's record.
-cli_import_copy_provider_projection: fn(target: &ProviderFacts, source: ProviderFacts, prefix: String) Never! {
+cli_import_copy_provider_projection: fn(target: ^ProviderFacts, source: ProviderFacts, prefix: String) Never! {
     keys := source.facts.keys().to_list()
     keys.sort()
     loop key in keys {

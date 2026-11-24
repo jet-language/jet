@@ -193,7 +193,7 @@ ir_debug_cell_exports: fn(m: IRModule) -> [X64DataExport] Never! {
 // (ir_debug_cell_exports), so the evaluation reads and writes the
 // program's cell, not a copy. An image that holds no such symbol refuses
 // the evaluation's placement.
-ir_debug_cells_bind: fn(m: &IRModule) Never! {
+ir_debug_cells_bind: fn(m: ^IRModule) Never! {
     loop export in ir_debug_cell_exports(m) -> m.core_cells[export.data] = export.symbol
 }
 
@@ -233,7 +233,7 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! {
 // is Core's or the Prelude's) and outside the Core packages `lowered` names
 // (ir_core_package), and every function they reach, on up to `threads`
 // threads; the other inputs as ir_build_program's.
-ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
+ir_build_core_library: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], entry_module: ModuleID, lowered: [String], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants, threads)
     p.quiet_points = ir_core_quiet_points(p)
     p.sentries = true
@@ -282,7 +282,7 @@ ir_core_package: fn(module_name: String) -> String Never! {
 // call stands in for. Each round skips at least one more root, so the
 // rounds end. A failure in a function no root is (one a root reaches)
 // fails the library.
-ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, lowered: [String], skipped: &&[IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
+ir_core_library_from: fn(program: ^^IRProgram, entry_module: ModuleID, lowered: [String], skipped: ^^[IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := program.move()
     // By the first row of each key (ir_function_row): the skipped roots,
     // then the ones this round builds.
@@ -471,7 +471,7 @@ ir_core_callers: fn(m: IRModule) -> [[Int]] Never! {
 
 // `seeds`, joined by every function that reaches one along `callers`
 // (ir_core_callers).
-ir_core_spread: fn(callers: [[Int]], seeds: &&[Bool]) -> [Bool] Never! {
+ir_core_spread: fn(callers: [[Int]], seeds: ^^[Bool]) -> [Bool] Never! {
     reached := seeds.move()
     work := [Int]{}
     loop (id, seed) in reached {
@@ -606,7 +606,7 @@ ir_core_image_fits: fn(p: IRProgram) -> Bool Never! {
 // of its ir_core_symbol) at the IR signature the call passes and returns
 // (ir_core_call_signature). A function marked `#Inline(Always)` is never
 // bound: the program builds it, so its optimizer can keep the mark's promise.
-ir_core_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
+ir_core_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
     if p.checks.core == None || type_args.len() > 0 || p.functions[row].is_inline_always || ir_bounds_mode(p, row) != .Fatal {
         return ""
     }
@@ -624,7 +624,7 @@ ir_core_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args
 // The IR signature (ir_core_signature) of a call of non-generic function
 // row `row` passing `slots`: their layouts, then its result's; "" when the
 // result has no value type.
-ir_core_call_signature: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
+ir_core_call_signature: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
     words: loop slot in slots -> ir_core_layout(ir_export_layout(m.types[b.f.slot_type[slot]]))
     declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, [Type]{}, written, span)) else -> Type?{None}
     returned: ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
@@ -648,7 +648,7 @@ ir_core_call_signature: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, 
 // that returns a pointer, and they are the only convention an O0 image
 // changes, so the call passes its slots as the IR signature names them, as
 // the image's code takes them.
-ir_held_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], span: Span) -> String Never! {
+ir_held_bound: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, type_args: [Type], span: Span) -> String Never! {
     function: p.functions[row]
     if !ir_held_holds(p.checks, function.key) || type_args.len() > 0 || function.generic_params.len() > 0 || function.is_inline_always || function.stand_in {
         return ""
@@ -668,7 +668,7 @@ ir_held_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args
 // Names the image's Core cells for the program's own (IRModule.core_cells):
 // each writable Core cell (ir_core_cell_key) the image exports under its
 // key, so the code the program builds and the image's code share one.
-ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
+ir_core_cells_bind: fn(m: ^IRModule, image: IRCoreImage) Never! {
     loop id in 0..<m.constant_rows.len() {
         local: m.constant_rows[id]
         if local < 0 || !ir_core_cell_key(m.constant_rows_keys.texts[id]) -> next

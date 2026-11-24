@@ -207,7 +207,7 @@ UINode: struct {
     // one, on its new text; a drop on a text input that takes drops gives it
     // each text and URI item. A click, a change and a drop run the handler
     // the runtime keeps for the node's slot.
-    __input: fn(&self, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
+    __input: fn(^self, frame: Frame, event: UIEvent, focused: ^Int) -> Bool Never! {
         internal.window_input(self, frame, event, focused)
     }
 
@@ -345,7 +345,7 @@ UINode: struct {
     // Makes `text` the text of the text input that is node `focused` of the
     // tree's focus ring (`__input`), and runs its change handler, as typing
     // does; whether one is, which then needs drawing again.
-    __set_focused_text: fn(&self, focused: Int, text: String) -> Bool Never! {
+    __set_focused_text: fn(^self, focused: Int, text: String) -> Bool Never! {
         internal.set_focused_input(self, focused, text)
     }
 }
@@ -475,16 +475,16 @@ tablet: fn() -> UIPreviewViewport Never! {
 }
 
 // A preview renders in the desktop viewport unless `viewport:` names another.
-preview: fn(name: String, body: &&fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+preview: fn(name: String, body: ^^fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Preview, name: name, viewport: viewport ?? desktop(), body: body}
 }
 
-playground: fn(name: String, body: &&fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+playground: fn(name: String, body: ^^fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Playground, name: name, viewport: viewport ?? desktop(), body: body}
 }
 
 // Registers previews and playgrounds alike; each entry's `kind` tells them apart.
-previews: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+previews: fn(entries: ^^[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     preview_registry(entries)
 }
 
@@ -544,7 +544,7 @@ UIAsset: struct {
 
 asset: fn(path: String) -> UIAsset Never! { UIAsset{path: path} }
 
-preview_registry: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+preview_registry: fn(entries: ^^[UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
     loop (index, entry) in entries {
         if entry.name == "" -> return Err(UIPreviewError.EmptyName)
@@ -869,7 +869,7 @@ get_collision_rec: fn(rec1: Rect, rec2: Rect) -> Rect Never! { draw.get_collisio
 
 // Images. A side below 1, a side above 16384 or more than 2^24 pixels
 // makes an image of width 0. The functions that change an image take it
-// through `&`, copy their color, alpha included, without blending, and
+// through `^`, copy their color, alpha included, without blending, and
 // leave an image with no pixels as it is.
 gen_image_color: fn(width: Int, height: Int, color: Color) -> Image Never! {
     Image{canvas: draw.gen_image_color(width, height, color)}
@@ -886,15 +886,15 @@ get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
     draw.get_image_color(image.canvas, x, y)
 }
 
-image_clear_background: fn(image: &Image, color: Color) Never! {
+image_clear_background: fn(image: ^Image, color: Color) Never! {
     draw.image_clear_background(image.canvas, color)
 }
 
-image_draw_pixel: fn(image: &Image, x: Int, y: Int, color: Color) Never! {
+image_draw_pixel: fn(image: ^Image, x: Int, y: Int, color: Color) Never! {
     draw.image_draw_pixel(image.canvas, x, y, color)
 }
 
-image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
+image_draw_rectangle: fn(image: ^Image, x: Int, y: Int, width: Int, height: Int, color: Color) Never! {
     draw.image_draw_rectangle(image.canvas, x, y, width, height, color)
 }
 
@@ -902,7 +902,7 @@ image_draw_rectangle: fn(image: &Image, x: Int, y: Int, width: Int, height: Int,
 // left with less than one column still sets its first pixel unless it
 // sits at the left edge, and one with columns but less than one row fills
 // its first row.
-image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
+image_draw_rectangle_rec: fn(image: ^Image, rec: Rect, color: Color) Never! {
     draw.image_draw_rectangle_rec(image.canvas, rec, color)
 }
 
@@ -910,42 +910,42 @@ image_draw_rectangle_rec: fn(image: &Image, rec: Rect, color: Color) Never! {
 // truncated to whole pixels; one past the right or bottom edge leaves the
 // image as it is. One with no whole column or row leaves no pixels, its
 // truncated sides (not below 0) as the size.
-image_crop: fn(image: &Image, crop: Rect) Never! { draw.image_crop(image.canvas, crop) }
+image_crop: fn(image: ^Image, crop: Rect) Never! { draw.image_crop(image.canvas, crop) }
 
 // Nearest neighbor; a new size an image cannot have leaves the image as
 // it is.
-image_resize_nn: fn(image: &Image, new_width: Int, new_height: Int) Never! {
+image_resize_nn: fn(image: ^Image, new_width: Int, new_height: Int) Never! {
     draw.image_resize_nn(image.canvas, new_width, new_height)
 }
 
-image_flip_vertical: fn(image: &Image) Never! { draw.image_flip_vertical(image.canvas) }
+image_flip_vertical: fn(image: ^Image) Never! { draw.image_flip_vertical(image.canvas) }
 
-image_flip_horizontal: fn(image: &Image) Never! { draw.image_flip_horizontal(image.canvas) }
+image_flip_horizontal: fn(image: ^Image) Never! { draw.image_flip_horizontal(image.canvas) }
 
 // A quarter turn clockwise.
-image_rotate_cw: fn(image: &Image) Never! { draw.image_rotate_cw(image.canvas) }
+image_rotate_cw: fn(image: ^Image) Never! { draw.image_rotate_cw(image.canvas) }
 
 // A quarter turn counterclockwise.
-image_rotate_ccw: fn(image: &Image) Never! { draw.image_rotate_ccw(image.canvas) }
+image_rotate_ccw: fn(image: ^Image) Never! { draw.image_rotate_ccw(image.canvas) }
 
 // Each channel becomes channel * tint / 255, rounded down, alpha
 // included.
-image_color_tint: fn(image: &Image, color: Color) Never! {
+image_color_tint: fn(image: ^Image, color: Color) Never! {
     draw.image_color_tint(image.canvas, color)
 }
 
 // Red, green and blue become 255 minus themselves.
-image_color_invert: fn(image: &Image) Never! { draw.image_color_invert(image.canvas) }
+image_color_invert: fn(image: ^Image) Never! { draw.image_color_invert(image.canvas) }
 
 // Adds `brightness`, clamped to -255..255, to red, green and blue; a sum
 // above 255 becomes 255 and one below 0 becomes 1.
-image_color_brightness: fn(image: &Image, brightness: Int) Never! {
+image_color_brightness: fn(image: ^Image, brightness: Int) Never! {
     draw.image_color_brightness(image.canvas, brightness)
 }
 
 // Pixels that hold `color` become `replace`. An image keeps its pixels
 // premultiplied, so a clear pixel holds every color of alpha 0.
-image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! {
+image_color_replace: fn(image: ^Image, color: Color, replace: Color) Never! {
     draw.image_color_replace(image.canvas, color, replace)
 }
 
@@ -1486,7 +1486,7 @@ Frames: struct {
     impl Iterable {
         Iter: FrameCursor,
 
-        iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
+        iter: fn(^^self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
     }
 }
 
@@ -1501,7 +1501,7 @@ FrameCursor: struct {
         // first, copying only the pixels its draws changed (one pixel when
         // they all fell outside, so its frames keep coming); a display server
         // that fails then records the failure and ends the frames.
-        next: fn(&self) -[Env, Net, Time]> Frame? {
+        next: fn(^self) -[Env, Net, Time]> Frame? {
             guard := self.state.guard_edit()
             if guard.value.drawn && !guard.value.presented {
                 if guard.value.link == .Val(link) {
@@ -1945,7 +1945,7 @@ Frame: struct {
 // measure, lay out and paint: not part of the ui surface.
 priv internal: module {
     // Notes that a draw call changed the pixels in `rect` (unclipped).
-    mark: fn(state: &WindowState, rect: UIRect) {
+    mark: fn(state: ^WindowState, rect: UIRect) {
         state.drawn = true
         wayland.grow_damage(state.damage, rect)
     }
@@ -2068,19 +2068,19 @@ priv internal: module {
         value
     }
 
-    layout_state: fn(state: &UIBackendState, frame: Rect) Never! {
+    layout_state: fn(state: ^UIBackendState, frame: Rect) Never! {
         state.frame = Val(frame)
         if state.tui -> reset_cells(state, frame.width, frame.height)
     }
 
-    mount_state: fn(state: &UIBackendState, tree: UINode, constraint: SizeConstraint?) Never! {
+    mount_state: fn(state: ^UIBackendState, tree: UINode, constraint: SizeConstraint?) Never! {
         viewport: constraint ?? SizeConstraint{min_width: 0.0, min_height: 0.0, max_width: 80.0, max_height: 24.0}
         size: measure_tree(tree, viewport)
         layout_state(state, Rect{x: 0.0, y: 0.0, width: size.width, height: size.height})
         paint_state(state, tree)
     }
 
-    paint_state: fn(state: &UIBackendState, tree: UINode) Never! {
+    paint_state: fn(state: ^UIBackendState, tree: UINode) Never! {
         frame: state.frame ?? Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}
         if state.tui {
             state.renders += 1
@@ -2108,12 +2108,12 @@ priv internal: module {
     // its frame, each its own height across the frame's width; every other
     // node is a leaf painted into its frame. Every backend lays a tree out
     // this way.
-    placed_leaves: fn(node: UINode, frame: Rect, leaves: &[UIPlaced]) Never! {
+    placed_leaves: fn(node: UINode, frame: Rect, leaves: ^[UIPlaced]) Never! {
         placed_under(node, frame, UIHolders{drag: 0, files: 0, menu: [UINode]{}, web_drag: None, web_zone: None}, leaves)
     }
 
     // `placed_leaves` within the bodies `outer`.
-    placed_under: fn(node: UINode, frame: Rect, outer: UIHolders, leaves: &[UIPlaced]) Never! {
+    placed_under: fn(node: UINode, frame: Rect, outer: UIHolders, leaves: ^[UIPlaced]) Never! {
         held: UIHolders{
             drag: if node.drag != 0 -> node.drag else -> outer.drag,
             files: if node.web_files != 0 -> node.web_files else -> outer.files,
@@ -2132,7 +2132,7 @@ priv internal: module {
         leaves.push(UIPlaced{node: node.copy(), frame: frame, held: held})
     }
 
-    paint_leaf: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
+    paint_leaf: fn(state: ^UIBackendState, node: UINode, frame: Rect) Never! {
         if state.tui {
             row: cell_index(frame.y)
             if row < state.rows {
@@ -2177,7 +2177,7 @@ priv internal: module {
     // inputs. Gives whether the event changed the tree: only typing does,
     // as a click's or a drop's handler changes what the app shows through
     // the app's own state.
-    window_input: fn(tree: &UINode, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
+    window_input: fn(tree: ^UINode, frame: Frame, event: UIEvent, focused: ^Int) -> Bool Never! {
         leaves := [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ring: focus_ring_of(leaves)
@@ -2292,7 +2292,7 @@ priv internal: module {
     }
 
     // `UINode.__set_focused_text`.
-    set_focused_input: fn(tree: &UINode, focused: Int, text: String) -> Bool Never! {
+    set_focused_input: fn(tree: ^UINode, focused: Int, text: String) -> Bool Never! {
         if focused_input(tree, focused) == None -> return false
         leaves := [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
@@ -2304,7 +2304,7 @@ priv internal: module {
     // Makes `text` the text of the text input that is leaf `index` of
     // `tree`'s `leaves`, and runs the input's change handler, if it has one,
     // on it: typing, Backspace and an edit menu's Cut all edit it so.
-    edited: fn(tree: &UINode, leaves: [UIPlaced], index: Int, text: String) Never! {
+    edited: fn(tree: ^UINode, leaves: [UIPlaced], index: Int, text: String) Never! {
         change: leaves[index].node.change
         seen := 0
         tree = retyped(tree, index, seen, text)
@@ -2365,7 +2365,7 @@ priv internal: module {
     // (`placed_leaves`) from `seen` leaves before `node`, showing `label`
     // at the width `text_input` gives it; a box is as wide as its widest
     // child, as `box` makes it.
-    retyped: fn(node: UINode, target: Int, seen: &Int, label: String) -> UINode Never! {
+    retyped: fn(node: UINode, target: Int, seen: ^Int, label: String) -> UINode Never! {
         result := node.copy()
         if node.kind != .Box {
             if seen == target {
@@ -2433,14 +2433,14 @@ priv internal: module {
     }
 
     // The interactive nodes (buttons and text inputs) of a tree, in pre-order.
-    collect_focus: fn(node: UINode, found: &[UINode]) Never! {
+    collect_focus: fn(node: UINode, found: ^[UINode]) Never! {
         if node.role == Val(UIAriaRole.Button) || node.role == Val(UIAriaRole.TextInput) {
             found.push(node.copy())
         }
         loop child in node.children -> collect_focus(child, found)
     }
 
-    dispatch: fn(state: &UIBackendState, event: InputEvent) -> EventResult Never! {
+    dispatch: fn(state: ^UIBackendState, event: InputEvent) -> EventResult Never! {
         if event == {
             .Key(code) -> {
                 if code.to_ascii_lower() == "tab" && state.focus.len() > 0 {
@@ -2460,7 +2460,7 @@ priv internal: module {
         }
     }
 
-    focus_ring: fn(state: &UIBackendState, nodes: [UINode]) Never! {
+    focus_ring: fn(state: ^UIBackendState, nodes: [UINode]) Never! {
         state.focus = nodes.copy()
         state.focused = if nodes.len() == 0 -> -1 else -> 0
     }
@@ -2471,7 +2471,7 @@ priv internal: module {
     }
 
     // A grid of the whole cells of a side, at least one each way, all blank.
-    reset_cells: fn(state: &UIBackendState, width: Float, height: Float) Never! {
+    reset_cells: fn(state: ^UIBackendState, width: Float, height: Float) Never! {
         state.cols = cell_index(if width >= 1.0 -> width else -> 1.0)
         state.rows = cell_index(if height >= 1.0 -> height else -> 1.0)
         count: state.cols * state.rows
@@ -2488,7 +2488,7 @@ priv internal: module {
     }
 
     // The UTF-8 bytes of scalar `n`.
-    push_scalar: fn(out: &[U8], n: Int) Never! {
+    push_scalar: fn(out: ^[U8], n: Int) Never! {
         if n < 0x80 -> out.push(U8{n}) else if n < 0x800 {
             out.push(U8{0xC0 + (n >> 6)})
             out.push(U8{0x80 + (n & 63)})
@@ -3105,7 +3105,7 @@ priv ui_saved_bytes_load: fn() -> [U8] Never! {
     held.value.bytes.copy()
 }
 
-priv ui_saved_bytes_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+priv ui_saved_bytes_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool Never! {
     if world_rt.world_store_replace(UI_SAVED_STORE, expected, replacement) == .Val(replaced) {
         return replaced
     }

@@ -35,7 +35,7 @@ ir_map_entry_type: fn(ty: Type) -> Type? Never! {
 // The row of a Map type whose keys have an order the builder knows and
 // whose keys and values lay out (the entries live behind the header's
 // buffer pointer, so a struct being laid out may hold a Map of itself).
-ir_map_row: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
+ir_map_row: fn(m: ^IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if ir_untag(ty) == .Map(key, _, value) {
         if !ir_pointee_lays_out(m, p, key, laying) || !ir_pointee_lays_out(m, p, value, laying) {
             return None
@@ -68,7 +68,7 @@ IRMapShape: struct {
     kind: String,
 }
 
-ir_map_shape: fn(m: &IRModule, p: IRProgram, map_row: Int) -> IRMapShape? Never! {
+ir_map_shape: fn(m: ^IRModule, p: IRProgram, map_row: Int) -> IRMapShape? Never! {
     entry_ty: ir_map_entry_type(ir_row_ty(m, p, map_row)) ?? return None
     fields: if entry_ty == .Tuple(fields) -> fields else -> {
         return None
@@ -116,7 +116,7 @@ IRMapOrder: struct {
     same: Int,
 }
 
-ir_map_order: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
+ir_map_order: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, kind: String, left: Int, right: Int) -> IRMapOrder Never! {
     if kind == "string" || kind == "order" {
         word_row: ir_word_row(m)
         order: if kind == "string" -> ir_runtime(m, b, "jet_rt_string_compare", [Int]{left, right}, word_row) else -> ir_order_sign(m, p, b, left, right, Span{start: 0, end: 0})
@@ -136,21 +136,21 @@ ir_map_hashed: fn(shape: IRMapShape) -> Bool Never! {
 
 // Whether the type row `row` is a Map, Set or Rank row with a hash index
 // (ir_map_hashed).
-ir_map_row_hashed: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_map_row_hashed: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     shape: ir_keyed_shape(m, p, row) ?? return false
     ir_map_hashed(shape)
 }
 
 // The entry layout of the Map row `row`, or of the Set or Rank row `row`
 // (ir_set_shape: the key alone); None for any other row.
-ir_keyed_shape: fn(m: &IRModule, p: IRProgram, row: Int) -> IRMapShape? Never! {
+ir_keyed_shape: fn(m: ^IRModule, p: IRProgram, row: Int) -> IRMapShape? Never! {
     if ir_map_entry_type(ir_row_ty(m, p, row)) != None -> return ir_map_shape(m, p, row)
     ir_set_shape(m, p, row)
 }
 
 // The id of Map helper `name` of the Map, Set or Rank type row `map_row`,
 // built on first use.
-ir_map_helper: fn(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
+ir_map_helper: fn(m: ^IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, map_row))}>"
     if ir_keyed_function(m, key) == .Val(known) -> return known
     shape: ir_keyed_shape(m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
@@ -210,7 +210,7 @@ ir_map_helper_symbol: fn(name: String) -> String Never! {
 
 // Binary search over the ascending entries: the entry's index, or -1 - the
 // insertion point when the key is absent.
-ir_map_find_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
+ir_map_find_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
     a.f.result = ir_word_row(m)
     low: ir_map_search(m, p, a, shape, map, key)
     minus_one: ir_word_const(m, a, -1)
@@ -220,7 +220,7 @@ ir_map_find_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 
 // The binary search of ir_map_find_body: returns the index of an entry
 // whose key is `key`; falls through with the insertion point.
-ir_map_search: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) -> Int Never! {
+ir_map_search: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map: Int, key: Int) -> Int Never! {
     length: ir_load_word(m, a, map, 0)
     data: ir_load_word(m, a, map, 16)
     low: ir_word_const(m, a, 0)
@@ -256,7 +256,7 @@ ir_map_search: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, 
 // or an exact Int's inline word, times the 64-bit golden ratio, the high
 // half folded into the low. Every big Int hashes as 0: an Int in the inline
 // range is always inline (Int.jet int_pack), so equal keys hash equal.
-ir_map_tag: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, key: Int) -> Int Never! {
+ir_map_tag: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, key: Int) -> Int Never! {
     word_row: ir_word_row(m)
     low_bits: ir_word_const(m, a, 2147483647)
     if shape.kind == "string" {
@@ -295,12 +295,12 @@ ir_map_tag: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, key: Int) -> Int 
 // The address of the trailer of a hashed Map's counted buffer `data` of
 // `capacity` entries: its sorted count at 0, its mask at 8, slot `i` at
 // 16 + 8 * i.
-ir_map_trailer: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, data: Int, capacity: Int) -> Int Never! {
+ir_map_trailer: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, data: Int, capacity: Int) -> Int Never! {
     ir_element_address(m, a, data, capacity, shape.stride)
 }
 
 // The address of slot `at` of the trailer at `trailer`.
-ir_map_slot_address: fn(m: &IRModule, a: &IRBuilder, trailer: Int, at: Int) -> Int Never! {
+ir_map_slot_address: fn(m: ^IRModule, a: ^IRBuilder, trailer: Int, at: Int) -> Int Never! {
     sixteen: ir_word_const(m, a, 16)
     slots: ir_word_op(m, a, IROp.Add, trailer, sixteen)
     ir_element_address(m, a, slots, at, 8)
@@ -308,7 +308,7 @@ ir_map_slot_address: fn(m: &IRModule, a: &IRBuilder, trailer: Int, at: Int) -> I
 
 // The bytes of a hashed Map's counted buffer of `capacity` entries whose
 // index has mask `mask`: the entries, the two trailer words, the slots.
-ir_map_block_bytes: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, capacity: Int, mask: Int) -> Int Never! {
+ir_map_block_bytes: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, capacity: Int, mask: Int) -> Int Never! {
     width: ir_word_const(m, a, shape.stride)
     entries: ir_word_op(m, a, IROp.Mul, capacity, width)
     three: ir_word_const(m, a, 3)
@@ -321,7 +321,7 @@ ir_map_block_bytes: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, capacity:
 // The bytes a hashed Map's counted buffer `data` of `capacity` entries
 // takes (its mask read from its trailer); `capacity` itself for any other
 // row's buffer of entries of `stride` bytes.
-ir_buffer_bytes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, data: Int, capacity: Int, stride: Int) -> Int Never! {
+ir_buffer_bytes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, data: Int, capacity: Int, stride: Int) -> Int Never! {
     if ir_map_row_hashed(m, p, row) {
         shape: ir_keyed_shape(m, p, row) ?? panic("hashed Map row without a Map shape")
         trailer: ir_map_trailer(m, b, shape, data, capacity)
@@ -335,7 +335,7 @@ ir_buffer_bytes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, data: I
 // map.find of a hashed Map: the entry's index, -1 when the key is absent. A
 // frozen buffer is searched; a counted one probes its index from the tag's
 // home slot to the first empty one.
-ir_map_probe_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
+ir_map_probe_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
     word_row: ir_word_row(m)
     a.f.result = word_row
     zero: ir_word_const(m, a, 0)
@@ -382,7 +382,7 @@ ir_map_probe_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 
 // Records entry `position` under tag `hash` in the index of the trailer at
 // `trailer`: the first empty slot from the tag's home.
-ir_map_slot_insert: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
+ir_map_slot_insert: fn(m: ^IRModule, a: ^IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
     mask: ir_load_word(m, a, trailer, 8)
@@ -410,7 +410,7 @@ ir_map_slot_insert: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, pos
 // trailer at `trailer` as the entries after it shift down one place: its
 // slot empties (ir_map_slot_unlink), every later position drops by one, and
 // so does the sorted count when the entry was in order.
-ir_map_slot_remove: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
+ir_map_slot_remove: fn(m: ^IRModule, a: ^IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
     ir_map_slot_unlink(m, a, trailer, hash, position)
     one: ir_word_const(m, a, 1)
     low_half: ir_word_const(m, a, 4294967295)
@@ -446,7 +446,7 @@ ir_map_slot_remove: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, pos
 // index of the trailer at `trailer`, the probe run after it shifted back
 // over the hole (each slot whose home is not cyclically after the hole), so
 // no probe stops early; the other slots keep their positions.
-ir_map_slot_unlink: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
+ir_map_slot_unlink: fn(m: ^IRModule, a: ^IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
     word_row: ir_word_row(m)
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
@@ -498,7 +498,7 @@ ir_map_slot_unlink: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, pos
 
 // Points the index's slot for entry `from` (hashed under tag `hash`) in the
 // trailer at `trailer` at entry `to` instead, where the entry moved.
-ir_map_slot_renumber: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, from: Int, to: Int) Never! {
+ir_map_slot_renumber: fn(m: ^IRModule, a: ^IRBuilder, trailer: Int, hash: Int, from: Int, to: Int) Never! {
     one: ir_word_const(m, a, 1)
     low_half: ir_word_const(m, a, 4294967295)
     numbered: ir_word_op(m, a, IROp.Add, from, one)
@@ -534,7 +534,7 @@ ir_map_slot_renumber: fn(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, f
 // tail an ordered read merges. Any other buffer, and a Rank (`keeps`, whose
 // entries stay in its key order), shifts the later entries down one place,
 // a counted hashed one renumbering its index (ir_map_slot_remove).
-ir_map_close_gap: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int, data: Int, entry: Int, index: Int, hash: Int, keeps: Bool) Never! {
+ir_map_close_gap: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, map: Int, data: Int, entry: Int, index: Int, hash: Int, keeps: Bool) Never! {
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
     length: ir_load_word(m, a, map, 0)
@@ -582,7 +582,7 @@ ir_map_close_gap: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int, d
 
 // The sorted count of a hashed Map: every entry of a frozen buffer, the
 // trailer's count of a counted one.
-ir_map_sorted: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int) -> Int Never! {
+ir_map_sorted: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, map: Int) -> Int Never! {
     word_row: ir_word_row(m)
     length: ir_load_word(m, a, map, 0)
     capacity: ir_load_word(m, a, map, 8)
@@ -602,7 +602,7 @@ ir_map_sorted: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int) -> I
 // map.merge(map, target): byte copies of the hashed Map's entries in key
 // order at `target` (room for its length): the sorted entries merged with
 // the appended tail, whose positions are merge sorted by key first.
-ir_map_merge_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, target: Int) Never! {
+ir_map_merge_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map: Int, target: Int) Never! {
     word_row: ir_word_row(m)
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
@@ -724,7 +724,7 @@ ir_map_merge_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 }
 
 // `value` = min(value, limit), in place.
-ir_map_clamp: fn(m: &IRModule, a: &IRBuilder, value: Int, limit: Int) Never! {
+ir_map_clamp: fn(m: ^IRModule, a: ^IRBuilder, value: Int, limit: Int) Never! {
     over: ir_bool_op(m, a, IROp.Gt, value, limit)
     ir_open_if(a.f, over, a.line)
     ir_emit(a.f, IROp.Copy, value, limit, -1, -1, a.line)
@@ -735,7 +735,7 @@ ir_map_clamp: fn(m: &IRModule, a: &IRBuilder, value: Int, limit: Int) Never! {
 // right_end) is spent, or the left run [left, left_end) is not and its key
 // is the lesser. A run's item `i` is entry `i` itself when its array is -1,
 // else the entry whose position is word `i` of the array.
-ir_map_takes_left: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, data: Int, left_array: Int, left: Int, left_end: Int, right_array: Int, right: Int, right_end: Int) -> Int Never! {
+ir_map_takes_left: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, data: Int, left_array: Int, left: Int, left_end: Int, right_array: Int, right: Int, right_end: Int) -> Int Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     takes: ir_temp(m, a, bool_row)
     ir_emit(a.f, IROp.Const, takes, 1, -1, -1, a.line)
@@ -754,7 +754,7 @@ ir_map_takes_left: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 }
 
 // The key of item `index` of a merge run (ir_map_takes_left).
-ir_map_run_key: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, data: Int, array: Int, index: Int) -> Int Never! {
+ir_map_run_key: fn(m: ^IRModule, a: ^IRBuilder, shape: IRMapShape, data: Int, array: Int, index: Int) -> Int Never! {
     position := index
     if array >= 0 {
         at: ir_element_address(m, a, array, index, 8)
@@ -767,7 +767,7 @@ ir_map_run_key: fn(m: &IRModule, a: &IRBuilder, shape: IRMapShape, data: Int, ar
 // map.order(map) -> the address of the hashed Map's entries in key order:
 // its own buffer when frozen or when every entry is in order, else a fresh
 // buffer of byte copies (map.merge) the caller frees.
-ir_map_order_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int) Never! {
+ir_map_order_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map_row: Int, map: Int) Never! {
     word_row: ir_word_row(m)
     a.f.result = word_row
     length: ir_load_word(m, a, map, 0)
@@ -789,7 +789,7 @@ ir_map_order_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 // map.settle(map): a hashed Map whose own variable reads it in key order
 // merges its tail in place first, so that read and the ones after it walk
 // its buffer: made unique, then rebuilt at its capacity.
-ir_map_settle_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, map_row: Int, map: Int) Never! {
+ir_map_settle_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, map_row: Int, map: Int) Never! {
     shape: ir_keyed_shape(m, p, map_row) ?? panic("map.settle of a type without a Map shape")
     length: ir_load_word(m, a, map, 0)
     sorted: ir_map_sorted(m, a, shape, map)
@@ -808,7 +808,7 @@ ir_map_settle_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, map_row: Int, 
 // caller, which made it unique (a counted one is freed, its entries moved).
 // map.grow (`merge` false) moves them as they lie, the sorted count kept:
 // the appended tail stays unsorted until an ordered read merges it.
-ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, capacity: Int, merge: Bool) Never! {
+ir_map_rebuild_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map_row: Int, map: Int, capacity: Int, merge: Bool) Never! {
     word_row: ir_word_row(m)
     zero: ir_word_const(m, a, 0)
     one: ir_word_const(m, a, 1)
@@ -885,7 +885,7 @@ ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapS
 // returned in an Option box by map.insert (null when the key was new). A
 // Map's entries are the heap's, so what they hold moves there first
 // (BuildMove.jet).
-ir_map_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, option_row: Int) Never! {
+ir_map_insert_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, option_row: Int) Never! {
     a.f.result = option_row
     ir_move_heap(m, p, a, value)
     word_row: ir_word_row(m)
@@ -907,7 +907,7 @@ ir_map_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
 // that entry's index so the caller keeps the key and value; a new key goes
 // in as map.set puts it, its value moved to the heap first as map.set moves
 // it, and the helper returns -1.
-ir_map_add_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int) Never! {
+ir_map_add_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int) Never! {
     word_row: ir_word_row(m)
     a.f.result = word_row
     index: ir_map_call(m, p, a, map_row, "map.find", [Int]{map, key}, word_row)
@@ -925,7 +925,7 @@ ir_map_add_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
 // Puts in a key the Map at `map` doesn't hold; `index` is what map.find
 // returned for it (-1 - the insertion point on a sorted Map). The key moves
 // to the heap first; the caller has moved the value.
-ir_map_place_new: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, index: Int) Never! {
+ir_map_place_new: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, index: Int) Never! {
     ir_move_heap(m, p, a, key)
     if ir_map_hashed(shape) {
         // A new key goes after the last entry, out of order until a
@@ -979,7 +979,7 @@ ir_map_place_new: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 
 // map.set and map.insert on a key the Map at `map` holds at `index`: the
 // value is replaced and the incoming key dropped.
-ir_map_replace_value: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int, value: Int, index: Int, option_row: Int) Never! {
+ir_map_replace_value: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map: Int, key: Int, value: Int, index: Int, option_row: Int) Never! {
     entries: ir_load_word(m, a, map, 16)
     entry: ir_element_address(m, a, entries, index, shape.stride)
     old := -1
@@ -1007,7 +1007,7 @@ ir_map_replace_value: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMap
 // The value under a borrowed key in an Option box (null when absent): map.get
 // copies it, map.remove moves it out, drops the entry's key and closes the
 // gap.
-ir_map_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, option_row: Int, removes: Bool) Never! {
+ir_map_take_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, option_row: Int, removes: Bool) Never! {
     a.f.result = option_row
     word_row: ir_word_row(m)
     index: ir_map_call(m, p, a, map_row, "map.find", [Int]{map, key}, word_row)
@@ -1053,7 +1053,7 @@ ir_map_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 }
 
 // A call of Map helper `name` with result row `result` (-1: none).
-ir_map_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
+ir_map_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, map_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
     callee: ir_map_helper(m, p, map_row, name)
     dst: if result >= 0 -> ir_fresh_temp(m, b, result) else -> -1
     operands: ir_args(b.f, args)
@@ -1065,7 +1065,7 @@ ir_map_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map_row: Int, name: S
 // The index of the entry map.set just added to the Map at `map` after
 // map.find missed with `found`: a hashed Map appends it, any other inserts it
 // at the insertion point -1 - found.
-ir_map_added_index: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int, found: Int) -> Int Never! {
+ir_map_added_index: fn(m: ^IRModule, b: ^IRBuilder, shape: IRMapShape, map: Int, found: Int) -> Int Never! {
     if ir_map_hashed(shape) {
         length: ir_load_word(m, b, map, 0)
         one: ir_word_const(m, b, 1)
@@ -1077,7 +1077,7 @@ ir_map_added_index: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int,
 
 // Room for one more element of the list at `list`: grows its buffer to twice
 // its capacity (at least 4) when full; returns the length.
-ir_list_reserve: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int) -> Int Never! {
+ir_list_reserve: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, list: Int, row: Int) -> Int Never! {
     stride: ir_list_stride(m, row)
     width: ir_word_const(m, b, stride)
     length: ir_load_word(m, b, list, 0)
@@ -1111,7 +1111,7 @@ ir_list_reserve: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: I
 // entries in the order they were added, so the found index is the earlier
 // entry; for any other Map the stop compares the key with the earlier
 // entries' keys. Only the stop does any work beyond the lookup.
-ir_map_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, entries: [BodyMapEntry], span: Span) -> Int Never! {
+ir_map_literal: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, entries: [BodyMapEntry], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     shape: ir_map_shape(m, p, row) ?? return ir_fail_slot(b, span, "map literal of {ir_type_name(ty)}")
     line: b.line
@@ -1158,7 +1158,7 @@ ir_map_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, entries:
 // The stop of a map literal whose entry `second` repeats the key of the entry
 // at index `held` of the Map at `map`: the message names the key and both
 // entries, counted from 1. False when the key has no debug text.
-ir_map_literal_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, map: Int, keys: [Int], second: Int, held: Int) -> Bool Never! {
+ir_map_literal_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, map: Int, keys: [Int], second: Int, held: Int) -> Bool Never! {
     entries: ir_load_word(m, b, map, 16)
     entry: ir_element_address(m, b, entries, held, shape.stride)
     key: ir_load_at(m, b, entry, shape.key.offset, shape.key.ty)
@@ -1196,7 +1196,7 @@ ir_map_literal_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapS
 }
 
 // Pushes entry index `index` counted from 1.
-ir_map_literal_push_count: fn(m: &IRModule, b: &IRBuilder, builder: Int, index: Int) Never! {
+ir_map_literal_push_count: fn(m: ^IRModule, b: ^IRBuilder, builder: Int, index: Int) Never! {
     one: ir_word_const(m, b, 1)
     count: ir_word_op(m, b, IROp.Add, index, one)
     string_row: ir_string_row(m)
@@ -1206,7 +1206,7 @@ ir_map_literal_push_count: fn(m: &IRModule, b: &IRBuilder, builder: Int, index: 
 
 // Pushes the debug text of `key`, a key of the map `shape` describes, onto
 // `builder`; false when rendering it failed.
-ir_map_push_key_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, builder: Int, key: Int) -> Bool Never! {
+ir_map_push_key_text: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, builder: Int, key: Int) -> Bool Never! {
     key_ty: ir_row_ty(m, p, shape.key.ty)
     text: ir_render(m, p, b, key_ty, key, IRRender.Debug, Span{start: 0, end: 0})
     if ir_failed(b) -> return false
@@ -1215,7 +1215,7 @@ ir_map_push_key_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMap
 }
 
 // Moves owned copies of `key` and `value` into the map at `map`.
-ir_map_set: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int, value: Int) Never! {
+ir_map_set: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, map: Int, key: Int, value: Int) Never! {
     owned_key: ir_own(m, p, b, key)
     owned_value: ir_own(m, p, b, value)
     _: ir_map_call(m, p, b, row, "map.set", [Int]{map, owned_key, owned_value}, -1)
@@ -1231,7 +1231,7 @@ ir_line_report: fn(p: IRProgram, b: IRBuilder) -> TPanicLoc Never! {
 
 // The address of the value stored under `key` in the map at `map`; a missing
 // key stops at the current line with the key's debug text (jet_index_map_ref).
-ir_map_value_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int) -> Int Never! {
+ir_map_value_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, map: Int, key: Int) -> Int Never! {
     shape: ir_map_shape(m, p, row) ?? return -1
     word_row: ir_word_row(m)
     found: ir_map_call(m, p, b, row, "map.find", [Int]{map, key}, word_row)
@@ -1255,7 +1255,7 @@ ir_map_value_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, ma
 }
 
 // `map[key]` read as a value (borrowed: the map keeps it).
-ir_map_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, span: Span) -> Int Never! {
+ir_map_index: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index: Int, span: Span) -> Int Never! {
     base_ty: ir_ty(m, p, b, base)
     map: ir_expr(m, p, b, base)
     if ir_failed(b) || map < 0 -> return -1
@@ -1269,12 +1269,12 @@ ir_map_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: In
     ir_end_read_base(m, p, b, map, read, span)
 }
 
-// `&map[key]` as a write place: the key's value in the map's own buffer (a
-// missing key stops, as a read does). `&map[key, or: start]` (`started`,
+// `^map[key]` as a write place: the key's value in the map's own buffer (a
+// missing key stops, as a read does). `^map[key, or: start]` (`started`,
 // `index` the key and start pair) gives a missing key its starting value
 // first (ir_map_slot_entry). An aggregate value is its storage's address,
 // any other the address of its word (ir_place_address).
-ir_map_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, started: Bool, backs: &[IRWriteBack], span: Span) -> Int Never! {
+ir_map_place_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index: Int, started: Bool, backs: ^[IRWriteBack], span: Span) -> Int Never! {
     base_ty: ir_ty(m, p, b, base)
     map: ir_place_address(m, p, b, base, backs, span)
     if ir_failed(b) -> return -1
@@ -1318,7 +1318,7 @@ ir_map_slot_parts: fn(p: IRProgram, b: IRBuilder, pair: Int) -> IRMapSlotParts? 
 // The address of the key's value in the map at `map` (made unique by the
 // caller) after one probe: a missing key first goes in with the starting
 // value, which runs only then, at the place the probe found for it.
-ir_map_slot_entry: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, row: Int, map: Int, parts: IRMapSlotParts, span: Span) -> Int Never! {
+ir_map_slot_entry: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, row: Int, map: Int, parts: IRMapSlotParts, span: Span) -> Int Never! {
     key: ir_value_as(m, p, b, parts.key, shape.key.ty, span)
     if ir_failed(b) || key < 0 -> return -1
     word_row: ir_word_row(m)
@@ -1354,7 +1354,7 @@ ir_map_slot_entry: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapSha
 // `map[key, or: start]` read as a value: a copy of the key's value, or,
 // where the key is missing, the starting value, which runs only then. One
 // probe, and the map is left as it is.
-ir_map_slot_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, pair: Int, span: Span) -> Int Never! {
+ir_map_slot_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, pair: Int, span: Span) -> Int Never! {
     parts: ir_map_slot_parts(p, b, pair) ?? return ir_fail_slot(b, span, "map slot without a key and a starting value")
     base_ty: ir_ty(m, p, b, base)
     map: ir_expr(m, p, b, base)
@@ -1391,7 +1391,7 @@ ir_map_slot_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, pair:
 // `map[key] = value` does (the starting value never runs); a compound update
 // finds or makes the key's entry with one probe (ir_map_slot_entry) and
 // updates its value in place.
-ir_map_slot_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, pair: Int, op: TBinaryOp?, value: Int, span: Span) Never! {
+ir_map_slot_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, pair: Int, op: TBinaryOp?, value: Int, span: Span) Never! {
     parts: ir_map_slot_parts(p, b, pair) ?? return ir_fail(b, span, "map slot without a key and a starting value")
     binary: op ?? return ir_map_index_assign(m, p, b, base, parts.key, None, value, span)
     base_ty: ir_ty(m, p, b, base)
@@ -1429,7 +1429,7 @@ ir_map_slot_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, pai
 // assignment updates the value in place. The value comes before the place
 // (ir_assign_place), and the place is a write base (ir_write_base): a Map
 // inside a List element writes that List's own buffer, never a shared one.
-ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, op: TBinaryOp?, value: Int, span: Span) Never! {
+ir_map_index_assign: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index: Int, op: TBinaryOp?, value: Int, span: Span) Never! {
     base_ty: ir_ty(m, p, b, base)
     written_row: ir_value_type(m, p, base_ty) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
     written: ir_map_shape(m, p, written_row) ?? return ir_fail(b, span, "map index write of {ir_type_name(base_ty)}")
@@ -1475,7 +1475,7 @@ ir_map_index_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
 
 // `map[key] = value` over a present key: the entry's old value closes first,
 // as a field write closes it; map.set then drops it.
-ir_map_close_replaced: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape: IRMapShape, map: Int, key: Int, span: Span) Never! {
+ir_map_close_replaced: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, shape: IRMapShape, map: Int, key: Int, span: Span) Never! {
     glue: ir_close_glue(m, p, b, shape.value.ty, false, span)
     if glue < 0 {
         return
@@ -1555,7 +1555,7 @@ ir_map_update_primitive: fn(ty: Type) -> Bool Never! {
 // copied; a missing key is set as ir_map_set sets it. Key and value only
 // read, so building them before the value, not after as
 // ir_map_index_assign does, is the same program.
-ir_map_update: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, value: Int, span: Span) Never! {
+ir_map_update: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, base: Int, index: Int, value: Int, span: Span) Never! {
     base_ty: ir_ty(m, p, b, base)
     map: ir_write_base(m, p, b, base, span)
     if ir_failed(b) || map < 0 {
@@ -1611,7 +1611,7 @@ ir_map_probed: fn(b: IRBuilder, map: Int, key: Int) -> Int? Never! {
 
 // `map.get(key)` from the entry `found` a probe found: a copy of its value,
 // absent when `found` is negative (as map.get answers).
-ir_map_found_option: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, map: Int, found: Int, option_row: Int) -> Int Never! {
+ir_map_found_option: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, map: Int, found: Int, option_row: Int) -> Int Never! {
     result: ir_fresh_temp(m, b, option_row)
     ir_option_none(m, b, result)
     none: ir_word_const(m, b, 0)
@@ -1640,7 +1640,7 @@ IRMapTake: struct {
 // The index in `body` of the store of the group update statement `at`
 // starts (-1: none). A group update is `group := map.get(key) ?? fallback`,
 // statements, then `map[key] = group`. It builds as the write window
-// `group := &map[key]`, a missing key first seeded with the fallback
+// `group := ^map[key]`, a missing key first seeded with the fallback
 // (ir_map_take), and its store builds nothing: each write of `group` lands
 // in the map's entry, so growing a group row by row is linear in the group,
 // not a copy of it per row. That is the same program when only `group` can
@@ -1738,7 +1738,7 @@ ir_map_take_captured: fn(p: IRProgram, b: IRBuilder, name: String) -> Bool Never
 }
 
 // Sets `found` when node `id` or a node inside it reads the variable `name`.
-ir_map_take_note: fn(p: IRProgram, b: IRBuilder, id: Int, name: String, found: &Bool) Never! {
+ir_map_take_note: fn(p: IRProgram, b: IRBuilder, id: Int, name: String, found: ^Bool) Never! {
     if found {
         return
     }
@@ -1852,7 +1852,7 @@ ir_map_take_nested: fn(kind: StmtKind) -> [Int]? Never! {
 // inside an expression (which may), a raw address, a write or move of the
 // key's variable or a move of the group; after the store, a read of the
 // group.
-ir_map_take_node_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int, between: Bool, bad: &Bool) Never! {
+ir_map_take_node_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int, between: Bool, bad: ^Bool) Never! {
     if bad {
         return
     }
@@ -1965,7 +1965,7 @@ ir_map_take_store: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, place: Body
 // `local := map.get(key) ?? fallback` of a group update (ir_map_take_fuses):
 // `local` binds the write window of the key's entry, which a missing key
 // first gets with the fallback's value (a fallback that stops leaves).
-ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
+ir_map_take: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, local: TLocal, init: Int, span: Span) Never! {
     ir_stmt_line(p, b, span)
     receiver := -1
     index := -1
@@ -2040,7 +2040,7 @@ ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
 
 // `[k: v, ...]` in display: `[:]` when empty; keys and values render as
 // themselves.
-ir_render_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
+ir_render_map: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
     row: b.f.slot_type[slot]
     shape: ir_map_shape(m, p, row) ?? return ir_fail(b, span, "display of {ir_type_name(ir_row_ty(m, p, row))}")
     length: ir_load_word(m, b, slot, 0)
@@ -2073,7 +2073,7 @@ ir_render_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
 // map.order buffer (capacity 0 when that is the Map's own), held by a
 // variable binding so that any exit drops it, as ir_map_ordered_end does on
 // the way out; any other Map is its own.
-ir_map_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int) -> Int Never! {
+ir_map_ordered: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, map: Int) -> Int Never! {
     row: b.f.slot_type[map]
     shape: ir_keyed_shape(m, p, row) ?? return map
     if !ir_map_hashed(shape) -> return map
@@ -2098,7 +2098,7 @@ ir_map_ordered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int) -> Int N
 }
 
 // Drops the ordered header `header` of the Map at `map` (ir_map_ordered).
-ir_map_ordered_end: fn(m: &IRModule, b: &IRBuilder, map: Int, header: Int) Never! {
+ir_map_ordered_end: fn(m: ^IRModule, b: ^IRBuilder, map: Int, header: Int) Never! {
     if header == map || !ir_owned_binding(b, header) {
         return
     }
@@ -2110,7 +2110,7 @@ ir_map_ordered_end: fn(m: &IRModule, b: &IRBuilder, map: Int, header: Int) Never
 // reads: a variable that owns it and may write it (a `:=` binding, a write
 // parameter) settles it (map.settle), its out-of-order entries merged into
 // its own buffer, so the walk reads that buffer instead of a sorted copy.
-ir_map_settle_for: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection: Int, map: Int) Never! {
+ir_map_settle_for: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, collection: Int, map: Int) Never! {
     row: b.f.slot_type[map]
     shape: ir_keyed_shape(m, p, row) ?? return
     if !ir_map_hashed(shape) {
@@ -2131,7 +2131,7 @@ ir_map_settle_for: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection: Int
 // (ir_map_walk_take): a part of an entry closes or is a move-only handle
 // (ir_map_part_closes), which a step can't share with the Map (a byte copy
 // shares it uncounted, so both would end it).
-ir_map_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int, paired: Bool, by_value: Bool, span: Span) -> Bool Never! {
+ir_map_walk_takes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, map: Int, paired: Bool, by_value: Bool, span: Span) -> Bool Never! {
     if !paired || !(b.fresh[map] || (by_value && ir_owned_binding(b, map))) -> return false
     shape: ir_map_shape(m, p, b.f.slot_type[map]) ?? return false
     key: ir_map_part_closes(m, p, b, shape.key.ty, span)
@@ -2147,7 +2147,7 @@ ir_map_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int, paire
 // in key order, and shortens the Map past it (ir_map_walk_entry). On any exit
 // the holder closes the entries no step took in key order, from the last one
 // (ir_map_rest_glue), and its drop ends them.
-ir_map_walk_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int, span: Span) -> Int Never! {
+ir_map_walk_take: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, map: Int, span: Span) -> Int Never! {
     row: b.f.slot_type[map]
     shape: ir_map_shape(m, p, row) ?? return ir_fail_slot(b, span, "walk of {ir_type_name(ir_row_ty(m, p, row))}")
     ir_close_disarm(b, map)
@@ -2178,7 +2178,7 @@ ir_map_walk_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int, span: 
 // row `row` left of it (ir_map_walk_take): its entries, reversed in place,
 // from the last one, so they close in key order as the Map's own close
 // (ir_close_glue) closes them; -1 when nothing in an entry closes.
-ir_map_rest_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape: IRMapShape, span: Span) -> Int Never! {
+ir_map_rest_glue: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, shape: IRMapShape, span: Span) -> Int Never! {
     key: "#close.rest<{ir_row_key(m, row)}>"
     known: name_column_value(m.close_glue_keys, m.close_glue, key) ?? -3
     if known == -2 {
@@ -2232,7 +2232,7 @@ ir_map_rest_glue: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shape:
 
 // Whether a value of type row `row` closes or is a move-only handle, as the
 // items a List walk takes over (ir_list_walk_takes).
-ir_map_part_closes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Bool Never! {
+ir_map_part_closes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, span: Span) -> Bool Never! {
     if ir_close_handle(m, row) -> return true
     ir_close_glue(m, p, b, row, false, span) >= 0
 }
@@ -2240,7 +2240,7 @@ ir_map_part_closes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span
 // Reverses the entries of the unique Map at `map` in place. Only a walk that
 // takes them (ir_map_walk_take) reorders them: the Map's index no longer
 // finds them, and nothing looks one up again.
-ir_map_reverse_entries: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int) Never! {
+ir_map_reverse_entries: fn(m: ^IRModule, b: ^IRBuilder, shape: IRMapShape, map: Int) Never! {
     length: ir_load_word(m, b, map, 0)
     data: ir_load_word(m, b, map, 16)
     one: ir_word_const(m, b, 1)
@@ -2269,7 +2269,7 @@ ir_map_reverse_entries: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: 
 // The entry step `index` of a walk that takes the `length` entries of the
 // Map at `map` (ir_map_walk_take) reads: the last one left in `data`, which
 // the Map stops holding.
-ir_map_walk_entry: fn(m: &IRModule, b: &IRBuilder, map: Int, data: Int, length: Int, index: Int, stride: Int) -> Int Never! {
+ir_map_walk_entry: fn(m: ^IRModule, b: ^IRBuilder, map: Int, data: Int, length: Int, index: Int, stride: Int) -> Int Never! {
     one: ir_word_const(m, b, 1)
     left: ir_word_op(m, b, IROp.Sub, length, index)
     last: ir_word_op(m, b, IROp.Sub, left, one)
@@ -2280,7 +2280,7 @@ ir_map_walk_entry: fn(m: &IRModule, b: &IRBuilder, map: Int, data: Int, length: 
 // The `part` of the entry at `item` a step of a Map walk binds: read in
 // place, or, when the step `takes` the entry (ir_map_walk_takes), the step's
 // own value, an aggregate copied out of the entry.
-ir_map_walk_part: fn(m: &IRModule, b: &IRBuilder, item: Int, part: IRMember, takes: Bool) -> Int Never! {
+ir_map_walk_part: fn(m: ^IRModule, b: ^IRBuilder, item: Int, part: IRMember, takes: Bool) -> Int Never! {
     read: ir_load_at(m, b, item, part.offset, part.ty)
     if !takes || read < 0 -> return read
     taken := read
@@ -2294,7 +2294,7 @@ ir_map_walk_part: fn(m: &IRModule, b: &IRBuilder, item: Int, part: IRMember, tak
 }
 
 // Empties the index of the hashed Map at `map` after its entries are gone.
-ir_map_clear_index: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int) Never! {
+ir_map_clear_index: fn(m: ^IRModule, b: ^IRBuilder, shape: IRMapShape, map: Int) Never! {
     zero: ir_word_const(m, b, 0)
     capacity: ir_load_word(m, b, map, 8)
     counted: ir_bool_op(m, b, IROp.Gt, capacity, zero)
@@ -2323,7 +2323,7 @@ ir_map_clear_index: fn(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int)
 // (the removed value), keys / values (an Iter), top_n (a ranked List of
 // entries) and update (in place); `ty` is the result type. None
 // when the builder does not lower `symbol` on Maps.
-ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
+ir_map_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, symbol: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     row: b.f.slot_type[subject]
     shape: ir_map_shape(m, p, row) ?? return None
     if symbol == "jet_map_len" {
@@ -2656,7 +2656,7 @@ ir_map_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: 
 // `map.keys()` / `map.values()`: a List of copies of the entries' keys
 // (values), in key order, handed to the runtime Iter by value; later map
 // writes never reach it.
-ir_map_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, keys: Bool, span: Span) -> Int Never! {
+ir_map_view: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, shape: IRMapShape, map: Int, keys: Bool, span: Span) -> Int Never! {
     member: if keys -> shape.key else -> shape.value
     item_ty: ir_row_ty(m, p, member.ty)
     if m.types[member.ty].kind == .Unit {
@@ -2679,7 +2679,7 @@ ir_map_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMa
 // `map.first_key()` / `map.min_value()` / `map.max_value()`: a copy of the
 // chosen key or value in an Option box, None when the map is empty. min keeps
 // the first least value, max the last greatest (Iterator::min / max).
-ir_map_pick: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, symbol: String, span: Span) -> Int Never! {
+ir_map_pick: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, shape: IRMapShape, map: Int, symbol: String, span: Span) -> Int Never! {
     keyed: symbol == "jet_map_first_key"
     member: if keyed -> shape.key else -> shape.value
     kind: ir_map_key_kind(m, p, member.ty)
@@ -2732,7 +2732,7 @@ ir_map_pick: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMa
 // of `other`, in key order, set as a copy; a key both hold gets
 // `conflict(key, left value, right value)`, the callback borrowing its
 // arguments, and the left value it replaces ends.
-ir_map_merge_with: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, row: Int, subject: Int, other: Int, callback: Int, span: Span) -> Int Never! {
+ir_map_merge_with: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, row: Int, subject: Int, other: Int, callback: Int, span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     target: ir_copy_value(m, p, b, subject, span)
     // The copy shares the receiver's buffer until it is the target's own.
@@ -2768,7 +2768,7 @@ ir_map_merge_with: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapSha
 // lowest ranked at its root, takes each later entry that ranks above that
 // root; heapsort then orders it best first: O(len log keep) comparisons and
 // O(keep) extra words.
-ir_map_top_n: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, map: Int, count: Int, span: Span) -> Int Never! {
+ir_map_top_n: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, shape: IRMapShape, map: Int, count: Int, span: Span) -> Int Never! {
     value_kind: ir_map_key_kind(m, p, shape.value.ty)
     if value_kind == "" || shape.stride %% 8 != 0 {
         return ir_fail_slot(b, span, "Map top_n over {ir_type_name(shape.value_ty)} values is not lowered at O0 yet")
@@ -2891,7 +2891,7 @@ ir_map_top_n: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRM
 
 // Whether the entry at position `first` ranks above the one at `second` in
 // top_n order: a greater value, or an equal value and a smaller key.
-ir_map_top_above: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, value_kind: String, data: Int, first: Int, second: Int) -> Int Never! {
+ir_map_top_above: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, value_kind: String, data: Int, first: Int, second: Int) -> Int Never! {
     upper: ir_element_address(m, b, data, first, shape.stride)
     lower: ir_element_address(m, b, data, second, shape.stride)
     upper_value: ir_load_at(m, b, upper, shape.value.offset, shape.value.ty)
@@ -2911,7 +2911,7 @@ ir_map_top_above: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShap
 // Puts entry position `item` at the root of the `count`-position heap at
 // `heap` and sinks it below every child that ranks under it, so the root
 // again holds the lowest ranked position.
-ir_map_top_sink: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, value_kind: String, data: Int, heap: Int, count: Int, item: Int) Never! {
+ir_map_top_sink: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, value_kind: String, data: Int, heap: Int, count: Int, item: Int) Never! {
     word_row: ir_word_row(m)
     one: ir_word_const(m, b, 1)
     hole: ir_word_const(m, b, 0)
@@ -2953,7 +2953,7 @@ ir_map_top_sink: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape
 // `Map.from_keys(keys, default)`: every key, in List order, set to a copy of
 // the default (a later duplicate key replacing the earlier entry). The caller
 // keeps `keys` and `fallback`.
-ir_map_from_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, keys: Int, fallback: Int, result: Type, span: Span) -> Int Never! {
+ir_map_from_keys: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, keys: Int, fallback: Int, result: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
     shape: ir_map_shape(m, p, row) ?? return ir_fail_slot(b, span, "Map.from_keys into {ir_type_name(result)} is not lowered at O0 yet")
     if m.types[shape.value.ty].kind == .Unit {

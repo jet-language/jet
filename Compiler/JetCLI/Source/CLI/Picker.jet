@@ -236,7 +236,7 @@ jet_cli_picker_word_break: fn(text: String) -> Bool Never! {
 // The fuzzy score of `query` against `hay` (letter case ignored), filling
 // `positions` with the matched character positions; None when some query
 // character has no match in order.
-jet_cli_picker_fuzzy: fn(query: String, hay: String, positions: &[Int]) -> Int? Never! {
+jet_cli_picker_fuzzy: fn(query: String, hay: String, positions: ^[Int]) -> Int? Never! {
     if query == "" -> return Val(0)
     wanted: query.to_lower().chars()
     chars: hay.to_lower().chars()
@@ -260,7 +260,7 @@ jet_cli_picker_fuzzy: fn(query: String, hay: String, positions: &[Int]) -> Int? 
 
 // Keeps the better of `best` and the match of `query` in `hay`; the earlier
 // text wins a tie.
-jet_cli_picker_consider: fn(best: &JetCLIPickerHit?, entry: Int, query: String, hay: String) Never! {
+jet_cli_picker_consider: fn(best: ^JetCLIPickerHit?, entry: Int, query: String, hay: String) Never! {
     positions := [Int]{}
     score: jet_cli_picker_fuzzy(query, hay, positions) ?? return
     if best == .Val(current) && score <= current.score {
@@ -752,7 +752,7 @@ jet_cli_picker_list_mode: fn(state: JetCLIPickerState) -> JetCLIPickerMode Never
 }
 
 // A reference search selects the best command and opens its category.
-jet_cli_picker_reference_search: fn(state: &JetCLIPickerState) Never! {
+jet_cli_picker_reference_search: fn(state: ^JetCLIPickerState) Never! {
     if state.ref_query == "" {
         return
     }
@@ -767,7 +767,7 @@ jet_cli_picker_reference_search: fn(state: &JetCLIPickerState) Never! {
     state.ref_entry = Val(first)
 }
 
-jet_cli_picker_move: fn(state: &JetCLIPickerState, delta: Int) Never! {
+jet_cli_picker_move: fn(state: ^JetCLIPickerState, delta: Int) Never! {
     if state.mode == {
         .Categorized -> {
             if state.cat_entry == .Val(entry) {
@@ -799,7 +799,7 @@ jet_cli_picker_move: fn(state: &JetCLIPickerState, delta: Int) Never! {
 }
 
 // Up or Down: scroll a code page or a detail, else move the selection.
-jet_cli_picker_vertical: fn(state: &JetCLIPickerState, delta: Int) Never! {
+jet_cli_picker_vertical: fn(state: ^JetCLIPickerState, delta: Int) Never! {
     if state.mode == .Reference {
         if jet_cli_picker_search(state.index, state.ref_query).code != None {
             state.ref_scroll = jet_cli_picker_floor(state.ref_scroll + delta)
@@ -831,7 +831,7 @@ jet_cli_picker_pick: fn(state: JetCLIPickerState, example: Bool) -> String? Neve
     Val("{JET_CLI_BINARY} {entry.name}")
 }
 
-jet_cli_picker_apply: fn(state: &JetCLIPickerState, key: JetCLIPickerKey) -> JetCLIPickerAction Never! {
+jet_cli_picker_apply: fn(state: ^JetCLIPickerState, key: JetCLIPickerKey) -> JetCLIPickerAction Never! {
     if key == {
         .Quit -> JetCLIPickerAction.Quit
         .Other -> JetCLIPickerAction.Continue
@@ -954,7 +954,7 @@ jet_cli_picker_apply: fn(state: &JetCLIPickerState, key: JetCLIPickerKey) -> Jet
 
 // The keys in `bytes`. A sequence or character cut off at the end is left
 // in `rest` for the next read.
-jet_cli_picker_keys: fn(bytes: [U8], rest: &[U8]) -> [JetCLIPickerKey] Never! {
+jet_cli_picker_keys: fn(bytes: [U8], rest: ^[U8]) -> [JetCLIPickerKey] Never! {
     keys := [JetCLIPickerKey]{}
     rest = [U8]{}
     at := 0

@@ -2,7 +2,7 @@
 // fixed-output fetchers that require explicit fetch authority.
 
 impl NixEvaluator {
-    builtins_field: fn(&self, field: String) -> Int? Never! {
+    builtins_field: fn(^self, field: String) -> Int? Never! {
         if field == {
             "currentSystem" -> Val(self.value_thunk(NixEvalValue.Str(self.system)))
             "storeDir" -> Val(self.value_thunk(NixEvalValue.Str("/nix/store")))
@@ -13,7 +13,7 @@ impl NixEvaluator {
         }
     }
 
-    apply_builtin: fn(&self, builtin: NixEvalBuiltin, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
+    apply_builtin: fn(^self, builtin: NixEvalBuiltin, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
         if builtin == {
             .AttrNames -> {
                 fields: nixeval_attribute_set(argument, "attribute set")
@@ -100,7 +100,7 @@ impl NixEvaluator {
     }
 
     // `builtins.attrNames`: the attribute names in key order, as strings.
-    attribute_names: fn(&self, fields: [String:Int]) -> NixEvalValue Never! {
+    attribute_names: fn(^self, fields: [String:Int]) -> NixEvalValue Never! {
         names := [Int]{}
         loop name in nixeval_sorted(fields.keys().to_list()) {
             names.push(self.value_thunk(NixEvalValue.Str(name)))
@@ -110,7 +110,7 @@ impl NixEvaluator {
 
     // `builtins.fromJSON`: the reference reader's depth failure is a resource
     // limit; every other JSON failure is an invalid expression.
-    from_json: fn(&self, text: String) -> NixEvalValue NixEvalError! {
+    from_json: fn(^self, text: String) -> NixEvalValue NixEvalError! {
         if NixEvalJSON.parse(text) == {
             .Ok(document) -> return self.json_to_value(document, document.root, 0)
             .Err(error) -> {
@@ -123,11 +123,11 @@ impl NixEvaluator {
         }
     }
 
-    partial: fn(&self, operation: NixEvalOperation, argument: NixEvalValue) -> NixEvalValue Never! {
+    partial: fn(^self, operation: NixEvalOperation, argument: NixEvalValue) -> NixEvalValue Never! {
         NixEvalValue.Native(NixEvalNative.Partial{operation: operation, arguments: [Int]{self.value_thunk(argument)}})
     }
 
-    apply_partial: fn(&self, operation: NixEvalOperation, arguments: [Int]) -> NixEvalValue NixEvalError! {
+    apply_partial: fn(^self, operation: NixEvalOperation, arguments: [Int]) -> NixEvalValue NixEvalError! {
         if arguments.len() < operation.arity() {
             return Ok(NixEvalValue.Native(NixEvalNative.Partial{operation: operation, arguments: arguments}))
         }
@@ -229,7 +229,7 @@ impl NixEvaluator {
         }
     }
 
-    string_list: fn(&self, value: NixEvalValue) -> [String] NixEvalError! {
+    string_list: fn(^self, value: NixEvalValue) -> [String] NixEvalError! {
         items: nixeval_list(value, "string list")
         strings := [String]{}
         loop item in items {
@@ -239,7 +239,7 @@ impl NixEvaluator {
         Ok(strings)
     }
 
-    apply_fetch: fn(&self, fetcher: NixEvalFetcher, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
+    apply_fetch: fn(^self, fetcher: NixEvalFetcher, argument: NixEvalValue) -> NixEvalValue NixEvalError! {
         fields: nixeval_attribute_set(argument, "fixed-output fetcher attribute set")
         if self.authority == None {
             return Err(NixEvalError.Unsupported("fixed-output fetchers require explicit fetch authority and verified bytes"))
@@ -263,7 +263,7 @@ impl NixEvaluator {
     }
 
     // The plain string of the first present field among `names`.
-    first_string_field: fn(&self, fields: [String:Int], names: [String]) -> String? NixEvalError! {
+    first_string_field: fn(^self, fields: [String:Int], names: [String]) -> String? NixEvalError! {
         loop name in names {
             found: self.field_value(fields, name)
             value: found ?? next

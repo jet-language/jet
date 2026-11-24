@@ -13,7 +13,7 @@ held: fn() -[FS]> Int {
 
 lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
+consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
 Meter: trait {
     read: fn(self, n: Int) -[]> Int,
@@ -44,7 +44,7 @@ large: fn() -> Meter { Large{k: 10} }
 // moves the lock only where `n` is absent: on every implementation's path
 // where it is present, the parameter still owns the lock, which closes as
 // this returns.
-measured: fn(l: &&FileLock, m: Meter, n: Int?) -[FS]> Int {
+measured: fn(l: ^^FileLock, m: Meter, n: Int?) -[FS]> Int {
     total: m.read(n ?? consume_lock(l.move()))
     total + held()
 }

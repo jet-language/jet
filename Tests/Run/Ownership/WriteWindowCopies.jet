@@ -23,8 +23,8 @@ show: fn(e: Expr) -> String {
 }
 
 // Writes through the write parameter's own window.
-bump: fn(e: &Expr) {
-    if &e == {
+bump: fn(e: ^Expr) {
+    if ^e == {
         .Pair(_, n) -> { n += 100 }
         .Many(items) -> { items.push(7) }
         .Lit(n) -> n += 1000
@@ -32,8 +32,8 @@ bump: fn(e: &Expr) {
 }
 
 // Writes through the recursive edge `left`, a window inside the window.
-bump_left: fn(e: &Expr) {
-    if &e == {
+bump_left: fn(e: ^Expr) {
+    if ^e == {
         .Pair(left, _) -> bump(left)
         .Lit(_) | .Many(_) -> {}
     }
@@ -45,7 +45,7 @@ run: fn() {
     // An owned local.
     a: sample()
     local := a
-    if &local == {
+    if ^local == {
         .Pair(_, n) -> n = 7
         .Lit(_) | .Many(_) -> {}
     }
@@ -70,11 +70,11 @@ run: fn() {
     // A field place.
     holder: Holder{expr: sample(), note: Val("kept")}
     field := holder
-    if &field.expr == {
+    if ^field.expr == {
         .Pair(_, n) -> n = 30
         .Lit(_) | .Many(_) -> {}
     }
-    if &field.note == {
+    if ^field.note == {
         .Val(text) -> { text = "edited" }
         None -> {}
     }

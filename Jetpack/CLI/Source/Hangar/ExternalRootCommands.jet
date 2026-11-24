@@ -8,7 +8,7 @@ use {
     time: core.time
 }
 
-cli_hangar_register_external_root: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+cli_hangar_register_external_root: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     args: cli_positional_values_after(parsed, "register-external-root")
     if args.len() < 2 {
         return cli_hangar_report_error(
@@ -79,7 +79,7 @@ cli_hangar_register_external_root: fn(verification: &StoreVerification, theme: T
     EXIT_OK
 }
 
-cli_hangar_list_external_roots: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+cli_hangar_list_external_roots: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     views: store_list_external_roots(verification, pkg_resolve_roots(), cli_external_root_principal()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
         machine_roots := [Dyn]{}
@@ -112,7 +112,7 @@ cli_hangar_list_external_roots: fn(verification: &StoreVerification, theme: Them
     EXIT_OK
 }
 
-cli_hangar_unregister_external_root: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+cli_hangar_unregister_external_root: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     args: cli_positional_values_after(parsed, "unregister-external-root")
     if args.len() == 0 {
         return cli_hangar_report_error(

@@ -52,7 +52,7 @@ sema_frame_lambda_schedule: fn(lambda: Lambda, environment: SemaScopeEnvironment
     sema_frame_schedule_produce(operations, environment, program, source, lambda.span.start)
 }
 
-sema_frame_note_refusal: fn(scan: &SemaFrameCallScan, detail: String, source_index: Int) Never! {
+sema_frame_note_refusal: fn(scan: ^SemaFrameCallScan, detail: String, source_index: Int) Never! {
     if scan.refusal != None && scan.refusal_index <= source_index {
         return
     }
@@ -60,7 +60,7 @@ sema_frame_note_refusal: fn(scan: &SemaFrameCallScan, detail: String, source_ind
     scan.refusal_index = source_index
 }
 
-sema_frame_note_fact: fn(scan: &SemaFrameCallScan, fact: SemaFrameOperationFact, source_index: Int) Never! {
+sema_frame_note_fact: fn(scan: ^SemaFrameCallScan, fact: SemaFrameOperationFact, source_index: Int) Never! {
     if fact.error == .Val(detail) {
         sema_frame_note_refusal(scan, detail, source_index)
         return
@@ -68,7 +68,7 @@ sema_frame_note_fact: fn(scan: &SemaFrameCallScan, fact: SemaFrameOperationFact,
     if fact.operation == .Val(operation) -> scan.operations.push(operation.copy())
 }
 
-sema_frame_note_call: fn(scan: &SemaFrameCallScan, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+sema_frame_note_call: fn(scan: ^SemaFrameCallScan, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     if expression == {
         .Call(call, _) -> {
             index: call.name_span.start
@@ -141,7 +141,7 @@ sema_frame_registered_call_operation: fn(name: String, args: [CallArg], target: 
 
 // The checked DMA starts bound to a source local anywhere in the callback's
 // statement blocks, so a later `transfer.wait()` names its exact start token.
-sema_frame_collect_dma_starts: fn(scan: &SemaFrameCallScan, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+sema_frame_collect_dma_starts: fn(scan: ^SemaFrameCallScan, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     loop statement in body {
         if statement == {
             .Val(binding) -> {
@@ -176,7 +176,7 @@ sema_frame_collect_dma_starts: fn(scan: &SemaFrameCallScan, body: [Stmt], enviro
     }
 }
 
-sema_frame_record_dma_start: fn(scan: &SemaFrameCallScan, name: String, init: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+sema_frame_record_dma_start: fn(scan: ^SemaFrameCallScan, name: String, init: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     if init == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method != "start" {

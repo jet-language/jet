@@ -149,7 +149,7 @@ from the syntax registry
 ([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
 and the marker structs of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet)).
 Semantic tokens refine live coloring for ownership markers, rules, decorators,
-and effect rows. Calls carry no marks, so inlay hints show the `&` or `&&` a
+and effect rows. Calls carry no marks, so inlay hints show the `^` or `^^` a
 callee's signature puts on each argument or receiver it writes or takes, and a
 name a call writes carries the `modification` modifier, which the extension
 underlines. The editor surface is not a substitute for the compiler's

@@ -136,7 +136,7 @@ jet_cli_import_report: fn(plan: JetCLIImportPlan) -> String Never! {
 }
 
 // Rust `attach_import_evidence`: the boundary carries its derivation and record.
-jet_cli_import_attach_evidence: fn(plan: &JetCLIImportPlan) JetCLIImportPlanError! {
+jet_cli_import_attach_evidence: fn(plan: ^JetCLIImportPlan) JetCLIImportPlanError! {
     if plan.evidence.derivations.records.len() == 0 {
         return Err(jet_cli_import_plan_error("source import evidence has no derivation"))
     }
@@ -179,7 +179,7 @@ JetCLIImportWrite: struct {
 
 // One generated file (or the report) against the editable target and the
 // stored baseline (Rust `apply_plan`'s write/conflict table).
-jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: String, contents: String, writes: &[JetCLIImportWrite], conflicts: &[String]) -[FS.Read]> Never! {
+jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: String, contents: String, writes: ^[JetCLIImportWrite], conflicts: ^[String]) -[FS.Read]> Never! {
     existing: jet_cli_import_existing(target)
     prior: jet_cli_import_existing(baseline)
     if mode != JetCLIImportMode.DryRun {

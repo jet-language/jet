@@ -19,7 +19,7 @@ view_field_key: fn(name: String, kind: SymbolKind) -> String Never! {
 }
 
 // A body symbol of the fixture's `window`, interned in the body's `keys`.
-view_field_symbol: fn(keys: &SymbolLocalKeys, name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
+view_field_symbol: fn(keys: ^SymbolLocalKeys, name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
     Symbol{id: symbol_local_keys_intern(keys, view_field_key(name, kind)), kind: kind, name: name, module_identity: module_none(), owner: Val("window"), span: span, ty: Val(ty), visibility: 0}
 }
 
@@ -71,7 +71,7 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
 // registration graph: prepare, the declaration stage and finalization. A
 // direct call and a payload pattern resolve against the registered
 // declarations, so no check without a graph reaches the bodies.
-view_pattern_checked: fn(name: String, source: &&String) -> SemaGraphResult Never! {
+view_pattern_checked: fn(name: String, source: ^^String) -> SemaGraphResult Never! {
     parsed := parse_source(source.bytes())
     view_field_require(!sema_has_error_since(parsed.diagnostics, 0), "{name} parses: {parsed.diagnostics:Debug}")
     table := module_table()
@@ -94,7 +94,7 @@ view_pattern_checked: fn(name: String, source: &&String) -> SemaGraphResult Neve
 // Exercise the production parser and complete Source checker, rather than
 // manufacturing payload facts: both ordinary conditions and dispatch tables
 // must preserve the matched owner's return provenance.
-view_pattern_case: fn(name: String, source: &&String, expected: String) {
+view_pattern_case: fn(name: String, source: ^^String, expected: String) {
     checked: view_pattern_checked(name, source.move())
     codes := [String]{}
     loop diagnostic in checked.diagnostics {
@@ -133,29 +133,29 @@ view_pattern_sources: fn() {
     table: "return if value == {{ .Array(items) -> Ok(items[0..<items.len()])\n.Object(items) -> Ok(items[0..<items.len()]) }}"
     view_pattern_case("read-payload-if", "{declaration}select: fn(value: Payload) -> View<Int> Err! {{ {ordinary} }}", "")
     view_pattern_case("read-payload-table", "{declaration}select: fn(value: Payload) -> View<Int> Err! {{ {table} }}", "")
-    view_pattern_case("consumed-payload-if", "{declaration}select: fn(value: &&Payload) -> View<Int> Err! {{ {ordinary} }}", "E2305")
-    view_pattern_case("consumed-payload-table", "{declaration}select: fn(value: &&Payload) -> View<Int> Err! {{ {table} }}", "E2305")
+    view_pattern_case("consumed-payload-if", "{declaration}select: fn(value: ^^Payload) -> View<Int> Err! {{ {ordinary} }}", "E2305")
+    view_pattern_case("consumed-payload-table", "{declaration}select: fn(value: ^^Payload) -> View<Int> Err! {{ {table} }}", "E2305")
     view_pattern_case("local-payload-if", "{declaration}select: fn() -> View<Int> Err! {{ value: Payload.Array([Int]{{1}})\n{ordinary} }}", "E2305")
     view_pattern_case("local-payload-table", "{declaration}select: fn() -> View<Int> Err! {{ value: Payload.Array([Int]{{1}})\n{table} }}", "E2305")
     sum: "total := 0\nloop item in items.move() -> total += item\ntotal"
     owned_table: "if value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }}"
-    view_pattern_case("consumed-table-payload-retains-ownership", "{declaration}sum: fn(value: &&Payload) -> Int {{ {owned_table} }}", "")
+    view_pattern_case("consumed-table-payload-retains-ownership", "{declaration}sum: fn(value: ^^Payload) -> Int {{ {owned_table} }}", "")
     view_pattern_case("local-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\n{owned_table} }}", "")
     view_pattern_case("taken-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\nif value.move() == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }} }}", "")
 }
 
 view_pattern_reborrows: fn() {
     declaration: "Value: enum {{ Struct(name: String, fields: [Field]), List([Value]), Text(String) }}\nField: struct {{ value: Value }}\n"
-    nested: "if &fields[i].value == .Struct(_, metadata_fields) {{ if &metadata_fields[j].value == .List(items) {{ items.push(item) }} }}"
-    view_pattern_case("nested-write-payload", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ {nested}\ncount: fields.len() }} }}", "")
-    view_pattern_case("nested-write-payload-table", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == {{ .Struct(_, fields) -> {{ {nested} }}\n.List(_) | .Text(_) -> {{}} }} }}", "")
-    view_pattern_case("nested-write-parent-suspended", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ if &fields[i].value == .Struct(_, metadata_fields) {{ count: fields.len()\nif &metadata_fields[j].value == .List(items) {{ items.push(item) }} }} }} }}", "E0220")
-    view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ unrelated: fields[0..<fields.len()]\n{nested}\ncount: unrelated.len() }} }}", "E0212")
+    nested: "if ^fields[i].value == .Struct(_, metadata_fields) {{ if ^metadata_fields[j].value == .List(items) {{ items.push(item) }} }}"
+    view_pattern_case("nested-write-payload", "{declaration}edit: fn(result: ^Value, item: ^^Value, i: Int, j: Int) {{ if ^result == .Struct(_, fields) {{ {nested}\ncount: fields.len() }} }}", "")
+    view_pattern_case("nested-write-payload-table", "{declaration}edit: fn(result: ^Value, item: ^^Value, i: Int, j: Int) {{ if ^result == {{ .Struct(_, fields) -> {{ {nested} }}\n.List(_) | .Text(_) -> {{}} }} }}", "")
+    view_pattern_case("nested-write-parent-suspended", "{declaration}edit: fn(result: ^Value, item: ^^Value, i: Int, j: Int) {{ if ^result == .Struct(_, fields) {{ if ^fields[i].value == .Struct(_, metadata_fields) {{ count: fields.len()\nif ^metadata_fields[j].value == .List(items) {{ items.push(item) }} }} }} }}", "E0220")
+    view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}edit: fn(result: ^Value, item: ^^Value, i: Int, j: Int) {{ if ^result == .Struct(_, fields) {{ unrelated: fields[0..<fields.len()]\n{nested}\ncount: unrelated.len() }} }}", "E0212")
     view_pattern_case("inner-owned-match-subject-type", "Outer: enum {{ Case(Int) }}\nInner: enum {{ Text(String), Empty }}\ninspect: fn(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner: Inner.Text(\"x\")\nif inner.move() == {{ .Text(text) -> text.count_bytes()\n.Empty -> 0 }} }} }} }}", "")
 }
 
 view_pattern_reinitialization: fn() {
-    declaration: "Inner: struct {{ left: String, right: String }}\nPair: struct {{ inner: Inner, other: String }}\nconsume: fn(value: &&String) {{}}\nconsume_inner: fn(value: &&Inner) {{}}\n"
+    declaration: "Inner: struct {{ left: String, right: String }}\nPair: struct {{ inner: Inner, other: String }}\nconsume: fn(value: ^^String) {{}}\nconsume_inner: fn(value: ^^Inner) {{}}\n"
     initial: "pair := Pair{{inner: Inner{{left: \"left\", right: \"right\"}}, other: \"other\"}}"
     view_pattern_case("partial-field-reinitialized", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume(pair.inner.left.move())\npair.inner.left = \"new\"\npair.inner.right.count_bytes() + pair.inner.left.count_bytes() }}", "")
     view_pattern_case("partial-field-sibling-stays-readable", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume(pair.inner.left.move())\npair.inner.right.count_bytes() }}", "")
@@ -181,13 +181,13 @@ view_pattern_reinitialization: fn() {
 // parent accesses; no prebuilt view facts grant the successful writes.
 view_constructor_and_split_fields: fn() {
     declaration: "Choice: enum {{ First(ViewMut<Int>), Second(ViewMut<Int>) }}\n"
-    view_pattern_case("marked-enum-payload", "{declaration}choose: fn(values: &[Int], first: Bool) -> Choice {{ part: &values[0..1]\nif first {{ return Choice.First(part) }} return Choice.Second(part) }}\nrun: fn() {{ values := [1, 2]\nselected: choose(values, false)\nif selected == {{ .First(part) -> {{ part[0] = 3 }} .Second(part) -> {{ part[0] = 4 }} }} }}", "")
-    view_pattern_case("marked-enum-read-owner-rejected", "{declaration}choose: fn(values: [Int]) -> Choice {{ part: &values[0..1]\nreturn Choice.First(part) }}", "E0205")
-    view_pattern_case("unmarked-enum-write-payload-rejected", "{declaration}choose: fn(values: &[Int]) -> Choice {{ return Choice.First(values[0..1]) }}", "E0108")
+    view_pattern_case("marked-enum-payload", "{declaration}choose: fn(values: ^[Int], first: Bool) -> Choice {{ part: ^values[0..1]\nif first {{ return Choice.First(part) }} return Choice.Second(part) }}\nrun: fn() {{ values := [1, 2]\nselected: choose(values, false)\nif selected == {{ .First(part) -> {{ part[0] = 3 }} .Second(part) -> {{ part[0] = 4 }} }} }}", "")
+    view_pattern_case("marked-enum-read-owner-rejected", "{declaration}choose: fn(values: [Int]) -> Choice {{ part: ^values[0..1]\nreturn Choice.First(part) }}", "E0205")
+    view_pattern_case("unmarked-enum-write-payload-rejected", "{declaration}choose: fn(values: ^[Int]) -> Choice {{ return Choice.First(values[0..1]) }}", "E0108")
     split: "values := [1, 2, 3, 4]\nparts: values.split_write(2) ?? panic(\"split failed\")\n"
     view_pattern_case("split-write-field-access", "run: fn() {{ {split}(parts).left[0] = 10\nparts.right[1] = (parts).left[0]\nprint(parts.right[1]) }}", "")
     view_pattern_case("split-write-owner-suspended", "run: fn() {{ {split}print(values[0])\nprint(parts.left[0]) }}", "E0220")
-    view_pattern_case("split-write-parent-suspended", "run: fn() {{ {split}child: &parts.left[0..1]\nparts.left[0] = 10\nprint(child[0]) }}", "E0220")
+    view_pattern_case("split-write-parent-suspended", "run: fn() {{ {split}child: ^parts.left[0..1]\nparts.left[0] = 10\nprint(child[0]) }}", "E0220")
 }
 
 view_disjoint_admission_sources: fn() {

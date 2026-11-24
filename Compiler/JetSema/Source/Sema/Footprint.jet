@@ -4,7 +4,7 @@
 // through `self`. Calls to sibling methods on `self` add their footprints; any
 // other use of the whole `self` makes the footprint the whole record. It is
 // solved per owner to a fixpoint over sibling calls. A stated footprint on the
-// receiver (`&self.log`, `&self.[log, hits]`) must name stored fields and
+// receiver (`^self.log`, `^self.[log, hits]`) must name stored fields and
 // cover the body (E0231).
 use {
     jet_foundation.[ASTTables, AccessConvention, Diagnostic, Expr, ExprNode, FnBody, Func, Item, NamedSpan, PublicAPIItem, Span, ast_expr, ast_visit_statement, symbol_none, type_name]
@@ -24,7 +24,7 @@ SemaFootprintUses: struct {
     // the walk visits a node before its children.
     settled: [Int:Bool],
 
-    visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! {
+    visit: fn(^self, tables: ASTTables, expression: ExprNode) Never! {
         if ast_expr(tables, expression) == {
             .Field(base, member, span, _) -> {
                 if sema_footprint_self_span(base) == .Val(self_span) {
@@ -67,7 +67,7 @@ SemaFootprint: struct {
     whole: Span?,
 }
 
-// The span of `self`, or of a marked `&self` / `&&self` place.
+// The span of `self`, or of a marked `^self` / `^^self` place.
 sema_footprint_self_span: fn(expression: Expr) -> Span? Never! {
     if expression == {
         .Ident(name, span, _) -> if name == "self" -> Val(span) else -> None
@@ -78,7 +78,7 @@ sema_footprint_self_span: fn(expression: Expr) -> Span? Never! {
 
 // A stored field joins the footprint at its first use; any other member (a
 // method value or computed field) reads the whole record.
-sema_footprint_note_field: fn(uses: &SemaFootprintUses, name: String, span: Span) Never! {
+sema_footprint_note_field: fn(uses: ^SemaFootprintUses, name: String, span: Span) Never! {
     if !uses.known.contains(name) {
         if uses.whole == None -> uses.whole = Val(span)
         return
@@ -90,8 +90,8 @@ sema_footprint_note_field: fn(uses: &SemaFootprintUses, name: String, span: Span
     uses.spans.push(span.copy())
 }
 
-// The receiver of a method that can have a footprint: a `self` or `&self`
-// first parameter, not a consuming `&&self`.
+// The receiver of a method that can have a footprint: a `self` or `^self`
+// first parameter, not a consuming `^^self`.
 sema_footprint_has_receiver: fn(method: Func) -> Bool Never! {
     if method.params.len() == 0 -> return false
     method.params[0].name == "self" && method.params[0].convention != AccessConvention.Move
@@ -196,7 +196,7 @@ sema_footprint_solve_module: fn(tables: ASTTables, items: [Item]) -> SemaFootpri
 
 // Attach solved method footprints onto the matching registered struct and impl
 // methods in `module_row`.
-sema_footprint_populate_module: fn(module_row: &SemaRegistrationModule) {
+sema_footprint_populate_module: fn(module_row: ^SemaRegistrationModule) {
     result: sema_footprint_solve_module(module_row.program.tables, module_row.program.items)
     if result.footprints.len() == 0 -> return
     by_start := [Int:Int]{}
@@ -240,7 +240,7 @@ sema_footprint_for_method_span: fn(module_row: SemaRegistrationModule, span: Spa
     None
 }
 
-sema_footprint_add_owner: fn(owners: &[SemaFootprintOwner], name: String, methods: [Func], stated: &Bool) Never! {
+sema_footprint_add_owner: fn(owners: ^[SemaFootprintOwner], name: String, methods: [Func], stated: ^Bool) Never! {
     loop method in methods {
         if method.params.len() > 0 && method.params[0].declared_footprint != None -> stated = true
     }
@@ -267,7 +267,7 @@ sema_footprint_sorted_unique: fn(names: [String]) -> [String] Never! {
 // each receiver method's effective footprint (stated when valid, else inferred).
 // A name declared twice (an inherent and a trait method) resolves to the whole
 // record at its call sites, as does a consuming, static or unknown callee.
-sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, known: [String], diagnostics: &[Diagnostic], footprints: &[SemaSolvedMethodFootprint]) {
+sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, known: [String], diagnostics: ^[Diagnostic], footprints: ^[SemaSolvedMethodFootprint]) {
     // The method position each name calls, or -1 when it has no footprint
     // receiver or is declared more than once.
     index := [String:Int]{}
@@ -364,13 +364,13 @@ sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, kno
     source: `Counter: struct {
     hits: Int,
     log: [String],
-    bump: fn(&self) { self.hits += 1 }
-    record: fn(&self.[log, hits], msg: String) {
+    bump: fn(^self) { self.hits += 1 }
+    record: fn(^self.[log, hits], msg: String) {
         self.bump()
         self.log.push(msg)
     }
-    bad_field: fn(&self.missing) { self.hits += 1 }
-    bad_escape: fn(&self.hits) { self.log.push("x") }
+    bad_field: fn(^self.missing) { self.hits += 1 }
+    bad_escape: fn(^self.hits) { self.log.push("x") }
 }`
     parsed: parse_generated_source(source.bytes())
     assert(parsed.diagnostics.is_empty())
@@ -409,9 +409,9 @@ sema_footprint_solve_owner: fn(tables: ASTTables, owner: SemaFootprintOwner, kno
 Counter: struct {
     hits: Int,
     log: [String],
-    bump: fn(&self.hits) { self.hits += 1 }
+    bump: fn(^self.hits) { self.hits += 1 }
     peek_log: fn(self.log) -> Int { self.log.len() }
-    record: fn(&self.[log, hits], msg: String) {
+    record: fn(^self.[log, hits], msg: String) {
         self.bump()
         self.log.push(msg)
     }
@@ -436,7 +436,7 @@ demo: fn() -> Int {
 Counter: struct {
     hits: Int,
     log: [String],
-    push_log: fn(&self.log, msg: String) { self.log.push(msg) }
+    push_log: fn(^self.log, msg: String) { self.log.push(msg) }
 }
 
 demo: fn() -> Int {

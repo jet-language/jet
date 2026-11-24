@@ -53,7 +53,7 @@ use {
     ]
 }
 
-output_fixture_graph: fn(label: String, source: String, effects_source: String, failures: &[String]) -> SemaRegistrationGraph? {
+output_fixture_graph: fn(label: String, source: String, effects_source: String, failures: ^[String]) -> SemaRegistrationGraph? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
         failures.push("{label}: source parsing failed: {parsed.diagnostics:Debug}")
@@ -76,7 +76,7 @@ output_fixture_graph: fn(label: String, source: String, effects_source: String, 
     Val(graph)
 }
 
-output_fixture_case: fn(label: String, source: String, effects_source: String, intent: SemaOutputIntent, address: String?, expected_codes: [String], expected_selected: [String], failures: &[String]) {
+output_fixture_case: fn(label: String, source: String, effects_source: String, intent: SemaOutputIntent, address: String?, expected_codes: [String], expected_selected: [String], failures: ^[String]) {
     graph := output_fixture_graph(label, source, effects_source, failures) ?? return
     if !graph.complete || graph.internal_problem != None {
         failures.push("{label}: registration failed: {graph.diagnostics:Debug}")
@@ -105,7 +105,7 @@ output_fixture_case: fn(label: String, source: String, effects_source: String, i
     }
 }
 
-output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
+output_fixture_solved_effects: fn(effects_source: String, failures: ^[String]) {
     source: "APP: Output.Executable{{name: \"app\", entry: launch}}\nleaf: fn() {{ print(\"checked effect\") }}\nlaunch: fn() {{ leaf() }}\n"
     graph := output_fixture_graph("solved effect publication", source, effects_source, failures) ?? return
     output_diagnostics: sema_output_resolve(graph, SemaOutputIntent.Run, None, false)
@@ -229,7 +229,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
 
 // `linked` is the registered name of the function a linking Output selects,
 // or None when the link is rejected.
-output_fixture_visibility: fn(label: String, main_source: String, bank_source: String, bridge_source: String?, bank_package: String, main_package: String, effects_source: String, linked: String?, failures: &[String]) {
+output_fixture_visibility: fn(label: String, main_source: String, bank_source: String, bridge_source: String?, bank_package: String, main_package: String, effects_source: String, linked: String?, failures: ^[String]) {
     sources := [String]{main_source, bank_source}
     names := [String]{"main", "bank"}
     packages := [String]{main_package, bank_package}
@@ -323,7 +323,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
 
 // A run with no address, no `run: fn` and no Output selects nothing (E0101),
 // unless the package manifest binds an `outputs.*.entry` function.
-output_fixture_manifest_entry: fn(label: String, manifest_entry: Bool, expected_codes: [String], effects_source: String, failures: &[String]) {
+output_fixture_manifest_entry: fn(label: String, manifest_entry: Bool, expected_codes: [String], effects_source: String, failures: ^[String]) {
     graph := output_fixture_graph(label, "cli_run: fn() {{}}\n", effects_source, failures) ?? return
     diagnostics: sema_output_resolve(graph, SemaOutputIntent.Run, None, manifest_entry)
     codes := [String]{}
@@ -333,7 +333,7 @@ output_fixture_manifest_entry: fn(label: String, manifest_entry: Bool, expected_
     }
 }
 
-output_fixture_visibility_cases: fn(effects_source: String, failures: &[String]) {
+output_fixture_visibility_cases: fn(effects_source: String, failures: ^[String]) {
     direct: "use bank: \"bank.jet\"\nAPP: Output.Executable{{name: \"app\", entry: bank.launch}}\n"
     forwarded: "use bridge: \"bridge.jet\"\nAPP: Output.Executable{{name: \"app\", entry: bridge.bank.launch}}\n"
     public: "launch: fn() {{}}\n"

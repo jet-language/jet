@@ -167,7 +167,7 @@ hole_width: fn(kind: Int) -> Int Never! {
     1
 }
 
-add_stencil: fn(list: &[StencilSpec], name: String, inline_always: Bool, params: [String], bytes: [U8], holes: [StencilHole]) Never! {
+add_stencil: fn(list: ^[StencilSpec], name: String, inline_always: Bool, params: [String], bytes: [U8], holes: [StencilHole]) Never! {
     // Sanity-check every hole fits inside bytes and does not overlap.
     n: bytes.len()
     used := [U8]{}
@@ -183,7 +183,7 @@ add_stencil: fn(list: &[StencilSpec], name: String, inline_always: Bool, params:
     list.push(StencilSpec{name: name, inline_always: inline_always, params: params, bytes: bytes, holes: holes})
 }
 
-add_frame_stencils: fn(s: &[StencilSpec]) Never! {
+add_frame_stencils: fn(s: ^[StencilSpec]) Never! {
     c0 := x64_code()
     x64_push(c0, X64_RBP)
     x64_mov_rr(c0, X64_RBP, X64_RSP)
@@ -269,7 +269,7 @@ add_frame_stencils: fn(s: &[StencilSpec]) Never! {
     add_stencil(s, "o0_st_pop_rax2", true, [String]{}, c14.bytes, [StencilHole]{})
 }
 
-add_reg_stencils: fn(s: &[StencilSpec]) Never! {
+add_reg_stencils: fn(s: ^[StencilSpec]) Never! {
     hot_regs: [Int]{X64_RAX, X64_RCX, X64_RDX, X64_RSI, X64_RDI, X64_R8, X64_R9, X64_R10, X64_R11}
     hot_names: [String]{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
     loop idx in 0..<hot_regs.len() {
@@ -369,7 +369,7 @@ add_reg_stencils: fn(s: &[StencilSpec]) Never! {
     }
 }
 
-add_const_stencils: fn(s: &[StencilSpec]) Never! {
+add_const_stencils: fn(s: ^[StencilSpec]) Never! {
     c1 := x64_code()
     x64_mov_mem_imm32(c1, X64_RBP, SENTINEL_D8, SENTINEL_I32)
     add_stencil(s, "o0_st_const_i32_8", true, [String]{"dst", "imm"}, c1.bytes, [StencilHole]{
@@ -446,7 +446,7 @@ add_const_stencils: fn(s: &[StencilSpec]) Never! {
     })
 }
 
-add_alu_stencils: fn(s: &[StencilSpec]) Never! {
+add_alu_stencils: fn(s: ^[StencilSpec]) Never! {
     alu_ops: [X64Alu]{X64Alu.Add, X64Alu.Sub, X64Alu.Cmp, X64Alu.And, X64Alu.Or, X64Alu.Xor}
     alu_names: [String]{"add", "sub", "cmp", "and", "or", "xor"}
     loop idx in 0..<alu_ops.len() {
@@ -551,7 +551,7 @@ add_alu_stencils: fn(s: &[StencilSpec]) Never! {
     add_stencil(s, "o0_st_test_inline_rcx", true, [String]{}, c22.bytes, [StencilHole]{StencilHole{at: jo_at2, kind: HOLE_ZERO32, param: ""}})
 }
 
-add_float_stencils: fn(s: &[StencilSpec]) Never! {
+add_float_stencils: fn(s: ^[StencilSpec]) Never! {
     fops: [X64FloatOp]{X64FloatOp.Add, X64FloatOp.Sub, X64FloatOp.Mul, X64FloatOp.Div}
     fnames: [String]{"add", "sub", "mul", "div"}
     loop idx in 0..<fops.len() {
@@ -627,7 +627,7 @@ add_float_stencils: fn(s: &[StencilSpec]) Never! {
     add_stencil(s, "o0_st_vfmadd213sd", true, [String]{}, c13.bytes, [StencilHole]{})
 }
 
-add_mem_stencils: fn(s: &[StencilSpec]) Never! {
+add_mem_stencils: fn(s: ^[StencilSpec]) Never! {
     widths: [Int]{1, 1, 2, 2, 4, 4, 8}
     signeds: [Bool]{false, true, false, true, false, true, false}
     wnames: [String]{"u8", "i8", "u16", "i16", "u32", "i32", "i64"}
@@ -715,7 +715,7 @@ add_mem_stencils: fn(s: &[StencilSpec]) Never! {
     add_stencil(s, "o0_st_lock_cmpxchg_rdi_rcx", true, [String]{}, alc.bytes, [StencilHole]{})
 }
 
-add_cf_stencils: fn(s: &[StencilSpec]) Never! {
+add_cf_stencils: fn(s: ^[StencilSpec]) Never! {
     c1 := x64_code()
     h1: x64_jmp_rel32(c1)
     add_stencil(s, "o0_st_jmp_rel32", true, [String]{}, c1.bytes, [StencilHole]{StencilHole{at: h1, kind: HOLE_ZERO32, param: ""}})
@@ -791,7 +791,7 @@ add_cf_stencils: fn(s: &[StencilSpec]) Never! {
     add_stencil(s, "o0_st_test_rax_i32", true, [String]{"imm"}, c14.bytes, [StencilHole]{StencilHole{at: c14.bytes.len() - 4, kind: HOLE_I32, param: "imm"}})
 }
 
-add_fastpath_stencils: fn(s: &[StencilSpec]) Never! {
+add_fastpath_stencils: fn(s: ^[StencilSpec]) Never! {
     c1 := x64_code()
     x64_load(c1, X64_RAX, X64_RBP, SENTINEL_D8)
     x64_mov_rr(c1, X64_RDX, X64_RAX)
@@ -905,7 +905,7 @@ add_fastpath_stencils: fn(s: &[StencilSpec]) Never! {
     })
 }
 
-add_extra_stencils: fn(s: &[StencilSpec]) Never! {
+add_extra_stencils: fn(s: ^[StencilSpec]) Never! {
     // Remaining RIP-relative & disp32 fast-path stencils
     r_rcx := x64_code()
     h_rcx: x64_lea_rip(r_rcx, X64_RCX)
@@ -1186,7 +1186,7 @@ add_extra_stencils: fn(s: &[StencilSpec]) Never! {
     }
 }
 
-add_stack_grow_stencils: fn(s: &[StencilSpec]) Never! {
+add_stack_grow_stencils: fn(s: ^[StencilSpec]) Never! {
     arg_regs: [Int]{X64_RDI, X64_RSI, X64_RDX, X64_RCX, X64_R8, X64_R9}
     // Save all 6 arg GPRs + 8 XMMs to [rbp - 8..192]
     sb := x64_code()
@@ -1291,14 +1291,14 @@ render_stencil_source: fn() -> String Never! {
     out.push("")
     out.push("O0_STENCIL_DIGEST: \"{digest}\"")
     out.push("")
-    out.push("#Inline(Always) o0_patch_i32: fn(c: &[U8], at: Int, value: Int) Never! {{")
+    out.push("#Inline(Always) o0_patch_i32: fn(c: ^[U8], at: Int, value: Int) Never! {{")
     out.push("    c[at] = U8{{value & 255}}")
     out.push("    c[at + 1] = U8{{(value >> 8) & 255}}")
     out.push("    c[at + 2] = U8{{(value >> 16) & 255}}")
     out.push("    c[at + 3] = U8{{(value >> 24) & 255}}")
     out.push("}}")
     out.push("")
-    out.push("#Inline(Always) o0_patch_i64: fn(c: &[U8], at: Int, value: Int) Never! {{")
+    out.push("#Inline(Always) o0_patch_i64: fn(c: ^[U8], at: Int, value: Int) Never! {{")
     out.push("    o0_patch_i32(c, at, value)")
     out.push("    o0_patch_i32(c, at + 4, value >> 32)")
     out.push("}}")
@@ -1312,7 +1312,7 @@ render_stencil_source: fn() -> String Never! {
             w: hole_width(h.kind)
             loop k in 0..<w -> hole_idx[h.at + k] = hi
         }
-        sig := "c: &[U8], p: Int"
+        sig := "c: ^[U8], p: Int"
         loop param in sp.params -> sig = "{sig}, {param}: Int"
         prefix: if sp.inline_always -> "#Inline(Always) " else -> ""
         out.push("{prefix}{sp.name}: fn({sig}) -> Int Never! {{")

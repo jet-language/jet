@@ -5,7 +5,7 @@ Lock: struct {
     name: String,
 
     impl Close {
-        close: fn(&&self) { print("release {self.name}") }
+        close: fn(^^self) { print("release {self.name}") }
     }
 }
 
@@ -14,11 +14,11 @@ Session: struct {
     user: String,
 }
 
-hand_off: fn(s: &&Session) { print("got {s.user}") }
+hand_off: fn(s: ^^Session) { print("got {s.user}") }
 
-sink: fn<T>(x: &&T) { print("sunk") }
+sink: fn<T>(x: ^^T) { print("sunk") }
 
-forward: fn<T>(x: &&T) {
+forward: fn<T>(x: ^^T) {
     sink(x)
     print("forwarded")
 }

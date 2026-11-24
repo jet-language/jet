@@ -44,7 +44,7 @@ jet_cli_expand_checked_display: fn(value: TComptimeValue?) -> String Never! {
     }
 }
 
-jet_cli_expand_location: fn(fields: &[JetCLIStatusField], modules: [JetDriverDocModule], source: String, span: Span) Never! {
+jet_cli_expand_location: fn(fields: ^[JetCLIStatusField], modules: [JetDriverDocModule], source: String, span: Span) Never! {
     if jet_cli_expand_source(modules, source) == .Val(text) {
         fields.push(jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(text, span.start))))
         fields.push(jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(text, span.start))))
@@ -330,7 +330,7 @@ jet_cli_expand_reflect_fields: fn(tree: BodyTree, args: [Int], at: Int) -> {text
 
 // Each checked `reflect.of(x)` call below `id`: the type it retains and every
 // stored field it captures with that type, one fact per call site.
-jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: Int, facts: &[JetCLIExpandFact]) Never! {
+jet_cli_expand_reflect_expr: fn(unit: JetDriverDocModule, tree: BodyTree, id: Int, facts: ^[JetCLIExpandFact]) Never! {
     node: body_node(tree, id)
     if node.kind == .CoreCall(record, args, span, _, _, _) {
         if record.module_name == "core.reflect" && record.member == "of" && args.len() >= 5 {

@@ -23,14 +23,14 @@ Slot: enum {
 
 acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
 
-release: fn(lease: &&Lease) {
+release: fn(lease: ^^Lease) {
     print("released {lease.name}")
     #Unsafe("the lease's job is done by hand here") { consume(lease) }
 }
 
-release_holder: fn(holder: &&Holder) { release(holder.lease.move()) }
+release_holder: fn(holder: ^^Holder) { release(holder.lease.move()) }
 
-release_slot: fn(slot: &&Slot) {
+release_slot: fn(slot: ^^Slot) {
     print("released slot")
     #Unsafe("the slot's lease is done by hand here") { consume(slot) }
 }
@@ -39,7 +39,7 @@ make: fn(name: String) -> Holder { Holder{lease: acquire(name), count: 1} }
 
 name_of: fn(holder: Holder) -> String { holder.lease.name.copy() }
 
-bump: fn(holder: &Holder) { holder.count += 1 }
+bump: fn(holder: ^Holder) { holder.count += 1 }
 
 run: fn() {
     whole := make("whole")

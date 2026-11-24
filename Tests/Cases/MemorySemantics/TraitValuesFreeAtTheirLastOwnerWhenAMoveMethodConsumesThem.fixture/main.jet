@@ -1,5 +1,5 @@
 // A dynamic call of a method every implementation takes by move
-// (`&&self`) consumes the trait value: a box with no other owner hands its
+// (`^^self`) consumes the trait value: a box with no other owner hands its
 // payload to the implementation and is freed; a box another owner shares
 // (a list element read) keeps its payload, the implementation gets its own
 // copy, and the box loses an owner. The payload is ended once either way,
@@ -16,7 +16,7 @@ Context: struct {
 }
 
 Sink: trait {
-    finish: fn(&&self) -[]> Int,
+    finish: fn(^^self) -[]> Int,
     peek: fn(self) -[]> Int,
 }
 
@@ -25,7 +25,7 @@ Worker: struct {
     n: Int,
 
     impl Sink {
-        finish: fn(&&self) -[]> Int { self.n + 2 }
+        finish: fn(^^self) -[]> Int { self.n + 2 }
 
         peek: fn(self) -[]> Int { self.n + 1 }
     }

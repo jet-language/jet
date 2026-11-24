@@ -512,14 +512,14 @@ source_identity_to_json: fn(value: SourceIdentity) -> CanonicalJSON JetTraceErro
     jettrace_object([CanonicalJSONField]{jettrace_field("path", .String(value.path.copy())), jettrace_field("sha256", .String(value.sha256.copy())), jettrace_field("symbols", .Array(symbols.move()))})
 }
 
-trace_source_map_from_map_bytes: fn(kind: &&String, path: &&String, map: &&String) -> TraceSourceMap Never! {
+trace_source_map_from_map_bytes: fn(kind: ^^String, path: ^^String, map: ^^String) -> TraceSourceMap Never! {
     raw: map.bytes()
     hash: sha256_bytes(raw[0..<raw.len()])
     digest: sha256_hex_bytes(hash[0..<hash.len()])
     TraceSourceMap{kind: kind.move(), path: path.move(), sha256: digest, map: map.move()}
 }
 
-trace_source_map_jet_with_source: fn(path: &&String, source: String) -> TraceSourceMap JetTraceError! {
+trace_source_map_jet_with_source: fn(path: ^^String, source: String) -> TraceSourceMap JetTraceError! {
     map: jettrace_object([CanonicalJSONField]{jettrace_field("file", .String(path.copy())), jettrace_field("mappings", .String("")), jettrace_field("names", .Array([CanonicalJSON]{})), jettrace_field("sources", .Array([CanonicalJSON]{.String(path.copy())})), jettrace_field("sourcesContent", .Array([CanonicalJSON]{.String(source.copy())})), jettrace_field("version", .Integer("3"))})
     text: String.from_bytes(canonical_json_bytes(map)) ?? return Err(jettrace_error("canonical json is not utf-8"))
     Ok(trace_source_map_from_map_bytes("jet", path, text))

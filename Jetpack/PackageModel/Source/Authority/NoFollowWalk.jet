@@ -34,7 +34,7 @@ AuthorityWalkBudget: struct {
 
     new: fn() -> AuthorityWalkBudget Never! { AuthorityWalkBudget{entries: 0, files: 0, bytes: 0} }
 
-    note_entry: fn(&self, path: String) AuthorityError! {
+    note_entry: fn(^self, path: String) AuthorityError! {
         if self.entries >= PKG_MAX_TREE_FILES {
             return Err(pkg_authority_limit_error(path, "authority directory walk exceeds the {PKG_MAX_TREE_FILES}-entry bound"))
         }
@@ -53,7 +53,7 @@ AuthorityWalkBudget: struct {
         }
     }
 
-    record_file: fn(&self, path: String, length: Int) AuthorityError! {
+    record_file: fn(^self, path: String, length: Int) AuthorityError! {
         self.ensure_file(path, length)
         self.files += 1
         self.bytes += length
@@ -62,7 +62,7 @@ AuthorityWalkBudget: struct {
 
 // Every entry of the held `directory` (displayed as `path`), sorted by name,
 // each observed with a no-follow Stat and counted against `budget`.
-pkg_authority_read_sorted_entries: fn(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
+pkg_authority_read_sorted_entries: fn(directory: Directory, path: String, budget: ^AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
     listed: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
     entries := [AuthorityEntry]{}
     loop entry in listed {
@@ -77,7 +77,7 @@ pkg_authority_read_sorted_entries: fn(directory: Directory, path: String, budget
 // The Jet source names directly in the held `directory` (displayed as `path`),
 // sorted. Each entry counts against `budget`; none is stat'ed here, because
 // the caller opens every returned name with its own checked no-follow read.
-pkg_authority_sorted_source_names: fn(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [String] AuthorityError! {
+pkg_authority_sorted_source_names: fn(directory: Directory, path: String, budget: ^AuthorityWalkBudget) -[FS]> [String] AuthorityError! {
     listed: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
     names := [String]{}
     loop entry in listed {

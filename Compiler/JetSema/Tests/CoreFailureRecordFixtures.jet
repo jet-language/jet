@@ -94,7 +94,7 @@ core_failure_record_check: fn(source: String, module_identity: String, expected_
     core_failure_record_check(range_source, "<corelib>/fixture", "")
     core_failure_record_check(text_source, "user/fixture", "E0119")
     core_failure_record_check(range_source, "user/fixture", "E0119")
-    io_source: "retain: fn(operation: &&IOOperation) -> IOOperation Never! {{ operation }}\nrun: fn() {{}}"
+    io_source: "retain: fn(operation: ^^IOOperation) -> IOOperation Never! {{ operation }}\nrun: fn() {{}}"
     core_failure_record_check(io_source, "<corelib>/fixture", "")
     core_failure_record_check(io_source, "user/fixture", "E0119")
     copy_source: "#Policy(copies: .Explicit)\ncontext: fn(operation: IOOperation) -> IOContext Never! {{ IOContext{{operation: operation.copy(), resource: None, os_code: None, cause: None}} }}\nretain: fn(operation: IOOperation) -> IOOperation Never! {{ operation.copy() }}\nrun: fn() {{}}"

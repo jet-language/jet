@@ -24,7 +24,7 @@ loader_error: fn(kind: DataErrorKind, reason: String, operation: String) -> Data
 // them.  `last_good` is only changed by that commit, so bind/mark_stale can
 // retain a known snapshot without falsely reporting a fresh one.
 
-bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
+bind: fn<T>(loader: ^DataLoader<T>, payload: [U8]) DataError! {
     if loader.canceled {
         return Err(loader_error(DataErrorKind.State, "loader was canceled", source_path<T>(loader)))
     }
@@ -58,7 +58,7 @@ bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
     return
 }
 
-bind_text: fn<T>(loader: &DataLoader<T>, text: String) DataError! { bind<T>(loader, text.bytes()) }
+bind_text: fn<T>(loader: ^DataLoader<T>, text: String) DataError! { bind<T>(loader, text.bytes()) }
 
 authority: fn<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
 
@@ -81,7 +81,7 @@ snapshot_reusable: fn(previous: DataSnapshotIdentity, current: DataSnapshotIdent
 
 source_identity: fn<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
 
-cancel: fn<T>(loader: &DataLoader<T>) Never! {
+cancel: fn<T>(loader: ^DataLoader<T>) Never! {
     loader.canceled = true
     if loader.source.kind != DataLoaderKind.Value -> loader.payload = None
     loader.status.freshness = DataFreshness.Canceled
@@ -94,7 +94,7 @@ cancel: fn<T>(loader: &DataLoader<T>) Never! {
     loader.status.last_good = loader.last_good != None
 }
 
-offline: fn<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
+offline: fn<T>(loader: ^DataLoader<T>, enabled: Bool) Never! {
     loader.offline = enabled
     if enabled {
         if loader.payload == None && loader.last_good != None {
@@ -112,7 +112,7 @@ offline: fn<T>(loader: &DataLoader<T>, enabled: Bool) Never! {
     }
 }
 
-mark_stale: fn<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
+mark_stale: fn<T>(loader: ^DataLoader<T>, cause: DataInvalidationCause) Never! {
     loader.status.invalidated_by = cause.copy()
     loader.status.freshness = DataFreshness.Stale
     loader.status.error = ""

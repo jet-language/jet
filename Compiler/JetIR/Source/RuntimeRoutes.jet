@@ -36,7 +36,7 @@ runtime_abi_atom: fn(name: String) -> String Never! {
 // slots through out pointers (zeroed eight-byte slots); an Option item
 // writes a 0/1 tag followed by its payload slots and returns nothing. A
 // Tuple carrier (an Option's tuple payload) writes its items' slots in the
-// checked tuple's member order. `ListMut` lends a `&` List argument's
+// checked tuple's member order. `ListMut` lends a `^` List argument's
 // 24-byte header in place (one word): the route rewrites its length inside
 // the buffer it already has, never growing it. `Frozen` is a List result
 // whose (data, length) the runtime lends for the process's life (a part of
@@ -1915,7 +1915,7 @@ ir_native_type: fn(name: String) -> IRNativeType? {
 
 // The names a generated record row can be read by: a route carrier's
 // handle or tag, and its members'.
-ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
+ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: ^[String]) Never! {
     if carrier == {
         .Handle(name) | .HandleMut(name) -> { out.push(name.copy()) }
         .Tag(name, _) -> out.push(name.copy())

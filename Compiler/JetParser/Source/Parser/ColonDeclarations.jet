@@ -330,7 +330,7 @@ parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
 // Moves the keyword at `keyword` before the name path at `head`. The path,
 // the `:` (now trivia) and any trivia before the keyword each shift one slot
 // right, and the keyword takes the name's start as a zero-width span.
-parser_colon_rotate: fn(tokens: &[Token], head: Int, keyword: Int, colon: Int) Never! {
+parser_colon_rotate: fn(tokens: ^[Token], head: Int, keyword: Int, colon: Int) Never! {
     moved: tokens[keyword]
     index := keyword
     loop index > head {
@@ -415,7 +415,7 @@ parser_colon_declared_name: fn(tokens: [Token], head: Int) -> Int Never! {
 // Writes `module` in front of each binding that names a module (see the file
 // comment). A binding naming an instance is one too, so the choice runs to a
 // fixed point over the file's candidates.
-parser_colon_mark_instances: fn(tokens: &&[Token], candidates: [ParserColonInstance], declared_module_names: [Int], declared_other_names: [Int]) -> [Token] Never! {
+parser_colon_mark_instances: fn(tokens: ^^[Token], candidates: [ParserColonInstance], declared_module_names: [Int], declared_other_names: [Int]) -> [Token] Never! {
     modules := [Int:Bool]{}
     loop id in declared_module_names -> modules[id] = true
     others := [Int:Bool]{}
@@ -604,7 +604,7 @@ parser_colon_resolve_named_instances: fn(chunk_count: Int, candidates: [ParserCo
 
 // Inserts `TOKEN_KW_MODULE` with a zero-width span before each ascending token
 // index in `chosen_heads` inside one chunk's token list.
-parser_colon_insert_module_heads: fn(input: &&[Token], chosen_heads: [Int]) -> [Token] Never! {
+parser_colon_insert_module_heads: fn(input: ^^[Token], chosen_heads: [Int]) -> [Token] Never! {
     tokens := input.move()
     if chosen_heads.len() == 0 -> return tokens
     marked := [Token]{}
@@ -627,7 +627,7 @@ parser_colon_insert_module_heads: fn(input: &&[Token], chosen_heads: [Int]) -> [
 // Rotates unambiguous local colon heads (`fn`/`struct`/`enum`/`trait`/`module`)
 // in place on `tokens` and returns the compact module-instance summary for
 // whole-file fixed-point resolution.
-parser_colon_declarations_local: fn(tokens: &[Token], tables: TokenTables) -> ParserColonLocal Never! {
+parser_colon_declarations_local: fn(tokens: ^[Token], tables: TokenTables) -> ParserColonLocal Never! {
     marker_id: parser_colon_find_name(tables, "Marker")
     derive_id: parser_colon_find_name(tables, "Derive")
     expand_id: parser_colon_find_name(tables, "expand")
@@ -794,7 +794,7 @@ parser_colon_declarations_local: fn(tokens: &[Token], tables: TokenTables) -> Pa
 }
 
 // `tables` spells the tokens' names.
-parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] Never! {
+parser_colon_declarations: fn(input: ^^[Token], tables: TokenTables) -> [Token] Never! {
     tokens := input.move()
     local := parser_colon_declarations_local(tokens, tables)
     if local.candidates.len() == 0 -> return tokens.move()

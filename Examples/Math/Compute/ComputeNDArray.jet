@@ -29,12 +29,12 @@ run: fn() {
     // `sum` reduces every element to one Float.
     print("sum:{compute.sum(tt) ?? panic("sum")}")
 
-    // Bracket slices take first-axis windows. A bare slice copies; `&` makes
+    // Bracket slices take first-axis windows. A bare slice copies; `^` makes
     // a mutable write-through view.
     tensor := compute.from_list([Float]{1.0, 2.0, 3.0, 4.0}) ?? panic("tensor")
     copied: tensor[1..2].copy()
     print("copied:{compute.to_list(copied)}")
-    edit: &tensor[1..2]
+    edit: ^tensor[1..2]
     edit[0] = Float{9.0}
     print("edited:{compute.to_list(tensor)}")
 }

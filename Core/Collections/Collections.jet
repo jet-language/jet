@@ -59,7 +59,7 @@ Rows: struct<T> {
     __rows: [T]{[]},
 
     /// Appends `value` and returns its handle. Panics past 4294967295 rows.
-    add: fn(&self, value: &&T) -> Row<T> Never! {
+    add: fn(^self, value: ^^T) -> Row<T> Never! {
         count: self.__rows.len()
         if count >= 4294967295 -> panic("Rows.add: a table holds at most 4294967295 rows")
         slot: checked(U32{count}) ?? panic("Rows.add: a table holds at most 4294967295 rows")
@@ -145,7 +145,7 @@ collection_sort_order: fn<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E
 // order[new] = old. Pop retains the receiver's allocation, and each payload
 // enters exactly one empty optional slot before returning in sorted order.
 // No indexed payload read, owning copy, or default T is needed.
-collection_sort_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
+collection_sort_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
     count: rows.len()
     if count < 2 {
         return
@@ -179,13 +179,13 @@ collection_sort_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
 // The declared borrowed return checks the range as a View, not an owning List.
 collection_sort_view: fn<T>(values: [T]) -> View<T> Never! from values { values[0..<values.len()] }
 
-collection_sort_by_compare: fn<T, E>(rows: &[T], compare: &&fn(T, T) -> Ordering E!) E! {
+collection_sort_by_compare: fn<T, E>(rows: ^[T], compare: ^^fn(T, T) -> Ordering E!) E! {
     window: collection_sort_view<T>(rows)
     order := collection_sort_order<T, E>(window, compare, false)
     collection_sort_apply_order<T>(rows, order)
 }
 
-collection_sort_by_key: fn<T, K: Comparable, E>(rows: &[T], key: &&fn(T) -> K E!, descending: Bool) E! {
+collection_sort_by_key: fn<T, K: Comparable, E>(rows: ^[T], key: ^^fn(T) -> K E!, descending: Bool) E! {
     keys := [K]{}
     loop index in 0..<rows.len() {
         value := key(rows[index])
@@ -353,7 +353,7 @@ most_common: fn(c: Counter, k: Int) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-remove_counter_at: fn(keys: &[String], counts: &[Int], index: Int) {
+remove_counter_at: fn(keys: ^[String], counts: ^[Int], index: Int) {
     i := index
     loop i + 1 < keys.len() {
         keys[i] = keys[i + 1]
@@ -364,7 +364,7 @@ remove_counter_at: fn(keys: &[String], counts: &[Int], index: Int) {
     _: counts.pop()
 }
 
-apply_counter_delta: fn(keys: &[String], counts: &[Int], key: String, delta: Int) {
+apply_counter_delta: fn(keys: ^[String], counts: ^[Int], key: String, delta: Int) {
     i := 0
     loop i < keys.len() {
         if keys[i] == key {
@@ -421,7 +421,7 @@ merge_add: fn(a: Counter, b: Counter) -> Counter Never! {
 
 clear_counter: fn(_c: Counter) -> Counter Never! { counter() }
 
-sift_down: fn(xs: &[Int], start: Int, end: Int) {
+sift_down: fn(xs: ^[Int], start: Int, end: Int) {
     i := start
     loop {
         left := i * 2 + 1
@@ -443,7 +443,7 @@ sift_down: fn(xs: &[Int], start: Int, end: Int) {
     }
 }
 
-sift_up: fn(xs: &[Int], start: Int) {
+sift_up: fn(xs: ^[Int], start: Int) {
     i := start
     loop i > 0 {
         parent := (i - 1) /% 2
@@ -523,7 +523,7 @@ heapreplace: fn(xs: [Int], value: Int) -> {heap: [Int], value: Int?} Never! {
     {heap: rest, value: Val(popped)}
 }
 
-max_sift_down: fn(xs: &[Int], start: Int, end: Int) {
+max_sift_down: fn(xs: ^[Int], start: Int, end: Int) {
     i := start
     loop {
         left := i * 2 + 1
@@ -545,7 +545,7 @@ max_sift_down: fn(xs: &[Int], start: Int, end: Int) {
     }
 }
 
-max_sift_up: fn(xs: &[Int], start: Int) {
+max_sift_up: fn(xs: ^[Int], start: Int) {
     i := start
     loop i > 0 {
         parent := (i - 1) /% 2

@@ -84,13 +84,13 @@ ir_coverage: fn() -> IRCoverage Never! {
 }
 
 // Probes function `key` at source line `line`.
-ir_coverage_put: fn(coverage: &IRCoverage, key: String, line: Int) Never! {
+ir_coverage_put: fn(coverage: ^IRCoverage, key: String, line: Int) Never! {
     name_column_set(coverage.keys, coverage.lines, key, line)
 }
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
-ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&IRSourceTexts, constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
+ir_build_tests: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, type_defs: ^^[TTypeDef], impls: ^^[TImplDef], sources: ^^IRSourceTexts, constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
     p := ir_program_new(functions, decls, symbols, interner, type_defs, impls, sources, constants)
     p.checks = checks
     p.zone_table = true
@@ -140,7 +140,7 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
 // `jet test --coverage`: a probed function's entry hands its line to the
 // runtime (JetRuntime Coverage.jet), which records the first entry of each
 // line in the test process.
-ir_coverage_probe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
+ir_coverage_probe: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody) Never! {
     line: name_column_get(p.coverage.keys, p.coverage.lines, function.key) ?? return
     word: ir_word_const(m, b, line)
     _: ir_runtime(m, b, "jet_rt_coverage_function", [Int]{word}, -1)
@@ -149,7 +149,7 @@ ir_coverage_probe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
 // The package's `test: fn(t: Test)`, when it has one: the project's test
 // entry, called with the suite before the harness runs the discovered tests,
 // unless the harness is the stock one. -1 when there is none.
-ir_test_override: fn(m: &IRModule, p: IRProgram) -> Int Never! {
+ir_test_override: fn(m: ^IRModule, p: IRProgram) -> Int Never! {
     key: ir_test_override_key(p.functions)
     if key == "" -> return -1
     ir_function_id(m, p, key, [Type]{}) ?? -1
@@ -177,7 +177,7 @@ ir_test_override_key: fn(functions: [FnBody]) -> String Never! {
 // A generated harness function: `name`, keyed and symbolled after the
 // function `from` (`suffix` appended), at its source location; a shared
 // helper (`from` < 0) is keyed `jet_ir_test_<suffix>`.
-ir_test_function: fn(m: &IRModule, name: String, from: Int, suffix: String) -> Int Never! {
+ir_test_function: fn(m: ^IRModule, name: String, from: Int, suffix: String) -> Int Never! {
     key := "jet_ir_test_{suffix}"
     symbol := key.copy()
     source_file := ""
@@ -197,7 +197,7 @@ ir_test_function: fn(m: &IRModule, name: String, from: Int, suffix: String) -> I
 
 // Ends a generated function: records its failure, resolves its deferred
 // calls and stores it.
-ir_test_finish: fn(m: &IRModule, p: IRProgram, b: &&IRBuilder, id: Int, failures: &[IRBuildFailure]) Never! {
+ir_test_finish: fn(m: ^IRModule, p: IRProgram, b: ^^IRBuilder, id: Int, failures: ^[IRBuildFailure]) Never! {
     built := b.move()
     if built.error != "" {
         failures.push(IRBuildFailure{key: m.functions[id].key, name: m.functions[id].name, message: built.error, source_file: m.functions[id].source_file, span: built.error_span})
@@ -207,18 +207,18 @@ ir_test_finish: fn(m: &IRModule, p: IRProgram, b: &&IRBuilder, id: Int, failures
 }
 
 // Drops `slot` when its type has a drop, leaving its freshness alone.
-ir_test_drop: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+ir_test_drop: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
     if slot >= 0 && ir_has_drop(m, b, slot) -> ir_emit(b.f, IROp.Drop, -1, slot, -1, -1, b.line)
 }
 
 // A fresh owned String of `text`.
-ir_test_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
+ir_test_text: fn(m: ^IRModule, b: ^IRBuilder, text: String) -> Int Never! {
     string_row: ir_string_row(m)
     pair: ir_static_text(m, b, text)
     ir_runtime(m, b, "jet_rt_string_from_static", pair, string_row)
 }
 
-ir_test_bool: fn(m: &IRModule, b: &IRBuilder, value: Bool) -> Int Never! {
+ir_test_bool: fn(m: ^IRModule, b: ^IRBuilder, value: Bool) -> Int Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     slot: ir_temp(m, b, bool_row)
     ir_emit(b.f, IROp.Const, slot, if value -> 1 else -> 0, -1, -1, b.line)
@@ -227,7 +227,7 @@ ir_test_bool: fn(m: &IRModule, b: &IRBuilder, value: Bool) -> Int Never! {
 
 // The environment variable `name`: a String slot, null when it is unset.
 // String drop accepts null; every other read is guarded by its presence.
-ir_test_env: fn(m: &IRModule, b: &IRBuilder, name: String) -> Int Never! {
+ir_test_env: fn(m: ^IRModule, b: ^IRBuilder, name: String) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     key: ir_test_text(m, b, name)
@@ -244,7 +244,7 @@ ir_test_env: fn(m: &IRModule, b: &IRBuilder, name: String) -> Int Never! {
 // Whether the pointer-sized `value` is not null: compared as a raw word,
 // since a String `!=` is a text comparison. The word is a Move, a plain
 // transfer (a String Copy clones, which a null text cannot).
-ir_test_present: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+ir_test_present: fn(m: ^IRModule, b: ^IRBuilder, value: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     word: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Move, word, value, -1, -1, b.line)
@@ -254,14 +254,14 @@ ir_test_present: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 }
 
 // Ends the process with `code`.
-ir_test_exit: fn(m: &IRModule, b: &IRBuilder, code: Int) Never! {
+ir_test_exit: fn(m: ^IRModule, b: ^IRBuilder, code: Int) Never! {
     status: ir_word_const(m, b, code)
     _: ir_runtime(m, b, "jet_std_process_exit", [Int]{status}, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
 // test.invoke(env) for the test body `body`.
-ir_test_invoke: fn(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
+ir_test_invoke: fn(m: ^IRModule, p: IRProgram, body: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     id: ir_test_function(m, "test.invoke", body, "invoke")
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[body].line
@@ -329,7 +329,7 @@ ir_test_invoke: fn(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFai
 
 // The pointer word test.invoke returns for the owned failure message `text`:
 // the String moves out as its header pointer, which the test runtime takes.
-ir_test_message_word: fn(m: &IRModule, b: &IRBuilder, text: Int) -> Int Never! {
+ir_test_message_word: fn(m: ^IRModule, b: ^IRBuilder, text: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     word: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.Move, word, text, -1, -1, b.line)
@@ -341,7 +341,7 @@ ir_test_message_word: fn(m: &IRModule, b: &IRBuilder, text: Int) -> Int Never! {
 // clauses is rejected (ir_test_property_reject) before anything else. The
 // rendered inputs (`name = value, …`) go to the context first, so a failing
 // case reports them. The result is owned by the caller, -1 for Unit.
-ir_test_property_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, ctx: Int, span: Span) -> Int Never! {
+ir_test_property_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, body: Int, ctx: Int, span: Span) -> Int Never! {
     row: ir_function_row(p, m.functions[body].key) ?? return ir_fail_slot(b, span, "a property test outside the checked program")
     params: p.functions[row].params
     values := [Int]{}
@@ -375,7 +375,7 @@ ir_test_property_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, 
 // (jet_rt_test_property_reject) and test.invoke returns without calling the
 // body. The clauses read the property's own tree, so they build with its row
 // and its parameters bound to the values.
-ir_test_property_reject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, ctx: Int, values: [Int]) Never! {
+ir_test_property_reject: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, ctx: Int, values: [Int]) Never! {
     pre: p.functions[row].pre
     if pre.len() == 0 {
         return
@@ -415,7 +415,7 @@ ir_test_property_reject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int,
 // (JetRuntime TestProperty.jet): fresh where its type owns storage. An
 // integer stays within ±2^62; a struct is its stored fields, each drawn in
 // turn.
-ir_test_generate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Type, span: Span) -> Int Never! {
+ir_test_generate: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ctx: Int, ty: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     word_row: ir_word_row(m)
     limit: 4611686018427387904
@@ -504,7 +504,7 @@ ir_test_generate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Ty
 }
 
 // An integer of type row `row` in lo...hi.
-ir_test_generate_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, lo: Int, hi: Int, row: Int, span: Span) -> Int Never! {
+ir_test_generate_word: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ctx: Int, lo: Int, hi: Int, row: Int, span: Span) -> Int Never! {
     low: ir_word_const(m, b, lo)
     high: ir_word_const(m, b, hi)
     word_row: ir_word_row(m)
@@ -514,7 +514,7 @@ ir_test_generate_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, l
 
 // A List of type row `row` holding `count` (a word slot) generated
 // `element`s, in fresh frame storage.
-ir_test_generate_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, row: Int, element: Type, count: Int, span: Span) -> Int Never! {
+ir_test_generate_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ctx: Int, row: Int, element: Type, count: Int, span: Span) -> Int Never! {
     element_row: ir_value_type(m, p, element) ?? return ir_type_fail(b, span, element)
     list: ir_list_empty(m, p, b, row)
     index: ir_count_open(m, b, count)
@@ -527,7 +527,7 @@ ir_test_generate_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, r
 
 // test.unit(env) for `test`, whose body is `body`: the canonical test rail
 // over its test.invoke.
-ir_test_unit: fn(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failures: &[IRBuildFailure]) -> Int Never! {
+ir_test_unit: fn(m: ^IRModule, p: IRProgram, test: IRTestCase, body: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     invoke: ir_test_invoke(m, p, body, failures)
     id: ir_test_function(m, "test.unit", body, "unit")
     b := ir_builder_new(m.functions[id].copy())
@@ -559,7 +559,7 @@ ir_test_unit: fn(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failur
 
 // test.release(env): the harness spawns with a null environment, so it owns
 // nothing.
-ir_test_release: fn(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure]) -> Int Never! {
+ir_test_release: fn(m: ^IRModule, p: IRProgram, failures: ^[IRBuildFailure]) -> Int Never! {
     id: ir_test_function(m, "test.release", -1, "release")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
@@ -572,7 +572,7 @@ ir_test_release: fn(m: &IRModule, p: IRProgram, failures: &[IRBuildFailure]) -> 
 
 // Appends `text` to the records file `path`; a write failure is a protocol
 // failure (exit 103), never a failure of the joined test.
-ir_test_append: fn(m: &IRModule, b: &IRBuilder, path: Int, text: Int) Never! {
+ir_test_append: fn(m: ^IRModule, b: ^IRBuilder, path: Int, text: Int) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     string_row: ir_string_row(m)
@@ -592,7 +592,7 @@ ir_test_append: fn(m: &IRModule, b: &IRBuilder, path: Int, text: Int) Never! {
 }
 
 // Joins the spawned test `handle` and appends its record.
-ir_test_stream: fn(m: &IRModule, b: &IRBuilder, handle: Int, id: Int, path: Int) Never! {
+ir_test_stream: fn(m: ^IRModule, b: ^IRBuilder, handle: Int, id: Int, path: Int) Never! {
     pointer_row: ir_pointer_row(m)
     string_row: ir_string_row(m)
     outcome: ir_runtime(m, b, "jet_rt_test_join", [Int]{handle}, pointer_row)
@@ -607,7 +607,7 @@ ir_test_stream: fn(m: &IRModule, b: &IRBuilder, handle: Int, id: Int, path: Int)
 
 // Reporter mode: reads the parent's outcome file `path`, prints the
 // canonical report and exits 1 when a test failed.
-ir_test_report: fn(m: &IRModule, b: &IRBuilder, path: Int) Never! {
+ir_test_report: fn(m: ^IRModule, b: ^IRBuilder, path: Int) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     string_row: ir_string_row(m)
@@ -638,7 +638,7 @@ ir_test_report: fn(m: &IRModule, b: &IRBuilder, path: Int) Never! {
 }
 
 // Calls the package's `test: fn(t: Test)` (`override`) with a fresh suite.
-ir_test_call_override: fn(m: &IRModule, b: &IRBuilder, override: Int) Never! {
+ir_test_call_override: fn(m: ^IRModule, b: ^IRBuilder, override: Int) Never! {
     pointer_row: ir_pointer_row(m)
     suite: ir_runtime(m, b, "jet_test_suite_new", [Int]{}, pointer_row)
     row: m.functions[override].result
@@ -654,7 +654,7 @@ ir_test_call_override: fn(m: &IRModule, b: &IRBuilder, override: Int) Never! {
 // `function`) once: a Bool `false` stops the program, any other result is
 // dropped unclassified. It carries the check function's name, which the
 // stop report shows.
-ir_test_check: fn(m: &IRModule, p: IRProgram, check: IROutputCheck, function: Int, failures: &[IRBuildFailure]) -> Int Never! {
+ir_test_check: fn(m: ^IRModule, p: IRProgram, check: IROutputCheck, function: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     name: m.functions[function].name.copy()
     id: ir_test_function(m, name, function, "check")
     b := ir_builder_new(m.functions[id].copy())
@@ -687,7 +687,7 @@ ir_test_check: fn(m: &IRModule, p: IRProgram, check: IROutputCheck, function: In
 }
 
 // The harness entry `main` (see the head of this file).
-ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: &[IRBuildFailure]) -> Int Never! {
+ir_test_main: fn(m: ^IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int], check_ids: [Int], override: Int, failures: ^[IRBuildFailure]) -> Int Never! {
     units := [Int]{}
     loop (index, test) in harness.tests {
         units.push(ir_test_unit(m, p, test, bodies[index], failures))
@@ -799,7 +799,7 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
 //                         timeout_leave: past its limit, timeout_failure;
 //   `.skip { … }`         the body never runs; skip_scope(whole test: the
 //                         member is the body's first statement).
-ir_scope_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, kind: BodyScopeMemberKind, body: [Int], span: Span) Never! {
+ir_scope_member: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, statement: Int, kind: BodyScopeMemberKind, body: [Int], span: Span) Never! {
     if kind == {
         .Setup -> {
             loop inner in body {

@@ -322,7 +322,7 @@ no_exclusions: fn() -> Exclusions Never! {
 }
 
 // Records `rule` for `key` unless an earlier rule holds it.
-note: fn(rules: &[String:String], key: String, rule: String) {
+note: fn(rules: ^[String:String], key: String, rule: String) {
     if !rules.has_key(key) -> rules[key.copy()] = rule.copy()
 }
 
@@ -447,7 +447,7 @@ rewrites_sources: fn(text: String) -> Bool Never! {
 // Keeps out the fixtures of a case at `path` that rewrites its sources, and
 // every source it names by repository path but the migration runner, which
 // the case runs and does not rewrite.
-add_fmt_case_inputs: fn(path: String, text: String, out: &Exclusions) {
+add_fmt_case_inputs: fn(path: String, text: String, out: ^Exclusions) {
     if !rewrites_sources(text) {
         return
     }
@@ -482,7 +482,7 @@ parse_diagnostic_types: fn(rows: String) -> [String] Never! {
 
 // Keeps out the ui fixture whose snapshot at `path` shows a parse error: the
 // `.jet` beside an `x.stderr`, or the whole folder of a folder's `stderr`.
-note_parse_lesson: fn(path: String, out: &Exclusions) {
+note_parse_lesson: fn(path: String, out: ^Exclusions) {
     if base_name(path) == UI_FOLDER_SNAPSHOT {
         note(out.trees, parent(path), RULE_PARSE_LESSON)
         return
@@ -493,7 +493,7 @@ note_parse_lesson: fn(path: String, out: &Exclusions) {
 }
 
 // Adds to `into` each tracked source beneath `folder` it doesn't hold yet.
-add_beneath: fn(tracked: Sources, folder: String, into: &[String]) {
+add_beneath: fn(tracked: Sources, folder: String, into: ^[String]) {
     slot: tracked.folder_at.get(folder) ?? -1
     if slot < 0 {
         return
@@ -647,7 +647,7 @@ exclusions: fn(root: String) -[Exec, FS.Read, Time.Wait]> Exclusions CorpusError
 
 // Every tracked file at `root` that may pin sources, outside the evidence.
 // The sources an evidence file pins by name are kept out in `out`.
-pin_sites: fn(root: String, tracked: Sources, out: &Exclusions) -[Exec, FS.Read, Time.Wait]> [PinSite] CorpusError! {
+pin_sites: fn(root: String, tracked: Sources, out: ^Exclusions) -[Exec, FS.Read, Time.Wait]> [PinSite] CorpusError! {
     sites := [PinSite]{}
     loop path in grep_roots(root, [String]{}, PIN_GREP) ?? return Err(err) {
         if !is_pin_site(path) -> next
@@ -668,7 +668,7 @@ pin_sites: fn(root: String, tracked: Sources, out: &Exclusions) -[Exec, FS.Read,
 }
 
 // Records the tracked source `path` in `tracked`.
-add_source: fn(tracked: &Sources, path: String) {
+add_source: fn(tracked: ^Sources, path: String) {
     tracked.known[path.copy()] = true
     loop dir in ancestors(path) {
         slot := tracked.folder_at.get(dir) ?? -1
@@ -804,7 +804,7 @@ pin_spots: fn(text: String) -> [PinSpot] Never! {
 }
 
 // Each `<name>.jet:<line>[:<column>]` and `<name>.jet:<start>..<end>` in `bytes`.
-named_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+named_spots: fn(bytes: [U8], spots: ^[PinSpot]) {
     marker: ".jet:".bytes()
     at := 0
     loop at < bytes.len() {
@@ -839,7 +839,7 @@ breaks_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
 
 // Each `span=<start>..<end>`, of the source the last named place before it
 // on its line names.
-span_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+span_spots: fn(bytes: [U8], spots: ^[PinSpot]) {
     marker: "span=".bytes()
     named: spots.len()
     loop at in 0..<bytes.len() {
@@ -859,7 +859,7 @@ span_spots: fn(bytes: [U8], spots: &[PinSpot]) {
 }
 
 // Each `<source>:<line>[:<column>]`, which names no source.
-source_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+source_spots: fn(bytes: [U8], spots: ^[PinSpot]) {
     marker: "<source>:".bytes()
     loop at in 0..<bytes.len() {
         if !number_follows(bytes, at, marker) -> next
@@ -997,7 +997,7 @@ follows_span_key: fn(bytes: [U8], open: Int) -> Bool Never! {
 // of an object that it or the object around it names the source of, unless it
 // counts a `character`; and the `start` (and `end`) of a `span` object or of
 // an object that names its source.
-json_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+json_spots: fn(bytes: [U8], spots: ^[PinSpot]) {
     line_key: "line".bytes()
     column_key: "column".bytes()
     character_key: "character".bytes()
@@ -1039,7 +1039,7 @@ json_path_before: fn(bytes: [U8], at: Int) -> String Never! {
 
 // Each JSON path's `.line = <n>`, which names no source, with the
 // `.column = <n>` of the same path.
-json_path_spots: fn(bytes: [U8], spots: &[PinSpot]) {
+json_path_spots: fn(bytes: [U8], spots: ^[PinSpot]) {
     marker: ".line = ".bytes()
     loop at in 0..<bytes.len() {
         if !number_follows(bytes, at, marker) -> next
@@ -1496,7 +1496,7 @@ pinned_sources: fn(root: String, found: Corpus, dirty: [String]) -[FS.Read]> [St
 // Reads the formatted text of `target`, a source of `before`, into `after`,
 // and the `ink_map` from its old text into `maps`, once; whether `jet fmt`
 // changed it only in blank space and canonical spellings, so its pins move.
-formatted_map: fn(root: String, target: String, before: [String:String], after: &[String:String], maps: &[String:[Int]]) -[FS.Read]> Bool CorpusError! {
+formatted_map: fn(root: String, target: String, before: [String:String], after: ^[String:String], maps: ^[String:[Int]]) -[FS.Read]> Bool CorpusError! {
     if !after.has_key(target) {
         new_text: read_tracked(root, target) ?? return Err(err)
         maps[target.copy()] = ink_map((before.get(target) ?? "").bytes(), new_text.bytes()) ?? [Int]{}
@@ -1509,7 +1509,7 @@ formatted_map: fn(root: String, target: String, before: [String:String], after: 
 // site's `bytes` is the old digest of, among the sources its unnamed pins
 // mean; in a case, a digest that is no such source's stays and goes to
 // `problems`. How many digests move.
-move_digests: fn(root: String, site: PinSite, bytes: [U8], before: [String:String], after: &[String:String], maps: &[String:[Int]], edits: &[TextEdit], problems: &[String]) -[FS.Read]> Int CorpusError! {
+move_digests: fn(root: String, site: PinSite, bytes: [U8], before: [String:String], after: ^[String:String], maps: ^[String:[Int]], edits: ^[TextEdit], problems: ^[String]) -[FS.Read]> Int CorpusError! {
     spans: digest_spans(bytes)
     if spans.len() == 0 -> return Ok(0)
     digests := [String:String]{}
@@ -1643,7 +1643,7 @@ fmt_meaning_change: fn(errors: String) -> String? Never! {
 // until the refused source runs alone, and it is set aside as unparsed. A run
 // that hangs or crashes is split the same way; the source it fails on is set
 // aside as failed. Returns the number of formatter runs.
-run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
+run_fmt: fn(formatter: Formatter, sources: [String], outcome: ^FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
     if sources.len() == 0 -> return Ok(0)
     receipt: fmt_spec(formatter, sources).run() ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
     fmt_receipt(formatter, sources, receipt, outcome)
@@ -1663,7 +1663,7 @@ fmt_limit_ms: fn(sources: [String]) -> Int Never! {
 
 // What the formatter run of `sources` that gave `receipt` said, into
 // `outcome`, as run_fmt describes; a run that failed runs again in parts.
-fmt_receipt: fn(formatter: Formatter, sources: [String], receipt: ProcessReceipt, outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
+fmt_receipt: fn(formatter: Formatter, sources: [String], receipt: ProcessReceipt, outcome: ^FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
     checking: formatter.flags.contains("--check")
     limit_ms: fmt_limit_ms(sources)
     // Under `--check`, exit 1 means a source would change.

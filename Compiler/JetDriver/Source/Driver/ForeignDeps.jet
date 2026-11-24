@@ -140,7 +140,7 @@ jet_driver_foreign_link_cache_identity: fn(facts: JetDriverForeignLinkFacts) -> 
     "direct={facts.direct_links.join(",")};transitive={facts.transitive_links.join(",")}"
 }
 
-jet_driver_foreign_push_unique: fn(rows: &[String], value: String) Never! {
+jet_driver_foreign_push_unique: fn(rows: ^[String], value: String) Never! {
     if !rows.contains(value) -> rows.push(value.copy())
 }
 
@@ -189,7 +189,7 @@ JetDriverForeignLines: struct {
 // `source_files` with that path); 0 when the file is not among them. The
 // file's newlines are scanned into `lines` the first time a row names it, so
 // each row is a binary search instead of a scan from the file's start.
-jet_driver_foreign_line: fn(lines: &JetDriverForeignLines, source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
+jet_driver_foreign_line: fn(lines: ^JetDriverForeignLines, source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
     slot := lines.files.get(path) ?? -1
     if slot < 0 {
         found: loop (index, source_file) in source_files {

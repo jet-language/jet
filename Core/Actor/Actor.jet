@@ -22,7 +22,7 @@ Actor: struct<M> {
 
     /// Queues `message` for the actor. Fails with the message back once the
     /// actor has stopped.
-    send: fn(self, message: &&M) -[Time.Wait]> SendError<M>! {
+    send: fn(self, message: ^^M) -[Time.Wait]> SendError<M>! {
         self.inbox.send(Envelope<M>{message: message, done: None}) ?? return Err(SendError<M>{value: err.value.message})
     }
 
@@ -52,7 +52,7 @@ Reply: struct<R> {
     priv sender: Sender<R>,
 
     /// Gives the asker `value`. Only the first answer counts.
-    answer: fn(self, value: &&R) -[Time.Wait]> { self.sender.send(value) ?? return }
+    answer: fn(self, value: ^^R) -[Time.Wait]> { self.sender.send(value) ?? return }
 }
 
 /// What a supervised actor does when its handler fails: stop, or restart
@@ -65,9 +65,9 @@ Strategy: enum {
 /// Starts an actor whose state begins as `state`; each message replaces the
 /// state with `handler(state, message)`. The actor stops when its handler
 /// fails or when it is stopped.
-spawn: fn<S, M>(state: &&S, handler: &&fn(S, M) -> S) -> Actor<M> {
+spawn: fn<S, M>(state: ^^S, handler: ^^fn(S, M) -> S) -> Actor<M> {
     { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
-    worker: task &&mailbox {
+    worker: task ^^mailbox {
         current := state
         loop envelope in mailbox {
             if !turn(current, handler, envelope) -> break
@@ -84,9 +84,9 @@ spawn: fn<S, M>(state: &&S, handler: &&fn(S, M) -> S) -> Actor<M> {
 /// dropped and `strategy` decides: `.Stop` stops the actor, `.Restart(limit)`
 /// starts again from `start()` until it has restarted `limit` times, then
 /// stops.
-supervise: fn<S, M>(start: &&fn() -> S, handler: &&fn(S, M) -> S, strategy: Strategy) -> Actor<M> {
+supervise: fn<S, M>(start: ^^fn() -> S, handler: ^^fn(S, M) -> S, strategy: Strategy) -> Actor<M> {
     { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
-    worker: task &&mailbox {
+    worker: task ^^mailbox {
         current := start()
         restarts := 0
         loop envelope in mailbox {
@@ -117,7 +117,7 @@ priv Envelope: struct<M> {
 
 // Handles one message: whether the handler succeeded, the state replaced
 // when it did.
-priv turn: fn<S, M>(current: &S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
+priv turn: fn<S, M>(current: ^S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
     handled: if handler(current, envelope.message) == {
         .Ok(next) -> {
             current = next
@@ -132,7 +132,7 @@ priv turn: fn<S, M>(current: &S, handler: fn(S, M) -> S, envelope: Envelope<M>) 
 // Handles one message as `turn` does, in a `task.group` child: whether the
 // handler finished, the state replaced when it did. The child borrows the
 // state, the handler and the envelope until its join.
-priv supervised_turn: fn<S, M>(current: &S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
+priv supervised_turn: fn<S, M>(current: ^S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
     outcome := S?{None}
     task.group group {
         attempt: task handler(current, envelope.message)

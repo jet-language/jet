@@ -29,7 +29,7 @@ use jet_foundation.[
     type_name,
 ]
 
-sema_loop_value_check_result_exit: fn(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_loop_value_check_result_exit: fn(context: ^SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     frame: if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> Val(context.loop_value_frames[frame_index]) else -> None
     target: frame ?? return None
     if target.kind != SemaLoopValueKind.Result -> return None
@@ -52,7 +52,7 @@ sema_loop_value_check_result_exit: fn(context: &SemaCheckContext, frame_index: I
     Val(value)
 }
 
-sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_loop_value_check_collecting_item: fn(value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if context.collect_item_types.len() == 0 -> return None
     expected := sema_loop_value_collecting_type(context)
     checked_expected := expected
@@ -97,14 +97,14 @@ sema_loop_value_collect_push: fn(local: TLocal, item_type: Type, value: TExpr, s
     TStmt.ExprStmt{value: call, span: span}
 }
 
-sema_loop_value_collect_widen: fn(value: TExpr, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_loop_value_collect_widen: fn(value: TExpr, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     if type_identity_equal(value.ty, item_type) -> return Val(value)
     if sema_expr_numeric_value_widening(value, item_type) != (Val(true)) -> return None
     line: sema_source_line_at(environment.source_segments, value.span) ?? 0
     sema_expr_numeric_literal_conversion(value, item_type, value.span, line, diagnostics)
 }
 
-sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_loop_value_rewrite_collecting_statements: fn(statements: ^[TStmt], local: TLocal, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool Never! {
     index := 0
     loop index < statements.len() {
         statement := statements[index]
@@ -341,7 +341,7 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
     true
 }
 
-sema_loop_value_lower_collecting_body: fn(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [TStmt]? {
+sema_loop_value_lower_collecting_body: fn(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> [TStmt]? {
     collector_type := Type.List{element: item_type}
     local := checked_generated_local("__jet_collect_{span.start}", span, collector_type)
     local.mutable = true
@@ -361,7 +361,7 @@ sema_loop_value_result_exit_matches: fn(label: String?, root_label: String?, all
     allow_unlabeled && root_label == None
 }
 
-sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: String?, result_type: Type, allow_unlabeled: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_loop_value_widen_result_breaks_in: fn(statements: ^[TStmt], root_label: String?, result_type: Type, allow_unlabeled: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     index := 0
     loop index < statements.len() {
         statement := statements[index]
@@ -603,7 +603,7 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
     true
 }
 
-sema_loop_value_widen_result_breaks: fn(body: &[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_loop_value_widen_result_breaks: fn(body: ^[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     sema_loop_value_widen_result_breaks_in(body, root_label, result_type, true, environment, program, diagnostics)
 }
 
@@ -673,7 +673,7 @@ sema_loop_value_collecting_body: fn(value: Expr) -> [Stmt]? Never! {
 // the entry's value. Every nested block is walked, loops included, because a
 // `yield` there still feeds this loop. Nested loop values are expressions and
 // keep their own items.
-sema_loop_value_head_items: fn(statements: &[Stmt], head: Expr, entry_value: Expr?) Never! {
+sema_loop_value_head_items: fn(statements: ^[Stmt], head: Expr, entry_value: Expr?) Never! {
     loop index in 0..<statements.len() {
         // An owned copy, so its nested bodies can move into the rebuilt statement.
         statement := statements[index]
@@ -765,13 +765,13 @@ sema_loop_value_head_items: fn(statements: &[Stmt], head: Expr, entry_value: Exp
     }
 }
 
-sema_loop_value_head_items_in: fn(body: &&[Stmt], head: Expr, entry_value: Expr?) -> [Stmt] Never! {
+sema_loop_value_head_items_in: fn(body: ^^[Stmt], head: Expr, entry_value: Expr?) -> [Stmt] Never! {
     updated := body
     sema_loop_value_head_items(updated, head, entry_value)
     updated
 }
 
-sema_loop_value_head_items_arms: fn(arms: &&[SwitchArm], head: Expr, entry_value: Expr?) -> [SwitchArm] Never! {
+sema_loop_value_head_items_arms: fn(arms: ^^[SwitchArm], head: Expr, entry_value: Expr?) -> [SwitchArm] Never! {
     updated := arms
     loop arm_index in 0..<updated.len() {
         arm := updated[arm_index]
@@ -781,7 +781,7 @@ sema_loop_value_head_items_arms: fn(arms: &&[SwitchArm], head: Expr, entry_value
     updated
 }
 
-sema_loop_value_head_items_else: fn(else_body: &&[Stmt]?, head: Expr, entry_value: Expr?) -> [Stmt]? Never! {
+sema_loop_value_head_items_else: fn(else_body: ^^[Stmt]?, head: Expr, entry_value: Expr?) -> [Stmt]? Never! {
     if else_body == {
         .Val(body) -> Val(sema_loop_value_head_items_in(body, head, entry_value))
         .None -> None

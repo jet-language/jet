@@ -1,4 +1,4 @@
-// E0201: `^` cannot take a field out of a `&` parameter, because the caller
+// E0201: `^` cannot take a field out of a `^` parameter, because the caller
 // still owns that storage. The diagnostic names the borrowed root and teaches
 // the copy or an owning parameter; it offers no source edit. Every value
 // position reports it: a binding, an assignment, a field initializer, and a
@@ -15,12 +15,12 @@ Root: struct {
 
 consume: fn(s: Session) -> Int { s.id }
 
-take_field: fn(r: &Root) -> Int {
+take_field: fn(r: ^Root) -> Int {
     taken := r.session.move()
     consume(taken)
 }
 
-replace_field: fn(r: &Root) -> Int {
+replace_field: fn(r: ^Root) -> Int {
     taken := Session{id: 0, names: [String]{}}
     taken = r.session.move()
     consume(taken)

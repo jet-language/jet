@@ -12,13 +12,13 @@ use fs: core.files
 RNG: struct {
     state: Int,
 
-    step: fn(&self) -> Int {
+    step: fn(^self) -> Int {
         self.state = (self.state * 1103515245 + 12345) %% 2147483648
         self.state /% 65536
     }
 
     // The next value in 0..<n.
-    below: fn(&self, n: Int) -> Int {
+    below: fn(^self, n: Int) -> Int {
         if n <= 32768 -> return self.step() %% n
         high: self.step()
         (high * 32768 + self.step()) %% n

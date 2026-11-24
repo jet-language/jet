@@ -75,7 +75,7 @@ leading_name: fn(line: String) -> String Never! {
 }
 
 // Every top-level `NAME: "spelling"` constant of `text`, by name, as written.
-read_spellings: fn(text: String, out: &[String:String]) {
+read_spellings: fn(text: String, out: ^[String:String]) {
     loop line in text.lines() {
         name: leading_name(line)
         if name == "" -> next
@@ -330,7 +330,7 @@ render_error: fn(registry: String, markers: String, dictionary: String) -> Strin
     assert(rendered.contains(tokens), rendered)
     markers: "{MARKERS_OPEN}\n    {{token: \"As\", query: \"as\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n    {{token: \"Shared\", query: \"shared\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n    {{token: \"Unsafe\", query: \"unsafe\", registry_name: \"MARKER_SOURCE\", kind: JetCLISyntaxKind.Marker, meanings: [JetCLISyntaxMeaning]{{}}}},\n{MARKERS_CLOSE}\n{TRAITS_OPEN}\n    {{token: \"Codable\", query: \"codable\"}},\n"
     assert(rendered.contains(markers), rendered)
-    // The hand-written `&&` row moved into the block; rendering twice changes nothing.
+    // The hand-written `^^` row moved into the block; rendering twice changes nothing.
     assert(!rendered.contains("{TOKENS_CLOSE}\n    {{token: \"&&\""), rendered)
     assert_eq(render_dictionary([String]{MINIMAL_REGISTRY}, MINIMAL_MARKERS, rendered) ?? panic(err.message), rendered)
 }

@@ -120,7 +120,7 @@ dhm_get_value: fn(ctx: DHMContext, param: DHMParam) -> bn.Mpi Never! {
 }
 
 // One ServerKeyExchange number: a 2-byte big-endian length and its bytes.
-read_bignum: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi DHMError! {
+read_bignum: fn(data: [U8], p: ^Int, end: Int) -> bn.Mpi DHMError! {
     if end - p < 2 -> return Err(.BadInput)
     n: (Int{data[p]} << 8) | Int{data[p + 1]}
     p += 2
@@ -138,7 +138,7 @@ check_range: fn(param: bn.Mpi, p: bn.Mpi) DHMError! {
 
 /// Read p, g and the peer's gy from data[p..end] and check gy's range
 /// (mbedtls_dhm_read_params).
-dhm_read_params: fn(ctx: &DHMContext, data: [U8], p: &Int, end: Int) DHMError! {
+dhm_read_params: fn(ctx: ^DHMContext, data: [U8], p: ^Int, end: Int) DHMError! {
     np: read_bignum(data, p, end)
     bn.set_mpi(ctx.p, np)
     ng: read_bignum(data, p, end)
@@ -149,7 +149,7 @@ dhm_read_params: fn(ctx: &DHMContext, data: [U8], p: &Int, end: Int) DHMError! {
 }
 
 // A uniform r in 2..m - 2.
-random_below: fn<R: RNG>(m: bn.Mpi, rng: &R) -> bn.Mpi bn.MpiError! {
+random_below: fn<R: RNG>(m: bn.Mpi, rng: ^R) -> bn.Mpi bn.MpiError! {
     r: bn.random(3, m, rng)
     out: bn.sub_int(r, 1)
     Ok(out)
@@ -158,7 +158,7 @@ random_below: fn<R: RNG>(m: bn.Mpi, rng: &R) -> bn.Mpi bn.MpiError! {
 // A private value of x_size random bytes, or uniform in 2..p - 2 when
 // x_size is at least p's length. MakeParamsFailed(None) when no draw falls
 // in range; any other bignum error stays bare for the caller to wrap.
-private_value: fn<R: RNG>(p: bn.Mpi, x_size: Int, rng: &R) -> bn.Mpi DHMError! {
+private_value: fn<R: RNG>(p: bn.Mpi, x_size: Int, rng: ^R) -> bn.Mpi DHMError! {
     if x_size < bn.size(p) {
         small: bn.fill_random(x_size, rng)
         return Ok(small)
@@ -173,7 +173,7 @@ private_value: fn<R: RNG>(p: bn.Mpi, x_size: Int, rng: &R) -> bn.Mpi DHMError! {
 }
 
 // A fresh private value x and gx = g^x mod p, range-checked.
-make_common: fn<R: RNG>(ctx: &DHMContext, x_size: Int, rng: &R) DHMError! {
+make_common: fn<R: RNG>(ctx: ^DHMContext, x_size: Int, rng: ^R) DHMError! {
     if bn.cmp_int(ctx.p, 0) == 0 || x_size < 0 -> return Err(.BadInput)
     x: private_value(ctx.p, x_size, rng)
     bn.set_mpi(ctx.x, x)
@@ -183,7 +183,7 @@ make_common: fn<R: RNG>(ctx: &DHMContext, x_size: Int, rng: &R) DHMError! {
 }
 
 // A number as its 2-byte length and its bytes without leading zeros.
-push_number: fn(out: &[U8], x: bn.Mpi) bn.MpiError! {
+push_number: fn(out: ^[U8], x: bn.Mpi) bn.MpiError! {
     n: bn.size(x)
     out.push(U8{(n >> 8) & 0xFF})
     out.push(U8{n & 0xFF})
@@ -195,7 +195,7 @@ push_number: fn(out: &[U8], x: bn.Mpi) bn.MpiError! {
 /// is at least p's length) and return the ServerKeyExchange parameters p,
 /// g and g^x, each with a 2-byte length and no leading zero bytes
 /// (mbedtls_dhm_make_params).
-dhm_make_params: fn<R: RNG>(ctx: &DHMContext, x_size: Int, rng: &R) -> [U8] DHMError! {
+dhm_make_params: fn<R: RNG>(ctx: ^DHMContext, x_size: Int, rng: ^R) -> [U8] DHMError! {
     if make_common(ctx, x_size, rng) == .Err(e) {
         return Err(if e == .Mpi(m) -> DHMError.MakeParamsFailed(Val(m)) else -> e.copy())
     }
@@ -207,14 +207,14 @@ dhm_make_params: fn<R: RNG>(ctx: &DHMContext, x_size: Int, rng: &R) -> [U8] DHME
 }
 
 /// Set the group from p and g (mbedtls_dhm_set_group).
-dhm_set_group: fn(ctx: &DHMContext, p: bn.Mpi, g: bn.Mpi) DHMError! {
+dhm_set_group: fn(ctx: ^DHMContext, p: bn.Mpi, g: bn.Mpi) DHMError! {
     bn.set_mpi(ctx.p, p) ?? return Err(.SetGroupFailed(err))
     bn.set_mpi(ctx.g, g) ?? return Err(.SetGroupFailed(err))
 }
 
 /// Take the peer's public value, 1 to p's length big-endian bytes
 /// (mbedtls_dhm_read_public). Its range is checked by dhm_calc_secret.
-dhm_read_public: fn(ctx: &DHMContext, input: [U8]) DHMError! {
+dhm_read_public: fn(ctx: ^DHMContext, input: [U8]) DHMError! {
     if input.len() < 1 || input.len() > dhm_get_len(ctx) -> return Err(.BadInput)
     gy: bn.read_binary(input) ?? return Err(.ReadPublicFailed(err))
     bn.set_mpi(ctx.gy, gy)
@@ -222,7 +222,7 @@ dhm_read_public: fn(ctx: &DHMContext, input: [U8]) DHMError! {
 
 /// Make a private value of x_size bytes and return g^x as olen big-endian
 /// bytes, 1 <= olen <= p's length (mbedtls_dhm_make_public).
-dhm_make_public: fn<R: RNG>(ctx: &DHMContext, x_size: Int, olen: Int, rng: &R) -> [U8] DHMError! {
+dhm_make_public: fn<R: RNG>(ctx: ^DHMContext, x_size: Int, olen: Int, rng: ^R) -> [U8] DHMError! {
     if olen < 1 || olen > dhm_get_len(ctx) -> return Err(.BadInput)
     if make_common(ctx, x_size, rng) == .Err(e) {
         return Err(
@@ -240,7 +240,7 @@ dhm_make_public: fn<R: RNG>(ctx: &DHMContext, x_size: Int, olen: Int, rng: &R) -
 // Refresh vi and vf (Kocher, CRYPTO'96, section 10): none the first time a
 // private value is used, then squares of the pair, made fresh when it was
 // none.
-update_blinding: fn<R: RNG>(ctx: &DHMContext, rng: &R) bn.MpiError! {
+update_blinding: fn<R: RNG>(ctx: ^DHMContext, rng: ^R) bn.MpiError! {
     if bn.cmp_mpi(ctx.x, ctx.px) != 0 {
         bn.set_mpi(ctx.px, ctx.x)
         bn.lset(ctx.vi, 1)
@@ -265,7 +265,7 @@ update_blinding: fn<R: RNG>(ctx: &DHMContext, rng: &R) bn.MpiError! {
 }
 
 // k = ((gy * vi)^x * vf) mod p.
-calc_core: fn<R: RNG>(ctx: &DHMContext, rng: &R) bn.MpiError! {
+calc_core: fn<R: RNG>(ctx: ^DHMContext, rng: ^R) bn.MpiError! {
     update_blinding(ctx, rng)
     gy_vi: bn.mul_mpi(ctx.gy, ctx.vi)
     gyb: bn.mod_mpi(gy_vi, ctx.p)
@@ -278,7 +278,7 @@ calc_core: fn<R: RNG>(ctx: &DHMContext, rng: &R) bn.MpiError! {
 /// The shared secret gy^x mod p without leading zero bytes, as TLS 1.2
 /// requires (RFC 5246 section 8.1.2), after checking gy's range
 /// (mbedtls_dhm_calc_secret).
-dhm_calc_secret: fn<R: RNG>(ctx: &DHMContext, rng: &R) -> [U8] DHMError! {
+dhm_calc_secret: fn<R: RNG>(ctx: ^DHMContext, rng: ^R) -> [U8] DHMError! {
     check_range(ctx.gy, ctx.p)
     calc_core(ctx, rng) ?? return Err(.CalcSecretFailed(err))
     out: bn.write_binary(ctx.k, bn.size(ctx.k)) ?? return Err(.CalcSecretFailed(err))

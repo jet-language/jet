@@ -142,7 +142,7 @@ priv ZBits: struct {
     acc: Int,
     count: Int,
 
-    put: fn(&self, out: &[U8], value: Int, n: Int) Never! {
+    put: fn(^self, out: ^[U8], value: Int, n: Int) Never! {
         self.acc |= value << self.count
         self.count += n
         loop self.count >= 8 {
@@ -153,13 +153,13 @@ priv ZBits: struct {
     }
 
     // The end marker bit, then the last partial byte.
-    close: fn(&self, out: &[U8]) Never! {
+    close: fn(^self, out: ^[U8]) Never! {
         self.put(out, 1, 1)
         if self.count > 0 -> out.push(wrapping(U8{self.acc}))
     }
 }
 
-priv zenc_header: fn(out: &[U8], size: Int, kind: Int, last: Int) Never! {
+priv zenc_header: fn(out: ^[U8], size: Int, kind: Int, last: Int) Never! {
     header: (size << 3) | kind << 1 | last
     out.push(wrapping(U8{header}))
     out.push(wrapping(U8{header >> 8}))
@@ -172,7 +172,7 @@ priv zhash4: fn(data: [U8], at: Int) -> Int Never! {
 
 // One block of `data[start..<end]` onto `out`: RLE when it repeats one byte,
 // else compressed when that is smaller than the bytes, else raw.
-priv zenc_block: fn(data: [U8], start: Int, end: Int, last: Bool, heads: &[Int], tables: ZEnc, out: &[U8]) Never! {
+priv zenc_block: fn(data: [U8], start: Int, end: Int, last: Bool, heads: ^[Int], tables: ZEnc, out: ^[U8]) Never! {
     size: end - start
     flag: if last -> 1 else -> 0
     run := size > 1
@@ -201,7 +201,7 @@ priv zenc_block: fn(data: [U8], start: Int, end: Int, last: Bool, heads: &[Int],
 // position of each 4-byte hash, across the frame), coded as sequences with
 // the predefined tables. Every offset is coded as a new offset, never a
 // repeat.
-priv zenc_compressed: fn(data: [U8], start: Int, end: Int, heads: &[Int], tables: ZEnc) -> [U8] Never! {
+priv zenc_compressed: fn(data: [U8], start: Int, end: Int, heads: ^[Int], tables: ZEnc) -> [U8] Never! {
     literals := [U8]{}
     lengths := [Int]{}
     matches := [Int]{}
@@ -249,7 +249,7 @@ priv zenc_compressed: fn(data: [U8], start: Int, end: Int, heads: &[Int], tables
 }
 
 // The raw literals section header (RFC 8878 3.1.1.3.1.1).
-priv zenc_literals: fn(out: &[U8], size: Int) Never! {
+priv zenc_literals: fn(out: ^[U8], size: Int) Never! {
     if size < 32 -> out.push(wrapping(U8{size << 3})) else if size < 4096 {
         out.push(wrapping(U8{(size << 4) | 4}))
         out.push(wrapping(U8{size >> 4}))
@@ -264,7 +264,7 @@ priv zenc_literals: fn(out: &[U8], size: Int) Never! {
 // first: the decoder reads the initial states, then per sequence the offset,
 // match and literal extra bits, then the literal, match and offset state
 // updates, so each sequence writes those in the reverse order.
-priv zenc_sequences: fn(out: &[U8], lengths: [Int], matches: [Int], offsets: [Int], tables: ZEnc) Never! {
+priv zenc_sequences: fn(out: ^[U8], lengths: [Int], matches: [Int], offsets: [Int], tables: ZEnc) Never! {
     bits := ZBits{acc: 0, count: 0}
     ll_state := 0
     of_state := 0
@@ -349,7 +349,7 @@ ZstdDecoder: struct {
     priv produced: Int,
     priv hash: ZHash,
 
-    feed: fn(&self, bytes: [U8]) Never! {
+    feed: fn(^self, bytes: [U8]) Never! {
         if self.consumed > 0 {
             self.input = self.input[self.consumed..<self.input.len()].copy()
             self.consumed = 0
@@ -357,7 +357,7 @@ ZstdDecoder: struct {
         loop byte in bytes -> self.input.push(byte)
     }
 
-    read_bytes: fn(&self, limit: Int) -> [U8] ZstdFileError! {
+    read_bytes: fn(^self, limit: Int) -> [U8] ZstdFileError! {
         if limit <= 0 -> return Ok([U8]{})
         loop self.ready >= self.state.out.len() {
             progressed: self.step()
@@ -382,7 +382,7 @@ ZstdDecoder: struct {
     }
 
     // Decode the next frame header, block or checksum if it is fully buffered.
-    step: fn(&self) -> Bool ZstdFileError! {
+    step: fn(^self) -> Bool ZstdFileError! {
         available: self.input.len() - self.consumed
         if self.phase == 0 {
             if available < 4 -> return Ok(false)
@@ -447,7 +447,7 @@ ZstdReader: struct {
     priv decoder: ZstdDecoder,
     priv ended: Bool,
 
-    read_bytes: fn(&self, limit: Int) -[FS.Read]> [U8] ZstdFileError! {
+    read_bytes: fn(^self, limit: Int) -[FS.Read]> [U8] ZstdFileError! {
         loop {
             out: self.decoder.read_bytes(limit)
             if out.len() > 0 || limit <= 0 || self.ended -> return Ok(out)
@@ -461,7 +461,7 @@ ZstdReader: struct {
 }
 
 /// Decode the Zstandard frames of an open file as it is read.
-reader: fn(file: &&FileReader) -> ZstdReader Never! {
+reader: fn(file: ^^FileReader) -> ZstdReader Never! {
     ZstdReader{file: file.move(), decoder: decoder(), ended: false}
 }
 
@@ -540,7 +540,7 @@ ZState: struct {
     rep: [Int],
 
     // Decode the block at `data[start..]` onto `out`.
-    next_block: fn(&self, data: [U8], start: Int, window: Int) -> ZBlock ZstdFileError! {
+    next_block: fn(^self, data: [U8], start: Int, window: Int) -> ZBlock ZstdFileError! {
         if start + 3 > data.len() -> return Ok(ZBlock{after: -1, last: false})
         header: u8_int(data[start]) | u8_int(data[start + 1]) << 8 | u8_int(data[start + 2]) << 16
         last: header & 1 != 0
@@ -567,7 +567,7 @@ ZState: struct {
     }
 
     // A compressed block (RFC 8878 3.1.1.3): literals, then sequences.
-    compressed: fn(&self, data: [U8], start: Int, end: Int) ZstdFileError! {
+    compressed: fn(^self, data: [U8], start: Int, end: Int) ZstdFileError! {
         literals := [U8]{}
         used: self.literals(data, start, end, literals)
         p := start + used
@@ -656,7 +656,7 @@ ZState: struct {
 
     // The literals section (RFC 8878 3.1.1.3.1) onto `literals`; returns its
     // byte length.
-    literals: fn(&self, data: [U8], start: Int, end: Int, literals: &[U8]) -> Int ZstdFileError! {
+    literals: fn(^self, data: [U8], start: Int, end: Int, literals: ^[U8]) -> Int ZstdFileError! {
         if start >= end -> return Err(ZstdFileError.Malformed)
         first: u8_int(data[start])
         kind: first & 3
@@ -762,7 +762,7 @@ ZBack: struct {
     end: Int,
     offset: Int,
 
-    read: fn(&self, data: [U8], n: Int) -> Int Never! {
+    read: fn(^self, data: [U8], n: Int) -> Int Never! {
         self.offset -= n
         zbits(data, self.start, self.end, self.offset, n)
     }
@@ -1028,7 +1028,7 @@ zhuf_build: fn(weights: [Int], description: Int) -> ZHuf ZstdFileError! {
 }
 
 // Decode `count` literals from one Huffman stream at `data[start..<end]`.
-zhuf_stream: fn(data: [U8], start: Int, end: Int, table: ZHuf, count: Int, out: &[U8]) ZstdFileError! {
+zhuf_stream: fn(data: [U8], start: Int, end: Int, table: ZHuf, count: Int, out: ^[U8]) ZstdFileError! {
     stream := zback(data, start, end)
     mask: (1 << table.max_bits) - 1
     state := stream.read(data, table.max_bits)
@@ -1052,7 +1052,7 @@ ZHash: struct {
     total: Int,
     pending: [U8],
 
-    update: fn(&self, data: [U8], start: Int, end: Int) Never! {
+    update: fn(^self, data: [U8], start: Int, end: Int) Never! {
         i := start
         loop i < end && self.pending.len() > 0 {
             self.pending.push(data[i])
@@ -1077,7 +1077,7 @@ ZHash: struct {
         self.total += end - start
     }
 
-    stripe: fn(&self, a: U64, b: U64, c: U64, d: U64) Never! {
+    stripe: fn(^self, a: U64, b: U64, c: U64, d: U64) Never! {
         self.v1 = xxh_round(self.v1, a)
         self.v2 = xxh_round(self.v2, b)
         self.v3 = xxh_round(self.v3, c)
@@ -1135,7 +1135,7 @@ xxh64: fn(data: [U8]) -> U64 Never! {
 
 xxh64_low32: fn(data: [U8]) -> Int Never! { Int{(xxh64(data)) & U64{4294967295}} }
 
-put32: fn(out: &[U8], n: Int) Never! {
+put32: fn(out: ^[U8], n: Int) Never! {
     out.push(wrapping(U8{n}))
     out.push(wrapping(U8{n >> 8}))
     out.push(wrapping(U8{n >> 16}))

@@ -183,7 +183,7 @@ pkg_fetch_git_populate: fn(transport: PackageFetchGitTransport, stage: Foundatio
     stage.revalidate() ?? return Err(pkg_fetch_git_bad("Git cache authority changed: {err}"))
 }
 
-pkg_fetch_git_node: fn(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, url: String, selector: GitSelector, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
+pkg_fetch_git_node: fn(verification: ^StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: ^PackageFetchResolver, name: String, url: String, selector: GitSelector, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
     transport: pkg_fetch_git_transport(resolver.root, url)
     if !provider_git_available() {
         return Err(pkg_fetch_git_bad("git is not installed or is not on PATH"))

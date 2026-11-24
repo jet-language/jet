@@ -76,7 +76,7 @@ IR_TAIL_CALLS_MIN_FUNCTIONS_PER_THREAD: 1024
 // function slices; `ir_tail_ownable` and `ir_tail_sites` then run only on
 // the sparse candidate functions and their tail-called callees, in function
 // order, producing the exact same variants and rewrites for any thread count.
-ir_tail_calls: fn(m: &IRModule, threads: CompilerThreads) Never! {
+ir_tail_calls: fn(m: ^IRModule, threads: CompilerThreads) Never! {
     count: m.functions.len()
     if count == 0 {
         return
@@ -207,7 +207,7 @@ ir_tail_candidate_range: fn(m: IRModule, start: Int, end: Int, poll: Int, trap: 
     found
 }
 
-ir_tail_ownable_cached: fn(m: IRModule, callee: Int, ownable: &[Int:Int]) -> Int Never! {
+ir_tail_ownable_cached: fn(m: IRModule, callee: Int, ownable: ^[Int:Int]) -> Int Never! {
     if ownable.get(callee) == .Val(mask) -> return mask
     mask: ir_tail_ownable(m, m.functions[callee])
     ownable[callee] = mask
@@ -239,7 +239,7 @@ ir_tail_ownable: fn(m: IRModule, f: IRFunction) -> Int Never! {
 
 // The tail calls of `f` owning the parameters in `owned`, each targeting
 // its callee until ir_tail_targets names the variants.
-ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, ownable: &[Int:Int]) -> IRTailPlan Never! {
+ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, ownable: ^[Int:Int]) -> IRTailPlan Never! {
     plan := IRTailPlan{calls: [Int]{}, returns: [Int]{}, targets: [Int]{}, masks: [Int]{}, polls: [Int]{}, drop_start: [Int]{0}, drops: [Int]{}}
     if f.asm != None -> return plan
     loop at in 0..<f.op.len() {
@@ -262,7 +262,7 @@ ir_tail_sites: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, 
 
 // Points each call of `plan` handing values over at the variant of its
 // callee owning them, queued as a work item when new.
-ir_tail_targets: fn(plan: &IRTailPlan, keys: &NameTable, rows: &[Int], base_count: Int, sources: &[Int], masks: &[Int]) Never! {
+ir_tail_targets: fn(plan: ^IRTailPlan, keys: ^NameTable, rows: ^[Int], base_count: Int, sources: ^[Int], masks: ^[Int]) Never! {
     loop site in 0..<plan.calls.len() {
         mask: plan.masks[site]
         if mask == 0 -> next
@@ -283,7 +283,7 @@ ir_tail_none: fn() -> IRTailSite Never! { IRTailSite{call: -1, mask: 0, poll: -1
 
 // The tail call the Return at `ret` ends, when it has the shape and its
 // arguments allow a jump (ir_tail_calls).
-ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, trap: Int, ownable: &[Int:Int]) -> IRTailSite Never! {
+ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, trap: Int, ownable: ^[Int:Int]) -> IRTailSite Never! {
     // Back from the Return over Drops, Moves, Copies and stop polls.
     at := ret - 1
     loop at >= 0 {
@@ -441,7 +441,7 @@ ir_tail_safe: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
 // stop it drops the values it would hand over and returns), then is the Call
 // to its target and a marked Return; each other Return first drops the owned
 // parameters it does not return (itself or by a Move of it).
-ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
+ir_tail_rewrite: fn(f: ^IRFunction, plan: IRTailPlan, owned: Int) Never! {
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     params := [Int]{}
     loop slot in 0..<f.param_count {
@@ -510,7 +510,7 @@ ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
 }
 
 // Drops of the arguments of the Call at `call` that `mask` hands over.
-ir_tail_put_handed: fn(code: &IROptCode, f: IRFunction, call: Int, mask: Int, line: Int) Never! {
+ir_tail_put_handed: fn(code: ^IROptCode, f: IRFunction, call: Int, mask: Int, line: Int) Never! {
     loop position in 0..<f.c[call] {
         if ir_tail_has(mask, position) {
             ir_opt_code_put(code, .Drop, -1, f.args[f.b[call] + position], -1, -1, line)

@@ -438,7 +438,7 @@ sema_authority_call_argument_escape: fn(expr: Expr, handle: String, aliases: [St
     }
 }
 
-sema_authority_derived_binding: fn(init: Expr, name: String, handle: String, aliases: &[String]) -> Span? {
+sema_authority_derived_binding: fn(init: Expr, name: String, handle: String, aliases: ^[String]) -> Span? {
     if sema_authority_narrowing_chain(init, handle, aliases) || sema_authority_bound_spec(init, handle, aliases) {
         if name != "_" -> aliases.push(name.copy())
         return None
@@ -455,7 +455,7 @@ sema_authority_derived_block: fn(statements: [Stmt], handle: String, aliases: [S
     None
 }
 
-sema_authority_derived_stmt: fn(statement: Stmt, handle: String, aliases: &[String]) -> Span? {
+sema_authority_derived_stmt: fn(statement: Stmt, handle: String, aliases: ^[String]) -> Span? {
     if statement == {
         .Expr(value) -> sema_authority_call_argument_escape(value, handle, aliases)
         .Val(binding) -> sema_authority_derived_binding(binding.init, binding.name, handle, aliases)
@@ -565,7 +565,7 @@ sema_authority_scope_regions: fn(statements: [Stmt], function_name: String) -> [
     frames
 }
 
-sema_authority_collect_fx_regions: fn(statements: [Stmt], regions: &[SemaEffectFxRegion]) {
+sema_authority_collect_fx_regions: fn(statements: [Stmt], regions: ^[SemaEffectFxRegion]) {
     loop statement in statements {
         if statement == {
             .AuthorityScope(caps, caps_span, _, body, span) -> {
@@ -599,7 +599,7 @@ sema_authority_collect_fx_regions: fn(statements: [Stmt], regions: &[SemaEffectF
 }
 
 // `outer` is the cap set of the enclosing `#FX` region, if any.
-sema_authority_check_statements: fn(statements: [Stmt], outer: [String]?, diagnostics: &[Diagnostic]) {
+sema_authority_check_statements: fn(statements: [Stmt], outer: [String]?, diagnostics: ^[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .AuthorityScope(caps, caps_span, binding, body, _) -> {
@@ -646,11 +646,11 @@ sema_authority_check_statements: fn(statements: [Stmt], outer: [String]?, diagno
     }
 }
 
-sema_authority_check_functions: fn(functions: [Func], diagnostics: &[Diagnostic]) {
+sema_authority_check_functions: fn(functions: [Func], diagnostics: ^[Diagnostic]) {
     loop function in functions -> sema_authority_check_statements(function.body, None, diagnostics)
 }
 
-sema_authority_check_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
+sema_authority_check_items: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == {
             .Func(function) -> { sema_authority_check_statements(function.body, None, diagnostics) }
@@ -683,7 +683,7 @@ sema_authority_check_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
 
 // E0711 over every source module. Returns true when a diagnostic was
 // reported.
-sema_effect_check_authority_handles: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_authority_handles: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) -> Bool {
     found := false
     loop source_module_index in 0..<graph.modules.len() {
         start: diagnostics.len()

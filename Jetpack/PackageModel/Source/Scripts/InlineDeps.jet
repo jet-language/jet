@@ -353,13 +353,13 @@ pkg_inline_deps_valid_package_name: fn(name: String) -> Bool Never! {
 }
 
 // A big-endian 64-bit length prefix, then the UTF-8 bytes.
-pkg_inline_deps_framed: fn(bytes: &[U8], value: String) Never! {
+pkg_inline_deps_framed: fn(bytes: ^[U8], value: String) Never! {
     raw: value.bytes()
     pkg_inline_deps_framed_count(bytes, raw.len())
     loop byte in raw -> bytes.push(byte)
 }
 
-pkg_inline_deps_framed_count: fn(bytes: &[U8], count: Int) Never! {
+pkg_inline_deps_framed_count: fn(bytes: ^[U8], count: Int) Never! {
     loop shift in FOUNDATION_U64_SHIFTS -> bytes.push(U8{((count >> shift)) & 255})
 }
 

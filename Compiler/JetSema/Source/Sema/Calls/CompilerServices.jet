@@ -57,7 +57,7 @@ sema_compiler_host_value_held: fn(ty: Type) -> String? Never! {
 // Runtime code reading `name`, a compile-time value that holds compiler value
 // `held`: no compiler answers its fields and methods once the program runs,
 // so only comptime code and the build entry `build: fn(b: Build)` read it.
-sema_compiler_host_value_runtime_read: fn(name: String, held: String, span: Span, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_compiler_host_value_runtime_read: fn(name: String, held: String, span: Span, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     if sema_scope_build_time(scopes, environment, program) -> return
     diagnostics.push(sema_error("E0956", span, "`{name}` holds a compiler value (`{held}`), which exists only while compiling", "comptime code and `build: fn` read compiler values; the running program has no compiler to answer them", "compute the plain value you need (a Bool, number or String) inside a `#run` block and read that at runtime"))
 }
@@ -287,11 +287,11 @@ sema_call_try_compiler_value_method: fn(
     expected: Type?,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
-    scopes: &SemaScopeTable,
-    state: &SemaOwnershipState,
-    tail_store: &SemaStatementTailStore,
-    context: &SemaCheckContext,
-    diagnostics: &[Diagnostic],
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
     owner: sema_call_compiler_value_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_args: sema_call_compiler_value_expected_args(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}

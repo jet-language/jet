@@ -53,7 +53,7 @@ pkg_data_json_number_lexeme: fn(value: Dyn) -> String? Never! {
 }
 
 // The one type every value shares, and whether any value is null.
-pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: String) -> {ty: BoundType, nullable: Bool} DataBindError! {
+pkg_data_json_values_type: fn(builder: ^SchemaBuilder, values: [Dyn], hint: String) -> {ty: BoundType, nullable: Bool} DataBindError! {
     nullable := false
     nonnull := [Dyn]{}
     loop value in values {
@@ -81,7 +81,7 @@ pkg_data_json_values_type: fn(builder: &SchemaBuilder, values: [Dyn], hint: Stri
 
 // A list over every element of every array; a nullable element type becomes
 // an optional element.
-pkg_data_json_array_type: fn(builder: &SchemaBuilder, arrays: [Dyn], hint: String) -> BoundType DataBindError! {
+pkg_data_json_array_type: fn(builder: ^SchemaBuilder, arrays: [Dyn], hint: String) -> BoundType DataBindError! {
     elements := [Dyn]{}
     loop value in arrays {
         items: pkg_json_array(value) ?? next
@@ -110,7 +110,7 @@ pkg_data_json_number_type: fn(numbers: [Dyn]) -> BoundType Never! {
 
 // One record over every object: the union of their keys in sorted order, a
 // key missing from any object is optional.
-pkg_data_add_json_record: fn(builder: &SchemaBuilder, preferred: String, objects: [Dyn]) -> String DataBindError! {
+pkg_data_add_json_record: fn(builder: ^SchemaBuilder, preferred: String, objects: [Dyn]) -> String DataBindError! {
     record: builder.begin_record(preferred)
     maps := [[String:Dyn]]{}
     keys := [String]{}

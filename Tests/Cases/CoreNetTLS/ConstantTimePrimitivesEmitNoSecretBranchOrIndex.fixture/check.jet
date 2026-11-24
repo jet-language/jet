@@ -191,7 +191,7 @@ slot_count: fn(c: Check, f: Int) -> Int Never! {
 
 /// The instance of function `f` walked with argument pattern `pattern`, made
 /// (with every bit clear) when new.
-instance: fn(c: &Check, f: Int, pattern: String) -> Int Never! {
+instance: fn(c: ^Check, f: Int, pattern: String) -> Int Never! {
     key: "{f}/{pattern}"
     found: c.inst_by.get(key) ?? -1
     if found >= 0 -> return found
@@ -225,7 +225,7 @@ slot_ref: fn(token: String) -> Int Never! { Int.parse(token.trim().removeprefix(
 number: fn(token: String) -> Int Never! { Int.parse(token.trim()) ?? -1 }
 
 /// Reads one log into `c`; the problems it found.
-read_log: fn(c: &Check, text: String) -> [String] Never! {
+read_log: fn(c: ^Check, text: String) -> [String] Never! {
     problems := [String]{}
     current := -1
     file := ""
@@ -350,7 +350,7 @@ is_struct: fn(ty: String) -> Bool Never! {
 }
 
 /// One instruction, `op [sD <-] operands [(args)] [; callee]`.
-read_op: fn(c: &Check, text: String, whole: String) Never! {
+read_op: fn(c: ^Check, text: String, whole: String) Never! {
     called: text.partition(" ; ")
     main: called.head
     args := [Int]{}
@@ -443,7 +443,7 @@ inputs: fn(c: Check, i: Int, k: Int) -> [Int] Never! {
 /// slot's storage: a returned aggregate is copied into fresh frame storage
 /// (OptInline.jet ir_opt_result), as a call's result is. The rest of the
 /// body is judged as the caller's code.
-declassify_inlined: fn(c: &Check, spec: Spec) Never! {
+declassify_inlined: fn(c: ^Check, spec: Spec) Never! {
     loop f in 0..<c.fn_op.len() {
         first: c.fn_op[f]
         last: if f + 1 < c.fn_op.len() -> c.fn_op[f + 1] else -> c.op_name.len()
@@ -504,7 +504,7 @@ scalar_kind: fn(kind: String) -> Bool Never! {
     kind == "Int" || kind == "Word" || kind == "Bool" || kind == "Char" || kind == "Float" || kind == "Float32"
 }
 
-set_value: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
+set_value: fn(c: ^Check, slot: Int, on: Bool) -> Bool Never! {
     if slot < 0 || !on || c.value[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified {
         return false
     }
@@ -518,7 +518,7 @@ set_value: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
 /// (an optimized build's addresses are machine words), nor does a word
 /// find_addresses finds no address reaches, so its contents bit stays
 /// clear: a length summed with an address is no address itself.
-set_contents: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
+set_contents: fn(c: ^Check, slot: Int, on: Bool) -> Bool Never! {
     if slot < 0 || !on || c.contents[slot] || c.slot_public[c.state_static[slot]] || slot == c.at_declassified {
         return false
     }
@@ -539,7 +539,7 @@ set_contents: fn(c: &Check, slot: Int, on: Bool) -> Bool Never! {
 /// parameter some call hands one, or of a function no logged call reaches.
 /// A word narrower than eight bytes, a constant, a comparison and any other
 /// arithmetic hold none.
-find_addresses: fn(c: &Check, spec: Spec) Never! {
+find_addresses: fn(c: ^Check, spec: Spec) Never! {
     c.slot_addr = loop s in 0..<c.slot_kind.len() -> !scalar_kind(c.slot_kind[s]) || c.slot_type[s] == "Pointer"
     count: c.fn_op.len()
     called := loop _ in 0..<count -> false
@@ -598,7 +598,7 @@ find_addresses: fn(c: &Check, spec: Spec) Never! {
 
 /// Marks static slot `s` as one that may hold an address, unless it is
 /// narrower than one; whether that changed it.
-mark_address: fn(c: &Check, s: Int) -> Bool Never! {
+mark_address: fn(c: ^Check, s: Int) -> Bool Never! {
     if c.slot_addr[s] || c.slot_size[s] < 8 -> return false
     c.slot_addr[s] = true
     true
@@ -655,7 +655,7 @@ aggregate_type: fn(ty: String) -> Bool Never! {
 /// many bytes; the glue follows the copy, so the copy is seen first. An
 /// untyped address no copy places holds what its one struct-typed `offset`
 /// addresses (a boxed variant's payload read through its box).
-find_elements: fn(c: &Check, spec: Spec) Never! {
+find_elements: fn(c: ^Check, spec: Spec) Never! {
     c.slot_elem = loop _ in 0..<c.slot_kind.len() -> ""
     c.slot_defs = loop _ in 0..<c.slot_kind.len() -> [Int]{}
     c.slot_payload = loop _ in 0..<c.slot_kind.len() -> ""
@@ -758,7 +758,7 @@ find_elements: fn(c: &Check, spec: Spec) Never! {
 
 /// Records that static slot `a` addresses a `ty` from `at` bytes on
 /// (`slot_payload`); "?" once two places disagree.
-place_payload: fn(c: &Check, a: Int, ty: String, at: Int) Never! {
+place_payload: fn(c: ^Check, a: Int, ty: String, at: Int) Never! {
     known: c.slot_payload[a]
     if {
         known == "" -> {
@@ -849,7 +849,7 @@ holds_word: fn(c: Check, slot: Int) -> Bool Never! {
 
 /// Taints `slot` as an unknown result that saw a secret: its value when it
 /// holds a word, else what it points to.
-taint_result: fn(c: &Check, slot: Int, secret: Bool) -> Bool Never! {
+taint_result: fn(c: ^Check, slot: Int, secret: Bool) -> Bool Never! {
     if slot < 0 -> return false
     if holds_word(c, slot) -> return set_value(c, slot, secret)
     set_contents(c, slot, secret)
@@ -1012,7 +1012,7 @@ type_size: fn(c: Check, ty: String) -> Int Never! {
 
 /// One pass of the flow over instruction `k` of instance `i`; whether a bit
 /// changed.
-flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
+flow: fn(c: ^Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
     c.at_op = k
     c.at_inst = i
     op: c.op_name[k]
@@ -1028,7 +1028,7 @@ flow: fn(c: &Check, spec: Spec, i: Int, k: Int) -> Bool Never! {
                 at: access(c, spec, c.state_static[a], c.op_b[k])
                 if at.public -> return false
                 // A reference past the struct's start to a public Int or
-                // Bool member (`&ctx.iv_off`) points at no secret; what is
+                // Bool member (`^ctx.iv_off`) points at no secret; what is
                 // stored through it still reaches the struct.
                 if c.op_b[k] != 0 && type_of(c, d) == "Pointer" && exact_member(c, spec, at, -1) {
                     return set_contents(c, a, c.contents[d])
@@ -1231,7 +1231,7 @@ marked: fn(c: Check, spec: Spec, f: Int, k: Int, line: String) -> String Never! 
 
 /// The findings of instance `i`, each one line (marked), but for those
 /// `seen` (lines of another instance of the same function) holds.
-findings_of: fn(c: Check, spec: Spec, i: Int, seen: &[String:Bool]) -> [String] Never! {
+findings_of: fn(c: Check, spec: Spec, i: Int, seen: ^[String:Bool]) -> [String] Never! {
     out := [String]{}
     f: c.inst_fn[i]
     loop r in c.fn_row[f]..<(c.fn_row[f] + c.fn_rows[f]) {

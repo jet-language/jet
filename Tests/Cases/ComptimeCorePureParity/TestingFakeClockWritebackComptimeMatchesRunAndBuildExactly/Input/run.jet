@@ -6,7 +6,7 @@ ClockHolder: struct {
     clock: Clock,
 }
 
-drive: fn(clock: &Clock) -> String {
+drive: fn(clock: ^Clock) -> String {
     ticked: clock.tick(1)
     advanced: clock.advance(10)
     duration: Duration.milliseconds(2) ?? panic("duration")
@@ -14,7 +14,7 @@ drive: fn(clock: &Clock) -> String {
     return "{ticked}|{advanced}|{waited}|{clock.now()}"
 }
 
-counted_clock: fn(hits: &Int) -> Clock {
+counted_clock: fn(hits: ^Int) -> Clock {
     hits += 1
     return testing.fake_clock(7)
 }

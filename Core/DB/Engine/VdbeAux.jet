@@ -64,86 +64,86 @@ VT_DISCONNECT: 7
 Host: trait {
     // Whether the module of VTable vt has method `method` (VT_*): its
     // pointer is not NULL.
-    vtab_has: fn(&self, db: conn.Conn, vt: Int, method: Int) -[]> Bool Never!,
+    vtab_has: fn(^self, db: conn.Conn, vt: Int, method: Int) -[]> Bool Never!,
     // sqlite3_module.iVersion of VTable vt's module.
-    vtab_version: fn(&self, db: conn.Conn, vt: Int) -[]> Int Never!,
+    vtab_version: fn(^self, db: conn.Conn, vt: Int) -[]> Int Never!,
     // Call method `method` of VTable vt's instance; arg is the savepoint
     // of VT_SAVEPOINT, VT_RELEASE and VT_ROLLBACK_TO. Its result code.
-    vtab_call: fn(&self, db: &conn.Conn, vt: Int, method: Int, arg: Int) -[DB]> Int Never!,
+    vtab_call: fn(^self, db: ^conn.Conn, vt: Int, method: Int, arg: Int) -[DB]> Int Never!,
     // xClose of the Host's virtual table cursor `cursor` on VTable vt.
-    vtab_close: fn(&self, db: &conn.Conn, vt: Int, cursor: Int) -[DB]> Never!,
+    vtab_close: fn(^self, db: ^conn.Conn, vt: Int, cursor: Int) -[DB]> Never!,
     // Take sqlite3_vtab.zErrMsg of VTable vt's instance; None when unset.
-    vtab_take_errmsg: fn(&self, db: conn.Conn, vt: Int) -[]> [U8]? Never!,
+    vtab_take_errmsg: fn(^self, db: conn.Conn, vt: Int) -[]> [U8]? Never!,
     // xOpen on VTable vt: cursor gets the new cursor's handle.
-    vtab_open: fn(&self, db: &conn.Conn, vt: Int, cursor: &Int) -[DB]> Int Never!,
+    vtab_open: fn(^self, db: ^conn.Conn, vt: Int, cursor: ^Int) -[DB]> Int Never!,
     // xFilter of `cursor` with idxNum, idxStr and the argc values in the
     // registers from Vdbe.mem index arg.
-    vtab_filter: fn(&self, db: &conn.Conn, v: &conn.Vdbe, cursor: Int, idx_num: Int, idx_str: [U8]?, arg: Int, argc: Int) -[DB]> Int Never!,
+    vtab_filter: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe, cursor: Int, idx_num: Int, idx_str: [U8]?, arg: Int, argc: Int) -[DB]> Int Never!,
     // xEof of `cursor`.
-    vtab_eof: fn(&self, db: &conn.Conn, cursor: Int) -[DB]> Bool Never!,
+    vtab_eof: fn(^self, db: ^conn.Conn, cursor: Int) -[DB]> Bool Never!,
     // xNext of `cursor`.
-    vtab_next: fn(&self, db: &conn.Conn, cursor: Int) -[DB]> Int Never!,
+    vtab_next: fn(^self, db: ^conn.Conn, cursor: Int) -[DB]> Int Never!,
     // xColumn of `cursor` for column col, the result going to the context
     // Vdbe.fctx (its out register).
-    vtab_column: fn(&self, db: &conn.Conn, v: &conn.Vdbe, cursor: Int, col: Int) -[DB]> Int Never!,
+    vtab_column: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe, cursor: Int, col: Int) -[DB]> Int Never!,
     // xRowid of `cursor`.
-    vtab_rowid: fn(&self, db: &conn.Conn, cursor: Int, rowid: &Int) -[DB]> Int Never!,
+    vtab_rowid: fn(^self, db: ^conn.Conn, cursor: Int, rowid: ^Int) -[DB]> Int Never!,
     // xUpdate of VTable vt with the argc values in the registers from
     // Vdbe.mem index arg; rowid gets an inserted row's rowid.
-    vtab_update: fn(&self, db: &conn.Conn, v: &conn.Vdbe, vt: Int, arg: Int, argc: Int, rowid: &Int) -[DB]> Int Never!,
+    vtab_update: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe, vt: Int, arg: Int, argc: Int, rowid: ^Int) -[DB]> Int Never!,
     // xRename of VTable vt.
-    vtab_rename: fn(&self, db: &conn.Conn, vt: Int, name: [U8]) -[DB]> Int Never!,
+    vtab_rename: fn(^self, db: ^conn.Conn, vt: Int, name: [U8]) -[DB]> Int Never!,
     // xIntegrity of VTable vt, for table `table` of schema `schema`.
-    vtab_integrity: fn(&self, db: &conn.Conn, vt: Int, schema: [U8], table: [U8], flags: Int, err: &[U8]?) -[DB]> Int Never!,
+    vtab_integrity: fn(^self, db: ^conn.Conn, vt: Int, schema: [U8], table: [U8], flags: Int, err: ^[U8]?) -[DB]> Int Never!,
     // sqlite3VtabCallCreate: create the virtual table `name` of database
     // i_db.
-    vtab_call_create: fn(&self, db: &conn.Conn, i_db: Int, name: [U8], err: &[U8]?) -[DB]> Int Never!,
+    vtab_call_create: fn(^self, db: ^conn.Conn, i_db: Int, name: [U8], err: ^[U8]?) -[DB]> Int Never!,
     // sqlite3VtabCallDestroy: destroy the virtual table `name` of database
     // i_db.
-    vtab_call_destroy: fn(&self, db: &conn.Conn, i_db: Int, name: [U8]) -[DB]> Int Never!,
+    vtab_call_destroy: fn(^self, db: ^conn.Conn, i_db: Int, name: [U8]) -[DB]> Int Never!,
     // Call method `method` (FN_*) of the function of the context Vdbe.fctx.
-    func_call: fn(&self, db: &conn.Conn, v: &conn.Vdbe, method: Int) -[DB]> Never!,
+    func_call: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe, method: Int) -[DB]> Never!,
     // The commit hook's answer, nonzero to turn the commit into a
     // rollback; 0 when no hook is set.
-    commit_hook: fn(&self, db: &conn.Conn) -[DB]> Int Never!,
+    commit_hook: fn(^self, db: ^conn.Conn) -[DB]> Int Never!,
     // Call the rollback hook, if one is set.
-    rollback_hook: fn(&self, db: &conn.Conn) -[DB]> Never!,
+    rollback_hook: fn(^self, db: ^conn.Conn) -[DB]> Never!,
     // Whether an update hook is set (db->xUpdateCallback).
-    has_update_hook: fn(&self, db: conn.Conn) -[]> Bool Never!,
+    has_update_hook: fn(^self, db: conn.Conn) -[]> Bool Never!,
     // The update hook for operation op (SQLITE_INSERT, SQLITE_DELETE,
     // SQLITE_UPDATE) on row rowid of table `table` in database db_name.
-    update_hook: fn(&self, db: &conn.Conn, op: Int, db_name: [U8], table: [U8], rowid: Int) -[DB]> Never!,
+    update_hook: fn(^self, db: ^conn.Conn, op: Int, db_name: [U8], table: [U8], rowid: Int) -[DB]> Never!,
     // The progress handler: true to interrupt (only called while
     // Conn.n_progress_ops is set).
-    progress: fn(&self, db: &conn.Conn) -[DB]> Bool Never!,
+    progress: fn(^self, db: ^conn.Conn) -[DB]> Bool Never!,
     // The trace callback for `event` (conn.TRACE_STMT with the statement's
     // text, conn.TRACE_ROW), called while Conn.m_trace has the event.
-    trace: fn(&self, db: &conn.Conn, v: conn.Vdbe, event: Int, text: [U8]) -[DB]> Never!,
+    trace: fn(^self, db: ^conn.Conn, v: conn.Vdbe, event: Int, text: [U8]) -[DB]> Never!,
     // The profile callbacks (sqlite3_profile's xProfile with
     // conn.TRACE_XPROFILE, the trace callback's conn.TRACE_PROFILE) for a
     // statement that ran elapsed_ns nanoseconds.
-    profile: fn(&self, db: &conn.Conn, v: conn.Vdbe, elapsed_ns: Int) -[DB]> Never!,
+    profile: fn(^self, db: ^conn.Conn, v: conn.Vdbe, elapsed_ns: Int) -[DB]> Never!,
     // The sqlite3_wal_hook callback (Conn.wal_hook is conn.WAL_HOOK_USER)
     // after a commit left n_frame frames in database db_name's log.
-    wal_hook: fn(&self, db: &conn.Conn, db_name: [U8], n_frame: Int) -[DB]> Int Never!,
+    wal_hook: fn(^self, db: ^conn.Conn, db_name: [U8], n_frame: Int) -[DB]> Int Never!,
     // sqlite3_exec of sql (OP_SqlExec), with the authorizer and the trace
     // callback off when `quiet`.
-    sql_exec: fn(&self, db: &conn.Conn, sql: [U8], quiet: Bool, err: &[U8]?) -[DB]> Int Never!,
+    sql_exec: fn(^self, db: ^conn.Conn, sql: [U8], quiet: Bool, err: ^[U8]?) -[DB]> Int Never!,
     // sqlite3InitOne: read the schema of database i_db.
-    init_one: fn(&self, db: &conn.Conn, i_db: Int, flags: Int, err: &[U8]?) -[DB]> Int Never!,
+    init_one: fn(^self, db: ^conn.Conn, i_db: Int, flags: Int, err: ^[U8]?) -[DB]> Int Never!,
     // OP_ParseSchema's reparse: the schema rows of database i_db that
     // match `where`, through sqlite3InitCallback, with db->init.busy set;
     // SQLITE_CORRUPT when no row matches.
-    parse_schema: fn(&self, db: &conn.Conn, i_db: Int, where: [U8], err: &[U8]?) -[DB]> Int Never!,
+    parse_schema: fn(^self, db: ^conn.Conn, i_db: Int, where: [U8], err: ^[U8]?) -[DB]> Int Never!,
     // sqlite3AnalysisLoad of database i_db.
-    load_analysis: fn(&self, db: &conn.Conn, i_db: Int) -[DB]> Int Never!,
+    load_analysis: fn(^self, db: ^conn.Conn, i_db: Int) -[DB]> Int Never!,
     // sqlite3RunVacuum of database i_db, into the file named by `into`
     // when set.
-    run_vacuum: fn(&self, db: &conn.Conn, i_db: Int, into: base.Mem?, err: &[U8]?) -[DB]> Int Never!,
+    run_vacuum: fn(^self, db: ^conn.Conn, i_db: Int, into: base.Mem?, err: ^[U8]?) -[DB]> Int Never!,
     // sqlite3Reprepare: compile v's SQL again (after SQLITE_SCHEMA or an
     // EXPLAIN mode change) and move the new program, with v's bindings,
     // into v; the connection's error on failure.
-    reprepare: fn(&self, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never!,
+    reprepare: fn(^self, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never!,
 }
 
 // The methods of a function call (Host.func_call): xSFunc, xStep,
@@ -164,7 +164,7 @@ FN_VALUE: 4
 // sqlite3OomFault: the connection ran out of memory (here: a program grew
 // past SQLITE_LIMIT_VDBE_OP). A running statement is interrupted; the
 // prepare in progress reports SQLITE_NOMEM.
-oom_fault: fn(db: &conn.Conn) Never! {
+oom_fault: fn(db: ^conn.Conn) Never! {
     if db.malloc_failed {
         return
     }
@@ -176,7 +176,7 @@ oom_fault: fn(db: &conn.Conn) Never! {
 }
 
 // sqlite3OomClear: the fault ends once no statement is running.
-oom_clear: fn(db: &conn.Conn) Never! {
+oom_clear: fn(db: ^conn.Conn) Never! {
     if db.malloc_failed && db.n_vdbe_exec == 0 {
         db.malloc_failed = false
         db.is_interrupted = false
@@ -186,7 +186,7 @@ oom_clear: fn(db: &conn.Conn) Never! {
 
 // sqlite3ApiExit: the code an API routine returns for rc, masked by the
 // connection's errMask; after a memory fault, SQLITE_NOMEM.
-api_exit: fn(db: &conn.Conn, rc: Int) -> Int Never! {
+api_exit: fn(db: ^conn.Conn, rc: Int) -> Int Never! {
     if !db.malloc_failed && rc == base.OK -> return base.OK
     if db.malloc_failed || rc == base.IOERR_NOMEM {
         oom_clear(db)
@@ -199,7 +199,7 @@ api_exit: fn(db: &conn.Conn, rc: Int) -> Int Never! {
 // sqlite3SystemError: record the OS error behind an I/O or open failure
 // (sqlite3OsGetLastError), here the last failed system call on a database
 // or journal file of the connection.
-system_error: fn(db: &conn.Conn, rc: Int) Never! {
+system_error: fn(db: ^conn.Conn, rc: Int) Never! {
     if rc == base.IOERR_NOMEM {
         return
     }
@@ -222,7 +222,7 @@ system_error: fn(db: &conn.Conn, rc: Int) Never! {
 }
 
 // sqlite3Error: set the connection's error code; the message becomes NULL.
-sql_error: fn(db: &conn.Conn, code: Int) Never! {
+sql_error: fn(db: ^conn.Conn, code: Int) Never! {
     db.err_code = code
     if code != base.OK || db.has_err_msg {
         if db.has_err_msg -> db.err_msg = None
@@ -232,7 +232,7 @@ sql_error: fn(db: &conn.Conn, code: Int) Never! {
 }
 
 // sqlite3ErrorWithMsg: set the connection's error code and message.
-error_with_msg: fn(db: &conn.Conn, code: Int, msg: [U8]) Never! {
+error_with_msg: fn(db: ^conn.Conn, code: Int, msg: [U8]) Never! {
     db.err_code = code
     system_error(db, code)
     db.err_msg = Val(msg)
@@ -240,13 +240,13 @@ error_with_msg: fn(db: &conn.Conn, code: Int, msg: [U8]) Never! {
 }
 
 // sqlite3VdbeError: the statement's error message.
-vdbe_error: fn(v: &conn.Vdbe, msg: [U8]) Never! { v.err_msg = Val(msg) }
+vdbe_error: fn(v: ^conn.Vdbe, msg: [U8]) Never! { v.err_msg = Val(msg) }
 
 // ---------------------------------------------------------------------------
 // Transactions (main.c, build.c, vtab.c).
 
 // sqlite3CloseSavepoints.
-close_savepoints: fn(db: &conn.Conn) Never! {
+close_savepoints: fn(db: ^conn.Conn) Never! {
     db.savepoints = [conn.Savepoint]{}
     db.n_savepoint = 0
     db.n_statement = 0
@@ -255,13 +255,13 @@ close_savepoints: fn(db: &conn.Conn) Never! {
 }
 
 // sqlite3CommitInternalChanges.
-commit_internal_changes: fn(db: &conn.Conn) Never! {
+commit_internal_changes: fn(db: ^conn.Conn) Never! {
     db.m_db_flags = util.clear_bits(db.m_db_flags, conn.DBFLAG_SCHEMA_CHANGE)
 }
 
 // sqlite3RollbackAll: roll back every database's transaction, tripping
 // open cursors with trip_code.
-rollback_all: fn<H: Host>(h: &H, db: &conn.Conn, trip_code: Int) -[DB]> Never! {
+rollback_all: fn<H: Host>(h: ^H, db: ^conn.Conn, trip_code: Int) -[DB]> Never! {
     conn.sync_btrees(db)
     schema_change: db.m_db_flags & conn.DBFLAG_SCHEMA_CHANGE != 0 && !db.init.busy
     in_trans := false
@@ -284,13 +284,13 @@ rollback_all: fn<H: Host>(h: &H, db: &conn.Conn, trip_code: Int) -[DB]> Never! {
 }
 
 // sqlite3VtabImportErrmsg: move VTable vt's error message to the statement.
-vtab_import_errmsg: fn<H: Host>(h: &H, db: conn.Conn, v: &conn.Vdbe, vt: Int) Never! {
+vtab_import_errmsg: fn<H: Host>(h: ^H, db: conn.Conn, v: ^conn.Vdbe, vt: Int) Never! {
     if h.vtab_take_errmsg(db, vt) == .Val(msg) -> v.err_msg = Val(msg)
 }
 
 // Disconnect the VTables whose last reference went (C's sqlite3VtabUnlock
 // does at once) and free their slots.
-vtab_reap: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! {
+vtab_reap: fn<H: Host>(h: ^H, db: ^conn.Conn) -[DB]> Never! {
     i := 0
     loop i < db.vtab_dead.len() {
         vt: db.vtab_dead[i]
@@ -303,7 +303,7 @@ vtab_reap: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! {
 
 // callFinaliser: call xCommit or xRollback on every VTable of the
 // transaction and empty it.
-vtab_finish: fn<H: Host>(h: &H, db: &conn.Conn, method: Int) -[DB]> Never! {
+vtab_finish: fn<H: Host>(h: ^H, db: ^conn.Conn, method: Int) -[DB]> Never! {
     trans: db.v_trans.copy()
     db.v_trans = [Int]{}
     loop vt in trans {
@@ -317,16 +317,16 @@ vtab_finish: fn<H: Host>(h: &H, db: &conn.Conn, method: Int) -[DB]> Never! {
 }
 
 // sqlite3VtabRollback.
-vtab_rollback: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! {
+vtab_rollback: fn<H: Host>(h: ^H, db: ^conn.Conn) -[DB]> Never! {
     vtab_finish<H>(h, db, VT_ROLLBACK)
 }
 
 // sqlite3VtabCommit.
-vtab_commit: fn<H: Host>(h: &H, db: &conn.Conn) -[DB]> Never! { vtab_finish<H>(h, db, VT_COMMIT) }
+vtab_commit: fn<H: Host>(h: ^H, db: ^conn.Conn) -[DB]> Never! { vtab_finish<H>(h, db, VT_COMMIT) }
 
 // sqlite3VtabSync: xSync every VTable of the transaction until one fails.
 // While the calls run the transaction is in sync (sqlite3VtabInSync).
-vtab_sync: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+vtab_sync: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     rc := base.OK
     trans: db.v_trans.copy()
     db.vtab_in_sync = trans.len() > 0
@@ -343,7 +343,7 @@ vtab_sync: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 
 // sqlite3VtabBegin: add VTable vt (-1 for none) to the transaction with
 // xBegin, opening the savepoints already open on it.
-vtab_begin: fn<H: Host>(h: &H, db: &conn.Conn, vt: Int) -[DB]> Int Never! {
+vtab_begin: fn<H: Host>(h: ^H, db: ^conn.Conn, vt: Int) -[DB]> Int Never! {
     if db.vtab_in_sync -> return base.LOCKED
     if vt < 0 || !h.vtab_has(db, vt, VT_BEGIN) -> return base.OK
     loop t in db.v_trans {
@@ -363,7 +363,7 @@ vtab_begin: fn<H: Host>(h: &H, db: &conn.Conn, vt: Int) -[DB]> Int Never! {
 
 // sqlite3VtabSavepoint: open (SAVEPOINT_BEGIN), roll back to or release
 // savepoint i_savepoint on every VTable of the transaction.
-vtab_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, op: Int, i_savepoint: Int) -[DB]> Int Never! {
+vtab_savepoint: fn<H: Host>(h: ^H, db: ^conn.Conn, op: Int, i_savepoint: Int) -[DB]> Int Never! {
     rc := base.OK
     if db.vtab_in_sync -> return rc
     trans: db.v_trans.copy()
@@ -395,7 +395,7 @@ vtab_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, op: Int, i_savepoint: Int) -[
 
 // sqlite3VdbeCreate: a new statement holding OP_Init, out of its slot for
 // the build (conn.vdbe_put returns it).
-vdbe_create: fn(db: &conn.Conn) -> conn.Vdbe Never! {
+vdbe_create: fn(db: ^conn.Conn) -> conn.Vdbe Never! {
     s: conn.vdbe_alloc(db)
     v := conn.vdbe_take(db, s)
     v.state = conn.VDBE_INIT_STATE
@@ -404,7 +404,7 @@ vdbe_create: fn(db: &conn.Conn) -> conn.Vdbe Never! {
 }
 
 // sqlite3VdbeSetSql.
-set_sql: fn(v: &conn.Vdbe, z: [U8], prep_flags: Int) Never! {
+set_sql: fn(v: ^conn.Vdbe, z: [U8], prep_flags: Int) Never! {
     v.prep_flags = prep_flags
     if prep_flags & conn.PREPARE_SAVESQL == 0 -> v.expmask = 0
     v.sql = z
@@ -412,7 +412,7 @@ set_sql: fn(v: &conn.Vdbe, z: [U8], prep_flags: Int) Never! {
 
 // growOpArray: double the op capacity (1024 bytes' worth to start), within
 // SQLITE_LIMIT_VDBE_OP. false when the limit stops it.
-grow_op_array: fn(db: &conn.Conn, v: &conn.Vdbe) -> Bool Never! {
+grow_op_array: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Bool Never! {
     n_new: if v.n_op_alloc > 0 -> 2 * v.n_op_alloc else -> 42
     if n_new > db.limits[ast.LIMIT_VDBE_OP] {
         oom_fault(db)
@@ -423,7 +423,7 @@ grow_op_array: fn(db: &conn.Conn, v: &conn.Vdbe) -> Bool Never! {
 }
 
 // sqlite3VdbeAddOp3: the new op's address (1 when the program cannot grow).
-add_op3: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! {
+add_op3: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: Int) -> Int Never! {
     i: v.ops.len()
     if v.n_op_alloc <= i && !grow_op_array(db, v) -> return 1
     v.ops.push(conn.VdbeOp{opcode: opcode, p1: p1, p2: p2, p3: p3, p4: conn.P4.NotUsed, p5: 0})
@@ -431,47 +431,47 @@ add_op3: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: In
 }
 
 // sqlite3VdbeAddOp0.
-add_op0: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int) -> Int Never! {
+add_op0: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int) -> Int Never! {
     add_op3(db, v, opcode, 0, 0, 0)
 }
 
 // sqlite3VdbeAddOp1.
-add_op1: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int, p1: Int) -> Int Never! {
+add_op1: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int, p1: Int) -> Int Never! {
     add_op3(db, v, opcode, p1, 0, 0)
 }
 
 // sqlite3VdbeAddOp2.
-add_op2: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int, p1: Int, p2: Int) -> Int Never! {
+add_op2: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int, p1: Int, p2: Int) -> Int Never! {
     add_op3(db, v, opcode, p1, p2, 0)
 }
 
 // sqlite3VdbeGoto.
-add_goto: fn(db: &conn.Conn, v: &conn.Vdbe, dest: Int) -> Int Never! {
+add_goto: fn(db: ^conn.Conn, v: ^conn.Vdbe, dest: Int) -> Int Never! {
     add_op3(db, v, opc.OP_GOTO, 0, dest, 0)
 }
 
 // sqlite3VdbeAddOp4 (and sqlite3VdbeAddOp4Dup8 with an Int64 or Real P4).
-add_op4: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! {
+add_op4: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: Int, p4: conn.P4) -> Int Never! {
     addr: add_op3(db, v, opcode, p1, p2, p3)
     change_p4(db, v, addr, p4)
     addr
 }
 
 // sqlite3VdbeAddOp4Int.
-add_op4_int: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! {
+add_op4_int: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int, p1: Int, p2: Int, p3: Int, p4: Int) -> Int Never! {
     addr: add_op3(db, v, opcode, p1, p2, p3)
     if !db.malloc_failed -> v.ops[addr].p4 = conn.P4.Int32(p4)
     addr
 }
 
 // sqlite3VdbeLoadString: OP_String8 of z into register dest.
-load_string: fn(db: &conn.Conn, v: &conn.Vdbe, dest: Int, z: [U8]) -> Int Never! {
+load_string: fn(db: ^conn.Conn, v: ^conn.Vdbe, dest: Int, z: [U8]) -> Int Never! {
     add_op4(db, v, opc.OP_STRING8, 0, dest, 0, conn.P4.Text(z))
 }
 
 // sqlite3VdbeMultiLoad: load vals (texts, integers and NULLs) into
 // registers dest.., then with result_row emit them as a row.
-multi_load: fn(db: &conn.Conn, v: &conn.Vdbe, dest: Int, vals: [base.Mem], result_row: Bool) Never! {
+multi_load: fn(db: ^conn.Conn, v: ^conn.Vdbe, dest: Int, vals: [base.Mem], result_row: Bool) Never! {
     loop i in 0..<vals.len() {
         m: vals[i]
         if m.flags & base.MEM_INT != 0 -> _: add_op2(db, v, opc.OP_INTEGER, m.i, dest + i) else if m.flags & base.MEM_STR != 0 {
@@ -492,7 +492,7 @@ VdbeOpList: struct {
 // sqlite3VdbeAddOpList: append the ops of list, a jump's positive P2
 // counting from the first; the first one's address, -1 when the program
 // cannot grow.
-add_op_list: fn(db: &conn.Conn, v: &conn.Vdbe, list: [VdbeOpList]) -> Int Never! {
+add_op_list: fn(db: ^conn.Conn, v: ^conn.Vdbe, list: [VdbeOpList]) -> Int Never! {
     if v.ops.len() + list.len() > v.n_op_alloc && !grow_op_array(db, v) -> return -1
     first: v.ops.len()
     loop o in list {
@@ -504,7 +504,7 @@ add_op_list: fn(db: &conn.Conn, v: &conn.Vdbe, list: [VdbeOpList]) -> Int Never!
 }
 
 // sqlite3VdbeMakeLabel: a new unresolved label (negative).
-make_label: fn(v: &conn.Vdbe) -> Int Never! {
+make_label: fn(v: ^conn.Vdbe) -> Int Never! {
     v.n_label -= 1
     v.n_label
 }
@@ -512,7 +512,7 @@ make_label: fn(v: &conn.Vdbe) -> Int Never! {
 // sqlite3VdbeResolveLabel: label x is the address of the next op. true
 // when the label table grew past another hundred entries, the point where
 // C calls sqlite3ProgressCheck.
-resolve_label: fn(v: &conn.Vdbe, x: Int) -> Bool Never! {
+resolve_label: fn(v: ^conn.Vdbe, x: Int) -> Bool Never! {
     j: -1 - x
     if v.n_label_alloc + v.n_label >= 0 {
         v.labels[j] = v.ops.len()
@@ -527,10 +527,10 @@ resolve_label: fn(v: &conn.Vdbe, x: Int) -> Bool Never! {
 }
 
 // sqlite3VdbeRunOnlyOnce.
-run_only_once: fn(db: &conn.Conn, v: &conn.Vdbe) Never! { _: add_op2(db, v, opc.OP_EXPIRE, 1, 1) }
+run_only_once: fn(db: ^conn.Conn, v: ^conn.Vdbe) Never! { _: add_op2(db, v, opc.OP_EXPIRE, 1, 1) }
 
 // sqlite3VdbeReusable: undo run_only_once.
-reusable: fn(v: &conn.Vdbe) Never! {
+reusable: fn(v: ^conn.Vdbe) Never! {
     loop i in 1..<v.ops.len() {
         if v.ops[i].opcode == opc.OP_EXPIRE {
             v.ops[1].opcode = opc.OP_NOOP
@@ -542,7 +542,7 @@ reusable: fn(v: &conn.Vdbe) Never! {
 // resolveP2Values: resolve the labels in jump P2s, settle readOnly and
 // bIsReader, and raise max_args to the most arguments an OP_VUpdate or
 // OP_VFilter passes. Frees the label table.
-resolve_p2_values: fn(v: &conn.Vdbe, max_args: &Int) Never! {
+resolve_p2_values: fn(v: ^conn.Vdbe, max_args: ^Int) Never! {
     v.read_only = true
     v.is_reader = false
     i := v.ops.len() - 1
@@ -583,7 +583,7 @@ current_addr: fn(v: conn.Vdbe) -> Int Never! { v.ops.len() }
 
 // sqlite3VdbeTakeOpArray: the finished ops of a trigger program's
 // statement, which is then freed (C deletes the sub-parse's Vdbe).
-take_op_array: fn(db: &conn.Conn, v: &&conn.Vdbe, max_args: &Int) -> [conn.VdbeOp] Never! {
+take_op_array: fn(db: ^conn.Conn, v: ^^conn.Vdbe, max_args: ^Int) -> [conn.VdbeOp] Never! {
     w := v
     resolve_p2_values(w, max_args)
     conn.vdbe_release(db, w.slot)
@@ -592,7 +592,7 @@ take_op_array: fn(db: &conn.Conn, v: &&conn.Vdbe, max_args: &Int) -> [conn.VdbeO
 
 // sqlite3VdbeLinkSubProgram: add a trigger program; its Vdbe.programs
 // index, the P4 of the OP_Program that runs it.
-link_sub_program: fn(v: &conn.Vdbe, p: &&conn.SubProgram) -> Int Never! {
+link_sub_program: fn(v: ^conn.Vdbe, p: ^^conn.SubProgram) -> Int Never! {
     v.programs.push(p)
     v.programs.len() - 1
 }
@@ -611,34 +611,34 @@ op_at: fn(db: conn.Conn, v: conn.Vdbe, addr: Int) -> conn.VdbeOp Never! {
 }
 
 // sqlite3VdbeChangeOpcode.
-change_opcode: fn(db: conn.Conn, v: &conn.Vdbe, addr: Int, opcode: Int) Never! {
+change_opcode: fn(db: conn.Conn, v: ^conn.Vdbe, addr: Int, opcode: Int) Never! {
     if !db.malloc_failed -> v.ops[addr].opcode = opcode
 }
 
 // sqlite3VdbeChangeP1.
-change_p1: fn(db: conn.Conn, v: &conn.Vdbe, addr: Int, val: Int) Never! {
+change_p1: fn(db: conn.Conn, v: ^conn.Vdbe, addr: Int, val: Int) Never! {
     if !db.malloc_failed -> v.ops[addr].p1 = val
 }
 
 // sqlite3VdbeChangeP2.
-change_p2: fn(db: conn.Conn, v: &conn.Vdbe, addr: Int, val: Int) Never! {
+change_p2: fn(db: conn.Conn, v: ^conn.Vdbe, addr: Int, val: Int) Never! {
     if !db.malloc_failed -> v.ops[addr].p2 = val
 }
 
 // sqlite3VdbeChangeP3.
-change_p3: fn(db: conn.Conn, v: &conn.Vdbe, addr: Int, val: Int) Never! {
+change_p3: fn(db: conn.Conn, v: ^conn.Vdbe, addr: Int, val: Int) Never! {
     if !db.malloc_failed -> v.ops[addr].p3 = val
 }
 
 // sqlite3VdbeChangeP5: of the last op.
-change_p5: fn(v: &conn.Vdbe, p5: Int) Never! {
+change_p5: fn(v: ^conn.Vdbe, p5: Int) Never! {
     n: v.ops.len()
     if n > 0 -> v.ops[n - 1].p5 = p5
 }
 
 // sqlite3VdbeTypeofColumn: the OP_Column just added into dest feeds
 // typeof() (OPFLAG_TYPEOFARG).
-typeof_column: fn(db: conn.Conn, v: &conn.Vdbe, dest: Int) Never! {
+typeof_column: fn(db: conn.Conn, v: ^conn.Vdbe, dest: Int) Never! {
     n: v.ops.len()
     if db.malloc_failed || n == 0 {
         return
@@ -649,18 +649,18 @@ typeof_column: fn(db: conn.Conn, v: &conn.Vdbe, dest: Int) Never! {
 }
 
 // sqlite3VdbeJumpHere: the jump at addr goes to the next op.
-jump_here: fn(db: conn.Conn, v: &conn.Vdbe, addr: Int) Never! {
+jump_here: fn(db: conn.Conn, v: ^conn.Vdbe, addr: Int) Never! {
     change_p2(db, v, addr, v.ops.len())
 }
 
 // sqlite3VdbeJumpHereOrPopInst: as jump_here, but a jump that is the last
 // op is dropped instead.
-jump_here_or_pop_inst: fn(db: conn.Conn, v: &conn.Vdbe, addr: Int) Never! {
+jump_here_or_pop_inst: fn(db: conn.Conn, v: ^conn.Vdbe, addr: Int) Never! {
     if addr == v.ops.len() - 1 -> _: v.ops.pop() else -> change_p2(db, v, addr, v.ops.len())
 }
 
 // freeP4: drop the reference a P4 holds.
-free_p4: fn(db: &conn.Conn, p4: conn.P4) Never! {
+free_p4: fn(db: ^conn.Conn, p4: conn.P4) Never! {
     if p4 == .Vtab(vt) -> conn.vtab_unlock(db, vt) else if p4 == .TableRef(t) {
         conn.delete_table(db, t)
     }
@@ -669,7 +669,7 @@ free_p4: fn(db: &conn.Conn, p4: conn.P4) Never! {
 // sqlite3VdbeChangeP4: the P4 of op addr (-1 for the last). A VTable
 // gains a reference; after a malloc failure the value is dropped. A P4
 // already set is replaced without being freed, as in C.
-change_p4: fn(db: &conn.Conn, v: &conn.Vdbe, addr: Int, p4: conn.P4) Never! {
+change_p4: fn(db: ^conn.Conn, v: ^conn.Vdbe, addr: Int, p4: conn.P4) Never! {
     if db.malloc_failed {
         if p4 == .TableRef(t) -> conn.delete_table(db, t)
         return
@@ -681,7 +681,7 @@ change_p4: fn(db: &conn.Conn, v: &conn.Vdbe, addr: Int, p4: conn.P4) Never! {
 
 // sqlite3VdbeAppendP4: the P4 of the last op, taking the caller's
 // reference.
-append_p4: fn(db: &conn.Conn, v: &conn.Vdbe, p4: conn.P4) Never! {
+append_p4: fn(db: ^conn.Conn, v: ^conn.Vdbe, p4: conn.P4) Never! {
     if db.malloc_failed {
         free_p4(db, p4)
         return
@@ -690,7 +690,7 @@ append_p4: fn(db: &conn.Conn, v: &conn.Vdbe, p4: conn.P4) Never! {
 }
 
 // sqlite3VdbeChangeToNoop.
-change_to_noop: fn(db: &conn.Conn, v: &conn.Vdbe, addr: Int) -> Bool Never! {
+change_to_noop: fn(db: ^conn.Conn, v: ^conn.Vdbe, addr: Int) -> Bool Never! {
     if db.malloc_failed -> return false
     free_p4(db, v.ops[addr].p4)
     v.ops[addr].p4 = conn.P4.NotUsed
@@ -700,21 +700,21 @@ change_to_noop: fn(db: &conn.Conn, v: &conn.Vdbe, addr: Int) -> Bool Never! {
 
 // sqlite3VdbeDeletePriorOpcode: turn the last op into a no-op if it is an
 // `opcode`.
-delete_prior_opcode: fn(db: &conn.Conn, v: &conn.Vdbe, opcode: Int) -> Bool Never! {
+delete_prior_opcode: fn(db: ^conn.Conn, v: ^conn.Vdbe, opcode: Int) -> Bool Never! {
     n: v.ops.len()
     if n > 0 && v.ops[n - 1].opcode == opcode -> return change_to_noop(db, v, n - 1)
     false
 }
 
 // sqlite3VdbeUsesBtree.
-uses_btree: fn(v: &conn.Vdbe, i: Int) Never! { v.btree_mask |= 1 << i }
+uses_btree: fn(v: ^conn.Vdbe, i: Int) Never! { v.btree_mask |= 1 << i }
 
 // sqlite3VdbeCountChanges.
-count_changes: fn(v: &conn.Vdbe) Never! { v.change_cnt_on = true }
+count_changes: fn(v: ^conn.Vdbe) Never! { v.change_cnt_on = true }
 
 // sqlite3VdbeSetVarmask: a change to parameter i_var re-prepares the
 // statement.
-set_varmask: fn(v: &conn.Vdbe, i_var: Int) Never! {
+set_varmask: fn(v: ^conn.Vdbe, i_var: Int) Never! {
     bit: if i_var >= 32 -> 2147483648 else -> 1 << (i_var - 1)
     v.expmask |= bit
 }
@@ -730,7 +730,7 @@ get_bound_value: fn(v: conn.Vdbe, i_var: Int, aff: Int) -> base.Mem? Never! {
 }
 
 // sqlite3VdbeSetNumCols.
-set_num_cols: fn(v: &conn.Vdbe, n: Int) Never! {
+set_num_cols: fn(v: ^conn.Vdbe, n: Int) Never! {
     v.col_names = [base.Mem]{}
     loop _ in 0..<n * conn.COLNAME_N -> v.col_names.push(base.mem_null())
     v.n_res_column = n
@@ -738,7 +738,7 @@ set_num_cols: fn(v: &conn.Vdbe, n: Int) Never! {
 }
 
 // sqlite3VdbeSetColName: name kind var (COLNAME_*) of result column idx.
-set_col_name: fn(db: conn.Conn, v: &conn.Vdbe, idx: Int, var: Int, name: [U8]) -> Int Never! {
+set_col_name: fn(db: conn.Conn, v: ^conn.Vdbe, idx: Int, var: Int, name: [U8]) -> Int Never! {
     if db.malloc_failed -> return base.NOMEM
     k: idx + var * v.n_res_alloc
     mem.set_str(v.col_names[k], name, name.len(), base.UTF8, db.limits[ast.LIMIT_LENGTH])
@@ -747,12 +747,12 @@ set_col_name: fn(db: conn.Conn, v: &conn.Vdbe, idx: Int, var: Int, name: [U8]) -
 // ---------------------------------------------------------------------------
 // The EXPLAIN listing.
 
-append_bytes: fn(out: &[U8], z: [U8]) Never! {
+append_bytes: fn(out: ^[U8], z: [U8]) Never! {
     loop b in z -> out.push(b)
 }
 
 // sqlite3_str_appendall of a C string: z up to its first NUL.
-append_c_string: fn(out: &[U8], z: [U8]) Never! {
+append_c_string: fn(out: ^[U8], z: [U8]) Never! {
     n: printf.c_len(z)
     loop i in 0..<n -> out.push(z[i])
 }
@@ -844,7 +844,7 @@ op_of: fn(v: conn.Vdbe, prog: Int, i: Int) -> conn.VdbeOp Never! {
 // program and of the trigger programs it reaches) or EXPLAIN QUERY PLAN
 // (explain 2: the OP_Explain ops) into registers 1..8. SQLITE_ROW,
 // SQLITE_DONE or SQLITE_ERROR.
-list: fn(db: &conn.Conn, v: &conn.Vdbe) -> Int Never! {
+list: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Int Never! {
     release_mem_array(v, 1, 9)
     if v.rc == base.NOMEM {
         oom_fault(db)
@@ -931,7 +931,7 @@ list: fn(db: &conn.Conn, v: &conn.Vdbe) -> Int Never! {
 // Readying a statement.
 
 // sqlite3VdbeRewind: back to the start of the program.
-rewind: fn(v: &conn.Vdbe) Never! {
+rewind: fn(v: ^conn.Vdbe) Never! {
     v.state = conn.VDBE_READY_STATE
     v.pc = -1
     v.rc = base.OK
@@ -947,7 +947,7 @@ rewind: fn(v: &conn.Vdbe) Never! {
 // run, with n_var parameters, n_mem registers and n_cursor cursors
 // (pParse->nVar, nMem and nTab); explain is pParse->explain and
 // uses_stmt_journal is pParse->isMultiWrite && pParse->mayAbort.
-make_ready: fn(db: &conn.Conn, v: &conn.Vdbe, n_var: Int, n_mem_in: Int, n_cursor: Int, explain: Int, uses_stmt_journal: Bool) Never! {
+make_ready: fn(db: ^conn.Conn, v: ^conn.Vdbe, n_var: Int, n_mem_in: Int, n_cursor: Int, explain: Int, uses_stmt_journal: Bool) Never! {
     // Each cursor has a register; register 0 exists even when unused.
     n_mem := n_mem_in + n_cursor
     if n_cursor == 0 && n_mem > 0 -> n_mem += 1
@@ -986,7 +986,7 @@ make_ready: fn(db: &conn.Conn, v: &conn.Vdbe, n_var: Int, n_mem_in: Int, n_curso
 // Free the engine object register i holds: an aggregate's context or a
 // RowSet (sqlite3VdbeMemRelease of MEM_Agg or MEM_Dyn). C also runs a
 // pending aggregate's xFinalize here, which only frees its context.
-release_object: fn(v: &conn.Vdbe, i: Int) Never! {
+release_object: fn(v: ^conn.Vdbe, i: Int) Never! {
     f: v.mem[i].flags
     if f & base.MEM_AGG != 0 {
         k: v.mem[i].i
@@ -1000,7 +1000,7 @@ release_object: fn(v: &conn.Vdbe, i: Int) Never! {
 }
 
 // releaseMemArray: registers from..<to become undefined.
-release_mem_array: fn(v: &conn.Vdbe, from: Int, to: Int) Never! {
+release_mem_array: fn(v: ^conn.Vdbe, from: Int, to: Int) Never! {
     loop i in from..<to {
         release_object(v, i)
         v.mem[i].flags = conn.MEM_UNDEFINED
@@ -1010,7 +1010,7 @@ release_mem_array: fn(v: &conn.Vdbe, from: Int, to: Int) Never! {
 
 // sqlite3VdbeFreeCursorNN: close cursor slot ci of v.csr. An ephemeral
 // table's btree closes with its last cursor and frees its slot.
-free_cursor: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Never! {
+free_cursor: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Never! {
     t: v.csr[ci].cur_type
     if t == conn.CURTYPE_BTREE {
         bt: v.csr[ci].bt
@@ -1029,7 +1029,7 @@ free_cursor: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> N
 }
 
 // closeCursorsInFrame: close the running program's cursors.
-close_cursors_in_frame: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
+close_cursors_in_frame: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
     loop ci in v.csr_base..<v.csr.len() {
         if v.csr[ci].live -> free_cursor<H>(h, db, v, ci)
     }
@@ -1037,7 +1037,7 @@ close_cursors_in_frame: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]>
 
 // sqlite3VdbeFrameRestore with the frame's deletion: end the running
 // trigger program, back to its parent. The parent's pc.
-frame_restore: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+frame_restore: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     depth: v.frames.len()
     close_cursors_in_frame<H>(h, db, v)
     release_mem_array(v, v.mem_base, v.mem.len())
@@ -1069,7 +1069,7 @@ frame_restore: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Neve
 
 // closeAllCursors: end every trigger program, close the cursors, release
 // the registers and free the auxiliary data.
-close_all_cursors: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
+close_all_cursors: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
     loop v.frames.len() > 0 -> _: frame_restore<H>(h, db, v)
     close_cursors_in_frame<H>(h, db, v)
     release_mem_array(v, 0, v.mem.len())
@@ -1080,7 +1080,7 @@ close_all_cursors: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Neve
 // sqlite3VdbeDeleteAuxData of the running program's list: drop its
 // auxiliary data of op i_op whose argument is not in mask (bits 0..31), or
 // all of it for i_op < 0.
-delete_aux_data: fn(v: &conn.Vdbe, i_op: Int, mask: Int) Never! {
+delete_aux_data: fn(v: ^conn.Vdbe, i_op: Int, mask: Int) Never! {
     depth: v.frames.len()
     kept := [conn.AuxData]{}
     loop a in v.aux {
@@ -1091,7 +1091,7 @@ delete_aux_data: fn(v: &conn.Vdbe, i_op: Int, mask: Int) Never! {
 }
 
 // sqlite3VdbeFinishMoveto: do cursor ci's deferred seek to moveto_target.
-finish_moveto: fn(db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Int Never! {
+finish_moveto: fn(db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Int Never! {
     res := 0
     rc: btree.btree_table_moveto(db.btrees[v.csr[ci].bt], v.csr[ci].btc, v.csr[ci].moveto_target, false, res)
     if rc != base.OK -> return rc
@@ -1103,7 +1103,7 @@ finish_moveto: fn(db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Int Never! {
 
 // sqlite3VdbeHandleMovedCursor: restore cursor ci after its btree moved
 // it; a row that went leaves the cursor on a NULL row.
-handle_moved_cursor: fn(db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Int Never! {
+handle_moved_cursor: fn(db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Int Never! {
     different := false
     rc: btree.btree_cursor_restore(db.btrees[v.csr[ci].bt], v.csr[ci].btc, different)
     v.csr[ci].cache_status = conn.CACHE_STALE
@@ -1112,7 +1112,7 @@ handle_moved_cursor: fn(db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Int Never
 }
 
 // sqlite3VdbeCursorRestore.
-cursor_restore: fn(db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Int Never! {
+cursor_restore: fn(db: ^conn.Conn, v: ^conn.Vdbe, ci: Int) -[DB]> Int Never! {
     if btree.btree_cursor_has_moved(db.btrees[v.csr[ci].bt], v.csr[ci].btc) {
         return handle_moved_cursor(db, v, ci)
     }
@@ -1121,7 +1121,7 @@ cursor_restore: fn(db: &conn.Conn, v: &conn.Vdbe, ci: Int) -[DB]> Int Never! {
 
 // The payload of btree cursor btc, whole, with nine zero bytes after it
 // so that a varint read at its end stays in bounds.
-cursor_record: fn(db: &conn.Conn, bt: Int, btc: Int, n: Int, buf: &[U8]) -[DB]> Int Never! {
+cursor_record: fn(db: ^conn.Conn, bt: Int, btc: Int, n: Int, buf: ^[U8]) -[DB]> Int Never! {
     buf = pager.zeros(n + 9)
     btree.btree_payload(db.btrees[bt], btc, 0, n, buf)
 }
@@ -1129,7 +1129,7 @@ cursor_record: fn(db: &conn.Conn, bt: Int, btc: Int, n: Int, buf: &[U8]) -[DB]> 
 // sqlite3VdbeMemFromBtreeZeroOffset: the n-byte payload of btree cursor
 // btc read where it lies when all of it is on the cursor's page (buf the
 // page image, at its offset there), else a cursor_record copy at 0.
-cursor_payload: fn(db: &conn.Conn, bt: Int, btc: Int, n: Int, buf: &[U8], at: &Int) -[DB]> Int Never! {
+cursor_payload: fn(db: ^conn.Conn, bt: Int, btc: Int, n: Int, buf: ^[U8], at: ^Int) -[DB]> Int Never! {
     amt := 0
     off: btree.btree_payload_fetch(db.btrees[bt], btc, amt)
     if n <= amt {
@@ -1143,7 +1143,7 @@ cursor_payload: fn(db: &conn.Conn, bt: Int, btc: Int, n: Int, buf: &[U8], at: &I
 
 // sqlite3VdbeIdxRowid: the rowid that ends the index record at btree
 // cursor btc.
-idx_rowid: fn(db: &conn.Conn, bt: Int, btc: Int, rowid: &Int) -[DB]> Int Never! {
+idx_rowid: fn(db: ^conn.Conn, bt: Int, btc: Int, rowid: ^Int) -[DB]> Int Never! {
     n: btree.btree_payload_size(db.btrees[bt], btc)
     buf := [U8]{}
     at := 0
@@ -1162,7 +1162,7 @@ idx_rowid: fn(db: &conn.Conn, bt: Int, btc: Int, rowid: &Int) -[DB]> Int Never! 
 
 // sqlite3VdbeIdxKeyCompare: res is the comparison of the index record at
 // btree cursor btc with key.
-idx_key_compare: fn(db: &conn.Conn, bt: Int, btc: Int, key: &record.UnpackedRecord, res: &Int) -[DB]> Int Never! {
+idx_key_compare: fn(db: ^conn.Conn, bt: Int, btc: Int, key: ^record.UnpackedRecord, res: ^Int) -[DB]> Int Never! {
     n: btree.btree_payload_size(db.btrees[bt], btc)
     if n <= 0 || n > 2147483647 {
         res = 0
@@ -1177,7 +1177,7 @@ idx_key_compare: fn(db: &conn.Conn, bt: Int, btc: Int, key: &record.UnpackedReco
 }
 
 // sqlite3VdbeSetChanges.
-set_changes: fn(db: &conn.Conn, n: Int) Never! {
+set_changes: fn(db: ^conn.Conn, n: Int) Never! {
     db.n_change = n
     db.n_total_change += n
 }
@@ -1187,7 +1187,7 @@ set_changes: fn(db: &conn.Conn, n: Int) Never! {
 
 // vdbeCommit: commit the transaction of every database, through a super
 // journal when more than one file with a rollback journal is written.
-commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+commit: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     conn.sync_btrees(db)
     rc := vtab_sync<H>(h, db, v)
     n_trans := 0
@@ -1291,7 +1291,7 @@ commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 
 // sqlite3VdbeCloseStatement: release (SAVEPOINT_RELEASE) or roll back
 // (SAVEPOINT_ROLLBACK) the statement's subtransaction, if it opened one.
-close_statement: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, op: Int) -[DB]> Int Never! {
+close_statement: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, op: Int) -[DB]> Int Never! {
     if db.n_statement == 0 || v.i_statement == 0 -> return base.OK
     conn.sync_btrees(db)
     rc := base.OK
@@ -1325,7 +1325,7 @@ close_statement: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, op: Int) -[DB
 
 // sqlite3VdbeCheckFk: fail the statement while it (deferred: the
 // transaction) leaves foreign key constraints violated.
-check_fk: fn(db: conn.Conn, v: &conn.Vdbe, deferred: Bool) -> Int Never! {
+check_fk: fn(db: conn.Conn, v: ^conn.Vdbe, deferred: Bool) -> Int Never! {
     violated: if deferred -> db.n_deferred_cons + db.n_deferred_imm_cons > 0 else -> v.n_fk_constraint > 0
     if !violated -> return base.OK
     v.rc = base.CONSTRAINT_FOREIGNKEY
@@ -1337,7 +1337,7 @@ check_fk: fn(db: conn.Conn, v: &conn.Vdbe, deferred: Bool) -> Int Never! {
 
 // Roll back the whole transaction after an error that leaves it unusable
 // and return to autocommit.
-abort_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Never! {
+abort_transaction: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Never! {
     rollback_all<H>(h, db, base.ABORT_ROLLBACK)
     close_savepoints(db)
     db.auto_commit = true
@@ -1348,7 +1348,7 @@ abort_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Neve
 // cursors, then commit or roll back its statement and, in autocommit, its
 // transaction. SQLITE_BUSY when a commit has to be retried, else
 // SQLITE_OK; the outcome is v.rc.
-halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+halt: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     if db.malloc_failed -> v.rc = base.NOMEM
     close_all_cursors<H>(h, db, v)
     if v.is_reader {
@@ -1424,11 +1424,11 @@ halt: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 }
 
 // sqlite3VdbeResetStepResult.
-reset_step_result: fn(v: &conn.Vdbe) Never! { v.rc = base.OK }
+reset_step_result: fn(v: ^conn.Vdbe) Never! { v.rc = base.OK }
 
 // sqlite3VdbeTransferError: the statement's error becomes the
 // connection's.
-transfer_error: fn(db: &conn.Conn, v: conn.Vdbe) -> Int Never! {
+transfer_error: fn(db: ^conn.Conn, v: conn.Vdbe) -> Int Never! {
     if v.err_msg == .Val(msg) {
         db.err_msg = Val(msg)
         db.has_err_msg = true
@@ -1440,7 +1440,7 @@ transfer_error: fn(db: &conn.Conn, v: conn.Vdbe) -> Int Never! {
 
 // sqlite3VdbeReset: halt a running statement and hand its error to the
 // connection. The result code, masked by the connection's errMask.
-reset: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+reset: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     if v.state == conn.VDBE_RUN_STATE -> _: halt<H>(h, db, v)
     if v.pc >= 0 {
         if db.has_err_msg || v.err_msg != None -> _: transfer_error(db, v) else {
@@ -1454,7 +1454,7 @@ reset: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 
 // sqlite3VdbeDelete: free a statement, dropping the references its ops
 // hold, and its slot.
-delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &&conn.Vdbe) -[DB]> Never! {
+delete: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Never! {
     loop p in v.programs {
         loop o in p.ops -> free_p4(db, o.p4)
     }
@@ -1464,7 +1464,7 @@ delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &&conn.Vdbe) -[DB]> Never! {
 }
 
 // sqlite3VdbeFinalize: reset (if it ran) and delete; reset's result.
-finalize: fn<H: Host>(h: &H, db: &conn.Conn, v: &&conn.Vdbe) -[DB]> Int Never! {
+finalize: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^^conn.Vdbe) -[DB]> Int Never! {
     w := v
     rc := base.OK
     if w.state >= conn.VDBE_READY_STATE -> rc = reset<H>(h, db, w)

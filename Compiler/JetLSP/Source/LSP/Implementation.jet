@@ -32,7 +32,7 @@ lsp_impl_sites: fn(checked: LSPChecked) -> [LSPImplSite] Never! {
     sites
 }
 
-lsp_collect_impl_sites: fn(module_path: String, items: [Item], sites: &[LSPImplSite]) Never! {
+lsp_collect_impl_sites: fn(module_path: String, items: [Item], sites: ^[LSPImplSite]) Never! {
     loop item in items {
         if item == {
             .Impl(implementation) -> {
@@ -50,7 +50,7 @@ lsp_collect_impl_sites: fn(module_path: String, items: [Item], sites: &[LSPImplS
     }
 }
 
-lsp_collect_trait_blocks: fn(module_path: String, owner: String, blocks: [TraitImplBlock], sites: &[LSPImplSite]) Never! {
+lsp_collect_trait_blocks: fn(module_path: String, owner: String, blocks: [TraitImplBlock], sites: ^[LSPImplSite]) Never! {
     loop block in blocks {
         if block.compiler_generated -> next
         sites.push(LSPImplSite{module_path: module_path, type_name: owner, trait_name: Val(block.trait_name.copy()), span: block.trait_span})
@@ -102,7 +102,7 @@ lsp_implementation_spans: fn(checked: LSPChecked, index: SemIndex, def: SemDef) 
 
 // Places the implementations of `def` in `checked` not yet seen. A span past
 // its module's text is generated code, with no place in the file.
-lsp_place_implementations: fn(checked: LSPChecked, def: SemDef, seen: &[String:Bool], found: &[LSPLocation]) Never! {
+lsp_place_implementations: fn(checked: LSPChecked, def: SemDef, seen: ^[String:Bool], found: ^[LSPLocation]) Never! {
     index: checked.index ?? return
     loop target in lsp_implementation_spans(checked, index, def) {
         location: lsp_location(checked, target.module_path, target.span) ?? next
@@ -149,7 +149,7 @@ lsp_implementation_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
 }
 
 // The named types `ty` mentions, outermost first.
-lsp_type_names: fn(ty: Type, names: &[String]) Never! {
+lsp_type_names: fn(ty: Type, names: ^[String]) Never! {
     if ty == {
         .Named(name) -> names.push(name.copy())
         .Apply(name, args) -> {

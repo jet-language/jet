@@ -18,7 +18,7 @@ PhpPool: struct {
     priv value: Int,
 
     impl Close {
-        close: fn(&&self) { abi.close(self.value) }
+        close: fn(^^self) { abi.close(self.value) }
     }
 }
 
@@ -32,7 +32,7 @@ PhpError: enum {
     Limit,
 }
 
-close: fn(pool: &&PhpPool) { abi.close(pool.value) }
+close: fn(pool: ^^PhpPool) { abi.close(pool.value) }
 
 open: fn() -> PhpPool PhpError! {
     handle: abi.open()

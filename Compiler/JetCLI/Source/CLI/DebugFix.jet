@@ -21,7 +21,7 @@ use {
 
 // The prompt's text after `fix` of the program `session` runs, built from
 // `entry` with `deep_checks`.
-jet_cli_debug_fix: fn(session: &NativeSession, entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
+jet_cli_debug_fix: fn(session: ^NativeSession, entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
     if entry == "" -> return "Fix needs the program's source: debug it as `jet debug <file.jet>`\n"
     since: fix_time.unix_ns()
     source: fix_files.read(entry) ?? return "Fix refused: couldn't read `{entry}`: {err}\n"
@@ -42,7 +42,7 @@ jet_cli_debug_fix: fn(session: &NativeSession, entry: String, deep_checks: DeepC
 
 // The fix of the checked compile `result` of `entry`, whose sources
 // `snapshot` holds, read no earlier than `since` (unix_ns).
-jet_cli_debug_fix_checked: fn(session: &NativeSession, entry: String, source: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, since: Int) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
+jet_cli_debug_fix_checked: fn(session: ^NativeSession, entry: String, source: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: ^^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, since: Int) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String Never! {
     errors: jet_driver_present_diagnostics(jet_driver_check_failures(result.diagnostics), snapshot, result.generated_source_files)
     if errors.len() > 0 {
         return "{jet_driver_report_problems(entry, source, errors, color, true)}Fix refused: the edit doesn't compile; the program runs on as it was\n"

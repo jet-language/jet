@@ -71,7 +71,7 @@ PEMBlock: struct {
     used: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             der := self.der.move()
             core.crypto.wipe(der)
         }
@@ -354,7 +354,7 @@ pbkdf1: fn(keylen: Int, iv: [U8], pwd: [U8]) -> [U8] Never! {
 }
 
 // Decrypt a DEK-Info body in CBC mode under the password's key.
-decrypt: fn(alg: PEMCipher, iv: &[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! {
+decrypt: fn(alg: PEMCipher, iv: ^[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! {
     keylen: if alg == {
         .DESCBC -> 8
         .DESEDE3CBC -> 24
@@ -482,7 +482,7 @@ sealed_body: fn(body: [U8]) -> [U8] Never! { body.copy() }
 
 // The decrypted, unpadded body of an encrypted block; body is wiped on every
 // path.
-open_block: fn(alg: PEMCipher, iv: &[U8], body: &[U8], pwd: [U8]?) -> [U8] PEMError! {
+open_block: fn(alg: PEMCipher, iv: ^[U8], body: ^[U8], pwd: [U8]?) -> [U8] PEMError! {
     secret: pwd ?? return refuse(body, .PasswordRequired)
     plain := decrypt(alg, iv, body, secret) ?? return refuse(body, err)
     core.crypto.wipe(body)
@@ -493,7 +493,7 @@ open_block: fn(alg: PEMCipher, iv: &[U8], body: &[U8], pwd: [U8]?) -> [U8] PEMEr
 }
 
 // Wipe buf and fail with e.
-refuse: fn(buf: &[U8], e: PEMError) -> [U8] PEMError! {
+refuse: fn(buf: ^[U8], e: PEMError) -> [U8] PEMError! {
     core.crypto.wipe(buf)
     Err(e.copy())
 }

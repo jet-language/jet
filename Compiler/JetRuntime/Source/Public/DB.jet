@@ -15,7 +15,7 @@ db: module {
     // pread of `count` bytes at file offset `offset` into `buffer` from index
     // `at`, and pwrite of `count` bytes of `data` from index `at`; the bytes
     // moved.
-    #Import(c) priv vfs_read: fn(fd: Int, offset: Int, buffer: &[U8], at: Int, count: Int) -[DB]> Int = "jet_db_vfs_read"
+    #Import(c) priv vfs_read: fn(fd: Int, offset: Int, buffer: ^[U8], at: Int, count: Int) -[DB]> Int = "jet_db_vfs_read"
 
     #Import(c) priv vfs_write: fn(fd: Int, offset: Int, data: [U8], at: Int, count: Int) -[DB]> Int = "jet_db_vfs_write"
 
@@ -63,7 +63,7 @@ db: module {
     #Import(c) priv vfs_sleep: fn(micros: Int) -[DB]> Int = "jet_db_vfs_sleep"
 
     // Fills `buffer` from getrandom(2); the bytes filled.
-    #Import(c) priv vfs_random: fn(buffer: &[U8]) -[DB]> Int = "jet_db_vfs_random"
+    #Import(c) priv vfs_random: fn(buffer: ^[U8]) -[DB]> Int = "jet_db_vfs_random"
 
     // The wall clock in milliseconds since the Unix epoch.
     #Import(c) priv vfs_now_ms: fn() -[DB]> Int = "jet_db_vfs_now_ms"

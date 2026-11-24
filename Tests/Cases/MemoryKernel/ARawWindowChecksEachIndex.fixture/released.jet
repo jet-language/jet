@@ -23,7 +23,7 @@ acquire: fn(count: Int) -> Words? {
     .None
 }
 
-release: fn(words: &&Words) {
+release: fn(words: ^^Words) {
     #Unsafe("`base` came from `alloc_raw` in `acquire`, and the capability is spent here, once") {
         mem.free_raw(mem.Ptr<U8>.from_addr(words.base))
         consume(words)

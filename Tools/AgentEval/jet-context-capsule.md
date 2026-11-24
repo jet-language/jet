@@ -91,9 +91,9 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
 
 ## 3. Memory and ownership verbs
 
-- A bare parameter type `T` is read. `&T` gives exclusive write access, and
-  `&&T` takes ownership. The sigil is on the type: `edit: fn(x: &T)` and
-  `consume: fn(x: &&T)`.
+- A bare parameter type `T` is read. `^T` gives exclusive write access, and
+  `^^T` takes ownership. The sigil is on the type: `edit: fn(x: ^T)` and
+  `consume: fn(x: ^^T)`.
 - Calls carry no marks; the signature decides: `edit(value)` writes `value`,
   and `consume(value)` moves `value` into the callee. A later use, a loop
   reuse, or two arguments naming the same binding need a deliberate

@@ -22,7 +22,7 @@ use jet_foundation.[Span, Type, jet_layout_one_bit_shift, type_carrier_identity]
 
 // The entry layout of the Set type row `set_row`: the key at offset 0 of a
 // key-sized entry; None when its keys have no order the builder knows.
-ir_set_shape: fn(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! {
+ir_set_shape: fn(m: ^IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! {
     elem := ir_set_element(ir_untag(ir_row_ty(m, p, set_row))) ?? return None
     if ir_bit_set_def(p, ir_row_ty(m, p, set_row)) != None -> return None
     key_row: ir_value_type(m, p, elem) ?? return None
@@ -44,7 +44,7 @@ ir_rank_type: fn(ty: Type) -> Bool Never! {
 // returning from the helper: the index of the entry equal to `key`, else
 // -1 - its key position (ir_set_key_point). A native order falls through to
 // the binary search.
-ir_set_keyed_find: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set: Int, key: Int) Never! {
+ir_set_keyed_find: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, set: Int, key: Int) Never! {
     word_row: ir_word_row(m)
     a.f.result = word_row
     rank_order: ir_heap_order(m, a, set)
@@ -77,7 +77,7 @@ ir_set_keyed_find: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 // The key position of `key` in the Rank `set` under the key order `order`:
 // after every entry whose key `key`'s does not order before, so equal keys
 // keep insertion order.
-ir_set_key_point: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set: Int, key: Int, order: Int) -> Int Never! {
+ir_set_key_point: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, set: Int, key: Int, order: Int) -> Int Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     length: ir_load_word(m, a, set, 0)
     data: ir_load_word(m, a, set, 16)
@@ -105,7 +105,7 @@ ir_set_key_point: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 // keeps the entries, all in order, in place), the key moved in at its key
 // position, then the index rebuilt over the shifted positions with every
 // entry counted sorted.
-ir_set_keyed_place: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, order: Int) Never! {
+ir_set_keyed_place: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, order: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     length: ir_load_word(m, a, set, 0)
     ir_set_hashed_room(m, p, a, set_row, set, length)
@@ -146,7 +146,7 @@ ir_set_keyed_place: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
 
 // Grows the hashed Set `set` of `length` entries when it is full: map.grow
 // at twice its length, at least 4.
-ir_set_hashed_room: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, set_row: Int, set: Int, length: Int) Never! {
+ir_set_hashed_room: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, set_row: Int, set: Int, length: Int) Never! {
     capacity: ir_load_word(m, a, set, 8)
     full: ir_bool_op(m, a, IROp.Ge, length, capacity)
     ir_open_if(a.f, full, a.line)
@@ -162,7 +162,7 @@ ir_set_hashed_room: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, set_row: Int, 
 
 // An empty header of the Set type row `set_row`; a Rank's takes `like`'s
 // order, whose function value gains it as an owner.
-ir_set_empty_like: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, like: Int) -> Int Never! {
+ir_set_empty_like: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, set_row: Int, like: Int) -> Int Never! {
     target: ir_list_empty(m, p, b, set_row)
     if !ir_rank_type(ir_row_ty(m, p, set_row)) -> return target
     order: ir_load_word(m, b, like, 24)
@@ -176,7 +176,7 @@ ir_set_empty_like: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, l
 }
 
 // The id of Set helper `name` of the Set type row `set_row`, built on first use.
-ir_set_helper: fn(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int Never! {
+ir_set_helper: fn(m: ^IRModule, p: IRProgram, set_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(ir_row_ty(m, p, set_row))}>"
     if ir_keyed_function(m, key) == .Val(known) -> return known
     shape: ir_set_shape(m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
@@ -211,7 +211,7 @@ ir_set_helper: fn(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int
 }
 
 // A call of Set helper `name` with result row `result` (-1: none).
-ir_set_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
+ir_set_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, set_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
     callee: ir_set_helper(m, p, set_row, name)
     dst: if result >= 0 -> ir_fresh_temp(m, b, result) else -> -1
     operands: ir_args(b.f, args)
@@ -225,7 +225,7 @@ ir_set_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, name: S
 // hashed Set appends the key, out of order until a rebuild merges it in,
 // and a hashed Rank under a key order places it (ir_set_keyed_place); any
 // other inserts it at its insertion point.
-ir_set_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int) Never! {
+ir_set_insert_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
     word_row: ir_word_row(m)
@@ -285,7 +285,7 @@ ir_set_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
 // (null when absent), set.remove (`option_row` -1) drops it; both close the
 // gap, and a hashed Set takes the key out of its index too. map.remove
 // cannot express this: it drops the key and returns the Unit value.
-ir_set_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, option_row: Int) Never! {
+ir_set_take_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, option_row: Int) Never! {
     discard: option_row < 0
     a.f.result = option_row
     word_row: ir_word_row(m)
@@ -330,7 +330,7 @@ ir_set_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShap
 // for a hashed Set, whose entries are not in key order, or when either Rank
 // has a key order (equality ignores the orders), each left key held by the
 // right Set.
-ir_set_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, left: Int, right: Int) Never! {
+ir_set_equal_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, shape: IRMapShape, set_row: Int, left: Int, right: Int) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
     left_len: ir_load_word(m, a, left, 0)
@@ -391,7 +391,7 @@ ir_set_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
 }
 
 // A List of copies of the Set's keys in key order.
-ir_set_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set: Int, list_row: Int) -> Int Never! {
+ir_set_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, shape: IRMapShape, set: Int, list_row: Int) -> Int Never! {
     out: ir_list_empty(m, p, b, list_row)
     ordered: ir_map_ordered(m, p, b, set)
     walk: ir_walk_open(m, b, ordered, shape.entry)
@@ -404,7 +404,7 @@ ir_set_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, se
 // `[a, b]` in display: a Set renders as the List of its keys in key order (a
 // Set stored as bits, of its cases in case order), each key in the Set's own
 // mode.
-ir_render_set: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
+ir_render_set: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
     set_row: b.f.slot_type[slot]
     ty: ir_row_ty(m, p, set_row)
     ir_push_static(m, b, builder, "[")
@@ -443,7 +443,7 @@ ir_render_set: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
 
 // Inserts into `target` a copy of each key of `from` that `probe` holds
 // (`held`) or lacks, in `from`'s order.
-ir_set_keep_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, shape: IRMapShape, from: Int, probe: Int, target: Int, held: Bool, span: Span) Never! {
+ir_set_keep_keys: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, set_row: Int, shape: IRMapShape, from: Int, probe: Int, target: Int, held: Bool, span: Span) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     word_row: ir_word_row(m)
     walk: ir_walk_open(m, b, from, shape.key.ty)
@@ -459,7 +459,7 @@ ir_set_keep_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, sh
 }
 
 // Inserts into `target` a copy of each key of `from`.
-ir_set_add_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, shape: IRMapShape, from: Int, target: Int, span: Span) Never! {
+ir_set_add_keys: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, set_row: Int, shape: IRMapShape, from: Int, target: Int, span: Span) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     walk: ir_walk_open(m, b, from, shape.key.ty)
     key: ir_copy_value(m, p, b, walk.item, span)
@@ -470,7 +470,7 @@ ir_set_add_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, sha
 
 // `rank.first()` / `rank.last()`: a copy of the least (greatest) key in an
 // Option box, None when the Rank is empty.
-ir_set_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
+ir_set_end: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     result: ir_fresh_temp(m, b, result_row)
     ir_option_none(m, b, result)
@@ -499,7 +499,7 @@ ir_set_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
 
 // `Set.new()` / `Rank.new()` (the Prelude std.collections.HashSet.new /
 // BTreeSet.new route): an empty header.
-ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_set_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 0 -> return ir_fail_slot(b, span, "Set.new with {inputs.len()} arguments")
     set_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
     if ir_bit_set_def(p, result) != None {
@@ -518,7 +518,7 @@ ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result:
 // are copied. An Iter is drained into a List first, as Iter.to_list is.
 // `order` (-1: the native order) is a Rank's fresh key order, which the new
 // header owns (Rank.from_by).
-ir_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, order: Int, span: Span) -> Int Never! {
+ir_set_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, source: Int, order: Int, span: Span) -> Int Never! {
     set_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     if ir_bit_set_def(p, ty) != None -> return ir_bit_set_from(m, p, b, ty, set_row, source, span)
     shape: ir_set_shape(m, p, set_row) ?? return ir_fail_slot(b, span, "Set construction of {ir_type_name(ty)}")
@@ -585,7 +585,7 @@ ir_set_symbol: fn(symbol: String) -> String Never! {
 // symmetric_difference, their in-place `_update` forms and `update`,
 // is_subset, is_superset and is_disjoint; None when the builder does not
 // lower `symbol` on Sets.
-ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
+ir_set_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, route: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     symbol: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
         if operands.len() != 1 -> return None
@@ -793,7 +793,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
 
 // `shuffle()` over `items`, a fresh List of copies of a Set's keys: a fresh
 // List of them in the Iter shuffle's order.
-ir_set_shuffled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, elem: Type, items: Int, list_row: Int, span: Span) -> Int Never! {
+ir_set_shuffled: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, elem: Type, items: Int, list_row: Int, span: Span) -> Int Never! {
     iter_ty: Type.Apply{name: "Iter", args: [Type]{elem.copy()}}
     iter_row: ir_value_type(m, p, iter_ty) ?? return ir_type_fail(b, span, iter_ty)
     meta: ir_lazy_meta(m, p, b, elem, span)
@@ -811,7 +811,7 @@ ir_set_shuffled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, elem: Type, items
 
 // `values()` over `items`, a fresh List of copies of a Set's keys: the
 // Iter of type row `iter_row` over them.
-ir_set_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, elem: Type, items: Int, iter_row: Int, span: Span) -> Int Never! {
+ir_set_values: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, elem: Type, items: Int, iter_row: Int, span: Span) -> Int Never! {
     meta: ir_lazy_meta(m, p, b, elem, span)
     if meta < 0 -> return -1
     ir_lazy_iter_from_list(m, p, b, items, elem, meta, iter_row, span)
@@ -867,7 +867,7 @@ ir_bit_set_shifts: fn(p: IRProgram, definition: Int) -> [Int]? Never! {
 }
 
 // A fresh Set of type row `set_row` stored as the bits `word`.
-ir_bit_set_make: fn(m: &IRModule, b: &IRBuilder, set_row: Int, word: Int) -> Int Never! {
+ir_bit_set_make: fn(m: ^IRModule, b: ^IRBuilder, set_row: Int, word: Int) -> Int Never! {
     set: ir_fresh_temp(m, b, set_row)
     ir_emit(b.f, IROp.StackAddress, set, 8, 8, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, set, 0, word, b.line)
@@ -875,7 +875,7 @@ ir_bit_set_make: fn(m: &IRModule, b: &IRBuilder, set_row: Int, word: Int) -> Int
 }
 
 // The word `1 << shift`.
-ir_bit_set_bit: fn(m: &IRModule, b: &IRBuilder, shift: Int) -> Int Never! {
+ir_bit_set_bit: fn(m: ^IRModule, b: ^IRBuilder, shift: Int) -> Int Never! {
     one: ir_word_const(m, b, 1)
     ir_word_op(m, b, IROp.Shl, one, shift)
 }
@@ -888,7 +888,7 @@ IRBitWalk: struct {
 
 // Opens a walk over the cases whose bit `word` holds, in case order; inside
 // it, `index` is the case index. ir_bit_walk_close ends it.
-ir_bit_walk_open: fn(m: &IRModule, b: &IRBuilder, word: Int, cases: Int) -> IRBitWalk Never! {
+ir_bit_walk_open: fn(m: ^IRModule, b: ^IRBuilder, word: Int, cases: Int) -> IRBitWalk Never! {
     index: ir_word_const(m, b, 0)
     zero: ir_word_const(m, b, 0)
     one: ir_word_const(m, b, 1)
@@ -904,7 +904,7 @@ ir_bit_walk_open: fn(m: &IRModule, b: &IRBuilder, word: Int, cases: Int) -> IRBi
     IRBitWalk{index: index, done: done}
 }
 
-ir_bit_walk_close: fn(m: &IRModule, b: &IRBuilder, walk: IRBitWalk) Never! {
+ir_bit_walk_close: fn(m: ^IRModule, b: ^IRBuilder, walk: IRBitWalk) Never! {
     ir_end(b.f, b.line)
     one: ir_word_const(m, b, 1)
     ir_emit(b.f, IROp.Add, walk.index, walk.index, one, IR_OVERFLOW_WRAP, b.line)
@@ -915,7 +915,7 @@ ir_bit_walk_close: fn(m: &IRModule, b: &IRBuilder, walk: IRBitWalk) Never! {
 
 // A fresh List of type row `list_row` of the cases whose bit `word` holds,
 // in case order.
-ir_bit_set_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, word: Int, cases: Int, elem_row: Int, list_row: Int) -> Int Never! {
+ir_bit_set_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, word: Int, cases: Int, elem_row: Int, list_row: Int) -> Int Never! {
     out: ir_list_empty(m, p, b, list_row)
     walk: ir_bit_walk_open(m, b, word, cases)
     key: ir_temp(m, b, elem_row)
@@ -927,7 +927,7 @@ ir_bit_set_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, word: Int, cases:
 
 // `Set.from(source)` / `source.to_set()` of a Set stored as bits: the bit
 // of each element of the List or Iter `source`.
-ir_bit_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, set_row: Int, source: Int, span: Span) -> Int Never! {
+ir_bit_set_from: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, set_row: Int, source: Int, span: Span) -> Int Never! {
     elem: ir_set_element(ir_untag(ty)) ?? return ir_type_fail(b, span, ty)
     elem_row: ir_value_type(m, p, elem) ?? return ir_type_fail(b, span, elem)
     source_ty: ir_lazy_slot_type(m, p, b, source)
@@ -951,7 +951,7 @@ ir_bit_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, set_row
 
 // `set.bits()` (the Prelude std.collections.HashSet.bits route): the
 // word as a U64, each present case of a `#Specified` enum as its own value.
-ir_bit_set_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_bit_set_bits: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 1 || inputs[0] < 0 {
         return ir_fail_slot(b, span, "Set.bits with {inputs.len()} arguments")
     }
@@ -985,7 +985,7 @@ ir_bit_set_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], re
 // `Set<E>.from_bits(n)` (the Prelude std.collections.HashSet.from_bits
 // route): the Set whose bits `n` gives, each case of a `#Specified` enum by
 // its own value; None when `n` has a bit no case stands for.
-ir_bit_set_from_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_bit_set_from_bits: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 1 || inputs[0] < 0 {
         return ir_fail_slot(b, span, "Set.from_bits with {inputs.len()} arguments")
     }
@@ -1039,7 +1039,7 @@ ir_bit_set_from_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int
 }
 
 // A Set builtin on a Set stored as bits (ir_set_builtin's symbols).
-ir_bit_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, symbol: String, set_row: Int, definition: Int, subject: Int, operands: [Int], span: Span) -> Int? Never! {
+ir_bit_set_builtin: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, route: String, symbol: String, set_row: Int, definition: Int, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     elem := ir_set_element(ir_untag(ir_row_ty(m, p, set_row))) ?? return None
     elem_row: ir_value_type(m, p, elem) ?? return Val(ir_type_fail(b, span, elem))
     cases: ir_bit_set_cases(p, definition)

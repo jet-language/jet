@@ -11,7 +11,7 @@ Board: struct {
 
 flip: fn(xs: [Bool]) -> [Bool] {
     out := [Bool]{}
-    loop x in xs -> &out.push(!x)
+    loop x in xs -> ^out.push(!x)
     out
 }
 
@@ -25,7 +25,7 @@ count: fn(xs: [Bool]) -> Int {
 
 sieve: fn(n: Int) -> Int {
     marks := [Bool]{}
-    loop _ in 0..<n -> &marks.push(true)
+    loop _ in 0..<n -> ^marks.push(true)
     marks[0] = false
     marks[1] = false
     i := 2
@@ -45,10 +45,10 @@ sieve: fn(n: Int) -> Int {
 run: fn() {
     xs := [true, false, true, true, false, false, true]
     print("{xs} {xs.len()} {count(xs)}")
-    &xs.push(false)
-    &xs.push(true)
+    ^xs.push(false)
+    ^xs.push(true)
     print("{xs} {xs.len()}")
-    popped: &xs.pop()
+    popped: ^xs.pop()
     print("{popped} {xs}")
     xs[1] = true
     xs[2] = false
@@ -56,32 +56,32 @@ run: fn() {
     print("contains true {xs.contains(true)} index_of false {xs.index_of(false)}")
     ys := flip(xs)
     print("{ys} eq {xs == ys} eq2 {xs == flip(ys)}")
-    &ys.sort()
+    ^ys.sort()
     print("sorted {ys}")
-    &ys.reverse()
+    ^ys.reverse()
     print("reversed {ys}")
     print("slice {xs[1..<4]}")
     print("static {STATIC_FLAGS} {count(STATIC_FLAGS)}")
     b := Board{cells: [false, true, true], name: "b"}
-    &b.cells.push(false)
+    ^b.cells.push(false)
     print("{b.name} {b.cells} {count(b.cells)}")
     grid := [[Bool]]{}
     loop r in 0..<3 {
         row := [Bool]{}
-        loop c in 0..<5 -> &row.push((r + c) %% 2 == 0)
-        &grid.push(row)
+        loop c in 0..<5 -> ^row.push((r + c) %% 2 == 0)
+        ^grid.push(row)
     }
     print("grid {grid}")
     total := 0
     loop row in grid -> total += count(row)
     print("grid count {total}")
     many := [Bool]{}
-    loop k in 0..<1000 -> &many.push(k %% 3 == 0)
+    loop k in 0..<1000 -> ^many.push(k %% 3 == 0)
     print("many {count(many)} {many[999]} {many[998]} {many[0]}")
     print("sieve {sieve(100000)}")
     print("min {xs.min()} max {xs.max()}")
     words := [Int]{}
-    loop k in 0..<9 -> &words.push(k)
+    loop k in 0..<9 -> ^words.push(k)
     odd: words.filter(fn(w: Int) { w %% 2 == 1 })
     print("odd {odd}")
     flags: words.map(fn(w: Int) { w > 4 })

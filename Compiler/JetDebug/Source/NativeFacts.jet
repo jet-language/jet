@@ -296,7 +296,7 @@ native_image_of_types: fn(debug: X64ModuleDebug) -> NativeImage Never! {
 }
 
 // `members` as a new group of image.members; its index.
-native_image_members: fn(image: &NativeImage, members: [X64DebugMember]) -> Int Never! {
+native_image_members: fn(image: ^NativeImage, members: [X64DebugMember]) -> Int Never! {
     image.members.push(loop member in members -> NativeMember{name: member.name, offset: member.offset, ty: member.ty, die: -1})
     image.members.len() - 1
 }
@@ -434,7 +434,7 @@ native_frames_read: fn(elf: [U8]) -> NativeFrames Never! {
 
 // Each FDE of the `.eh_frame` section `code`, the `section`-th, whose CIE
 // the reader takes.
-native_frames_index: fn(fdes: &[NativeFde], code: NativeCode, section: Int) Never! {
+native_frames_index: fn(fdes: ^[NativeFde], code: NativeCode, section: Int) Never! {
     at := 0
     loop at + 8 <= code.bytes.len() {
         length: link_debug_le(code.bytes, at, 4)
@@ -643,7 +643,7 @@ NATIVE_CFI_LOG_MARK: -2
 // with NATIVE_CFI_LOG_FRAME give the canonical frame address register
 // `rule` and offset `offset`; `log` gains what it replaced. A register past
 // the return address's column has no rule.
-native_cfi_rule: fn(row: &NativeCfiRow, log: &[Int], register: Int, rule: Int, offset: Int) Never! {
+native_cfi_rule: fn(row: ^NativeCfiRow, log: ^[Int], register: Int, rule: Int, offset: Int) Never! {
     if register == NATIVE_CFI_LOG_FRAME {
         native_cfi_log(log, NATIVE_CFI_LOG_FRAME, row.register, row.offset)
         row.register = rule
@@ -659,7 +659,7 @@ native_cfi_rule: fn(row: &NativeCfiRow, log: &[Int], register: Int, rule: Int, o
 }
 
 // Add the entry `kind`, `value`, `offset` to native_cfi_row's `log`.
-native_cfi_log: fn(log: &[Int], kind: Int, value: Int, offset: Int) Never! {
+native_cfi_log: fn(log: ^[Int], kind: Int, value: Int, offset: Int) Never! {
     log.push(kind)
     log.push(value)
     log.push(offset)
@@ -669,7 +669,7 @@ native_cfi_log: fn(log: &[Int], kind: Int, value: Int, offset: Int) Never! {
 // instructions end, at `cie_end` in `log`: what the first change after
 // that replaced, else the rule it still has. Within the CIE's
 // instructions (`cie_end` -1) that is the rule every register starts with.
-native_cfi_restore: fn(row: &NativeCfiRow, log: &[Int], cie_end: Int, register: Int) Never! {
+native_cfi_restore: fn(row: ^NativeCfiRow, log: ^[Int], cie_end: Int, register: Int) Never! {
     if register < 0 || register >= NATIVE_CFI_REGISTERS {
         return
     }
@@ -691,7 +691,7 @@ native_cfi_restore: fn(row: &NativeCfiRow, log: &[Int], cie_end: Int, register: 
 
 // Undo `row`'s changes in `log` back to its last DW_CFA_remember_state
 // mark at or past `floor`; false when there is none.
-native_cfi_undo: fn(row: &NativeCfiRow, log: &[Int], floor: Int) -> Bool Never! {
+native_cfi_undo: fn(row: ^NativeCfiRow, log: ^[Int], floor: Int) -> Bool Never! {
     loop log.len() >= floor + 3 {
         offset: log.pop() ?? 0
         value: log.pop() ?? 0
@@ -794,7 +794,7 @@ NativeUnitBases: struct {
 
 // The DIEs of the unit at [start, end) of `info`, into `image`; `ranges`
 // is the image's `.debug_rnglists` and `line_table` its `.debug_line`.
-native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], ranges: [U8], line_table: [U8], start: Int, end: Int) Never! {
+native_image_unit: fn(image: ^NativeImage, info: [U8], abbrev: [U8], ranges: [U8], line_table: [U8], start: Int, end: Int) Never! {
     version: link_debug_le(info, start + 4, 2)
     if version != 5 || link_debug_le(info, start + 6, 1) != 1 || link_debug_le(info, start + 7, 1) != 8 {
         return
@@ -843,7 +843,7 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], ranges: [U8
 // location list index the loclists offsets table, and a range list
 // (DW_AT_ranges, of an inlined run) sets the die's code to its ranges'
 // span.
-native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int, image: NativeImage, ranges: [U8], bases: &NativeUnitBases) Never! {
+native_die_attribute: fn(die: ^NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int, image: NativeImage, ranges: [U8], bases: ^NativeUnitBases) Never! {
     if form == 0x18 && (attribute == 0x02 || attribute == 0x7e) {
         cursor := at
         length: link_debug_uleb(info, cursor)
@@ -931,7 +931,7 @@ native_list_offset: fn(lists: [U8], base: Int, index: Int) -> Int Never! {
 // from its lowest start to its highest end. Index entries read the
 // `.debug_addr` table at `addr_base` of `addresses`. A list it can't read
 // leaves `die` as it was.
-native_die_ranges: fn(die: &NativeDie, addresses: [U8], ranges: [U8], list: Int, addr_base: Int) Never! {
+native_die_ranges: fn(die: ^NativeDie, addresses: [U8], ranges: [U8], list: Int, addr_base: Int) Never! {
     if list < 0 {
         return
     }
@@ -1053,7 +1053,7 @@ native_line_files: fn(bytes: [U8], start: Int) -> [String] Never! {
 
 // What `die` adds to `image`, nested in the `open` DIEs, in a unit whose
 // bases are `bases`.
-native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bases: NativeUnitBases) Never! {
+native_image_die: fn(image: ^NativeImage, die: NativeDie, open: [NativeDie], bases: NativeUnitBases) Never! {
     size: if die.size < 0 -> 0 else -> die.size
     code: die.tag
     if {

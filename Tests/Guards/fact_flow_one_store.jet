@@ -42,7 +42,7 @@ ffs_field: fn(line: String) -[]> Bool {
 
 // The refusals of one struct `name` of `path` whose body is `body`, as
 // `path:line: why`.
-ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out: &[String]) -[]> {
+ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out: ^[String]) -[]> {
     home: path == FFS_HOME
     fields := [String]{}
     plane := false
@@ -68,7 +68,7 @@ ffs_check_struct: fn(path: String, line: Int, name: String, body: [String], out:
 }
 
 // Every refusal under `path`. Symbolic links and hidden entries are skipped.
-ffs_scan: fn(path: String, out: &[String]) -[FS]> {
+ffs_scan: fn(path: String, out: ^[String]) -[FS]> {
     if ffs_files.is_symlink(path) -> return
     if ffs_files.is_dir(path) {
         loop child in (ffs_files.list_dir(path) ?? panic("list {path}: {err}")) {

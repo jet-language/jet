@@ -397,14 +397,14 @@ web_host_queue_client: fn(state: Shared<WebHostState>, client: String, dropped: 
     if permit.value.noted.len() < WEB_HOST_MAX_QUEUED -> permit.value.noted.push("{client}")
 }
 
-web_host_queue_beacon: fn(state: Shared<WebHostState>, body: &&[U8]) -> Bool {
+web_host_queue_beacon: fn(state: Shared<WebHostState>, body: ^^[U8]) -> Bool {
     permit := state.guard_edit()
     if permit.value.beacons.len() >= WEB_HOST_MAX_QUEUED -> return false
     permit.value.beacons.push(body.move())
     true
 }
 
-web_host_queue_envelope: fn(state: Shared<WebHostState>, envelope: &&JetDevtoolsDecodedEnvelope) -> Bool {
+web_host_queue_envelope: fn(state: Shared<WebHostState>, envelope: ^^JetDevtoolsDecodedEnvelope) -> Bool {
     permit := state.guard_edit()
     if permit.value.envelopes.len() >= WEB_HOST_MAX_QUEUED -> return false
     permit.value.envelopes.push(envelope.move())

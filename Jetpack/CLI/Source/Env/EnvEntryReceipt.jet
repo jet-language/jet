@@ -157,7 +157,7 @@ cli_environment_entry_definition_fingerprint_with_hook: fn(requested_preset: Str
 
 // Fresh cache expectations for every plan member, so a stale composite stamp
 // can still reuse each member that verifies on its own.
-cli_environment_member_expectations: fn(verification: &StoreVerification, roots: HangarRoots, project_dir: String, flags: CLIFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String:CacheExpectation] Never! {
+cli_environment_member_expectations: fn(verification: ^StoreVerification, roots: HangarRoots, project_dir: String, flags: CLIFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String:CacheExpectation] Never! {
     context: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), Val(project_dir), None, Val(roots))
     expectations := [String:CacheExpectation]{}
     loop spec in plan.refs {

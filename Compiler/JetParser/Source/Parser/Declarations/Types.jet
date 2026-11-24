@@ -47,7 +47,7 @@ use {
     ]
 }
 
-parser_distinct_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_distinct_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && parser_kind_at(state, 2) == TOKEN_IDENT && parser_value_at(state, 2) == "distinct"
 }
 
@@ -60,7 +60,7 @@ parser_distinct_ahead: fn(state: &JetParserState) -> Bool Never! {
 // nominal type. There is no `alias` keyword. A `:` inside `<…>` is a bound.
 // A `state { … }` right-hand side takes the alias path so the alias reports
 // the ineligible state section (E0158).
-parser_type_alias_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool {
+parser_type_alias_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool {
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
     after := offset + 1
     generic: parser_kind_at(state, after) == TOKEN_LT
@@ -101,14 +101,14 @@ parser_type_alias_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool {
 
 // `Name: path` whose right-hand side is a bare path: a constant binding until
 // sema reads what the path names (a type makes it an alias).
-parser_path_binding_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_path_binding_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(state, offset) == TOKEN_IDENT && parser_kind_at(state, offset + 1) == TOKEN_COLON && parser_bare_path_rhs_at(state, offset + 2)
 }
 
 // `(a.b)` ending the item, each word of the path a value name: a re-export
 // target written in parentheses, which the constant parse refuses
 // (parser_parse_const), not a type.
-parser_parenthesized_value_path_at: fn(state: &JetParserState, offset: Int) -[]> Bool {
+parser_parenthesized_value_path_at: fn(state: ^JetParserState, offset: Int) -[]> Bool {
     if parser_kind_at(state, offset) != TOKEN_LPAREN -> return false
     at := offset + 1
     words := 0
@@ -125,7 +125,7 @@ parser_parenthesized_value_path_at: fn(state: &JetParserState, offset: Int) -[]>
 }
 
 // `IDENT (. IDENT)*` ending the item: a path that may name a type or a value.
-parser_bare_path_rhs_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_bare_path_rhs_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     at := offset
     loop {
         if parser_kind_at(state, at) != TOKEN_IDENT -> return false
@@ -142,7 +142,7 @@ parser_alias_rhs_end: fn(kind: Int) -> Bool Never! {
 
 // The right-hand side at `offset` parses as one whole type and nothing more.
 // The parse is speculative and fully undone.
-parser_type_only_rhs_at: fn(state: &JetParserState, offset: Int) -> Bool {
+parser_type_only_rhs_at: fn(state: ^JetParserState, offset: Int) -> Bool {
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
@@ -160,7 +160,7 @@ parser_type_only_rhs_at: fn(state: &JetParserState, offset: Int) -> Bool {
     whole
 }
 
-parser_unit_family_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_unit_family_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "UnitFamily" && parser_kind_at(state, 2) == TOKEN_LPAREN
 }
 
@@ -185,7 +185,7 @@ parser_distinct_marker_derives: fn(markers: [Marker]) -> [NamedSpan] Never! {
     derives
 }
 
-parser_parse_distinct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+parser_parse_distinct: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start: modifiers.start_span
     name: parser_expect_name(state, "as the distinct type name")
     parser_expect(state, TOKEN_COLON, "`:` after a distinct type name")
@@ -234,7 +234,7 @@ DistinctRangeBound: struct {
     span: Span,
 }
 
-parser_distinct_range_bound: fn(state: &JetParserState, context: String) -> DistinctRangeBound {
+parser_distinct_range_bound: fn(state: ^JetParserState, context: String) -> DistinctRangeBound {
     token: parser_current(state)
     if token.kind == TOKEN_MINUS {
         parser_add_error(state, token.span, "expected a non-negative whole number {context}", "a range constraint's bounds are literal whole numbers", "write a plain integer, e.g. `0..10`")
@@ -255,11 +255,11 @@ parser_distinct_range_bound: fn(state: &JetParserState, context: String) -> Dist
     DistinctRangeBound{value: parser_integer(state, token) ?? 0, span: token.span}
 }
 
-parser_type_declaration_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+parser_type_declaration_error: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(state, code, span, what, why, fix)
 }
 
-parser_parse_unit_family: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
+parser_parse_unit_family: fn(state: ^JetParserState, modifiers: ParsedItemModifiers) -> Item {
     marker: if {
         parser_current_kind(state) == TOKEN_HASH -> parser_parse_marker(state)
         else -> {
@@ -431,7 +431,7 @@ ParsedUnitScale: struct {
     provenance: UnitScaleProvenance,
 }
 
-parser_unit_scale: fn(state: &JetParserState) -> ParsedUnitScale {
+parser_unit_scale: fn(state: ^JetParserState) -> ParsedUnitScale {
     if parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "pi" {
         parser_bump(state)
         parser_expect(state, TOKEN_SLASH, "`/` after `pi`")
@@ -479,7 +479,7 @@ UnitText: struct {
     span: Span,
 }
 
-parser_unit_decimal: fn(state: &JetParserState, context: String) -> UnitText {
+parser_unit_decimal: fn(state: ^JetParserState, context: String) -> UnitText {
     sign := ""
     start: parser_current(state).span
     if parser_current_kind(state) == TOKEN_MINUS {
@@ -496,7 +496,7 @@ parser_unit_decimal: fn(state: &JetParserState, context: String) -> UnitText {
     UnitText{text: "{sign}{parser_text(state, token)}", span: parser_cover(start, token.span)}
 }
 
-parser_unit_integer: fn(state: &JetParserState, context: String) -> UnitText {
+parser_unit_integer: fn(state: ^JetParserState, context: String) -> UnitText {
     sign := ""
     start: parser_current(state).span
     if parser_current_kind(state) == TOKEN_MINUS {
@@ -513,7 +513,7 @@ parser_unit_integer: fn(state: &JetParserState, context: String) -> UnitText {
     UnitText{text: "{sign}{parser_text(state, token)}", span: parser_cover(start, token.span)}
 }
 
-parser_unit_ratio: fn(state: &JetParserState) -> UnitRatio {
+parser_unit_ratio: fn(state: ^JetParserState) -> UnitRatio {
     numerator: parser_unit_integer(state, "as conversion metadata")
     denominator := UnitText{text: "1", span: numerator.span}
     if parser_current_kind(state) == TOKEN_SLASH {
@@ -526,7 +526,7 @@ parser_unit_ratio: fn(state: &JetParserState) -> UnitRatio {
     parser_unit_ratio_from_text(numerator.text, denominator.text)
 }
 
-parser_unit_plain_string: fn(state: &JetParserState, context: String) -> String {
+parser_unit_plain_string: fn(state: ^JetParserState, context: String) -> String {
     token: parser_current(state)
     if token.kind != TOKEN_STRING && token.kind != TOKEN_RAW_STRING {
         parser_add_error(state, token.span, "expected a plain string {context}", "unit provenance sources are fixed text", "write a non-interpolated string")

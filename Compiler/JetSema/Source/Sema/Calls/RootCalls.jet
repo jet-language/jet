@@ -126,7 +126,7 @@ sema_root_call_owner_declares: fn(receiver_type: Type, method: String, method_sp
 
 // The receiver-first call `receiver.method(args)` when `method` names a
 // `#Root` function that accepts the receiver; unhandled otherwise.
-sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_root_call_named(method, environment, program, scopes) -> return unhandled
     probe_diagnostics := [Diagnostic]{}

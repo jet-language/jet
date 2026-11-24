@@ -1,4 +1,4 @@
-// E0211: a taking receiver (`&&self`) read in place leaves its place still
+// E0211: a taking receiver (`^^self`) read in place leaves its place still
 // owning the value. Releasing a lease that is a field of a list element, or of
 // a read receiver, would close its handle once in the call and again when the
 // list or the caller cleans up. Take the element out of its list first.
@@ -7,7 +7,7 @@ use files: core.files
 Lease: struct {
     handle: files.Directory?,
 
-    release: fn(&&self) {}
+    release: fn(^^self) {}
 }
 
 Package: struct {
@@ -15,7 +15,7 @@ Package: struct {
     lease: Lease,
 }
 
-element_field: fn(packages: &&[Package]) { packages[0].lease.release() }
+element_field: fn(packages: ^^[Package]) { packages[0].lease.release() }
 
 Holder: struct {
     lease: Lease,

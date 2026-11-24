@@ -58,7 +58,7 @@ SemaScopeMembersDSLHeaderResult: struct {
     diagnostics: [Diagnostic],
 }
 
-sema_scope_members_append_name: fn(values: &[String], name: String) Never! {
+sema_scope_members_append_name: fn(values: ^[String], name: String) Never! {
     loop existing in values {
         if existing == name {
             return
@@ -126,11 +126,11 @@ sema_scope_members_first_parameter_is_type: fn(declaration: MarkerDecl) -> Bool 
     false
 }
 
-sema_scope_members_registry_add_declaration: fn(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool Never! {
+sema_scope_members_registry_add_declaration: fn(registry: ^SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool Never! {
     sema_scope_members_registry_add_identity(registry, declaration, None, None)
 }
 
-sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl, identity: ModuleID?, span: Span?) -> Bool Never! {
+sema_scope_members_registry_add_identity: fn(registry: ^SemaScopeMembersMarkerRegistry, declaration: MarkerDecl, identity: ModuleID?, span: Span?) -> Bool Never! {
     loop existing in registry.marker_rules {
         if existing.name == declaration.name && existing.declaration_module == identity && existing.declaration_span == span {
             return identity != None
@@ -177,14 +177,14 @@ sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRe
     true
 }
 
-sema_scope_members_registry_add_program: fn(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool Never! {
+sema_scope_members_registry_add_program: fn(registry: ^SemaScopeMembersMarkerRegistry, program: Program) -> Bool Never! {
     loop declaration in sema_marker_module_declarations(program.items, "", false) {
         if !sema_scope_members_registry_add_declaration(registry, declaration) -> return false
     }
     true
 }
 
-sema_scope_members_registry_add_applied_catalog: fn(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
+sema_scope_members_registry_add_applied_catalog: fn(registry: ^SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
     seen := [String]{}
     loop rule in catalog.rows {
         if seen.contains(rule.name) -> return false
@@ -257,7 +257,7 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
 // written as one plain string, as the driver reads an `impl Language`
 // block's root (jet_driver_language_root). The trait is matched by name, so
 // a package's codec needs no compiler change.
-sema_scope_members_add_format_names: fn(names: &[String], graph: SemaRegistrationGraph) Never! {
+sema_scope_members_add_format_names: fn(names: ^[String], graph: SemaRegistrationGraph) Never! {
     loop row in graph.modules {
         loop item in row.program.items {
             if item == .Struct(definition) {
@@ -364,7 +364,7 @@ sema_scope_members_check: fn(tables: ASTTables, items: [Item], has_scope_member:
 // `assert`/`assert_eq` or `expect(…).snapshot` is L2901. The walk reads every
 // expression the body holds, nested blocks and lambdas included, as Rust's
 // `statements_have_assertion` does.
-sema_scope_members_check_assertionless_tests: fn(tables: ASTTables, items: [Item], diagnostics: &[Diagnostic]) {
+sema_scope_members_check_assertionless_tests: fn(tables: ASTTables, items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == .Test(test) {
             found := false
@@ -378,7 +378,7 @@ sema_scope_members_check_assertionless_tests: fn(tables: ASTTables, items: [Item
     }
 }
 
-sema_scope_members_note_assertion: fn(tables: ASTTables, found: &Bool, expression: ExprNode) Never! {
+sema_scope_members_note_assertion: fn(tables: ASTTables, found: ^Bool, expression: ExprNode) Never! {
     if ast_expr(tables, expression) == {
         .Call(call, _) -> {
             if call.name == "assert" || call.name == "assert_eq" -> found = true
@@ -400,7 +400,7 @@ sema_scope_members_is_expect_call: fn(expression: Expr) -> Bool Never! {
 
 // Rust `check_marker_body`: each direct-child member is validated against the
 // marker's vocabulary; anything deeper is nested.
-sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnostics: &[Diagnostic]) {
+sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnostics: ^[Diagnostic]) {
     loop (index, statement) in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
             if dsl -> next
@@ -414,7 +414,7 @@ sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnosti
 
 // Rust `validate_member`: E0614 for a marker without members or a name outside
 // its vocabulary, E0616 for a `.setup` that is not the first statement.
-sema_scope_members_validate_member: fn(marker: String, name: String, is_first: Bool, dot_span: Span, diagnostics: &[Diagnostic]) {
+sema_scope_members_validate_member: fn(marker: String, name: String, is_first: Bool, dot_span: Span, diagnostics: ^[Diagnostic]) {
     vocabulary := [String]{}
     if sema_scope_members_vocabulary(marker) == {
         .Val(found) -> { vocabulary = found }
@@ -439,7 +439,7 @@ sema_scope_members_validate_member: fn(marker: String, name: String, is_first: B
 
 // Rust `reject_nested` (nested = true, E0618) and `reject_all` (E0615): every
 // dot member anywhere in `body`, through control blocks and member bodies.
-sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: &[Diagnostic]) {
+sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: ^[Diagnostic]) {
     loop statement in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
             if !dsl {
@@ -455,7 +455,7 @@ sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: &[Diagnosti
 
 // Rust `child_bodies`: walks every statement block a statement carries, in
 // place (arms in order, then the else body).
-sema_scope_members_walk_children: fn(statement: Stmt, nested: Bool, diagnostics: &[Diagnostic]) {
+sema_scope_members_walk_children: fn(statement: Stmt, nested: Bool, diagnostics: ^[Diagnostic]) {
     if statement == {
         .Switch(_, arms, else_body, _) -> {
             loop arm in arms -> sema_scope_members_walk(arm.body, nested, diagnostics)

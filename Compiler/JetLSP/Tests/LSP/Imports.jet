@@ -172,11 +172,11 @@ LSPImportsChecker: struct {
             checked
         }
 
-        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             LSPFixtureChecker{}.failure_marks(entry, overlays)
         }
 
@@ -205,7 +205,7 @@ lsp_imports_action_params: fn(uri: String, line: Int, only: String) -> String {
 // The actions of the kinds `only` for the whole of line `line`, each as
 // `title|kind|preferred|range newText` per edit. An action offered without
 // its edit is resolved for it.
-lsp_imports_actions: fn(server: &LSPServer, uri: String, line: Int, only: String) -> [String] {
+lsp_imports_actions: fn(server: ^LSPServer, uri: String, line: Int, only: String) -> [String] {
     shown := [String]{}
     loop offered in lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", lsp_imports_action_params(uri, line, only))) {
         action: if lsp_member(offered, "edit") == None -> lsp_test_result(server, "codeAction/resolve", jet_error_json_encode_value(offered)) else -> offered

@@ -15,7 +15,7 @@ ir_layout_value_type: fn(ty: Type) -> Bool Never! {
 }
 
 // The statement: the handle, named after the binding, then the body.
-ir_layout_statement: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal, label: String, body: [Int], span: Span) Never! {
+ir_layout_statement: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, handle: TLocal, label: String, body: [Int], span: Span) Never! {
     layout_ty: Type.Named{name: "Layout"}
     row: ir_value_type(m, p, layout_ty) ?? {
         _: ir_type_fail(b, span, layout_ty)
@@ -32,7 +32,7 @@ ir_layout_statement: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLoca
 }
 
 // A plain number in a layout expression: a constant LinExpr.
-ir_layout_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
+ir_layout_literal: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     number := ir_expr(m, p, b, value)
     if ir_failed(b) || number < 0 -> return -1
@@ -48,7 +48,7 @@ ir_layout_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value
 }
 
 // `a + b` / `a - b` over layout values.
-ir_layout_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
+ir_layout_binary: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     export := ""
     if op == {
         .Add -> export = "jet_rt_layout_add"
@@ -68,7 +68,7 @@ ir_layout_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TB
 
 // `a <= b` / `a >= b` / `a == b`: the Constraint (Le0/Ge1/Eq2), registered
 // with the layout its variables belong to.
-ir_layout_compare: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
+ir_layout_compare: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     code := 0
     if op == {
         .Le -> code = 0
@@ -89,7 +89,7 @@ ir_layout_compare: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: T
 }
 
 // The Layout and Constraint methods (Handle / Constraint).
-ir_layout_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+ir_layout_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     method := ""
     if operation == {
         .LayoutMethod(name) -> method = name
@@ -134,7 +134,7 @@ ir_layout_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
 
 // `layout.conflict()`: the runtime hands over the [String] buffer and its
 // length (jet_rt_layout_conflict_into), which the List header here owns.
-ir_layout_conflict: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, call_args: [Int], span: Span) -> Int Never! {
+ir_layout_conflict: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, call_args: [Int], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     out: ir_out_slot(m, b, 1)
     args := call_args
@@ -150,7 +150,7 @@ ir_layout_conflict: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, call
 
 // `.required()` / `.strong()` / `.medium()` / `.weak()`: the runtime takes
 // the constraint and returns the same shell, so a kept one is cloned first.
-ir_layout_strength: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, strength: Int, span: Span) -> Int Never! {
+ir_layout_strength: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, strength: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     constraint := ir_expr(m, p, b, receiver)
     if ir_failed(b) || constraint < 0 -> return -1

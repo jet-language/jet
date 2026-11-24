@@ -274,7 +274,7 @@ ParsedBlock: struct {
 parser_synthetic_token: fn(kind: Int, span: Span) -> Token Never! { token_synthetic(kind, span) }
 
 // A synthetic token spelled `text`, interned in the state's names.
-parser_spelled_token: fn(state: &JetParserState, kind: Int, span: Span, text: String) -> Token Never! {
+parser_spelled_token: fn(state: ^JetParserState, kind: Int, span: Span, text: String) -> Token Never! {
     name: name_intern(state.tables[0].names, text)
     token := token_synthetic(kind, span)
     token.text = name
@@ -293,7 +293,7 @@ parser_text: fn(state: JetParserState, token: Token) -> String Never! {
 }
 
 // The decoded spelling of the token `offset` tokens ahead (0 = current).
-parser_value_at: fn(state: &JetParserState, offset: Int) -> String Never! {
+parser_value_at: fn(state: ^JetParserState, offset: Int) -> String Never! {
     token: parser_lookahead(state, offset)
     parser_value(state, token)
 }
@@ -343,7 +343,7 @@ parser_text_reading: fn(state: JetParserState, token: Token, head: Bool) -> Toke
 
 // Consumes the current quoted text in the reading `head` picks
 // (parser_text_reading) and reports the diagnostics the lexer kept for it.
-parser_take_text: fn(state: &JetParserState, head: Bool) -> Token Never! {
+parser_take_text: fn(state: ^JetParserState, head: Bool) -> Token Never! {
     bumped: parser_bump(state)
     token: parser_text_reading(state, bumped, head)
     if token.literal < 0 -> return token
@@ -356,7 +356,7 @@ parser_take_text: fn(state: &JetParserState, head: Bool) -> Token Never! {
 
 // Marks the current token as the start of a typed literal's body and returns
 // the mark to restore once the body is read.
-parser_mark_head_body: fn(state: &JetParserState) -> Int Never! {
+parser_mark_head_body: fn(state: ^JetParserState) -> Int Never! {
     saved: state.head_text_at
     state.head_text_at = state.position
     saved
@@ -373,7 +373,7 @@ parser_token_decoded_is_id: fn(token: Token, id: Int) -> Bool Never! {
 // A nested state parses with its parent's tables and numbers its nodes on
 // from the parent's count; it must hand both back with
 // `parser_return_tables` before the parent reads a token again.
-parser_lend_tables: fn(state: &JetParserState, nested: &JetParserState) Never! {
+parser_lend_tables: fn(state: ^JetParserState, nested: ^JetParserState) Never! {
     nested.node_base = state.node_base
     nested.next_node = state.next_node
     nested.words = state.words
@@ -381,14 +381,14 @@ parser_lend_tables: fn(state: &JetParserState, nested: &JetParserState) Never! {
     nested.tables.push(tables)
 }
 
-parser_return_tables: fn(state: &JetParserState, nested: &JetParserState) Never! {
+parser_return_tables: fn(state: ^JetParserState, nested: ^JetParserState) Never! {
     state.next_node = nested.next_node
     tables: nested.tables.pop() ?? return
     state.tables.push(tables)
 }
 
 // The next AST NodeId of the current top-level unit.
-parser_node_id: fn(state: &JetParserState) -> Int Never! {
+parser_node_id: fn(state: ^JetParserState) -> Int Never! {
     id: state.node_base + state.next_node
     state.next_node += 1
     id
@@ -401,7 +401,7 @@ parser_node_id: fn(state: &JetParserState) -> Int Never! {
 // 2&&PARSER_NODE_UNIT_BITS nodes per source byte.
 PARSER_NODE_UNIT_BITS: 24
 
-parser_begin_node_unit: fn(state: &JetParserState, start: Int) Never! {
+parser_begin_node_unit: fn(state: ^JetParserState, start: Int) Never! {
     state.node_base = start << PARSER_NODE_UNIT_BITS
     state.next_node = 0
 }
@@ -410,7 +410,7 @@ parser_begin_node_unit: fn(state: &JetParserState, start: Int) Never! {
 // source row moves to the nested state and back instead of the whole source
 // being copied once per hole. Every exit returns both before the parent
 // reads again.
-parser_lend_hole: fn(state: &JetParserState, nested: &JetParserState) Never! {
+parser_lend_hole: fn(state: ^JetParserState, nested: ^JetParserState) Never! {
     parser_lend_tables(state, nested)
     nested.source_offset = state.source_offset
     nested.line_base = state.line_base
@@ -418,7 +418,7 @@ parser_lend_hole: fn(state: &JetParserState, nested: &JetParserState) Never! {
     nested.sources.push(source)
 }
 
-parser_return_hole: fn(state: &JetParserState, nested: &JetParserState) Never! {
+parser_return_hole: fn(state: ^JetParserState, nested: ^JetParserState) Never! {
     parser_return_tables(state, nested)
     source: nested.sources.pop() ?? return
     state.sources.push(source)
@@ -428,13 +428,13 @@ parser_is_trivia: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
 }
 
-parser_skip_trivia: fn(state: &JetParserState) Never! {
+parser_skip_trivia: fn(state: ^JetParserState) Never! {
     loop state.position >= 0 && state.position < state.tokens.len() && parser_is_trivia(state.tokens[state.position].kind) {
         state.position += 1
     }
 }
 
-parser_current: fn(state: &JetParserState) -> Token Never! {
+parser_current: fn(state: ^JetParserState) -> Token Never! {
     if state.pending_type_gt {
         return parser_synthetic_token(TOKEN_GT, Span{start: state.pending_type_gt_span.start + 1, end: state.pending_type_gt_span.end})
     }
@@ -473,7 +473,7 @@ parser_lookahead_forward: fn(state: JetParserState, start: Int, skip: Int) -> To
     parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
 }
 
-parser_lookahead: fn(state: &JetParserState, offset: Int) -> Token Never! {
+parser_lookahead: fn(state: ^JetParserState, offset: Int) -> Token Never! {
     seek_offset := offset
     if state.pending_type_gt {
         if seek_offset == 0 -> return parser_current(state)
@@ -516,7 +516,7 @@ parser_lookahead_kind_forward: fn(state: JetParserState, start: Int, skip: Int) 
     TOKEN_EOF
 }
 
-parser_current_kind: fn(state: &JetParserState) -> Int Never! {
+parser_current_kind: fn(state: ^JetParserState) -> Int Never! {
     // Keep parser_current's split-token, trivia, and EOF cursor rules.
     if state.pending_type_gt -> return TOKEN_GT
     pos := state.position
@@ -538,7 +538,7 @@ parser_current_kind: fn(state: &JetParserState) -> Int Never! {
     }
 }
 
-parser_kind_at: fn(state: &JetParserState, offset: Int) -> Int Never! {
+parser_kind_at: fn(state: ^JetParserState, offset: Int) -> Int Never! {
     if offset == 0 -> return parser_current_kind(state)
     if offset == 1 && !state.pending_type_gt {
         len: state.tokens.len()
@@ -578,7 +578,7 @@ parser_kind_at: fn(state: &JetParserState, offset: Int) -> Int Never! {
     TOKEN_EOF
 }
 
-parser_bump: fn(state: &JetParserState) -> Token Never! {
+parser_bump: fn(state: ^JetParserState) -> Token Never! {
     if state.pending_type_gt {
         token: parser_current(state)
         state.pending_type_gt = false
@@ -606,7 +606,7 @@ parser_template_paste: fn(state: JetParserState, token: Token) -> Bool Never! {
     parser_source_byte(state, token.span.start) == 35 && parser_text(state, token).starts_with("#{{")
 }
 
-parser_report_paste_outside_template: fn(state: &JetParserState, token: Token) Never! {
+parser_report_paste_outside_template: fn(state: ^JetParserState, token: Token) Never! {
     paste: parser_text(state, token)
     state.diagnostics.push(diagnostic_from_registry("E0003", Val(token.span), "`{paste}` pastes a template binding outside a template", "only a derive or marker template splices a binding's name into the code it generates", "write the name itself, or move this code into a derive or marker template"))
 }
@@ -628,7 +628,7 @@ parser_glued_paste: fn(state: JetParserState, token: Token) -> Bool Never! {
     !text.starts_with("#{{") || !text.ends_with("}}") || text.slice(2, text.len()).contains("#{{")
 }
 
-parser_report_glued_paste: fn(state: &JetParserState, token: Token) Never! {
+parser_report_glued_paste: fn(state: ^JetParserState, token: Token) Never! {
     word: parser_text(state, token)
     state.diagnostics.push(diagnostic_from_registry("E0003", Val(token.span), "`{word}` glues a paste onto letters", "a paste `#{{…}}` stands for a whole name; it never joins the letters beside it, so `pkg#1.4` and `[Int#4]` keep their meaning", "build the name as a string first, as in `method: \"get_{{field.name}}\"`, then paste `#{{method}}`"))
 }
@@ -636,7 +636,7 @@ parser_report_glued_paste: fn(state: &JetParserState, token: Token) Never! {
 // An explicit `;` stays a statement boundary but is not canonical
 // Jet. The edit replaces it with a line break when code follows on the same
 // line and deletes it otherwise.
-parser_report_explicit_semicolon: fn(state: &JetParserState, span: Span) Never! {
+parser_report_explicit_semicolon: fn(state: ^JetParserState, span: Span) Never! {
     state.explicit_semicolon_reported = true
     next_start := -1
     loop index in (state.position + 1)..<state.tokens.len() {
@@ -658,13 +658,13 @@ parser_report_explicit_semicolon: fn(state: &JetParserState, span: Span) Never! 
     state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: new_text}))
 }
 
-parser_type_close_here: fn(state: &JetParserState) -> Bool Never! {
+parser_type_close_here: fn(state: ^JetParserState) -> Bool Never! {
     if state.pending_type_gt -> return true
     kind: parser_current_kind(state)
     kind == TOKEN_GT || kind == TOKEN_SHR
 }
 
-parser_take_type_close: fn(state: &JetParserState) -> Span Never! {
+parser_take_type_close: fn(state: ^JetParserState) -> Span Never! {
     token: parser_current(state)
     if state.pending_type_gt {
         state.pending_type_gt = false
@@ -682,7 +682,7 @@ parser_take_type_close: fn(state: &JetParserState) -> Span Never! {
 
 parser_cover: fn(left: Span, right: Span) -> Span Never! { Span{start: left.start, end: right.end} }
 
-parser_add_error_code: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+parser_add_error_code: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     if parser_aborting(state) {
         return
     }
@@ -690,7 +690,7 @@ parser_add_error_code: fn(state: &JetParserState, code: String, span: Span, what
 }
 
 // A coded error with its fix edit (Rust `Diagnostic.error(…).with_edit(edit)`).
-parser_add_error_code_edit: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, edit: TextEdit) {
+parser_add_error_code_edit: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String, edit: TextEdit) {
     if parser_aborting(state) {
         return
     }
@@ -712,7 +712,7 @@ parser_deletion_edit: fn(state: JetParserState, span: Span) -> TextEdit Never! {
 
 // A fatal error: Rust returns it as the statement's or item's `Err`, so
 // nothing more is reported until the enclosing loop resynchronizes.
-parser_add_fatal_code: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
+parser_add_fatal_code: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     if parser_aborting(state) {
         return
     }
@@ -721,11 +721,11 @@ parser_add_fatal_code: fn(state: &JetParserState, code: String, span: Span, what
     state.abort_position = state.position
 }
 
-parser_add_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+parser_add_error: fn(state: ^JetParserState, span: Span, what: String, why: String, fix: String) {
     parser_add_fatal_code(state, "E0003", span, what, why, fix)
 }
 
-parser_aborting: fn(state: &JetParserState) -> Bool Never! {
+parser_aborting: fn(state: ^JetParserState) -> Bool Never! {
     if state.abort_mark == 0 -> return false
     if state.diagnostics.len() < state.abort_mark {
         state.abort_mark = 0
@@ -737,7 +737,7 @@ parser_aborting: fn(state: &JetParserState) -> Bool Never! {
 // Resume after a fatal error found inside the construct that began at token
 // index `start`: put the cursor back where the error was found, as Rust's
 // `?` leaves it. An abort from before `start` belongs to an outer loop.
-parser_take_abort: fn(state: &JetParserState, start: Int) -> Bool Never! {
+parser_take_abort: fn(state: ^JetParserState, start: Int) -> Bool Never! {
     if !parser_aborting(state) || state.abort_position < start -> return false
     state.abort_mark = 0
     state.position = state.abort_position
@@ -745,7 +745,7 @@ parser_take_abort: fn(state: &JetParserState, start: Int) -> Bool Never! {
     true
 }
 
-parser_recover_aborted_statement: fn(state: &JetParserState, start: Int) Never! {
+parser_recover_aborted_statement: fn(state: ^JetParserState, start: Int) Never! {
     if !parser_take_abort(state, start) {
         return
     }
@@ -761,11 +761,11 @@ parser_recover_aborted_statement: fn(state: &JetParserState, start: Int) Never! 
     parser_sync_stmt_from(state, open)
 }
 
-parser_recover_aborted_item: fn(state: &JetParserState, start: Int) Never! {
+parser_recover_aborted_item: fn(state: ^JetParserState, start: Int) Never! {
     if parser_take_abort(state, start) -> parser_sync_top(state)
 }
 
-parser_add_error_here: fn(state: &JetParserState, what: String, why: String, fix: String) {
+parser_add_error_here: fn(state: ^JetParserState, what: String, why: String, fix: String) {
     span: parser_current(state).span
     parser_add_error(state, span, what, why, fix)
 }
@@ -789,7 +789,7 @@ parser_describe_token: fn(state: JetParserState, token: Token) -> String Never! 
     "`{parser_text(state, token)}`"
 }
 
-parser_expect: fn(state: &JetParserState, kind: Int, context: String) -> Token {
+parser_expect: fn(state: ^JetParserState, kind: Int, context: String) -> Token {
     if parser_current_kind(state) == kind -> return parser_bump(state)
     span: parser_current(state).span
     parser_report_expected(state, context)
@@ -797,7 +797,7 @@ parser_expect: fn(state: &JetParserState, kind: Int, context: String) -> Token {
 }
 
 // The generic parse error at the current token, naming what belongs there.
-parser_report_expected: fn(state: &JetParserState, context: String) {
+parser_report_expected: fn(state: ^JetParserState, context: String) {
     token: parser_current(state)
     found: parser_describe_token(state, token)
     parser_add_error(
@@ -809,7 +809,7 @@ parser_report_expected: fn(state: &JetParserState, context: String) {
     )
 }
 
-parser_expect_name: fn(state: &JetParserState, context: String) -> Token {
+parser_expect_name: fn(state: ^JetParserState, context: String) -> Token {
     if parser_current_kind(state) == TOKEN_IDENT -> return parser_bump(state)
     token: parser_current(state)
     // Rust `expect_ident`: `in` is the source-loop keyword, never a name.
@@ -829,12 +829,12 @@ parser_expect_name: fn(state: &JetParserState, context: String) -> Token {
 }
 
 // Callables, arms and lambdas share one arrow, `->`.
-parser_at_unified_arrow: fn(state: &JetParserState) -> Bool Never! {
+parser_at_unified_arrow: fn(state: ^JetParserState) -> Bool Never! {
     kind: parser_current_kind(state)
     kind == TOKEN_UNIFIED_ARROW
 }
 
-parser_expect_unified_arrow: fn(state: &JetParserState, context: String) -> Token {
+parser_expect_unified_arrow: fn(state: ^JetParserState, context: String) -> Token {
     token: parser_current(state)
     if !parser_at_unified_arrow(state) {
         found: parser_describe_token(state, token)
@@ -889,7 +889,7 @@ parser_previous_end: fn(state: JetParserState) -> Int Never! {
 // E0083 (#3719): a delimited list cut off by the end of a line, a closer of
 // another kind, or the end of the file reports its opener, never a missing
 // separator before an invisible terminator. Returns true when it reported.
-parser_unclosed_delimiter: fn(state: &JetParserState, construct: String) -> Bool {
+parser_unclosed_delimiter: fn(state: ^JetParserState, construct: String) -> Bool {
     token: parser_current(state)
     at_line_end: token.kind == TOKEN_SEMI && token.span.start == token.span.end
     if !(at_line_end || token.kind == TOKEN_EOF || parser_is_closer(token.kind)) -> return false
@@ -917,7 +917,7 @@ parser_error_within: fn(state: JetParserState, start: Int, end: Int) -> Bool Nev
     false
 }
 
-parser_report_unclosed: fn(state: &JetParserState, opener: Token, cutoff: String, construct: String) {
+parser_report_unclosed: fn(state: ^JetParserState, opener: Token, cutoff: String, construct: String) {
     close: parser_closer_text(opener.kind)
     open: parser_text(state, opener)
     at: parser_previous_end(state)
@@ -934,7 +934,7 @@ parser_report_unclosed: fn(state: &JetParserState, opener: Token, cutoff: String
 // indentation, so the mismatch names the likely opener, and its `}` belongs
 // before the first line back at the opener's indentation. Reports nothing
 // and returns false when every such `}` sits at its opener's indentation.
-parser_report_unclosed_by_indent: fn(state: &JetParserState, open: Token) -> Bool {
+parser_report_unclosed_by_indent: fn(state: ^JetParserState, open: Token) -> Bool {
     if state.line_starts.len() == 0 || state.sources.len() == 0 || state.sources[0].len() == 0 -> return false
     openers := [Int]{}
     loop index in 0..<state.tokens.len() {
@@ -959,7 +959,7 @@ parser_report_unclosed_by_indent: fn(state: &JetParserState, open: Token) -> Boo
 }
 
 // E0083 for the `{` that a `}` left of its line closes too early.
-parser_report_misindented_close: fn(state: &JetParserState, opener: Token, close: Token, opener_start: Int, indent: Int) {
+parser_report_misindented_close: fn(state: ^JetParserState, opener: Token, close: Token, opener_start: Int, indent: Int) {
     opener_line: parser_line_number_of(state, opener.span.start)
     close_line: parser_line_number_of(state, close.span.start)
     size: parser_source_end_offset(state)
@@ -1037,11 +1037,11 @@ parser_line_indent_width: fn(state: JetParserState, line_start: Int) -> Int Neve
     end - line_start
 }
 
-parser_skip_semicolons: fn(state: &JetParserState) Never! {
+parser_skip_semicolons: fn(state: ^JetParserState) Never! {
     loop parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
 }
 
-parser_skip_synthetic_semicolons: fn(state: &JetParserState) Never! {
+parser_skip_synthetic_semicolons: fn(state: ^JetParserState) Never! {
     loop {
         if parser_current_kind(state) != TOKEN_SEMI -> break
         semi: parser_current(state)
@@ -1073,7 +1073,7 @@ parser_authored_line_break: fn(state: JetParserState, start: Int, end: Int) -> B
 // L0507: a multi-line or chained classic branch prefers one ordered arm
 // table. When the recorded parts cover the whole construct, the arm-table
 // rewrite rides along as a safe fix.
-parser_prefer_arm_table: fn(state: &JetParserState, span: Span, parts: [ParserBranchPart], diag_mark: Int) {
+parser_prefer_arm_table: fn(state: ^JetParserState, span: Span, parts: [ParserBranchPart], diag_mark: Int) {
     diagnostic: diagnostic_from_registry("L0507", Val(span), "prefer an ordered arm table for this branch", "one ordered arm table is Jet's normal form for multi-line and chained choices", "write `if {{ condition -> body else -> body }}`")
     edit: parser_arm_table_edit(state, span, parts, diag_mark)
     if edit == .Val(value) {
@@ -1282,7 +1282,7 @@ parser_prev_token_end: fn(state: JetParserState) -> Int Never! {
 
 // Undo a speculative parse: restore the cursor and drop every diagnostic,
 // block span, `else` arm and statement rule it recorded.
-parser_rewind: fn(state: &JetParserState, position: Int, diagnostics: Int, blocks: Int, else_arms: Int) {
+parser_rewind: fn(state: ^JetParserState, position: Int, diagnostics: Int, blocks: Int, else_arms: Int) {
     state.position = position
     loop state.diagnostics.len() > diagnostics -> _ := state.diagnostics.pop()
     loop state.block_spans.len() > blocks -> _ := state.block_spans.pop()
@@ -1299,7 +1299,7 @@ parser_rewind: fn(state: &JetParserState, position: Int, diagnostics: Int, block
     }
 }
 
-parser_recover_statement: fn(state: &JetParserState) Never! {
+parser_recover_statement: fn(state: ^JetParserState) Never! {
     loop {
         kind: parser_current_kind(state)
         if kind == {
@@ -1317,7 +1317,7 @@ parser_recover_statement: fn(state: &JetParserState) Never! {
 // After a failed top-level item: skip to the next plausible item start. A
 // `#run`, `#if` or `#loop` starts an item only at the start of a line; after
 // `NAME:` it is that binding's value, which goes with the skipped line.
-parser_sync_top: fn(state: &JetParserState) Never! {
+parser_sync_top: fn(state: ^JetParserState) Never! {
     loop {
         kind: parser_current_kind(state)
         if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST {
@@ -1333,9 +1333,9 @@ parser_sync_top: fn(state: &JetParserState) Never! {
 // After a failed statement: skip to just past the next `;` at this brace
 // depth, or stop before the block's closing `}`. `open` counts braces the
 // failed statement opened and left unclosed; their closers belong to it.
-parser_sync_stmt: fn(state: &JetParserState) Never! { parser_sync_stmt_from(state, 0) }
+parser_sync_stmt: fn(state: ^JetParserState) Never! { parser_sync_stmt_from(state, 0) }
 
-parser_sync_stmt_from: fn(state: &JetParserState, open: Int) Never! {
+parser_sync_stmt_from: fn(state: ^JetParserState, open: Int) Never! {
     depth := open
     loop {
         kind: parser_current_kind(state)
@@ -1350,4 +1350,4 @@ parser_sync_stmt_from: fn(state: &JetParserState, open: Int) Never! {
     }
 }
 
-parser_type_gt_span: fn(state: &JetParserState) -> Span Never! { parser_take_type_close(state) }
+parser_type_gt_span: fn(state: ^JetParserState) -> Span Never! { parser_take_type_close(state) }

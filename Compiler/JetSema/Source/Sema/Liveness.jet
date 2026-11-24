@@ -70,7 +70,7 @@ SemaLivenessResult: struct {
     facts: [StructureFact],
 }
 
-sema_liveness_verdict: fn(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
+sema_liveness_verdict: fn(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: ^[SemaLivenessVerdict]) Never! {
     verdicts.push(
         SemaLivenessVerdict{
             code: code,
@@ -84,7 +84,7 @@ sema_liveness_verdict: fn(code: String, name: String, source: String, span: Span
 // with the rename to `_name` as its edit, among the module's diagnostics.
 // Each such lint becomes the binding's `unused` fact; its name is the edit's
 // text past the `_` the rename adds.
-sema_liveness_unused_bindings: fn(diagnostics: [Diagnostic], source: String, verdicts: &[SemaLivenessVerdict]) Never! {
+sema_liveness_unused_bindings: fn(diagnostics: [Diagnostic], source: String, verdicts: ^[SemaLivenessVerdict]) Never! {
     loop diagnostic in diagnostics {
         if diagnostic.code != "L0101" -> next
         span: diagnostic.span ?? next
@@ -102,7 +102,7 @@ sema_liveness_unused_bindings: fn(diagnostics: [Diagnostic], source: String, ver
     }
 }
 
-sema_liveness_located: fn(diagnostic: &&Diagnostic?, segments: [SemaSourceSegment]) -> Diagnostic? Never! {
+sema_liveness_located: fn(diagnostic: ^^Diagnostic?, segments: [SemaSourceSegment]) -> Diagnostic? Never! {
     found: diagnostic ?? return None
     Val(sema_diagnostic_with_source_location(found, segments))
 }
@@ -119,7 +119,7 @@ sema_liveness_member_owner: fn(program: Program, alias: String) -> Bool Never! {
     false
 }
 
-sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], source: String, verdicts: &[SemaLivenessVerdict]) {
+sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], source: String, verdicts: ^[SemaLivenessVerdict]) {
     loop declaration in program.imports {
         if declaration.is_pub || declaration.is_package_pub -> next
         if declaration.kind == {
@@ -177,7 +177,7 @@ sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], so
     }
 }
 
-sema_liveness_note_import: fn(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit?, verdicts: &[SemaLivenessVerdict]) Never! {
+sema_liveness_note_import: fn(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit?, verdicts: ^[SemaLivenessVerdict]) Never! {
     if name == "" || name.starts_with("_") || span.start >= span.end {
         return
     }
@@ -218,7 +218,7 @@ SemaLivenessCandidates: struct {
     reached: [Bool],
 }
 
-sema_liveness_add_candidate: fn(candidates: &SemaLivenessCandidates, id: SymbolID, candidate: &&SemaLivenessCandidate) Never! {
+sema_liveness_add_candidate: fn(candidates: ^SemaLivenessCandidates, id: SymbolID, candidate: ^^SemaLivenessCandidate) Never! {
     if candidates.ids.get(id.id) == .Val(row) {
         candidates.rows[row] = candidate.move()
         return
@@ -260,7 +260,7 @@ sema_liveness_removable: fn(function: Func) -> Bool Never! {
 }
 
 // `caller_key` is the calling body's key ("" when unknown).
-sema_liveness_note_site: fn(candidates: &SemaLivenessCandidates, graph: SemaRegistrationGraph, source_index: Int, id: SymbolID, site: Span, caller_key: String) Never! {
+sema_liveness_note_site: fn(candidates: ^SemaLivenessCandidates, graph: SemaRegistrationGraph, source_index: Int, id: SymbolID, site: Span, caller_key: String) Never! {
     row: candidates.ids.get(id.id) ?? return
     candidate: candidates.rows[row]
     if source_index == candidate.module_index {
@@ -404,14 +404,14 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
     result
 }
 
-sema_liveness_unreachable_export: fn(name: String, source: String, span: Span, verdicts: &[SemaLivenessVerdict]) {
+sema_liveness_unreachable_export: fn(name: String, source: String, span: Span, verdicts: ^[SemaLivenessVerdict]) {
     diagnostic: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; a library's public items remain open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
     sema_liveness_verdict("L0105", name, source, span, "package export is unreachable", diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "_{name}"}), verdicts)
 }
 
 // `pub(package) use m.[name]` is reached when another module of the package
 // imports `name` through this module.
-sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_index: Int, verdicts: &[SemaLivenessVerdict]) {
+sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_index: Int, verdicts: ^[SemaLivenessVerdict]) {
     module_row: graph.modules[module_index]
     loop import in module_row.imports {
         if !import.declaration.is_package_pub -> next
@@ -511,7 +511,7 @@ SemaLivenessMemberUses: struct {
 }
 
 // Adds each spelling of `from` to `into`.
-sema_liveness_merge: fn(into: &NameTable, from: NameTable) Never! {
+sema_liveness_merge: fn(into: ^NameTable, from: NameTable) Never! {
     loop text in from.texts -> _ := name_intern(into, text)
 }
 
@@ -528,7 +528,7 @@ sema_liveness_application: fn(graph: SemaRegistrationGraph) -> String? Never! {
 }
 
 // Each named type `ty` holds, by last name segment.
-sema_liveness_type_names: fn(ty: Type, names: &NameTable) -[Mem.Alloc]> Never! {
+sema_liveness_type_names: fn(ty: Type, names: ^NameTable) -[Mem.Alloc]> Never! {
     if ty == {
         .Named(name) -> { _ := name_intern(names, sema_call_reflection_leaf_name(name)) }
         .Apply(name, args) -> {
@@ -553,20 +553,20 @@ sema_liveness_type_names: fn(ty: Type, names: &NameTable) -[Mem.Alloc]> Never! {
 }
 
 // The types node `id`'s checked type holds.
-sema_liveness_node_type_names: fn(interner: Interner, type_delta: [InternerDelta], tree: BodyTree, id: Int, names: &NameTable) -[Mem.Alloc]> Never! {
+sema_liveness_node_type_names: fn(interner: Interner, type_delta: [InternerDelta], tree: BodyTree, id: Int, names: ^NameTable) -[Mem.Alloc]> Never! {
     tid: checked_expr_type_id(tree.expr_types, id) ?? return
     ty: if type_delta.len() > 0 -> delta_type_syntax(interner, type_delta[0], tid) else -> type_syntax(interner, tid)
     sema_liveness_type_names(ty, names)
 }
 
-sema_liveness_note_field: fn(field: TFieldRef, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_note_field: fn(field: TFieldRef, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if field.owner == .Val(owner) -> _ := name_intern(uses.fields, "{owner.id}:{field.name}") else {
         _ := name_intern(uses.field_names, field.name)
     }
 }
 
 // A pattern reads the fields it names; matching a case builds nothing.
-sema_liveness_pattern_uses: fn(shape: BodyPatternShape, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_pattern_uses: fn(shape: BodyPatternShape, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if shape == {
         .Struct(fields, _) -> {
             loop field in fields {
@@ -601,7 +601,7 @@ sema_liveness_pattern_uses: fn(shape: BodyPatternShape, uses: &SemaLivenessMembe
     }
 }
 
-sema_liveness_condition_uses: fn(condition: BodyIfCond, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_condition_uses: fn(condition: BodyIfCond, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if condition == {
         .Plain(_) -> {}
         .And(left, right) -> {
@@ -615,7 +615,7 @@ sema_liveness_condition_uses: fn(condition: BodyIfCond, uses: &SemaLivenessMembe
 // A compile-time value builds the cases it holds; a `T.reflect()` record
 // reflects `T`, and a FieldInfo row (`T.reflect().fields`, folded without
 // its TypeInfo) reads the field it names and reflects the field's type.
-sema_liveness_comptime_uses: fn(value: TComptimeValue, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_comptime_uses: fn(value: TComptimeValue, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if value == {
         .Enum(type_name, variant, args) -> {
             _ := name_intern(uses.case_names, "{sema_call_reflection_leaf_name(type_name)}.{variant}")
@@ -659,7 +659,7 @@ sema_liveness_compares: fn(op: TBinaryOp) -> Bool Never! {
 // A type handed to generic code is read and built there: generic code reads
 // a value through its contracts (equality, hashing, encoding) and builds one
 // through them (decoding, a default).
-sema_liveness_generic_uses: fn(type_args: [Type], uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_generic_uses: fn(type_args: [Type], uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     loop ty in type_args {
         sema_liveness_type_names(ty, uses.read_types)
         sema_liveness_type_names(ty, uses.built_types)
@@ -671,7 +671,7 @@ sema_liveness_keyed: fn(operation: TClosureOp) -> Bool Never! {
     operation == .SortBy || operation == .SortByDesc || operation == .TrySortBy || operation == .TrySortByDesc || operation == .MinBy || operation == .MaxBy || operation == .ListMinMaxBy || operation == .ListBinarySearchBy || operation == .IsSortedBy || operation == .GroupBy || operation == .CountBy || operation == .DedupBy
 }
 
-sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: &SemaLivenessMemberUses, type_delta: [InternerDelta]{[InternerDelta]{}}) -[Mem.Alloc]> Never! {
+sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: ^SemaLivenessMemberUses, type_delta: [InternerDelta]{[InternerDelta]{}}) -[Mem.Alloc]> Never! {
     tree: function.tree
     has_delta: type_delta.len() > 0
     // A plain assignment's target is written, not read; `+=` reads it.
@@ -822,7 +822,7 @@ sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: &
 // A type read or built with every member reads or builds the types its
 // fields and cases hold, and an alias the type it names: comparing,
 // encoding, reflecting or handing a value to foreign code reaches them too.
-sema_liveness_member_closure: fn(graph: SemaRegistrationGraph, types: &NameTable) -[Mem.Alloc]> Never! {
+sema_liveness_member_closure: fn(graph: SemaRegistrationGraph, types: ^NameTable) -[Mem.Alloc]> Never! {
     grew := true
     loop grew {
         before: name_count(types)
@@ -847,7 +847,7 @@ sema_liveness_member_closure: fn(graph: SemaRegistrationGraph, types: &NameTable
     }
 }
 
-sema_liveness_member_uses_merge: fn(into: &SemaLivenessMemberUses, part: SemaLivenessMemberUses) {
+sema_liveness_member_uses_merge: fn(into: ^SemaLivenessMemberUses, part: SemaLivenessMemberUses) {
     sema_liveness_merge(into.fields, part.fields)
     sema_liveness_merge(into.field_names, part.field_names)
     loop (id, _) in part.cases -> into.cases[id] = true
@@ -857,7 +857,7 @@ sema_liveness_member_uses_merge: fn(into: &SemaLivenessMemberUses, part: SemaLiv
     if part.program_index -> into.program_index = true
 }
 
-sema_liveness_member_uses_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], markers: NameTable, bounds: [Int], from: Int, workers: Int, parts: &[SemaLivenessMemberUses?]) {
+sema_liveness_member_uses_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], markers: NameTable, bounds: [Int], from: Int, workers: Int, parts: ^[SemaLivenessMemberUses?]) {
     if from >= workers - 1 {
         parts[from] = Val(sema_liveness_member_uses_range(graph, modules, markers, bounds[from], bounds[from + 1]))
         return
@@ -1061,7 +1061,7 @@ sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [Sema
 // `target.marker(T)` and `T.reflect().uses` read; and a type a marker or
 // derive marks, which that template and those records reflect. Every field
 // counts as read and every case as built.
-sema_liveness_whole_type_uses: fn(type_name: String, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_whole_type_uses: fn(type_name: String, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     _ := name_intern(uses.read_types, type_name)
     _ := name_intern(uses.built_types, type_name)
 }
@@ -1070,7 +1070,7 @@ sema_liveness_whole_type_uses: fn(type_name: String, uses: &SemaLivenessMemberUs
 // and hear each call's arguments as the values they encode, so the types its
 // parameters and result hold count as read and built, as a type the marker
 // marks does.
-sema_liveness_marked_signature_uses: fn(function: Func, markers: NameTable, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+sema_liveness_marked_signature_uses: fn(function: Func, markers: NameTable, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if !sema_liveness_carries_marker(function.markers, [NamedSpan]{}, markers) -> return
     loop parameter in function.params {
         sema_liveness_type_names(parameter.ty, uses.read_types)
@@ -1136,7 +1136,7 @@ sema_liveness_carries_marker: fn(type_markers: [Marker], derives: [NamedSpan], m
     false
 }
 
-sema_liveness_unused_members: fn(graph: SemaRegistrationGraph, module_index: Int, application: String?, uses: SemaLivenessMemberUses, verdicts: &[SemaLivenessVerdict]) -[Mem.Alloc]> Never! {
+sema_liveness_unused_members: fn(graph: SemaRegistrationGraph, module_index: Int, application: String?, uses: SemaLivenessMemberUses, verdicts: ^[SemaLivenessVerdict]) -[Mem.Alloc]> Never! {
     // The program's own compiler index reflects every member.
     if uses.program_index {
         return

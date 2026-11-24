@@ -39,7 +39,7 @@ sema_lint_allowance_name: fn(marker: Marker) -> String? Never! {
     None
 }
 
-sema_lint_allowance_push: fn(markers: [Marker], target: Span, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowance_push: fn(markers: [Marker], target: Span, segments: [SemaSourceSegment], allowances: ^[SemaLintAllowance]) Never! {
     loop marker in markers {
         lint: sema_lint_allowance_name(marker) ?? next
         location: sema_source_location_at(segments, target) ?? next
@@ -47,13 +47,13 @@ sema_lint_allowance_push: fn(markers: [Marker], target: Span, segments: [SemaSou
     }
 }
 
-sema_lint_allowance_functions: fn(functions: [Func], segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowance_functions: fn(functions: [Func], segments: [SemaSourceSegment], allowances: ^[SemaLintAllowance]) Never! {
     loop function in functions {
         sema_lint_allowance_push(function.markers, function.span, segments, allowances)
     }
 }
 
-sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowances: ^[SemaLintAllowance]) Never! {
     if item == {
         .Func(function) -> {
             sema_lint_allowance_push(function.markers, function.span, segments, allowances)
@@ -92,7 +92,7 @@ sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowanc
 
 // Every allowance a module's program writes: the statement rung is the
 // parser's applied rule with its statement target.
-sema_lint_allowances: fn(program: Program, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowances: fn(program: Program, segments: [SemaSourceSegment], allowances: ^[SemaLintAllowance]) Never! {
     loop application in program.applied_rules {
         if application.site != Val(RuleSite.Statement) -> next
         target: application.target ?? next

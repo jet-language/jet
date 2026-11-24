@@ -12,14 +12,14 @@ Bucket: struct {
     by_name: [String:Int],
 }
 
-extract_owner: fn(holder: &&Holder) -> Shared<Int> { return holder.owner }
+extract_owner: fn(holder: ^^Holder) -> Shared<Int> { return holder.owner }
 
-append_then_fail: fn(values: &[Int], value: Int) -> Int? Err! {
+append_then_fail: fn(values: ^[Int], value: Int) -> Int? Err! {
     values.push(value)
     return Err("expected failure")
 }
 
-make_counter: fn(owner: &&Shared<Int>) -> fn(Int) -> Int {
+make_counter: fn(owner: ^^Shared<Int>) -> fn(Int) -> Int {
     bucket := Bucket{values: [Int]{}, by_name: [String:Int]{}}
     return fn(value: Int) {
         failure: append_then_fail(bucket.values, value) ?? -value
@@ -28,14 +28,14 @@ make_counter: fn(owner: &&Shared<Int>) -> fn(Int) -> Int {
     }
 }
 
-take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
+take_once: fn(owner: ^^Shared<Int>) -> Shared<Int> {
     callback: fn() -> Shared<Int> {
         owner
     }
     return callback()
 }
 
-replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
+replace_then_take: fn(owner: ^^Shared<Int>) -> Shared<Int> {
     current := owner.move()
     callback: fn() -> Shared<Int> {
         current = Shared{13}
@@ -44,7 +44,7 @@ replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
     return callback()
 }
 
-take_captured_first: fn(pair: &&SharedPair) -> Shared<Int> {
+take_captured_first: fn(pair: ^^SharedPair) -> Shared<Int> {
     callback: fn() -> Shared<Int> {
         pair.first
     }
@@ -67,7 +67,7 @@ snapshot_scope: fn(escaped: Shared<Int>) {
     print(snapshot_copy.value())
 }
 
-counter_scope: fn(live: &&Shared<Int>, escaped: Shared<Int>) {
+counter_scope: fn(live: ^^Shared<Int>, escaped: Shared<Int>) {
     counter: make_counter(live)
     alias: counter.copy()
     print(counter(1))

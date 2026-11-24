@@ -268,7 +268,7 @@ ExecutableLeaseProtocol: struct {
         self.recover_sweep_containers(protected, preserve_containers)
     }
 
-    recover_collect_live: fn(self, records: String, protected: &[String], preserve_containers: &Bool) -[FS, Env]> IOError! {
+    recover_collect_live: fn(self, records: String, protected: ^[String], preserve_containers: ^Bool) -[FS, Env]> IOError! {
         entries: files.list_dir(records)
         loop entry in entries {
             name: entry.name
@@ -314,7 +314,7 @@ ExecutableLeaseProtocol: struct {
         }
     }
 
-    recover_reclaim_records: fn(self, records: String, protected: &[String], preserve_containers: &Bool) -[FS, Env]> IOError! {
+    recover_reclaim_records: fn(self, records: String, protected: ^[String], preserve_containers: ^Bool) -[FS, Env]> IOError! {
         entries: files.list_dir(records)
         loop entry in entries {
             name: entry.name
@@ -887,7 +887,7 @@ store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
 // then delete it. Unix keeps the kernel claim through the namespace move;
 // Windows denies replacing a directory while its lock marker is open, so the
 // claim ends first (the outer Hangar lock keeps producers out of that gap).
-store_lease_reclaim_container: fn(path: String, leases: String, live_lock: &&RuntimeLock) -[FS, Env, Rand]> Bool Never! {
+store_lease_reclaim_container: fn(path: String, leases: String, live_lock: ^^RuntimeLock) -[FS, Env, Rand]> Bool Never! {
     token: store_lease_random_id(8) ?? return false
     quarantine: files.join(leases, ".reclaiming-{sys.pid()}-{token}")
     if store_lease_quarantine(path, quarantine, leases, live_lock) == {
@@ -914,7 +914,7 @@ LeaseQuarantine: enum {
 
 // Rename `path` to `quarantine` and sync `leases` while the live claim is
 // held (released first on Windows); the claim ends when this returns.
-store_lease_quarantine: fn(path: String, quarantine: String, leases: String, live_lock: &&RuntimeLock) -[FS, Env]> LeaseQuarantine Never! {
+store_lease_quarantine: fn(path: String, quarantine: String, leases: String, live_lock: ^^RuntimeLock) -[FS, Env]> LeaseQuarantine Never! {
     if sys.is_windows() -> close(live_lock)
     if files.rename(path, quarantine) == .Err(_) -> return LeaseQuarantine.NotMoved
     // Publish the quarantine name before deleting anything: an interrupted

@@ -17,11 +17,11 @@ warm: fn(n: Int) { total(n, n).drop("only warms the cache") }
 twice: fn(n: Int) -> Int { n * 2 }
 
 // Quiet: a last line calling a unit `Never!` function succeeds with unit.
-leave: fn(counter: &Counter) Never! {
+leave: fn(counter: ^Counter) Never! {
     if counter.hits > 0 -> counter.hits -= 1
 }
 
-leave_twice: fn(counter: &Counter) {
+leave_twice: fn(counter: ^Counter) {
     leave(counter)
     leave(counter)
 }

@@ -51,7 +51,7 @@ IRBranchJoinFunction: struct {
 // The functions of the IR builder source `text` from the file at `path`. A
 // function starts at a top-level `ir_…: fn(` line and runs to the next
 // top-level line.
-ir_branch_join_functions: fn(path: String, text: String, out: &[IRBranchJoinFunction]) {
+ir_branch_join_functions: fn(path: String, text: String, out: ^[IRBranchJoinFunction]) {
     name := ""
     start := 0
     signature := ""
@@ -169,11 +169,11 @@ ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBran
 
 #Test("the branch ownership census reports a branch that skips the join, and a stale row") {
     source: [String]{
-        `ir_lowered: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCond, span: Span) -> Int Never! {`,
+        `ir_lowered: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, condition: BodyIfCond, span: Span) -> Int Never! {`,
         `    ir_expr(m, p, b, 0)`,
         `}`,
         "",
-        `ir_joined: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {`,
+        `ir_joined: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, body: [Int]) Never! {`,
         `    before: ir_own_states(b, b.bindings.len())`,
         `    ir_open_if(b.f, 1, b.line)`,
         `    ir_stmts(m, p, b, body)`,
@@ -181,7 +181,7 @@ ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBran
         `    ir_meet_paths(m, b, 1, before, false, false)`,
         `}`,
         "",
-        `ir_skipped: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, test: Int) Never! {`,
+        `ir_skipped: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, test: Int) Never! {`,
         `    ir_open_if(b.f, test, b.line)`,
         `    ir_else(b.f, b.line) // ir_stmts(m, p, b, body) in a comment is no call`,
         `    _: ir_lowered(m, p, b, BodyIfCond.Plain(0), span)`,
@@ -189,7 +189,7 @@ ir_branch_join_problems: fn(functions: [IRBranchJoinFunction], reviewed: [IRBran
         `    _: ir_expr(m, p, b, 0)`,
         `}`,
         "",
-        `ir_constant: fn(m: &IRModule, b: &IRBuilder, test: Int) Never! {`,
+        `ir_constant: fn(m: ^IRModule, b: ^IRBuilder, test: Int) Never! {`,
         `    ir_open_if(b.f, test, b.line)`,
         `    _: ir_runtime(m, b, "jet_x", [Int]{}, -1)`,
         `    ir_end(b.f, b.line)`,

@@ -140,11 +140,11 @@ sema_call_rules_hear: fn(
     receiver_span: Span,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
-    scopes: &SemaScopeTable,
-    state: &SemaOwnershipState,
-    tail_store: &SemaStatementTailStore,
-    context: &SemaCheckContext,
-    diagnostics: &[Diagnostic],
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
 ) -> SemaCallRuleHearing {
     hearing := SemaCallRuleHearing{from: context.comptime_body_sources.len()}
     owner: sema_scope_function_owner_key(scopes)
@@ -178,7 +178,7 @@ sema_call_rules_hear: fn(
 // so the call waits on its rules with the errors held back (a rejection
 // replaces them, and the recheck after the run reports them otherwise);
 // false after the held diagnostics are pushed.
-sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: &&[Diagnostic], context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: ^^[Diagnostic], context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if sema_has_error_since(held, 0) {
         loop row in hearing.from..<context.comptime_body_sources.len() {
             if context.comptime_body_sources[row].rule != None -> context.comptime_body_sources[row].rule_held = true
@@ -191,7 +191,7 @@ sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: &&[Diagnostic], con
 
 // Stages one rule's site at a call: the rule's marker value and the call's
 // row, which the driver's batch of the rule hears (sema_call_rule_batches).
-sema_call_rule_stage: fn(context: &SemaCheckContext, environment: SemaScopeEnvironment, owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
+sema_call_rule_stage: fn(context: ^SemaCheckContext, environment: SemaScopeEnvironment, owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
     destination_key: sema_comptime_body_destination_key(owner, rule.span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
     if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
@@ -235,10 +235,10 @@ sema_rule_call_value: fn(
     owner: String,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
-    scopes: &SemaScopeTable,
-    state: &SemaOwnershipState,
-    tail_store: &SemaStatementTailStore,
-    context: &SemaCheckContext,
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
 ) -> SemaCallRuleHeard {
     file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
     caller: sema_rule_identity(graph, owner, context.rule_identities)
@@ -286,7 +286,7 @@ SemaRuleIdentities: struct {
 // and kept in `known`: every heard call of a body names the body as its
 // caller, and its calls of one callee name that callee. A body names few,
 // so a key is found by a scan.
-sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: &SemaRuleIdentities) -> String {
+sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: ^SemaRuleIdentities) -> String {
     loop (index, written) in known.keys {
         if written == key -> return "{known.identities[index]}"
     }
@@ -300,7 +300,7 @@ sema_rule_identity: fn(graph: SemaRegistrationGraph, key: String, known: &SemaRu
 // no type expected, or, when that fails on a type name (`Checkout`,
 // `Box<Int>`), its check where the prelude `Type` is expected, which makes
 // it that type's `Type` value.
-sema_rule_probe: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> TExpr? {
+sema_rule_probe: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> TExpr? {
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(expression, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
     if probed != None || sema_module_no_prelude(environment, program) -> return probed
@@ -333,7 +333,7 @@ sema_rule_function_named: fn(expression: Expr, span: Span, environment: SemaScop
 // build knows as `known` and which names the function `function` (a
 // FunctionInfo), to `heard`; its type is the TypeId the one maker makes in
 // `graph`.
-sema_rule_call_arg: fn(heard: &SemaCallRuleHeard, label: &&String?, ty: Type, known: TComptimeValue?, function: &&TComptimeValue?, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) Never! {
+sema_rule_call_arg: fn(heard: ^SemaCallRuleHeard, label: ^^String?, ty: Type, known: TComptimeValue?, function: ^^TComptimeValue?, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment) Never! {
     written := 0
     if label.move() == .Val(text) {
         heard.texts.push(text.move())
@@ -545,7 +545,7 @@ sema_rule_known_written: fn(graph: SemaRegistrationGraph, module_index: Int, exp
 
 // A heard `Path{…}` argument, known when its text is: the built-in Path
 // keeps that text, only turning `\` into `/` (Path.from).
-sema_rule_known_path: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> TComptimeValue? {
+sema_rule_known_path: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> TComptimeValue? {
     if expression == .TypedLit(_, body, _, _) {
         if body == .Value(value) {
             probe_diagnostics := [Diagnostic]{}
@@ -749,7 +749,7 @@ sema_rule_dyn_entry: fn(key: String, tree: TComptimeValue) -> TComptimeValue Nev
 // lint and a `.Report` one no diagnostic, and neither replaces the call's
 // checks. A finding whose code is the compiler's own takes its registry row,
 // a package's code is reported as written (jet_driver_build_findings).
-sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if answer == .Present(inner) -> return sema_call_rule_rejects(inner, fallback, diagnostics)
     if answer == .Struct(type_name, fields) {
         if type_name != "CompilerRejection" -> return false
@@ -809,7 +809,7 @@ SemaCallRuleBatchSite: struct {
 // declaring module and marker), in the order the sites were met, each
 // appended to `sources` as one item. Each site's marker value and call row
 // move into its batch's columns; the other sources stay as they are.
-sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: &[SemaComptimeBodySource], pass: Int, sources: &[SemaComptimeItemSource]) -> [SemaCallRuleBatch] {
+sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptimeBodySource], pass: Int, sources: ^[SemaComptimeItemSource]) -> [SemaCallRuleBatch] {
     batches := [SemaCallRuleBatch]{}
     loop index in 0..<pending.len() {
         site: pending[index].rule ?? next
@@ -868,7 +868,7 @@ SEMA_CALL_RULE_TEXT_WORDS: [Int]{1, 2, 3, 4, 7}
 // Moves one staged site's marker value and call row into `columns`,
 // renumbering the row's own text, type, value and function indices into
 // the batch's.
-sema_call_rule_columns_add: fn(columns: &SemaCallRuleColumns, staged: &&SemaComptimeRuleSite?) Never! {
+sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComptimeRuleSite?) Never! {
     site: staged.move() ?? return
     rule := 0
     loop rule < columns.rules.len() && columns.rules[rule] != site.value -> rule += 1
@@ -898,7 +898,7 @@ sema_call_rule_columns_add: fn(columns: &SemaCallRuleColumns, staged: &&SemaComp
 // Renumbers the argument words at `at` of a call row by its texts' and
 // types' batch indices, its values starting at `values` and its functions
 // at `functions` in the batch's.
-sema_call_rule_columns_arg: fn(words: &[Int], at: Int, texts: [Int], types: [Int], values: Int, functions: Int) Never! {
+sema_call_rule_columns_arg: fn(words: ^[Int], at: Int, texts: [Int], types: [Int], values: Int, functions: Int) Never! {
     if words[at] > 0 -> words[at] = texts[words[at] - 1] + 1
     words[at + 1] = types[words[at + 1]]
     if words[at + 2] > 0 -> words[at + 2] = words[at + 2] + values
@@ -907,7 +907,7 @@ sema_call_rule_columns_arg: fn(words: &[Int], at: Int, texts: [Int], types: [Int
 
 // The index of a TypeId among the batch's types: a batch's arguments have
 // few types, so one is found by a scan.
-sema_call_rule_columns_type: fn(columns: &SemaCallRuleColumns, ty: &&TComptimeValue) -> Int Never! {
+sema_call_rule_columns_type: fn(columns: ^SemaCallRuleColumns, ty: ^^TComptimeValue) -> Int Never! {
     loop (index, known) in columns.types {
         if known == ty -> return index
     }
@@ -917,7 +917,7 @@ sema_call_rule_columns_type: fn(columns: &SemaCallRuleColumns, ty: &&TComptimeVa
 
 // A rule's batch item, in the rule's own module, holding the batch's
 // columns as prepared locals.
-sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRuleBatch, pass: Int, columns: &&SemaCallRuleColumns) -> SemaComptimeItemSource {
+sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRuleBatch, pass: Int, columns: ^^SemaCallRuleColumns) -> SemaComptimeItemSource {
     file := ""
     if sema_registration_module_index(graph, batch.module_identity) == .Val(row) -> file = "{graph.modules[row].source_file}"
     marker: Type.Named{name: batch.marker}
@@ -993,7 +993,7 @@ sema_call_rule_arg_text: fn(at: String) -> String Never! {
 // batches' own values: the batch's answer at the call's place, or, when the
 // batch has no answer for every call, a failure, which rejects nothing.
 // True when an answer is a rejection, which the recheck reports.
-sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: &[SemaComptimeItemValue]) -> Bool Never! {
+sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: ^[SemaComptimeItemValue]) -> Bool Never! {
     if batches.len() == 0 -> return false
     rejected := false
     landed := [Bool]{}
@@ -1027,7 +1027,7 @@ sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: &[SemaComp
 // One batch's answers landed as its sites' values (in reverse, as the rows
 // around them are); true when one is a rejection of any tier (a `None`
 // answer or a failure is none).
-sema_call_rule_batch_land: fn(batch: SemaCallRuleBatch, answers: &[TComptimeValue], values: &[SemaComptimeItemValue]) -> Bool Never! {
+sema_call_rule_batch_land: fn(batch: SemaCallRuleBatch, answers: ^[TComptimeValue], values: ^[SemaComptimeItemValue]) -> Bool Never! {
     whole: answers.len() == batch.sites.len()
     rejected := false
     index := batch.sites.len()

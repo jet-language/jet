@@ -74,7 +74,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -109,13 +109,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -127,7 +127,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
@@ -147,7 +147,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
 
 // The pixel (x, y) of `buffer` as red, green, blue and alpha, decoded by
 // the format the window gave the buffer.
-fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
+fake_pixel: fn(f: ^Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
     if buffer.pool >= f.fds.len() || x >= buffer.width || y >= buffer.height {
         fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
         return [U8]{}
@@ -169,7 +169,7 @@ fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
 
 // A commit of the window's surface: its frame callbacks are done, and a
 // new buffer is a frame to look at.
-fake_commit: fn(f: &Fake) -[Env, FS]> {
+fake_commit: fn(f: ^Fake) -[Env, FS]> {
     f.commits += 1
     callbacks: f.callbacks.copy()
     f.callbacks = [Int]{}
@@ -214,7 +214,7 @@ fake_commit: fn(f: &Fake) -[Env, FS]> {
     f.phase = 2
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, FS]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, FS]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -300,7 +300,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, FS]> {
     }
 }
 
-fake_dispatch: fn(f: &Fake) -[Env, FS]> {
+fake_dispatch: fn(f: ^Fake) -[Env, FS]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

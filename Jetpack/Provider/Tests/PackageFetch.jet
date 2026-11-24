@@ -4,9 +4,9 @@ use {
 }
 
 #Test("fetch capability digest is package then signature ordered and excludes release headers") {
-    first: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 1.0.0\nz: fn(v: &Value)\na: fn() Int\n") ?? panic("snapshot")
+    first: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 1.0.0\nz: fn(v: ^Value)\na: fn() Int\n") ?? panic("snapshot")
     second: pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 2.0.0\nread: fn(v: Value)\n") ?? panic("snapshot")
-    assert_eq(pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first, second}), "a\nread: fn(v: Value)\n--\nb\na: fn() Int\nz: fn(v: &Value)")
+    assert_eq(pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first, second}), "a\nread: fn(v: Value)\n--\nb\na: fn() Int\nz: fn(v: ^Value)")
     assert(pkg_capability_snapshot_parse("api_version = nope\npackage = a\npublished_version = 1\n") == None)
     assert(pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 1\nunknown\n") == None)
     assert(pkg_capability_snapshot_parse("api_version = -1\npackage = a\npublished_version = 1\n") == None)

@@ -185,7 +185,7 @@ cli_coverage_unique: fn(packages: [CoveragePackage], bucket: CoverageBucket?) ->
 
 // The bucket's packages in identity order, each recorded in `assigned`. A
 // package outside the inventory or already in another bucket is an error.
-cli_coverage_assign: fn(packages: [CoveragePackage], bucket: CoverageBucket, inventory: [CoveragePackage], assigned: &[{package: CoveragePackage, bucket: CoverageBucket}]) -> [CoveragePackage] CoverageError! {
+cli_coverage_assign: fn(packages: [CoveragePackage], bucket: CoverageBucket, inventory: [CoveragePackage], assigned: ^[{package: CoveragePackage, bucket: CoverageBucket}]) -> [CoveragePackage] CoverageError! {
     unique: cli_coverage_unique(packages, Val(bucket))
     loop package in unique {
         if !inventory.contains(package) {

@@ -24,16 +24,16 @@ leaf: fn(token: Int) -> HostValue Never! {
     HostValue.Leaf{carrier: Carrier{owner: TokenOwner{token: token}, adopted: false}}
 }
 
-adopt: fn(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
+adopt: fn(value: ^HostValue, path: [Int], position: Int) -> Bool Never! {
     if position >= path.len() {
-        if &value == .Leaf(carrier) {
+        if ^value == .Leaf(carrier) {
             if carrier.adopted -> return false
             carrier.adopted = true
             return true
         }
         return false
     }
-    if &value == .List(values) {
+    if ^value == .List(values) {
         index: path[position]
         if index < 0 || index >= values.len() -> return false
         return adopt(values[index], path, position + 1)

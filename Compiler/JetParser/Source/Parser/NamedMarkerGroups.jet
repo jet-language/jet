@@ -108,7 +108,7 @@ marker_group_token_range: fn(tokens: [Token], tables: TokenTables, start: Int) -
     Val(MarkerGroupTokenRange{name: token_decoded(tables, tokens[start]), start: head + 4, end: end, stop: stop})
 }
 
-marker_group_namespace_advance: fn(scope: &MarkerGroupNamespace, tokens: [Token], tables: TokenTables, index: Int) Never! {
+marker_group_namespace_advance: fn(scope: ^MarkerGroupNamespace, tokens: [Token], tables: TokenTables, index: Int) Never! {
     if tokens[index].kind == TOKEN_LBRACE {
         previous := String?{None}
         if index >= 3 && tokens[index - 1].kind == TOKEN_KW_MODULE && tokens[index - 2].kind == TOKEN_COLON && tokens[index - 3].kind == TOKEN_IDENT {
@@ -222,7 +222,7 @@ marker_group_expandable: fn(group: NamedMarkerGroupTokens, local: [NamedMarkerGr
 // Tokens from another lexed source carry table-local IDs. Preserve the old
 // self-contained-payload behavior by importing every referenced fact, including
 // nested interpolation tokens, into the destination table before insertion.
-marker_group_rebase_token: fn(token: Token, source: TokenTables, tables: &TokenTables) -> Token Never! {
+marker_group_rebase_token: fn(token: Token, source: TokenTables, tables: ^TokenTables) -> Token Never! {
     value := token
     value.text = name_intern(tables.names, name_text(source.names, token.text))
     value.decoded = name_intern(tables.names, name_text(source.names, token.decoded))
@@ -250,7 +250,7 @@ marker_group_rebase_token: fn(token: Token, source: TokenTables, tables: &TokenT
     value
 }
 
-marker_group_push_members: fn(output: &[Token], group: NamedMarkerGroupTokens, span: Span, tables: &TokenTables) Never! {
+marker_group_push_members: fn(output: ^[Token], group: NamedMarkerGroupTokens, span: Span, tables: ^TokenTables) Never! {
     loop token in group.members {
         value := marker_group_rebase_token(token, group.tables, tables)
         value.span = span
@@ -258,7 +258,7 @@ marker_group_push_members: fn(output: &[Token], group: NamedMarkerGroupTokens, s
     }
 }
 
-expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: &TokenTables, imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
+expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: ^TokenTables, imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
     local: named_marker_groups(tokens, tables)
     if local.len() == 0 && imported.len() == 0 {
         return ExpandedMarkerGroups{tokens: tokens, uses: [ExpandedMarkerGroupUse]{}}

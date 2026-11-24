@@ -845,7 +845,7 @@ jet_eval_compiler_services_module_is_supplied: fn(module_row: SemaRegistrationMo
 // The checked entry's module under the file its caller names: `file`, the
 // file the caller read it from, or empty for text handed to the query. The
 // loader holds it under the query's own name, which no caller wrote.
-jet_eval_compiler_services_name_entry: fn(registration: &SemaRegistrationGraph, file: String) Never! {
+jet_eval_compiler_services_name_entry: fn(registration: ^SemaRegistrationGraph, file: String) Never! {
     loop index in 0..<registration.modules.len() {
         if registration.modules[index].module_identity != registration.entry_module_identity -> next
         staged: "{registration.modules[index].source_file}"
@@ -989,7 +989,7 @@ JetCompilerServicesProgramInfo: enum {
 // as a trap of its declared signature. `stages` holds the moments the
 // compile reached, each its `core.compiler.Event`, which `meta.stages()`
 // reads.
-jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool, stages: &&[TComptimeValue]) -> JetCompilerServicesProgramInfo {
+jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool, stages: ^^[TComptimeValue]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing{fact: "the registration graph is incomplete"}
     if !graph.complete -> return .Missing{fact: "the checked graph is incomplete"}
     index: sema_compiler_semantic_index_from_checked(registration, graph, sema_source_digest(source), module_sources)

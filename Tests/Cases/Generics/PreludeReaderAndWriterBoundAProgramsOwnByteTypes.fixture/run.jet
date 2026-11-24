@@ -7,13 +7,13 @@ Chunks: struct {
     at: Int,
 
     impl Reader {
-        read_bytes: fn(&self, limit: Int) -> [U8] IOError! {
+        read_bytes: fn(^self, limit: Int) -> [U8] IOError! {
             out := [U8]{}
             _: self.read_into(out, limit) ?? return Err(err)
             Ok(out)
         }
 
-        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+        read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError! {
             count := 0
             loop count < limit && self.at < self.data.len() {
                 buffer.push(self.data[self.at])
@@ -30,16 +30,16 @@ Sink: struct {
     flushes: Int,
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) IOError! {
+        write_bytes: fn(^self, bytes: [U8]) IOError! {
             loop byte in bytes -> self.bytes.push(byte)
         }
 
-        flush: fn(&self) IOError! { self.flushes += 1 }
+        flush: fn(^self) IOError! { self.flushes += 1 }
     }
 }
 
 // Reads `source` to its end, `step` bytes at a time, into one buffer.
-drain: fn<R: Reader>(source: &R, step: Int) -> [U8] IOError! {
+drain: fn<R: Reader>(source: ^R, step: Int) -> [U8] IOError! {
     out := [U8]{}
     loop {
         count: source.read_into(out, step)
@@ -49,7 +49,7 @@ drain: fn<R: Reader>(source: &R, step: Int) -> [U8] IOError! {
 }
 
 // Copies `source` into `sink` in reads of three bytes; the count copied.
-pipe: fn<R: Reader, W: Writer>(source: &R, sink: &W) -> Int IOError! {
+pipe: fn<R: Reader, W: Writer>(source: ^R, sink: ^W) -> Int IOError! {
     total := 0
     loop {
         chunk: source.read_bytes(3)
@@ -65,7 +65,7 @@ Pull: struct<R: Reader> {
     input: R,
     buffer: [U8],
 
-    fill: fn(&self) -> Int IOError! {
+    fill: fn(^self) -> Int IOError! {
         self.buffer.clear()
         self.input.read_into(self.buffer, 2)
     }

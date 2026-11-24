@@ -161,7 +161,7 @@ jfmt_inside_markers: fn(markers: [Marker]) -> [Marker] Never! {
 
 // A declaration's `#X: value` lines as body members at their authored
 // offsets; `index` points into `markers`.
-jfmt_push_marker_members: fn(members: &[JetFmtMember], markers: [Marker]) Never! {
+jfmt_push_marker_members: fn(members: ^[JetFmtMember], markers: [Marker]) Never! {
     loop index in 0..<markers.len() {
         if markers[index].inside {
             members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER, index: index, start: markers[index].span.start})
@@ -170,13 +170,13 @@ jfmt_push_marker_members: fn(members: &[JetFmtMember], markers: [Marker]) Never!
 }
 
 // One `#X: value` line of a body with the comments before it.
-jfmt_fmt_marker_line: fn(f: &JetFmt, marker: Marker) {
+jfmt_fmt_marker_line: fn(f: ^JetFmt, marker: Marker) {
     jfmt_emit_leading(f, marker.span.start)
     jfmt_fmt_inbody_marker(f, marker)
 }
 
 // The markers written above a declaration, each set on its own line.
-jfmt_fmt_above_markers: fn(f: &JetFmt, markers: [Marker]) {
+jfmt_fmt_above_markers: fn(f: ^JetFmt, markers: [Marker]) {
     jfmt_fmt_marker_group(f, jfmt_above_markers(markers), "#", true)
 }
 
@@ -311,7 +311,7 @@ jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Ne
     }
 }
 
-jfmt_push_shape: fn(shapes: &[SerdeWireShape], shape: SerdeWireShape) Never! {
+jfmt_push_shape: fn(shapes: ^[SerdeWireShape], shape: SerdeWireShape) Never! {
     loop existing in shapes {
         if existing == shape {
             return
@@ -443,7 +443,7 @@ jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
 }
 
 // Rust `AST.resolved_decode_wire_shapes` `named`.
-jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: &[String]) -> [SerdeWireShape]? {
+jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: ^[String]) -> [SerdeWireShape]? {
     loop seen_name in seen {
         if seen_name == name -> return None
     }
@@ -467,7 +467,7 @@ jfmt_decode_asked: fn(derives: [NamedSpan], markers: [Marker]) -> Bool? Never! {
     owned_trait_requested(markers, "Decode")
 }
 
-jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], seen: &[String]) -> [SerdeWireShape]? {
+jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], seen: ^[String]) -> [SerdeWireShape]? {
     loop item in items {
         if item == {
             .Struct(def) -> {
@@ -551,7 +551,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
 }
 
 // Rust `AST.resolved_decode_wire_shapes` `resolve`.
-jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: &[String]) -> [SerdeWireShape]? {
+jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: ^[String]) -> [SerdeWireShape]? {
     shapes := [SerdeWireShape]{}
     if ty == {
         .Int | .IntN(_, _) | .InlineRange(_, _, _) -> {
@@ -627,7 +627,7 @@ jfmt_has_ambiguous_decode_union: fn(items: [Item], ty: Type) -> Bool {
     }
 }
 
-jfmt_fmt_decode_type: fn(f: &JetFmt, ty: Type, span: Span, derives_decode: Bool) {
+jfmt_fmt_decode_type: fn(f: ^JetFmt, ty: Type, span: Span, derives_decode: Bool) {
     if derives_decode && jfmt_has_ambiguous_decode_union(f.items, ty) {
         if jfmt_source_type_spelling(f, span.start) == .Val(source_ty) {
             jfmt_write(f, source_ty)
@@ -638,7 +638,7 @@ jfmt_fmt_decode_type: fn(f: &JetFmt, ty: Type, span: Span, derives_decode: Bool)
     jfmt_fmt_type_at(f, ty, Val(span))
 }
 
-jfmt_fmt_meta_attr: fn(f: &JetFmt, meta: MetaAttr) {
+jfmt_fmt_meta_attr: fn(f: ^JetFmt, meta: MetaAttr) {
     jfmt_write(f, "#")
     jfmt_fmt_meta_rule(f, meta)
 }
@@ -652,7 +652,7 @@ jfmt_meta_field_span: fn(field: MetaField) -> Span Never! {
     }
 }
 
-jfmt_fmt_meta_rule: fn(f: &JetFmt, meta: MetaAttr) {
+jfmt_fmt_meta_rule: fn(f: ^JetFmt, meta: MetaAttr) {
     jfmt_write(f, "Meta(")
     source: jfmt_source_list_span_after(f, meta.span.start, JFMT_DELIM_PAREN)
     multiline: jfmt_comma_begin(f, meta.fields.len(), source)
@@ -687,7 +687,7 @@ jfmt_fmt_meta_rule: fn(f: &JetFmt, meta: MetaAttr) {
 }
 
 // Copy an item's source slice verbatim and skip the comments inside it.
-jfmt_write_verbatim: fn(f: &JetFmt, start: Int, end: Int, newline: Bool) {
+jfmt_write_verbatim: fn(f: ^JetFmt, start: Int, end: Int, newline: Bool) {
     text: jfmt_src_text(f, start, end)
     jfmt_write(f, text)
     if newline -> jfmt_newline(f)
@@ -696,7 +696,7 @@ jfmt_write_verbatim: fn(f: &JetFmt, start: Int, end: Int, newline: Bool) {
 
 // A verbatim item whose body holds `#X: value` lines: the text between
 // them is copied, and each line prints as the formatter prints marker lines.
-jfmt_write_verbatim_marker_lines: fn(f: &JetFmt, start: Int, end: Int, markers: [Marker]) {
+jfmt_write_verbatim_marker_lines: fn(f: ^JetFmt, start: Int, end: Int, markers: [Marker]) {
     cursor := start
     loop marker in jfmt_inside_markers(markers) {
         if marker.span.start < cursor || marker.span.end > end -> next
@@ -708,7 +708,7 @@ jfmt_write_verbatim_marker_lines: fn(f: &JetFmt, start: Int, end: Int, markers: 
     jfmt_write_verbatim(f, cursor, end, false)
 }
 
-jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
+jfmt_fmt_item: fn(f: ^JetFmt, item: Item) {
     if item == {
         .Func(value) -> { jfmt_fmt_func(f, value) }
         .Struct(value) -> { jfmt_fmt_struct(f, value) }
@@ -820,7 +820,7 @@ jfmt_impl_sugar_text: fn(f: JetFmt, i: ImplDef) -> [U8]? Never! {
 
 // A fact plane: its field-less struct holding the `impl Fact` block, one
 // setting per line in the order written.
-jfmt_fmt_fact_decl: fn(f: &JetFmt, declaration: FactDecl) {
+jfmt_fmt_fact_decl: fn(f: ^JetFmt, declaration: FactDecl) {
     jfmt_write(f, declaration.name)
     jfmt_write(f, ": struct {{")
     jfmt_newline(f)
@@ -845,7 +845,7 @@ jfmt_fmt_fact_decl: fn(f: &JetFmt, declaration: FactDecl) {
     jfmt_end_block(f)
 }
 
-jfmt_fmt_protocol_decl: fn(f: &JetFmt, protocol: ProtocolDecl) {
+jfmt_fmt_protocol_decl: fn(f: ^JetFmt, protocol: ProtocolDecl) {
     jfmt_write(f, "protocol ")
     jfmt_write(f, protocol.name)
     jfmt_write(f, " {{")
@@ -887,11 +887,11 @@ jfmt_fmt_protocol_decl: fn(f: &JetFmt, protocol: ProtocolDecl) {
 // Policy wrappers are carried beside ordinary items, so
 // preserve their checked source boundary. `span` starts at the `policy`
 // keyword; declarations carry no visibility marker.
-jfmt_fmt_user_policy_decl: fn(f: &JetFmt, declaration: UserPolicyDecl) {
+jfmt_fmt_user_policy_decl: fn(f: ^JetFmt, declaration: UserPolicyDecl) {
     jfmt_write_verbatim(f, declaration.span.start, declaration.span.end, true)
 }
 
-jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
+jfmt_fmt_item_template_loop: fn(f: ^JetFmt, loop_item: ItemTemplateLoop) {
     jfmt_write(f, "#loop ")
     jfmt_write(f, loop_item.var)
     jfmt_write(f, " in ")
@@ -909,7 +909,7 @@ jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
 // These bodies share one representation, so one walk closes both. A blank
 // line written between two template lines stays, as it does between
 // statements.
-jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
+jfmt_fmt_derive_body_items: fn(f: ^JetFmt, body: [DeriveBodyItem]) {
     previous_end := -1
     loop index in 0..<body.len() {
         body_item: body[index]
@@ -947,7 +947,7 @@ jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
 
 // `#if cond { … } else { … }` in a template body; an `else` holding one more
 // template `if` prints as `else #if`.
-jfmt_fmt_derive_body_if: fn(f: &JetFmt, cond: Expr, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?) {
+jfmt_fmt_derive_body_if: fn(f: ^JetFmt, cond: Expr, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?) {
     jfmt_write(f, "#if ")
     jfmt_fmt_expr(f, cond, JFMT_PREC_OR_FALLBACK)
     jfmt_write(f, " {{")
@@ -971,7 +971,7 @@ jfmt_fmt_derive_body_if: fn(f: &JetFmt, cond: Expr, then_body: [DeriveBodyItem],
     }
 }
 
-jfmt_end_template_block: fn(f: &JetFmt) {
+jfmt_end_template_block: fn(f: ^JetFmt) {
     if !f.at_line_start -> jfmt_newline(f)
     jfmt_write(f, "}}")
 }
@@ -995,7 +995,7 @@ jfmt_derive_body_item_end: fn(f: JetFmt, body_item: DeriveBodyItem) -> Int {
 // Rust `ModuleBodyEntry`: module imports and items live in separate AST
 // vectors, so retain authored order while formatting. Each run of imports
 // with no item between them prints as one group (jfmt_fmt_import_groups).
-jfmt_fmt_module_body: fn(f: &JetFmt, imports: [ImportDecl], items: [Item], markers: [Marker], span_end: Int) {
+jfmt_fmt_module_body: fn(f: ^JetFmt, imports: [ImportDecl], items: [Item], markers: [Marker], span_end: Int) {
     entries := [JetFmtMember]{}
     loop index in 0..<imports.len() {
         entries.push(JetFmtMember{kind: JFMT_MEMBER_IMPORT, index: index, start: imports[index].span.start})
@@ -1040,14 +1040,14 @@ jfmt_fmt_module_body: fn(f: &JetFmt, imports: [ImportDecl], items: [Item], marke
     jfmt_emit_leading(f, span_end)
 }
 
-jfmt_end_module_block: fn(f: &JetFmt) {
+jfmt_end_module_block: fn(f: ^JetFmt) {
     if !f.at_line_start -> jfmt_newline(f)
     jfmt_write(f, "}}")
 }
 
 // A module's markers print on its `name: module` line: a lone `#Policy(…)`
 // line above it would be the file's policy declaration.
-jfmt_fmt_code_module: fn(f: &JetFmt, code_module: CodeModule) {
+jfmt_fmt_code_module: fn(f: ^JetFmt, code_module: CodeModule) {
     above: jfmt_above_markers(code_module.markers)
     if above.len() > 0 {
         jfmt_write(f, "#")
@@ -1089,7 +1089,7 @@ jfmt_generic_module_param_span: fn(param: GenericModuleParam) -> Span Never! {
     }
 }
 
-jfmt_fmt_generic_module: fn(f: &JetFmt, generic: GenericModuleDef) {
+jfmt_fmt_generic_module: fn(f: ^JetFmt, generic: GenericModuleDef) {
     jfmt_fmt_above_markers(f, generic.markers)
     jfmt_fmt_module_privacy(f, generic.is_pub, generic.is_package_pub)
     jfmt_write(f, generic.name)
@@ -1150,7 +1150,7 @@ jfmt_fmt_generic_module: fn(f: &JetFmt, generic: GenericModuleDef) {
     jfmt_end_module_block(f)
 }
 
-jfmt_fmt_c_module: fn(f: &JetFmt, c_module: CModule) {
+jfmt_fmt_c_module: fn(f: ^JetFmt, c_module: CModule) {
     jfmt_write(
         f,
         if c_module.kind == {
@@ -1181,7 +1181,7 @@ jfmt_perf_lit: fn(value: ContribValue) -> PerfLit? Never! {
     None
 }
 
-jfmt_fmt_perf_module: fn(f: &JetFmt, declaration: ModuleDecl) -> Bool {
+jfmt_fmt_perf_module: fn(f: ^JetFmt, declaration: ModuleDecl) -> Bool {
     if declaration.sources.len() > 0 || declaration.imports.len() > 0 || declaration.members.len() > 0 || declaration.contributions.len() != 1 {
         return false
     }
@@ -1242,7 +1242,7 @@ jfmt_fmt_perf_module: fn(f: &JetFmt, declaration: ModuleDecl) -> Bool {
     true
 }
 
-jfmt_fmt_perf_budget_fields: fn(f: &JetFmt, fields: [BudgetField], source: JetFmtSourceList?) {
+jfmt_fmt_perf_budget_fields: fn(f: ^JetFmt, fields: [BudgetField], source: JetFmtSourceList?) {
     multiline: jfmt_comma_begin(f, fields.len(), source)
     loop index in 0..<fields.len() {
         field: fields[index]
@@ -1256,7 +1256,7 @@ jfmt_fmt_perf_budget_fields: fn(f: &JetFmt, fields: [BudgetField], source: JetFm
 }
 
 // A declared effect row `-[A, B]>` over its authored entries.
-jfmt_fmt_effect_row: fn(f: &JetFmt, effects: [EffectRowEntry], source: JetFmtSourceList?) {
+jfmt_fmt_effect_row: fn(f: ^JetFmt, effects: [EffectRowEntry], source: JetFmtSourceList?) {
     multiline: jfmt_comma_begin(f, effects.len(), source)
     loop index in 0..<effects.len() {
         jfmt_comma_before(f, index, multiline, effects[index].span.start)
@@ -1266,7 +1266,7 @@ jfmt_fmt_effect_row: fn(f: &JetFmt, effects: [EffectRowEntry], source: JetFmtSou
     jfmt_comma_end(f, multiline, source)
 }
 
-jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
+jfmt_fmt_trait: fn(f: ^JetFmt, t: TraitDef) {
     jfmt_fmt_above_markers(f, t.markers)
     jfmt_fmt_written_privacy(f, t.is_pub, t.name_span.start)
     jfmt_write(f, t.name)
@@ -1391,7 +1391,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
     jfmt_write(f, "}}")
 }
 
-jfmt_fmt_extern_rust: fn(f: &JetFmt, block: ExternRustBlock) {
+jfmt_fmt_extern_rust: fn(f: ^JetFmt, block: ExternRustBlock) {
     jfmt_write(f, "extern")
     jfmt_write(f, " ")
     jfmt_write(f, "rust")
@@ -1406,7 +1406,7 @@ jfmt_fmt_extern_rust: fn(f: &JetFmt, block: ExternRustBlock) {
     jfmt_end_block(f)
 }
 
-jfmt_fmt_extern_fn: fn(f: &JetFmt, ef: ExternFn) {
+jfmt_fmt_extern_fn: fn(f: ^JetFmt, ef: ExternFn) {
     if ef.close == .Val(closer) -> jfmt_write(f, "#Close({closer.name}) ")
     if ef.undo == .Val(inverse) -> jfmt_write(f, "#Undo({inverse.name}) ")
     if ef.abi == .Val(abi) -> jfmt_write(f, "#ABI({abi.name}) ")
@@ -1429,7 +1429,7 @@ jfmt_fmt_extern_fn: fn(f: &JetFmt, ef: ExternFn) {
     jfmt_newline(f)
 }
 
-jfmt_fmt_test: fn(f: &JetFmt, t: TestDef) {
+jfmt_fmt_test: fn(f: ^JetFmt, t: TestDef) {
     // A property test's `#Pre(condition, message)` lines head it.
     loop clause in t.pre {
         jfmt_write(f, "#Pre(")
@@ -1498,14 +1498,14 @@ jfmt_fmt_test: fn(f: &JetFmt, t: TestDef) {
 }
 
 // `priv module` / `priv(package) module`.
-jfmt_fmt_module_privacy: fn(f: &JetFmt, is_pub: Bool, is_package_pub: Bool) {
+jfmt_fmt_module_privacy: fn(f: ^JetFmt, is_pub: Bool, is_package_pub: Bool) {
     if is_package_pub -> jfmt_write(f, "priv(package) ") else if !is_pub -> jfmt_write(f, "priv ")
 }
 
 // A declaration's `priv` or `priv(package)` as written directly before its
 // name. An item of a narrowed module body is not public with no keyword
 // written, so the source decides, not `is_pub`.
-jfmt_fmt_written_privacy: fn(f: &JetFmt, is_pub: Bool, name_start: Int) {
+jfmt_fmt_written_privacy: fn(f: ^JetFmt, is_pub: Bool, name_start: Int) {
     if is_pub {
         return
     }
@@ -1513,7 +1513,7 @@ jfmt_fmt_written_privacy: fn(f: &JetFmt, is_pub: Bool, name_start: Int) {
     if privacy.len() > 0 -> jfmt_write(f, privacy)
 }
 
-jfmt_fmt_distinct: fn(f: &JetFmt, d: DistinctDef) {
+jfmt_fmt_distinct: fn(f: ^JetFmt, d: DistinctDef) {
     jfmt_fmt_type_markers(f, d.type_markers, true)
     jfmt_fmt_written_privacy(f, d.is_pub, d.name_span.start)
     jfmt_write(f, d.name)
@@ -1522,7 +1522,7 @@ jfmt_fmt_distinct: fn(f: &JetFmt, d: DistinctDef) {
     if d.range == .Val(range) -> jfmt_write(f, "({range.lo}..{range.hi})")
 }
 
-jfmt_fmt_type_alias: fn(f: &JetFmt, a: TypeAliasDef) {
+jfmt_fmt_type_alias: fn(f: ^JetFmt, a: TypeAliasDef) {
     jfmt_fmt_written_privacy(f, a.is_pub, a.name_span.start)
     jfmt_write(f, a.name)
     type_source: jfmt_source_list_span_after(f, a.name_span.end, JFMT_DELIM_ANGLE)
@@ -1545,7 +1545,7 @@ jfmt_fmt_type_alias: fn(f: &JetFmt, a: TypeAliasDef) {
     jfmt_write(f, " }}")
 }
 
-jfmt_fmt_type_params: fn(f: &JetFmt, params: [TypeParam], source: JetFmtSourceList?) {
+jfmt_fmt_type_params: fn(f: ^JetFmt, params: [TypeParam], source: JetFmtSourceList?) {
     if params.len() == 0 {
         return
     }
@@ -1591,7 +1591,7 @@ jfmt_marker_call_arg_span: fn(argument: MarkerCallArg) -> Span Never! {
 }
 
 // –8: render one applied rule.
-jfmt_fmt_marker: fn(f: &JetFmt, m: Marker) {
+jfmt_fmt_marker: fn(f: ^JetFmt, m: Marker) {
     if m.negated -> jfmt_write(f, "!")
     jfmt_write(f, m.name)
     jfmt_fmt_marker_args(f, m)
@@ -1600,7 +1600,7 @@ jfmt_fmt_marker: fn(f: &JetFmt, m: Marker) {
 // A marker written as a line of a declaration's body: `#X: true` with no
 // arguments, `#X: false` when signed, `#X: v` for one unlabeled name
 // path, string or number, else `#X: (args)`.
-jfmt_fmt_inbody_marker: fn(f: &JetFmt, m: Marker) {
+jfmt_fmt_inbody_marker: fn(f: ^JetFmt, m: Marker) {
     jfmt_write(f, "#")
     jfmt_write(f, m.name)
     jfmt_write(f, ": ")
@@ -1621,7 +1621,7 @@ jfmt_fmt_inbody_marker: fn(f: &JetFmt, m: Marker) {
 
 // The `(args)` of a marker, nothing when it has none. An in-body line's
 // arguments start after its `:`, which the source lookup skips.
-jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
+jfmt_fmt_marker_args: fn(f: ^JetFmt, m: Marker) {
     // `#State(A -> B)` prints its arrow, not a comma list.
     if m.args.len() == 2 && m.arg_labels.len() == 2 && m.arg_labels[1] == .Val(arrow) && arrow.name == STATE_ARROW_LABEL {
         jfmt_write(f, "(")
@@ -1657,7 +1657,7 @@ jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
     }
 }
 
-jfmt_fmt_marker_call_arg: fn(f: &JetFmt, argument: MarkerCallArg) {
+jfmt_fmt_marker_call_arg: fn(f: ^JetFmt, argument: MarkerCallArg) {
     if argument == {
         .Expr(value) -> { jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK) }
         .EffectRow(effects, span) -> {
@@ -1671,7 +1671,7 @@ jfmt_fmt_marker_call_arg: fn(f: &JetFmt, argument: MarkerCallArg) {
 
 // Render the declaration's one applied-rule group. A lone rule may
 // use `#A`; multiple rules use `#[A, B]`.
-jfmt_fmt_type_markers: fn(f: &JetFmt, markers: [Marker], lone_hash_ok: Bool) {
+jfmt_fmt_type_markers: fn(f: ^JetFmt, markers: [Marker], lone_hash_ok: Bool) {
     if markers.len() == 0 {
         return
     }
@@ -1685,7 +1685,7 @@ jfmt_fmt_type_markers: fn(f: &JetFmt, markers: [Marker], lone_hash_ok: Bool) {
 }
 
 // The inline `[A, B]` list of one marker group (without its sigil).
-jfmt_fmt_marker_list: fn(f: &JetFmt, markers: [Marker], source: JetFmtSourceList?) {
+jfmt_fmt_marker_list: fn(f: ^JetFmt, markers: [Marker], source: JetFmtSourceList?) {
     multiline: jfmt_comma_begin(f, markers.len(), source)
     loop index in 0..<markers.len() {
         jfmt_comma_before(f, index, multiline, markers[index].span.start)
@@ -1696,7 +1696,7 @@ jfmt_fmt_marker_list: fn(f: &JetFmt, markers: [Marker], source: JetFmtSourceList
 }
 
 // One marker-list group on a single plane. `sigil` is `"@"` or `"#"`.
-jfmt_fmt_marker_group: fn(f: &JetFmt, markers: [Marker], sigil: String, lone_ok: Bool) {
+jfmt_fmt_marker_group: fn(f: ^JetFmt, markers: [Marker], sigil: String, lone_ok: Bool) {
     if markers.len() == 0 {
         return
     }
@@ -1714,7 +1714,7 @@ jfmt_fmt_marker_group: fn(f: &JetFmt, markers: [Marker], sigil: String, lone_ok:
     jfmt_newline(f)
 }
 
-jfmt_fmt_trait_impl_block: fn(f: &JetFmt, block: TraitImplBlock) {
+jfmt_fmt_trait_impl_block: fn(f: ^JetFmt, block: TraitImplBlock) {
     // The block is a body member like any other, so its own leading comments
     // belong before `impl`, not inside the braces where the first method's
     // `emit_leading` would otherwise flush them.
@@ -1741,7 +1741,7 @@ jfmt_fmt_trait_impl_block: fn(f: &JetFmt, block: TraitImplBlock) {
 
 // The rest of an operator impl head: `(Rhs)` when the right-hand type isn't
 // `Self`, then `#Commutative` unless the impl's markers already write it.
-jfmt_fmt_operator_head: fn(f: &JetFmt, rhs: Type?, marker: OperatorMarker?, markers: [Marker]) {
+jfmt_fmt_operator_head: fn(f: ^JetFmt, rhs: Type?, marker: OperatorMarker?, markers: [Marker]) {
     if rhs == .Val(ty) {
         jfmt_write(f, "(")
         jfmt_fmt_type(f, ty)
@@ -1762,7 +1762,7 @@ jfmt_fmt_operator_head: fn(f: &JetFmt, rhs: Type?, marker: OperatorMarker?, mark
 // `Name: Concrete` rows, `name: value` constants and methods arrive
 // in three vectors, so printing one vector and then another moves a row the
 // author wrote after a method.
-jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplConstValue], methods: [Func], markers: [Marker]) {
+jfmt_fmt_impl_body: fn(f: ^JetFmt, assoc_types: [NamedType], constants: [ImplConstValue], methods: [Func], markers: [Marker]) {
     members := [JetFmtMember]{}
     loop index in 0..<assoc_types.len() {
         members.push(JetFmtMember{kind: JFMT_MEMBER_ASSOC_TYPE, index: index, start: assoc_types[index].span.start})
@@ -1840,7 +1840,7 @@ jfmt_empty_body_inline: fn(f: JetFmt, span: Span) -> Bool Never! {
 // The markers written above a function or a trait method signature: one
 // marker before `fn` on its line, unless it is one that keeps its own line,
 // and several as one list.
-jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
+jfmt_fmt_callable_markers: fn(f: ^JetFmt, markers: [Marker]) {
     above: jfmt_above_markers(markers)
     if above.len() == 1 {
         jfmt_write(f, "#")
@@ -1851,7 +1851,7 @@ jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
     } else if above.len() > 1 { jfmt_fmt_marker_group(f, above, "#", false) }
 }
 
-jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
+jfmt_fmt_func: fn(f: ^JetFmt, func: Func) {
     jfmt_fmt_callable_markers(f, func.markers)
     // (card #2789), respelled by preserve
     // the build-time callable mark on capability constructors. It sits after
@@ -1992,12 +1992,12 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     f.expected_return_type = saved_return_type
 }
 
-jfmt_fmt_policy_declarations: fn(f: &JetFmt, declarations: [PolicyDeclaration]) {
+jfmt_fmt_policy_declarations: fn(f: ^JetFmt, declarations: [PolicyDeclaration]) {
     jfmt_write(f, "#")
     jfmt_fmt_policy_rule(f, declarations)
 }
 
-jfmt_fmt_policy_rule: fn(f: &JetFmt, declarations: [PolicyDeclaration]) {
+jfmt_fmt_policy_rule: fn(f: ^JetFmt, declarations: [PolicyDeclaration]) {
     jfmt_write(f, "Policy(")
     source: if declarations.len() > 0 -> jfmt_source_list_span_after(f, declarations[0].span.start, JFMT_DELIM_PAREN) else -> None
     multiline: jfmt_comma_begin(f, declarations.len(), source)
@@ -2021,7 +2021,7 @@ JetFmtParamEntry: struct {
 // Reprint a parameter list with its zone separators. `/` goes
 // after the last positional-only parameter, `*` before the first label-only
 // one, so the printed form re-parses to the same zones.
-jfmt_fmt_param_list: fn(f: &JetFmt, params: [Param], source: JetFmtSourceList?) {
+jfmt_fmt_param_list: fn(f: ^JetFmt, params: [Param], source: JetFmtSourceList?) {
     entries := [JetFmtParamEntry]{}
     star_done := false
     loop index in 0..<params.len() {
@@ -2048,7 +2048,7 @@ jfmt_fmt_param_list: fn(f: &JetFmt, params: [Param], source: JetFmtSourceList?) 
     jfmt_comma_end(f, multiline, source)
 }
 
-jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
+jfmt_fmt_param: fn(f: ^JetFmt, p: Param) {
     param_start: if p.public_label == .Val(label) -> label.span.start else -> p.name_span.start
     jfmt_fmt_rules_before(f, RuleSite.Parameter, param_start)
     if p.root {
@@ -2121,7 +2121,7 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
 
 // A receiver footprint after `self`: one field reads `.log` unless the source
 // spelled the member spread `.[log]`; none or several read `.[log, hits]`.
-jfmt_fmt_receiver_footprint: fn(f: &JetFmt, fields: [NamedSpan], self_end: Int) {
+jfmt_fmt_receiver_footprint: fn(f: ^JetFmt, fields: [NamedSpan], self_end: Int) {
     if fields.len() == 1 && jfmt_bytes_rfind(f.src_bytes, fields[0].span.start, "[") < self_end {
         jfmt_write(f, ".")
         jfmt_write(f, fields[0].name)
@@ -2136,7 +2136,7 @@ jfmt_fmt_receiver_footprint: fn(f: &JetFmt, fields: [NamedSpan], self_end: Int) 
 }
 
 // Reprint a function return `from` clause.
-jfmt_fmt_declared_return_view_from: fn(f: &JetFmt, map: ViewProvenanceMap, params: [Param]) {
+jfmt_fmt_declared_return_view_from: fn(f: ^JetFmt, map: ViewProvenanceMap, params: [Param]) {
     if map.entries.len() == 0 {
         return
     }
@@ -2157,7 +2157,7 @@ jfmt_fmt_declared_return_view_from: fn(f: &JetFmt, map: ViewProvenanceMap, param
     jfmt_write(f, ")")
 }
 
-jfmt_fmt_view_source_union: fn(f: &JetFmt, provenance: ViewProvenance, params: [Param]) {
+jfmt_fmt_view_source_union: fn(f: ^JetFmt, provenance: ViewProvenance, params: [Param]) {
     loop index in 0..<provenance.sources.len() {
         path: provenance.sources[index]
         if index > 0 -> jfmt_write(f, " | ")
@@ -2193,7 +2193,7 @@ jfmt_fmt_view_source_union: fn(f: &JetFmt, provenance: ViewProvenance, params: [
 
 // A state list with no moves and no groups keeps the comma form
 // `state { A, B }`; any move or group puts one entry on each line.
-jfmt_fmt_state_section: fn(f: &JetFmt, state: StateDecl) {
+jfmt_fmt_state_section: fn(f: ^JetFmt, state: StateDecl) {
     jfmt_emit_leading(f, state.span.start)
     jfmt_write(f, "state {{")
     lines := state.groups.len() > 0
@@ -2251,7 +2251,7 @@ jfmt_fmt_state_section: fn(f: &JetFmt, state: StateDecl) {
 
 // Print one type-body member. `derives_decode` is the type-level `Decode`
 // fact a field's type spelling depends on.
-jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtTypeBody, derives_decode: Bool) {
+jfmt_fmt_type_body_member: fn(f: ^JetFmt, member: JetFmtMember, body: JetFmtTypeBody, derives_decode: Bool) {
     if member.kind == JFMT_MEMBER_STATE {
         state: body.state ?? return
         jfmt_fmt_state_section(f, state)
@@ -2301,7 +2301,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
 // declaration print here, without their sigil. A setting written twice keeps
 // both rows: sema reports the second (E0937), and the declaration holds only
 // the first, so the second comes from the block's generated `Marker` impl.
-jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplBlock], methods: [Func], start: Int, expand: Span?) {
+jfmt_fmt_marker_impl: fn(f: ^JetFmt, declaration: MarkerDecl, impls: [TraitImplBlock], methods: [Func], start: Int, expand: Span?) {
     jfmt_emit_leading(f, start)
     settings := [MarkerDeclParam]{}
     loop param in declaration.params {
@@ -2376,7 +2376,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplB
 // A marker's `check` rule as written: the struct method
 // parser_parse_marker_check made, without the result and the closing `None`
 // the parser gave it.
-jfmt_fmt_marker_check: fn(f: &JetFmt, method: Func) {
+jfmt_fmt_marker_check: fn(f: ^JetFmt, method: Func) {
     jfmt_emit_leading(f, method.span.start)
     jfmt_write(f, "check: fn(")
     param_source: jfmt_source_list_span_after(f, method.name_span.end, JFMT_DELIM_PAREN)
@@ -2394,7 +2394,7 @@ jfmt_fmt_marker_check: fn(f: &JetFmt, method: Func) {
 
 // `impl Trait.Derive { expand: fn(target: Target) { … } }`: the block holds
 // only the template.
-jfmt_fmt_derive_impl: fn(f: &JetFmt, declaration: MarkerDecl) {
+jfmt_fmt_derive_impl: fn(f: ^JetFmt, declaration: MarkerDecl) {
     jfmt_emit_leading(f, declaration.span.start)
     jfmt_write(f, "impl {declaration.name}.Derive {{")
     jfmt_newline(f)
@@ -2405,7 +2405,7 @@ jfmt_fmt_derive_impl: fn(f: &JetFmt, declaration: MarkerDecl) {
 }
 
 // A marker's or a derive's `expand` template, its row and its body.
-jfmt_fmt_marker_template: fn(f: &JetFmt, declaration: MarkerDecl, expand: Span?) {
+jfmt_fmt_marker_template: fn(f: ^JetFmt, declaration: MarkerDecl, expand: Span?) {
     template: declaration.body ?? return
     if expand == .Val(span) -> jfmt_emit_leading(f, span.start)
     signature: if declaration.is_derive -> "expand: fn(target: Target) " else -> "expand: fn(self, target: Target) "
@@ -2428,7 +2428,7 @@ jfmt_fmt_marker_template: fn(f: &JetFmt, declaration: MarkerDecl, expand: Span?)
 // `impl Effect { … }` in a struct or enum body: empty, or a package
 // effect's `parent: Name`, its one `irreversible: fn(self) -> Bool` method
 // and a toolchain effect's `expert` method on one line each.
-jfmt_fmt_effect_impl: fn(f: &JetFmt, declared: EffectImpl) {
+jfmt_fmt_effect_impl: fn(f: ^JetFmt, declared: EffectImpl) {
     jfmt_emit_leading(f, declared.span.start)
     if declared.irreversible == None && declared.expert == None && declared.parent == None {
         jfmt_write(f, "impl Effect {{}}")
@@ -2469,7 +2469,7 @@ jfmt_item_prints_inside_type: fn(items: [Item], index: Int) -> Bool Never! {
 // Emit a source-ordered type-body member list. `preceded` says whether the
 // body already printed something this list must be separated from (an enum's
 // variant list).
-jfmt_fmt_type_body_members: fn(f: &JetFmt, members: [JetFmtMember], body: JetFmtTypeBody, derives_decode: Bool, preceded: Bool) {
+jfmt_fmt_type_body_members: fn(f: ^JetFmt, members: [JetFmtMember], body: JetFmtTypeBody, derives_decode: Bool, preceded: Bool) {
     loop position in 0..<members.len() {
         member: members[position]
         if position > 0 || preceded {
@@ -2481,7 +2481,7 @@ jfmt_fmt_type_body_members: fn(f: &JetFmt, members: [JetFmtMember], body: JetFmt
     }
 }
 
-jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
+jfmt_fmt_struct: fn(f: ^JetFmt, s: StructDef) {
     // The retained registry marker nodes are the sole
     // formatter input. Typed flags remain for sema/codegen only.
     lone_hash_ok: s.layout == None && !s.is_published_schema && !s.is_single_use && !s.is_must_use
@@ -2550,7 +2550,7 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
 
 // A struct or enum body with no members: `{}` on the header line, or, when
 // it holds comments, those comments one per line inside the braces.
-jfmt_fmt_empty_type_body: fn(f: &JetFmt, open: Int, end: Int) {
+jfmt_fmt_empty_type_body: fn(f: ^JetFmt, open: Int, end: Int) {
     if !jfmt_span_has_comment(f, open, end) {
         jfmt_write(f, " {{}}")
         return
@@ -2579,7 +2579,7 @@ jfmt_source_body_is_one_line: fn(f: JetFmt, after: Int) -[]> Bool {
     !jfmt_source_span_multiline(f, body.span)
 }
 
-jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
+jfmt_fmt_enum: fn(f: ^JetFmt, e: EnumDef) {
     // Type markers are retained nodes, not flag
     // reconstruction. The flags below remain semantic data only.
     lone_hash_ok: !e.is_single_use && !e.is_must_use
@@ -2665,7 +2665,7 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
     jfmt_end_block(f)
 }
 
-jfmt_fmt_variant: fn(f: &JetFmt, v: Variant, derives_decode: Bool) {
+jfmt_fmt_variant: fn(f: ^JetFmt, v: Variant, derives_decode: Bool) {
     jfmt_fmt_variant_name_and_payload(f, v, v.name, derives_decode)
 }
 
@@ -2688,7 +2688,7 @@ JetFmtEnumEntry: struct {
 
 // The cases and case groups of `e` under `prefix`, each followed by `,` on
 // its own line, or separated by `, ` on one line.
-jfmt_fmt_enum_entries: fn(f: &JetFmt, e: EnumDef, prefix: String, derives_decode: Bool, one_line: Bool) -[]> {
+jfmt_fmt_enum_entries: fn(f: ^JetFmt, e: EnumDef, prefix: String, derives_decode: Bool, one_line: Bool) -[]> {
     loop (position, entry) in jfmt_enum_entries_at_prefix(e, prefix) {
         if position > 0 {
             if one_line -> jfmt_write(f, ", ") else -> jfmt_newline(f)
@@ -2716,7 +2716,7 @@ jfmt_fmt_enum_entries: fn(f: &JetFmt, e: EnumDef, prefix: String, derives_decode
 
 // A case group stays on one line inside a one-line body, or when its own
 // source body is one line without comments.
-jfmt_fmt_enum_group: fn(f: &JetFmt, e: EnumDef, g: EnumGroup, derives_decode: Bool, one_line: Bool) -[]> {
+jfmt_fmt_enum_group: fn(f: ^JetFmt, e: EnumDef, g: EnumGroup, derives_decode: Bool, one_line: Bool) -[]> {
     jfmt_write(f, jfmt_last_segment(g.path, "."))
     prefix: "{g.path}."
     if one_line || jfmt_source_body_is_one_line(f, g.name_span.end) {
@@ -2733,7 +2733,7 @@ jfmt_fmt_enum_group: fn(f: &JetFmt, e: EnumDef, g: EnumGroup, derives_decode: Bo
     jfmt_end_block(f)
 }
 
-jfmt_fmt_variant_name_and_payload: fn(f: &JetFmt, v: Variant, name: String, derives_decode: Bool) {
+jfmt_fmt_variant_name_and_payload: fn(f: ^JetFmt, v: Variant, name: String, derives_decode: Bool) {
     // Per-variant `#[Rename("x")]` markers sit inline before the name.
     if v.serde_markers.len() == 1 {
         jfmt_write(f, "#")
@@ -2817,7 +2817,7 @@ jfmt_is_direct_child_path: fn(path: String, prefix: String) -> Bool Never! {
     !rest.contains(".")
 }
 
-jfmt_fmt_impl: fn(f: &JetFmt, i: ImplDef) {
+jfmt_fmt_impl: fn(f: ^JetFmt, i: ImplDef) {
     jfmt_fmt_above_markers(f, i.markers)
     jfmt_write(f, "impl ")
     jfmt_write(f, i.type_name)
@@ -2849,7 +2849,7 @@ jfmt_fmt_impl: fn(f: &JetFmt, i: ImplDef) {
     jfmt_end_block(f)
 }
 
-jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
+jfmt_fmt_const: fn(f: ^JetFmt, c: ConstDef) {
     if c.meta == .Val(meta) {
         jfmt_fmt_meta_attr(f, meta)
         jfmt_newline(f)
@@ -2921,7 +2921,7 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
 // (`clamp: core.math.clamp`) and prints as one, a line each, after the
 // imports. Comments before the first import print above the group; the rest
 // stay beside their rows.
-jfmt_fmt_import_groups: fn(f: &JetFmt, imports: [ImportDecl]) {
+jfmt_fmt_import_groups: fn(f: ^JetFmt, imports: [ImportDecl]) {
     groups := [[ImportDecl]]{[ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}}
     loop import in jfmt_import_rows(imports) {
         slot: if import.is_pub -> 2 else if import.comptime_span != None -> 1 else -> 0
@@ -2943,7 +2943,7 @@ jfmt_fmt_import_groups: fn(f: &JetFmt, imports: [ImportDecl]) {
 
 // Re-exports written as declarations, a `name: path` line each, the path (or
 // the file row's name) as written.
-jfmt_fmt_reexport_group: fn(f: &JetFmt, imports: [ImportDecl]) {
+jfmt_fmt_reexport_group: fn(f: ^JetFmt, imports: [ImportDecl]) {
     loop index in 0..<imports.len() {
         if index > 0 -> jfmt_newline(f)
         imp: imports[index]
@@ -3004,7 +3004,7 @@ jfmt_import_rows: fn(imports: [ImportDecl]) -> [ImportDecl] Never! {
     rows
 }
 
-jfmt_fmt_import_group: fn(f: &JetFmt, imports: [ImportDecl]) {
+jfmt_fmt_import_group: fn(f: ^JetFmt, imports: [ImportDecl]) {
     jfmt_emit_leading(f, imports[0].span.start)
     if imports.len() == 1 {
         jfmt_fmt_import(f, imports[0])
@@ -3025,13 +3025,13 @@ jfmt_fmt_import_group: fn(f: &JetFmt, imports: [ImportDecl]) {
     jfmt_write(f, "}}")
 }
 
-jfmt_fmt_import: fn(f: &JetFmt, imp: ImportDecl) {
+jfmt_fmt_import: fn(f: ^JetFmt, imp: ImportDecl) {
     jfmt_fmt_import_head(f, imp)
     jfmt_fmt_import_row(f, imp)
 }
 
 // `#run use` marks a build-only import.
-jfmt_fmt_import_head: fn(f: &JetFmt, imp: ImportDecl) {
+jfmt_fmt_import_head: fn(f: ^JetFmt, imp: ImportDecl) {
     if imp.comptime_span != None -> jfmt_write(f, "#run ")
     jfmt_write(f, "use ")
 }
@@ -3039,7 +3039,7 @@ jfmt_fmt_import_head: fn(f: &JetFmt, imp: ImportDecl) {
 // One import row; an alias prints as `alias: path` (#6542). A written alias
 // always prints: dropping one that repeats the path's last segment would
 // keep the binding but change the spelling the row was written in.
-jfmt_fmt_import_row: fn(f: &JetFmt, imp: ImportDecl) {
+jfmt_fmt_import_row: fn(f: ^JetFmt, imp: ImportDecl) {
     if imp.kind == {
         .File(path, span) -> {
             if imp.alias != jfmt_last_segment(path, "/") || jfmt_import_alias_written(imp, span) {
@@ -3106,7 +3106,7 @@ jfmt_import_alias_written: fn(imp: ImportDecl, path_span: Span) -> Bool Never! {
     imp.alias_span.start < path_span.start && imp.alias_span.end <= path_span.start
 }
 
-jfmt_fmt_field: fn(f: &JetFmt, field: Field, derives_decode: Bool) {
+jfmt_fmt_field: fn(f: ^JetFmt, field: Field, derives_decode: Bool) {
     // Field rules share one inline `#[…]` group. `Redact` stays in that group
     // where it was written; the parser also sets the field's `redact` bit.
     if field.serde_markers.len() > 0 {
@@ -3156,7 +3156,7 @@ jfmt_field_source_end: fn(field: Field) -[]> Int {
 
 // Format a callable program-struct member without lowering
 // it into a field or a method.
-jfmt_fmt_cli_binding: fn(f: &JetFmt, binding: CLICommandBinding) {
+jfmt_fmt_cli_binding: fn(f: ^JetFmt, binding: CLICommandBinding) {
     if binding.markers.len() > 0 {
         jfmt_write(f, "#")
         if binding.markers.len() == 1 -> jfmt_fmt_marker(f, binding.markers[0]) else {

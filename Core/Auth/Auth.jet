@@ -388,12 +388,12 @@ paseto_pae: fn(message: [U8], footer: [U8], implicit: [U8]) -> [U8] Never! {
     out
 }
 
-pae_part: fn(out: &[U8], bytes: [U8]) Never! {
+pae_part: fn(out: ^[U8], bytes: [U8]) Never! {
     pae_len(out, bytes.len())
     loop byte in bytes -> out.push(byte)
 }
 
-pae_len: fn(out: &[U8], value: Int) Never! {
+pae_len: fn(out: ^[U8], value: Int) Never! {
     n := value
     loop _ in 0..<8 {
         out.push(wrapping(U8{n}))
@@ -459,7 +459,7 @@ priv store_load: fn() -[DB]> [U8] Never! {
     AUTH_STORE.bytes
 }
 
-priv store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
+priv store_replace: fn(expected: [U8], replacement: ^^[U8]) -[DB]> Bool Never! {
     if rt.world_store_replace("core.auth", expected, replacement) == .Val(replaced) {
         return replaced
     }
@@ -830,7 +830,7 @@ encode_store: fn(records: [AuthRecord]) -> [U8] Never! {
     out
 }
 
-put_field: fn(out: &[U8], text: String) Never! {
+put_field: fn(out: ^[U8], text: String) Never! {
     raw: text.bytes()
     n: raw.len()
     out.push(wrapping(U8{n}))
@@ -1156,7 +1156,7 @@ json_hex4: fn(raw: [U8], start: Int) -> Int? {
     Val(value)
 }
 
-push_scalar: fn(out: &[U8], cp: Int) Never! {
+push_scalar: fn(out: ^[U8], cp: Int) Never! {
     if cp < 128 -> out.push(wrapping(U8{cp})) else if cp < 2048 {
         out.push(wrapping(U8{(192) | (cp >> 6)}))
         out.push(wrapping(U8{(128) | (cp & 63)}))

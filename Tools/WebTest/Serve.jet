@@ -104,7 +104,7 @@ serve_one: fn(root: ServeRoot, listener: TCPListener) {
 }
 
 // The request target of the first request line, once the whole head arrived.
-request_target: fn(stream: &TCPStream) -> String? {
+request_target: fn(stream: ^TCPStream) -> String? {
     head := [U8]{}
     loop head.len() < C_MAX_HEAD_BYTES {
         // A silent client is given up on after 5 s.
@@ -132,7 +132,7 @@ head_end: fn(head: [U8]) -> Bool {
     false
 }
 
-send: fn(stream: &TCPStream, reply: Reply) {
+send: fn(stream: ^TCPStream, reply: Reply) {
     reason: if reply.status == 200 -> "OK" else if reply.status == 400 -> "Bad Request" else -> "Not Found"
     content_type: if reply.content_type == "" -> "" else -> "content-type: {reply.content_type}\r\n"
     // Cross-origin isolation: the web runtime shares its memory through a
@@ -238,7 +238,7 @@ open_failed: fn(candidate: String) -> Opened {
     Opened.Refused(404)
 }
 
-file_reply: fn(file: &&HeldFile, served: String) -> Reply {
+file_reply: fn(file: ^^HeldFile, served: String) -> Reply {
     if !file.stat.is_file || file.stat.links != 1 -> return refused(400)
     held := file
     body := [U8]{}

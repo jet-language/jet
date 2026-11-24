@@ -327,7 +327,7 @@ SemSymbolConversion: struct {
     source: String,
 }
 
-semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool, checked_text_error: String?, module_path: String, scope_identity: String, span: Span, lexical_scope: SemSymbolScope?, symbols: &[SemSymbol]) Never! {
+semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool, checked_text_error: String?, module_path: String, scope_identity: String, span: Span, lexical_scope: SemSymbolScope?, symbols: ^[SemSymbol]) Never! {
     conversions := [SemSymbolConversion]{}
     base_name: type_name(base)
     if semindex_symbol_is_numeric(base) {
@@ -395,7 +395,7 @@ semindex_symbol_module_scope: fn(index: SemIndex, module_path: String, name: Str
     SemSymbolScope{identity: identity, structural_parent: structural_parent, structural_slot: "items", span: span, depth: depth, declaration_offset: name_span.start}
 }
 
-semindex_symbol_collect_conversions: fn(index: SemIndex, items: [Item], module_path: String, scope_identity: String, lexical_scope: SemSymbolScope?, symbols: &[SemSymbol]) Never! {
+semindex_symbol_collect_conversions: fn(index: SemIndex, items: [Item], module_path: String, scope_identity: String, lexical_scope: SemSymbolScope?, symbols: ^[SemSymbol]) Never! {
     loop item in items {
         if item == {
             .Distinct(definition) -> {
@@ -509,7 +509,7 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
 
 // The scopes of one module's definition spans (`spans`, in order) among its
 // structural nodes (`nodes`, in start order).
-semindex_symbol_module_scopes: fn(scopes: &SemSymbolScopes, module_path: String, spans: [Span], nodes: [SemNode]) Never! {
+semindex_symbol_module_scopes: fn(scopes: ^SemSymbolScopes, module_path: String, spans: [Span], nodes: [SemNode]) Never! {
     next_node := 0
     active := [SemNode]{}
     loop span in spans {
@@ -530,7 +530,7 @@ semindex_symbol_module_scopes: fn(scopes: &SemSymbolScopes, module_path: String,
     }
 }
 
-semindex_symbol_enclose: fn(scopes: &SemSymbolScopes, key: String, candidates: [SemNode], span: Span) Never! {
+semindex_symbol_enclose: fn(scopes: ^SemSymbolScopes, key: String, candidates: [SemNode], span: Span) Never! {
     if semindex_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) {
         scopes.enclosing[key] = found
     }
@@ -745,7 +745,7 @@ semindex_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: J
     None
 }
 
-semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], scope: SemSymbolScope?) Never! {
+semindex_symbol_collect_imports: fn(symbols: ^[SemSymbol], modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], scope: SemSymbolScope?) Never! {
     loop import in imports {
         if import.kind == {
             .Unqualified(module_alias, _, items, items_span, _) -> {
@@ -809,7 +809,7 @@ semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDo
     }
 }
 
-semindex_symbol_collect_inline_imports: fn(index: SemIndex, symbols: &[SemSymbol], modules: [JetDriverDocModule], doc_module: JetDriverDocModule, items: [Item], parent_scope: SemSymbolScope?) Never! {
+semindex_symbol_collect_inline_imports: fn(index: SemIndex, symbols: ^[SemSymbol], modules: [JetDriverDocModule], doc_module: JetDriverDocModule, items: [Item], parent_scope: SemSymbolScope?) Never! {
     loop item in items {
         if item == .CodeModule(code_module) {
             parent_identity: if parent_scope == .Val(parent) -> parent.identity else -> "module:{doc_module.path}"

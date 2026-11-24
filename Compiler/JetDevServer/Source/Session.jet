@@ -175,19 +175,19 @@ BrowserAssetWatcher: struct {
         watcher
     }
 
-    reopen: fn(&self, entry: String) {
+    reopen: fn(^self, entry: String) {
         self.root = browser_asset_root(entry)
         self.snapshot()
     }
 
-    snapshot: fn(&self) {
+    snapshot: fn(^self) {
         files := [String:BrowserAssetStamp]{}
         skipped := 0
         browser_asset_collect(self.root, files, skipped)
         self.known = files
     }
 
-    poll: fn(&self) -> BrowserAssetPoll {
+    poll: fn(^self) -> BrowserAssetPoll {
         current := [String:BrowserAssetStamp]{}
         skipped := 0
         browser_asset_collect(self.root, current, skipped)
@@ -224,7 +224,7 @@ BrowserAssetWatcher: struct {
         BrowserAssetPoll{changes: kept, skipped: skipped}
     }
 
-    frame: fn(&self, session_id: String) -> String {
+    frame: fn(^self, session_id: String) -> String {
         polled: self.poll()
         prefix: "{self.root}/"
         events := [String]{}
@@ -243,7 +243,7 @@ browser_asset_root: fn(entry: String) -> String Never! {
     session_files.join(if parent == "" -> "." else -> parent, "assets")
 }
 
-browser_asset_collect: fn(path: String, files: &[String:BrowserAssetStamp], skipped: &Int) {
+browser_asset_collect: fn(path: String, files: ^[String:BrowserAssetStamp], skipped: ^Int) {
     if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES {
         skipped += 1
         return
@@ -366,7 +366,7 @@ ResidentDevSession: struct {
         }
     }
 
-    note_client: fn(&self, client: String) {
+    note_client: fn(^self, client: String) {
         if !session_client_id_is_valid(client) {
             return
         }
@@ -378,7 +378,7 @@ ResidentDevSession: struct {
         self.clients[client] = now
     }
 
-    drop_client: fn(&self, client: String) {
+    drop_client: fn(^self, client: String) {
         if !session_client_id_is_valid(client) {
             return
         }
@@ -386,7 +386,7 @@ ResidentDevSession: struct {
         _: self.clients.remove(client)
     }
 
-    expire_clients: fn(&self, now: Int) {
+    expire_clients: fn(^self, now: Int) {
         kept := [String:Int]{}
         loop client in self.clients.keys().to_list() {
             seen: self.clients[client]
@@ -395,14 +395,14 @@ ResidentDevSession: struct {
         self.clients = kept
     }
 
-    client_count: fn(&self) -> Int {
+    client_count: fn(^self) -> Int {
         self.expire_clients(self.clock.elapsed_millis())
         self.clients.len()
     }
 
     // Up to 32 queued browser game controls as one command frame; on a
     // serialization failure every taken control returns to the queue front.
-    browser_game_control_frame: fn(&self) -> String Err! {
+    browser_game_control_frame: fn(^self) -> String Err! {
         frame := JetDevtoolsCommandEnvelope.new("{self.session_id}", session_unix_ms())
         request_ids := [String]{}
         loop request_ids.len() < SESSION_MAX_GAME_CONTROL_FRAME && self.browser_game_controls.len() > 0 {
@@ -425,12 +425,12 @@ ResidentDevSession: struct {
         Ok(body)
     }
 
-    browser_game_asset_frame: fn(&self) -> String {
+    browser_game_asset_frame: fn(^self) -> String {
         frame: self.browser_asset_watcher.frame(self.session_id)
         frame
     }
 
-    reopen_game_asset_watcher: fn(&self, entry: String) Err! {
+    reopen_game_asset_watcher: fn(^self, entry: String) Err! {
         if entry.trim() == "" -> return Err("browser game asset watcher entry must not be empty")
         self.browser_asset_watcher.reopen(entry)
         Ok()
@@ -490,7 +490,7 @@ ResidentDevSession: struct {
         }
     }
 
-    observe_source: fn(&self, revision: String) {
+    observe_source: fn(^self, revision: String) {
         if revision == "" {
             return
         }
@@ -498,7 +498,7 @@ ResidentDevSession: struct {
         if self.accepted_revision == "" -> self.accepted_revision = revision
     }
 
-    set_live_lineage: fn(&self, source_id: String, build_id: String, revision: String, world_id: String) Err! {
+    set_live_lineage: fn(^self, source_id: String, build_id: String, revision: String, world_id: String) Err! {
         if !session_lineage_part(source_id) || !session_lineage_part(build_id) || !session_lineage_part(revision) || !session_lineage_part(world_id) {
             return Err("live lineage is incomplete")
         }
@@ -510,7 +510,7 @@ ResidentDevSession: struct {
 
     capture_facts: fn(self) -> [CaptureSessionFact] Never! { self.capture_fact_list }
 
-    trim_capture_facts: fn(&self) {
+    trim_capture_facts: fn(^self) {
         loop self.capture_fact_list.len() > SESSION_MAX_RECEIPTS {
             _: self.capture_fact_list.remove(0, .Slot)
         }
@@ -526,12 +526,12 @@ ResidentDevSession: struct {
         Ok()
     }
 
-    mark_building: fn(&self) {
+    mark_building: fn(^self) {
         self.state = "building"
         self.publish_session_state("building", "", "")
     }
 
-    mark_ready: fn(&self) {
+    mark_ready: fn(^self) {
         self.state = "ready"
         self.diagnostic_code = ""
         self.diagnostic = ""
@@ -539,7 +539,7 @@ ResidentDevSession: struct {
         self.publish_session_state("ready", "", "")
     }
 
-    mark_error: fn(&self, code: String, diagnostic: String) {
+    mark_error: fn(^self, code: String, diagnostic: String) {
         self.state = "error"
         self.diagnostic_code = code
         self.diagnostic = diagnostic
@@ -547,7 +547,7 @@ ResidentDevSession: struct {
         self.publish_session_state("error", code, diagnostic)
     }
 
-    mark_stopped: fn(&self) {
+    mark_stopped: fn(^self) {
         self.state = "stopped"
         self.publish_session_state("stopped", "", "")
     }
@@ -580,7 +580,7 @@ ResidentDevSession: struct {
     }
 
     // One rebuild executor per host; the host unregisters it when it stops.
-    register_project_rebuild_executor: fn(&self) Err! {
+    register_project_rebuild_executor: fn(^self) Err! {
         if self.project_rebuild_executor {
             return Err("a project rebuild executor is already registered")
         }
@@ -588,7 +588,7 @@ ResidentDevSession: struct {
         Ok()
     }
 
-    unregister_project_rebuild_executor: fn(&self) { self.project_rebuild_executor = false }
+    unregister_project_rebuild_executor: fn(^self) { self.project_rebuild_executor = false }
 
     project_rebuild_executor_available: fn(self) -> Bool Never! { self.project_rebuild_executor }
 
@@ -608,7 +608,7 @@ ResidentDevSession: struct {
         Ok()
     }
 
-    enqueue_devtools_command: fn(&self, command: &&JetDevtoolsCommand) Err! {
+    enqueue_devtools_command: fn(^self, command: ^^JetDevtoolsCommand) Err! {
         self.validate_devtools_command_admission(command)
         self.commands.enqueue(command)
         Ok()
@@ -628,7 +628,7 @@ ResidentDevSession: struct {
         None
     }
 
-    take_project_rebuild: fn(&self) -> JetDevtoolsProjectRebuildRequest? Err! {
+    take_project_rebuild: fn(^self) -> JetDevtoolsProjectRebuildRequest? Err! {
         command: self.commands.poll() ?? return Ok(None)
         is_rebuild: command == .ProjectRebuild(_)
         if !is_rebuild {
@@ -647,7 +647,7 @@ ResidentDevSession: struct {
         Ok(None)
     }
 
-    finish_project_rebuild: fn(&self, request: JetDevtoolsProjectRebuildRequest, failure: &&String?) Err! {
+    finish_project_rebuild: fn(^self, request: JetDevtoolsProjectRebuildRequest, failure: ^^String?) Err! {
         request.validate()
         if request.session_id != self.session_id {
             return Err("jet.devtools.v1 command session identity mismatch")
@@ -658,29 +658,29 @@ ResidentDevSession: struct {
         Ok()
     }
 
-    publish_devtools_event: fn(&self, event: &&JetDevtoolsEvent) -> Int Err! {
+    publish_devtools_event: fn(^self, event: ^^JetDevtoolsEvent) -> Int Err! {
         self.push_devtools_event(event)
     }
 
-    enqueue_game_control: fn(&self, request: &&JetDevtoolsGameControlRequest) Err! {
+    enqueue_game_control: fn(^self, request: ^^JetDevtoolsGameControlRequest) Err! {
         self.enqueue_devtools_command(JetDevtoolsCommand.GameControl{request: request.move()})
     }
 
-    poll_devtools_command: fn(&self) -> JetDevtoolsCommand? Never! { self.commands.poll() }
+    poll_devtools_command: fn(^self) -> JetDevtoolsCommand? Never! { self.commands.poll() }
 
     // The runtime host pulls EXPLAIN work from the session's queue; nothing
     // is dispatched through a process-global callback.
-    poll_database_explain: fn(&self) -> JetDevtoolsDatabaseExplainRequest? Never! {
+    poll_database_explain: fn(^self) -> JetDevtoolsDatabaseExplainRequest? Never! {
         request: self.commands.poll_database_explain() ?? return None
         self.update_command_receipt(request.request_id, "dispatched", None)
         Val(request)
     }
 
-    update_command_receipt: fn(&self, request_id: String, status: &&String, error: &&String?) {
+    update_command_receipt: fn(^self, request_id: String, status: ^^String, error: ^^String?) {
         self.commands.update_receipt(request_id, status, error).drop("a receipt for a request the queue no longer holds has nothing to update")
     }
 
-    publish_database_explain_result: fn(&self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: Int, source: &&String) -> Int Err! {
+    publish_database_explain_result: fn(^self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: Int, source: ^^String) -> Int Err! {
         if result.session_id != self.session_id {
             return Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
         }
@@ -689,7 +689,7 @@ ResidentDevSession: struct {
         self.push_devtools_event(event.move())
     }
 
-    ingest_devtools_envelope: fn(&self, decoded: JetDevtoolsDecodedEnvelope) -> Int Err! {
+    ingest_devtools_envelope: fn(^self, decoded: JetDevtoolsDecodedEnvelope) -> Int Err! {
         decoded.validate()
         if decoded.session_id() != self.session_id {
             return Err("jet.devtools.v1 envelope session identity mismatch")
@@ -744,7 +744,7 @@ ResidentDevSession: struct {
         }
     }
 
-    publish_panel_events: fn(&self, events: &&[JetDevtoolsEvent]) -> Int Err! {
+    publish_panel_events: fn(^self, events: ^^[JetDevtoolsEvent]) -> Int Err! {
         count := 0
         loop event in events.move() {
             _: self.push_devtools_event(event.move())

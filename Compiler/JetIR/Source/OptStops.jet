@@ -17,7 +17,7 @@
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
 use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_intern]
 
-ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
+ir_opt_stops_after_calls: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never! {
     poll := ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
     turn := ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
@@ -113,7 +113,7 @@ ir_opt_stops_any_poll: fn(f: IRFunction, poll: Int, turn: Int, at: Int) -> Bool 
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
-ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Never! {
+ir_opt_stops_drops: fn(code: ^IROptCode, f: IRFunction, start: Int, end: Int) Never! {
     loop k in start..<end {
         ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
     }
@@ -143,7 +143,7 @@ ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Ne
 // exits stay as the module passes after (Opt.jet ir_optimize_module's
 // entry versions, OptReduce.jet) read them, so a loop they left alone
 // before stays so.
-ir_opt_stops_hand_off: fn(f: &IRFunction, m: IRModule) Never! {
+ir_opt_stops_hand_off: fn(f: ^IRFunction, m: IRModule) Never! {
     poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
     turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
@@ -209,7 +209,7 @@ ir_opt_stops_before_drops: fn(f: IRFunction, at: Int) -> Int Never! {
 // edge that stays where it is: each call gets operands of its own in `f`'s
 // args pool, as no two calls share one entry (the SSA form maps each
 // entry's read to one value, Ssa.jet IRSsa.use_args).
-ir_opt_stops_edge_copy: fn(code: &IROptCode, f: &IRFunction, start: Int, end: Int) Never! {
+ir_opt_stops_edge_copy: fn(code: ^IROptCode, f: ^IRFunction, start: Int, end: Int) Never! {
     loop k in start..<end {
         op: f.op[k]
         b := f.b[k]
@@ -253,7 +253,7 @@ ir_opt_stops_handing: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, edge: I
 // by size) for both, one thread each, that read the keys, bodies and reports
 // and own their part; the reports are found between the two walks on the
 // calling thread, over the scans in function order.
-ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction], threads: CompilerThreads) Never! {
+ir_opt_stop_facts: fn(m: IRModule, functions: ^[IRFunction], threads: CompilerThreads) Never! {
     count: functions.len()
     keys := [String]{}
     bodies := [Bool]{}
@@ -312,7 +312,7 @@ ir_opt_stops_scan_new: fn() -> IROptStopsScan Never! {
 }
 
 // Appends function `f`, function `id`, to `scan`.
-ir_opt_stops_scan: fn(m: IRModule, f: IRFunction, id: Int, keys: [String], bodies: [Bool], scan: &IROptStopsScan) Never! {
+ir_opt_stops_scan: fn(m: IRModule, f: IRFunction, id: Int, keys: [String], bodies: [Bool], scan: ^IROptStopsScan) Never! {
     body: bodies[id]
     if body {
         loop at in 0..<f.op.len() {
@@ -369,7 +369,7 @@ IROptStopsPart: struct {
 
 // Walks `parts` (ir_opt_stops_part), in part order: the last part on its
 // own thread, the ones before it the same way, and the first on this one.
-ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], parts: &&[IROptStopsPart]) -> [IROptStopsPart] Never! {
+ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], parts: ^^[IROptStopsPart]) -> [IROptStopsPart] Never! {
     rest := parts.move()
     last: rest.pop() ?? return rest
     if rest.len() == 0 {
@@ -387,7 +387,7 @@ ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bo
 
 // One part's walk: its functions' scan while there are no reports, else
 // their removals.
-ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], part: &&IROptStopsPart) -> IROptStopsPart Never! {
+ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], part: ^^IROptStopsPart) -> IROptStopsPart Never! {
     walked := part.move()
     start: walked.start
     scanning: reports.len() == 0
@@ -406,7 +406,7 @@ ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Boo
 }
 
 // The reports of every function, from the parts' scans in function order.
-ir_opt_stops_reported: fn(parts: &[IROptStopsPart]) -> [Bool] Never! {
+ir_opt_stops_reported: fn(parts: ^[IROptStopsPart]) -> [Bool] Never! {
     scan := ir_opt_stops_scan_new()
     loop at in 0..<parts.len() -> ir_opt_stops_scan_take(scan, parts[at].scan)
     ir_opt_stops_reports(scan)
@@ -414,7 +414,7 @@ ir_opt_stops_reported: fn(parts: &[IROptStopsPart]) -> [Bool] Never! {
 
 // Appends `part`'s scan to `scan`, its call ends shifted past the calls
 // already there.
-ir_opt_stops_scan_take: fn(scan: &IROptStopsScan, part: &IROptStopsScan) Never! {
+ir_opt_stops_scan_take: fn(scan: ^IROptStopsScan, part: ^IROptStopsScan) Never! {
     base: scan.calls.len()
     compiler_transfer_rows<Bool>(scan.starts, part.starts)
     compiler_transfer_rows<Int>(scan.calls, part.calls)
@@ -490,7 +490,7 @@ ir_opt_stops_kind: fn(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never
 
 // Removes from body `f` each stop point right after a call of a body that
 // reports no stop.
-ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], reports: [Bool]) Never! {
+ir_opt_stops_unreported: fn(f: ^IRFunction, keys: [String], bodies: [Bool], reports: [Bool]) Never! {
     removed := false
     loop at in 1..<f.op.len() {
         if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) || reports[f.a[at - 1]] {
@@ -523,7 +523,7 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // and a zone site's arguments around it may be skipped (X64Select.jet
 // ir_x64_zone_regions). The stop points' and the widening's ids are the
 // module's (ir_opt_view names them in `m`).
-ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
+ir_opt_fold_polls: fn(f: ^IRFunction, m: IRModule) Never! {
     poll: ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
     turn: ir_interned_name(m, IR_STOP_TURN_KEY) ?? -1
     if poll < 0 && turn < 0 {
@@ -735,7 +735,7 @@ IRStripMineLoop: struct {
     safe_limit: Bool,
 }
 
-ir_opt_strip_mine: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+ir_opt_strip_mine: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     if f.asm != None || f.cold || f.op.len() == 0 -> return 0
     poll: ir_keyed_function(m, IR_STOP_POLL_KEY) ?? -1
     trap: ir_keyed_function(m, IR_STOP_TRAP_KEY) ?? -1
@@ -743,7 +743,7 @@ ir_opt_strip_mine: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     ir_opt_strip_mine_with(m, f, poll, trap, turn)
 }
 
-ir_opt_strip_mine_with: fn(m: IRModule, f: &IRFunction, poll: Int, trap: Int, turn: Int) -> Int Never! {
+ir_opt_strip_mine_with: fn(m: IRModule, f: ^IRFunction, poll: Int, trap: Int, turn: Int) -> Int Never! {
     if f.asm != None || f.cold || f.op.len() == 0 || turn < 0 -> return 0
     has_turn := false
     loop at in 0..<f.op.len() {
@@ -955,7 +955,7 @@ ir_opt_strip_mine_safe_limit: fn(m: IRModule, f: IRFunction, facts: OptFacts, lo
     false
 }
 
-ir_opt_strip_mine_emit: fn(f: &IRFunction, code: &IROptCode, plan: IRStripMineLoop) Never! {
+ir_opt_strip_mine_emit: fn(f: ^IRFunction, code: ^IROptCode, plan: IRStripMineLoop) Never! {
     line: f.code_line[plan.loop_at]
     idx_row: f.slot_type[plan.idx]
     bool_row: f.slot_type[f.dst[plan.head]]

@@ -2,11 +2,11 @@
 // EvidenceCodec; both use EvidenceCodecTables and EvidenceReport. Native runtime
 // composes this encoder without decoder/Core JSON dependencies.
 
-evidence_put_number: fn(out: &[U8], value: U64, width: Int) Never! {
+evidence_put_number: fn(out: ^[U8], value: U64, width: Int) Never! {
     loop index in 0..<width { out.push(U8{Int{(value >> ((width - index - 1) * 8)) & U64{255}}}) }
 }
 
-evidence_put_string: fn(out: &[U8], text: String) EvidenceCodecError! {
+evidence_put_string: fn(out: ^[U8], text: String) EvidenceCodecError! {
     bytes: text.bytes()
     if bytes.len() > 1048576 {
         return Err(evidence_codec_error("evidence report field exceeds the 1 MiB limit"))
@@ -16,13 +16,13 @@ evidence_put_string: fn(out: &[U8], text: String) EvidenceCodecError! {
     return
 }
 
-evidence_put_len: fn(out: &[U8], length: Int) EvidenceCodecError! {
+evidence_put_len: fn(out: ^[U8], length: Int) EvidenceCodecError! {
     if length > 10000 -> return Err(evidence_codec_error("evidence report collection is too large"))
     evidence_put_number(out, U64{length}, 4)
     return
 }
 
-evidence_put_optional: fn(out: &[U8], value: String?) EvidenceCodecError! {
+evidence_put_optional: fn(out: ^[U8], value: String?) EvidenceCodecError! {
     if value == {
         .None -> { out.push(U8{0}) }
         .Val(text) -> {
@@ -54,7 +54,7 @@ evidence_chain_indices: fn(values: [EvidenceChainLink]) -> [Int] Never! {
     indices
 }
 
-evidence_encode_record_body: fn(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
+evidence_encode_record_body: fn(record: EvidenceRecord, out: ^[U8]) EvidenceCodecError! {
     if evidence_record_validate(record) == {
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}
@@ -115,7 +115,7 @@ evidence_encode_record_body: fn(record: EvidenceRecord, out: &[U8]) EvidenceCode
     return
 }
 
-evidence_encode_record: fn(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
+evidence_encode_record: fn(record: EvidenceRecord, out: ^[U8]) EvidenceCodecError! {
     if record.derivation != None {
         return Err(evidence_codec_error("evidence record has a derivation; encode with its canonical definition"))
     }
@@ -124,7 +124,7 @@ evidence_encode_record: fn(record: EvidenceRecord, out: &[U8]) EvidenceCodecErro
     return
 }
 
-evidence_encode_record_with_derivation: fn(record: EvidenceRecord, derivation: DerivationRecord, out: &[U8]) EvidenceCodecError! {
+evidence_encode_record_with_derivation: fn(record: EvidenceRecord, derivation: DerivationRecord, out: ^[U8]) EvidenceCodecError! {
     if evidence_record_validate(record) == {
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}
@@ -137,7 +137,7 @@ evidence_encode_record_with_derivation: fn(record: EvidenceRecord, derivation: D
     evidence_encode_derivation(derivation, out)
 }
 
-evidence_encode_derivation: fn(value: DerivationRecord, out: &[U8]) EvidenceCodecError! {
+evidence_encode_derivation: fn(value: DerivationRecord, out: ^[U8]) EvidenceCodecError! {
     if !derivation_record_validate(value) {
         return Err(evidence_codec_error("derivation {value.id} has a non-canonical identity"))
     }

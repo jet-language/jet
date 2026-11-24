@@ -24,7 +24,7 @@ use {
     jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, compiler_threads_single, effect_vocabulary_module, jet_target_machine_hosted, module_intern, module_table]
 }
 
-shared_cycle_diagnostics: fn(failures: &[String], source: String) -> [Diagnostic]? {
+shared_cycle_diagnostics: fn(failures: ^[String], source: String) -> [Diagnostic]? {
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 {
         failures.push("fixture does not parse: {source}")
@@ -63,7 +63,7 @@ shared_cycle_diagnostics: fn(failures: &[String], source: String) -> [Diagnostic
     Val(checked.diagnostics.move())
 }
 
-shared_cycle_expect: fn(failures: &[String], source: String, places: [String]) {
+shared_cycle_expect: fn(failures: ^[String], source: String, places: [String]) {
     diagnostics: shared_cycle_diagnostics(failures, source) ?? return
     found := [String]{}
     loop diagnostic in diagnostics {
@@ -117,7 +117,7 @@ SHARED_CYCLE_FEED: "Feed: struct {{\nname: String,\nlisteners: [fn() -> Int],\np
     // A function value holds what it captures: storing one that may capture a
     // strong handle to the cell closes the loop.
     shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}run: fn() {{\nfeed: Shared{{Feed{{name: \"f\", listeners: [], peers: []}}}}\nhandle: feed.copy()\nfeed.listeners.push(fn() {{ handle.strong_count() }})\n}}", [String]{"feed.listeners"})
-    shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}watch: fn(feed: Shared<Feed>, listener: &&fn() -> Int) {{\nfeed.listeners.push(listener)\n}}", [String]{"feed.listeners"})
+    shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}watch: fn(feed: Shared<Feed>, listener: ^^fn() -> Int) {{\nfeed.listeners.push(listener)\n}}", [String]{"feed.listeners"})
     // A weak capture, a named function, and a callback a writing call only
     // runs do not.
     shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}named: fn() -> Int {{\n1\n}}\nrun: fn() {{\nfeed: Shared{{Feed{{name: \"f\", listeners: [], peers: []}}}}\nback: feed.downgrade()\nlistener: fn() -> Int {{ if back.upgrade() == .Val(f) -> f.name.len() else -> 0 }}\nfeed.listeners.push(listener)\nfeed.listeners.push(named)\n}}", [String]{})

@@ -81,7 +81,7 @@ jet_cli_reduce_oracle: fn(scratch: String, source: String, code: String) -> Bool
     false
 }
 
-jet_cli_reduce_candidate: fn(lines: &[String], start: Int, end: Int) -> [String] Never! {
+jet_cli_reduce_candidate: fn(lines: ^[String], start: Int, end: Int) -> [String] Never! {
     // Build only the retained lines; do not clone and drain the whole input.
     candidate := [String]{}
     loop (index, line) in lines {
@@ -91,7 +91,7 @@ jet_cli_reduce_candidate: fn(lines: &[String], start: Int, end: Int) -> [String]
 }
 
 // The reducer owns its line buffer; candidates borrow it until accepted.
-jet_cli_reduce_lines: fn(lines: &&[String], scratch: String, code: String) -> [String] {
+jet_cli_reduce_lines: fn(lines: ^^[String], scratch: String, code: String) -> [String] {
     current := lines.move()
     chunks := 2
     loop current.len() >= 2 {

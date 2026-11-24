@@ -58,7 +58,7 @@ sema_call_http_static_tree_arg: fn(value: TExpr, argument: CallArg) -> TCallArg 
     }
 }
 
-sema_call_http_check_value: fn(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_http_check_value: fn(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if type_identity_equal(checked.ty, required) -> return Val(checked)
     compatible: sema_call_type_assignable(required, checked.ty, environment, program) ?? return None
@@ -71,7 +71,7 @@ sema_call_http_check_value: fn(argument: CallArg, required: Type, environment: S
     None
 }
 
-sema_call_http_check_serde: fn(direction: SemaSerdeDirection, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_call_http_check_serde: fn(direction: SemaSerdeDirection, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     lack: sema_serde_lack(environment, program, ty, direction) ?? return
     shown: sema_type_show_quoted(ty)
     diagnostics.push(sema_error("E2411", span, "{shown} can't be {if direction == SemaSerdeDirection.Encode -> "serialized" else -> "decoded"}", sema_serde_lack_why(lack.shown, shown), lack.fix))
@@ -92,7 +92,7 @@ sema_call_http_source_json_target: fn(target: SemaCallDirectTarget, environment:
     } else { return false }
 }
 
-sema_call_http_record_effect: fn(effect_name: String, api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_call_http_record_effect: fn(effect_name: String, api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
     row := [EffectRowEntry]{EffectRowEntry{name: effect_name, span: span}}
     _ := sema_effect_record_intrinsic_fact(
         environment,
@@ -114,7 +114,7 @@ sema_call_http_record_effect: fn(effect_name: String, api: String, result_type: 
 
 // Only a lambda's captures cross the handler boundary; a named function or
 // callable value carries no captured state to prove.
-sema_call_http_check_middleware_callback: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_http_check_middleware_callback: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if value.kind == {
         .Lambda(lambda) -> {
             updated_lambda := lambda
@@ -146,7 +146,7 @@ sema_call_http_check_middleware_callback: fn(value: TExpr, environment: SemaScop
     true
 }
 
-sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     if updated_args.len() != 1 {
         diagnostics.push(sema_call_arity_diagnostic("middleware", 1, updated_args.len(), false, span))
@@ -182,7 +182,7 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
 // the method): the place of this call, as at any call. An App method (the
 // server's or the app graph's) returns the App, so registrations chain; a
 // router's registers Net.
-sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: &&[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: ^^[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     owner: sema_call_http_nominal_leaf(receiver_value.ty)
     if program.registration_graph == .Val(graph) {
         candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, diagnostics)
@@ -274,7 +274,7 @@ sema_call_http_core_form_descriptor: fn(field: Field, value_variant: String, con
 // markers hear the call before it is checked (Calls/CheckRules.jet), as
 // `form` called on the model with the action alone: Core's `#Web.Form`
 // rejects an action that does not take the model.
-sema_call_try_web_form: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_web_form: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != SEMA_WEB_MARKER_MODULE || member != "form" {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
@@ -301,7 +301,7 @@ sema_call_try_web_form: fn(module_name: String, member: String, alias: String, a
     checked
 }
 
-sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if !sema_call_core_check_type_args(SEMA_WEB_MARKER_MODULE, "form", 0, false, type_args, span, diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
@@ -455,7 +455,7 @@ sema_web_form_method_member: fn(method: String, arity: Int) -> String? Never! {
 
 // Only the native typed-model identity is routed here. Canonical source
 // forms records continue through ordinary source method/function checking.
-sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "WebFormTyped"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -517,7 +517,7 @@ sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method:
 // order, once they bind, type-check and pass the ownership check of a read
 // receiver; None after a diagnostic. Arguments that do not bind are still
 // checked, for their own diagnostics.
-sema_web_form_checked_args: fn(method: String, params: [SemaCallParam], args: [CallArg], receiver: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+sema_web_form_checked_args: fn(method: String, params: [SemaCallParam], args: [CallArg], receiver: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [TExpr]? {
     checked_args := args
     binding: sema_call_bind_args(method, params, checked_args, span, diagnostics) ?? {
         loop argument in args {
@@ -548,7 +548,7 @@ sema_web_form_checked_args: fn(method: String, params: [SemaCallParam], args: [C
 // selector lowers to the ABI field-name String. A lower-case selector parses
 // as a bare member chain, an upper-case one as a leading-dot enum literal.
 // None for any other argument.
-sema_web_form_field_selector: fn(argument: CallArg, diagnostics: &[Diagnostic]) -> CallArg? {
+sema_web_form_field_selector: fn(argument: CallArg, diagnostics: ^[Diagnostic]) -> CallArg? {
     if argument.expr == .Field(base, member, member_span, _) {
         if !sema_expr_is_bare_subject(base) -> return None
         return Val(sema_web_form_selector_name(member, member_span, argument))

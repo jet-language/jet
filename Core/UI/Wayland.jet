@@ -778,7 +778,7 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
 // A frame that presents nothing lets the window sleep until input or a
 // wake (`waker`) arrives. A failure ends the stream with `.Close`;
 // `failure()` says why.
-next_frame: fn(c: &Connection) -[Env, Net, Time]> [UIEvent] {
+next_frame: fn(c: ^Connection) -[Env, Net, Time]> [UIEvent] {
     // Uncapped, nothing waits for the callback: read what has arrived.
     if c.uncapped && c.mapped -> receive(c, 0)
     loop c.failure == None && !c.frame_due && !has_close(c.events) && !urgent(c) {
@@ -907,7 +907,7 @@ draw_budget: fn(c: Connection) -> Int {
 
 // Asks for a frame callback with a one-pixel damage of the buffer on
 // screen, so a compositor that repaints only damaged surfaces sends it.
-request_frame: fn(c: &Connection) {
+request_frame: fn(c: ^Connection) {
     c.frame_callback = new_id(c)
     header(c, c.surface, 3, 4)
     put32(c.out, c.frame_callback)
@@ -926,7 +926,7 @@ request_frame: fn(c: &Connection) {
 // by the difference, so an ack riding a buffer of another size makes
 // the window jump. Acking a configure answers every older one too; a
 // newer configure of another size waits for the frame drawn at it.
-ack_configure: fn(c: &Connection) {
+ack_configure: fn(c: ^Connection) {
     found := -1
     loop index in 0..<c.configures.len() {
         if answers(c, c.configures[index]) -> found = index
@@ -949,7 +949,7 @@ answers: fn(c: Connection, configure: Configure) -> Bool {
 
 // Says how the buffers map onto the window: the viewport's logical
 // size, else the integer buffer scale.
-apply_scale: fn(c: &Connection) {
+apply_scale: fn(c: ^Connection) {
     if !c.rescaled {
         return
     }
@@ -975,7 +975,7 @@ has_close: fn(events: [UIEvent]) -> Bool {
 // callback and presentation feedback. Three buffers and one frame in
 // flight leave one free; if none is, this waits for a release rather
 // than drop the frame.
-present: fn(c: &Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError! {
+present: fn(c: ^Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     frame_bytes: c.width * c.height * 4
     if pixels.len() != frame_bytes {
@@ -1074,7 +1074,7 @@ free_buffer: fn(c: Connection) -> Int {
 // When it meets none and the list already holds DAMAGE_RECTS, it joins the
 // one whose bounds with it add the least area, and goes on meeting others.
 // An empty rectangle adds nothing.
-grow_damage: fn(damage: &[UIRect], rect: UIRect) {
+grow_damage: fn(damage: ^[UIRect], rect: UIRect) {
     if rect.width <= 0 || rect.height <= 0 {
         return
     }
@@ -1131,19 +1131,19 @@ bounds: fn(a: UIRect, b: UIRect) -> UIRect {
     UIRect{x: x, y: y, width: max_int(a.x + a.width, b.x + b.width) - x, height: max_int(a.y + a.height, b.y + b.height) - y}
 }
 
-fail: fn(c: &Connection, failure: UIError) {
+fail: fn(c: ^Connection, failure: UIError) {
     if c.failure == None -> c.failure = Val(failure)
 }
 
 // ---- the wire ---------------------------------------------------------
 
-new_id: fn(c: &Connection) -> Int {
+new_id: fn(c: ^Connection) -> Int {
     id: c.next_id
     c.next_id += 1
     id
 }
 
-put32: fn(out: &[U8], value: Int) {
+put32: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -1168,20 +1168,20 @@ text_argument: fn(text: String) -> [U8] {
     out
 }
 
-request: fn(c: &Connection, object: Int, opcode: Int, arguments: [U8]) {
+request: fn(c: ^Connection, object: Int, opcode: Int, arguments: [U8]) {
     header(c, object, opcode, arguments.len())
     loop b in arguments -> c.out.push(b)
 }
 
 // A request header; `argument_bytes` of arguments must follow.
-header: fn(c: &Connection, object: Int, opcode: Int, argument_bytes: Int) {
+header: fn(c: ^Connection, object: Int, opcode: Int, argument_bytes: Int) {
     put32(c.out, object)
     put32(c.out, ((argument_bytes + 8) << 16) + opcode)
 }
 
 // Sends the queued requests; queued descriptors ride with them and are
 // closed here (the compositor got its own copies).
-flush: fn(c: &Connection) -[Net, Time]> {
+flush: fn(c: ^Connection) -[Net, Time]> {
     if c.out.len() == 0 || c.failure != None {
         return
     }
@@ -1198,7 +1198,7 @@ flush: fn(c: &Connection) -[Net, Time]> {
 // key's next repeat ends the wait early, and so does the next look at the
 // settings portal while it is followed, and a wake (`waker`), which the
 // next frame answers.
-receive: fn(c: &Connection, timeout_ns: Int) -[Env, Net, Time]> {
+receive: fn(c: ^Connection, timeout_ns: Int) -[Env, Net, Time]> {
     if c.failure != None {
         return
     }
@@ -1234,7 +1234,7 @@ receive: fn(c: &Connection, timeout_ns: Int) -[Env, Net, Time]> {
     flush(c)
 }
 
-roundtrip: fn(c: &Connection) -[Env, Net, Time]> {
+roundtrip: fn(c: ^Connection) -[Env, Net, Time]> {
     c.synced = false
     c.sync_callback = new_id(c)
     request(c, DISPLAY, 0, words([Int]{c.sync_callback}))
@@ -1264,7 +1264,7 @@ string_at: fn(bytes: [U8], at: Int) -> String {
 }
 
 // Handles every complete event in the inbox.
-dispatch: fn(c: &Connection) -[Env, Time]> {
+dispatch: fn(c: ^Connection) -[Env, Time]> {
     at := 0
     loop c.inbox.len() - at >= 8 && c.failure == None {
         object: u32_at(c.inbox, at)
@@ -1281,7 +1281,7 @@ dispatch: fn(c: &Connection) -[Env, Time]> {
     if at > 0 -> c.inbox = c.inbox[at..<c.inbox.len()].copy()
 }
 
-bind: fn(c: &Connection, name: Int, interface: String, version: Int) -> Int {
+bind: fn(c: ^Connection, name: Int, interface: String, version: Int) -> Int {
     id: new_id(c)
     arguments := text_argument(interface)
     args := words([Int]{name})
@@ -1296,7 +1296,7 @@ min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
 
 max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
 
-event: fn(c: &Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
+event: fn(c: ^Connection, object: Int, opcode: Int, body: [U8]) -[Env, Time]> {
     if body.len() < required_bytes(c, object, opcode) {
         fail(c, UIError.Protocol("event {opcode} on object {object} is too short"))
         return
@@ -1501,7 +1501,7 @@ required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
     0
 }
 
-global: fn(c: &Connection, name: Int, interface: String, version: Int) {
+global: fn(c: ^Connection, name: Int, interface: String, version: Int) {
     if interface == "wl_compositor" && c.compositor == 0 {
         c.compositor_version = min_int(version, 6)
         c.compositor = bind(c, name, interface, c.compositor_version)
@@ -1591,7 +1591,7 @@ pending_index: fn(c: Connection, object: Int) -> Int {
 // grid frames aim at and the local clock's offset; a frame seen after
 // the vblank it aimed at is missed and widens the safety margin.
 // Intervals and input-to-photon latencies feed frame_stats.
-presented: fn(c: &Connection, object: Int, body: [U8]) -[Time]> {
+presented: fn(c: ^Connection, object: Int, body: [U8]) -[Time]> {
     stamp: ((u32_at(body, 0) << 32) + u32_at(body, 4)) * 1000000000 + u32_at(body, 8)
     refresh: u32_at(body, 12)
     if refresh > 0 -> c.refresh_ns = refresh
@@ -1646,11 +1646,11 @@ presented: fn(c: &Connection, object: Int, body: [U8]) -[Time]> {
     c.presented += 1
 }
 
-keep: fn(samples: &[Int], at: Int, value: Int) {
+keep: fn(samples: ^[Int], at: Int, value: Int) {
     if samples.len() < SAMPLES_KEPT -> samples.push(value) else -> samples[at] = value
 }
 
-capabilities: fn(c: &Connection, mask: Int) {
+capabilities: fn(c: ^Connection, mask: Int) {
     if mask & 1 != 0 && c.pointer == 0 {
         c.pointer = new_id(c)
         request(c, c.seat, 0, words([Int]{c.pointer}))
@@ -1667,7 +1667,7 @@ capabilities: fn(c: &Connection, mask: Int) {
     }
 }
 
-keyboard: fn(c: &Connection, opcode: Int, body: [U8]) -[Env, Time]> {
+keyboard: fn(c: ^Connection, opcode: Int, body: [U8]) -[Env, Time]> {
     if opcode == 0 {
         // keymap: its descriptor is the oldest one queued.
         fd: c.inbox_fds.pop() ?? {
@@ -1715,7 +1715,7 @@ keyboard: fn(c: &Connection, opcode: Int, body: [U8]) -[Env, Time]> {
 // NUL included) behind `fd`. One the engine cannot compile, or another
 // format, leaves the US table in charge; a key held across the change
 // stops repeating.
-load_keymap: fn(c: &Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
+load_keymap: fn(c: ^Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
     c.held = -1
     c.keymap = [xkb.Keymap]{}
     if format != KEYMAP_XKB_V1 || size > KEYMAP_MAX {
@@ -1734,7 +1734,7 @@ load_keymap: fn(c: &Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
 // wl_keyboard.key: a press or release of evdev key `code` (its `state`)
 // with its serial. A press the frame takes, and that key's release, reach
 // no program.
-key_event: fn(c: &Connection, serial: Int, code: Int, state: Int) -[Time]> {
+key_event: fn(c: ^Connection, serial: Int, code: Int, state: Int) -[Time]> {
     pressed: press(c, code, state)
     if state != KEY_PRESSED {
         if release_frame_key(c, code) {
@@ -1756,7 +1756,7 @@ key_event: fn(c: &Connection, serial: Int, code: Int, state: Int) -[Time]> {
 
 // A key press or release (wl_keyboard.key's `state`) through the keymap,
 // else the US table: the key and, on a press, the text it types.
-press: fn(c: &Connection, code: Int, state: Int) -> {key: Key, text: String} {
+press: fn(c: ^Connection, code: Int, state: Int) -> {key: Key, text: String} {
     down: state == KEY_PRESSED
     map := c.keymap.pop() ?? {
         text: if down -> evdev_text(code, c.modifiers) else -> ""
@@ -1769,7 +1769,7 @@ press: fn(c: &Connection, code: Int, state: Int) -> {key: Key, text: String} {
 
 // A press starts the key repeating when the keymap says it repeats (the
 // US table: anything but a modifier), and ends another key's repeat.
-hold: fn(c: &Connection, code: Int, key: Key, text: String) -[Time]> {
+hold: fn(c: ^Connection, code: Int, key: Key, text: String) -[Time]> {
     c.held = -1
     repeats: if c.keymap.len() > 0 -> c.keymap[0].repeats(code) else -> !modifier(key)
     if !repeats || c.repeat.rate <= 0 {
@@ -1810,7 +1810,7 @@ portal_wait: fn(c: Connection, timeout_ns: Int) -> Int {
 // session bus: its color scheme picks the frame's theme, dark unless it
 // prefers light. No bus leaves the frame dark. A portal that does not
 // answer yet is read when it starts.
-watch_portal: fn(c: &Connection) -[Env, Net, Time]> {
+watch_portal: fn(c: ^Connection) -[Env, Net, Time]> {
     bus := dbus.session(PORTAL_WAIT_NS) ?? return
     dbus.watch_appearance(bus, PORTAL_WAIT_NS) ?? return
     look: dbus.appearance(bus, PORTAL_WAIT_NS) ?? dbus.default_appearance()
@@ -1821,7 +1821,7 @@ watch_portal: fn(c: &Connection) -[Env, Net, Time]> {
 // Applies the portal's signals since the last look: a changed setting,
 // or a restarted portal read anew. A bus that fails is let go, and the
 // frame keeps the theme it has.
-follow_portal: fn(c: &Connection) -[Net, Time]> {
+follow_portal: fn(c: ^Connection) -[Net, Time]> {
     if c.portal.len() == 0 {
         return
     }
@@ -1839,7 +1839,7 @@ follow_portal: fn(c: &Connection) -[Net, Time]> {
 
 // The frame takes the desktop's appearance, and is drawn anew when its
 // theme changed.
-take_appearance: fn(c: &Connection, look: dbus.PortalAppearance) {
+take_appearance: fn(c: ^Connection, look: dbus.PortalAppearance) {
     dark: look.scheme != .Light
     if dark != c.look.dark {
         c.look.dark = dark
@@ -1851,7 +1851,7 @@ take_appearance: fn(c: &Connection, look: dbus.PortalAppearance) {
 // The held key repeats once, as a KeyDown and its text, when a repeat has
 // fallen due; repeats missed while the program was busy are dropped, not
 // delivered in a burst.
-repeat_key: fn(c: &Connection) -[Time]> {
+repeat_key: fn(c: ^Connection) -[Time]> {
     if c.held < 0 || c.failure != None {
         return
     }
@@ -1869,7 +1869,7 @@ repeat_key: fn(c: &Connection) -[Time]> {
 to_pixels: fn(c: Connection, fixed: Int) -> Int { fixed * c.scale120 /% 30720 }
 
 // Events on the chrome work the frame and reach no program.
-pointer: fn(c: &Connection, opcode: Int, body: [U8]) {
+pointer: fn(c: ^Connection, opcode: Int, body: [U8]) {
     // enter: the cursor is the client's to set again, at this serial.
     if opcode == 0 {
         c.pointer_serial = u32_at(body, 0)
@@ -1921,7 +1921,7 @@ pointer: fn(c: &Connection, opcode: Int, body: [U8]) {
 
 // Notes an input event's time (ms on the compositor's clock) for the
 // input-to-photon latency of the frame that shows it.
-note_input: fn(c: &Connection, ms: Int) {
+note_input: fn(c: ^Connection, ms: Int) {
     if c.input_ms < 0 -> c.input_ms = ms
 }
 
@@ -1937,7 +1937,7 @@ pointer_button: fn(code: Int) -> UIPointerButton {
 
 // The seat's wl_data_device (get_data_device), once the manager and the
 // seat both exist: it brings the clipboard's offers and the drags.
-data_device: fn(c: &Connection) {
+data_device: fn(c: ^Connection) {
     if c.data_manager == 0 || c.seat == 0 || c.data_device != 0 {
         return
     }
@@ -1958,7 +1958,7 @@ offer_index: fn(c: Connection, object: Int) -> Int {
 // motion moves it, and drop keeps an accepted one for the next frame to
 // read (`take_drops`). Every other offer but the clipboard's is destroyed
 // once the compositor moves on (leave, drop, a new selection).
-data_device_event: fn(c: &Connection, opcode: Int, body: [U8]) {
+data_device_event: fn(c: ^Connection, opcode: Int, body: [U8]) {
     if opcode == 0 -> c.offers.push(Offer{id: u32_at(body, 0), types: [String]{}})
     if opcode == 1 -> drag_enter(c, body)
     if opcode == 3 && c.drag != 0 {
@@ -1982,7 +1982,7 @@ data_device_event: fn(c: &Connection, opcode: Int, body: [U8]) {
 // whose offer comes as a list of URIs or as text is accepted as a copy in
 // that type; one over the frame, or with neither, is refused (accept with
 // no type), so it can't drop there.
-drag_enter: fn(c: &Connection, body: [U8]) {
+drag_enter: fn(c: ^Connection, body: [U8]) {
     c.drag = 0
     offer: u32_at(body, 16)
     at: offer_index(c, offer)
@@ -2015,7 +2015,7 @@ drop_type: fn(types: [String]) -> String {
 
 // Destroys (wl_data_offer.destroy) every offer but the clipboard's, the
 // drag's over the window and those dropped and not yet read.
-drop_offers: fn(c: &Connection) {
+drop_offers: fn(c: ^Connection) {
     offers: c.offers.copy()
     kept := [Offer]{}
     loop offer in offers {
@@ -2037,7 +2037,7 @@ dropped: fn(c: Connection, offer: Int) -> Bool {
 // tells its source the drop is done (finish, from version 3) and destroys
 // it: a `.Drop` where it fell, with its items. A drop whose source sends
 // nothing readable, or nothing, is left out.
-take_drops: fn(c: &Connection) -[Env, Net, Time]> {
+take_drops: fn(c: ^Connection) -[Env, Net, Time]> {
     drops: c.drops.copy()
     c.drops.clear()
     loop drop in drops {
@@ -2084,7 +2084,7 @@ text_type: fn(types: [String]) -> String {
 // that rides with it, and closing that descriptor ends the text; a source
 // this window has replaced answers with nothing. `canceled` says another
 // client copied, which ends the source.
-source_event: fn(c: &Connection, object: Int, opcode: Int) -[Env, Time]> {
+source_event: fn(c: ^Connection, object: Int, opcode: Int) -[Env, Time]> {
     if opcode == 1 {
         fd: c.inbox_fds.pop() ?? {
             fail(c, UIError.Protocol("wl_data_source.send arrived without its descriptor"))
@@ -2129,7 +2129,7 @@ send_text: fn(fd: sys.Fd, bytes: [U8]) -[Env, Time]> {
 // The clipboard's text: this window's own copy while it holds the
 // clipboard, else the holder's, in the first text type it offers
 // (`offer_text`); "" when the clipboard is empty or holds no text.
-clipboard_text: fn(c: &Connection) -[Env, Net, Time]> String UIError! {
+clipboard_text: fn(c: ^Connection) -[Env, Net, Time]> String UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     if c.data_device == 0 {
         return Err(UIError.Unsupported("the compositor offers no wl_data_device_manager"))
@@ -2144,7 +2144,7 @@ clipboard_text: fn(c: &Connection) -[Env, Net, Time]> String UIError! {
 
 // The data of `offer` as `kind`, read through a pipe whose write end goes
 // to its source (wl_data_offer.receive).
-offer_text: fn(c: &Connection, offer: Int, kind: String) -[Env, Net, Time]> String UIError! {
+offer_text: fn(c: ^Connection, offer: Int, kind: String) -[Env, Net, Time]> String UIError! {
     ends := sys.open_pipe() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed: {err}"))
     writer: ends.pop() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed"))
     reader: ends.pop() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed"))
@@ -2181,7 +2181,7 @@ read_text: fn(reader: sys.Fd) -[Env, Time]> String UIError! {
 // text type, set as the selection at the latest input's serial (the
 // compositor takes a copy only from the client with the keyboard focus).
 // The source answers pastes until another client copies.
-set_clipboard_text: fn(c: &Connection, text: String) -[Net, Time]> UIError! {
+set_clipboard_text: fn(c: ^Connection, text: String) -[Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     if c.data_device == 0 {
         return Err(UIError.Unsupported("the compositor offers no wl_data_device_manager"))
@@ -2206,7 +2206,7 @@ no_composition: fn() -> UIIMEComposition {
 
 // The seat's zwp_text_input_v3 (get_text_input), once the manager and the
 // seat both exist.
-text_input_device: fn(c: &Connection) {
+text_input_device: fn(c: ^Connection) {
     if c.text_manager == 0 || c.seat == 0 || c.text_input != 0 {
         return
     }
@@ -2218,7 +2218,7 @@ text_input_device: fn(c: &Connection) {
 // preedit_string, commit_string and delete_surrounding_text, which the
 // next done applies. This window sends no surrounding text, so an input
 // method has none to delete.
-text_input_event: fn(c: &Connection, opcode: Int, body: [U8]) {
+text_input_event: fn(c: ^Connection, opcode: Int, body: [U8]) {
     if opcode == 0 {
         if u32_at(body, 0) != c.surface {
             return
@@ -2292,7 +2292,7 @@ characters: fn(bytes: [U8], count: Int) -> Int {
 }
 
 // Tells the program of `composition` unless it already knows it.
-compose: fn(c: &Connection, composition: UIIMEComposition) {
+compose: fn(c: ^Connection, composition: UIIMEComposition) {
     if composition == c.composing {
         return
     }
@@ -2302,7 +2302,7 @@ compose: fn(c: &Connection, composition: UIIMEComposition) {
 
 // enable, then the content type (no hints, normal) and the caret's area,
 // applied by commit.
-enable_text_input: fn(c: &Connection) {
+enable_text_input: fn(c: ^Connection) {
     request(c, c.text_input, 1, [U8]{})
     request(c, c.text_input, 5, words([Int]{0, 0}))
     area: words(c.text_area)
@@ -2314,7 +2314,7 @@ enable_text_input: fn(c: &Connection) {
 // pixels, and none means it has no text field, which turns the input
 // method off and ends the composition. A compositor without
 // zwp_text_input_v3 leaves typing to the keyboard alone.
-set_text_input: fn(c: &Connection, area: UIRect?) -[Net, Time]> UIError! {
+set_text_input: fn(c: ^Connection, area: UIRect?) -[Net, Time]> UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     logical := [Int]{}
     if area == .Val(rect) {
@@ -2347,14 +2347,14 @@ set_text_input: fn(c: &Connection, area: UIRect?) -[Net, Time]> UIError! {
 
 // xdg_toplevel.set_maximized (9) or unset_maximized (10). The
 // compositor answers with a configure, which the next frames follow.
-set_maximized: fn(c: &Connection, maximized: Bool) {
+set_maximized: fn(c: ^Connection, maximized: Bool) {
     opcode: if maximized -> 9 else -> 10
     request(c, c.toplevel, opcode, [U8]{})
 }
 
 // xdg_toplevel.set_fullscreen (11) on the output the compositor picks
 // (a null output), or unset_fullscreen (12).
-set_fullscreen: fn(c: &Connection, fullscreen: Bool) {
+set_fullscreen: fn(c: ^Connection, fullscreen: Bool) {
     if fullscreen {
         request(c, c.toplevel, 11, words([Int]{0}))
         return
@@ -2365,7 +2365,7 @@ set_fullscreen: fn(c: &Connection, fullscreen: Bool) {
 // xdg_toplevel.set_minimized (13). The window is hidden from now on; only
 // xdg_wm_base v6 says, by its suspended state, when the user brings it
 // back, so on an older compositor its visibility is unknown from now on.
-minimize: fn(c: &Connection) {
+minimize: fn(c: ^Connection) {
     request(c, c.toplevel, 13, [U8]{})
     c.minimized = true
     tell_visibility(c)
@@ -2381,14 +2381,14 @@ is_fullscreen: fn(c: Connection) -> Bool { c.fullscreen }
 
 // xdg_toplevel.set_app_id: the desktop matches it to the application's
 // desktop entry, for its name, icon and grouping.
-set_app_id: fn(c: &Connection, app_id: String) { request(c, c.toplevel, 3, text_argument(app_id)) }
+set_app_id: fn(c: ^Connection, app_id: String) { request(c, c.toplevel, 3, text_argument(app_id)) }
 
 // Names the window's menu: the dbusmenu at `path` of the session bus
 // connection `service` (its unique name), through org_kde_kwin_appmenu
 // (create, then set_address), and flushes. A desktop with a global menu
 // (KDE Plasma's) shows it as the window's menu bar. Whether the compositor
 // offers the protocol; without it, nothing is sent.
-set_menu_address: fn(c: &Connection, service: String, path: String) -[Net, Time]> Bool {
+set_menu_address: fn(c: ^Connection, service: String, path: String) -[Net, Time]> Bool {
     if c.appmenu_manager == 0 -> return false
     if c.appmenu == 0 {
         c.appmenu = new_id(c)
@@ -2406,7 +2406,7 @@ set_menu_address: fn(c: &Connection, service: String, path: String) -[Net, Time]
 // pool kept until the next icon replaces it; an icon with neither
 // unsets the window's. A compositor without the protocol keeps the icon
 // of the app_id's desktop entry.
-set_icon: fn(c: &Connection, icon: UIIcon) -[Env]> UIError! {
+set_icon: fn(c: ^Connection, icon: UIIcon) -[Env]> UIError! {
     if c.icon_manager == 0 -> return Ok()
     toplevel: c.toplevel
     manager: c.icon_manager
@@ -2478,7 +2478,7 @@ premultiplied_argb: fn(rgba: [U8]) -> [U8] {
 }
 
 // Destroys the previous icon's buffers and pool.
-release_icon: fn(c: &Connection) {
+release_icon: fn(c: ^Connection) {
     loop id in c.icon_buffers.copy() -> request(c, id, 0, [U8]{})
     if c.icon_pool != 0 {
         pool: c.icon_pool
@@ -2492,7 +2492,7 @@ release_icon: fn(c: &Connection) {
 
 // Asks for the pointer's wp_cursor_shape_device_v1 once both the
 // manager and the pointer exist.
-cursor_device: fn(c: &Connection) {
+cursor_device: fn(c: ^Connection) {
     if c.cursor_manager == 0 || c.pointer == 0 || c.cursor_device != 0 {
         return
     }
@@ -2502,7 +2502,7 @@ cursor_device: fn(c: &Connection) {
 
 // The program's cursor; it is shown at once while the pointer is over
 // the window, else at its next enter.
-set_cursor: fn(c: &Connection, cursor: UICursor) {
+set_cursor: fn(c: ^Connection, cursor: UICursor) {
     if cursor == c.cursor {
         return
     }
@@ -2514,7 +2514,7 @@ set_cursor: fn(c: &Connection, cursor: UICursor) {
 // Shows the program's cursor at the latest enter's serial: `.Hidden` is
 // wl_pointer.set_cursor with no surface, every other shape
 // wp_cursor_shape_device_v1.set_shape.
-show_cursor: fn(c: &Connection) {
+show_cursor: fn(c: ^Connection) {
     if c.pointer_serial < 0 {
         return
     }
@@ -2593,7 +2593,7 @@ wants_reshape: fn(c: Connection) -> Bool {
 // pool and buffers are destroyed (the compositor keeps what is on
 // screen). A fractional size rounds half away from zero, as
 // wp_fractional_scale_v1 asks.
-allocate: fn(c: &Connection, width: Int, height: Int) -[Env, Net, Time]> {
+allocate: fn(c: ^Connection, width: Int, height: Int) -[Env, Net, Time]> {
     scale: wanted_scale(c)
     logical_w: if width < 1 -> 1 else -> min_int(width, SIDE_MAX)
     logical_h: if height < 1 -> 1 else -> min_int(height, SIDE_MAX)
@@ -2665,7 +2665,7 @@ rounded: fn(c: Connection) -> Bool { c.chrome != 0 && header_height(c) > 0 && !c
 // compositor shows no part of the window, which is minimized, on another
 // workspace or wholly covered. A v6 configure says the window's
 // visibility, minimized or not.
-toplevel_states: fn(c: &Connection, body: [U8]) {
+toplevel_states: fn(c: ^Connection, body: [U8]) {
     end: min_int(12 + u32_at(body, 8), body.len())
     maximized := false
     fullscreen := false
@@ -2699,7 +2699,7 @@ toplevel_states: fn(c: &Connection, body: [U8]) {
 // first frame on, shown unless it is suspended or minimized, and unknown
 // once minimized on a compositor that never says when it comes back. The
 // window's focus says nothing of it.
-tell_visibility: fn(c: &Connection) {
+tell_visibility: fn(c: ^Connection) {
     if !c.mapped {
         return
     }
@@ -2718,7 +2718,7 @@ tell_visibility: fn(c: &Connection) {
 
 // The frame's shape changed: the chrome and every buffer's content
 // corners are drawn again.
-restale: fn(c: &Connection) {
+restale: fn(c: ^Connection) {
     loop index in 0..<c.buffers.len() {
         c.buffers[index].stale = [UIRect]{UIRect{x: 0, y: 0, width: c.width, height: c.height}}
     }
@@ -2729,7 +2729,7 @@ restale: fn(c: &Connection) {
 // chrome buffer and commits it; the content's next commit shows it. The
 // ring goes only into a buffer that does not hold it yet, the title bar
 // every time; with no buffer free the chrome stays stale.
-draw_chrome: fn(c: &Connection) -[Env]> {
+draw_chrome: fn(c: ^Connection) -[Env]> {
     c.chrome_stale = false
     if c.chrome == 0 {
         return
@@ -2822,14 +2822,14 @@ draw_chrome: fn(c: &Connection) -[Env]> {
 
 // Shows a chrome-only change: the chrome is synchronized with the
 // content, so a commit of the content with nothing new of its own shows it.
-refresh_chrome: fn(c: &Connection) -[Env]> {
+refresh_chrome: fn(c: ^Connection) -[Env]> {
     draw_chrome(c)
     if !c.chrome_stale -> header(c, c.surface, 6, 0)
 }
 
 // Row `y` of the shadow ring, from window pixel `x0` to before `x1`, into
 // the chrome buffer at `base`.
-ring_row: fn(c: &Connection, slot: Int, base: Int, y: Int, x0: Int, x1: Int) -[Env]> {
+ring_row: fn(c: ^Connection, slot: Int, base: Int, y: Int, x0: Int, x1: Int) -[Env]> {
     if x1 <= x0 || c.failure != None {
         return
     }
@@ -2860,7 +2860,7 @@ ring_row: fn(c: &Connection, slot: Int, base: Int, y: Int, x0: Int, x1: Int) -[E
 
 // CHROME_BUFFERS `width` x `height` pixel ARGB8888 buffers in one new
 // sealed pool, replacing the old ones.
-allocate_chrome: fn(c: &Connection, width: Int, height: Int) -[Env]> {
+allocate_chrome: fn(c: ^Connection, width: Int, height: Int) -[Env]> {
     loop buffer in c.chrome_buffers -> request(c, buffer.id, 0, [U8]{})
     c.chrome_buffers = [ChromeBuffer]{}
     if c.chrome_pool != 0 -> request(c, c.chrome_pool, 1, [U8]{})
@@ -2897,7 +2897,7 @@ allocate_chrome: fn(c: &Connection, width: Int, height: Int) -[Env]> {
 // xdg_surface.set_window_geometry: the window's part of the content
 // surface's coordinates, title bar in, shadow out; the content's next
 // commit applies it.
-set_geometry: fn(c: &Connection, geometry: [Int]) {
+set_geometry: fn(c: ^Connection, geometry: [Int]) {
     if geometry == c.geometry {
         return
     }
@@ -2909,7 +2909,7 @@ set_geometry: fn(c: &Connection, geometry: [Int]) {
 // where the rectangle (x0, y0)-(x1, y1) of the buffer at `offset` was just
 // written, so the ring under them shows: each pixel times its cover,
 // premultiplied as ARGB8888 wants.
-cover_corners: fn(c: &Connection, offset: Int, x0: Int, y0: Int, x1: Int, y1: Int) -[Env]> {
+cover_corners: fn(c: ^Connection, offset: Int, x0: Int, y0: Int, x1: Int, y1: Int) -[Env]> {
     side: frame.corner_side(c.scale120)
     if side * 2 > c.width || side > c.height {
         return
@@ -2929,7 +2929,7 @@ cover_corners: fn(c: &Connection, offset: Int, x0: Int, y0: Int, x1: Int, y1: In
 
 // Pixels `from` to before `to` of row `y`, pixel x scaled by cover byte
 // `start + step * x`.
-cover_run: fn(c: &Connection, offset: Int, y: Int, from: Int, to: Int, start: Int, step: Int) -[Env]> {
+cover_run: fn(c: ^Connection, offset: Int, y: Int, from: Int, to: Int, start: Int, step: Int) -[Env]> {
     if to <= from || c.failure != None {
         return
     }
@@ -2954,7 +2954,7 @@ shm_span: fn(n: Int, what: String) -> Int(0..1073741824) UIError! {
     Ok(Int(0..1073741824).from_int(n) ?? return Err(UIError.Protocol("{what} failed: byte {n} lies outside shared memory")))
 }
 
-shm_write: fn(memory: &sys.SharedMemory, at: Int, bytes: [U8], what: String) -[Env]> UIError! {
+shm_write: fn(memory: ^sys.SharedMemory, at: Int, bytes: [U8], what: String) -[Env]> UIError! {
     memory.write(shm_span(at, what), bytes) ?? return Err(UIError.Protocol("{what} failed: {err}"))
     Ok()
 }
@@ -2963,7 +2963,7 @@ shm_read: fn(memory: sys.SharedMemory, at: Int, count: Int, what: String) -[Env]
     Ok(memory.read(shm_span(at, what), shm_span(count, what)) ?? return Err(UIError.Protocol("{what} failed: {err}")))
 }
 
-shm_fill: fn(memory: &sys.SharedMemory, at: Int, count: Int, value: Int, what: String) -[Env]> UIError! {
+shm_fill: fn(memory: ^sys.SharedMemory, at: Int, count: Int, value: Int, what: String) -[Env]> UIError! {
     pixels: Int(0..268435456).from_int(count) ?? return Err(UIError.Protocol("{what} failed: {count} pixels do not fit shared memory"))
     word: Int(0..4294967295).from_int(value) ?? return Err(UIError.Protocol("{what} failed: {value} is not a 32-bit pixel"))
     memory.fill_u32(shm_span(at, what), pixels, word) ?? return Err(UIError.Protocol("{what} failed: {err}"))
@@ -2972,7 +2972,7 @@ shm_fill: fn(memory: &sys.SharedMemory, at: Int, count: Int, value: Int, what: S
 
 // The rectangle (`x`, `y`) `width` by `height` of the RGBA `pixels`, rows
 // `stride` bytes, into the image at byte `offset` of `memory` as `format`.
-shm_pixels: fn(memory: &sys.SharedMemory, offset: Int, pixels: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: sys.PixelFormat) -[Env]> UIError! {
+shm_pixels: fn(memory: ^sys.SharedMemory, offset: Int, pixels: [U8], stride: Int, x: Int, y: Int, width: Int, height: Int, format: sys.PixelFormat) -[Env]> UIError! {
     what: "writing the frame"
     outside: UIError.Protocol("{what} failed: the {width}x{height} rectangle at {x},{y} of a {stride}-byte row lies outside a window")
     row: Int(4..65536).from_int(stride) ?? return Err(outside)
@@ -2995,7 +2995,7 @@ chrome_spot: fn(c: Connection) -> frame.FrameSpot {
 // The pointer moved on the chrome: its button lights, its cursor shows
 // the edge it would resize, and the buttons gather back from a finger's
 // spacing.
-chrome_pointer: fn(c: &Connection, fx: Int, fy: Int) {
+chrome_pointer: fn(c: ^Connection, fx: Int, fy: Int) {
     c.chrome_fx = fx
     c.chrome_fy = fy
     if c.look.coarse && c.touch_id < 0 {
@@ -3015,7 +3015,7 @@ chrome_pointer: fn(c: &Connection, fx: Int, fy: Int) {
 // A pointer button on the chrome: the primary works the frame, the
 // secondary on the title opens the compositor's window menu at the
 // pointer, in the content surface's coordinates.
-chrome_button: fn(c: &Connection, serial: Int, time: Int, button: Int, state: Int) {
+chrome_button: fn(c: ^Connection, serial: Int, time: Int, button: Int, state: Int) {
     note_input(c, time)
     if button == 272 && state == 1 -> frame_press(c, serial, time)
     if button == 272 && state == 0 -> frame_release(c)
@@ -3028,7 +3028,7 @@ chrome_button: fn(c: &Connection, serial: Int, time: Int, button: Int, state: In
 // A finger on the frame works it as the primary button does and spreads
 // the buttons to a finger's size until the pointer comes back. Touches on
 // the content reach no program: UIEvent has no touch.
-touch: fn(c: &Connection, opcode: Int, body: [U8]) {
+touch: fn(c: ^Connection, opcode: Int, body: [U8]) {
     // down: serial, time, surface, id, x, y.
     if opcode == 0 {
         c.input_serial = u32_at(body, 0)
@@ -3072,7 +3072,7 @@ touch: fn(c: &Connection, opcode: Int, body: [U8]) {
 // A press on the frame: a button holds down; the title moves the window,
 // or toggles maximizing when pressed twice in quick succession; an edge
 // resizes it. The compositor runs moves and resizes.
-frame_press: fn(c: &Connection, serial: Int, time: Int) {
+frame_press: fn(c: ^Connection, serial: Int, time: Int) {
     place: chrome_spot(c)
     if place == .Button(button) {
         c.look.pressed = button
@@ -3094,7 +3094,7 @@ frame_press: fn(c: &Connection, serial: Int, time: Int) {
 }
 
 // The press ends: a button released over itself acts.
-frame_release: fn(c: &Connection) {
+frame_release: fn(c: ^Connection) {
     pressed: c.look.pressed
     if pressed == .Nothing {
         return
@@ -3107,21 +3107,21 @@ frame_release: fn(c: &Connection) {
     }
 }
 
-act: fn(c: &Connection, button: frame.FrameButton) {
+act: fn(c: ^Connection, button: frame.FrameButton) {
     if button == .Close -> c.events.push(UIEvent.Close)
     if button == .Maximize -> set_maximized(c, !c.look.maximized)
     if button == .Minimize -> minimize(c)
 }
 
 // The button under the pointer or finger lights.
-hover_spot: fn(c: &Connection) {
+hover_spot: fn(c: ^Connection) {
     lit := frame.FrameButton.Nothing
     place: chrome_spot(c)
     if place == .Button(button) -> lit = button
     set_hover(c, lit)
 }
 
-set_hover: fn(c: &Connection, button: frame.FrameButton) {
+set_hover: fn(c: ^Connection, button: frame.FrameButton) {
     if c.look.hover == button {
         return
     }
@@ -3138,7 +3138,7 @@ set_hover: fn(c: &Connection, button: frame.FrameButton) {
 // Space works the focused one, Shift+F10 opens the window menu under it,
 // and Escape or F6 gives the focus back to the content. With Jet's frame
 // not showing, no key is the frame's.
-frame_key: fn(c: &Connection, serial: Int, key: Key) -> Bool {
+frame_key: fn(c: ^Connection, serial: Int, key: Key) -> Bool {
     if c.chrome == 0 || header_height(c) == 0 {
         set_focus(c, frame.FrameButton.Nothing)
         return false
@@ -3171,7 +3171,7 @@ frame_key: fn(c: &Connection, serial: Int, key: Key) -> Bool {
 
 // A key went up: true when its press was the frame's, which the release
 // then is too.
-release_frame_key: fn(c: &Connection, code: Int) -> Bool {
+release_frame_key: fn(c: ^Connection, code: Int) -> Bool {
     loop at in 0..<c.frame_keys.len() {
         if c.frame_keys[at] == code {
             _: c.frame_keys.remove(at)
@@ -3183,7 +3183,7 @@ release_frame_key: fn(c: &Connection, code: Int) -> Bool {
 
 // The button with the keyboard focus rings; `Nothing` gives the focus to
 // the content.
-set_focus: fn(c: &Connection, button: frame.FrameButton) {
+set_focus: fn(c: ^Connection, button: frame.FrameButton) {
     if c.look.focus == button {
         return
     }
@@ -3193,7 +3193,7 @@ set_focus: fn(c: &Connection, button: frame.FrameButton) {
 
 // The compositor's window menu, under the focused button or else the
 // title's start, at the header's foot (content surface coordinates).
-window_menu: fn(c: &Connection, serial: Int) {
+window_menu: fn(c: ^Connection, serial: Int) {
     x: if c.look.focus == .Nothing -> frame.TITLE_INSET else -> frame.button_center(c.look.focus, c.logical_width, c.look)
     request(c, c.toplevel, 4, words([Int]{c.seat, serial, x, 0}))
 }

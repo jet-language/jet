@@ -118,7 +118,7 @@ sema_source_edit_at: fn(segments: [SemaSourceSegment], edit: TextEdit) -> TextEd
     Val(TextEdit{span: Span{start: edit.span.start + shift, end: edit.span.end + shift}, new_text: edit.new_text, path: Val(location.source_path)})
 }
 
-sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
+sema_diagnostic_with_source_location: fn(diagnostic: ^^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
     updated := diagnostic
     span: updated.span ?? return updated
     location: sema_source_location_at(segments, span) ?? {
@@ -158,7 +158,7 @@ sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [Se
     diagnostic_with_source_mapping(updated, location.source_path, location.aggregate_start, location.source_start)
 }
 
-sema_attach_diagnostic_source_locations: fn(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) Never! {
+sema_attach_diagnostic_source_locations: fn(diagnostics: ^[Diagnostic], start: Int, segments: [SemaSourceSegment]) Never! {
     loop index in start..<diagnostics.len() {
         diagnostics[index] = sema_diagnostic_with_source_location(diagnostics[index], segments)
     }
@@ -200,7 +200,7 @@ sema_registration_blocking_diagnostic: fn(diagnostic: Diagnostic) -> Bool Never!
 
 // Names the first error in `root_start..<start` as the cause of every report
 // from `start` on; nothing changes when that range has no error.
-sema_link_reports_to_first_error: fn(diagnostics: &[Diagnostic], root_start: Int, start: Int) Never! {
+sema_link_reports_to_first_error: fn(diagnostics: ^[Diagnostic], root_start: Int, start: Int) Never! {
     root := -1
     loop index in root_start..<start {
         if diagnostics[index].severity == DIAGNOSTIC_ERROR {

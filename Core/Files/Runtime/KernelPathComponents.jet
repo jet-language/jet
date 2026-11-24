@@ -232,7 +232,7 @@ single: fn(path: OSPath, cursor: Components, start: Int, end: Int) -> PathCompon
     Val(component(.Normal, start, end))
 }
 
-next: fn(path: OSPath, cursor: &Components) -> PathComponent? Never! {
+next: fn(path: OSPath, cursor: ^Components) -> PathComponent? Never! {
     loop !finished(cursor) {
         if cursor.front == 0 {
             cursor.front = 1
@@ -269,7 +269,7 @@ next: fn(path: OSPath, cursor: &Components) -> PathComponent? Never! {
     None
 }
 
-next_back: fn(path: OSPath, cursor: &Components) -> PathComponent? Never! {
+next_back: fn(path: OSPath, cursor: ^Components) -> PathComponent? Never! {
     loop !finished(cursor) {
         if cursor.back == 2 {
             body: cursor.start + before_body(path, cursor)
@@ -376,21 +376,21 @@ owned_span: fn(path: OSPath, extent: PathSpan) -> OSPath Never! {
     OSPath{encoded: out, platform: path.platform}
 }
 
-truncate: fn(out: &[U8], len: Int) Never! {
+truncate: fn(out: ^[U8], len: Int) Never! {
     loop out.len() > len -> _: out.pop()
 }
 
-append_span: fn(out: &[U8], path: OSPath, extent: PathSpan) Never! {
+append_span: fn(out: ^[U8], path: OSPath, extent: PathSpan) Never! {
     loop i in extent.start..<extent.end -> out.push(path.encoded[i])
 }
 
-append_component: fn(out: &[U8], path: OSPath, value: PathComponent) Never! {
+append_component: fn(out: ^[U8], path: OSPath, value: PathComponent) Never! {
     if value.kind == .RootDir -> out.push(main_separator(path.platform)) else {
         append_span(out, path, value.span)
     }
 }
 
-push_verbatim: fn(base: &OSPath, path: OSPath, extent: PathSpan) Never! {
+push_verbatim: fn(base: ^OSPath, path: OSPath, extent: PathSpan) Never! {
     values := [PathComponent]{}
     owners := [Bool]{}
     cursor := components(base)
@@ -434,7 +434,7 @@ push_verbatim: fn(base: &OSPath, path: OSPath, extent: PathSpan) Never! {
     base.encoded = out
 }
 
-push: fn(base: &OSPath, path: OSPath) Never! {
+push: fn(base: ^OSPath, path: OSPath) Never! {
     assert(base.platform == path.platform)
     extent: span(0, path.encoded.len())
     prefix: parse_prefix(base)

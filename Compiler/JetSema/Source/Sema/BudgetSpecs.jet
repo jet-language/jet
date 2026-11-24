@@ -175,7 +175,7 @@ BudgetLocatedDiagnostic: struct {
 // Every module's budgets in module order, Core's among them, then each
 // owning package's resolution and collision findings. Only a package with a
 // budget reads its attachments, so only its modules are walked for them.
-sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBudgetSpec]) -> [BudgetLocatedDiagnostic] Never! {
+sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: ^[LocatedBudgetSpec]) -> [BudgetLocatedDiagnostic] Never! {
     findings := [BudgetLocatedDiagnostic]{}
     packages := [String]{}
     group_specs := [String:[LocatedBudgetSpec]]{}
@@ -214,7 +214,7 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBud
     findings
 }
 
-sema_budget_elaborate_items: fn(items: [Item], diagnostics: &[Diagnostic]) -> [BudgetSpec] Never! {
+sema_budget_elaborate_items: fn(items: [Item], diagnostics: ^[Diagnostic]) -> [BudgetSpec] Never! {
     specs := [BudgetSpec]{}
     loop item in items {
         if item == .Module(declaration) {
@@ -228,11 +228,11 @@ sema_budget_empty_catalog: fn() -> BudgetAttachmentCatalog Never! {
     BudgetAttachmentCatalog{envs: [String]{}, services: [String]{}, targets: [String]{}, scenes: [String]{}, tests: [String]{}}
 }
 
-sema_budget_set_insert: fn(set: &[String], value: String) Never! {
+sema_budget_set_insert: fn(set: ^[String], value: String) Never! {
     if !set.contains(value) -> set.push(value.copy())
 }
 
-sema_budget_catalog_extend: fn(catalog: &BudgetAttachmentCatalog, other: BudgetAttachmentCatalog) Never! {
+sema_budget_catalog_extend: fn(catalog: ^BudgetAttachmentCatalog, other: BudgetAttachmentCatalog) Never! {
     loop value in other.envs -> sema_budget_set_insert(catalog.envs, value)
     loop value in other.services -> sema_budget_set_insert(catalog.services, value)
     loop value in other.targets -> sema_budget_set_insert(catalog.targets, value)
@@ -292,7 +292,7 @@ sema_budget_attachment_catalog: fn(tables: ASTTables, items: [Item]) -> BudgetAt
     catalog
 }
 
-sema_budget_scene_attachments: fn(tables: ASTTables, stmts: [Stmt], scenes: &[String]) Never! {
+sema_budget_scene_attachments: fn(tables: ASTTables, stmts: [Stmt], scenes: ^[String]) Never! {
     loop stmt in stmts {
         if stmt == {
             .Val(binding) -> { sema_budget_scene_expr(tables, binding.init, scenes) }
@@ -324,7 +324,7 @@ sema_budget_scene_attachments: fn(tables: ASTTables, stmts: [Stmt], scenes: &[St
     }
 }
 
-sema_budget_scene_expr: fn(tables: ASTTables, expr: Expr, scenes: &[String]) Never! {
+sema_budget_scene_expr: fn(tables: ASTTables, expr: Expr, scenes: ^[String]) Never! {
     if expr == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
             scene_receiver: if receiver == {
@@ -353,7 +353,7 @@ sema_budget_scene_expr: fn(tables: ASTTables, expr: Expr, scenes: &[String]) Nev
     }
 }
 
-sema_budget_validate_resolution: fn(specs: [LocatedBudgetSpec], catalog: BudgetAttachmentCatalog, findings: &[BudgetLocatedDiagnostic]) Never! {
+sema_budget_validate_resolution: fn(specs: [LocatedBudgetSpec], catalog: BudgetAttachmentCatalog, findings: ^[BudgetLocatedDiagnostic]) Never! {
     loop located in specs {
         spec: located.spec.copy()
         if sema_budget_named_key(spec.scope) == .Val(scope) {
@@ -404,7 +404,7 @@ sema_budget_named_key: fn(value: String) -> BudgetNamedKey? Never! {
     Val(BudgetNamedKey{kind: foundation_byte_text(value.bytes(), 0, open), name: foundation_byte_text(value.bytes(), open + 1, length - 1)})
 }
 
-sema_budget_validate_collisions: fn(specs: [LocatedBudgetSpec], findings: &[BudgetLocatedDiagnostic]) Never! {
+sema_budget_validate_collisions: fn(specs: [LocatedBudgetSpec], findings: ^[BudgetLocatedDiagnostic]) Never! {
     loop (index, located) in specs {
         right: located.spec.copy()
         loop left_index in 0..<index {
@@ -443,7 +443,7 @@ sema_budget_invalid: fn(name: String, why: String, fix: String, span: Span) -> D
     sema_error("E2903", span, "performance budget {name} is not valid", why, fix)
 }
 
-sema_budget_validate_module: fn(declaration: ModuleDecl, specs: &[BudgetSpec], diagnostics: &[Diagnostic]) Never! {
+sema_budget_validate_module: fn(declaration: ModuleDecl, specs: ^[BudgetSpec], diagnostics: ^[Diagnostic]) Never! {
     loop contribution in declaration.contributions {
         perf: if contribution.value == {
             .Perf(value) -> value
@@ -726,7 +726,7 @@ sema_budget_validate_scope_provider_pair: fn(name: String, metric: String, scope
     }
 }
 
-sema_budget_compile_workload_catalog: fn(role: String, declarations: [CompileWorkloadDecl], diagnostics: &[Diagnostic]) -> [String:CompileWorkloadFact] Never! {
+sema_budget_compile_workload_catalog: fn(role: String, declarations: [CompileWorkloadDecl], diagnostics: ^[Diagnostic]) -> [String:CompileWorkloadFact] Never! {
     catalog := [String:CompileWorkloadFact]{}
     loop declaration in declarations {
         target_value: sema_budget_string_value(declaration.target)

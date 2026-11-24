@@ -162,7 +162,7 @@ gate_same_fact: fn(left: GateEntry, right: GateEntry) -> Bool Never! {
     left.span != None && left.span == right.span && left.source == right.source
 }
 
-gate_ledger_push: fn(ledger: &GateLedger, entry: &&GateEntry) Never! {
+gate_ledger_push: fn(ledger: ^GateLedger, entry: ^^GateEntry) Never! {
     written := entry
     if written.provenance.len() == 0 -> written.provenance.push(written.source)
     loop index in 0..<ledger.rows.len() {
@@ -199,7 +199,7 @@ gate_entry_compare: fn(left: GateEntry, right: GateEntry) -> Ordering Never! {
     left.detail <=> right.detail
 }
 
-gate_ledger_sort: fn(ledger: &GateLedger) Never! {
+gate_ledger_sort: fn(ledger: ^GateLedger) Never! {
     ledger.rows = loop fresh_item in ledger.rows -> fresh_item
     ledger.rows.sort_by(fn(left: GateEntry, right: GateEntry) { gate_entry_compare(left, right) })
 }

@@ -47,7 +47,7 @@ OwnedNamedKey: struct {
     label: String,
 
     impl Close {
-        close: fn(&&self) { print("close named key: {self.label}") }
+        close: fn(^^self) { print("close named key: {self.label}") }
     }
 }
 
@@ -55,7 +55,7 @@ tuple_key: fn(j: Job) -> {team: Int, cost: Int} KeyError! { Ok({team: j.team, co
 
 named_key: fn(j: Job) -> NamedKey KeyError! { Ok(NamedKey{team: j.team, label: j.name}) }
 
-named_key_failure: fn(j: Job, calls: &Int) -> OwnedNamedKey KeyError! {
+named_key_failure: fn(j: Job, calls: ^Int) -> OwnedNamedKey KeyError! {
     calls += 1
     if j.name == "c" -> return Err(KeyError{message: "named key refused c"})
     Ok(OwnedNamedKey{team: j.team, label: "label-{j.name}"})
@@ -70,12 +70,12 @@ large_rows: fn(count: Int, equal: Bool) -> [Job] {
     rows.move()
 }
 
-large_key: fn(j: Job, calls: &Int) -> Int {
+large_key: fn(j: Job, calls: ^Int) -> Int {
     calls += 1
     j.team
 }
 
-large_compare: fn(a: Job, b: Job, calls: &Int) -> Ordering {
+large_compare: fn(a: Job, b: Job, calls: ^Int) -> Ordering {
     calls += 1
     a.team <=> b.team
 }

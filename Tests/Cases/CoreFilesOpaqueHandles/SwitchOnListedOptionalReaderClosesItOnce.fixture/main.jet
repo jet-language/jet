@@ -7,8 +7,8 @@ Member: struct {
 
 // The match form over a borrowed element's optional handle: the
 // switch's subject aliases the element, so only the List closes the handle.
-member_size: fn(members: &[Member], index: Int) -> Int IOError! {
-    if &members[index].file == {
+member_size: fn(members: ^[Member], index: Int) -> Int IOError! {
+    if ^members[index].file == {
         .Val(input) -> {
             info: input.stat()
             Ok(info.size)
@@ -20,19 +20,19 @@ member_size: fn(members: &[Member], index: Int) -> Int IOError! {
 // The window's payload passes on to a borrowing parameter, as Jetpack's
 // CacheLease.copy_profile_executable does: the value table's subject is
 // its generated `it`, which still windows the element.
-reader_size: fn(input: &FileReader) -> Int { input.stat().size }
+reader_size: fn(input: ^FileReader) -> Int { input.stat().size }
 
-member_size_through: fn(members: &[Member], index: Int) -> Int {
-    if &members[index].file == {
+member_size_through: fn(members: ^[Member], index: Int) -> Int {
+    if ^members[index].file == {
         .Val(input) -> reader_size(input)
         .None -> -1
     }
 }
 
 // The handle still reads after every match above.
-member_bytes: fn(members: &[Member], index: Int) -> Int IOError! {
+member_bytes: fn(members: ^[Member], index: Int) -> Int IOError! {
     total := 0
-    if &members[index].file == .Val(input) {
+    if ^members[index].file == .Val(input) {
         input.seek(0)
         loop {
             chunk: input.read_bytes(65536)

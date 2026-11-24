@@ -17,7 +17,7 @@ zero: fn() -> Expr { return atom(Node.Const(Float{0.0})) }
 
 one: fn() -> Expr { return atom(Node.Const(Float{1.0})) }
 
-emit_operator: fn(operator: String, code: &[Node]) {
+emit_operator: fn(operator: String, code: ^[Node]) {
     if operator == "+" -> code.push(Node.Add) else if operator == "-" -> code.push(Node.Sub) else if operator == "*" {
         code.push(Node.Mul)
     } else if operator == "neg" { code.push(Node.Neg) }
@@ -31,8 +31,8 @@ precedence: fn(operator: String) -> Int {
 
 drain_operators: fn(
     operator: String,
-    operators: &[String],
-    code: &[Node],
+    operators: ^[String],
+    code: ^[Node],
 ) {
     loop operators.len() > 0 {
         top: operators[operators.len() - 1]

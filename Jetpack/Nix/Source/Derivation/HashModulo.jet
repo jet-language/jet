@@ -16,7 +16,7 @@ NixDerivationStore: struct {
     // Output name -> SHA-256 modulo digest. `mask_outputs` is true for the
     // derivation's own output paths (`staticOutputHashes`) and false for the
     // digests substituted into a parent's inputs (`pathDerivationModulo`).
-    hash_modulo: fn(&self, drv_path: String, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
+    hash_modulo: fn(^self, drv_path: String, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
         key: "{mask_outputs}:{drv_path}"
         if self.memo.get(key) == {
             .Val(cached) -> return Ok(cached)
@@ -36,7 +36,7 @@ NixDerivationStore: struct {
 
     // One digest shared by every output, over the ATerm whose input
     // derivations are replaced by their own modulo digests.
-    input_modulo_hashes: fn(&self, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
+    input_modulo_hashes: fn(^self, drv: NixDerivation, mask_outputs: Bool) -> [String:[U8]] NixError! {
         inputs := [String:[String]]{}
         loop input in drv.input_drvs {
             child: self.read(input.path)
@@ -57,7 +57,7 @@ NixDerivationStore: struct {
 
     // Recompute every output path of `drv` at `drv_path`; a mismatch with the
     // embedded path is a divergence.
-    verify_output_paths: fn(&self, store_dir: String, drv_path: String, drv: NixDerivation) NixError! {
+    verify_output_paths: fn(^self, store_dir: String, drv_path: String, drv: NixDerivation) NixError! {
         drv_name: nix_drv_name_from_path(drv_path)
         if drv.is_fixed() {
             loop name in drv.output_names() {

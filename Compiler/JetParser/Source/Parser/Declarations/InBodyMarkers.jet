@@ -49,7 +49,7 @@ ParserMarkerSplice: struct {
 // `#Name:` or `#lib.Name:` starts a marker line. Nothing else puts `:`
 // right after a marker name, so field, variant and statement markers and the
 // `#Name` value expression never read as one.
-parser_inbody_marker_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_inbody_marker_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT {
         return false
     }
@@ -60,7 +60,7 @@ parser_inbody_marker_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_kind_at(state, offset) == TOKEN_COLON
 }
 
-parser_inbody_line_ends: fn(state: &JetParserState) -> Bool Never! {
+parser_inbody_line_ends: fn(state: ^JetParserState) -> Bool Never! {
     kind: parser_current_kind(state)
     kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF
 }
@@ -68,7 +68,7 @@ parser_inbody_line_ends: fn(state: &JetParserState) -> Bool Never! {
 // The token offset past the `#X: value` lines (and the line ends after
 // them) that start `offset` tokens ahead, so the value line before a body's
 // trailing marker lines is still its last line.
-parser_skip_inbody_marker_lines: fn(state: &JetParserState, offset: Int) -> Int Never! {
+parser_skip_inbody_marker_lines: fn(state: ^JetParserState, offset: Int) -> Int Never! {
     at := offset
     loop parser_kind_at(state, at) == TOKEN_HASH && parser_kind_at(state, at + 1) == TOKEN_IDENT {
         name_end := at + 2
@@ -99,7 +99,7 @@ parser_skip_inbody_marker_lines: fn(state: &JetParserState, offset: Int) -> Int 
 // `false` is the signed `#!X`, `(…)` holds the arguments exactly as `#X(…)`
 // does, and one name path, string or number is the one argument. None when
 // the value needs parentheses; that is reported with the edit adding them.
-parser_parse_inbody_marker: fn(state: &JetParserState) -> Marker? {
+parser_parse_inbody_marker: fn(state: ^JetParserState) -> Marker? {
     hash: parser_bump(state)
     name: parser_expect_marker_path(state, "after `#` in a marker line")
     parser_expect(state, TOKEN_COLON, "`:` after the marker name")
@@ -135,7 +135,7 @@ parser_parse_inbody_marker: fn(state: &JetParserState) -> Marker? {
 
 // The one bare argument of a marker line; a longer value is rewound and
 // reported.
-parser_parse_inbody_marker_value: fn(state: &JetParserState, first: Token) -> Expr? {
+parser_parse_inbody_marker_value: fn(state: ^JetParserState, first: Token) -> Expr? {
     position: state.position
     diagnostics: state.diagnostics.len()
     blocks: state.block_spans.len()
@@ -151,7 +151,7 @@ parser_parse_inbody_marker_value: fn(state: &JetParserState, first: Token) -> Ex
 
 // Skip to the end of a marker line whose value starts at `value_start` and
 // report that it needs parentheses, with the edit that adds them.
-parser_report_inbody_parentheses: fn(state: &JetParserState, value_start: Int) {
+parser_report_inbody_parentheses: fn(state: ^JetParserState, value_start: Int) {
     depth := 0
     end := parser_prev_token_end(state)
     if end < value_start -> end = value_start
@@ -213,7 +213,7 @@ parser_marker_has_simple_value: fn(marker: Marker) -> Bool Never! {
 // Writing both is E0942, whose edits move the whole set above (primary) or
 // into the body. `head` is where the declaration's text starts and `close`
 // the offset of its body's `}`.
-parser_merge_inbody_markers: fn(state: &JetParserState, above: [Marker], inside: [Marker], head: Int, close: Int, noun: String) -> [Marker] {
+parser_merge_inbody_markers: fn(state: ^JetParserState, above: [Marker], inside: [Marker], head: Int, close: Int, noun: String) -> [Marker] {
     if inside.len() == 0 -> return above.copy()
     merged := above.copy()
     loop marker in inside -> merged.push(marker.copy())
@@ -460,7 +460,7 @@ parser_marker_placements: fn(source: [U8], inside: Bool, at: Int) -> [TextEdit] 
     edits
 }
 
-parser_marker_item_placement: fn(source: [U8], item: Item, inside: Bool, at: Int, edits: &[TextEdit]) {
+parser_marker_item_placement: fn(source: [U8], item: Item, inside: Bool, at: Int, edits: ^[TextEdit]) {
     if item == {
         .Func(function) -> { parser_marker_function_placement(source, function, inside, at, edits) }
         .Struct(definition) -> {
@@ -502,7 +502,7 @@ parser_marker_item_placement: fn(source: [U8], item: Item, inside: Bool, at: Int
     }
 }
 
-parser_marker_function_placement: fn(source: [U8], function: Func, inside: Bool, at: Int, edits: &[TextEdit]) {
+parser_marker_function_placement: fn(source: [U8], function: Func, inside: Bool, at: Int, edits: ^[TextEdit]) {
     if inside {
         loop marker in function.markers {
             if parser_marker_spells_body_shape(marker) {
@@ -513,7 +513,7 @@ parser_marker_function_placement: fn(source: [U8], function: Func, inside: Bool,
     parser_marker_place(source, function.markers, function.span, inside, false, at, edits)
 }
 
-parser_marker_block_placement: fn(source: [U8], block: TraitImplBlock, inside: Bool, at: Int, edits: &[TextEdit]) {
+parser_marker_block_placement: fn(source: [U8], block: TraitImplBlock, inside: Bool, at: Int, edits: ^[TextEdit]) {
     span: block.span ?? return
     parser_marker_place(source, block.markers, span, inside, false, at, edits)
     loop method in block.methods {
@@ -524,7 +524,7 @@ parser_marker_block_placement: fn(source: [U8], block: TraitImplBlock, inside: B
 // One declaration spanning `span`, whose body closes at its last byte. Its
 // text starts at the first non-blank byte of the line `span` starts on, so
 // a visibility word before the keyword stays after the markers.
-parser_marker_place: fn(source: [U8], markers: [Marker], span: Span, inside: Bool, same_line: Bool, at: Int, edits: &[TextEdit]) {
+parser_marker_place: fn(source: [U8], markers: [Marker], span: Span, inside: Bool, same_line: Bool, at: Int, edits: ^[TextEdit]) {
     if markers.len() == 0 || span.end <= span.start {
         return
     }

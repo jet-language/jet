@@ -218,7 +218,7 @@ provider_cc_pack_fixes: fn(asset: CcPackAsset, release: String?) -> String Never
 
 // The verified pack in the Hangar; a missing pack is fetched, verified,
 // unpacked and recorded first. A Hangar hit never touches the network.
-provider_cc_pack_ensure: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset, sources: CcPackSources, offline: Bool) -[IO, FS, Env, Net, Time, Time.Wait]> CcPackTools ProviderError! {
+provider_cc_pack_ensure: fn(verification: ^StoreVerification, roots: HangarRoots, asset: CcPackAsset, sources: CcPackSources, offline: Bool) -[IO, FS, Env, Net, Time, Time.Wait]> CcPackTools ProviderError! {
     found := CcPackTools?{None}
     if provider_cc_pack_lookup(verification, roots, asset) == {
         .Ok(value) -> found = value
@@ -321,7 +321,7 @@ provider_cc_pack_download: fn(url: String, destination: String, asset: CcPackAss
 
 // The open archive must hash to the embedded SHA-256 within the expected
 // size; it is then rewound so the same handle is unpacked.
-provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset, origin: String) -[FS]> CcToolchainError! {
+provider_cc_pack_verify_archive: fn(file: ^files.FileReader, asset: CcPackAsset, origin: String) -[FS]> CcToolchainError! {
     hasher := StreamingSHA256.new()
     total := 0
     loop {
@@ -343,7 +343,7 @@ provider_cc_pack_verify_archive: fn(file: &files.FileReader, asset: CcPackAsset,
 // Verify, unpack, seal and record a pack archive as the pack entry. One
 // open handle is hashed and then unpacked, so the bytes unpacked are the
 // bytes verified.
-provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset, archive: CcPackArchive, staging: String) -[FS, Env, Time]> CcPackTools CcToolchainError! {
+provider_cc_pack_install: fn(verification: ^StoreVerification, roots: HangarRoots, asset: CcPackAsset, archive: CcPackArchive, staging: String) -[FS, Env, Time]> CcPackTools CcToolchainError! {
     file := files.open(archive.path, links: .Refuse) ?? return Err(CcToolchainError.Invalid("open C toolchain pack from {archive.origin}: {err}"))
     provider_cc_pack_verify_archive(file, asset, archive.origin)
     files.create_dir_all(staging) ?? return Err(CcToolchainError.Invalid("create C toolchain pack staging directory: {err}"))
@@ -431,7 +431,7 @@ provider_cc_pack_digests: fn(staging: String) -[FS, Env]> CcPackDigests CcToolch
 }
 
 // Every regular file below `path`, with its size.
-provider_cc_pack_collect_files: fn(path: String, paths: &[String], sizes: &[Int]) -[FS]> CcToolchainError! {
+provider_cc_pack_collect_files: fn(path: String, paths: ^[String], sizes: ^[Int]) -[FS]> CcToolchainError! {
     entries: files.list_dir(path) ?? return Err(CcToolchainError.Invalid("list C toolchain pack directory `{path}`: {err}"))
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err(CcToolchainError.Invalid("inspect C toolchain pack entry `{entry.path}`: {err}"))
@@ -454,7 +454,7 @@ provider_cc_pack_tool_sha256: fn(root: String, relative: String, digests: [Strin
 }
 
 // The recorded pack for `asset`, re-proved, or None when the Hangar has none.
-provider_cc_pack_lookup: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset) -[FS, Env, Time]> CcPackTools? CcToolchainError! {
+provider_cc_pack_lookup: fn(verification: ^StoreVerification, roots: HangarRoots, asset: CcPackAsset) -[FS, Env, Time]> CcPackTools? CcToolchainError! {
     if !provider_cc_node_exists(roots.hangar_dir()) -> return Ok(None)
     entries: store_list_checked(verification, roots) ?? return Err(CcToolchainError.Invalid("could not inspect Hangar C toolchain packs: {err.message()}"))
     loop entry in entries {
@@ -543,7 +543,7 @@ CcPackTarStream: struct {
     at: Int,
 
     // At least `need` unread bytes buffered; false at the end of the stream.
-    fill: fn(&self, need: Int) -[FS.Read]> Bool CcToolchainError! {
+    fill: fn(^self, need: Int) -[FS.Read]> Bool CcToolchainError! {
         loop self.buffer.len() - self.at < need {
             chunk: self.reader.read_bytes(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("decompress C toolchain pack: {err}"))
             if chunk.len() == 0 -> return Ok(false)
@@ -556,7 +556,7 @@ CcPackTarStream: struct {
     }
 
     // The next `count` bytes.
-    next_bytes: fn(&self, count: Int) -[FS.Read]> [U8] CcToolchainError! {
+    next_bytes: fn(^self, count: Int) -[FS.Read]> [U8] CcToolchainError! {
         if !(self.fill(count)) {
             return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
         }
@@ -566,7 +566,7 @@ CcPackTarStream: struct {
     }
 
     // Drop the next `count` bytes.
-    skip: fn(&self, count: Int) -[FS.Read]> CcToolchainError! {
+    skip: fn(^self, count: Int) -[FS.Read]> CcToolchainError! {
         remaining := count
         loop remaining > 0 {
             if !(self.fill(1)) {
@@ -580,7 +580,7 @@ CcPackTarStream: struct {
     }
 
     // Write the next `count` bytes to a new file at `path`.
-    copy_to: fn(&self, path: String, count: Int) -[FS]> CcToolchainError! {
+    copy_to: fn(^self, path: String, count: Int) -[FS]> CcToolchainError! {
         output := files.create(path, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create `{path}`: {err}"))
         remaining := count
         loop remaining > 0 {
@@ -598,7 +598,7 @@ CcPackTarStream: struct {
 
 // Unpack the regular files and directories of a pack archive below
 // `destination`, within the entry and byte limits.
-provider_cc_pack_untar: fn(file: &&files.FileReader, destination: String) -[FS]> CcToolchainError! {
+provider_cc_pack_untar: fn(file: ^^files.FileReader, destination: String) -[FS]> CcToolchainError! {
     stream := CcPackTarStream{reader: zstd.reader(file), buffer: [U8]{}, at: 0}
     entries := 0
     unpacked := 0
@@ -647,7 +647,7 @@ provider_cc_pack_untar: fn(file: &&files.FileReader, destination: String) -[FS]>
 
 // Realize the target entry for `target` from the pack: fetch the pack on
 // first use, then lay out the target's sysroot (building musl if needed).
-provider_cc_realize_pack: fn(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx, target: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
+provider_cc_realize_pack: fn(verification: ^StoreVerification, spec: RefSpec, ctx: ProviderCtx, target: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
     covered: provider_cc_pack_covered_target(target) ?? return Err(ProviderError.Unsupported(err.message()))
     asset: provider_cc_pack_asset_for_host() ?? return Err(ProviderError.Unsupported(err.message()))
     roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("C toolchain realization has no Hangar roots"))

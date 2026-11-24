@@ -1,5 +1,5 @@
-// A consuming method (`&&self`) takes the value and drops it when it
-// returns, like a free function with a `&&` parameter does. A struct holding a
+// A consuming method (`^^self`) takes the value and drops it when it
+// returns, like a free function with a `^^` parameter does. A struct holding a
 // listener closes it there, so its port rebinds right after the call, whether
 // the method body is empty or moves a field out.
 package: {
@@ -13,9 +13,9 @@ Reservation: struct {
     ports: [Int],
     listeners: [TCPListener],
 
-    release_empty: fn(&&self) {}
+    release_empty: fn(^^self) {}
 
-    release_field: fn(&&self) { _held: self.listeners }
+    release_field: fn(^^self) { _held: self.listeners }
 }
 
 reserve: fn() -[Net]> Reservation NetError! {
@@ -26,7 +26,7 @@ reserve: fn() -[Net]> Reservation NetError! {
     Reservation{ports: [Int]{net.socket_port(address)}, listeners: held}
 }
 
-release_free: fn(reservation: &&Reservation) {}
+release_free: fn(reservation: ^^Reservation) {}
 
 try_bind: fn(label: String, port: Int) -[Net, IO]> {
     if net.tcp_listen("127.0.0.1:{port}") == {

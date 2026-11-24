@@ -116,7 +116,7 @@ ComBuildDirectory: struct {
     path: String,
 
     impl Close {
-        close: fn(&&self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
+        close: fn(^^self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
     }
 }
 
@@ -585,9 +585,9 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
     loop interface in interfaces -> out = "{out}{interface}: struct {{ value: Int }}\n"
     out = "{out}#Error\nComError: enum {{ WrongApartment, InvalidHandle, InvalidArgument, MemberFailed, TypeMismatch, Limit }}\n\n"
     out = "{out}open: fn() -[FFI.Com]> {root} ComError! {{\n    value: abi.open()\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({root}{{ value: value }})\n}}\n\n"
-    out = "{out}close: fn(&&object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
+    out = "{out}close: fn(^^object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
     loop interface in interfaces {
-        out = "{out}impl {interface}.Close {{\n    close: fn(&&self) {{\n        abi.close(self.value)\n        code: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
+        out = "{out}impl {interface}.Close {{\n    close: fn(^^self) {{\n        abi.close(self.value)\n        code: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
         out = "{out}#Unsafe(\"dynamic IDispatch has no type-library contract\")\ndynamic_{interface}: fn(object: {interface}, name: String, args: [Dyn], flags: Int) -[FFI.Com]> Dyn ComError! {{\n    payload: json.to_string(args) ?? return Err(ComError.TypeMismatch)\n    raw: abi.dynamic(object.value, name, payload, flags)\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
     }
     out = "{out}error: fn(code: Int) -[]> ComError Never! {{\n    if code == 1 {{ return ComError.WrongApartment }}\n    if code == 2 {{ return ComError.InvalidHandle }}\n    if code == 3 {{ return ComError.InvalidArgument }}\n    if code == 5 {{ return ComError.TypeMismatch }}\n    if code == 6 {{ return ComError.Limit }}\n    return ComError.MemberFailed\n}}\n\n"
@@ -637,24 +637,24 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
             param: method.params[index]
             at: count - 1 - index
             set: if param.kind == {
-                .Int -> "V_VT(&args[{at}])=VT_I8;V_I8(&args[{at}])={param.name};"
-                .Float -> "V_VT(&args[{at}])=VT_R8;V_R8(&args[{at}])={param.name};"
-                .Bool -> "V_VT(&args[{at}])=VT_BOOL;V_BOOL(&args[{at}])={param.name}?VARIANT_TRUE:VARIANT_FALSE;"
-                .Text -> "if(!text_arg({param.name},&args[{at}]))goto bad;"
-                .Data -> "if(!json_arg({param.name},&args[{at}]))goto bad;"
-                .Object(_) -> "if(!object_arg({param.name},&args[{at}]))goto bad;"
+                .Int -> "V_VT(^args[{at}])=VT_I8;V_I8(^args[{at}])={param.name};"
+                .Float -> "V_VT(^args[{at}])=VT_R8;V_R8(^args[{at}])={param.name};"
+                .Bool -> "V_VT(^args[{at}])=VT_BOOL;V_BOOL(^args[{at}])={param.name}?VARIANT_TRUE:VARIANT_FALSE;"
+                .Text -> "if(!text_arg({param.name},^args[{at}]))goto bad;"
+                .Data -> "if(!json_arg({param.name},^args[{at}]))goto bad;"
+                .Object(_) -> "if(!object_arg({param.name},^args[{at}]))goto bad;"
                 .Unit -> ""
             }
             wrappers = "{wrappers}{set}"
         }
-        wrappers = "{wrappers}if(!invoke_member(handle,{method.dispid}, {method.flags},args,{count},&result))goto bad;"
+        wrappers = "{wrappers}if(!invoke_member(handle,{method.dispid}, {method.flags},args,{count},^result))goto bad;"
         ret: if method.result == {
-            .Unit -> "VariantClear(&result);{clear}return;"
+            .Unit -> "VariantClear(^result);{clear}return;"
             .Int -> "int64_t value=variant_int(&result);VariantClear(&result);{clear}return value;"
-            .Float -> "double value=variant_float(&result);VariantClear(&result);{clear}return value;"
+            .Float -> "double value=variant_float(^result);VariantClear(^result);{clear}return value;"
             .Bool -> "int64_t value=variant_bool(&result);VariantClear(&result);{clear}return value;"
-            .Text -> "const char*value=variant_text(&result);VariantClear(&result);{clear}return value;"
-            .Data -> "const char*value=variant_json(&result);VariantClear(&result);{clear}return value;"
+            .Text -> "const char*value=variant_text(^result);VariantClear(^result);{clear}return value;"
+            .Data -> "const char*value=variant_json(^result);VariantClear(^result);{clear}return value;"
             .Object(_) -> "int64_t value=variant_object(&result);VariantClear(&result);{clear}return value;"
         }
         fallback: if method.result == {
@@ -663,7 +663,7 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
             .Text | .Data -> "return \"\";}}\n"
             .Int | .Bool | .Object(_) -> "return 0;}}\n"
         }
-        wrappers = "{wrappers}{ret}bad:VariantClear(&result);{clear}{fallback}"
+        wrappers = "{wrappers}{ret}bad:VariantClear(^result);{clear}{fallback}"
     }
     COM_RUNTIME_C.replace("@ABI@", abi).replace("@CLASS@", schema.class_guid).replace("@WRAPPERS@", wrappers)
 }

@@ -65,7 +65,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat", "wl_data_device_manager"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -100,13 +100,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -118,7 +118,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
@@ -131,7 +131,7 @@ digits: fn(count: Int) -> String {
 
 // Writes all of `bytes` into `fd`, 4096 at a time; dropping `fd` closes
 // the pipe and ends the text.
-fake_write_all: fn(f: &Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
+fake_write_all: fn(f: ^Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
     at := 0
     loop at < bytes.len() {
         end: if at + 4096 < bytes.len() -> at + 4096 else -> bytes.len()
@@ -144,7 +144,7 @@ fake_write_all: fn(f: &Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
 }
 
 // Reads `fd` to its end.
-fake_read_all: fn(f: &Fake, fd: sys.Fd) -[Env]> [U8] {
+fake_read_all: fn(f: ^Fake, fd: sys.Fd) -[Env]> [U8] {
     bytes := [U8]{}
     loop {
         chunk: fd.read(65536, WAIT_NS) ?? {
@@ -158,7 +158,7 @@ fake_read_all: fn(f: &Fake, fd: sys.Fd) -[Env]> [U8] {
 }
 
 // The queued events go out with `fd`, which this end then drops.
-fake_send_fd: fn(f: &Fake, fd: &&sys.Fd) -[Net, Time]> {
+fake_send_fd: fn(f: ^Fake, fd: ^^sys.Fd) -[Net, Time]> {
     out: f.out.copy()
     f.out = [U8]{}
     net.unix_send(f.stream, out, [sys.Fd]{fd}) ?? {
@@ -170,7 +170,7 @@ fake_send_fd: fn(f: &Fake, fd: &&sys.Fd) -[Net, Time]> {
 // wl_data_device.set_selection: the compositor pastes the new copy at
 // once, through a pipe whose write end goes to the window with
 // wl_data_source.send, and reads it to its end.
-fake_paste_copy: fn(f: &Fake, source: Int, serial: Int) -[Env, Net, Time]> {
+fake_paste_copy: fn(f: ^Fake, source: Int, serial: Int) -[Env, Net, Time]> {
     if serial != f.focus_serial {
         fake_fail(f, "set_selection at serial {serial}, not the focus serial {f.focus_serial}")
     }
@@ -192,7 +192,7 @@ fake_paste_copy: fn(f: &Fake, source: Int, serial: Int) -[Env, Net, Time]> {
     f.due_commit = f.commits + 2
 }
 
-fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
+fake_commit: fn(f: ^Fake) -[Env, Net, Time]> {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -245,7 +245,7 @@ fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
     }
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -365,7 +365,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     }
 }
 
-fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

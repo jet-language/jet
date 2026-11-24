@@ -318,7 +318,7 @@ go_program: fn(units: String, folds: String) -> String {
 }
 
 zig_program: fn(units: String, folds: String) -> String {
-    "// {HEADER}\nconst std = @import(\"std\");\n\n{units}\npub fn main(init: std.process.Init) !void {{\n    const allocator = std.heap.page_allocator;\n    var total: i64 = 0;\n{folds}\n    var out_buffer: [64]u8 = undefined;\n    var out = std.Io.File.Writer.init(.stdout(), init.io, &out_buffer);\n    try out.interface.print(\"checksum {{d}}\\n\", .{{total}});\n    try out.interface.flush();\n}}\n"
+    "// {HEADER}\nconst std = @import(\"std\");\n\n{units}\npub fn main(init: std.process.Init) !void {{\n    const allocator = std.heap.page_allocator;\n    var total: i64 = 0;\n{folds}\n    var out_buffer: [64]u8 = undefined;\n    var out = std.Io.File.Writer.init(.stdout(), init.io, ^out_buffer);\n    try out.interface.print(\"checksum {{d}}\\n\", .{{total}});\n    try out.interface.flush();\n}}\n"
 }
 
 rust_program: fn(units: String, folds: String) -> String {

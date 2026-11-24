@@ -70,7 +70,7 @@ x64_jetline_read: fn(elf: [U8]) -> X64Jetline? Never! {
 
 // The functions of the linked blocks in `table`; a block or record that
 // runs past its end ends the read.
-x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
+x64_jetline_parse: fn(table: ^^[U8]) -> X64Jetline Never! {
     functions := [X64JetlineFunction]{}
     ascending := true
     reached := 0
@@ -118,7 +118,7 @@ x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
 // X64_JETLINE_RUNTIME_DIRECTORY: the program's Jet functions, as the fault
 // report's `find` sees them. The debugger and `jet crash` read these; a
 // profile reads them all.
-x64_jetline_program: fn(lines: &&X64Jetline) -> X64Jetline Never! {
+x64_jetline_program: fn(lines: ^^X64Jetline) -> X64Jetline Never! {
     owned := lines.move()
     kept := [X64JetlineFunction]{}
     loop function in owned.functions.move() {
@@ -153,7 +153,7 @@ x64_jetline_find: fn(lines: X64Jetline, pc: Int) -> Int Never! {
 
 // Each row of `rows` with a source line, in the table's coding (above),
 // onto `out`; the rows are offsets from the function's start.
-x64_jetline_rows: fn(out: &[U8], rows: [X64LineRow]) Never! {
+x64_jetline_rows: fn(out: ^[U8], rows: [X64LineRow]) Never! {
     at := 0
     line := 1
     loop row in rows {
@@ -168,7 +168,7 @@ x64_jetline_rows: fn(out: &[U8], rows: [X64LineRow]) Never! {
 
 // The row at `at` of `table` after `row` (the one before it, or the
 // function's start and line 1 before the first), advancing `at` past it.
-x64_jetline_next: fn(table: [U8], at: &Int, row: &X64LineRow) Never! {
+x64_jetline_next: fn(table: [U8], at: ^Int, row: ^X64LineRow) Never! {
     advance: link_debug_uleb(table, at)
     row.at += advance >> 1
     row.call = advance & 1 == 1
@@ -210,7 +210,7 @@ x64_jetline_row: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int, ca
 
 // The sleb at `at` (advanced past it); 0 when it runs out. Every bit of a
 // 64-bit value is kept: an absent inline Option's discriminant is 2^62.
-x64_jetline_sleb: fn(bytes: [U8], at: &Int) -> Int Never! {
+x64_jetline_sleb: fn(bytes: [U8], at: ^Int) -> Int Never! {
     value := 0
     shift := 0
     loop at < bytes.len() {

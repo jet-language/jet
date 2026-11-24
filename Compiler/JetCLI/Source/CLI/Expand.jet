@@ -59,12 +59,12 @@ jet_cli_expand_source: fn(modules: [JetDriverDocModule], path: String) -> String
     None
 }
 
-jet_cli_expand_sort_facts: fn(facts: &[JetCLIExpandFact]) Never! {
+jet_cli_expand_sort_facts: fn(facts: ^[JetCLIExpandFact]) Never! {
     facts = loop fresh_item in facts -> fresh_item
     facts.sort_by(fn(left: JetCLIExpandFact, right: JetCLIExpandFact) { (left.source <=> right.source).then(left.offset <=> right.offset).then(left.name <=> right.name) })
 }
 
-jet_cli_expand_inline_function: fn(function: Func, owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
+jet_cli_expand_inline_function: fn(function: Func, owner: String?, unit: JetDriverDocModule, facts: ^[JetCLIExpandFact]) Never! {
     if !function.is_inline && !function.is_inline_always {
         return
     }
@@ -86,7 +86,7 @@ jet_cli_expand_inline_function: fn(function: Func, owner: String?, unit: JetDriv
     facts.push(JetCLIExpandFact{source: unit.path, offset: span.start, name: name, text: "{unit.path}:{line}:{column}   {name}   {contract}   -> {attribute}", value: value})
 }
 
-jet_cli_expand_inline_items: fn(items: [Item], owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
+jet_cli_expand_inline_items: fn(items: [Item], owner: String?, unit: JetDriverDocModule, facts: ^[JetCLIExpandFact]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { jet_cli_expand_inline_function(function, owner, unit, facts) }
@@ -198,7 +198,7 @@ jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [Je
 // The forwarded members of distinct `name` declared in module `path`, as Jet
 // source, or "" when `name` is not a distinct there. `forwards` keeps each
 // module's generated source, by its row in `modules`, so a module expands once.
-jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String, name: String, derives: [String], forwards: &[Int:SemaDistinctForwards]) -> String {
+jet_cli_expand_distinct_forward: fn(modules: [JetDriverDocModule], path: String, name: String, derives: [String], forwards: ^[Int:SemaDistinctForwards]) -> String {
     loop (unit_index, unit) in modules {
         if unit.path != path && unit.physical_path != path -> next
         loop item in unit.items {

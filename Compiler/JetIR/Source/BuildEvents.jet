@@ -14,14 +14,14 @@ ir_event_type: fn(ty: Type) -> Bool Never! {
     false
 }
 
-ir_event_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+ir_event_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int Never! {
     tid: ir_intern_tid(m, p, ty)
     ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, "jet_rt_handle_drop_jet_event", "jet_rt_handle_clone_jet_event"))
 }
 
 // `core.event.__event_with_policy<T>(policy)`: the provider borrows the
 // policy, which is released here when consumed.
-ir_event_with_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+ir_event_with_policy: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if !ir_event_type(result_ty) {
         return ir_fail_slot(b, span, "Event.with_policy producing {ir_type_name(result_ty)}")
     }
@@ -38,7 +38,7 @@ ir_event_with_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: T
 
 // A fresh synchronous `Event<T>` of type `ty`, as `event.point<T>()` makes
 // it: a declared event point's (ir_point_new).
-ir_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+ir_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, span: Span) -> Int Never! {
     policy_ty: Type.Named{name: "EventPolicy"}
     policy_row: ir_value_type(m, p, policy_ty) ?? return ir_type_fail(b, span, policy_ty)
     policy: ir_runtime(m, b, "jet_event_policy_sync", [Int]{}, policy_row)
@@ -50,7 +50,7 @@ ir_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span
 
 // Every `core.event` method row the providers implement, by the provider
 // symbol sema put on the operation; None leaves any other to ir_handle_method.
-ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+ir_event_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     symbol: if operation == {
         .EventMethod(route) -> route
         .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> {
@@ -121,7 +121,7 @@ ir_event_listen_export: fn(symbol: String) -> String? Never! {
 
 // A receiver-only method: Unit, an owned exact Int, a Bool, an owned String
 // or a payload-free enum's ordinal word.
-ir_event_query: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, span: Span) -> Int Never! {
+ir_event_query: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(b, span, "{export} with {args.len()} arguments")
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -140,7 +140,7 @@ ir_event_query: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 // priority crosses as a native word. A handler of a `T Never!` function
 // hands back its Result carrier, so the provider's slot gets its Ok payload
 // (lazy.carried), as a handler typed `-> T` writes it.
-ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, prioritized: Bool, once: Bool, span: Span) -> Int Never! {
+ir_event_listen: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, prioritized: Bool, once: Bool, span: Span) -> Int Never! {
     if args.len() != (if prioritized -> 3 else -> 2) {
         return ir_fail_slot(b, span, "Event listener registration with {args.len()} arguments")
     }
@@ -190,7 +190,7 @@ ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 // emit(payload): the payload's native slot is lent to every handler and a
 // consumed payload is released after the dispatch; the result is the
 // dispatch's EventTrace.
-ir_event_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_event_emit: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Event.emit with {args.len()} arguments")
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     event: ir_expr(m, p, b, receiver)
@@ -213,7 +213,7 @@ ir_event_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
 // and DecisionHook<T, E> (one hook box), AsyncEvent<T, E> and
 // DispatchReport<E>; None for any other type, a declared one of the same
 // name included.
-ir_event_family_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int? Never! {
+ir_event_family_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int? Never! {
     if ir_untag(ty) == .Apply(name, args) {
         handle: if name == {
             "Hook" | "DecisionHook" -> if args.len() == 2 -> "hook" else -> ""
@@ -230,7 +230,7 @@ ir_event_family_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int? Never! {
 
 // `core.event.__hook_new<T, R>(fallback)`: the hook takes over the moved
 // fallback under R's descriptor.
-ir_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+ir_hook_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "Hook.new with {args.len()} arguments")
     fallback: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
@@ -239,7 +239,7 @@ ir_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args
 
 // A Hook<T, R> of type `result_ty` that takes over the moved `fallback`
 // (no slot for a unit R) under R's descriptor.
-ir_hook_make: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, fallback: Int, span: Span) -[]> Int {
+ir_hook_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, fallback: Int, span: Span) -[]> Int {
     row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "Hook.new producing {ir_type_name(result_ty)}")
     fallback_ty: ir_type_args(ir_untag(result_ty))[1].copy()
     slot := ir_word_const(m, b, 0)
@@ -256,7 +256,7 @@ ir_hook_make: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, fal
 }
 
 // `core.event.__decision_hook_new<T, E>(policy)`.
-ir_decision_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+ir_decision_hook_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 {
         return ir_fail_slot(b, span, "DecisionHook.new with {args.len()} arguments")
     }
@@ -267,7 +267,7 @@ ir_decision_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: T
 
 // A DecisionHook<T, E> of type `result_ty` under `policy`, which is
 // released here: the provider takes its ordinal word.
-ir_decision_hook_make: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, policy: Int, span: Span) -[]> Int {
+ir_decision_hook_make: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, policy: Int, span: Span) -[]> Int {
     row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "DecisionHook.new producing {ir_type_name(result_ty)}")
     hook: ir_runtime(m, b, "jet_decision_hook_new", [Int]{policy}, row)
     b.fresh[hook] = true
@@ -289,7 +289,7 @@ ir_point_type: fn(p: IRProgram, ty: Type) -[]> Bool {
 // The carrier of declared point `definition` as its constructor makes it:
 // a synchronous Event, a Hook over the landed fallback or a DecisionHook
 // under the landed policy (ir_point_holder_read, ir_storage_start_helper).
-ir_point_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
+ir_point_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
     if ir_untag(definition.ty) == .Apply(name, args) {
         if name == {
             "Event" -> return ir_event_new(m, p, b, definition.ty, span)
@@ -319,7 +319,7 @@ ir_event_ok_type: fn(ty: Type) -> Type? Never! {
 // record is borrowed and released here when consumed. The provider keeps E's
 // descriptor and the handler result's (`Result<Unit, E>`): it reads each
 // handler's Ok or Err and keeps an Err's E for its DispatchReport.
-ir_async_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
+ir_async_event_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
     event_ty: ir_event_ok_type(result_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
     row: ir_event_family_row(m, p, event_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(b, span, "AsyncEvent.new with {args.len()} arguments")
@@ -344,7 +344,7 @@ ir_async_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Typ
 // DispatchFailure<E> boxes in the lowering's enum layout from the words
 // passed here (the runtime's FAILURE_* offsets in AsyncEvents.jet), each
 // Handler payload a clone of the report's E.
-ir_dispatch_report_failures: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_dispatch_report_failures: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 {
         return ir_fail_slot(b, span, "DispatchReport.failures with {args.len()} arguments")
     }
@@ -379,7 +379,7 @@ ir_dispatch_report_failures: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: T
 }
 
 // A value the runtime writes to frame storage through `export(args, out)`.
-ir_event_out_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, export: String, args: [Int], span: Span) -> Int Never! {
+ir_event_out_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, export: String, args: [Int], span: Span) -> Int Never! {
     call_args := args.copy()
     if ir_unit_type(ty) {
         call_args.push(ir_word_const(m, b, 0))
@@ -407,7 +407,7 @@ ir_event_out_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, expo
 
 // The lent slot of a call's payload argument (a word 0 for Unit) and the
 // payload value to release after the call (-1 for none).
-ir_event_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -> {slot: Int, value: Int} Never! {
+ir_event_lent_payload: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, arg: Int) -> {slot: Int, value: Int} Never! {
     if ir_unit_type(ir_ty(m, p, b, arg)) {
         _ := ir_expr(m, p, b, arg)
         return {slot: ir_word_const(m, b, 0), value: -1}
@@ -421,7 +421,7 @@ ir_event_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -
 // fallback moves to the provider, and the result R comes back in frame
 // storage. A run of a point no handler can reach (IRProgram.quiet_points)
 // is its fallback: no call, no hook and no cell.
-ir_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_hook_run: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 2 -> return ir_fail_slot(b, span, "Hook.run with {args.len()} arguments")
     if ir_quiet_point_read(p, b, receiver) -> return ir_quiet_hook_run(m, p, b, ty, args, span)
     hook: ir_expr(m, p, b, receiver)
@@ -456,7 +456,7 @@ ir_quiet_point_read: fn(p: IRProgram, b: IRBuilder, receiver: Int) -[]> Bool {
 // A quiet point's run(payload, fallback): the payload is evaluated and
 // dropped, as the provider would after a run no handler hears, and the
 // result is the owned fallback.
-ir_quiet_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -[]> Int {
+ir_quiet_hook_run: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [Int], span: Span) -[]> Int {
     payload: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
     fallback: ir_expr(m, p, b, args[1])
@@ -475,7 +475,7 @@ ir_quiet_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args:
 
 // The (variant index, single payload offset) of `variant` in enum row
 // `row` applied to `args`; a payload-free variant's offset is 0.
-ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant: String) -> {index: Int, offset: Int}? Never! {
+ir_event_variant: fn(m: ^IRModule, p: IRProgram, row: Int, args: [Type], variant: String) -> {index: Int, offset: Int}? Never! {
     index: ir_variant_index(p, row, variant) ?? return None
     members: ir_variant_members(m, p, row, args, index) ?? return None
     if members.len() == 0 -> return Val({index: index, offset: 0})
@@ -488,7 +488,7 @@ ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant
 // DECISION_* / OUTCOME_* offsets in EventHooks.jet). A run of a point no
 // handler can reach (IRProgram.quiet_points) is `HookOutcome.Continue` over
 // its own payload: no call, no hook and no cell.
-ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_decision_hook_run: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 {
         return ir_fail_slot(b, span, "DecisionHook.run with {args.len()} arguments")
     }
@@ -555,7 +555,7 @@ ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
 
 // AsyncEvent.emit_async(payload): the entry takes over the moved payload
 // under T's descriptor and its task's result is the DispatchReport.
-ir_async_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_async_emit: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 {
         return ir_fail_slot(b, span, "AsyncEvent.emit_async with {args.len()} arguments")
     }

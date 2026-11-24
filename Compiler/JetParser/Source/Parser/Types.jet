@@ -76,7 +76,7 @@ ParsedType: struct {
     span: Span,
 }
 
-parser_parse_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     if depth > 256 {
         span: parser_current(state).span
         parser_add_fatal_code(state, "E1403", span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
@@ -167,7 +167,7 @@ parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never!
 
 // Does an error contract start here? -1 when none, 0 for
 // `E!` or `(A | B)!`, and 1 for the rejected unparenthesized `A | B!`.
-parser_suffix_contract_ahead: fn(state: &JetParserState) -> Int Never! {
+parser_suffix_contract_ahead: fn(state: ^JetParserState) -> Int Never! {
     if state.pending_type_gt -> return -1
     parser_skip_trivia(state)
     index := state.position
@@ -191,7 +191,7 @@ parser_suffix_contract_ahead: fn(state: &JetParserState) -> Int Never! {
 
 // The error half of a contract and its `!`. A union needs
 // its parentheses: `A | B!` is taught as `(A | B)!`.
-parser_parse_suffix_contract: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_suffix_contract: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     bare_union: parser_suffix_contract_ahead(state) == 1
     first_index: state.position
     error_type: parser_parse_type_union(state, depth + 1)
@@ -229,7 +229,7 @@ parser_type_starts: fn(kind: Int) -> Bool Never! {
 }
 
 // `#TagName Type`: a value-tag prefix on a type. The tag is a PascalCase name.
-parser_type_tag_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_type_tag_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT {
         return false
     }
@@ -250,17 +250,17 @@ parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Ne
     out
 }
 
-parser_add_type_mark_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
+parser_add_type_mark_error: fn(state: ^JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
     diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)
     state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: replacement}))
 }
 
-parser_parse_type_union: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_type_union: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     ty: parser_parse_type_atom(state, depth + 1)
     parser_parse_type_union_tail(state, ty, depth + 1)
 }
 
-parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, depth: Int) -> ParsedType {
+parser_parse_type_union_tail: fn(state: ^JetParserState, first: ParsedType, depth: Int) -> ParsedType {
     result := first
     members := [Type]{}
     loop parser_current_kind(state) == TOKEN_PIPE {
@@ -282,7 +282,7 @@ parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, dept
 // Whether a union's named case `Name(T)` starts here: a name, then a `(` that
 // opens no inline range. After a `|` (`in_union`) that is enough; a first
 // member is a case only when a `|` follows its `)`. A bare name is a type.
-parser_union_case_ahead: fn(state: &JetParserState, in_union: Bool) -> Bool Never! {
+parser_union_case_ahead: fn(state: ^JetParserState, in_union: Bool) -> Bool Never! {
     if state.pending_type_gt || parser_current_kind(state) != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_LPAREN {
         return false
     }
@@ -305,7 +305,7 @@ parser_union_case_ahead: fn(state: &JetParserState, in_union: Bool) -> Bool Neve
 }
 
 // A union's named case `Name(T)`, written as inside an enum.
-parser_parse_union_case: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_union_case: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     name: parser_bump(state)
     parser_bump(state)
     payload: parser_parse_type(state, depth + 1)
@@ -315,7 +315,7 @@ parser_parse_union_case: fn(state: &JetParserState, depth: Int) -> ParsedType {
 
 // `?` follows the type it marks and binds tightly, so
 // `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
-parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_type_atom: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     if parser_union_case_ahead(state, false) -> return parser_parse_union_case(state, depth + 1)
     parsed: parser_parse_type_base(state, depth + 1)
     base: parser_parse_inline_range(state, parsed) ?? parsed
@@ -338,7 +338,7 @@ parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
 // its carrier is always `Int`. A consumed `>>` leaves one virtual outer `>`
 // pending, and the `(` after it belongs to the enclosing call. None when no
 // range follows `base`.
-parser_parse_inline_range: fn(state: &JetParserState, base: ParsedType) -> ParsedType? {
+parser_parse_inline_range: fn(state: ^JetParserState, base: ParsedType) -> ParsedType? {
     if state.pending_type_gt || parser_current_kind(state) != TOKEN_LPAREN -> return None
     if parser_kind_at(state, 1) != TOKEN_INT && parser_kind_at(state, 1) != TOKEN_MINUS {
         return None
@@ -359,7 +359,7 @@ parser_parse_inline_range: fn(state: &JetParserState, base: ParsedType) -> Parse
     Val(ParsedType{ty: Type.InlineRange{base: base.ty, lo: lower.value, hi: upper.value}, span: span})
 }
 
-parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_type_base: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     start: parser_current(state)
     kind: start.kind
 
@@ -467,7 +467,7 @@ parser_build_fact_type_path: fn(name: String) -> Bool Never! {
 // The type a written name means in this file: a size name (`U8`) is the
 // compiler's own type its Core alias names, unless the file binds that name
 // itself (`bound_size_rows`), where it stays a name Sema resolves in scope.
-parser_named_type: fn(state: &JetParserState, name: String) -> Type Never! {
+parser_named_type: fn(state: ^JetParserState, name: String) -> Type Never! {
     if state.bound_size_rows != 0 {
         loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
             if FOUNDATION_SIZE_ALIASES[row].name == name && (state.bound_size_rows & (1 << row)) != 0 {
@@ -632,7 +632,7 @@ parser_size_test_param_type: fn(source: String, name: String) -> Type {
     assert(parser_size_test_param_type(keyed, "f") == Type.IntN{signed: false, bits: 32})
 }
 
-parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_collection_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     open: parser_bump(state)
     first: parser_parse_type(state, depth + 1)
     if parser_current_kind(state) == TOKEN_COLON {
@@ -651,7 +651,7 @@ parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedTy
     ParsedType{ty: Type.List{element: first.ty}, span: parser_cover(open.span, close.span)}
 }
 
-parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_tuple_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     open: parser_bump(state)
     if parser_current_kind(state) == TOKEN_RPAREN {
         close: parser_bump(state)
@@ -679,7 +679,7 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
 
 // `{name: Type, …}`: a record type, an unnamed struct with named members.
 // Its members are separated by commas, on one line or many.
-parser_parse_record_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_record_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     open: parser_bump(state)
     fields := [TypeTupleField]{}
     loop {
@@ -706,7 +706,7 @@ parser_parse_record_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
 // The offset of the token after the `}` that closes a record type at offset
 // `at`: a `{` whose first member is `name:`. A record value has the same
 // shape, so only a type position asks.
-parser_record_type_end_at: fn(state: &JetParserState, at: Int) -> Int? Never! {
+parser_record_type_end_at: fn(state: ^JetParserState, at: Int) -> Int? Never! {
     if parser_kind_at(state, at) != TOKEN_LBRACE -> return None
     first := at + 1
     loop parser_kind_at(state, first) == TOKEN_SEMI -> first += 1
@@ -732,7 +732,7 @@ parser_record_type_end_at: fn(state: &JetParserState, at: Int) -> Int? Never! {
 // path (`Kind.Fast`) or a construction (`Point{…}`, `Val(…)`), or `Self`,
 // `[`, `(`, `{`, `fn`, `*` or a `#Tag`. A body such as `{ total: count }`
 // fails it.
-parser_record_type_members_typed_at: fn(state: &JetParserState, at: Int) -> Bool Never! {
+parser_record_type_members_typed_at: fn(state: ^JetParserState, at: Int) -> Bool Never! {
     end: parser_record_type_end_at(state, at) ?? return false
     depth := 0
     offset := at + 1
@@ -748,7 +748,7 @@ parser_record_type_members_typed_at: fn(state: &JetParserState, at: Int) -> Bool
     true
 }
 
-parser_record_member_type_starts_at: fn(state: &JetParserState, at: Int) -> Bool Never! {
+parser_record_member_type_starts_at: fn(state: ^JetParserState, at: Int) -> Bool Never! {
     kind: parser_kind_at(state, at)
     if kind != TOKEN_IDENT {
         return kind == TOKEN_SELF || kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_KW_FN || kind == TOKEN_STAR || kind == TOKEN_HASH
@@ -761,13 +761,13 @@ parser_record_member_type_starts_at: fn(state: &JetParserState, at: Int) -> Bool
 // A function type `fn(T1, …) -> R`, `fn(T1, …) -[E]> R` or `fn(…) E!`. It
 // reuses the parameter grammar's zone separators public
 // labels and zones are part of callable identity, local names are not.
-parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
+parser_parse_function_type: fn(state: ^JetParserState, depth: Int) -> ParsedType {
     start: parser_bump(state)
     parser_parse_function_type_from(state, depth, start.span)
 }
 
 // A function type from its `(` on; `start` is where the type began.
-parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: Span) -> ParsedType {
+parser_parse_function_type_from: fn(state: ^JetParserState, depth: Int, start: Span) -> ParsedType {
     parser_expect(state, TOKEN_LPAREN, "`(` after `fn` in a function type")
     params := [Type]{}
     names := [String]{}
@@ -806,9 +806,9 @@ parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: S
                         parser_bump(state)
                         name = parser_value(state, token)
                     }
-                    // A parameter type marks a written input `&` or a taken input
-                    // `&&`, as a declared parameter does: `fn(&[Int])` writes its
-                    // argument and `fn(&&Map)` takes it.
+                    // A parameter type marks a written input `^` or a taken input
+                    // `^^`, as a declared parameter does: `fn(^[Int])` writes its
+                    // argument and `fn(^^Map)` takes it.
                     convention := AccessConvention.Read
                     mark_kind: parser_current_kind(state)
                     if parser_write_mark(mark_kind) || parser_take_mark(mark_kind) {
@@ -917,7 +917,7 @@ parser_has_type: fn(value: ParsedType?) -> Bool Never! {
 }
 
 // The effect row of a function type, `-[E]>`.
-parser_parse_effect_arrow_row: fn(state: &JetParserState) -> [EffectRowEntry] {
+parser_parse_effect_arrow_row: fn(state: ^JetParserState) -> [EffectRowEntry] {
     parser_expect(state, TOKEN_MINUS, "`-` to start an effect arrow")
     parser_expect(state, TOKEN_LBRACKET, "`[` to start an effect row")
     effects: parser_parse_effect_row_entries(state, TOKEN_RBRACKET)
@@ -926,11 +926,11 @@ parser_parse_effect_arrow_row: fn(state: &JetParserState) -> [EffectRowEntry] {
     effects
 }
 
-parser_report_fn_type_zone: fn(state: &JetParserState, span: Span) {
+parser_report_fn_type_zone: fn(state: ^JetParserState, span: Span) {
     parser_add_error_code(state, "E0763", span, "this function type's parameter zones are out of order", "the zones read left to right: positional-only, then either, then label-only", "write at most one `/` before at most one `*`, each with parameters on its side")
 }
 
-parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {
+parser_parse_applied_type: fn(state: ^JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {
     parser_bump(state)
     args := [Type]{}
     // `Vec<N>` and `Matrix<M, N>` take shape measures in the declared-measure
@@ -966,7 +966,7 @@ parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span
 // `<N: Int>` number parameter (`Packet<4>`), the same length
 // measure `[T#4]` spells; anything else is a type. A named constant
 // (`Packet<SIZE>`) parses as a type name and sema reads its value.
-parser_parse_type_argument: fn(state: &JetParserState, depth: Int) -> Type {
+parser_parse_type_argument: fn(state: ^JetParserState, depth: Int) -> Type {
     if parser_current_kind(state) == TOKEN_INT {
         token: parser_bump(state)
         return Type.Measure{measure: Measure.Literal{kind: "length", value: parser_integer(state, token) ?? 0}}
@@ -974,7 +974,7 @@ parser_parse_type_argument: fn(state: &JetParserState, depth: Int) -> Type {
     parser_parse_type(state, depth).ty
 }
 
-parser_parse_measure: fn(state: &JetParserState, kind: String, depth: Int) -> Measure {
+parser_parse_measure: fn(state: ^JetParserState, kind: String, depth: Int) -> Measure {
     token: parser_current(state)
     // Rust `parse_declared_measure`: a fixed-list length is a whole,
     // non-negative number; either report is the item's `Err`.

@@ -33,7 +33,7 @@ rowset_new: fn() -> RowSet Never! {
 }
 
 // sqlite3RowSetClear: empty the set; it may be filled again.
-rowset_clear: fn(p: &RowSet) Never! {
+rowset_clear: fn(p: ^RowSet) Never! {
     p.entries = [Int]{}
     p.at = 0
     p.forest = [Int:Bool]{}
@@ -42,14 +42,14 @@ rowset_clear: fn(p: &RowSet) Never! {
 }
 
 // sqlite3RowSetInsert. Not called once reading has begun.
-rowset_insert: fn(p: &RowSet, rowid: Int) Never! {
+rowset_insert: fn(p: ^RowSet, rowid: Int) Never! {
     n: p.entries.len()
     if p.sorted && n > 0 && rowid <= p.entries[n - 1] -> p.sorted = false
     p.entries.push(rowid)
 }
 
 // rowSetEntrySort: sort the pending entries ascending and drop duplicates.
-rowset_sort: fn(p: &RowSet) Never! {
+rowset_sort: fn(p: ^RowSet) Never! {
     p.entries.sort()
     out := [Int]{}
     loop v in p.entries {
@@ -62,7 +62,7 @@ rowset_sort: fn(p: &RowSet) Never! {
 
 // sqlite3RowSetNext: the smallest remaining value, or None when the set is
 // empty (which clears it). Not called after rowset_test.
-rowset_next: fn(p: &RowSet) -> Int? Never! {
+rowset_next: fn(p: ^RowSet) -> Int? Never! {
     if !p.reading {
         if !p.sorted -> rowset_sort(p)
         p.reading = true
@@ -77,7 +77,7 @@ rowset_next: fn(p: &RowSet) -> Int? Never! {
 // sqlite3RowSetTest: whether `rowid` was inserted in a batch before
 // `batch`. The first probe of a new batch moves the pending entries into
 // the forest.
-rowset_test: fn(p: &RowSet, batch: Int, rowid: Int) -> Bool Never! {
+rowset_test: fn(p: ^RowSet, batch: Int, rowid: Int) -> Bool Never! {
     if batch != p.batch {
         if p.entries.len() > 0 {
             loop v in p.entries -> p.forest[v] = true

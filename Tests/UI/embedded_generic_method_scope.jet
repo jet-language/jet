@@ -1,21 +1,21 @@
 // Embedded generic method scope, including the source RNG signature shapes.
 GenericPicker: struct {
-    pick: fn<T>(&self, items: [T]) -> T? Never! {
+    pick: fn<T>(^self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
         Val(items[0].copy())
     }
 
-    weighted_pick: fn<T>(&self, items: [T], weights: [Float]) -> T? Never! {
+    weighted_pick: fn<T>(^self, items: [T], weights: [Float]) -> T? Never! {
         if weights.len() != items.len() -> return None
         self.pick(items)
     }
 
-    sample: fn<T>(&self, items: [T], count: Int) -> [T] Never! {
+    sample: fn<T>(^self, items: [T], count: Int) -> [T] Never! {
         if count <= 0 -> return [T]{}
         items.copy()
     }
 
-    shuffle: fn<T>(&self, items: &[T]) Never! { print(items.len()) }
+    shuffle: fn<T>(^self, items: ^[T]) Never! { print(items.len()) }
 }
 
 GenericOwner: struct<T> {

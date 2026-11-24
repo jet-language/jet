@@ -11,11 +11,11 @@ Error: Jet.MoveWithoutMarker: `f` takes `words`, but `words` is used again later
  Fix: Write `words.copy()` to pass a copy and keep `words`, or reorder so this call is the last use of `words`
 More: jet-lang.dev/e/Jet.MoveWithoutMarker
 
-Error: Jet.MarkedFunctionValue: `count` can't be used as a function value because its parameter `words` is `&&`
+Error: Jet.MarkedFunctionValue: `count` can't be used as a function value because its parameter `words` is `^^`
   --> Tests/UI/function_type_take_param.jet:24:29
     |
  24 |     slots: Slots{read_only: count, taking: count}
     |                             ^^^^^
- Why: A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `count` would drop the `&&` its parameter declares
- Fix: Call `count` directly, mark the parameter in the function type (`fn(&&T)`), or pass a lambda that makes that call
+ Why: A function type gives each parameter plain read access unless it marks a write (`fn(^T)`) or a take (`fn(^^T)`), so a value of `count` would drop the `^^` its parameter declares
+ Fix: Call `count` directly, mark the parameter in the function type (`fn(^^T)`), or pass a lambda that makes that call
 More: jet-lang.dev/e/Jet.MarkedFunctionValue

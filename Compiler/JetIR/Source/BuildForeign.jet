@@ -22,7 +22,7 @@ IRForeignHandle: struct {
 // name (the first row of a key), and by DeclID row over `decls`; and each C
 // handle type they name, with its close. The rows replace any a previous
 // build over the same declared program indexed (ir_program_bind).
-ir_foreign_index: fn(p: &IRProgram, foreign: &&[SemaCheckedForeignFunction], decls: DeclTable) Never! {
+ir_foreign_index: fn(p: ^IRProgram, foreign: ^^[SemaCheckedForeignFunction], decls: DeclTable) Never! {
     p.foreign_keys = name_column_table(foreign.len())
     p.foreign = name_column(foreign.len())
     p.foreign_rows = [SemaCheckedForeignFunction]{}
@@ -46,7 +46,7 @@ ir_foreign_of: fn(p: IRProgram, key: String) -> SemaCheckedForeignFunction? Neve
 // The C handle a foreign row names (its handle_key `c.<library>.<Name>`):
 // each parameter or result type named `Name`, closed by the row's `#Close`
 // when the row returns it.
-ir_foreign_handle_note: fn(p: &IRProgram, row: SemaCheckedForeignFunction) Never! {
+ir_foreign_handle_note: fn(p: ^IRProgram, row: SemaCheckedForeignFunction) Never! {
     if row.language != "c" {
         return
     }
@@ -60,7 +60,7 @@ ir_foreign_handle_note: fn(p: &IRProgram, row: SemaCheckedForeignFunction) Never
 
 // Registers `ty` as the C handle `leaf` when it names it, by its bare name:
 // the checked signature spells it module-qualified, a body by its bare name.
-ir_foreign_handle_add: fn(p: &IRProgram, ty: Type, leaf: String, close_foreign: String?, close_function: String?) Never! {
+ir_foreign_handle_add: fn(p: ^IRProgram, ty: Type, leaf: String, close_foreign: String?, close_function: String?) Never! {
     name: ir_nominal_name(ir_untag(ty)) ?? return
     if ir_short_name(name) != leaf {
         return
@@ -103,7 +103,7 @@ ir_foreign_handle_type: fn(p: IRProgram, ty: Type) -> Bool Never! {
 // function key), never by the adapter's row in this module: every build part
 // that lays the handle out gives its row the same drop, as ir_merge_type
 // requires.
-ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeignHandle) -> Int Never! {
+ir_foreign_handle_row: fn(m: ^IRModule, p: IRProgram, ty: Type, handle: IRForeignHandle) -> Int Never! {
     bare: Type.Named{name: ir_short_name(ir_nominal_name(ir_untag(ty)) ?? "")}
     identity: type_carrier_identity(bare)
     c_symbol := ""
@@ -148,7 +148,7 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
 // and their checked closure reaches a foreign function through branches a
 // run may never take. A compiler or build service import reached by a
 // running program stops it the same way: no host answers it there.
-ir_foreign_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, message: String) -> Int Never! {
+ir_foreign_stop: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, message: String) -> Int Never! {
     string_row: ir_string_row(m)
     text: ir_temp(m, b, string_row)
     ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, message), -1, -1, b.line)
@@ -164,8 +164,8 @@ ir_foreign_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
 // (BuildRoutes.jet ir_route_of_signature), lowered as a Core call's route
 // is; in a build invocation's `#Impure` block between the host marks
 // Impure.enter and Impure.leave. A Word argument crosses as its native I64,
-// any other one borrowed; a written (`&`) one the export changes in place.
-ir_runtime_binding_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+// any other one borrowed; a written (`^`) one the export changes in place.
+ir_runtime_binding_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != foreign.params.len() {
         return ir_fail_slot(b, span, "jet.runtime call {foreign.name} with {args.len()} arguments")
     }
@@ -190,14 +190,14 @@ ir_runtime_binding_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: 
 // NUL-terminated copy freed after the call, a C handle as its pointer (a
 // moved one is the C function's to close), a read List as the address of its
 // elements (a copy at the C stride when the strides differ), a written
-// machine scalar (`&U64`, `&I32`, `&F64`) as the address of its place, read
-// back after the call, a written List (`&[I8]`) as the address of its own
-// elements, and a written struct of machine scalars (`&Pair`) as the address
+// machine scalar (`^U64`, `^I32`, `^F64`) as the address of its place, read
+// back after the call, a written List (`^[I8]`) as the address of its own
+// elements, and a written struct of machine scalars (`^Pair`) as the address
 // of its own bytes, which the C function reads and writes in place; the C
 // result converts back: a handle is owned, and a List result is the C array's
 // elements, as many as its written length parameter holds, copied into a new
 // List (the array stays the C library's).
-ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+ir_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     // A jet.runtime binding is a runtime route, as a Core call's is: the
     // runtime is every build's, compile-time evaluation included.
     if foreign.abi == SEMA_GUEST_RUNTIME_ABI {
@@ -451,7 +451,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
 // its box first (ir_build_lambda); each gets an adapter with the callback's
 // C parameters (ir_c_callback_adapter). Sema admits no other callback
 // argument (E3203, E2104).
-ir_c_callback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg: BodyCallArg, span: Span) -> Int Never! {
+ir_c_callback: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, arg: BodyCallArg, span: Span) -> Int Never! {
     if arg.fn_coerce != None {
         return ir_fail_slot(b, span, "C callback argument needs a function coercion")
     }
@@ -497,7 +497,7 @@ ir_c_callback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg: Body
 // `outcome_row` (-1: none) is the Result box `target` returns: the adapter
 // hands C its Ok payload and stops the program on an Err, which C has no
 // way to receive.
-ir_c_callback_adapter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, target: Int, boxed: Bool, outcome_row: Int, name: String, span: Span) -> Int Never! {
+ir_c_callback_adapter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, target: Int, boxed: Bool, outcome_row: Int, name: String, span: Span) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     params := [Type]{}
     returned := Type?{None}
@@ -574,7 +574,7 @@ ir_c_callback_adapter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, t
 // scalar's own size, or a `#Layout(c)` struct of machine scalars (laid out
 // in declaration order, as C does) rounded up to its widest member's
 // alignment; None for any other element.
-ir_foreign_c_width: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
+ir_foreign_c_width: fn(m: ^IRModule, p: IRProgram, row: Int) -> Int? Never! {
     if m.types[row].drop != "" || ir_enum_def(m, p, row) != None -> return None
     if m.types[row].kind == {
         .Word | .Float | .Float32 | .Bool -> return Val(m.types[row].size)
@@ -604,7 +604,7 @@ ir_foreign_c_width: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
 
 // Copies `count` elements of `width` bytes from the buffer `from`, one each
 // `from_stride` bytes, into the buffer `to`, one each `to_stride` bytes.
-ir_foreign_restride: fn(m: &IRModule, b: &IRBuilder, to: Int, to_stride: Int, from: Int, from_stride: Int, count: Int, width: Int) Never! {
+ir_foreign_restride: fn(m: ^IRModule, b: ^IRBuilder, to: Int, to_stride: Int, from: Int, from_stride: Int, count: Int, width: Int) Never! {
     index: ir_word_const(m, b, 0)
     bytes: ir_word_const(m, b, width)
     exit: ir_open(b.f, IROp.Block, b.line)
@@ -624,7 +624,7 @@ ir_foreign_restride: fn(m: &IRModule, b: &IRBuilder, to: Int, to_stride: Int, fr
 // A new List of type row `row` holding the `length` elements of the C array
 // at `raw` (`width` bytes each), copied at the List's stride; empty when the
 // array is null or empty. The C array stays its library's.
-ir_foreign_list_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element: Int, width: Int, raw: Int, length: Int) -> Int Never! {
+ir_foreign_list_result: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, element: Int, width: Int, raw: Int, length: Int) -> Int Never! {
     stride: ir_list_stride(m, element)
     word_row: ir_word_row(m)
     storage: ir_fresh_temp(m, b, row)
@@ -661,7 +661,7 @@ ir_foreign_list_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, 
 // result comes back the same way, a String as a buffer the crate frees
 // (jet_ffi_cabi_free) once copied. A nonzero status is the Rust function's
 // panic, which stops the program.
-ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+ir_rust_foreign_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != foreign.params.len() {
         return ir_fail_slot(b, span, "foreign import argument count differs from its checked signature")
     }
@@ -751,7 +751,7 @@ ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: Sem
 // Whether a value of type row `row` crosses a Rust slot descriptor: a String
 // as its bytes, or in the value word an exact Int, a machine integer, a
 // float, a Bool or a Char.
-ir_rust_slot_crosses: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_rust_slot_crosses: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_option_inline(m, row) -> return false
     if m.types[row].kind == {
         .Int | .Bool | .Float | .Float32 | .Char | .String -> true
@@ -762,7 +762,7 @@ ir_rust_slot_crosses: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 
 // Whether type row `row` is a struct whose bytes hold only machine scalars:
 // inline integer words, floats and Bools with no drop, and structs of them.
-ir_foreign_plain_struct: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_foreign_plain_struct: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     ty: ir_untag(ir_row_ty(m, p, row))
     nominal: ir_nominal_name(ty) ?? return false
     definition: ir_type_def(p, nominal) ?? return false
@@ -784,7 +784,7 @@ ir_foreign_plain_struct: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never!
 // (ir_asm_leaf) on machine words. An exact Int crosses as its I64
 // (jet_int_owned_to_i64) and an Int result converts back
 // (jet_int_owned_from_i64), as for a C function.
-ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+ir_asm_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != foreign.params.len() {
         return ir_fail_slot(b, span, "inline asm argument count differs from its checked signature")
     }
@@ -854,7 +854,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
 // Word rows, its code the template (the first triple-quoted body within the
 // checked span) assembled for its parameter names. Returns the problem
 // when the template is missing or does not assemble, else "".
-ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
+ir_asm_leaf: fn(m: ^IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
     key: "{ir_symbol_key(p, foreign.symbol_id)}#asm"
     if ir_keyed_function(m, key) != None -> return ""
     source: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"

@@ -130,7 +130,7 @@ PreparedRealization: struct {
 // Build through the real provider boundary without consulting a shared
 // cache. This is also the seam the normal realization path uses when a
 // writable shared cache would otherwise receive the result.
-store_realize_uncached: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[IO, FS, Net, Env, Rand, Exec, Time, Time.Wait]> Realized RealizeError! {
+store_realize_uncached: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[IO, FS, Net, Env, Rand, Exec, Time, Time.Wait]> Realized RealizeError! {
     if request == {
         .Package(spec, table) -> {
             realized: provider_realize(verification, spec, table, ctx) ?? return Err(RealizeError.Provider(err))
@@ -156,7 +156,7 @@ store_repro_workspace_ctx: fn(ctx: ProviderCtx, store_dir: String) -> ProviderCt
 
 // Build one or two fresh roots. A non-source provider result is returned once
 // for the ordinary path; the explicit certification API rejects it.
-store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions, require_built: Bool) -[IO, FS, Net, Env, Rand, Exec, Time, Time.Wait]> PreparedRealization RealizeError! {
+store_build_for_cache: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions, require_built: Bool) -[IO, FS, Net, Env, Rand, Exec, Time, Time.Wait]> PreparedRealization RealizeError! {
     attempts: options.retries + 1
     loop attempt in 0..<attempts {
         final_attempt: attempt + 1 >= attempts
@@ -235,7 +235,7 @@ IndependentComparison: struct {
     difference: FirstDifference?,
 }
 
-store_repro_compare_independent: fn(verification: &StoreVerification, left_workspace: RootWorkspace, left: Realized, right_workspace: RootWorkspace, right: Realized) -[FS, Env]> IndependentComparison StoreError! {
+store_repro_compare_independent: fn(verification: ^StoreVerification, left_workspace: RootWorkspace, left: Realized, right_workspace: RootWorkspace, right: Realized) -[FS, Env]> IndependentComparison StoreError! {
     left_entry: store_repro_entry_from_realized(verification, left_workspace.roots, left)
     right_entry: store_repro_entry_from_realized(verification, right_workspace.roots, right)
     left_action: store_entry_action_key(left_entry)
@@ -282,7 +282,7 @@ store_repro_independent_attestation: fn(action_key: String, output_hash: String)
 
 // Check one independent build's output and identity, and build the Hangar
 // entry it would register as.
-store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized) -[FS, Env]> StoreEntry StoreError! {
+store_repro_entry_from_realized: fn(verification: ^StoreVerification, roots: HangarRoots, realized: Realized) -[FS, Env]> StoreEntry StoreError! {
     if realized.source_state != SourceState.Built {
         return Err(store_repro_invalid("independent root result was not built from source"))
     }
@@ -369,19 +369,19 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
 
 // Certify one closure batch against one snapshot of the existing projection.
 // Batch registration must not re-read every existing record per candidate.
-store_certify_registrations_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) -[FS, Env]> StoreError! {
+store_certify_registrations_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, entries: [StoreEntry]) -[FS, Env]> StoreError! {
     existing: store_list_unlocked(roots)
     loop entry in entries {
         store_repro_certify_registration(verification, roots, entry, entries, None, existing)
     }
 }
 
-store_certify_registration_unlocked_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) -[FS, Env]> StoreError! {
+store_certify_registration_unlocked_with_fresh_agreement: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) -[FS, Env]> StoreError! {
     existing: store_list_unlocked(roots)
     store_repro_certify_registration(verification, roots, entry, additional, Val(action_key), existing)
 }
 
-store_repro_certify_registration: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) -[FS, Env]> StoreError! {
+store_repro_certify_registration: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) -[FS, Env]> StoreError! {
     action_key: store_entry_action_key(entry)
     producer: store_repro_decode_producer(entry)
     fresh_agreement: fresh_action_key == Val((action_key)) && (producer.facts.get("cache.reproducibility") ?? "").starts_with(STORE_REPRO_INDEPENDENT_PREFIX)
@@ -420,7 +420,7 @@ store_repro_certify_registration: fn(verification: &StoreVerification, roots: Ha
 // one derivation action. Compare only the shared output names here; the
 // closure graph performs the complete disjoint-output merge after
 // certification, so valid `out` + `dev` records are not rejected early.
-store_repro_compare_registration_entries: fn(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord) -[FS, Env]> FirstDifference? StoreError! {
+store_repro_compare_registration_entries: fn(verification: ^StoreVerification, left_roots: HangarRoots, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord) -[FS, Env]> FirstDifference? StoreError! {
     if left_producer.provider != "nix" || right_producer.provider != "nix" {
         return store_repro_compare_entries(verification, left_roots, left, left_roots, right)
     }
@@ -696,7 +696,7 @@ store_repro_report_file_stem: fn(action_key: String) -> String Never! {
     "sha256-{crypto.sha256(raw).hex()}"
 }
 
-store_repro_verify_existing_output: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env]> StoreError! {
+store_repro_verify_existing_output: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env]> StoreError! {
     actual: store_try_entry_output_hash(verification, roots, entry)
     if actual != entry.envelope.output_hash {
         return Err(store_repro_invalid("existing action output `{entry.id}` is corrupt: expected `{entry.envelope.output_hash}`, got `{actual}`"))

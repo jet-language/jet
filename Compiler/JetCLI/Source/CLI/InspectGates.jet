@@ -93,7 +93,7 @@ jet_cli_gate_invocation_kind: fn(argument: String) -> GateKind? Never! {
 }
 
 // Call before gate_query so policy diagnostics see these same real writers.
-jet_cli_gate_append_invocation: fn(ledger: &GateLedger, args: [String]) Never! {
+jet_cli_gate_append_invocation: fn(ledger: ^GateLedger, args: [String]) Never! {
     loop (index, argument) in args {
         kind: jet_cli_gate_invocation_kind(argument) ?? next
         subject := argument.copy()

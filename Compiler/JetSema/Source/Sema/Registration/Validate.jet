@@ -52,7 +52,7 @@ SemaValidateRule: struct {
 // Rust `process_validate_blocks`: one generated impl per struct with a
 // non-empty block, after the written items. A block with a malformed rule
 // reports it and generates nothing.
-sema_validate_blocks: fn(tables: ASTTables, items: &[Item], diagnostics: &[Diagnostic]) {
+sema_validate_blocks: fn(tables: ASTTables, items: ^[Item], diagnostics: ^[Diagnostic]) {
     generated := [Item]{}
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
@@ -65,7 +65,7 @@ sema_validate_blocks: fn(tables: ASTTables, items: &[Item], diagnostics: &[Diagn
 }
 
 // Rust `synthesize_validate_impl`.
-sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: &[Diagnostic]) -> ImplDef? {
+sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: ^[Diagnostic]) -> ImplDef? {
     fields := [String:Bool]{}
     loop field in definition.fields -> fields[field.name] = true
     rules := [SemaValidateRule]{}
@@ -82,7 +82,7 @@ sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: &[
 // Rust `extract_check_rule`: `check(condition, at: field, message)` with a
 // bare sibling field after `at:`. A malformed rule reports its one problem
 // and gives None.
-sema_validate_rule: fn(statement: Stmt, fields: [String:Bool], diagnostics: &[Diagnostic]) -> SemaValidateRule? {
+sema_validate_rule: fn(statement: Stmt, fields: [String:Bool], diagnostics: ^[Diagnostic]) -> SemaValidateRule? {
     if statement == .Expr(expression) {
         if expression == .Call(call, _) {
             if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 {
@@ -110,7 +110,7 @@ sema_validate_rule: fn(statement: Stmt, fields: [String:Bool], diagnostics: &[Di
     sema_validate_refuse(sema_validate_e0353(sema_user_text_stmt_span(statement)), diagnostics)
 }
 
-sema_validate_refuse: fn(diagnostic: &&Diagnostic, diagnostics: &[Diagnostic]) -> SemaValidateRule? Never! {
+sema_validate_refuse: fn(diagnostic: ^^Diagnostic, diagnostics: ^[Diagnostic]) -> SemaValidateRule? Never! {
     diagnostics.push(diagnostic)
     None
 }
@@ -176,7 +176,7 @@ sema_validate_referenced_fields: fn(tables: ASTTables, rules: [SemaValidateRule]
     found
 }
 
-sema_validate_note_name: fn(tables: ASTTables, fields: [String:Bool], found: &[String], expression: ExprNode) -[Mem.Alloc]> Never! {
+sema_validate_note_name: fn(tables: ASTTables, fields: [String:Bool], found: ^[String], expression: ExprNode) -[Mem.Alloc]> Never! {
     if ast_expr(tables, expression) == .Ident(name, _, _) {
         if fields.get(name) == None || found.contains(name) {
             return
@@ -200,7 +200,7 @@ sema_validate_over_receiver: fn(receiver: Type, environment: SemaScopeEnvironmen
     None
 }
 
-sema_validate_over_rule: fn(subject: Type, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [CallArg]? {
+sema_validate_over_rule: fn(subject: Type, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> [CallArg]? {
     if args.len() != 3 -> return sema_validate_over_refuse(sema_validate_e0353(span), diagnostics)
     if args[0].label != None {
         return sema_validate_over_refuse(sema_validate_e0353(args[0].span), diagnostics)
@@ -231,14 +231,14 @@ sema_validate_over_rule: fn(subject: Type, args: [CallArg], span: Span, environm
     sema_validate_over_refuse(sema_validate_e0353(args[1].span), diagnostics)
 }
 
-sema_validate_over_refuse: fn(diagnostic: &&Diagnostic, diagnostics: &[Diagnostic]) -> [CallArg]? Never! {
+sema_validate_over_refuse: fn(diagnostic: ^^Diagnostic, diagnostics: ^[Diagnostic]) -> [CallArg]? Never! {
     diagnostics.push(diagnostic)
     None
 }
 
 // Whether `name` is a declared field of the validated type: a struct's own
 // field, or a builtin Core record's field row.
-sema_validate_over_has_field: fn(subject: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+sema_validate_over_has_field: fn(subject: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Bool {
     owner_name: if subject == {
         .Named(type_name) -> type_name
         .Apply(type_name, _) -> type_name

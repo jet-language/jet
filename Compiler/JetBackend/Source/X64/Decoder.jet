@@ -1864,7 +1864,7 @@ x64_decode: fn(bytes: [U8], from: Int, address: Int) -> X64Insn? Never! {
 // Read the VEX (C4, C5) or EVEX (62) prefix whose first byte `op` was just
 // read, and the opcode after it: 1 when read, 0 when the bytes can't start
 // one, -1 when they end first.
-x64_decode_vex: fn(d: &X64Decoding, bytes: [U8], op: Int) -> Int Never! {
+x64_decode_vex: fn(d: ^X64Decoding, bytes: [U8], op: Int) -> Int Never! {
     size: if { op == 0xc5 -> 1, op == 0xc4 -> 2, else -> 3 }
     if d.at + size >= bytes.len() -> return -1
     p0: Int{bytes[d.at]}
@@ -1920,7 +1920,7 @@ x64_decode_vex: fn(d: &X64Decoding, bytes: [U8], op: Int) -> Int Never! {
 
 // Read the ModRM byte at the cursor and the SIB and displacement it names;
 // false when the bytes end first.
-x64_decode_modrm: fn(d: &X64Decoding, bytes: [U8]) -> Bool Never! {
+x64_decode_modrm: fn(d: ^X64Decoding, bytes: [U8]) -> Bool Never! {
     if d.at >= bytes.len() -> return false
     byte: Int{bytes[d.at]}
     d.at += 1
@@ -2091,7 +2091,7 @@ x64_decode_memory_operand: fn(d: X64Decoding, code: String) -> Bool Never! {
 }
 
 // The instruction `row` names, its immediates read from the cursor.
-x64_decode_named: fn(d: &X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn? Never! {
+x64_decode_named: fn(d: ^X64Decoding, bytes: [U8], row: X64DecodeRow) -> X64Insn? Never! {
     field := -1
     width := 0
     loop code in row.operands {

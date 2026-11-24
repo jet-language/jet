@@ -104,7 +104,7 @@ RowsConstant: struct {
 }
 
 // The struct and enum declarations of every file under SHAPES_ROOT.
-read_shapes: fn(out: &RowsOut) -[FS]> PreludeRowsError! {
+read_shapes: fn(out: ^RowsOut) -[FS]> PreludeRowsError! {
     entries := files.walk_files(SHAPES_ROOT).list() ?? return Err(rows_fail("cannot list {SHAPES_ROOT}: {err}"))
     paths := [String]{}
     loop entry in entries.move() {
@@ -125,7 +125,7 @@ read_shapes: fn(out: &RowsOut) -[FS]> PreludeRowsError! {
     Ok()
 }
 
-add_item: fn(out: &RowsOut, item: &&Item) Never! {
+add_item: fn(out: ^RowsOut, item: ^^Item) Never! {
     if item == .Struct(_) {
         if item.move() == .Struct(def) -> add_struct(out, def.move())
         return
@@ -133,7 +133,7 @@ add_item: fn(out: &RowsOut, item: &&Item) Never! {
     if item.move() == .Enum(def) -> add_enum(out, def.move())
 }
 
-add_struct: fn(out: &RowsOut, def: &&StructDef) Never! {
+add_struct: fn(out: ^RowsOut, def: ^^StructDef) Never! {
     fields := [RowField]{}
     loop field in def.fields.move() {
         if field.computed != None -> next
@@ -143,7 +143,7 @@ add_struct: fn(out: &RowsOut, def: &&StructDef) Never! {
     add_shape(out, def.name.move(), RowShape{is_enum: false, fields: fields.move(), variants: [RowVariant]{}, twice: false, used: false})
 }
 
-add_enum: fn(out: &RowsOut, def: &&EnumDef) Never! {
+add_enum: fn(out: ^RowsOut, def: ^^EnumDef) Never! {
     variants := [RowVariant]{}
     loop variant in def.variants.move() {
         row := RowVariant{name: variant.name.move(), unit: false, single: None, fields: [RowField]{}}
@@ -163,7 +163,7 @@ add_enum: fn(out: &RowsOut, def: &&EnumDef) Never! {
 
 // The first declaration of a name keeps its place; another one marks it
 // declared twice.
-add_shape: fn(out: &RowsOut, name: &&String, shape: &&RowShape) Never! {
+add_shape: fn(out: ^RowsOut, name: ^^String, shape: ^^RowShape) Never! {
     if out.index.get(name) == .Val(at) {
         out.shapes[at].twice = true
         return
@@ -177,7 +177,7 @@ mismatch: fn(at: String, wanted: String) -> PreludeRowsError Never! {
 }
 
 // The Jet spelling of a field or element type.
-type_text: fn(out: &RowsOut, ty: Type, at: String) -> String PreludeRowsError! {
+type_text: fn(out: ^RowsOut, ty: Type, at: String) -> String PreludeRowsError! {
     if ty == .Int -> return Ok("Int")
     if ty == .Float -> return Ok("Float")
     if ty == .Bool -> return Ok("Bool")
@@ -198,7 +198,7 @@ type_text: fn(out: &RowsOut, ty: Type, at: String) -> String PreludeRowsError! {
 // The literal of `value`, a `ty`, in the constant `prefix`; `out.height`
 // becomes how deep the constructors written in it nest. The outermost one
 // (`top`) lists its elements or fields one per line.
-literal: fn(out: &RowsOut, ty: Type, value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
+literal: fn(out: ^RowsOut, ty: Type, value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
     out.height = 0
     if ty == .Option(inner) {
         if value == .Null -> return Ok("None")
@@ -244,7 +244,7 @@ joined: fn(parts: [String], top: Bool) -> String Never! {
     parts.join(", ")
 }
 
-named_literal: fn(out: &RowsOut, name: String, value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
+named_literal: fn(out: ^RowsOut, name: String, value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
     if fixed_int(name) {
         if value == .Int(n) -> return Ok("{name}{{{n}}}")
         return Err(mismatch(at, "an integer"))
@@ -294,7 +294,7 @@ named_literal: fn(out: &RowsOut, name: String, value: Dyn, top: Bool, at: String
 // `out.height` the deepest of theirs. A field the encoding left out is None
 // when optional, left out of the literal when it has a default, and refused
 // otherwise.
-fields_literal: fn(out: &RowsOut, name: String, fields: [RowField], value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
+fields_literal: fn(out: ^RowsOut, name: String, fields: [RowField], value: Dyn, top: Bool, at: String, prefix: String) -> String PreludeRowsError! {
     if value == .Object(entries) {
         loop entry in entries {
             known := false
@@ -338,7 +338,7 @@ is_optional: fn(ty: Type) -> Bool Never! {
 // A constructor literal whose fields nest `out.height` deep, or the name of
 // the node constant of the constant `prefix` that holds it once it nests
 // NODE_HEIGHT deep.
-node: fn(out: &RowsOut, text: &&String, top: Bool, prefix: String) -> String Never! {
+node: fn(out: ^RowsOut, text: ^^String, top: Bool, prefix: String) -> String Never! {
     out.height += 1
     if top || out.height < NODE_HEIGHT -> return text
     name: "{prefix}_NODE_{out.nodes.len()}"

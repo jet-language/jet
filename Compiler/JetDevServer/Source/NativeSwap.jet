@@ -539,7 +539,7 @@ NativeSwapPlan: struct {
     }
 
     // Handles stay ordered by identity so receipts and validation read them deterministically.
-    preserve_listener: fn(self, handle: &&NativeSwapListenerHandle) -> NativeSwapPlan {
+    preserve_listener: fn(self, handle: ^^NativeSwapListenerHandle) -> NativeSwapPlan {
         updated := self
         at := updated.preserve_listeners.len()
         loop index in 0..<updated.preserve_listeners.len() {
@@ -552,7 +552,7 @@ NativeSwapPlan: struct {
         updated
     }
 
-    preserve_connection: fn(self, handle: &&NativeSwapConnectionHandle) -> NativeSwapPlan {
+    preserve_connection: fn(self, handle: ^^NativeSwapConnectionHandle) -> NativeSwapPlan {
         updated := self
         at := updated.preserve_connections.len()
         loop index in 0..<updated.preserve_connections.len() {
@@ -740,7 +740,7 @@ NativeSwapState: struct {
         NativeSwapExplanation.compatible(plan.source.canonical())
     }
 
-    pause: fn(&self, plan: NativeSwapPlan) NativeSwapError! {
+    pause: fn(^self, plan: NativeSwapPlan) NativeSwapError! {
         if self.phase != .Ready {
             return Err(self.phase_error("pause requires a ready transaction"))
         }
@@ -751,7 +751,7 @@ NativeSwapState: struct {
         self.phase = .Paused
     }
 
-    apply: fn(&self, plan: NativeSwapPlan) NativeSwapError! {
+    apply: fn(^self, plan: NativeSwapPlan) NativeSwapError! {
         if self.phase != .Paused {
             return Err(self.phase_error("apply requires a paused transaction"))
         }
@@ -799,7 +799,7 @@ NativeSwapState: struct {
         self.phase = .Applied
     }
 
-    commit: fn(&self) -> NativeSwapReceipt NativeSwapError! {
+    commit: fn(^self) -> NativeSwapReceipt NativeSwapError! {
         if self.phase != .Applied {
             return Err(self.phase_error("commit requires an applied transaction"))
         }
@@ -811,7 +811,7 @@ NativeSwapState: struct {
         receipt_from_working(working, .Committed, None)
     }
 
-    rollback: fn(&self) -> NativeSwapReceipt NativeSwapError! {
+    rollback: fn(^self) -> NativeSwapReceipt NativeSwapError! {
         if self.phase != .Paused && self.phase != .Applied {
             return Err(self.phase_error("rollback requires a paused or applied transaction"))
         }

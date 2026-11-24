@@ -114,7 +114,7 @@ ir_timing_x64_row: fn(m: IRModule, f: IRFunction, at: Int) -> String Never! {
 // instruction with a fixed operand that is no load, store or copy), a
 // division, string operation or template with a fixed operand, and a call
 // through a fixed register.
-ir_timing_x64_check: fn(m: IRModule, f: IRFunction, log: [X64EmitRow], errors: &[String]) Never! {
+ir_timing_x64_check: fn(m: IRModule, f: IRFunction, log: [X64EmitRow], errors: ^[String]) Never! {
     fixed: ir_timing_fixed(f)
     reads := [Int]{}
     loop at in 0..<f.op.len() {
@@ -185,7 +185,7 @@ ir_timing_finding: fn(f: IRFunction, at: Int, message: String) -> String Never! 
 }
 
 // mix(key, data) = (key ^ data) + data, wrapping, with `key` fixed.
-ir_timing_test_function: fn(m: &IRModule, op: IROp, overflow: Int) -> IRFunction Never! {
+ir_timing_test_function: fn(m: ^IRModule, op: IROp, overflow: Int) -> IRFunction Never! {
     word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
     f := ir_function_new("mix", "test:timing.jet.mix", "", "timing.jet", 1)
     key: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "key"), 1)

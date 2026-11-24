@@ -57,12 +57,12 @@ ParserTailReach: enum {
 // last-line table hands its arms the value and a last-line `#Unsafe` region
 // its body, at the end of each of those. `raw` is the block's source, read
 // only for `SpelledTables`.
-parser_value_tails: fn(statements: [Stmt], reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+parser_value_tails: fn(statements: [Stmt], reach: ParserTailReach, raw: [U8], tails: ^[ParserValueTail]) -[]> {
     parser_value_tails_at(statements, 0, reach, raw, tails)
 }
 
 // `parser_value_tails` for a block `arms` tables deep.
-parser_value_tails_at: fn(statements: [Stmt], arms: Int, reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+parser_value_tails_at: fn(statements: [Stmt], arms: Int, reach: ParserTailReach, raw: [U8], tails: ^[ParserValueTail]) -[]> {
     count: statements.len()
     if count == 0 {
         return
@@ -125,7 +125,7 @@ parser_if_chain_closed: fn(value: Expr) -[]> Bool Never! {
 
 // `parser_value_tails_at` for each branch of the closed `if` chain `value`,
 // whose branches are arms of a table `arms` deep.
-parser_if_chain_tails: fn(value: Expr, arms: Int, reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+parser_if_chain_tails: fn(value: Expr, arms: Int, reach: ParserTailReach, raw: [U8], tails: ^[ParserValueTail]) -[]> {
     if value == .If(_, then_body, then_value, else_body, else_value, _, _) {
         parser_if_branch_tails(then_body, then_value, arms, reach, raw, tails)
         parser_if_branch_tails(else_body, else_value, arms, reach, raw, tails)
@@ -134,7 +134,7 @@ parser_if_chain_tails: fn(value: Expr, arms: Int, reach: ParserTailReach, raw: [
 
 // One branch of a closed `if` chain: a branch of statements ends one arm;
 // an `else if` continues the chain.
-parser_if_branch_tails: fn(body: [Stmt], value: Expr, arms: Int, reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+parser_if_branch_tails: fn(body: [Stmt], value: Expr, arms: Int, reach: ParserTailReach, raw: [U8], tails: ^[ParserValueTail]) -[]> {
     span: expr_source_span(value)
     if {
         span.start == span.end -> parser_value_tails_at(body, arms + 1, reach, raw, tails)

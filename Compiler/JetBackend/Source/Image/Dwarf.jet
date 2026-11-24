@@ -112,9 +112,9 @@ DwarfSectionRows: struct {
 // ---------------------------------------------------------------------------
 // Encoding.
 
-dwarf_u8: fn(bytes: &[U8], value: Int) Never! { bytes.push(U8{value & 255}) }
+dwarf_u8: fn(bytes: ^[U8], value: Int) Never! { bytes.push(U8{value & 255}) }
 
-dwarf_uleb: fn(bytes: &[U8], value: Int) Never! {
+dwarf_uleb: fn(bytes: ^[U8], value: Int) Never! {
     rest := value
     loop {
         low: rest & 0x7f
@@ -127,7 +127,7 @@ dwarf_uleb: fn(bytes: &[U8], value: Int) Never! {
     }
 }
 
-dwarf_sleb: fn(bytes: &[U8], value: Int) Never! {
+dwarf_sleb: fn(bytes: ^[U8], value: Int) Never! {
     rest := value
     loop {
         low: rest & 0x7f
@@ -140,12 +140,12 @@ dwarf_sleb: fn(bytes: &[U8], value: Int) Never! {
     }
 }
 
-dwarf_string: fn(bytes: &[U8], text: String) Never! {
+dwarf_string: fn(bytes: ^[U8], text: String) Never! {
     bytes.extend(text.bytes())
     bytes.push(U8{0})
 }
 
-dwarf_patch_u32: fn(bytes: &[U8], at: Int, value: Int) Never! {
+dwarf_patch_u32: fn(bytes: ^[U8], at: Int, value: Int) Never! {
     bytes[at] = U8{value & 255}
     bytes[at + 1] = U8{(value >> 8) & 255}
     bytes[at + 2] = U8{(value >> 16) & 255}
@@ -153,7 +153,7 @@ dwarf_patch_u32: fn(bytes: &[U8], at: Int, value: Int) Never! {
 }
 
 // The 4-byte length field at `at`: the bytes after it, to the end.
-dwarf_patch_length: fn(bytes: &[U8], at: Int) Never! {
+dwarf_patch_length: fn(bytes: ^[U8], at: Int) Never! {
     length: bytes.len() - at - 4
     dwarf_patch_u32(bytes, at, length)
 }
@@ -173,7 +173,7 @@ dwarf_uleb_size: fn(value: Int) -> Int Never! {
 // with their continuation bits set), so the bytes a later index takes are
 // known before it is: a `.debug_info` part writes its list indexes before
 // it knows how many lists the parts before it have (dwarf_info).
-dwarf_patch_uleb: fn(bytes: &[U8], at: Int, value: Int, width: Int) Never! {
+dwarf_patch_uleb: fn(bytes: ^[U8], at: Int, value: Int, width: Int) Never! {
     loop k in 0..<width {
         low: (value >> (7 * k)) & 0x7f
         bytes[at + k] = U8{if k + 1 < width -> low | 0x80 else -> low}
@@ -183,7 +183,7 @@ dwarf_patch_uleb: fn(bytes: &[U8], at: Int, value: Int, width: Int) Never! {
 // ---------------------------------------------------------------------------
 // Call frame instructions (data alignment -8, code alignment 1).
 
-dwarf_cfa_advance: fn(cfi: &[U8], from: Int, to: Int) Never! {
+dwarf_cfa_advance: fn(cfi: ^[U8], from: Int, to: Int) Never! {
     delta: to - from
     if delta <= 0 {
         return
@@ -205,24 +205,24 @@ dwarf_cfa_advance: fn(cfi: &[U8], from: Int, to: Int) Never! {
     }
 }
 
-dwarf_cfa_def_cfa: fn(cfi: &[U8], reg: Int, offset: Int) Never! {
+dwarf_cfa_def_cfa: fn(cfi: ^[U8], reg: Int, offset: Int) Never! {
     dwarf_u8(cfi, 0x0c)
     dwarf_uleb(cfi, reg)
     dwarf_uleb(cfi, offset)
 }
 
-dwarf_cfa_def_cfa_register: fn(cfi: &[U8], reg: Int) Never! {
+dwarf_cfa_def_cfa_register: fn(cfi: ^[U8], reg: Int) Never! {
     dwarf_u8(cfi, 0x0d)
     dwarf_uleb(cfi, reg)
 }
 
-dwarf_cfa_def_cfa_offset: fn(cfi: &[U8], offset: Int) Never! {
+dwarf_cfa_def_cfa_offset: fn(cfi: ^[U8], offset: Int) Never! {
     dwarf_u8(cfi, 0x0e)
     dwarf_uleb(cfi, offset)
 }
 
 // `reg` is saved at CFA - 8 * `factored`.
-dwarf_cfa_offset: fn(cfi: &[U8], reg: Int, factored: Int) Never! {
+dwarf_cfa_offset: fn(cfi: ^[U8], reg: Int, factored: Int) Never! {
     if {
         reg < 64 -> dwarf_u8(cfi, (0x80) | reg)
         else -> {
@@ -234,18 +234,18 @@ dwarf_cfa_offset: fn(cfi: &[U8], reg: Int, factored: Int) Never! {
 }
 
 // `reg` holds its caller's value (DW_CFA_same_value).
-dwarf_cfa_same_value: fn(cfi: &[U8], reg: Int) Never! {
+dwarf_cfa_same_value: fn(cfi: ^[U8], reg: Int) Never! {
     dwarf_u8(cfi, 0x08)
     dwarf_uleb(cfi, reg)
 }
 
-dwarf_cfa_remember_state: fn(cfi: &[U8]) Never! { dwarf_u8(cfi, 0x0a) }
+dwarf_cfa_remember_state: fn(cfi: ^[U8]) Never! { dwarf_u8(cfi, 0x0a) }
 
-dwarf_cfa_restore_state: fn(cfi: &[U8]) Never! { dwarf_u8(cfi, 0x0b) }
+dwarf_cfa_restore_state: fn(cfi: ^[U8]) Never! { dwarf_u8(cfi, 0x0b) }
 
 // Pad a CIE or FDE with DW_CFA_nop so the record (length field included)
 // is a whole number of words.
-dwarf_eh_finish: fn(eh: &[U8], start: Int) Never! {
+dwarf_eh_finish: fn(eh: ^[U8], start: Int) Never! {
     loop _ in 0..<((8 - (eh.len() - start) % 8) % 8) -> eh.push(U8{0})
     dwarf_patch_length(eh, start)
 }
@@ -526,7 +526,7 @@ DW_FORM_RNGLISTX: 0x23
 
 // One abbreviation: code, DIE tag, whether it has children, then
 // (attribute, form) pairs.
-dwarf_abbrev: fn(bytes: &[U8], code: Int, die: Int, children: Bool, attributes: [Int]) Never! {
+dwarf_abbrev: fn(bytes: ^[U8], code: Int, die: Int, children: Bool, attributes: [Int]) Never! {
     dwarf_uleb(bytes, code)
     dwarf_uleb(bytes, die)
     dwarf_u8(bytes, if children -> 1 else -> 0)
@@ -660,13 +660,13 @@ dwarf_encoding: fn(encoding: X64DebugEncoding) -> Int Never! {
 }
 
 // A ref4 to type `row`, patched once every type has its offset.
-dwarf_type_ref: fn(info: &[U8], refs: &[Int], rows: &[Int], row: Int) Never! {
+dwarf_type_ref: fn(info: ^[U8], refs: ^[Int], rows: ^[Int], row: Int) Never! {
     refs.push(info.len())
     rows.push(row)
     elf64_u32(info, 0)
 }
 
-dwarf_members: fn(info: &[U8], refs: &[Int], rows: &[Int], members: [X64DebugMember]) Never! {
+dwarf_members: fn(info: ^[U8], refs: ^[Int], rows: ^[Int], members: [X64DebugMember]) Never! {
     loop member in members {
         if member.ty < 0 -> next
         dwarf_uleb(info, DWARF_ABBREV_MEMBER)
@@ -678,7 +678,7 @@ dwarf_members: fn(info: &[U8], refs: &[Int], rows: &[Int], members: [X64DebugMem
 }
 
 // Every type DIE, in row order; returns each row's DIE offset.
-dwarf_types: fn(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
+dwarf_types: fn(info: ^[U8], types: [X64DebugType]) -> [Int] Never! {
     offsets := [Int]{}
     refs := [Int]{}
     rows := [Int]{}
@@ -792,7 +792,7 @@ dwarf_types: fn(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
 // memory at fbreg(offset); direct, the computed address (DW_OP_stack_value).
 // A Constant is its value (DW_OP_consts), an EntryValue the value its
 // register had at the function's entry (DW_OP_entry_value).
-dwarf_location_into: fn(expr: &[U8], location: X64DebugLocation, indirect: Bool) Never! {
+dwarf_location_into: fn(expr: ^[U8], location: X64DebugLocation, indirect: Bool) Never! {
     if location == {
         .Register(reg) -> {
             // DW_OP_reg0 + n / DW_OP_breg0 + n name registers below 32;
@@ -940,12 +940,12 @@ dwarf_range_order: fn(ranges: [X64VariableRange]) -> [Int] Never! {
 // ---------------------------------------------------------------------------
 // Compile unit, line program and location lists.
 
-dwarf_address: fn(bytes: &[U8], relas: &[X64ObjectRela], symbol: Int, addend: Int) Never! {
+dwarf_address: fn(bytes: ^[U8], relas: ^[X64ObjectRela], symbol: Int, addend: Int) Never! {
     relas.push(X64ObjectRela{at: bytes.len(), symbol: symbol, kind: ELF64_R_X86_64_64, addend: addend})
     elf64_u64(bytes, 0)
 }
 
-dwarf_section_offset: fn(bytes: &[U8], relas: &[X64ObjectRela], symbol: Int, addend: Int) Never! {
+dwarf_section_offset: fn(bytes: ^[U8], relas: ^[X64ObjectRela], symbol: Int, addend: Int) Never! {
     relas.push(X64ObjectRela{at: bytes.len(), symbol: symbol, kind: ELF64_R_X86_64_32, addend: addend})
     elf64_u32(bytes, 0)
 }
@@ -971,7 +971,7 @@ dwarf_function_debug: fn(program: X64ObjectModule, function: X64CompiledFunction
 // place and value) shift by the info bytes before its part, and each list
 // index by the lists before it, so the sections are the same for any
 // thread count.
-dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
+dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
     info := [U8]{}
     relas := [X64ObjectRela]{}
     elf64_u32(info, 0)
@@ -1149,7 +1149,7 @@ DwarfInfoPatched: struct {
     range_at: Int,
 }
 
-dwarf_info_patch_one: fn(job: &&DwarfInfoPatch) -> DwarfInfoPatched Never! {
+dwarf_info_patch_one: fn(job: ^^DwarfInfoPatch) -> DwarfInfoPatched Never! {
     item := job.move()
     rows := item.rows.move()
     info_at: item.info_at
@@ -1162,13 +1162,13 @@ dwarf_info_patch_one: fn(job: &&DwarfInfoPatch) -> DwarfInfoPatched Never! {
     DwarfInfoPatched{info: rows.info.move(), lists: rows.lists.bytes.move(), ranges: rows.ranges.bytes.move(), relas: rows.relas.move(), info_at: info_at, list_at: item.list_at, range_at: item.range_at}
 }
 
-dwarf_info_patch_parts: fn(jobs: &[DwarfInfoPatch]) -> [DwarfInfoPatched] Never! {
+dwarf_info_patch_parts: fn(jobs: ^[DwarfInfoPatch]) -> [DwarfInfoPatched] Never! {
     if jobs.len() == 0 -> return [DwarfInfoPatched]{}
     head := jobs.pop() ?? return [DwarfInfoPatched]{}
     if jobs.len() == 0 -> return [DwarfInfoPatched]{dwarf_info_patch_one(head)}
     out := [DwarfInfoPatched]{}
     task.group dwarf_info_patch_group {
-        done_head: task &&head { dwarf_info_patch_one(head) }
+        done_head: task ^^head { dwarf_info_patch_one(head) }
         rest: dwarf_info_patch_parts(jobs)
         out.push(done_head.join() ?? panic(compiler_threads_failure_text(err)))
         loop item in rest.move() -> out.push(item)
@@ -1198,7 +1198,7 @@ dwarf_lists_header: fn(count: Int) -> [U8] Never! {
 
 // Move a part's list indexes in its `info` (DwarfLists `refs` pairs) past
 // the `before` lists of the parts before it.
-dwarf_lists_index: fn(info: &[U8], refs: [Int], before: Int, width: Int) Never! {
+dwarf_lists_index: fn(info: ^[U8], refs: [Int], before: Int, width: Int) Never! {
     loop pair in 0..<(refs.len() >> 1) {
         dwarf_patch_uleb(info, refs[2 * pair], before + refs[2 * pair + 1], width)
     }
@@ -1317,7 +1317,7 @@ dwarf_info_part_take: fn(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
 // with code. Each reference to an abstract subprogram is a pair in `refs`:
 // the place of its ref4 in `info` and the DIE's offset, both from `info`'s
 // start. Only the call sites' return addresses take relocations.
-dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], lists: &DwarfLists, ranges: &DwarfLists, program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, slot: Int, offset: Int, size: Int, symbol: Int, type_offsets: [Int], widths: DwarfListWidths) Never! {
+dwarf_info_function: fn(info: ^[U8], relas: ^[X64ObjectRela], refs: ^[Int], lists: ^DwarfLists, ranges: ^DwarfLists, program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, slot: Int, offset: Int, size: Int, symbol: Int, type_offsets: [Int], widths: DwarfListWidths) Never! {
     facts: dwarf_function_debug(program, function)
     if facts.file < 0 {
         sited: debug.allocs.len() > 0
@@ -1435,7 +1435,7 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], list
 
 // A call site DIE per allocating call `sites` (X64AllocSite) of the
 // function at `offset` from `symbol`.
-dwarf_info_alloc_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64AllocSite], offset: Int, symbol: Int, type_offsets: [Int]) Never! {
+dwarf_info_alloc_sites: fn(info: ^[U8], relas: ^[X64ObjectRela], sites: [X64AllocSite], offset: Int, symbol: Int, type_offsets: [Int]) Never! {
     loop site in sites {
         dwarf_uleb(info, DWARF_ABBREV_CALL_SITE)
         dwarf_address(info, relas, symbol, offset + site.at)
@@ -1448,7 +1448,7 @@ dwarf_info_alloc_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64Allo
 // keeps: the argument's register and, as an expression its value
 // (DW_AT_call_value), where the caller keeps it (dwarf_location of an
 // indirect place: the address it computes is the value).
-dwarf_info_call_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64CallSite], offset: Int, symbol: Int) Never! {
+dwarf_info_call_sites: fn(info: ^[U8], relas: ^[X64ObjectRela], sites: [X64CallSite], offset: Int, symbol: Int) Never! {
     loop i in 0..<sites.len() {
         dwarf_uleb(info, DWARF_ABBREV_CALL_ARGUMENTS)
         dwarf_address(info, relas, symbol, offset + sites[i].at)
@@ -1478,7 +1478,7 @@ dwarf_info_call_sites: fn(info: &[U8], relas: &[X64ObjectRela], sites: [X64CallS
 
 // The abstract subprograms (DW_INL_inlined) of the functions inlined at
 // `sites`, one per function; per site, its function's DIE offset in `info`.
-dwarf_inline_origins: fn(info: &[U8], sites: [X64InlineSite]) -> [Int] Never! {
+dwarf_inline_origins: fn(info: ^[U8], sites: [X64InlineSite]) -> [Int] Never! {
     origins := [Int]{}
     if sites.len() == 0 -> return origins
     firsts := [Int:Int]{}
@@ -1505,7 +1505,7 @@ dwarf_inline_origins: fn(info: &[U8], sites: [X64InlineSite]) -> [Int] Never! {
 
 // A variable's DIE, declared in `file`; `place` is its location list's
 // number in the part's `lists`, -1 for none.
-dwarf_info_variable: fn(info: &[U8], lists: &DwarfLists, row: X64DebugVariable, file: Int, place: Int, type_offsets: [Int], width: Int) Never! {
+dwarf_info_variable: fn(info: ^[U8], lists: ^DwarfLists, row: X64DebugVariable, file: Int, place: Int, type_offsets: [Int], width: Int) Never! {
     located: place >= 0
     abbrev: if {
         row.parameter && located -> DWARF_ABBREV_PARAMETER
@@ -1524,7 +1524,7 @@ dwarf_info_variable: fn(info: &[U8], lists: &DwarfLists, row: X64DebugVariable, 
 // A list's index (DW_FORM_loclistx, DW_FORM_rnglistx) in `info`: list
 // `number` of the part's `lists`, `width` bytes, which dwarf_info moves
 // past the lists of the parts before.
-dwarf_list_ref: fn(info: &[U8], lists: &DwarfLists, number: Int, width: Int) Never! {
+dwarf_list_ref: fn(info: ^[U8], lists: ^DwarfLists, number: Int, width: Int) Never! {
     lists.refs.push(info.len())
     lists.refs.push(number)
     at: info.len()

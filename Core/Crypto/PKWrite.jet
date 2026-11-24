@@ -53,14 +53,14 @@ rsa_failure: fn(e: rsa.RSAError) -> pk.PKError Never! {
 }
 
 // pk_write_ec_pubkey: the uncompressed point.
-write_ec_pubkey: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+write_ec_pubkey: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     point: ecp.point_write_binary(key.ec.grp, key.ec.q, .Uncompressed, ecp.ECP_MAX_PT_LEN) ?? return Err(.Ecp(err))
     len: asn1.write_raw_buffer(buf, p, start, point) ?? return Err(.Asn1(err))
     Ok(len)
 }
 
 // pk_write_ec_param: the namedCurve OID.
-write_ec_param: fn(buf: &[U8], p: &Int, start: Int, id: ecp.GroupID) -> Int pk.PKError! {
+write_ec_param: fn(buf: ^[U8], p: ^Int, start: Int, id: ecp.GroupID) -> Int pk.PKError! {
     oid: oids.oid_by_ec_grp(id) ?? return Err(.Oid(err))
     len: asn1.write_oid(buf, p, start, oid) ?? return Err(.Asn1(err))
     Ok(len)
@@ -68,7 +68,7 @@ write_ec_param: fn(buf: &[U8], p: &Int, start: Int, id: ecp.GroupID) -> Int pk.P
 
 // pk_write_ec_private: the private value as an OCTET STRING of the order's
 // length.
-write_ec_private: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+write_ec_private: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     secret := ecp.write_key_ext(key.ec, ecp.ECP_MAX_BYTES) ?? return Err(.Ecp(err))
     if asn1.write_octet_string(buf, p, start, secret) == {
         .Ok(len) -> {
@@ -84,7 +84,7 @@ write_ec_private: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int 
 
 /// The bare public key: an RSAPublicKey, or the uncompressed point of an EC
 /// key; FeatureUnavailable for any other type (mbedtls_pk_write_pubkey).
-pk_write_pubkey: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+pk_write_pubkey: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     kind: key.kind ?? return Err(.FeatureUnavailable)
     if kind == .RSA {
         len: rsa.rsa_write_pubkey(key.rsa, buf, p, start) ?? return Err(rsa_failure(err))
@@ -95,7 +95,7 @@ pk_write_pubkey: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int p
 }
 
 /// A SubjectPublicKeyInfo (mbedtls_pk_write_pubkey_der).
-pk_write_pubkey_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+pk_write_pubkey_der: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     if p <= start -> return Err(.Asn1(.BufTooSmall))
     len := pk_write_pubkey(key, buf, p, start)
     if p - start < 1 -> return Err(.Asn1(.BufTooSmall))
@@ -127,7 +127,7 @@ pk_write_pubkey_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> I
 
 // pk_write_ec_rfc8410_der: a OneAsymmetricKey (RFC 8410) of version 0
 // holding a CurvePrivateKey.
-write_ec_rfc8410_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+write_ec_rfc8410_der: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     len := write_ec_private(key, buf, p, start)
     len += asn1.write_len(buf, p, start, len) ?? return Err(.Asn1(err))
     len += asn1.write_tag(buf, p, start, asn1.ASN1_OCTET_STRING) ?? return Err(.Asn1(err))
@@ -141,7 +141,7 @@ write_ec_rfc8410_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> 
 
 // pk_write_ec_der: an ECPrivateKey (RFC 5915) of version 1 with the
 // curve's OID and the public key.
-write_ec_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+write_ec_der: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     pub_len := write_ec_pubkey(key, buf, p, start)
     if p - start < 1 -> return Err(.Asn1(.BufTooSmall))
     p -= 1
@@ -165,7 +165,7 @@ write_ec_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.P
 
 /// The private key: a PKCS#1 RSAPrivateKey, a SEC1 ECPrivateKey, or an
 /// RFC 8410 OneAsymmetricKey for X25519 and X448 (mbedtls_pk_write_key_der).
-pk_write_key_der: fn(key: pk.PKContext, buf: &[U8], p: &Int, start: Int) -> Int pk.PKError! {
+pk_write_key_der: fn(key: pk.PKContext, buf: ^[U8], p: ^Int, start: Int) -> Int pk.PKError! {
     if p <= start -> return Err(.Asn1(.BufTooSmall))
     kind: key.kind ?? return Err(.FeatureUnavailable)
     if kind == .RSA {

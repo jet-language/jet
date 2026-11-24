@@ -106,7 +106,7 @@ ssl_mac_of: fn(key: hashes.HMACKey?, add_data: [U8], buf: [U8], off: Int, len: I
 
 /// Start the timer for `millisecs`; 0 cancels it (mbedtls_ssl_set_timer,
 /// with mbedtls_timing_set_delay's intermediate delay of a quarter).
-ssl_set_timer: fn(ssl: &ssldefs.SSLContext, millisecs: Int) Never! {
+ssl_set_timer: fn(ssl: ^ssldefs.SSLContext, millisecs: Int) Never! {
     if !ssl.timer.enabled {
         return
     }
@@ -141,7 +141,7 @@ ssl_compute_padding_length: fn(len: Int, granularity: Int) -> Int Never! {
 /// Append the content type and `pad` zeros to the `len` bytes at buf[off]
 /// (ssl_build_inner_plaintext): the new length, or -1 when the `remaining`
 /// bytes after them cannot hold the expansion.
-ssl_build_inner_plaintext: fn(buf: &[U8], off: Int, len: Int, remaining: Int, rec_type: Int, pad: Int) -> Int Never! {
+ssl_build_inner_plaintext: fn(buf: ^[U8], off: Int, len: Int, remaining: Int, rec_type: Int, pad: Int) -> Int Never! {
     if remaining == 0 -> return -1
     buf[off + len] = ssldefs.ssl_byte(rec_type)
     if remaining - 1 < pad -> return -1
@@ -152,7 +152,7 @@ ssl_build_inner_plaintext: fn(buf: &[U8], off: Int, len: Int, remaining: Int, re
 /// Strip the zero padding of the record's (D)TLSInnerPlaintext and take
 /// its content type (ssl_parse_inner_plaintext); false when it is all
 /// zeros.
-ssl_parse_inner_plaintext: fn(rec: &ssldefs.SSLRecord, buf: [U8]) -> Bool Never! {
+ssl_parse_inner_plaintext: fn(rec: ^ssldefs.SSLRecord, buf: [U8]) -> Bool Never! {
     data: rec.buf_start + rec.data_offset
     remaining := rec.data_len
     loop {
@@ -207,7 +207,7 @@ ssl_build_record_nonce: fn(fixed_iv: [U8], fixed_iv_len: Int, dynamic_iv: [U8], 
 /// wrap it in the inner plaintext for TLS 1.3 and CID records, then MAC and
 /// encrypt it as the transform's mode requires. `rng` draws the explicit
 /// CBC IV.
-ssl_encrypt_buf: fn<R: RNG>(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8], rng: &R) ssldefs.SSLError! {
+ssl_encrypt_buf: fn<R: RNG>(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8], rng: ^R) ssldefs.SSLError! {
     if !t.valid -> return Err(.InternalError)
     if rec.buf_len < rec.data_offset || rec.buf_len - rec.data_offset < rec.data_len || rec.cid_len != 0 {
         return Err(.InternalError)
@@ -255,7 +255,7 @@ ssl_encrypt_buf: fn<R: RNG>(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, b
             add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
             plain := ssldefs.ssl_bytes_of(buf, data, rec.data_len)
             sealed := [U8]{}
-            if &t.cipher_enc == {
+            if ^t.cipher_enc == {
                 .Val(c) -> sealed = layer.cipher_auth_encrypt_ext(c, ssldefs.ssl_bytes_of(iv, 0, t.ivlen), add_data, plain, t.taglen) ?? return Err(.Cipher(err))
                 None -> return Err(.InternalError)
             }
@@ -284,7 +284,7 @@ ssl_encrypt_buf: fn<R: RNG>(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, b
             ssldefs.ssl_copy_into(buf, data - t.ivlen, t.iv_enc, 0, t.ivlen)
             plain := ssldefs.ssl_bytes_of(buf, data, rec.data_len)
             enc := [U8]{}
-            if &t.cipher_enc == {
+            if ^t.cipher_enc == {
                 .Val(c) -> enc = layer.cipher_crypt(c, ssldefs.ssl_bytes_of(t.iv_enc, 0, t.ivlen), plain) ?? return Err(.Cipher(err))
                 None -> return Err(.InternalError)
             }
@@ -314,7 +314,7 @@ ssl_encrypt_buf: fn<R: RNG>(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, b
 /// (mbedtls_ssl_decrypt_buf). A CBC record's padding and MAC are checked
 /// without a branch or memory access that depends on the padding; any
 /// failure there is InvalidMac.
-ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8]) ssldefs.SSLError! {
+ssl_decrypt_buf: fn(t: ^ssldefs.SSLTransform, rec: ^ssldefs.SSLRecord, buf: ^[U8]) ssldefs.SSLError! {
     if rec.buf_len < rec.data_offset || rec.buf_len - rec.data_offset < rec.data_len {
         return Err(.InternalError)
     }
@@ -350,7 +350,7 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
             add_data: ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
             sealed := ssldefs.ssl_bytes_of(buf, data, rec.data_len + t.taglen)
             plain := [U8]{}
-            if &t.cipher_dec == {
+            if ^t.cipher_dec == {
                 .Val(c) -> {
                     if layer.cipher_auth_decrypt_ext(c, ssldefs.ssl_bytes_of(iv, 0, t.ivlen), add_data, sealed, t.taglen) == {
                         .Ok(p) -> { plain = p }
@@ -389,7 +389,7 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
             rec.data_len -= t.ivlen
             enc := ssldefs.ssl_bytes_of(buf, data, rec.data_len)
             dec := [U8]{}
-            if &t.cipher_dec == {
+            if ^t.cipher_dec == {
                 .Val(c) -> dec = layer.cipher_crypt(c, ssldefs.ssl_bytes_of(t.iv_dec, 0, t.ivlen), enc) ?? return Err(.Cipher(err))
                 None -> return Err(.InternalError)
             }
@@ -483,10 +483,10 @@ ssl_is_handshake_over: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 }
 
 /// mbedtls_ssl_handshake_set_state.
-ssl_handshake_set_state: fn(ssl: &ssldefs.SSLContext, state: Int) Never! { ssl.state = state }
+ssl_handshake_set_state: fn(ssl: ^ssldefs.SSLContext, state: Int) Never! { ssl.state = state }
 
 /// mbedtls_ssl_handshake_increment_state.
-ssl_handshake_increment_state: fn(ssl: &ssldefs.SSLContext) Never! { ssl.state += 1 }
+ssl_handshake_increment_state: fn(ssl: ^ssldefs.SSLContext) Never! { ssl.state += 1 }
 
 /// The length of a record header's epoch (mbedtls_ssl_ep_len).
 ssl_ep_len: fn(ssl: ssldefs.SSLContext) -> Int Never! { if ssl_is_dtls(ssl) -> 2 else -> 0 }
@@ -508,7 +508,7 @@ ssl_get_badmac_seen: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 }
 
 /// mbedtls_ssl_set_badmac_seen.
-ssl_set_badmac_seen: fn(ssl: &ssldefs.SSLContext, badmac_seen: Int) ssldefs.SSLError! {
+ssl_set_badmac_seen: fn(ssl: ^ssldefs.SSLContext, badmac_seen: Int) ssldefs.SSLError! {
     if !ssl_is_dtls(ssl) -> return Err(.CorruptionDetected)
     ssl.badmac_seen_or_in_hsfraglen = badmac_seen
 }
@@ -521,7 +521,7 @@ ssl_get_in_hsfraglen: fn(ssl: ssldefs.SSLContext) -> Int Never! {
 }
 
 /// mbedtls_ssl_set_in_hsfraglen.
-ssl_set_in_hsfraglen: fn(ssl: &ssldefs.SSLContext, in_hsfraglen: Int) ssldefs.SSLError! {
+ssl_set_in_hsfraglen: fn(ssl: ^ssldefs.SSLContext, in_hsfraglen: Int) ssldefs.SSLError! {
     if ssl_is_dtls(ssl) -> return Err(.CorruptionDetected)
     ssl.badmac_seen_or_in_hsfraglen = in_hsfraglen
 }
@@ -529,7 +529,7 @@ ssl_set_in_hsfraglen: fn(ssl: &ssldefs.SSLContext, in_hsfraglen: Int) ssldefs.SS
 /// Write the record version of `tls_version` at buf[off] in the
 /// transport's form; DTLS versions are the one's complement of their
 /// offset from 1.0 (mbedtls_ssl_write_version).
-ssl_write_version: fn(buf: &[U8], off: Int, transport: Int, tls_version: Int) Never! {
+ssl_write_version: fn(buf: ^[U8], off: Int, transport: Int, tls_version: Int) Never! {
     formatted := tls_version
     if transport == ssldefs.SSL_TRANSPORT_DATAGRAM {
         sub: if tls_version == 0x0302 -> 0x0202 else -> 0x0201
@@ -555,7 +555,7 @@ ssl_read_version: fn(buf: [U8], off: Int, transport: Int) -> Int Never! {
 /// f_recv into in_buf[off..<off+len]: the count of bytes read, 0 at end of
 /// file, or WantRead when nothing is queued. A DTLS read takes one whole
 /// datagram, truncated to `len` as a datagram socket's recv truncates it.
-ssl_bio_recv: fn(ssl: &ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SSLError! {
+ssl_bio_recv: fn(ssl: ^ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SSLError! {
     if ssl_is_dtls(ssl) {
         if ssl.bio.rx_dgrams.len() == 0 {
             if ssl.bio.rx_eof -> return 0
@@ -586,7 +586,7 @@ ssl_bio_recv: fn(ssl: &ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SS
 /// f_send of out_buf[off..<off+len]: the count of bytes taken, or
 /// WantWrite when `tx_room` has no room left. A DTLS write queues one whole
 /// datagram or nothing.
-ssl_bio_send: fn(ssl: &ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SSLError! {
+ssl_bio_send: fn(ssl: ^ssldefs.SSLContext, off: Int, len: Int) -> Int ssldefs.SSLError! {
     n := len
     if ssl.bio.tx_room >= 0 {
         if ssl.bio.tx_room == 0 -> return Err(.WantWrite)
@@ -638,7 +638,7 @@ ssl_get_remaining_payload_in_datagram: fn(ssl: ssldefs.SSLContext) -> Int ssldef
 /// Double the retransmit timeout within hs_timeout_max; false when it is
 /// already there (ssl_double_retransmit_timeout's -1). After the first
 /// retransmission the MTU falls back to 508 bytes (RFC 6347 4.1.1.1).
-ssl_double_retransmit_timeout: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
+ssl_double_retransmit_timeout: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! {
     if ssl.handshake.retransmit_timeout >= ssl.conf.hs_timeout_max -> return false
     if ssl.handshake.retransmit_timeout != ssl.conf.hs_timeout_min -> ssl.handshake.mtu = 508
     new_timeout := 2 * ssl.handshake.retransmit_timeout
@@ -650,7 +650,7 @@ ssl_double_retransmit_timeout: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
     true
 }
 
-ssl_reset_retransmit_timeout: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_reset_retransmit_timeout: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssl.handshake.retransmit_timeout = ssl.conf.hs_timeout_min
 }
 
@@ -661,7 +661,7 @@ ssl_reset_retransmit_timeout: fn(ssl: &ssldefs.SSLContext) Never! {
 /// then has exactly nb_want; DTLS reads a whole datagram, which may hold
 /// more, and the caller sets next_record_offset when done with a record.
 /// An expired DTLS timer during a handshake retransmits the flight.
-ssl_fetch_input: fn<R: RNG>(ssl: &ssldefs.SSLContext, nb_want: Int, rng: &R) ssldefs.SSLError! {
+ssl_fetch_input: fn<R: RNG>(ssl: ^ssldefs.SSLContext, nb_want: Int, rng: ^R) ssldefs.SSLError! {
     if nb_want > ssldefs.SSL_IN_BUFFER_LEN - ssl.in_hdr -> return Err(.BadInputData)
     if ssl_is_dtls(ssl) {
         // Move to the next record in the datagram already read.
@@ -709,7 +709,7 @@ ssl_fetch_input: fn<R: RNG>(ssl: &ssldefs.SSLContext, nb_want: Int, rng: &R) ssl
 
 /// Send the out_left bytes written before out_hdr
 /// (mbedtls_ssl_flush_output).
-ssl_flush_output: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_flush_output: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if ssl.out_left == 0 {
         return
     }
@@ -730,16 +730,16 @@ ssl_flush_output: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 
 /// Append the current handshake message to the outgoing flight
 /// (ssl_flight_append).
-ssl_flight_append: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_flight_append: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssl.handshake.flight.push(ssldefs.SSLFlightItem{p: ssldefs.ssl_bytes_of(ssl.out_buf, ssl.out_msg, ssl.out_msglen), mtype: ssl.out_msgtype})
 }
 
 /// mbedtls_ssl_flight_free.
-ssl_flight_free: fn(hs: &ssldefs.SSLHandshake) Never! { hs.flight = [ssldefs.SSLFlightItem]{} }
+ssl_flight_free: fn(hs: ^ssldefs.SSLHandshake) Never! { hs.flight = [ssldefs.SSLFlightItem]{} }
 
 /// Swap transform_out and the out counter with the alternative ones
 /// (ssl_swap_epochs).
-ssl_swap_epochs: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_swap_epochs: fn(ssl: ^ssldefs.SSLContext) Never! {
     if ssl.transform_out == ssl.handshake.alt_transform_out {
         return
     }
@@ -753,7 +753,7 @@ ssl_swap_epochs: fn(ssl: &ssldefs.SSLContext) Never! {
 }
 
 /// mbedtls_ssl_resend.
-ssl_resend: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_resend: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_flight_transmit(ssl, rng)
 }
 
@@ -761,7 +761,7 @@ ssl_resend: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
 /// messages to the datagram room (mbedtls_ssl_flight_transmit). The
 /// message and offset reached are kept, so a WantWrite resumes there; it
 /// is called until the state leaves SENDING.
-ssl_flight_transmit: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_flight_transmit: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.handshake.retransmit_state != ssldefs.SSL_RETRANS_SENDING {
         ssl.handshake.cur_msg = if ssl.handshake.flight.len() == 0 -> -1 else -> 0
         ssl.handshake.cur_msg_p = 12
@@ -836,7 +836,7 @@ ssl_in_msg_is_finished: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 
 /// The last message of an incoming flight is in
 /// (mbedtls_ssl_recv_flight_completed).
-ssl_recv_flight_completed: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_recv_flight_completed: fn(ssl: ^ssldefs.SSLContext) Never! {
     // That flight need not be resent any more.
     ssl_flight_free(ssl.handshake)
     ssl.handshake.cur_msg = -1
@@ -853,7 +853,7 @@ ssl_recv_flight_completed: fn(ssl: &ssldefs.SSLContext) Never! {
 
 /// The last message of an outgoing flight is sent
 /// (mbedtls_ssl_send_flight_completed).
-ssl_send_flight_completed: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_send_flight_completed: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssl_reset_retransmit_timeout(ssl)
     ssl_set_timer(ssl, ssl.handshake.retransmit_timeout)
     if ssl_in_msg_is_finished(ssl) -> ssl.handshake.retransmit_state = ssldefs.SSL_RETRANS_FINISHED else {
@@ -867,7 +867,7 @@ ssl_send_flight_completed: fn(ssl: &ssldefs.SSLContext) Never! {
 /// Begin a handshake message of `hs_type` (mbedtls_ssl_start_handshake_msg):
 /// the offset in out_buf its body starts at, which has
 /// SSL_OUT_CONTENT_LEN - 4 bytes of room.
-ssl_start_handshake_msg: fn(ssl: &ssldefs.SSLContext, hs_type: Int) -> Int Never! {
+ssl_start_handshake_msg: fn(ssl: ^ssldefs.SSLContext, hs_type: Int) -> Int Never! {
     ssl.out_msgtype = ssldefs.SSL_MSG_HANDSHAKE
     ssl.out_buf[ssl.out_msg] = ssldefs.ssl_byte(hs_type)
     ssl.out_msg + 4
@@ -877,7 +877,7 @@ ssl_start_handshake_msg: fn(ssl: &ssldefs.SSLContext, hs_type: Int) -> Int Never
 /// message (mbedtls_ssl_write_handshake_msg_ext): fill in its handshake
 /// header and add it to the transcript when `update_checksum`. DTLS sends
 /// only a HelloRequest at once; the rest go at flight_transmit.
-ssl_write_handshake_msg_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, update_checksum: Bool, force_flush: Bool, rng: &R) ssldefs.SSLError! {
+ssl_write_handshake_msg_ext: fn<R: RNG>(ssl: ^ssldefs.SSLContext, update_checksum: Bool, force_flush: Bool, rng: ^R) ssldefs.SSLError! {
     hs_len: ssl.out_msglen - 4
     hs_type: ssldefs.ssl_u8(ssl.out_buf, ssl.out_msg)
     if ssl.out_msgtype != ssldefs.SSL_MSG_HANDSHAKE && ssl.out_msgtype != ssldefs.SSL_MSG_CHANGE_CIPHER_SPEC {
@@ -917,14 +917,14 @@ ssl_write_handshake_msg_ext: fn<R: RNG>(ssl: &ssldefs.SSLContext, update_checksu
 }
 
 /// mbedtls_ssl_write_handshake_msg.
-ssl_write_handshake_msg: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_write_handshake_msg: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_write_handshake_msg_ext(ssl, true, true, rng) ?? return Err(err)
 }
 
 /// Finish a message begun with ssl_start_handshake_msg whose body is
 /// `msg_len` bytes (mbedtls_ssl_finish_handshake_msg). The caller has
 /// added it to the transcript.
-ssl_finish_handshake_msg: fn<R: RNG>(ssl: &ssldefs.SSLContext, msg_len: Int, rng: &R) ssldefs.SSLError! {
+ssl_finish_handshake_msg: fn<R: RNG>(ssl: ^ssldefs.SSLContext, msg_len: Int, rng: ^R) ssldefs.SSLError! {
     ssl.out_msglen = msg_len + 4
     ssl_write_handshake_msg_ext(ssl, false, false, rng) ?? return Err(err)
 }
@@ -936,7 +936,7 @@ ssl_finish_handshake_msg: fn<R: RNG>(ssl: &ssldefs.SSLContext, msg_len: Int, rng
 /// (mbedtls_ssl_write_record). It is protected under transform_out and
 /// appended to the output; DTLS packs records into a datagram until it is
 /// full or `force_flush`.
-ssl_write_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, force_flush: Bool, rng: &R) ssldefs.SSLError! {
+ssl_write_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, force_flush: Bool, rng: ^R) ssldefs.SSLError! {
     len := ssl.out_msglen
     flush := force_flush
     // The content type is written after encryption, which a CID changes.
@@ -1001,7 +1001,7 @@ ssl_write_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, force_flush: Bool, rng: &
 
 /// Set the out_* offsets from out_hdr for records under `transform`, a
 /// transform pool index or -1 for none (mbedtls_ssl_update_out_pointers).
-ssl_update_out_pointers: fn(ssl: &ssldefs.SSLContext, transform: Int) Never! {
+ssl_update_out_pointers: fn(ssl: ^ssldefs.SSLContext, transform: Int) Never! {
     if ssl_is_dtls(ssl) {
         ssl.out_ctr = ssl.out_hdr + 3
         ssl.out_cid = ssl.out_ctr + ssldefs.SSL_SEQUENCE_NUMBER_LEN
@@ -1022,7 +1022,7 @@ ssl_update_out_pointers: fn(ssl: &ssldefs.SSLContext, transform: Int) Never! {
 
 /// Set the in_* offsets from in_hdr for an unprotected record with no CID;
 /// decryption moves in_msg to the plaintext (mbedtls_ssl_update_in_pointers).
-ssl_update_in_pointers: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_update_in_pointers: fn(ssl: ^ssldefs.SSLContext) Never! {
     if ssl_is_dtls(ssl) {
         ssl.in_ctr = ssl.in_hdr + 3
         ssl.in_cid = ssl.in_ctr + ssldefs.SSL_SEQUENCE_NUMBER_LEN
@@ -1038,13 +1038,13 @@ ssl_update_in_pointers: fn(ssl: &ssldefs.SSLContext) Never! {
 }
 
 /// mbedtls_ssl_reset_in_pointers.
-ssl_reset_in_pointers: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_reset_in_pointers: fn(ssl: ^ssldefs.SSLContext) Never! {
     if ssl_is_dtls(ssl) -> ssl.in_hdr = 0 else -> ssl.in_hdr = ssldefs.SSL_SEQUENCE_NUMBER_LEN
     ssl_update_in_pointers(ssl)
 }
 
 /// mbedtls_ssl_reset_out_pointers.
-ssl_reset_out_pointers: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_reset_out_pointers: fn(ssl: ^ssldefs.SSLContext) Never! {
     if ssl_is_dtls(ssl) -> ssl.out_hdr = 0 else {
         ssl.out_ctr = 0
         ssl.out_hdr = ssldefs.SSL_SEQUENCE_NUMBER_LEN
@@ -1133,7 +1133,7 @@ ssl_check_hs_header: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 
 // Mark bits offset..<offset+len of the reassembly bitmask at buf[base]
 // (ssl_bitmask_set); bit 7 of a byte is its first.
-ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
+ssl_bitmask_set: fn(buf: ^[U8], base: Int, offset0: Int, len0: Int) Never! {
     offset := offset0
     len := len0
     start_bits := 8 - offset %% 8
@@ -1193,7 +1193,7 @@ ssl_get_reassembly_buffer_size: fn(msg_len: Int, add_bitmap: Bool) -> Int Never!
 /// is dropped (resending the last flight on a repeat of its last message),
 /// a future one or a fragment is EarlyMessage for buffering. TLS: fragments
 /// are gathered at in_buf[8 + header], ContinueProcessing until complete.
-ssl_prepare_handshake_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_prepare_handshake_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     // The first fragment must hold the header, and with it the length.
     if ssl_get_in_hsfraglen(ssl) == 0 {
         if ssl.in_msglen < ssl_hs_hdr_len(ssl) -> return Err(.InvalidRecord)
@@ -1268,7 +1268,7 @@ ssl_prepare_handshake_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
 /// Add the complete handshake message at in_msg to the transcript and, for
 /// DTLS, move on to the next message sequence number
 /// (mbedtls_ssl_update_handshake_status).
-ssl_update_handshake_status: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_update_handshake_status: fn(ssl: ^ssldefs.SSLContext) Never! {
     if !ssl_is_handshake_over(ssl) && ssl.has_handshake {
         ssltls.ssl_update_checksum(ssl.handshake, ssl.in_buf, ssl.in_msg, ssl.in_hslen)
     }
@@ -1283,7 +1283,7 @@ ssl_update_handshake_status: fn(ssl: &ssldefs.SSLContext) Never! {
 // number in_window_top - n was seen.
 
 /// mbedtls_ssl_dtls_replay_reset.
-ssl_dtls_replay_reset: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_dtls_replay_reset: fn(ssl: ^ssldefs.SSLContext) Never! {
     ssl.in_window_top = U64{0}
     ssl.in_window = U64{0}
 }
@@ -1313,7 +1313,7 @@ ssl_dtls_replay_check: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 
 /// Record the validated record number at in_ctr in the window
 /// (mbedtls_ssl_dtls_replay_update).
-ssl_dtls_replay_update: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_dtls_replay_update: fn(ssl: ^ssldefs.SSLContext) Never! {
     rec_seqnum: ssl_load_six_bytes(ssl.in_buf, ssl.in_ctr + 2)
     if ssl.conf.anti_replay == ssldefs.SSL_ANTI_REPLAY_DISABLED {
         return
@@ -1337,7 +1337,7 @@ ssl_dtls_replay_update: fn(ssl: &ssldefs.SSLContext) Never! {
 /// cookie for `cli_id` (mbedtls_ssl_check_dtls_clihlo_cookie). 0: the cookie
 /// is valid. Otherwise a HelloVerifyRequest is written to obuf and its
 /// length returned, where C returns HELLO_VERIFY_REQUIRED with *olen.
-ssl_check_dtls_clihlo_cookie: fn(conf: ssldefs.SSLConfig, cli_id: [U8], inb: [U8], in_len: Int, obuf: &[U8], buf_len: Int) -> Int ssldefs.SSLError! {
+ssl_check_dtls_clihlo_cookie: fn(conf: ssldefs.SSLConfig, cli_id: [U8], inb: [U8], in_len: Int, obuf: ^[U8], buf_len: Int) -> Int ssldefs.SSLError! {
     // Record header (13 bytes), handshake header (12), client_version (2),
     // random (32), then the session ID and the cookie, each length-prefixed:
     // at least 61 bytes.
@@ -1394,7 +1394,7 @@ ssl_check_dtls_clihlo_cookie: fn(conf: ssldefs.SSLConfig, cli_id: [U8], inb: [U8
 // An epoch 0 ClientHello after the handshake (ssl_handle_possible_reconnect):
 // with no cookie it is answered with a HelloVerifyRequest and dropped; with a
 // valid one the context is reset and ClientReconnect returned.
-ssl_handle_possible_reconnect: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_handle_possible_reconnect: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     // Without cookies the peer's reachability can't be checked: drop it.
     if ssl.conf.f_cookie_write == {
         .Val(_) -> {}
@@ -1432,7 +1432,7 @@ ssl_check_record_type: fn(record_type: Int) -> Bool Never! {
 // `rec` (ssl_parse_record_header). DTLS:
 // UnexpectedRecord for a record of another epoch or a replay, EarlyMessage
 // for the next epoch's, InvalidRecord for a bad header.
-ssl_parse_record_header: fn(ssl: ssldefs.SSLContext, buf: [U8], off: Int, len: Int, rec: &ssldefs.SSLRecord) ssldefs.SSLError! {
+ssl_parse_record_header: fn(ssl: ssldefs.SSLContext, buf: [U8], off: Int, len: Int, rec: ^ssldefs.SSLRecord) ssldefs.SSLError! {
     dtls: ssl_is_dtls(ssl)
     rec_hdr_version_offset: 1
     rec_hdr_ctr_offset: 3
@@ -1484,7 +1484,7 @@ ssl_parse_record_header: fn(ssl: ssldefs.SSLContext, buf: [U8], off: Int, len: I
 // client reconnecting (ssl_check_client_reconnect). The handshake type is
 // read at in_buf[13], past the 13-byte DTLS header, as in_msg may sit after
 // an explicit IV.
-ssl_check_client_reconnect: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_check_client_reconnect: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     rec_epoch: ssldefs.ssl_get_u16(ssl.in_buf, ssl.in_ctr)
     if rec_epoch == 0 && ssl.conf.endpoint == ssldefs.SSL_IS_SERVER && ssl_is_handshake_over(ssl) && ssl.in_msgtype == ssldefs.SSL_MSG_HANDSHAKE && ssl.in_left > 13 && ssldefs.ssl_u8(ssl.in_buf, 13) == ssldefs.SSL_HS_CLIENT_HELLO {
         return ssl_handle_possible_reconnect(ssl)
@@ -1493,7 +1493,7 @@ ssl_check_client_reconnect: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 
 // Decrypt the record `rec` in in_buf under transform_in, if any
 // (ssl_prepare_record_content), and check its decrypted content.
-ssl_prepare_record_content: fn(ssl: &ssldefs.SSLContext, rec: &ssldefs.SSLRecord) ssldefs.SSLError! {
+ssl_prepare_record_content: fn(ssl: ^ssldefs.SSLContext, rec: ^ssldefs.SSLRecord) ssldefs.SSLError! {
     // TLS 1.3 ChangeCipherSpec records are never protected.
     done := false
     if ssl.transform_in >= 0 && ssl.tpool[ssl.transform_in].tls_version == ssldefs.SSL_VERSION_TLS1_3 && rec.rtype == ssldefs.SSL_MSG_CHANGE_CIPHER_SPEC {
@@ -1552,7 +1552,7 @@ ssl_prepare_record_content: fn(ssl: &ssldefs.SSLContext, rec: &ssldefs.SSLRecord
 /// Non-fatal alerts are skipped, and for DTLS invalid records too
 /// (RFC 6347 4.1.2.7). A handshake message is added to the transcript when
 /// `update_hs_digest`.
-ssl_read_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, update_hs_digest: Bool, rng: &R) ssldefs.SSLError! {
+ssl_read_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, update_hs_digest: Bool, rng: ^R) ssldefs.SSLError! {
     if ssl.keep_current_message != 0 {
         ssl.keep_current_message = 0
         return
@@ -1604,7 +1604,7 @@ ssl_next_record_is_in_datagram: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 // buffer into in_msg (ssl_load_buffered_message): whether one was loaded.
 // A buffered message too long for in_buf, C's INTERNAL_ERROR, which
 // mbedtls_ssl_read_record takes as nothing loaded, is not loaded.
-ssl_load_buffered_message: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
+ssl_load_buffered_message: fn(ssl: ^ssldefs.SSLContext) -> Bool Never! {
     if !ssl.has_handshake -> return false
     if ssl.state == ssldefs.SSL_CLIENT_CHANGE_CIPHER_SPEC || ssl.state == ssldefs.SSL_SERVER_CHANGE_CIPHER_SPEC {
         // A ChangeCipherSpec seen before is synthesized.
@@ -1633,7 +1633,7 @@ ssl_load_buffered_message: fn(ssl: &ssldefs.SSLContext) -> Bool Never! {
 // Free buffered data, the future epoch's record first and then the most
 // distant messages, until `desired` bytes may be buffered
 // (ssl_buffer_make_space, true where C returns 0).
-ssl_buffer_make_space: fn(ssl: &ssldefs.SSLContext, desired: Int) -> Bool Never! {
+ssl_buffer_make_space: fn(ssl: ^ssldefs.SSLContext, desired: Int) -> Bool Never! {
     ssl_free_buffered_record(ssl)
     if desired <= ssldefs.SSL_DTLS_MAX_BUFFERING - ssl.handshake.total_bytes_buffered -> return true
     offset := ssldefs.SSL_MAX_BUFFERED_HS - 1
@@ -1649,7 +1649,7 @@ ssl_buffer_make_space: fn(ssl: &ssldefs.SSLContext, desired: Int) -> Bool Never!
 
 // Buffer the DTLS message at in_msg, a future handshake message or fragment
 // or an early ChangeCipherSpec (ssl_buffer_message).
-ssl_buffer_message: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_buffer_message: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if !ssl.has_handshake {
         return
     }
@@ -1718,7 +1718,7 @@ ssl_buffer_message: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 // message is removed from the record, the rest moved up to in_msg; alerts
 // and ChangeCipherSpec consume the record; application data is consumed by
 // ssl_read.
-ssl_consume_current_message: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_consume_current_message: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if ssl.in_hslen != 0 {
         // No application data may be in flight.
         if ssl.in_offt >= 0 -> return Err(.InternalError)
@@ -1746,7 +1746,7 @@ ssl_consume_current_message: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 ssl_record_is_in_progress: fn(ssl: ssldefs.SSLContext) -> Bool Never! { ssl.in_msglen > 0 }
 
 // Drop the buffered record of the next epoch (ssl_free_buffered_record).
-ssl_free_buffered_record: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_free_buffered_record: fn(ssl: ^ssldefs.SSLContext) Never! {
     if !ssl.has_handshake {
         return
     }
@@ -1758,7 +1758,7 @@ ssl_free_buffered_record: fn(ssl: &ssldefs.SSLContext) Never! {
 
 // Move the buffered record of the next epoch to in_hdr once that epoch is
 // current and the datagram is consumed (ssl_load_buffered_record).
-ssl_load_buffered_record: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_load_buffered_record: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if !ssl_is_dtls(ssl) {
         return
     }
@@ -1784,7 +1784,7 @@ ssl_load_buffered_record: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
 
 // Buffer a handshake record of the next epoch, at most one, an early
 // Finished (ssl_buffer_future_record).
-ssl_buffer_future_record: fn(ssl: &ssldefs.SSLContext, rec: ssldefs.SSLRecord) Never! {
+ssl_buffer_future_record: fn(ssl: ^ssldefs.SSLContext, rec: ssldefs.SSLRecord) Never! {
     if !ssl.has_handshake {
         return
     }
@@ -1804,7 +1804,7 @@ ssl_buffer_future_record: fn(ssl: &ssldefs.SSLContext, rec: ssldefs.SSLRecord) N
 
 // Read and decrypt the next record (ssl_get_next_record). DTLS drops
 // unexpected and invalid records with ContinueProcessing.
-ssl_get_next_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_get_next_record: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     dtls: ssl_is_dtls(ssl)
     // A buffered record of a now current epoch is loaded, after which
     // fetch_input has nothing to do.
@@ -1907,7 +1907,7 @@ ssl_get_next_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLEr
 /// Handle the record read by its type (mbedtls_ssl_handle_message_type):
 /// prepare handshake messages, check ChangeCipherSpec and alerts, drop
 /// DTLS application data before the handshake is over.
-ssl_handle_message_type: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_handle_message_type: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     // Nothing but handshake records may come amid a fragmented handshake
     // message: TLS 1.3 forbids it, and this implementation for TLS 1.2.
     if ssl_get_in_hsfraglen(ssl) != 0 && ssl.in_msgtype != ssldefs.SSL_MSG_HANDSHAKE {
@@ -1957,13 +1957,13 @@ ssl_handle_message_type: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.S
 }
 
 /// mbedtls_ssl_send_fatal_handshake_failure.
-ssl_send_fatal_handshake_failure: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_send_fatal_handshake_failure: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_send_alert_message(ssl, ssldefs.SSL_ALERT_LEVEL_FATAL, ssldefs.SSL_ALERT_MSG_HANDSHAKE_FAILURE, rng)
 }
 
 /// Send an alert; pending output is flushed first, and the alert is then
 /// not sent (mbedtls_ssl_send_alert_message).
-ssl_send_alert_message: fn<R: RNG>(ssl: &ssldefs.SSLContext, level: Int, message: Int, rng: &R) ssldefs.SSLError! {
+ssl_send_alert_message: fn<R: RNG>(ssl: ^ssldefs.SSLContext, level: Int, message: Int, rng: ^R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if ssl.out_left != 0 -> return ssl_flush_output(ssl)
     ssl.out_msgtype = ssldefs.SSL_MSG_ALERT
@@ -1975,7 +1975,7 @@ ssl_send_alert_message: fn<R: RNG>(ssl: &ssldefs.SSLContext, level: Int, message
 
 /// Write a ChangeCipherSpec and move to the next state
 /// (mbedtls_ssl_write_change_cipher_spec).
-ssl_write_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_write_change_cipher_spec: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl.out_msgtype = ssldefs.SSL_MSG_CHANGE_CIPHER_SPEC
     ssl.out_msglen = 1
     ssl.out_buf[ssl.out_msg] = U8{1}
@@ -1985,7 +1985,7 @@ ssl_write_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
 
 /// Read the peer's ChangeCipherSpec and switch inbound records to the
 /// negotiated transform and session (mbedtls_ssl_parse_change_cipher_spec).
-ssl_parse_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_parse_change_cipher_spec: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ssl_read_record(ssl, true, rng) ?? return Err(err)
     // handle_message_type checked the length and content.
     if ssl.in_msgtype != ssldefs.SSL_MSG_CHANGE_CIPHER_SPEC {
@@ -2008,7 +2008,7 @@ ssl_parse_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
 
 // Parse and decrypt the DTLS record in buf (mbedtls_ssl_check_record's
 // work). Decryption works on a copy, wiped after.
-ssl_check_record_in: fn(ssl: &ssldefs.SSLContext, buf: [U8], buflen: Int) ssldefs.SSLError! {
+ssl_check_record_in: fn(ssl: ^ssldefs.SSLContext, buf: [U8], buflen: Int) ssldefs.SSLError! {
     // There is no use for checking TLS records.
     if !ssl_is_dtls(ssl) -> return Err(.FeatureUnavailable)
     rec := ssldefs.SSLRecord{}
@@ -2029,7 +2029,7 @@ ssl_check_record_in: fn(ssl: &ssldefs.SSLContext, buf: [U8], buflen: Int) ssldef
 /// its header and its authentication (mbedtls_ssl_check_record). The
 /// buffer is wiped. A record with an unexpected CID or of the next epoch is
 /// UnexpectedRecord.
-ssl_check_record: fn(ssl: &ssldefs.SSLContext, buf: &[U8], buflen: Int) ssldefs.SSLError! {
+ssl_check_record: fn(ssl: ^ssldefs.SSLContext, buf: ^[U8], buflen: Int) ssldefs.SSLError! {
     if ssl_check_record_in(ssl, buf, buflen) == {
         .Err(e) -> {
             ssldefs.ssl_fill(buf, 0, buflen, U8{0})
@@ -2057,7 +2057,7 @@ ssl_bytes_cmp: fn(a: [U8], aoff: Int, b: [U8], boff: Int, len: Int) -> Int Never
 
 // Renegotiate when a record counter passes renego_period
 // (ssl_check_ctr_renegotiate).
-ssl_check_ctr_renegotiate: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_check_ctr_renegotiate: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     ep_len: ssl_ep_len(ssl)
     if !ssl_is_handshake_over(ssl) || ssl.renego_status == ssldefs.SSL_RENEGOTIATION_PENDING || ssl.conf.disable_renegotiation == ssldefs.SSL_RENEGOTIATION_DISABLED {
         return
@@ -2079,7 +2079,7 @@ ssl_tls13_is_new_session_ticket: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 // A TLS 1.3 handshake message after the handshake: a client hands a
 // NewSessionTicket to the handshake when tickets are signaled, WantRead,
 // or ignores it (ssl_tls13_handle_hs_message_post_handshake).
-ssl_tls13_handle_hs_message_post_handshake: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
+ssl_tls13_handle_hs_message_post_handshake: fn(ssl: ^ssldefs.SSLContext) ssldefs.SSLError! {
     if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl_tls13_is_new_session_ticket(ssl) {
         if ssl.conf.session_tickets & 2 != 0 {
             ssl.keep_current_message = 1
@@ -2094,7 +2094,7 @@ ssl_tls13_handle_hs_message_post_handshake: fn(ssl: &ssldefs.SSLContext) ssldefs
 // A TLS 1.2 handshake message after the handshake, which may only start a
 // renegotiation: HelloRequest to a client, ClientHello to a server; others
 // fail TLS and are dropped for DTLS (ssl_tls12_handle_hs_message_post_handshake).
-ssl_tls12_handle_hs_message_post_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_tls12_handle_hs_message_post_handshake: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     hs_type: ssldefs.ssl_u8(ssl.in_buf, ssl.in_msg)
     if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && (hs_type != ssldefs.SSL_HS_HELLO_REQUEST || ssl.in_hslen != ssl_hs_hdr_len(ssl)) {
         // DTLS: probably from the last handshake.
@@ -2132,7 +2132,7 @@ ssl_tls12_handle_hs_message_post_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext,
 }
 
 // ssl_handle_hs_message_post_handshake, by protocol version.
-ssl_handle_hs_message_post_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_handle_hs_message_post_handshake: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_3 {
         return ssl_tls13_handle_hs_message_post_handshake(ssl)
     }
@@ -2144,7 +2144,7 @@ ssl_handle_hs_message_post_handshake: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: 
 
 // Copy up to `len` bytes of the application data at in_offt to buf, wiping
 // what was read (ssl_read_application_data).
-ssl_read_application_data: fn(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int) -> Int Never! {
+ssl_read_application_data: fn(ssl: ^ssldefs.SSLContext, buf: ^[U8], len: Int) -> Int Never! {
     n: if len < ssl.in_msglen -> len else -> ssl.in_msglen
     if len != 0 {
         ssldefs.ssl_copy_into(buf, 0, ssl.in_buf, ssl.in_offt, n)
@@ -2161,7 +2161,7 @@ ssl_read_application_data: fn(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int) ->
 /// Read up to `len` bytes of application data into buf[0..<len]
 /// (mbedtls_ssl_read): the count read, 0 at the end of the connection. The
 /// handshake, or a renegotiation, is carried on first.
-ssl_read: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int, rng: &R) -> Int ssldefs.SSLError! {
+ssl_read: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: ^[U8], len: Int, rng: ^R) -> Int ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if ssl_is_dtls(ssl) {
         ssl_flush_output(ssl) ?? return Err(err)
@@ -2249,7 +2249,7 @@ ssl_read: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: &[U8], len: Int, rng: &R) ->
 // payload limit (ssl_write_real): the count written. TLS writes a prefix of
 // a longer buffer; DTLS fails it. After WantWrite the pending record is
 // flushed, and the caller repeats the call with the same data.
-ssl_write_real: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: [U8], len0: Int, rng: &R) -> Int ssldefs.SSLError! {
+ssl_write_real: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: [U8], len0: Int, rng: ^R) -> Int ssldefs.SSLError! {
     max_len: ssltls.ssl_get_max_out_record_payload(ssl) ?? return Err(err)
     len := len0
     if len > max_len {
@@ -2268,7 +2268,7 @@ ssl_write_real: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: [U8], len0: Int, rng: 
 /// Write application data from buf[0..<len] (mbedtls_ssl_write): the count
 /// written, which may be less than `len` for TLS. Zero-length records may
 /// be sent (RFC 5246 6.2.1).
-ssl_write: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: [U8], len: Int, rng: &R) -> Int ssldefs.SSLError! {
+ssl_write: fn<R: RNG>(ssl: ^ssldefs.SSLContext, buf: [U8], len: Int, rng: ^R) -> Int ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     ssl_check_ctr_renegotiate(ssl, rng) ?? return Err(err)
     if ssl.state != ssldefs.SSL_HANDSHAKE_OVER -> ssltls.ssl_handshake(ssl, rng) ?? return Err(err)
@@ -2276,7 +2276,7 @@ ssl_write: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: [U8], len: Int, rng: &R) ->
 }
 
 /// Tell the peer the connection is closing (mbedtls_ssl_close_notify).
-ssl_close_notify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_close_notify: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if !ssl.has_conf -> return Err(.BadInputData)
     if ssl_is_handshake_over(ssl) {
         ssl_send_alert_message(ssl, ssldefs.SSL_ALERT_LEVEL_WARNING, ssldefs.SSL_ALERT_MSG_CLOSE_NOTIFY, rng) ?? return Err(err)
@@ -2285,14 +2285,14 @@ ssl_close_notify: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError
 
 /// Read records under `transform`, a pool index or -1, from sequence number
 /// 0 (mbedtls_ssl_set_inbound_transform).
-ssl_set_inbound_transform: fn(ssl: &ssldefs.SSLContext, transform: Int) Never! {
+ssl_set_inbound_transform: fn(ssl: ^ssldefs.SSLContext, transform: Int) Never! {
     ssl.transform_in = transform
     ssldefs.ssl_fill(ssl.in_buf, ssl.in_ctr, ssldefs.SSL_SEQUENCE_NUMBER_LEN, U8{0})
 }
 
 /// Write records under `transform`, a pool index or -1, from sequence
 /// number 0 (mbedtls_ssl_set_outbound_transform).
-ssl_set_outbound_transform: fn(ssl: &ssldefs.SSLContext, transform: Int) Never! {
+ssl_set_outbound_transform: fn(ssl: ^ssldefs.SSLContext, transform: Int) Never! {
     ssl.transform_out = transform
     ssldefs.ssl_fill(ssl.cur_out_ctr, 0, ssl.cur_out_ctr.len(), U8{0})
 }
@@ -2301,7 +2301,7 @@ ssl_set_outbound_transform: fn(ssl: &ssldefs.SSLContext, transform: Int) Never! 
 // DTLS buffering slots.
 
 /// Drop every buffered message and record (mbedtls_ssl_buffering_free).
-ssl_buffering_free: fn(ssl: &ssldefs.SSLContext) Never! {
+ssl_buffering_free: fn(ssl: ^ssldefs.SSLContext) Never! {
     if !ssl.has_handshake {
         return
     }
@@ -2310,7 +2310,7 @@ ssl_buffering_free: fn(ssl: &ssldefs.SSLContext) Never! {
 }
 
 // Wipe and drop buffering slot `slot` (ssl_buffering_free_slot).
-ssl_buffering_free_slot: fn(ssl: &ssldefs.SSLContext, slot: Int) Never! {
+ssl_buffering_free_slot: fn(ssl: ^ssldefs.SSLContext, slot: Int) Never! {
     if slot >= ssldefs.SSL_MAX_BUFFERED_HS || slot >= ssl.handshake.hs.len() {
         return
     }
@@ -2323,7 +2323,7 @@ ssl_buffering_free_slot: fn(ssl: &ssldefs.SSLContext, slot: Int) Never! {
 
 // Shift the buffering slots left by `shift`: slot i then holds what slot
 // i + shift held (ssl_buffering_shift_slots).
-ssl_buffering_shift_slots: fn(ssl: &ssldefs.SSLContext, shift0: Int) Never! {
+ssl_buffering_shift_slots: fn(ssl: ^ssldefs.SSLContext, shift0: Int) Never! {
     if shift0 == 0 {
         return
     }
@@ -2343,7 +2343,7 @@ ssl_buffering_shift_slots: fn(ssl: &ssldefs.SSLContext, shift0: Int) Never! {
 /// Send the pending fatal alert, if any (mbedtls_ssl_handle_pending_alert):
 /// the send's error, or else the alert's reason. After WantWrite the alert
 /// stays pending.
-ssl_handle_pending_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
+ssl_handle_pending_alert: fn<R: RNG>(ssl: ^ssldefs.SSLContext, rng: ^R) ssldefs.SSLError! {
     if ssl.send_alert == 0 {
         return
     }
@@ -2367,7 +2367,7 @@ ssl_handle_pending_alert: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.
 
 /// Set a fatal alert pending, to fail with `alert_reason`
 /// (mbedtls_ssl_pend_fatal_alert).
-ssl_pend_fatal_alert: fn(ssl: &ssldefs.SSLContext, alert_type: Int, alert_reason: ssldefs.SSLError) Never! {
+ssl_pend_fatal_alert: fn(ssl: ^ssldefs.SSLContext, alert_type: Int, alert_reason: ssldefs.SSLError) Never! {
     ssl.send_alert = 1
     ssl.alert_type = alert_type
     ssl.alert_reason = alert_reason

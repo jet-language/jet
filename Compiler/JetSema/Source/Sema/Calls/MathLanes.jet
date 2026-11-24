@@ -27,7 +27,7 @@ sema_call_math_reduce_error: fn(span: Span, what: String, why: String, fix: Stri
 // `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
 // value. A written value that names no `ReduceOp` case is E2510 before the
 // Core `reduce` method checks the call; true when it was.
-sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool Never! {
     if method != "reduce" || args.len() != 1 || sema_call_math_lane_name(receiver) == None {
         return false
     }

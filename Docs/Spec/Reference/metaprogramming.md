@@ -612,7 +612,7 @@ its owner's parameters the same way.
 Each `ParamInfo` carries the parameter's `name`; the `label` a call writes
 (its public label, else its name); its `zone` (`ParamZone`: `PositionalOnly`,
 `Either` or `LabelOnly`); its `type`, a TypeId; its `access` (`ParamAccess`: `Read`,
-`Write` for a `&` parameter, or `Move` for a `&&` one); its `default`, a
+`Write` for a `^` parameter, or `Move` for a `^^` one); its `default`, a
 `DefaultInfo?` read the same way as a field's and never run; and whether it is
 `variadic`. A catalog reads a callable's parameters without parsing a
 signature string (`Examples/Metaprogramming/Reflection/CallableCatalog/`).
@@ -928,7 +928,7 @@ bounds as `effects.declared` (`inferred` is `None`: a type has no body), the
 `Jet` calling convention and no generic bindings. Each `ParamInfo` keeps
 what the type writes: the label and zone a `/` or `*` gives it (positional
 and unlabeled with neither, as in `step: fn(Int) -[]> String`) and the
-access a `&` or `&&` mark gives it (`Read` with none); a written function
+access a `^` or `^^` mark gives it (`Read` with none); a written function
 type has no defaults and no variadic parameters, while the type of a named
 function keeps that function's parameter names, defaults and variadic
 flags. Its `generic_bindings` list the type's arguments, one

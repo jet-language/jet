@@ -87,7 +87,7 @@ sema_comptime_input_value_problem: fn(builtin: String, named: String, span: Span
     Val(sema_error("E0957", span, "`{builtin}` {noun} `{named}` can't use `..`", "comptime inputs are named from this file's own directory down, so a build can audit them; `..` is refused in a computed {noun} too", "compute a {noun} under this file's directory, without `..`"))
 }
 
-sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     builtin: call.name
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     noun: sema_comptime_input_noun(builtin)
@@ -108,7 +108,7 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
 // normalized and held to the path law here, or the computed String
 // expression, whose value the driver holds to it when the evaluation reaches
 // the call. None after a reported problem.
-sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     builtin: call.name
     if sema_comptime_input_literal(call.args[0].expr) == .Val(literal) {
         named: sema_comptime_input_named(literal)
@@ -132,7 +132,7 @@ sema_comptime_input_path_value: fn(call: Call, environment: SemaScopeEnvironment
 // row is its one effect (`FS.Read` for an input, `Net` for a fetch), so the
 // calling function's row carries it and its denials refuse it. False after a
 // reported refusal.
-sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: TFailureCarrier.Infallible,
@@ -150,7 +150,7 @@ sema_comptime_input_record_effect: fn(api: String, row_effect: String, result_ty
 // `Net`. The compiler fetches the URL while it builds (the driver's
 // jet_driver_build_fetch), and content that misses the pin is E3413. Another
 // `core.net` member is not handled here.
-sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_comptime_fetch: fn(module_name: String, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.net" || member != "fetch" {
         return SemaDirectSpecialCheck{handled: false, value: None}
     }

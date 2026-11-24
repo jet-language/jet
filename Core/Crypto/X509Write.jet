@@ -186,7 +186,7 @@ x509_create_value_hex_der: fn(s: [U8], from: Int, to: Int) -> {val: [U8], tag_id
 /// to the head of the list, so the last attribute is first. The text ends at
 /// its first NUL, as the C string does. BadInput when `head` holds names;
 /// InvalidName for malformed text or text with no attribute.
-x509_string_to_names: fn(head: &[asn1.NamedData], name: String) x509.X509Error! {
+x509_string_to_names: fn(head: ^[asn1.NamedData], name: String) x509.X509Error! {
     if head.len() != 0 -> return Err(.BadInput)
     s: x509_create_c_text(name)
     end: s.len()
@@ -243,7 +243,7 @@ x509_string_to_names: fn(head: &[asn1.NamedData], name: String) x509.X509Error! 
 /// Add the extension `oid` to `head`, or replace its value, with the DER
 /// value `val` (mbedtls_x509_set_extension). The stored value is the
 /// critical flag as one byte and then `val`, as mbedtls stores it.
-x509_set_extension: fn(head: &[asn1.NamedData], oid: [U8], critical: Bool, val: [U8]) Never! {
+x509_set_extension: fn(head: ^[asn1.NamedData], oid: [U8], critical: Bool, val: [U8]) Never! {
     stored := [U8]{}
     stored.push(if critical -> U8{1} else -> U8{0})
     loop b in val -> stored.push(b)
@@ -252,7 +252,7 @@ x509_set_extension: fn(head: &[asn1.NamedData], oid: [U8], critical: Bool, val: 
 
 // One RelativeDistinguishedName: the SET of the single
 // AttributeTypeAndValue `entry` (x509_write_name).
-x509_write_name: fn(buf: &[U8], p: &Int, start: Int, entry: asn1.NamedData) -> Int asn1.ASN1Error! {
+x509_write_name: fn(buf: ^[U8], p: ^Int, start: Int, entry: asn1.NamedData) -> Int asn1.ASN1Error! {
     len := asn1.write_tagged_string(buf, p, start, entry.val_tag, entry.val)
     len += asn1.write_oid(buf, p, start, entry.oid)
     len = asn1.write_len_and_tag(buf, p, start, len, X509_CREATE_SEQUENCE)
@@ -263,7 +263,7 @@ x509_write_name: fn(buf: &[U8], p: &Int, start: Int, entry: asn1.NamedData) -> I
 /// A Name: the SEQUENCE of one RDN per entry of `names`, the first written
 /// last, so a list x509_string_to_names built reads back in its text's
 /// order (mbedtls_x509_write_names).
-x509_write_names: fn(buf: &[U8], p: &Int, start: Int, names: [asn1.NamedData]) -> Int asn1.ASN1Error! {
+x509_write_names: fn(buf: ^[U8], p: ^Int, start: Int, names: [asn1.NamedData]) -> Int asn1.ASN1Error! {
     len := 0
     loop entry in names -> len += x509_write_name(buf, p, start, entry)
     total: asn1.write_len_and_tag(buf, p, start, len, X509_CREATE_SEQUENCE)
@@ -273,7 +273,7 @@ x509_write_names: fn(buf: &[U8], p: &Int, start: Int, names: [asn1.NamedData]) -
 /// A signature after its AlgorithmIdentifier: `oid`, with NULL parameters
 /// unless `pk_alg` is ECDSA, whose parameters RFC 5480 and RFC 5758 leave
 /// absent, then `sig` as a BIT STRING (mbedtls_x509_write_sig).
-x509_write_sig: fn(buf: &[U8], p: &Int, start: Int, oid: [U8], sig: [U8], pk_alg: oids.PKType) -> Int asn1.ASN1Error! {
+x509_write_sig: fn(buf: ^[U8], p: ^Int, start: Int, oid: [U8], sig: [U8], pk_alg: oids.PKType) -> Int asn1.ASN1Error! {
     if p < start || p - start < sig.len() -> return Err(.BufTooSmall)
     p -= sig.len()
     loop i in 0..<sig.len() -> buf[p + i] = sig[i]
@@ -288,7 +288,7 @@ x509_write_sig: fn(buf: &[U8], p: &Int, start: Int, oid: [U8], sig: [U8], pk_alg
 // One Extension: its OID, critical TRUE when the stored flag byte is set,
 // and the rest of the stored value as the OCTET STRING extnValue
 // (x509_write_extension).
-x509_write_extension: fn(buf: &[U8], p: &Int, start: Int, ext: asn1.NamedData) -> Int asn1.ASN1Error! {
+x509_write_extension: fn(buf: ^[U8], p: ^Int, start: Int, ext: asn1.NamedData) -> Int asn1.ASN1Error! {
     len := asn1.write_octet_string(buf, p, start, cipher.bytes_of(ext.val, 1, ext.val.len() - 1))
     if ext.val[0] != (U8{0}) -> len += asn1.write_bool(buf, p, start, true)
     len += asn1.write_oid(buf, p, start, ext.oid)
@@ -298,7 +298,7 @@ x509_write_extension: fn(buf: &[U8], p: &Int, start: Int, ext: asn1.NamedData) -
 
 /// Every extension of `exts`, the first written last, with no SEQUENCE
 /// around them (mbedtls_x509_write_extensions).
-x509_write_extensions: fn(buf: &[U8], p: &Int, start: Int, exts: [asn1.NamedData]) -> Int asn1.ASN1Error! {
+x509_write_extensions: fn(buf: ^[U8], p: ^Int, start: Int, exts: [asn1.NamedData]) -> Int asn1.ASN1Error! {
     len := 0
     loop ext in exts -> len += x509_write_extension(buf, p, start, ext)
     Ok(len)
@@ -321,7 +321,7 @@ x509write_san_unstructured: fn(kind: Int) -> Bool Never! {
 }
 
 // The SEQUENCE of GeneralNames of `sans`, the first written last.
-x509write_san_der: fn(buf: &[U8], p: &Int, sans: [X509SanEntry]) -> Int asn1.ASN1Error! {
+x509write_san_der: fn(buf: ^[U8], p: ^Int, sans: [X509SanEntry]) -> Int asn1.ASN1Error! {
     len := 0
     loop san in sans {
         if san.kind == x509.X509_SAN_DIRECTORY_NAME {
@@ -339,7 +339,7 @@ x509write_san_der: fn(buf: &[U8], p: &Int, sans: [X509SanEntry]) -> Int asn1.ASN
 /// `sans`, not critical (mbedtls_x509_write_set_san_common).
 /// FeatureUnavailable for a kind other than dNSName, rfc822Name, URI,
 /// iPAddress or directoryName.
-x509_write_set_san_common: fn(extensions: &[asn1.NamedData], sans: [X509SanEntry]) x509.X509Error! {
+x509_write_set_san_common: fn(extensions: ^[asn1.NamedData], sans: [X509SanEntry]) x509.X509Error! {
     // The most the list can take: a tag and up to 4 length bytes around
     // each value, and two of each around each name of a directoryName.
     buf_len := 0
@@ -421,13 +421,13 @@ x509write_crt_new: fn() -> X509WriteCert Never! {
 
 /// Set the subject from its string form (mbedtls_x509write_crt_set_subject_name;
 /// see x509_string_to_names).
-x509write_crt_set_subject_name: fn(ctx: &X509WriteCert, name: String) x509.X509Error! {
+x509write_crt_set_subject_name: fn(ctx: ^X509WriteCert, name: String) x509.X509Error! {
     ctx.subject = [asn1.NamedData]{}
     x509_string_to_names(ctx.subject, name)
 }
 
 /// Set the issuer from its string form (mbedtls_x509write_crt_set_issuer_name).
-x509write_crt_set_issuer_name: fn(ctx: &X509WriteCert, name: String) x509.X509Error! {
+x509write_crt_set_issuer_name: fn(ctx: ^X509WriteCert, name: String) x509.X509Error! {
     ctx.issuer = [asn1.NamedData]{}
     x509_string_to_names(ctx.issuer, name)
 }
@@ -435,7 +435,7 @@ x509write_crt_set_issuer_name: fn(ctx: &X509WriteCert, name: String) x509.X509Er
 /// Set the serial number to the big-endian bytes `serial`
 /// (mbedtls_x509write_crt_set_serial_raw); BadInput past
 /// X509_RFC5280_MAX_SERIAL_LEN bytes.
-x509write_crt_set_serial_raw: fn(ctx: &X509WriteCert, serial: [U8]) x509.X509Error! {
+x509write_crt_set_serial_raw: fn(ctx: ^X509WriteCert, serial: [U8]) x509.X509Error! {
     if serial.len() > X509_RFC5280_MAX_SERIAL_LEN -> return Err(.BadInput)
     ctx.serial = serial.copy()
 }
@@ -444,7 +444,7 @@ x509write_crt_set_serial_raw: fn(ctx: &X509WriteCert, serial: [U8]) x509.X509Err
 /// (mbedtls_x509write_crt_set_validity); BadInput for any other length.
 /// A year before 2050 is written as UTCTime, a later one as
 /// GeneralizedTime (RFC 5280 section 4.1.2.5).
-x509write_crt_set_validity: fn(ctx: &X509WriteCert, not_before: String, not_after: String) x509.X509Error! {
+x509write_crt_set_validity: fn(ctx: ^X509WriteCert, not_before: String, not_after: String) x509.X509Error! {
     before := x509_create_c_text(not_before)
     after := x509_create_c_text(not_after)
     if before.len() != X509_RFC5280_UTC_TIME_LEN - 1 || after.len() != X509_RFC5280_UTC_TIME_LEN - 1 {
@@ -458,19 +458,19 @@ x509write_crt_set_validity: fn(ctx: &X509WriteCert, not_before: String, not_afte
 
 /// Set the subjectAltName extension (mbedtls_x509write_crt_set_subject_alternative_name;
 /// see x509_write_set_san_common).
-x509write_crt_set_subject_alternative_name: fn(ctx: &X509WriteCert, sans: [X509SanEntry]) x509.X509Error! {
+x509write_crt_set_subject_alternative_name: fn(ctx: ^X509WriteCert, sans: [X509SanEntry]) x509.X509Error! {
     x509_write_set_san_common(ctx.extensions, sans)
 }
 
 /// Add or replace the extension `oid` with the DER value `val`
 /// (mbedtls_x509write_crt_set_extension).
-x509write_crt_set_extension: fn(ctx: &X509WriteCert, oid: [U8], critical: Bool, val: [U8]) Never! {
+x509write_crt_set_extension: fn(ctx: ^X509WriteCert, oid: [U8], critical: Bool, val: [U8]) Never! {
     x509_set_extension(ctx.extensions, oid, critical, val)
 }
 
 // The BasicConstraints value: cA TRUE and the path length for a CA, an
 // empty SEQUENCE otherwise.
-x509write_basic_constraints_der: fn(buf: &[U8], p: &Int, is_ca: Bool, max_pathlen: Int) -> Int asn1.ASN1Error! {
+x509write_basic_constraints_der: fn(buf: ^[U8], p: ^Int, is_ca: Bool, max_pathlen: Int) -> Int asn1.ASN1Error! {
     len := 0
     if is_ca {
         if max_pathlen >= 0 -> len += asn1.write_int(buf, p, 0, max_pathlen)
@@ -484,7 +484,7 @@ x509write_basic_constraints_der: fn(buf: &[U8], p: &Int, is_ca: Bool, max_pathle
 /// (mbedtls_x509write_crt_set_basic_constraints, RFC 5280 section
 /// 4.2.1.9); a negative `max_pathlen` leaves the path unlimited. BadInput
 /// for a CA path length over 127.
-x509write_crt_set_basic_constraints: fn(ctx: &X509WriteCert, is_ca: Bool, max_pathlen: Int) x509.X509Error! {
+x509write_crt_set_basic_constraints: fn(ctx: ^X509WriteCert, is_ca: Bool, max_pathlen: Int) x509.X509Error! {
     if is_ca && max_pathlen > 127 -> return Err(.BadInput)
     buf := cipher.zero_bytes(9)
     p := 9
@@ -494,7 +494,7 @@ x509write_crt_set_basic_constraints: fn(ctx: &X509WriteCert, is_ca: Bool, max_pa
 
 // The identifier `hash` under `tag_id`, inside a SEQUENCE for an
 // AuthorityKeyIdentifier.
-x509write_key_identifier_der: fn(buf: &[U8], p: &Int, hash: [U8], tag_id: Int, authority: Bool) -> Int asn1.ASN1Error! {
+x509write_key_identifier_der: fn(buf: ^[U8], p: ^Int, hash: [U8], tag_id: Int, authority: Bool) -> Int asn1.ASN1Error! {
     len := asn1.write_tagged_string(buf, p, 0, tag_id, hash)
     if authority -> len = asn1.write_len_and_tag(buf, p, 0, len, X509_CREATE_SEQUENCE)
     Ok(len)
@@ -503,7 +503,7 @@ x509write_key_identifier_der: fn(buf: &[U8], p: &Int, hash: [U8], tag_id: Int, a
 // The subjectKeyIdentifier of the subject key, or the AuthorityKeyIdentifier
 // of the issuer key: the SHA-1 of the key's subjectPublicKey bits, method 1
 // of RFC 5280 section 4.2.1.2 (mbedtls_x509write_crt_set_key_identifier).
-x509write_crt_set_key_identifier: fn(ctx: &X509WriteCert, authority: Bool) x509.X509Error! {
+x509write_crt_set_key_identifier: fn(ctx: ^X509WriteCert, authority: Bool) x509.X509Error! {
     // A tag, a length and two MPIs, as mbedtls sizes it.
     size: rsa.MPI_MAX_SIZE * 2 + 20
     buf := cipher.zero_bytes(size)
@@ -523,13 +523,13 @@ x509write_crt_set_key_identifier: fn(ctx: &X509WriteCert, authority: Bool) x509.
 
 /// Set the subjectKeyIdentifier extension from the subject key
 /// (mbedtls_x509write_crt_set_subject_key_identifier).
-x509write_crt_set_subject_key_identifier: fn(ctx: &X509WriteCert) x509.X509Error! {
+x509write_crt_set_subject_key_identifier: fn(ctx: ^X509WriteCert) x509.X509Error! {
     x509write_crt_set_key_identifier(ctx, false)
 }
 
 /// Set the authorityKeyIdentifier extension from the issuer key
 /// (mbedtls_x509write_crt_set_authority_key_identifier).
-x509write_crt_set_authority_key_identifier: fn(ctx: &X509WriteCert) x509.X509Error! {
+x509write_crt_set_authority_key_identifier: fn(ctx: ^X509WriteCert) x509.X509Error! {
     x509write_crt_set_key_identifier(ctx, true)
 }
 
@@ -539,7 +539,7 @@ X509WRITE_KU_ALLOWED: 0x80FF
 /// Set the keyUsage extension, critical, from X509_KU_* bits
 /// (mbedtls_x509write_crt_set_key_usage, RFC 5280 section 4.2.1.3);
 /// FeatureUnavailable for any other bit.
-x509write_crt_set_key_usage: fn(ctx: &X509WriteCert, key_usage: Int) x509.X509Error! {
+x509write_crt_set_key_usage: fn(ctx: ^X509WriteCert, key_usage: Int) x509.X509Error! {
     if key_usage &~ X509WRITE_KU_ALLOWED != 0 -> return Err(.FeatureUnavailable(None))
     ku: [U8]{U8{key_usage & 0xFF}, U8{(key_usage >> 8) & 0xFF}}
     buf := cipher.zero_bytes(5)
@@ -550,7 +550,7 @@ x509write_crt_set_key_usage: fn(ctx: &X509WriteCert, key_usage: Int) x509.X509Er
 }
 
 // The ExtKeyUsageSyntax of the KeyPurposeId OIDs `exts`, in order.
-x509write_ext_key_usage_der: fn(buf: &[U8], p: &Int, exts: [[U8]]) -> Int asn1.ASN1Error! {
+x509write_ext_key_usage_der: fn(buf: ^[U8], p: ^Int, exts: [[U8]]) -> Int asn1.ASN1Error! {
     len := 0
     i := exts.len()
     loop i > 0 {
@@ -565,7 +565,7 @@ x509write_ext_key_usage_der: fn(buf: &[U8], p: &Int, exts: [[U8]]) -> Int asn1.A
 /// `exts` in order (mbedtls_x509write_crt_set_ext_key_usage, RFC 5280
 /// section 4.2.1.12). BadInput for no OID, and the ASN.1 BufTooSmall past
 /// the 256 bytes mbedtls gives the value.
-x509write_crt_set_ext_key_usage: fn(ctx: &X509WriteCert, exts: [[U8]]) x509.X509Error! {
+x509write_crt_set_ext_key_usage: fn(ctx: ^X509WriteCert, exts: [[U8]]) x509.X509Error! {
     if exts.len() == 0 -> return Err(.BadInput)
     buf := cipher.zero_bytes(256)
     p := 256
@@ -584,14 +584,14 @@ x509write_byte_bitstring: fn(bits: U8) -> [U8] x509.X509Error! {
 
 /// Set the Netscape certificate type extension from X509_NS_CERT_TYPE_*
 /// bits (mbedtls_x509write_crt_set_ns_cert_type).
-x509write_crt_set_ns_cert_type: fn(ctx: &X509WriteCert, ns_cert_type: U8) x509.X509Error! {
+x509write_crt_set_ns_cert_type: fn(ctx: ^X509WriteCert, ns_cert_type: U8) x509.X509Error! {
     bits: x509write_byte_bitstring(ns_cert_type)
     x509_set_extension(ctx.extensions, oids.OID_NS_CERT_TYPE, false, bits)
 }
 
 // A validity time: UTCTime without the century before 2050, else
 // GeneralizedTime (x509_write_time, RFC 5280 section 4.1.2.5).
-x509write_time: fn(buf: &[U8], p: &Int, t: [U8]) -> Int asn1.ASN1Error! {
+x509write_time: fn(buf: ^[U8], p: ^Int, t: [U8]) -> Int asn1.ASN1Error! {
     utc: t[0] < U8{50} || (t[0] == U8{50} && t[1] == U8{48} && t[2] < U8{53})
     if utc {
         short: asn1.write_tagged_string(buf, p, 0, asn1.ASN1_UTC_TIME, cipher.bytes_of(t, 2, t.len() - 2))
@@ -602,7 +602,7 @@ x509write_time: fn(buf: &[U8], p: &Int, t: [U8]) -> Int asn1.ASN1Error! {
 }
 
 // The TBSCertificate's fields from the extensions down to the subject.
-x509write_crt_tail: fn(ctx: X509WriteCert, buf: &[U8], c: &Int) -> Int asn1.ASN1Error! {
+x509write_crt_tail: fn(ctx: X509WriteCert, buf: ^[U8], c: ^Int) -> Int asn1.ASN1Error! {
     len := 0
     if ctx.version == X509_CRT_VERSION_3 {
         len = x509_write_extensions(buf, c, 0, ctx.extensions)
@@ -614,7 +614,7 @@ x509write_crt_tail: fn(ctx: X509WriteCert, buf: &[U8], c: &Int) -> Int asn1.ASN1
 
 // The TBSCertificate's fields from the subject Name up to the signature
 // AlgorithmIdentifier.
-x509write_crt_head: fn(ctx: X509WriteCert, buf: &[U8], c: &Int, sig_oid: [U8], pk_alg: oids.PKType) -> Int asn1.ASN1Error! {
+x509write_crt_head: fn(ctx: X509WriteCert, buf: ^[U8], c: ^Int, sig_oid: [U8], pk_alg: oids.PKType) -> Int asn1.ASN1Error! {
     len := x509_write_names(buf, c, 0, ctx.subject)
     validity := x509write_time(buf, c, ctx.not_after)
     validity += x509write_time(buf, c, ctx.not_before)
@@ -626,7 +626,7 @@ x509write_crt_head: fn(ctx: X509WriteCert, buf: &[U8], c: &Int, sig_oid: [U8], p
 
 // The TBSCertificate's version, if any, and the SEQUENCE around `len`
 // bytes of fields.
-x509write_crt_version: fn(ctx: X509WriteCert, buf: &[U8], c: &Int, fields: Int) -> Int asn1.ASN1Error! {
+x509write_crt_version: fn(ctx: X509WriteCert, buf: ^[U8], c: ^Int, fields: Int) -> Int asn1.ASN1Error! {
     len := fields
     if ctx.version != X509_CRT_VERSION_1 {
         v: asn1.write_int(buf, c, 0, ctx.version)
@@ -643,7 +643,7 @@ x509write_crt_version: fn(ctx: X509WriteCert, buf: &[U8], c: &Int, fields: Int) 
 /// InvalidAlg for an issuer key that is neither RSA nor EC, the OID
 /// NOT_FOUND for a digest with no signature algorithm, and the key or
 /// signing failure otherwise.
-x509write_crt_der: fn<R: RNG>(ctx: &X509WriteCert, size: Int, rng: &R) -> [U8] x509.X509Error! {
+x509write_crt_der: fn<R: RNG>(ctx: ^X509WriteCert, size: Int, rng: ^R) -> [U8] x509.X509Error! {
     pk_alg: x509write_pk_alg(ctx.issuer_key)
     sig_oid: oids.oid_by_sig_alg(pk_alg, ctx.md_alg) ?? return Err(.OID(err))
     buf := cipher.zero_bytes(size)
@@ -670,7 +670,7 @@ x509write_crt_der: fn<R: RNG>(ctx: &X509WriteCert, size: Int, rng: &R) -> [U8] x
 
 /// The certificate as a PEM "CERTIFICATE" block (mbedtls_x509write_crt_pem;
 /// see x509write_crt_der).
-x509write_crt_pem: fn<R: RNG>(ctx: &X509WriteCert, size: Int, rng: &R) -> [U8] x509.X509Error! {
+x509write_crt_pem: fn<R: RNG>(ctx: ^X509WriteCert, size: Int, rng: ^R) -> [U8] x509.X509Error! {
     der: x509write_crt_der(ctx, size, rng)
     Ok(pem.pem_write_buffer("-----BEGIN CERTIFICATE-----\n", "-----END CERTIFICATE-----\n", der))
 }
@@ -694,40 +694,40 @@ x509write_csr_new: fn() -> X509WriteCSR Never! {
 
 /// Set the subject from its string form (mbedtls_x509write_csr_set_subject_name;
 /// see x509_string_to_names).
-x509write_csr_set_subject_name: fn(ctx: &X509WriteCSR, name: String) x509.X509Error! {
+x509write_csr_set_subject_name: fn(ctx: ^X509WriteCSR, name: String) x509.X509Error! {
     ctx.subject = [asn1.NamedData]{}
     x509_string_to_names(ctx.subject, name)
 }
 
 /// Add or replace the extension `oid` with the DER value `val`
 /// (mbedtls_x509write_csr_set_extension).
-x509write_csr_set_extension: fn(ctx: &X509WriteCSR, oid: [U8], critical: Bool, val: [U8]) Never! {
+x509write_csr_set_extension: fn(ctx: ^X509WriteCSR, oid: [U8], critical: Bool, val: [U8]) Never! {
     x509_set_extension(ctx.extensions, oid, critical, val)
 }
 
 /// Set the subjectAltName extension (mbedtls_x509write_csr_set_subject_alternative_name;
 /// see x509_write_set_san_common).
-x509write_csr_set_subject_alternative_name: fn(ctx: &X509WriteCSR, sans: [X509SanEntry]) x509.X509Error! {
+x509write_csr_set_subject_alternative_name: fn(ctx: ^X509WriteCSR, sans: [X509SanEntry]) x509.X509Error! {
     x509_write_set_san_common(ctx.extensions, sans)
 }
 
 /// Set the keyUsage extension, not critical, from the X509_KU_* bits of
 /// one byte (mbedtls_x509write_csr_set_key_usage).
-x509write_csr_set_key_usage: fn(ctx: &X509WriteCSR, key_usage: U8) x509.X509Error! {
+x509write_csr_set_key_usage: fn(ctx: ^X509WriteCSR, key_usage: U8) x509.X509Error! {
     bits: x509write_byte_bitstring(key_usage)
     x509_set_extension(ctx.extensions, oids.OID_KEY_USAGE, false, bits)
 }
 
 /// Set the Netscape certificate type extension from X509_NS_CERT_TYPE_*
 /// bits (mbedtls_x509write_csr_set_ns_cert_type).
-x509write_csr_set_ns_cert_type: fn(ctx: &X509WriteCSR, ns_cert_type: U8) x509.X509Error! {
+x509write_csr_set_ns_cert_type: fn(ctx: ^X509WriteCSR, ns_cert_type: U8) x509.X509Error! {
     bits: x509write_byte_bitstring(ns_cert_type)
     x509_set_extension(ctx.extensions, oids.OID_NS_CERT_TYPE, false, bits)
 }
 
 // The CertificationRequestInfo's attributes: the extensionRequest of the
 // extensions when there are any, inside the [0] of attributes.
-x509write_csr_attributes: fn(ctx: X509WriteCSR, buf: &[U8], c: &Int) -> Int asn1.ASN1Error! {
+x509write_csr_attributes: fn(ctx: X509WriteCSR, buf: ^[U8], c: ^Int) -> Int asn1.ASN1Error! {
     len := x509_write_extensions(buf, c, 0, ctx.extensions)
     if len != 0 {
         len = asn1.write_len_and_tag(buf, c, 0, len, X509_CREATE_SEQUENCE)
@@ -741,7 +741,7 @@ x509write_csr_attributes: fn(ctx: X509WriteCSR, buf: &[U8], c: &Int) -> Int asn1
 
 // The CertificationRequestInfo's subject and version 0, and the SEQUENCE
 // around `len` bytes of fields.
-x509write_csr_info: fn(ctx: X509WriteCSR, buf: &[U8], c: &Int, fields: Int) -> Int asn1.ASN1Error! {
+x509write_csr_info: fn(ctx: X509WriteCSR, buf: ^[U8], c: ^Int, fields: Int) -> Int asn1.ASN1Error! {
     len := fields
     len += x509_write_names(buf, c, 0, ctx.subject)
     len += asn1.write_int(buf, c, 0, 0)
@@ -755,7 +755,7 @@ x509write_csr_info: fn(ctx: X509WriteCSR, buf: &[U8], c: &Int, fields: Int) -> I
 /// BufTooSmall. BadInput for no digest, the signing failure, then
 /// InvalidAlg for a key that is neither RSA nor EC and the OID NOT_FOUND
 /// for a digest with no signature algorithm.
-x509write_csr_der: fn<R: RNG>(ctx: &X509WriteCSR, size: Int, rng: &R) -> [U8] x509.X509Error! {
+x509write_csr_der: fn<R: RNG>(ctx: ^X509WriteCSR, size: Int, rng: ^R) -> [U8] x509.X509Error! {
     buf := cipher.zero_bytes(size)
     c := size
     len := x509write_csr_attributes(ctx, buf, c) ?? return Err(.Asn1(err))
@@ -772,7 +772,7 @@ x509write_csr_der: fn<R: RNG>(ctx: &X509WriteCSR, size: Int, rng: &R) -> [U8] x5
 
 /// The request as a PEM "CERTIFICATE REQUEST" block
 /// (mbedtls_x509write_csr_pem; see x509write_csr_der).
-x509write_csr_pem: fn<R: RNG>(ctx: &X509WriteCSR, size: Int, rng: &R) -> [U8] x509.X509Error! {
+x509write_csr_pem: fn<R: RNG>(ctx: ^X509WriteCSR, size: Int, rng: ^R) -> [U8] x509.X509Error! {
     der: x509write_csr_der(ctx, size, rng)
     Ok(pem.pem_write_buffer("-----BEGIN CERTIFICATE REQUEST-----\n", "-----END CERTIFICATE REQUEST-----\n", der))
 }

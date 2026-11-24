@@ -136,7 +136,7 @@ OverlaySet: struct {
     // field priority (equal-priority disagreement fails closed), keyed
     // environment facts let a later equal-priority declaration win, and
     // flags, patches, and unfree grants accumulate.
-    merge_package: fn(&self, incoming: PackageOverride) OverlayError! {
+    merge_package: fn(^self, incoming: PackageOverride) OverlayError! {
         loop position in 0..<self.packages.len() {
             if self.packages[position].package == incoming.package {
                 existing := self.packages[position]
@@ -209,7 +209,7 @@ PackageOverride: struct {
         }
     }
 
-    set_scalar: fn(&self, field: OverrideScalarField, value: String) Never! {
+    set_scalar: fn(^self, field: OverrideScalarField, value: String) Never! {
         if field == {
             .Source -> { self.source = Val(value) }
             .Version -> self.version = Val(value)
@@ -217,13 +217,13 @@ PackageOverride: struct {
     }
 
     // Record `priority` for `field`, keeping any higher priority already there.
-    raise_priority: fn(&self, field: String, priority: Int) Never! {
+    raise_priority: fn(^self, field: String, priority: Int) Never! {
         current: self.field_priorities.get(field) ?? priority
         self.field_priorities[field] = if current > priority -> current else -> priority
     }
 
     // Record a contribution's priority for `field` and the aggregate maximum.
-    record_priority: fn(&self, field: String, priority: Int) Never! {
+    record_priority: fn(^self, field: String, priority: Int) Never! {
         if priority > self.priority -> self.priority = priority
         self.field_priorities[field] = priority
     }
@@ -231,7 +231,7 @@ PackageOverride: struct {
     env_value: fn(self, key: String) -> String? Never! { pkg_overlay_env_lookup(self.env, key) }
 
     // Replace the value for `key`, or append the fact when the key is new.
-    set_env: fn(&self, key: String, value: String) Never! {
+    set_env: fn(^self, key: String, value: String) Never! {
         loop position in 0..<self.env.len() {
             if self.env[position].key == key {
                 self.env[position].value = value
@@ -242,7 +242,7 @@ PackageOverride: struct {
     }
 
     // Merge a later declaration for the same package into this one.
-    absorb: fn(&self, incoming: PackageOverride) OverlayError! {
+    absorb: fn(^self, incoming: PackageOverride) OverlayError! {
         self.merge_scalar(incoming, OverrideScalarField.Source)
         self.merge_scalar(incoming, OverrideScalarField.Version)
         loop flag in incoming.flags -> self.flags.push(flag.copy())
@@ -279,7 +279,7 @@ PackageOverride: struct {
         self.env = pkg_overlay_sorted_env(self.env)
     }
 
-    merge_scalar: fn(&self, incoming: PackageOverride, field: OverrideScalarField) OverlayError! {
+    merge_scalar: fn(^self, incoming: PackageOverride, field: OverrideScalarField) OverlayError! {
         incoming_value: incoming.scalar(field) ?? return
         incoming_priority: incoming.field_priority(field.name())
         existing_priority: self.field_priority(field.name())
@@ -334,7 +334,7 @@ ResolvedPackageOverride: struct {
         }
     }
 
-    set_scalar: fn(&self, field: OverrideScalarField, value: String) Never! {
+    set_scalar: fn(^self, field: OverrideScalarField, value: String) Never! {
         if field == {
             .Source -> { self.source = Val(value) }
             .Version -> self.version = Val(value)
@@ -342,13 +342,13 @@ ResolvedPackageOverride: struct {
     }
 
     // Record `priority` for `field`, keeping any higher priority already there.
-    raise_priority: fn(&self, field: String, priority: Int) Never! {
+    raise_priority: fn(^self, field: String, priority: Int) Never! {
         current: self.field_priorities.get(field) ?? priority
         self.field_priorities[field] = if current > priority -> current else -> priority
     }
 
     // Replace the value for `key`, or append the fact when the key is new.
-    set_env: fn(&self, key: String, value: String) Never! {
+    set_env: fn(^self, key: String, value: String) Never! {
         loop position in 0..<self.env.len() {
             if self.env[position].key == key {
                 self.env[position].value = value

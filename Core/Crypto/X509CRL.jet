@@ -87,7 +87,7 @@ x509_crl_new: fn() -> X509Crl Never! {
 }
 
 // x509_crl_get_version: an INTEGER, v1 (0) when absent.
-x509_crl_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
+x509_crl_get_version: fn(data: [U8], p: ^Int, end: Int) -> Int x509.X509Error! {
     if asn1.get_int(data, p, end) == {
         .Ok(ver) -> Ok(ver)
         .Err(e) -> {
@@ -99,7 +99,7 @@ x509_crl_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
 
 // x509_get_crl_ext: the [0] crlExtensions, each well formed and none
 // critical; their content is not read.
-x509_crl_get_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
+x509_crl_get_ext: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
     if p == end -> return Ok(asn1.asn1_none())
     ext: x509.x509_get_ext(data, p, end, 0)
     exts_end: ext.p + ext.len
@@ -126,7 +126,7 @@ x509_crl_get_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Err
 
 // x509_get_crl_entry_ext: an entry's optional crlEntryExtensions, each
 // Extension only checked to be a SEQUENCE.
-x509_crl_get_entry_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
+x509_crl_get_entry_ext: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
     if end <= p -> return Ok(asn1.asn1_none())
     ext := asn1.ASN1Buf{tag_id: Int{data[p]}, p: p, len: 0}
     if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
@@ -147,7 +147,7 @@ x509_crl_get_entry_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X
 
 // x509_get_entries: the optional revokedCertificates. A malformed SEQUENCE
 // fails with the bare ASN.1 code, as mbedtls returns it.
-x509_crl_get_entries: fn(data: [U8], p: &Int, end: Int) -> [X509CrlEntry] x509.X509Error! {
+x509_crl_get_entries: fn(data: [U8], p: ^Int, end: Int) -> [X509CrlEntry] x509.X509Error! {
     entries := [X509CrlEntry]{}
     if p == end -> return Ok(entries)
     entry_len: if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
@@ -227,7 +227,7 @@ x509_crl_parse_der_core: fn(buf: [U8]) -> X509Crl x509.X509Error! {
 
 /// Parse one DER CRL filling buf and append it to chain
 /// (mbedtls_x509_crl_parse_der); on failure the chain is unchanged.
-x509_crl_parse_der: fn(chain: &[X509Crl], buf: [U8]) x509.X509Error! {
+x509_crl_parse_der: fn(chain: ^[X509Crl], buf: [U8]) x509.X509Error! {
     crl: x509_crl_parse_der_core(buf)
     chain.push(crl)
 }
@@ -237,7 +237,7 @@ x509_crl_parse_der: fn(chain: &[X509Crl], buf: [U8]) x509.X509Error! {
 /// text up to the first NUL byte reads; then each further block must read
 /// and parse until no text is left, the CRLs before a failure staying in
 /// the chain.
-x509_crl_parse: fn(chain: &[X509Crl], buf: [U8]) x509.X509Error! {
+x509_crl_parse: fn(chain: ^[X509Crl], buf: [U8]) x509.X509Error! {
     is_pem := false
     rest := buf.copy()
     loop {

@@ -53,7 +53,7 @@ X64_ASM_UNKNOWN: -100
 x64_asm_operand_value: fn(index: Int) -> Int Never! { -1 - index }
 
 // Register `reg` is written with a value the template does not track.
-x64_asm_wrote: fn(s: &X64AsmState, reg: Int) Never! {
+x64_asm_wrote: fn(s: ^X64AsmState, reg: Int) Never! {
     s.written[reg] = true
     s.values[reg] = X64_ASM_UNKNOWN
 }
@@ -209,7 +209,7 @@ x64_asm_sse_shift: fn(mnemonic: String) -> Int Never! {
     }
 }
 
-x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
+x64_asm_line: fn(s: ^X64AsmState, line: String) -> String? Never! {
     parts: line.split(";").to_list()
     instruction: parts[0].trim()
     if instruction == "" {

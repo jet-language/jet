@@ -231,7 +231,7 @@ Workspace: struct {
     // A fresh project and caches, the private Nix store seeded with the
     // pinned nixpkgs source (flake evaluation needs it; it is a toolchain
     // input), then one validated build by each peer.
-    set_up: fn(&self) Err! {
+    set_up: fn(^self) Err! {
         remove_if_exists(self.work_dir)
         files.create_dir_all(self.jet_store)
         write_project(self.project, self.repo)
@@ -254,7 +254,7 @@ Workspace: struct {
 
     // The output path `step` printed, its artifact run from under `prefix`
     // (a private store's root; "" for the system store).
-    validate_nix: fn(&self, step: Step, prefix: String) Err! {
+    validate_nix: fn(^self, step: Step, prefix: String) Err! {
         out: last_line(step)
         if !out.starts_with("/nix/store/") {
             return Err("nix build printed no output path: {json.stringify(Dyn.Text(step.output.copy()))}")
@@ -268,7 +268,7 @@ Workspace: struct {
 
     // One new unused function in the edit file: a real source change that
     // keeps the program's output.
-    edit: fn(&self, peer: String) Err! {
+    edit: fn(^self, peer: String) Err! {
         self.edits += 1
         n: self.edits
         if peer == "jet" {
@@ -279,7 +279,7 @@ Workspace: struct {
     }
 
     // The untimed preparation of `peer`'s sample of `cell`.
-    prepare: fn(&self, cell: String, peer: String) Err! {
+    prepare: fn(^self, cell: String, peer: String) Err! {
         jet_cache: files.join(self.jet_dir, ".jet")
         if "{cell} {peer}" == {
             "incremental jet" -> self.edit(peer)
@@ -304,7 +304,7 @@ Workspace: struct {
     }
 
     // One timed sample of `peer` on `cell`, its result validated.
-    measure: fn(&self, cell: Dyn, id: String, peer: String) -> Int Err! {
+    measure: fn(^self, cell: Dyn, id: String, peer: String) -> Int Err! {
         argv: self.expand(texts_at(cell, peer))
         what: "{id} ({peer})"
         done: if peer == "jet" -> self.must_jet(what, argv) else -> checked(what, argv, process.cmd(argv).cwd(self.nix_dir))
@@ -319,7 +319,7 @@ Workspace: struct {
     }
 
     // Every round over every cell, each peer in turn, the order alternating.
-    rounds: fn(&self, cells: [Dyn], samples: Int, warmups: Int) Err! {
+    rounds: fn(^self, cells: [Dyn], samples: Int, warmups: Int) Err! {
         self.set_up()
         loop round in 0..<(warmups + samples) {
             order: if round % 2 == 0 -> ["jet", "nix"] else -> ["nix", "jet"]

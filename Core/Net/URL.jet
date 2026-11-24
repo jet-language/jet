@@ -43,7 +43,7 @@ URL: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { unparse(self) }
+        debug: fn(^^self) -> String { unparse(self) }
     }
 
     impl Equatable {
@@ -378,7 +378,7 @@ find_text: fn(text: String, needle: String, start: Int) -> Int Never! {
     -1
 }
 
-replace_holes: fn(text: String, marker: String, holes: [String], cursor: &URLHoleCursor) -> String Never! {
+replace_holes: fn(text: String, marker: String, holes: [String], cursor: ^URLHoleCursor) -> String Never! {
     next_marker := find_text(text, marker, 0)
     if next_marker < 0 -> return text.copy()
     out := ""
@@ -393,7 +393,7 @@ replace_holes: fn(text: String, marker: String, holes: [String], cursor: &URLHol
     "{out}{slice(text.bytes(), start, text.bytes().len())}"
 }
 
-apply_holes: fn(text: String, marker: String, holes: [String], cursor: &URLHoleCursor) -> [URLPart] Never! {
+apply_holes: fn(text: String, marker: String, holes: [String], cursor: ^URLHoleCursor) -> [URLPart] Never! {
     out := [URLPart]{}
     start := 0
     loop {

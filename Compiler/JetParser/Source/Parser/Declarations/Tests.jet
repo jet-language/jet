@@ -18,7 +18,7 @@ use {
 }
 
 // `#Test.X` is a qualified marker from a module aliased `test`, not a test.
-parser_test_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_test_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Test" && parser_kind_at(state, 2) != TOKEN_DOT
 }
 
@@ -46,7 +46,7 @@ parser_test_name_of: fn(value: Expr?, fallback: Span) -> {name: String?, span: S
 // literal stays in `name_expr` for compile-time evaluation. A property test's
 // `#Pre(cond, msg)` markers (`markers`, the ones written above it) are its
 // precondition: a generated case that fails one is rejected, not run.
-parser_parse_test: fn(state: &JetParserState, markers: [Marker]) -> Item {
+parser_parse_test: fn(state: ^JetParserState, markers: [Marker]) -> Item {
     marker: parser_parse_marker(state)
     bound: parser_bind_marker_arguments(state, marker, [String]{"name", "faults", "expected_fail"}, 0)
     values := [Expr?]{None, None, None}

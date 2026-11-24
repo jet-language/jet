@@ -35,7 +35,7 @@ TYPE_ROW_SOURCE: "Logger: struct {{\n    prefix: String,\n\n    say: fn(self, te
 
 TYPE_ROW_MODULE: "type-rows.main"
 
-effect_type_row_graph: fn(failures: &[String]) -> SemaRegistrationGraph? {
+effect_type_row_graph: fn(failures: ^[String]) -> SemaRegistrationGraph? {
     parsed := parse_source(TYPE_ROW_SOURCE.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
         failures.push("source parsing failed: {parsed.diagnostics:Debug}")
@@ -80,7 +80,7 @@ effect_type_row_find: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRow]
 
 // `name`'s row holds `effect_name`, first brought in by a source of `kind`
 // labeled `label`; with `kind` "" the row must not hold `effect_name`.
-effect_type_row_expect: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRow], name: String, effect_name: String, kind: String, label: String, failures: &[String]) {
+effect_type_row_expect: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRow], name: String, effect_name: String, kind: String, label: String, failures: ^[String]) {
     row: effect_type_row_find(graph, rows, name) ?? {
         failures.push("{name}: no inferred row")
         return

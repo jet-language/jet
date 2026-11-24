@@ -1114,7 +1114,7 @@ sema_comptime_reflection_layout_item_name: fn(item: Item) -> String? {
     }
 }
 
-sema_comptime_reflection_layout_type_resolution: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, source_name: String, generic_params: [TypeParam], resolutions: &[TargetLayoutNameResolution]) Never! {
+sema_comptime_reflection_layout_type_resolution: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, source_name: String, generic_params: [TypeParam], resolutions: ^[TargetLayoutNameResolution]) Never! {
     loop parameter in generic_params {
         if parameter.name == source_name {
             return
@@ -1134,7 +1134,7 @@ sema_comptime_reflection_layout_type_resolution: fn(graph: SemaRegistrationGraph
     }
 }
 
-sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, generic_params: [TypeParam], ty: Type, resolutions: &[TargetLayoutNameResolution]) Never! {
+sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, generic_params: [TypeParam], ty: Type, resolutions: ^[TargetLayoutNameResolution]) Never! {
     if ty == {
         .Named(name) -> {
             sema_comptime_reflection_layout_type_resolution(graph, module_identity, owner, name, generic_params, resolutions)
@@ -1152,7 +1152,7 @@ sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGrap
     }
 }
 
-sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, item: Item, resolutions: &[TargetLayoutNameResolution]) Never! {
+sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, item: Item, resolutions: ^[TargetLayoutNameResolution]) Never! {
     if item == {
         .Struct(definition) -> {
             loop field in definition.fields {
@@ -1337,7 +1337,7 @@ sema_comptime_reflection_written_markers: fn(
     program: Program,
     catalog: TAppliedRuleCatalog,
     markers: [Marker],
-    registry: &SemaScopeMembersMarkerRegistry?,
+    registry: ^SemaScopeMembersMarkerRegistry?,
 ) -> [TComptimeValue]? {
     if markers.len() == 0 -> return Val([TComptimeValue]{})
     if registry == None {
@@ -1667,7 +1667,7 @@ sema_comptime_reflection_type_id_signed: fn(identity: String, name: String, sign
 // record a FunctionInfo's `signature` is, read from the type itself given
 // the TypeId of each of its parameter types `types`, in order, and its
 // `return_type` value `returned`: a ParamInfo per parameter, with the label
-// and zone the type's `/` or `*` gives it and the access its `&` or `&&`
+// and zone the type's `/` or `*` gives it and the access its `^` or `^^`
 // mark gives it (a plain `fn(Int) -> Int` writes none: its parameters are
 // positional, unlabeled and read), plus the name, default and variadic flag
 // the type of a named function keeps; the effect row it bounds as `declared`
@@ -2005,7 +2005,7 @@ sema_arithmetic_policy_facts: fn(function: Func) -> [ArithmeticPolicyFact] {
     facts
 }
 
-sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &SemaArithmeticScan) {
+sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: ^SemaArithmeticScan) {
     if expr == {
         .Call(call, _) -> {
             loop argument in call.args {
@@ -2147,7 +2147,7 @@ sema_comptime_reflection_append_arithmetic_expr: fn(expr: Expr, values: &SemaAri
     }
 }
 
-sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &SemaArithmeticScan) {
+sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: ^SemaArithmeticScan) {
     loop statement in body {
         if statement == {
             .Expr(value) | .BreakValue(value, _) | .Yield(value, _) -> {
@@ -2372,7 +2372,7 @@ sema_comptime_reflection_function_info: fn(registration: SemaRegistrationGraph, 
     sema_comptime_reflection_located(info, registered_module.source_segments, sema_comptime_reflection_module_of(registered_module), sema_comptime_reflection_doc_source(registered_module.source, registered_module.source_file))
 }
 
-sema_comptime_reflection_append_methods: fn(registration: SemaRegistrationGraph, caller: Int, methods: [Func], module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, bindings: [SemaInferenceBinding], values: &[TComptimeValue]) {
+sema_comptime_reflection_append_methods: fn(registration: SemaRegistrationGraph, caller: Int, methods: [Func], module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, bindings: [SemaInferenceBinding], values: ^[TComptimeValue]) {
     loop method in methods {
         if bindings.len() == 0 {
             values.push(sema_comptime_reflection_method_info(registration, caller, method, module_path, identity, registry, bindings))
@@ -2384,7 +2384,7 @@ sema_comptime_reflection_append_methods: fn(registration: SemaRegistrationGraph,
 
 // An inherent `impl Owner { ... }` block declares methods of `Owner` too; reflection lists them beside the body's own.
 // An impl that names its own type parameters (`impl Pair<U>`) binds them in order.
-sema_comptime_reflection_append_inherent_methods: fn(registration: SemaRegistrationGraph, caller: Int, items: [Item], owner: String, module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, bindings: [SemaInferenceBinding], values: &[TComptimeValue]) {
+sema_comptime_reflection_append_inherent_methods: fn(registration: SemaRegistrationGraph, caller: Int, items: [Item], owner: String, module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, bindings: [SemaInferenceBinding], values: ^[TComptimeValue]) {
     loop item in items {
         if item == {
             .Impl(implementation) -> {
@@ -2503,7 +2503,7 @@ sema_comptime_reflection_with_field: fn(info: TComptimeValue, name: String, valu
 
 // CallableSignature `signature` with the specialization `bindings` it was
 // built under as its `generic_bindings` (unchanged when there are none).
-sema_comptime_reflection_bound_signature: fn(registration: SemaRegistrationGraph, caller: Int, signature: &&TComptimeValue, bindings: [SemaInferenceBinding]) -> TComptimeValue {
+sema_comptime_reflection_bound_signature: fn(registration: SemaRegistrationGraph, caller: Int, signature: ^^TComptimeValue, bindings: [SemaInferenceBinding]) -> TComptimeValue {
     if bindings.len() == 0 -> return signature
     sema_comptime_reflection_with_field(signature, "generic_bindings", sema_comptime_reflection_binding_infos(registration, caller, bindings))
 }
@@ -2746,7 +2746,7 @@ sema_comptime_reflection_trait_contracts_from_items: fn(
     module_path: String,
     identity: String,
     registry: SemaScopeMembersMarkerRegistry,
-    contracts: &[TComptimeValue],
+    contracts: ^[TComptimeValue],
 ) {
     loop item in items {
         if item == {

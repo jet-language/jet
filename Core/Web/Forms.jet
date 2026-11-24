@@ -99,11 +99,11 @@ WebFormTyped: struct {
     input: WebFormInput,
 
     // Sets field `name` to `value`, as the browser would.
-    set: fn(&self, name: String, value: String) WebFormError! { typed_set(self, name, value) }
+    set: fn(^self, name: String, value: String) WebFormError! { typed_set(self, name, value) }
 
     // Runs `validator` on field `name`'s value and marks the field's result;
     // `timing` and `delay_ms` name when a browser would run it.
-    set_async_validator: fn<E>(&self, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
+    set_async_validator: fn<E>(^self, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
         typed_set_async_validator(self, name, timing, delay_ms, validator)
     }
 
@@ -113,22 +113,22 @@ WebFormTyped: struct {
     }
 
     // Leaves field `name`, which validates it.
-    blur: fn(&self, name: String) WebFormError! { typed_blur(self, name) }
+    blur: fn(^self, name: String) WebFormError! { typed_blur(self, name) }
 
     // Moves the focus to field `name`.
-    focus: fn(&self, name: String) WebFormError! { typed_focus(self, name) }
+    focus: fn(^self, name: String) WebFormError! { typed_focus(self, name) }
 
     // Decodes a script-free POST body against the model and encodes it back.
     post: fn(self, body: String) -> String WebFormError! { typed_post(self, body) }
 
     // Drops a pending submission and its form error.
-    cancel: fn(&self) Never! { typed_cancel(self) }
+    cancel: fn(^self) Never! { typed_cancel(self) }
 
     // Validates every field, then submits and renders the form.
-    submit: fn(&self) -> String WebFormError! { typed_submit(self) }
+    submit: fn(^self) -> String WebFormError! { typed_submit(self) }
 
     // The form as script-free HTML.
-    no_script: fn(&self) -> String WebFormError! { typed_no_script(self) }
+    no_script: fn(^self) -> String WebFormError! { typed_no_script(self) }
 
     // The form's status by name.
     state: fn(self) -> String Never! { typed_state(self) }
@@ -210,7 +210,7 @@ field: fn(form: WebForm, name: String, kind: String, required: Bool) -> WebForm 
     Ok(out)
 }
 
-set: fn(form: &WebForm, name: String, value: String) WebFormError! {
+set: fn(form: ^WebForm, name: String, value: String) WebFormError! {
     if value.len() > C_MAX_FORM_TEXT -> return Err(WebFormError.Invalid)
     loop i in 0..<form.fields.len() {
         if form.fields[i].name == name {
@@ -225,7 +225,7 @@ set: fn(form: &WebForm, name: String, value: String) WebFormError! {
     return Err(WebFormError.Missing)
 }
 
-blur: fn(form: &WebForm, name: String) WebFormError! {
+blur: fn(form: ^WebForm, name: String) WebFormError! {
     found := false
     valid := false
     loop field in form.fields {
@@ -242,7 +242,7 @@ blur: fn(form: &WebForm, name: String) WebFormError! {
     return Ok()
 }
 
-validate: fn(form: &WebForm) WebFormError! {
+validate: fn(form: ^WebForm) WebFormError! {
     if !apply_validation(form) -> return Err(WebFormError.Validation)
     return Ok()
 }
@@ -253,7 +253,7 @@ validate_async: fn(form: WebForm) -> WebForm Never! {
     out
 }
 
-submit: fn(form: &WebForm) -> String WebFormError! {
+submit: fn(form: ^WebForm) -> String WebFormError! {
     if !apply_validation(form) -> return Err(WebFormError.Validation)
     form.status = WebFormStatus.Submitted
     html(form)
@@ -352,11 +352,11 @@ typed: fn(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
     Ok(WebFormTyped{form: WebForm{action: action.copy(), method: "POST", fields: states, status: WebFormStatus.Idle, form_error: "", focused: ""}, action: action, input: input})
 }
 
-typed_set: fn(form: &WebFormTyped, name: String, value: String) WebFormError! {
+typed_set: fn(form: ^WebFormTyped, name: String, value: String) WebFormError! {
     set(form.form, name, value)
 }
 
-typed_set_async_validator: fn<E>(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
+typed_set_async_validator: fn<E>(form: ^WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
     _: timing.copy()
     _: delay_ms
     if name.len() == 0 -> return Err(WebFormError.Missing)
@@ -408,9 +408,9 @@ action_form_error: fn(error: WebFormActionError, message: String) -> WebFormActi
     out
 }
 
-typed_blur: fn(form: &WebFormTyped, name: String) WebFormError! { blur(form.form, name) }
+typed_blur: fn(form: ^WebFormTyped, name: String) WebFormError! { blur(form.form, name) }
 
-typed_validate: fn(form: &WebFormTyped) WebFormError! { validate(form.form) }
+typed_validate: fn(form: ^WebFormTyped) WebFormError! { validate(form.form) }
 
 typed_validate_async: fn(form: WebFormTyped) -> WebFormValidation Never! {
     out := form.copy()
@@ -443,13 +443,13 @@ typed_validation_render: fn(chain: WebFormValidationChain) -> String Never! {
     "{chain.field}:invalid"
 }
 
-typed_submit: fn(form: &WebFormTyped) -> String WebFormError! {
+typed_submit: fn(form: ^WebFormTyped) -> String WebFormError! {
     if !apply_validation(form.form) -> return Err(WebFormError.Validation)
     form.form.status = WebFormStatus.Submitted
     typed_html(form)
 }
 
-typed_no_script: fn(form: &WebFormTyped) -> String WebFormError! { typed_html(form) }
+typed_no_script: fn(form: ^WebFormTyped) -> String WebFormError! { typed_html(form) }
 
 typed_submit_async: fn(form: WebFormTyped) -> WebFormTypedSubmission Never! {
     out := form.copy()
@@ -486,7 +486,7 @@ typed_errors: fn(form: WebFormTyped) -> WebFormErrorState Never! {
     WebFormErrorState{fields: names, form: form_errors}
 }
 
-typed_focus: fn(form: &WebFormTyped, name: String) WebFormError! {
+typed_focus: fn(form: ^WebFormTyped, name: String) WebFormError! {
     if name.len() == 0 -> return Err(WebFormError.Missing)
     loop item in form.form.fields {
         if item.name == name {
@@ -497,7 +497,7 @@ typed_focus: fn(form: &WebFormTyped, name: String) WebFormError! {
     return Err(WebFormError.Missing)
 }
 
-typed_cancel: fn(form: &WebFormTyped) Never! {
+typed_cancel: fn(form: ^WebFormTyped) Never! {
     form.form.status = WebFormStatus.Idle
     form.form.form_error = ""
 }
@@ -509,24 +509,24 @@ typed_select_field: fn(form: WebFormTyped, name: String) -> WebFormFieldState We
     return Err(WebFormError.Missing)
 }
 
-typed_validation_wait: fn(validation: &WebFormValidation) WebFormError! {
+typed_validation_wait: fn(validation: ^WebFormValidation) WebFormError! {
     result: validate(validation.form.form)
     validation.pending = false
     result
 }
 
-typed_validation_cancel: fn(validation: &WebFormValidation) Never! {
+typed_validation_cancel: fn(validation: ^WebFormValidation) Never! {
     validation.pending = false
     validation.form.form.status = WebFormStatus.Idle
 }
 
-typed_submission_wait: fn(submission: &WebFormTypedSubmission) -> String WebFormError! {
+typed_submission_wait: fn(submission: ^WebFormTypedSubmission) -> String WebFormError! {
     result: typed_submit(submission.form)
     submission.pending = false
     result
 }
 
-typed_submission_cancel: fn(submission: &WebFormTypedSubmission) Never! {
+typed_submission_cancel: fn(submission: ^WebFormTypedSubmission) Never! {
     submission.pending = false
     submission.form.form.status = WebFormStatus.Idle
 }
@@ -611,7 +611,7 @@ validation_error: fn(field: WebFormFieldState) -> String Never! {
     ""
 }
 
-apply_validation: fn(form: &WebForm) -> Bool Never! {
+apply_validation: fn(form: ^WebForm) -> Bool Never! {
     ok := true
     loop i in 0..<form.fields.len() {
         err := validation_error(form.fields[i])
@@ -627,7 +627,7 @@ apply_validation: fn(form: &WebForm) -> Bool Never! {
     ok
 }
 
-validate_field_form: fn(form: &WebForm, name: String) -> Bool Never! {
+validate_field_form: fn(form: ^WebForm, name: String) -> Bool Never! {
     loop i in 0..<form.fields.len() {
         if form.fields[i].name == name {
             err := validation_error(form.fields[i])
@@ -919,7 +919,7 @@ esc: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-push_str: fn(out: &[U8], value: String) Never! {
+push_str: fn(out: ^[U8], value: String) Never! {
     loop b in value.bytes() -> out.push(b)
 }
 

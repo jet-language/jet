@@ -1144,7 +1144,7 @@ sema_compiler_index_ordinal_key: fn(parent: Int?, slot: String) -> String Never!
     "-:{slot}"
 }
 
-sema_compiler_index_walk_node: fn(state: &SemaCompilerIndexWalkState, class: String, shape: String, span: Span) -> Int? {
+sema_compiler_index_walk_node: fn(state: ^SemaCompilerIndexWalkState, class: String, shape: String, span: Span) -> Int? {
     if span.end < span.start -> return None
     parent := Int?{None}
     if state.parents.len() > 0 -> parent = Val(state.parents[state.parents.len() - 1])
@@ -1172,7 +1172,7 @@ sema_compiler_index_walk_node: fn(state: &SemaCompilerIndexWalkState, class: Str
     Val(id)
 }
 
-sema_compiler_index_walk_expr_slot: fn(state: &SemaCompilerIndexWalkState, slot: String, expression: Expr) {
+sema_compiler_index_walk_expr_slot: fn(state: ^SemaCompilerIndexWalkState, slot: String, expression: Expr) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1182,7 +1182,7 @@ sema_compiler_index_walk_expr_slot: fn(state: &SemaCompilerIndexWalkState, slot:
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_stmt_slot: fn(state: &SemaCompilerIndexWalkState, slot: String, statements: [Stmt]) {
+sema_compiler_index_walk_stmt_slot: fn(state: ^SemaCompilerIndexWalkState, slot: String, statements: [Stmt]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1192,7 +1192,7 @@ sema_compiler_index_walk_stmt_slot: fn(state: &SemaCompilerIndexWalkState, slot:
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_call_args_slot: fn(state: &SemaCompilerIndexWalkState, slot: String, args: [CallArg]) {
+sema_compiler_index_walk_call_args_slot: fn(state: ^SemaCompilerIndexWalkState, slot: String, args: [CallArg]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1202,11 +1202,11 @@ sema_compiler_index_walk_call_args_slot: fn(state: &SemaCompilerIndexWalkState, 
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_call_args: fn(state: &SemaCompilerIndexWalkState, args: [CallArg]) {
+sema_compiler_index_walk_call_args: fn(state: ^SemaCompilerIndexWalkState, args: [CallArg]) {
     sema_compiler_index_walk_call_args_slot(state, "args", args)
 }
 
-sema_compiler_index_walk_expr_list: fn(state: &SemaCompilerIndexWalkState, slot: String, expressions: [Expr]) {
+sema_compiler_index_walk_expr_list: fn(state: ^SemaCompilerIndexWalkState, slot: String, expressions: [Expr]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1216,7 +1216,7 @@ sema_compiler_index_walk_expr_list: fn(state: &SemaCompilerIndexWalkState, slot:
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_expr_fields: fn(state: &SemaCompilerIndexWalkState, slot: String, fields: [ExprField]) {
+sema_compiler_index_walk_expr_fields: fn(state: ^SemaCompilerIndexWalkState, slot: String, fields: [ExprField]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1226,7 +1226,7 @@ sema_compiler_index_walk_expr_fields: fn(state: &SemaCompilerIndexWalkState, slo
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_tuple_fields: fn(state: &SemaCompilerIndexWalkState, slot: String, fields: [TupleField]) {
+sema_compiler_index_walk_tuple_fields: fn(state: ^SemaCompilerIndexWalkState, slot: String, fields: [TupleField]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1236,7 +1236,7 @@ sema_compiler_index_walk_tuple_fields: fn(state: &SemaCompilerIndexWalkState, sl
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_expr_pairs: fn(state: &SemaCompilerIndexWalkState, slot: String, entries: [ExprPair], keys: Bool) {
+sema_compiler_index_walk_expr_pairs: fn(state: ^SemaCompilerIndexWalkState, slot: String, entries: [ExprPair], keys: Bool) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1250,7 +1250,7 @@ sema_compiler_index_walk_expr_pairs: fn(state: &SemaCompilerIndexWalkState, slot
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_expr: fn(state: &SemaCompilerIndexWalkState, expression: Expr) {
+sema_compiler_index_walk_expr: fn(state: ^SemaCompilerIndexWalkState, expression: Expr) {
     id: sema_compiler_index_walk_node(state, "expr", sema_compiler_index_expr_shape(expression), sema_compiler_index_expr_structural_span(expression)) ?? return
     state.parents.push(id)
     if expression == {
@@ -1414,7 +1414,7 @@ sema_compiler_index_walk_expr: fn(state: &SemaCompilerIndexWalkState, expression
     _ := state.parents.pop()
 }
 
-sema_compiler_index_walk_lvalue: fn(state: &SemaCompilerIndexWalkState, target: LValue) {
+sema_compiler_index_walk_lvalue: fn(state: ^SemaCompilerIndexWalkState, target: LValue) {
     if target == {
         .Local(_, _) -> {}
         .Index(base, index, _, _) -> {
@@ -1425,7 +1425,7 @@ sema_compiler_index_walk_lvalue: fn(state: &SemaCompilerIndexWalkState, target: 
     }
 }
 
-sema_compiler_index_walk_for_kind: fn(state: &SemaCompilerIndexWalkState, kind: ForKind) {
+sema_compiler_index_walk_for_kind: fn(state: ^SemaCompilerIndexWalkState, kind: ForKind) {
     if kind == {
         .Range(start, end, step, _) -> {
             sema_compiler_index_walk_expr_slot(state, "range_start", start)
@@ -1439,7 +1439,7 @@ sema_compiler_index_walk_for_kind: fn(state: &SemaCompilerIndexWalkState, kind: 
     }
 }
 
-sema_compiler_index_walk_arms: fn(state: &SemaCompilerIndexWalkState, arms: [SwitchArm]) {
+sema_compiler_index_walk_arms: fn(state: ^SemaCompilerIndexWalkState, arms: [SwitchArm]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = "arms"
@@ -1455,7 +1455,7 @@ sema_compiler_index_walk_arms: fn(state: &SemaCompilerIndexWalkState, arms: [Swi
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_stmt: fn(state: &SemaCompilerIndexWalkState, statement: Stmt) {
+sema_compiler_index_walk_stmt: fn(state: ^SemaCompilerIndexWalkState, statement: Stmt) {
     id: sema_compiler_index_walk_node(state, "stmt", sema_compiler_index_stmt_shape(statement), sema_compiler_index_stmt_span(statement)) ?? return
     state.parents.push(id)
     if statement == {
@@ -1537,7 +1537,7 @@ sema_compiler_index_walk_stmt: fn(state: &SemaCompilerIndexWalkState, statement:
     _ := state.parents.pop()
 }
 
-sema_compiler_index_walk_type_slot: fn(state: &SemaCompilerIndexWalkState, slot: String, span: Span, is_list: Bool) Never! {
+sema_compiler_index_walk_type_slot: fn(state: ^SemaCompilerIndexWalkState, slot: String, span: Span, is_list: Bool) Never! {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1547,7 +1547,7 @@ sema_compiler_index_walk_type_slot: fn(state: &SemaCompilerIndexWalkState, slot:
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_function: fn(state: &SemaCompilerIndexWalkState, function: Func, body_slot: String) {
+sema_compiler_index_walk_function: fn(state: ^SemaCompilerIndexWalkState, function: Func, body_slot: String) {
     loop fact in sema_arithmetic_policy_facts(function) {
         state.arithmetic.push(sema_compiler_index_arithmetic_fact(fact, state.module_name, state.file))
     }
@@ -1560,11 +1560,11 @@ sema_compiler_index_walk_function: fn(state: &SemaCompilerIndexWalkState, functi
     sema_compiler_index_walk_stmt_slot(state, body_slot, function.body)
 }
 
-sema_compiler_index_walk_methods: fn(state: &SemaCompilerIndexWalkState, methods: [Func]) {
+sema_compiler_index_walk_methods: fn(state: ^SemaCompilerIndexWalkState, methods: [Func]) {
     loop method in methods { sema_compiler_index_walk_function(state, method, "method_bodies") }
 }
 
-sema_compiler_index_walk_items_slot: fn(state: &SemaCompilerIndexWalkState, slot: String, items: [Item]) {
+sema_compiler_index_walk_items_slot: fn(state: ^SemaCompilerIndexWalkState, slot: String, items: [Item]) {
     old_slot := state.slot
     old_list := state.slot_is_list
     state.slot = slot
@@ -1574,7 +1574,7 @@ sema_compiler_index_walk_items_slot: fn(state: &SemaCompilerIndexWalkState, slot
     state.slot_is_list = old_list
 }
 
-sema_compiler_index_walk_derive_body: fn(state: &SemaCompilerIndexWalkState, body: [DeriveBodyItem]) {
+sema_compiler_index_walk_derive_body: fn(state: ^SemaCompilerIndexWalkState, body: [DeriveBodyItem]) {
     loop body_item in body {
         if body_item == {
             .Item(item) -> { sema_compiler_index_walk_item(state, item) }
@@ -1611,7 +1611,7 @@ sema_compiler_index_catalog_symbol: fn(catalog: [NamedSpan], candidate: Symbol) 
     false
 }
 
-sema_compiler_index_walk_item: fn(state: &SemaCompilerIndexWalkState, item: Item) {
+sema_compiler_index_walk_item: fn(state: ^SemaCompilerIndexWalkState, item: Item) {
     if sema_compiler_index_catalog_item(item) {
         return
     }
@@ -1954,7 +1954,7 @@ sema_compiler_index_derivation_item_kind: fn(item: Item) -> SymbolKind? Never! {
 // Appends the record of `definition`, declared by the text at `span`, unless
 // a record already credits it; a text outside the source sets `missing`
 // when it is still "".
-sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, registered_module: SemaRegistrationModule, source: String, definition: Symbol, span: Span, records: &[DerivationRecord], credited: &[U32:Bool], missing: &String) Never! {
+sema_compiler_index_derivation_push: fn(registration: SemaRegistrationGraph, registered_module: SemaRegistrationModule, source: String, definition: Symbol, span: Span, records: ^[DerivationRecord], credited: ^[U32:Bool], missing: ^String) Never! {
     // Keyed by the symbol id: equal ids are equal keys, so no key text is
     // resolved for a definition already credited.
     if credited.get(definition.id.id) != None {
@@ -2088,7 +2088,7 @@ sema_compiler_index_view: fn(views: SemaCompilerIndexViews, key: String) -> TCom
 
 // One definition, once, under its key text: `local_key` for a body's local
 // (its body's own symbols hold it), else the run's key of `symbol`.
-sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, local_key: String?, views: SemaCompilerIndexViews, definitions: &[TComptimeValue], seen: &NameTable) {
+sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, local_key: String?, views: SemaCompilerIndexViews, definitions: ^[TComptimeValue], seen: ^NameTable) {
     key := local_key ?? symbol_table_key(registration.symbols, symbol.id)
     if name_find(seen, key) != None {
         return
@@ -2101,7 +2101,7 @@ sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, c
 // in the body's own `locals`. A local id outside `locals` names some other
 // body's row: it is refused as one row of `refused` (every one is listed) and
 // has no key, never read past the keys.
-sema_compiler_index_body_key: fn(symbols: SymbolTable, locals: SymbolLocalKeys, id: SymbolID, name: String, span: Span, owner: String, refused: &[String]) -> String? Never! {
+sema_compiler_index_body_key: fn(symbols: SymbolTable, locals: SymbolLocalKeys, id: SymbolID, name: String, span: Span, owner: String, refused: ^[String]) -> String? Never! {
     if !symbol_is_local(id) -> return Val(symbol_table_key(symbols, id))
     if symbol_local_keys_text_at(locals, id) == .Val(key) -> return Val(key)
     refused.push("`{name}` at offset {span.start} in `{owner}`: local row {symbol_local_row(id)} is outside the body's {symbol_local_keys_count(locals)} keys")
@@ -2113,7 +2113,7 @@ sema_compiler_index_body_key: fn(symbols: SymbolTable, locals: SymbolLocalKeys, 
 // sema_compiler_semantic_index_from_checked builds them; every index is
 // bounds-checked. A body with no row (an empty key, or one no checked body
 // of the module has) is refused as one row of `refused` and has no row.
-sema_compiler_index_body_row: fn(keys: NameTable, rows: [Int], body: String, name: String, span: Span, refused: &[String]) -> Int? Never! {
+sema_compiler_index_body_row: fn(keys: NameTable, rows: [Int], body: String, name: String, span: Span, refused: ^[String]) -> Int? Never! {
     if name_find(keys, body) == .Val(found) {
         at: name_index(found)
         if at > 0 && at < rows.len() -> return Val(rows[at])
@@ -2123,14 +2123,14 @@ sema_compiler_index_body_row: fn(keys: NameTable, rows: [Int], body: String, nam
 }
 
 // A checked body's local, keyed in the body's own symbols `locals`.
-sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolLocalKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: SemaCompilerIndexViews, definitions: &[TComptimeValue], seen: &NameTable, refused: &[String]) {
+sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolLocalKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: SemaCompilerIndexViews, definitions: ^[TComptimeValue], seen: ^NameTable, refused: ^[String]) {
     local_id: local.symbol_id ?? return
     key: sema_compiler_index_body_key(registration.symbols, locals, local_id, local.name, local.span, owner, refused) ?? return
     symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
     sema_compiler_index_append_definition(registration, caller, symbol, Val(key), views, definitions, seen)
 }
 
-sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: SemaCompilerIndexViews, definitions: &[TComptimeValue], seen: &NameTable, refused: &[String]) {
+sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: SemaCompilerIndexViews, definitions: ^[TComptimeValue], seen: ^NameTable, refused: ^[String]) {
     loop statement in function.body {
         if function.tree.stmts[statement] == {
             .Let(local, _, _, _, _, _) -> {

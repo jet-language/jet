@@ -232,7 +232,7 @@ envmodel_classify_profile_ref: fn(raw: String, table: SourceTable) -> RefSpec Re
 // This is the same graph evaluator as `envmodel_evaluate_env_with_selections`;
 // only the file and directory boundary changes. Package tooling uses it to
 // keep every imported profile source inside the already-pinned package root.
-envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
+envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_dir: String, loader: ^L, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
     program: envmodel_parse_program(src)
     environment_root: envmodel_plan_files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     // The root `env.jet` plus every file reachable through `imports: find(…)`
@@ -559,7 +559,7 @@ envmodel_sorted_profile_names: fn(profiles: PackageProfileSet) -> [String] Never
 }
 
 // One managed file per destination; a second, different owner conflicts.
-envmodel_merge_managed_file: fn(managed_files: &[ManagedFile], file: ManagedFile) EnvModelEvalError! {
+envmodel_merge_managed_file: fn(managed_files: ^[ManagedFile], file: ManagedFile) EnvModelEvalError! {
     loop existing in managed_files {
         if existing.destination == file.destination {
             if existing != file {
@@ -587,13 +587,13 @@ envmodel_select_active_environment: fn(names: [String], requested_environment: S
     Ok(Val(names[0]))
 }
 
-envmodel_push_unique: fn(values: &[String], value: String) Never! {
+envmodel_push_unique: fn(values: ^[String], value: String) Never! {
     if !values.contains(value) -> values.push(value.copy())
 }
 
 // An explicit declaration replaces an integration's implicit source name;
 // any other repeated declaration conflicts.
-envmodel_merge_secret_spec: fn(specs: &[SecretSpec], incoming: SecretSpec) EnvModelEvalError! {
+envmodel_merge_secret_spec: fn(specs: ^[SecretSpec], incoming: SecretSpec) EnvModelEvalError! {
     loop index in 0..<specs.len() {
         existing: specs[index]
         if existing.name != incoming.name -> next

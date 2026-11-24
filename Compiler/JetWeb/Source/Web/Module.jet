@@ -55,7 +55,7 @@ WebModule: struct {
 
 // Lowers `m` as every backend's selection reads it (JetIR X64Module.jet
 // ir_x64_compile_module), on the calling thread.
-web_lower: fn(m: &IRModule) Never! {
+web_lower: fn(m: ^IRModule) Never! {
     ir_drop_early(m, compiler_threads_single())
     ir_tail_calls(m, compiler_threads_single())
 }
@@ -148,7 +148,7 @@ web_helper_body: fn(name: String) -> WebBody Never! {
 }
 
 // Calls IR function `row` with no arguments, dropping any result.
-web_call_dropping: fn(e: &WebEmitter, st: WebState, row: Int) Never! {
+web_call_dropping: fn(e: ^WebEmitter, st: WebState, row: Int) Never! {
     web_call(e, row)
     if web_sig_result(st.sigs[row]) != "" -> web_op(e, 0x1a)
 }
@@ -167,7 +167,7 @@ web_adapter_body: fn(sig: String, row: Int) -> WebBody Never! {
 
 // `jet_web_init` or `jet_web_fini`: the runtime's hooks of that kind, lowest
 // priority first, in export order within one priority.
-web_hooks_body: fn(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never! {
+web_hooks_body: fn(st: ^WebState, hooks: [WebHook], fini: Bool) -> WebBody Never! {
     e := web_plain_emitter(0, 0, "")
     priorities := [Int]{}
     loop hook in hooks {
@@ -201,7 +201,7 @@ web_hooks_body: fn(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never
 // `main` runs it (JetBackend Image/Object.jet x64_object_main) once the host
 // has passed the arguments (`jet_rt_host_arguments`): program start, the
 // entry by its table index, the stdout flush; the entry's exit code.
-web_run_body: fn(st: &WebState, entry: Int) -> WebBody Never! {
+web_run_body: fn(st: ^WebState, entry: Int) -> WebBody Never! {
     e := web_plain_emitter(0, 1, "l")
     start: web_symbol(st, "jet_rt_host_program_start", ":")
     web_call(e, start.callee)
@@ -542,7 +542,7 @@ web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Nev
 // The index of function `row`'s source file among `files`, which hold the
 // row of the first function naming each file; `row` joins them when its file
 // is new. Linear in the files, which are few next to the functions.
-web_file_index: fn(m: IRModule, files: &[Int], row: Int) -> Int Never! {
+web_file_index: fn(m: IRModule, files: ^[Int], row: Int) -> Int Never! {
     loop (index, named) in files {
         if m.functions[named].source_file == m.functions[row].source_file -> return index
     }
@@ -551,7 +551,7 @@ web_file_index: fn(m: IRModule, files: &[Int], row: Int) -> Int Never! {
 }
 
 // An `i32.const value; end` constant expression.
-web_put_const_i32: fn(out: &[U8], value: Int) Never! {
+web_put_const_i32: fn(out: ^[U8], value: Int) Never! {
     out.push(0x41)
     wasm_put_signed(out, value)
     out.push(0x0b)

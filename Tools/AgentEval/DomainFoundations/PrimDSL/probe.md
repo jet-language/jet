@@ -24,7 +24,7 @@ I built four small embedded-language packages: a symbolic expression builder/sim
 
 # Friction
 
-The four clients are 12, 6, 6, and 6 lines, but the library implementations are 157, 57, 28, and 58 lines. The symbolic 157 lines are mostly AST construction, stack evaluation, simplification, and differentiation that a symbolic DSL normally gets from an expression node/visitor runtime. The filter author repeats one match/access/loop shape per query. Rule users must construct `Rule`, `RuleCondition`, and `RuleAction` records rather than declare `when`/`then` clauses. Formula users must supply both `deps` and a scheduling order and must explicitly mark mutation with `&`.
+The four clients are 12, 6, 6, and 6 lines, but the library implementations are 157, 57, 28, and 58 lines. The symbolic 157 lines are mostly AST construction, stack evaluation, simplification, and differentiation that a symbolic DSL normally gets from an expression node/visitor runtime. The filter author repeats one match/access/loop shape per query. Rule users must construct `Rule`, `RuleCondition`, and `RuleAction` records rather than declare `when`/`then` clauses. Formula users must supply both `deps` and a scheduling order and must explicitly mark mutation with `^`.
 
 # Defects
 

@@ -36,11 +36,11 @@ LSPPrintChecker: struct {
             checked
         }
 
-        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
         }
 
-        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             LSPFixtureChecker{}.failure_marks(entry, overlays)
         }
 
@@ -56,14 +56,14 @@ lsp_print_server: fn(text: String) -> LSPServer {
     server
 }
 
-lsp_print_hover: fn(server: &LSPServer, line: Int, character: Int) -> String {
+lsp_print_hover: fn(server: ^LSPServer, line: Int, character: Int) -> String {
     hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_PRINT_URI, line, character))
     lsp_test_text(lsp_test_field(hover, "contents"), "value")
 }
 
 // The signature's label, then each parameter's label, then the active
 // parameter's index.
-lsp_print_signature: fn(server: &LSPServer, line: Int, character: Int) -> [String] {
+lsp_print_signature: fn(server: ^LSPServer, line: Int, character: Int) -> [String] {
     help: lsp_test_result(server, "textDocument/signatureHelp", lsp_test_at(LSP_PRINT_URI, line, character))
     signature: lsp_test_rows(lsp_test_field(help, "signatures"))[0]
     shown := [String]{lsp_test_text(signature, "label")}

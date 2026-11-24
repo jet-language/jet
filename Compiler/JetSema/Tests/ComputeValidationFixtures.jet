@@ -43,7 +43,7 @@ use {
     ]
 }
 
-compute_fixture_modules: fn(label: String, source: String, failures: &[String]) -> [SemaGraphModuleResult]? {
+compute_fixture_modules: fn(label: String, source: String, failures: ^[String]) -> [SemaGraphModuleResult]? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
         failures.push("{label}: real parsing failed {parsed.diagnostics:Debug}")
@@ -96,7 +96,7 @@ compute_fixture_key: fn(name: String) -> String Never! {
     symbol_key_text(SymbolKind.Function, "compute-fixture.main", "", name)
 }
 
-compute_fixture_fact: fn(modules: &[SemaGraphModuleResult], name: String, safe_panic: Bool, unsafe_panic: Bool) {
+compute_fixture_fact: fn(modules: ^[SemaGraphModuleResult], name: String, safe_panic: Bool, unsafe_panic: Bool) {
     key: compute_fixture_key(name)
     context := sema_check_context_init()
     if safe_panic -> sema_compute_note_panic(context, true)
@@ -111,7 +111,7 @@ compute_fixture_fact: fn(modules: &[SemaGraphModuleResult], name: String, safe_p
     modules[0].compute_facts.push(fact)
 }
 
-compute_fixture_obligation: fn(modules: &[SemaGraphModuleResult], target: String) {
+compute_fixture_obligation: fn(modules: ^[SemaGraphModuleResult], target: String) {
     context := sema_check_context_init()
     sema_compute_record_autodiff_obligation("grad", target, Span{start: 17, end: 23}, context)
     modules[0].compute_facts.push(sema_function_compute_facts("compute-fixture.proof", context))
@@ -128,7 +128,7 @@ compute_fixture_trace_error: fn() -> Diagnostic {
     sema_error("E0112", Span{start: 31, end: 34}, "`compute.grad` cannot trace `compute.det`", "this operation consumes, mutates, serializes, or has no registered Tensor derivative rule", "keep the differentiated function on pure differentiable Tensor operations")
 }
 
-compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], expected: [Diagnostic], expected_index: Bool, failures: &[String]) {
+compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], expected: [Diagnostic], expected_index: Bool, failures: ^[String]) {
     before: "{modules:Debug}"
     work := SemaComputeValidationWork{counting: true}
     indexed: sema_compute_validate_autodiff_purity(modules, work)
@@ -153,7 +153,7 @@ compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], exp
     }
 }
 
-compute_fixture_cases: fn(failures: &[String]) {
+compute_fixture_cases: fn(failures: ^[String]) {
     source: "pure: fn() {{}}\nio: fn() {{ print(\"effect\") }}\nlocal_panic: fn() {{ panic(\"local\") }}\ntransitive: fn() {{ local_panic() }}\ncycle_a: fn() {{ cycle_b() }}\ncycle_b: fn() {{ cycle_a()\nlocal_panic() }}\n"
     original := compute_fixture_modules("boundary semantic cases", source, failures) ?? return
     compute_fixture_compare("zero obligations", original, [Diagnostic]{}, false, failures)
@@ -201,7 +201,7 @@ compute_fixture_cases: fn(failures: &[String]) {
     compute_fixture_compare("multiple diagnostics preserve fact/obligation order", ordered, [Diagnostic]{compute_fixture_forbidden("io", "IO"), compute_fixture_forbidden("local_panic", "Panic")}, true, failures)
 }
 
-compute_fixture_size: fn(size: Int, failures: &[String]) {
+compute_fixture_size: fn(size: Int, failures: ^[String]) {
     parts := [String]{}
     loop index in 0..<size -> parts.push("f_{index}: fn() {{}}\n")
     modules := compute_fixture_modules("{size} functions", parts.join(""), failures) ?? return

@@ -9,7 +9,7 @@
 //   dispatch arm that constructs the type is folded before this runs.
 use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row, target_os_name, target_os_parse]
 
-sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
+sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) {
     gate_of_type := [String:String]{}
     loop graph_module in graph.modules {
         found := [Diagnostic]{}
@@ -80,7 +80,7 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic
     }
 }
 
-sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, span: Span, found: &[Diagnostic]) {
+sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, span: Span, found: ^[Diagnostic]) {
     bucket: ceiling ?? return
     row: diagnostic_registry_row("E-OSTARGET-MIXED-AXIS") ?? panic("E-OSTARGET-MIXED-AXIS has no registry row")
     os_name: sema_os_target_name(os)
@@ -100,7 +100,7 @@ sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, spa
 // type, so a method's receiver does not flag its own impl's siblings. Derived
 // methods (`equal`, `compare`, ...) are the compiler's, never the user's
 // ungated use.
-sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [String:String], found: &[Diagnostic]) {
+sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [String:String], found: ^[Diagnostic]) {
     if function.compiler_generated {
         return
     }
@@ -115,7 +115,7 @@ sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [S
     }
 }
 
-sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, gate_of_type: [String:String], found: &[Diagnostic]) {
+sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, gate_of_type: [String:String], found: ^[Diagnostic]) {
     if type_name == "" {
         return
     }

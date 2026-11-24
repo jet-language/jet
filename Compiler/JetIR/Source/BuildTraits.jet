@@ -61,7 +61,7 @@ ir_trait_key_free: fn(table: IRTraitKeys, identity: String, first: Int) -> Int N
 // candidate key: in identity order each takes its first candidate no
 // identity before it holds (ir_trait_key_free), so no two types share a
 // key and no key depends on the order the program declared its types in.
-ir_trait_key_table: fn(identities: &&[{identity: String, first: Int}]) -> IRTraitKeys Never! {
+ir_trait_key_table: fn(identities: ^^[{identity: String, first: Int}]) -> IRTraitKeys Never! {
     order := identities.move()
     order.sort_by(fn(left: {identity: String, first: Int}, right: {identity: String, first: Int}) { left.identity <=> right.identity })
     table := IRTraitKeys{identities: name_table_sized(order.len() + 1)}
@@ -79,7 +79,7 @@ ir_trait_key_table: fn(identities: &&[{identity: String, first: Int}]) -> IRTrai
 ir_trait_share: fn() -> String Never! { "#trait.share" }
 
 // `row`, a trait value row, drops through its glue and copies by sharing.
-ir_mark_trait: fn(m: &IRModule, row: Int) -> Int Never! {
+ir_mark_trait: fn(m: ^IRModule, row: Int) -> Int Never! {
     if m.types[row].drop == "" {
         m.types[row].drop = ir_drop_key(m, row)
         m.types[row].clone = ir_trait_share()
@@ -141,7 +141,7 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
 }
 
 // Whether `text` is new to `seen`, which holds it from then on.
-ir_trait_first: fn(seen: &NameTable, text: String) -> Bool Never! {
+ir_trait_first: fn(seen: ^NameTable, text: String) -> Bool Never! {
     before: name_count(seen)
     _ := name_intern(seen, text)
     name_count(seen) > before
@@ -195,7 +195,7 @@ ir_trait_boxed: fn(p: IRProgram) -> IRTraitBoxed Never! {
 
 // The call arguments of `args` boxed as trait values (box_as_trait), into
 // ir_trait_boxed's `boxed`.
-ir_trait_boxed_args: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, tree: BodyTree, args: [BodyCallArg]) Never! {
+ir_trait_boxed_args: fn(p: IRProgram, boxed: ^IRTraitBoxed, seen: ^NameTable, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop arg in args {
         if arg.box_as_trait == .Val(target) {
             ir_trait_boxed_put(p, boxed, seen, body_type(p.interner, tree, arg.value), target)
@@ -242,7 +242,7 @@ ir_print_style_key: fn(p: IRProgram, site: IRPrintStyle) -> IRPrintStyleKey? Nev
 // single pass over `function.tree.nodes`, and its first print-style guard
 // into `print` while that holds none. `check_boxed` is true for non-generic
 // bodies (where trait boxing candidates are valid).
-ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, interner: Interner, spawns: &[IRBodyScanSpawn], boxed: &[IRBodyScanBoxed], print: &IRPrintStyle?) Never! {
+ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, interner: Interner, spawns: ^[IRBodyScanSpawn], boxed: ^[IRBodyScanBoxed], print: ^IRPrintStyle?) Never! {
     if print == None {
         loop (stmt, statement) in function.tree.stmts {
             if statement == .ContextBlock(guards, _, _) {
@@ -289,7 +289,7 @@ ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, int
     }
 }
 
-ir_trait_boxed_candidate: fn(concrete: &&Type, target: Type, out: &[IRBodyScanBoxed]) Never! {
+ir_trait_boxed_candidate: fn(concrete: ^^Type, target: Type, out: ^[IRBodyScanBoxed]) Never! {
     if ir_type_args(concrete).len() == 0 && type_structural_family(ir_untag(concrete)) == None {
         return
     }
@@ -302,7 +302,7 @@ ir_trait_boxed_candidate: fn(concrete: &&Type, target: Type, out: &[IRBodyScanBo
     out.push(IRBodyScanBoxed{concrete: concrete, short: ir_short_name(bounds[0])})
 }
 
-ir_trait_boxed_put_short: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, concrete: &&Type, short: String) Never! {
+ir_trait_boxed_put_short: fn(p: IRProgram, boxed: ^IRTraitBoxed, seen: ^NameTable, concrete: ^^Type, short: String) Never! {
     if !ir_trait_first(seen, "{short}|{ir_trait_identity(p, concrete)}") {
         return
     }
@@ -313,7 +313,7 @@ ir_trait_boxed_put_short: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTabl
 
 // `concrete` boxed as a value of `target`, into ir_trait_boxed's `boxed`
 // when it is a generic instance and `target` a single trait.
-ir_trait_boxed_put: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, concrete: &&Type, target: Type) Never! {
+ir_trait_boxed_put: fn(p: IRProgram, boxed: ^IRTraitBoxed, seen: ^NameTable, concrete: ^^Type, target: Type) Never! {
     if ir_type_args(concrete).len() == 0 && type_structural_family(ir_untag(concrete)) == None {
         return
     }
@@ -355,7 +355,7 @@ ir_owner_generic: fn(p: IRProgram, owner: Type) -> Bool Never! {
 // The drop of the trait value box at `at` (trait value row `row`): a null
 // box holds nothing; the last owner calls the row's one last-owner routine
 // (ir_trait_last_helper).
-ir_trait_drop_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
+ir_trait_drop_body: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, at: Int) Never! {
     present: ir_option_is_some(m, b, at)
     ir_open_if(b.f, present, b.line)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
@@ -372,7 +372,7 @@ ir_trait_drop_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: 
 // holder's (ir_glue_drops: a handle payload is left to the move that reads
 // it out) and whose box (ir_trait_box_bytes) is freed. A key of no
 // implementer leaves the box as it is. Built once per row and never inlined.
-ir_trait_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
+ir_trait_last_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int) -> Int Never! {
     helper_key: "#trait.last<{ir_row_key(m, row)}>"
     known: ir_keyed_function(m, helper_key) ?? -1
     if known >= 0 -> return known
@@ -416,7 +416,7 @@ ir_trait_box_bytes: fn(m: IRModule, payload_row: Int) -> Int Never! {
 // box holds: its payload key selects the implementer, whose payload at 8
 // renders as that type's own value does (ir_render_push), so a list of trait
 // values shows each value. A key of no implementer adds nothing.
-ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
+ir_render_trait: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
     owners := [Type]{}
     if ir_untag(ir_row_ty(m, p, b.f.slot_type[slot])) == .TraitObject(bounds) {
         if bounds.len() == 1 -> owners = ir_trait_implementers(p, bounds[0])
@@ -451,7 +451,7 @@ ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slo
 // `T.reflect()` reads for it. `part` picks the type name (0) or the path
 // (1); a key of no listed type keeps the checked text of the trait value's
 // own type.
-ir_trait_reflect_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, args: [Int], names: Int, part: Int) -> Int Never! {
+ir_trait_reflect_text: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int, args: [Int], names: Int, part: Int) -> Int Never! {
     count: ir_reflect_count(p, b, args[names + 2])
     builder: ir_text_builder(m, b)
     key: ir_load_word(m, b, slot, 0)
@@ -539,7 +539,7 @@ ir_trait_constant_key: fn(trait_short: String, owner: String, name: String) -> S
 // `trait_short` the instance's concrete `owner` has; an implementation for
 // the exact type wins, else the generic owner's (`impl Box.Shape` for a
 // `Box<Int>`).
-ir_trait_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Type, trait_short: String, name: String, span: Span) -> Int Never! {
+ir_trait_constant: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, owner: Type, trait_short: String, name: String, span: Span) -> Int Never! {
     concrete: ir_fact(p, b, owner, span)
     if trait_short == "Decode" && name == IR_DECODE_ENV_NAMES {
         return ir_decode_env_names(m, p, b, ty, concrete, span)
@@ -559,7 +559,7 @@ IR_DECODE_ENV_NAMES: "__env_names"
 // stored, non-skipped field of the record, as JetSema's Registration/Checked
 // sema_checked_field_shape_names gave them. A T that is no record has
 // none. Built as a literal is (NodeKind.CtLit).
-ir_decode_env_names: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Type, span: Span) -> Int Never! {
+ir_decode_env_names: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, owner: Type, span: Span) -> Int Never! {
     rows := [TComptimeValue]{}
     if ir_nominal_name(ir_untag(owner)) == .Val(nominal) {
         if ir_type_def(p, nominal) == .Val(row) {
@@ -597,7 +597,7 @@ ir_trait_implementer: fn(p: IRProgram, row: Int, owner: SymbolID) -> Type? Never
 }
 
 // The list literal values boxed as trait values of `target`.
-ir_trait_boxes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, values: [Int], target: Type) -> [Int] Never! {
+ir_trait_boxes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, values: [Int], target: Type) -> [Int] Never! {
     boxed := [Int]{}
     loop value in values {
         value_span: ir_body_node(p, b, value).span
@@ -612,7 +612,7 @@ ir_trait_boxes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, values: [Int], tar
 // except that a read call argument (`lend`) another holder keeps is lent: its
 // bits go into the box with no new owner, as ir_union_lend lends a union's,
 // and `lends` gets the box, which ir_box_lends_end ends after the call.
-ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, lend: Bool, lends: &[IRBoxLend], span: Span) -> Int Never! {
+ir_trait_box: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, written: Type, lend: Bool, lends: ^[IRBoxLend], span: Span) -> Int Never! {
     target: ir_fact(p, b, written, span)
     if ir_failed(b) -> return -1
     bounds: if ir_untag(target) == .TraitObject(names) -> names else -> {
@@ -671,14 +671,14 @@ IRTraitTarget: struct {
 // `receiver.method(args)` on a trait value: the payload key selects the
 // implementation of the method's trait for the boxed concrete type; its
 // receiver is the payload's address (a write receiver or an aggregate) or the
-// payload value. A method every implementation takes by move (`&&self`)
+// payload value. A method every implementation takes by move (`^^self`)
 // consumes the trait value as sema reads it: the call owns the box
 // (ir_move_receiver), which hands the payload over to the implementation
 // (ir_box_hand_over), so only the implementation ends it. A move
 // implementation of a method the trait value is only read for gets a copy of
 // the payload, which the box keeps. No implementation, or an unknown key,
 // stops at jet_rt_unreachable; `ty` is the call's checked type.
-ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
+ir_trait_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg], ty: Type, span: Span) -> Int Never! {
     if type_args.len() > 0 {
         return ir_fail_slot(b, span, "generic dynamic trait receivers are not object-safe")
     }
@@ -813,7 +813,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
 // the call. A `T? Never!` method's call keeps its `Result<T?, Never>`
 // carrier, whose success is the optional itself: the implementation's
 // optional is that value, not a carrier to unwrap.
-ir_trait_propagate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMethodRef, slot: Int, checked: Type, span: Span) -> Int Never! {
+ir_trait_propagate: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, method: TMethodRef, slot: Int, checked: Type, span: Span) -> Int Never! {
     if method.trait_owner == None || slot < 0 || ir_failed(b) -> return slot
     returned: ir_row_ty(m, p, b.f.slot_type[slot])
     checked_success: ir_untag(ir_never_carrier_success(checked) ?? checked)
@@ -826,7 +826,7 @@ ir_trait_propagate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMetho
     ir_try_slot(m, p, b, slot, returned, TTryConvert.NoConversion, None, span)
 }
 
-ir_trait_unreachable: fn(m: &IRModule, b: &IRBuilder) Never! {
+ir_trait_unreachable: fn(m: ^IRModule, b: ^IRBuilder) Never! {
     message: ir_static_text(m, b, "unknown native trait method key")
     _: ir_runtime(m, b, "jet_rt_unreachable", message, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
@@ -838,7 +838,7 @@ ir_trait_unreachable: fn(m: &IRModule, b: &IRBuilder) Never! {
 // the trait with that identity, so a builtin implementer (`Int`) matches by
 // its carrier identity. A name binds the payload at 8 in place, a read of
 // the box the trait value keeps; a nested pattern tests it there.
-ir_trait_arm_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, identity: String, bindings: [BodyPatternBinding], span: Span) -> Int Never! {
+ir_trait_arm_test: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, subject: Int, identity: String, bindings: [BodyPatternBinding], span: Span) -> Int Never! {
     written: Type.Named{name: identity}
     wanted: ir_trait_identity(p, written)
     held := Type?{None}

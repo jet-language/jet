@@ -95,7 +95,7 @@ native_memory_type_size: fn(name: String) -[]> Int {
 
 // The frame `registers` and `memory` read: the selected one; None when the
 // stop has no frame.
-native_panel_frame: fn(session: &NativeSession) -> NativePanelFrame? NativeDebugError! {
+native_panel_frame: fn(session: ^NativeSession) -> NativePanelFrame? NativeDebugError! {
     frames: session.unwind() ?? return Err(err)
     if frames.len() == 0 -> return Ok(None)
     levels: native_levels(session.image, frames)
@@ -105,7 +105,7 @@ native_panel_frame: fn(session: &NativeSession) -> NativePanelFrame? NativeDebug
 
 // The machine frame `index` of the stop's task, as the editor adapter's
 // `[raw]` frames list them; None past its outermost.
-native_panel_machine: fn(session: &NativeSession, index: Int) -> NativePanelFrame? NativeDebugError! {
+native_panel_machine: fn(session: ^NativeSession, index: Int) -> NativePanelFrame? NativeDebugError! {
     frames: session.unwind() ?? return Err(err)
     if index < 0 || index >= frames.len() -> return Ok(None)
     Ok(Val(native_panel_level(session, frames, index, -1)))
@@ -113,7 +113,7 @@ native_panel_machine: fn(session: &NativeSession, index: Int) -> NativePanelFram
 
 // The machine frame `index` among `frames`, at the inlined run `site` (-1:
 // its function's own code).
-native_panel_level: fn(session: &NativeSession, frames: [NativeUnwound], index: Int, site: Int) -> NativePanelFrame Never! {
+native_panel_level: fn(session: ^NativeSession, frames: [NativeUnwound], index: Int, site: Int) -> NativePanelFrame Never! {
     caller: if site < 0 && index + 1 < frames.len() -> NativeUnwound?{Val(frames[index + 1])} else -> None
     NativePanelFrame{frame: frames[index], caller: caller, lookup: native_lookup(index, frames[index].pc), site: site, innermost: index == 0 && session.focus == None && session.dump == None}
 }
@@ -128,7 +128,7 @@ NativePanelJet: struct {
 
 // The frame a place in `memory` is found in: the selected one when it runs
 // Jet code, else the nearest outward that does; None when no frame does.
-native_panel_jet_frame: fn(session: &NativeSession) -> NativePanelJet? NativeDebugError! {
+native_panel_jet_frame: fn(session: ^NativeSession) -> NativePanelJet? NativeDebugError! {
     frames: session.unwind() ?? return Err(err)
     levels: native_levels(session.image, frames)
     from: if session.selected < levels.len() -> session.selected else -> 0
@@ -141,7 +141,7 @@ native_panel_jet_frame: fn(session: &NativeSession) -> NativePanelJet? NativeDeb
 }
 
 // The memory a stop's places are read from: a dump's, else the program's.
-native_panel_memory: fn(session: &NativeSession) -> NativeMemory Never! {
+native_panel_memory: fn(session: ^NativeSession) -> NativeMemory Never! {
     if session.dump == .Val(dumped) -> return dumped.memory
     NativeMemory{trace: Val(session.trace), blocks: [NativeBlock]{}}
 }
@@ -150,7 +150,7 @@ native_panel_memory: fn(session: &NativeSession) -> NativeMemory Never! {
 // `all` the vector registers, mxcsr, fs_base and gs_base. A register the
 // frame does not hold is not `known`; the vector registers and mxcsr are
 // known only in the stopped thread's innermost frame of a live program.
-native_registers: fn(session: &NativeSession, all: Bool{false}) -> [NativeRegisterRow] NativeDebugError! {
+native_registers: fn(session: ^NativeSession, all: Bool{false}) -> [NativeRegisterRow] NativeDebugError! {
     at := NativePanelFrame?{None}
     if native_panel_frame(session) == {
         .Ok(found) -> { at = found }
@@ -162,7 +162,7 @@ native_registers: fn(session: &NativeSession, all: Bool{false}) -> [NativeRegist
 
 // The registers of `frame` (native_registers), which the Canvas Debug view
 // reads with the frame it keys their changes by.
-native_registers_at: fn(session: &NativeSession, frame: NativePanelFrame, all: Bool{false}) -> [NativeRegisterRow] Never! {
+native_registers_at: fn(session: ^NativeSession, frame: NativePanelFrame, all: Bool{false}) -> [NativeRegisterRow] Never! {
     rows := [NativeRegisterRow]{}
     held: native_register_locals(session.image, frame)
     spans: native_memory_spans(session, frame)
@@ -232,7 +232,7 @@ native_register_locals: fn(image: NativeImage, at: NativePanelFrame) -> [Int:Str
 NATIVE_PANEL_DWARF_XMM0: 17
 
 // The code at `pc`, as `fib+14`; "" for an address no code is known at.
-native_panel_code: fn(session: &NativeSession, pc: Int) -> String Never! {
+native_panel_code: fn(session: ^NativeSession, pc: Int) -> String Never! {
     rows: native_listing_window(session, pc, 0, 1)
     if rows.len() == 0 || !rows[0].valid -> return ""
     rows[0].symbol
@@ -263,7 +263,7 @@ native_memory_points: fn(spans: [NativeMemorySpan], value: Int) -[]> String {
 }
 
 // The bytes the frame's locals own (NativeMemorySpan), in their order.
-native_memory_spans: fn(session: &NativeSession, at: NativePanelFrame) -> [NativeMemorySpan] Never! {
+native_memory_spans: fn(session: ^NativeSession, at: NativePanelFrame) -> [NativeMemorySpan] Never! {
     spans := [NativeMemorySpan]{}
     function: native_function_at(session.image, at.lookup) ?? return spans
     memory: native_panel_memory(session)
@@ -315,7 +315,7 @@ native_memory_list: fn(image: NativeImage, memory: NativeMemory, own: {address: 
 // them. A live program's are read a mapping at a time; a byte past a
 // mapping's end is tried again at the next page. The bytes under the
 // debugger's trap bytes, placed jumps and zone probes are the program's own.
-native_memory_view: fn(session: &NativeSession, at: NativePanelFrame?, address: Int, count: Int) -> NativeMemoryView Never! {
+native_memory_view: fn(session: ^NativeSession, at: NativePanelFrame?, address: Int, count: Int) -> NativeMemoryView Never! {
     bytes := loop _ in 0..<count -> U8{0}
     mapped := loop _ in 0..<count -> false
     if session.dump == {
@@ -369,7 +369,7 @@ native_memory_view: fn(session: &NativeSession, at: NativePanelFrame?, address: 
 
 // Mark in `marks`, which stand for the bytes from `address`, those of the
 // `size` bytes from `from`.
-native_memory_mark: fn(marks: &[Bool], address: Int, from: Int, size: Int) Never! {
+native_memory_mark: fn(marks: ^[Bool], address: Int, from: Int, size: Int) Never! {
     low: if from > address -> from else -> address
     high: if from + size < address + marks.len() -> from + size else -> address + marks.len()
     if low >= high {
@@ -379,7 +379,7 @@ native_memory_mark: fn(marks: &[Bool], address: Int, from: Int, size: Int) Never
 }
 
 // `registers [--all]` at the console: one row a register (native_registers).
-native_registers_answer: fn(session: &NativeSession, operand: String) -> NativeAnswer NativeDebugError! {
+native_registers_answer: fn(session: ^NativeSession, operand: String) -> NativeAnswer NativeDebugError! {
     if operand != "" && operand != "--all" {
         return Ok(NativeAnswer{text: "`registers` takes `--all` or nothing, as `registers --all`\n", refused: true})
     }
@@ -541,7 +541,7 @@ native_memory_answered: fn(text: String, refused: Bool{true}) -[]> NativeMemoryA
 
 // Where `place` (WHERE, its offset split off) starts in the stopped
 // program. `path` is the place a local's WHERE names (native_memory_name).
-native_memory_aim: fn(session: &NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
+native_memory_aim: fn(session: ^NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
     split: native_memory_offset(place)
     base: split.base
     selected := NativePanelFrame?{None}
@@ -582,7 +582,7 @@ native_memory_name: fn(ask: NativeMemoryAsk) -> String Never! {
 // The place WHERE of `ask` names (native_memory_name): in a live program
 // as a watch's (NativeSession.watch_path), in a dump as a dump's
 // (native_memory_dump_path). A WHERE that names no local names no place.
-native_memory_path: fn(session: &NativeSession, ask: NativeMemoryAsk) -> NativeWatchPath Never! {
+native_memory_path: fn(session: ^NativeSession, ask: NativeMemoryAsk) -> NativeWatchPath Never! {
     if session.dump != None -> return native_memory_dump_path(ask)
     name: native_memory_name(ask)
     if name == "" -> return native_watch_path_refusal("")
@@ -614,7 +614,7 @@ native_panel_register: fn(name: String) -[]> Int? {
 
 // The section `name` of the program's image, `offset` bytes in: refused
 // when the image has none of that name, or two, or doesn't load it.
-native_memory_section: fn(session: &NativeSession, name: String, offset: Int, at: NativePanelFrame?) -> NativeMemoryAim NativeDebugError! {
+native_memory_section: fn(session: ^NativeSession, name: String, offset: Int, at: NativePanelFrame?) -> NativeMemoryAim NativeDebugError! {
     elf: native_image_bytes(native_image_of(session)) ?? return Err(err)
     named := [NativeImageSection]{}
     loop section in native_image_sections(elf) {
@@ -643,7 +643,7 @@ native_memory_section: fn(session: &NativeSession, name: String, offset: Int, at
 // finds it), in the selected frame or, when that runs no Jet code, the
 // nearest frame outward that does. A local held in a register has no
 // address; a local the image can't show answers as `locals` shows it.
-native_memory_place: fn(session: &NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
+native_memory_place: fn(session: ^NativeSession, place: String, path: NativeWatchPath) -> NativeMemoryAim NativeDebugError! {
     found_frame := NativePanelJet?{None}
     if native_panel_jet_frame(session) == {
         .Ok(found) -> { found_frame = found }
@@ -725,7 +725,7 @@ NativeMemoryRead: struct {
 // Read what `ask` asks (native_memory_answer): COUNT values, or
 // NATIVE_MEMORY_DEFAULT bytes' worth, stopping at a section's end and at
 // NATIVE_MEMORY_SHOWN bytes.
-native_memory_read: fn(session: &NativeSession, ask: NativeMemoryAsk, path: NativeWatchPath) -> NativeMemoryRead NativeDebugError! {
+native_memory_read: fn(session: ^NativeSession, ask: NativeMemoryAsk, path: NativeWatchPath) -> NativeMemoryRead NativeDebugError! {
     if ask.refusal != "" {
         return Ok(NativeMemoryRead{aim: native_memory_answered("{native_memory_refusal(ask.refusal)}\n"), view: None, after: ""})
     }
@@ -757,7 +757,7 @@ native_memory_read: fn(session: &NativeSession, ask: NativeMemoryAsk, path: Nati
 // `[debugger]`. Each row names the locals and List items that start in it.
 // An answer stops at a section's end, and at NATIVE_MEMORY_SHOWN bytes,
 // and says where.
-native_memory_answer: fn(session: &NativeSession, ask: NativeMemoryAsk, path: NativeWatchPath) -> NativeAnswer NativeDebugError! {
+native_memory_answer: fn(session: ^NativeSession, ask: NativeMemoryAsk, path: NativeWatchPath) -> NativeAnswer NativeDebugError! {
     read: native_memory_read(session, ask, path) ?? return Err(err)
     if read.aim.answer != "" {
         return Ok(NativeAnswer{text: read.aim.answer, refused: read.aim.refused})
@@ -774,7 +774,7 @@ native_memory_answer: fn(session: &NativeSession, ask: NativeMemoryAsk, path: Na
 // to follow. A word with a byte that is unmapped, redacted or the
 // debugger's own is none, and so is one pointing into the debugger's own
 // bytes. Each page a word points into is looked up once.
-native_memory_pointers: fn(session: &NativeSession, view: NativeMemoryView) -> [Int] Never! {
+native_memory_pointers: fn(session: ^NativeSession, view: NativeMemoryView) -> [Int] Never! {
     found := [Int]{}
     memory: native_panel_memory(session)
     pages := [Int:Bool]{}
@@ -798,7 +798,7 @@ native_memory_pointers: fn(session: &NativeSession, view: NativeMemoryView) -> [
 
 // Whether `address` is one of the debugger's own bytes in a live program:
 // a placed condition's, or the evaluation room's.
-native_memory_debugger: fn(session: &NativeSession, address: Int) -> Bool Never! {
+native_memory_debugger: fn(session: ^NativeSession, address: Int) -> Bool Never! {
     if session.dump != None -> return false
     loop placed in session.placed {
         if address >= placed.low && address < placed.high -> return true
@@ -810,7 +810,7 @@ native_memory_debugger: fn(session: &NativeSession, address: Int) -> Bool Never!
 // --bytes` shows a section's: the address, the bytes in hex, then as text.
 // A run of the debugger's own bytes is one `[debugger]` row, and a row no
 // mapping holds says so.
-native_memory_byte_rows: fn(session: &NativeSession, view: NativeMemoryView) -> String Never! {
+native_memory_byte_rows: fn(session: ^NativeSession, view: NativeMemoryView) -> String Never! {
     text := ""
     count: view.bytes.len()
     start := 0
@@ -859,7 +859,7 @@ native_memory_byte_rows: fn(session: &NativeSession, view: NativeMemoryView) -> 
 // NATIVE_MEMORY_ROW_VALUES. A value with an unmapped byte shows as `??`,
 // one a dump redacted as `##`, one in the debugger's own bytes as
 // `[debugger]`.
-native_memory_value_rows: fn(session: &NativeSession, view: NativeMemoryView, type_name: String, size: Int) -> String Never! {
+native_memory_value_rows: fn(session: ^NativeSession, view: NativeMemoryView, type_name: String, size: Int) -> String Never! {
     text := ""
     values: view.bytes.len().div_euclid(size)
     row := 0
@@ -920,7 +920,7 @@ native_memory_unsigned: fn(word: Int) -[]> String {
 // What starts in the bytes [low, high) of the program: the frame's locals
 // and List items whose bytes do (`items[2..4]` for a run of items), and a
 // fix's jump.
-native_memory_row_labels: fn(session: &NativeSession, view: NativeMemoryView, low: Int, high: Int) -> String Never! {
+native_memory_row_labels: fn(session: ^NativeSession, view: NativeMemoryView, low: Int, high: Int) -> String Never! {
     labels := [String]{}
     loop span in view.spans {
         if span.stride == 0 {

@@ -77,12 +77,12 @@ store_lifecycle_test_persist_controlled: fn(roots: HangarRoots, known: [String],
 }
 
 // Prepare and commit one root.
-store_lifecycle_test_commit_root: fn(verification: &StoreVerification, roots: HangarRoots, identity: RootIdentity, target: String, prepared_at: Int, committed_at: Int) Never! {
+store_lifecycle_test_commit_root: fn(verification: ^StoreVerification, roots: HangarRoots, identity: RootIdentity, target: String, prepared_at: Int, committed_at: Int) Never! {
     _: store_lifecycle_prepare(verification, roots, identity, [String]{target}, store_lifecycle_test_at(prepared_at)) ?? panic("prepare")
     _: store_lifecycle_commit(verification, roots, identity.id, identity.incarnation, identity.witness, store_lifecycle_test_at(committed_at)) ?? panic("commit")
 }
 
-store_lifecycle_test_protected: fn(verification: &StoreVerification, roots: HangarRoots) -> [String] Never! {
+store_lifecycle_test_protected: fn(verification: ^StoreVerification, roots: HangarRoots) -> [String] Never! {
     snapshot: store_lifecycle_snapshot(verification, roots) ?? panic("snapshot")
     snapshot.protected_targets
 }

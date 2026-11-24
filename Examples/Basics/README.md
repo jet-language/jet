@@ -34,7 +34,7 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [ScriptRun](ScriptRun.jet) — A file with `run: fn` runs that body; its module declarations are available to every function in the file.
 - [ScriptStatements](ScriptStatements.jet) — A file of top-level statements just runs them in order; the names they bind are locals of that entry.
 - [SplitJoin](SplitJoin.jet) — Splitting a text and joining the pieces again replaces every separator with the joiner, keeping empty pieces at the start, between two separators and at the…
-- [StringAppend](StringAppend.jet) — `text += piece` appends to a String place: a local, a struct field, a field reached through a list element, or a `&String` parameter.
+- [StringAppend](StringAppend.jet) — `text += piece` appends to a String place: a local, a struct field, a field reached through a list element, or a `^String` parameter.
 - [StructCallWord](StructCallWord.jet) — Calls in record fields preserve fixed-width bits, not exact-Int pointer tags.
 - [StructConstants](StructConstants.jet) — Module-scope `:` constants can hold struct, enum, and list literal data.
 - [Through](Through.jet) — `#Through` after an arm's body runs the next arm's body too, so cases that share a tail write it once.

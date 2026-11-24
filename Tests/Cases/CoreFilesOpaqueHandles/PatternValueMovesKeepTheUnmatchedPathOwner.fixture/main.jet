@@ -13,7 +13,7 @@ held: fn() -[FS]> Int {
 
 lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
+consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
 Reading: enum {
     Missing,
@@ -23,20 +23,20 @@ Reading: enum {
 // A payload slot's value is compared only once the variant matches: on the
 // other variant the parameter still owns the lock, which closes as this
 // returns.
-variant_value: fn(l: &&FileLock, r: Reading) -[FS]> Int {
+variant_value: fn(l: ^^FileLock, r: Reading) -[FS]> Int {
     if r == .Count(consume_lock(l.move())) -> return 1
     0 + held()
 }
 
 // A later alternative is tested only where the earlier one missed.
-alternative_value: fn(l: &&FileLock, r: Reading) -[FS]> Int {
+alternative_value: fn(l: ^^FileLock, r: Reading) -[FS]> Int {
     if r == .Missing | .Count(consume_lock(l.move())) -> return 1 + held()
     0 + held()
 }
 
 // A list item's value is compared only once the length fits. The rest
 // marks the brackets a pattern: `[f(x)]` alone is a list value, built whole.
-list_value: fn(l: &&FileLock, xs: [Int]) -[FS]> Int {
+list_value: fn(l: ^^FileLock, xs: [Int]) -[FS]> Int {
     if xs == [consume_lock(l.move()), ..] -> return 1
     0 + held()
 }

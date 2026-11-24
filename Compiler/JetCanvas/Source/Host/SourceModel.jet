@@ -223,7 +223,7 @@ source_require_regular: fn(stat: Stat, name: String) CanvasSourceError! {
     Ok()
 }
 
-source_write_all: fn(writer: &FileWriter, bytes: [U8]) CanvasSourceError! {
+source_write_all: fn(writer: ^FileWriter, bytes: [U8]) CanvasSourceError! {
     writer.write_bytes(bytes) ?? return Err(canvas_source_error("couldn't write Canvas source `{writer.path}`: {err}"))
     writer.fsync() ?? return Err(canvas_source_error("couldn't sync Canvas source `{writer.path}`: {err}"))
     Ok()

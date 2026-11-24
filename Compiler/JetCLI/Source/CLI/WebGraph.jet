@@ -367,7 +367,7 @@ jet_cli_web_new_route: fn(path: String, handler: String, render: String, overrid
 
 // The first registration of a path owns it; an equally specific overlapping
 // pattern has no deterministic owner and is left out (check reports both).
-jet_cli_web_record_route: fn(walk: &JetCLIWebWalk, route: &&JetCLIWebRoute) {
+jet_cli_web_record_route: fn(walk: ^JetCLIWebWalk, route: ^^JetCLIWebRoute) {
     loop previous in walk.graph.routes {
         if previous.path == route.path {
             return
@@ -381,7 +381,7 @@ jet_cli_web_record_route: fn(walk: &JetCLIWebWalk, route: &&JetCLIWebRoute) {
 
 // ---- user declarations ----
 
-jet_cli_web_collect_functions: fn(items: [Item], out: &[Func]) {
+jet_cli_web_collect_functions: fn(items: [Item], out: ^[Func]) {
     loop item in items {
         if item == {
             .Func(function) -> { out.push(function.copy()) }
@@ -468,7 +468,7 @@ jet_cli_web_has_serde_derive: fn(derives: [String]) -> Bool {
     false
 }
 
-jet_cli_web_collect_serializable: fn(items: [Item], out: &[String]) {
+jet_cli_web_collect_serializable: fn(items: [Item], out: ^[String]) {
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -651,7 +651,7 @@ jet_cli_web_row: fn(verb: String, address: String, target: String, form: String,
     JetCLIWebRow{verb: verb, address: address, target: target, form: form, file: "", span: span}
 }
 
-jet_cli_web_walk: fn(tables: ASTTables, expression: ExprNode, walk: &JetCLIWebWalk, functions: [Func]) {
+jet_cli_web_walk: fn(tables: ASTTables, expression: ExprNode, walk: ^JetCLIWebWalk, functions: [Func]) {
     if ast_expr(tables, expression) == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method == "app" && args.len() == 0 && jet_cli_web_is_app_receiver(tables, receiver) {
@@ -679,7 +679,7 @@ jet_cli_web_walk: fn(tables: ASTTables, expression: ExprNode, walk: &JetCLIWebWa
 
 // `on_app` says the receiver is the App, so a name every type may have
 // (`get`, `post`, ...) registers a route.
-jet_cli_web_apply: fn(tables: ASTTables, method: String, args: [CallArg], span: Span, on_app: Bool, walk: &JetCLIWebWalk, functions: [Func]) {
+jet_cli_web_apply: fn(tables: ASTTables, method: String, args: [CallArg], span: Span, on_app: Bool, walk: ^JetCLIWebWalk, functions: [Func]) {
     if method == "route" || method == "page" || method == "layout" {
         path: sema_app_canonical_route_path(jet_cli_web_const_text(tables, args, 0) ?? "/")
         handler: jet_cli_web_handler(tables, args, 1) ?? "<dynamic>"
@@ -854,7 +854,7 @@ jet_cli_web_int_list: fn(tables: ASTTables, expression: ExprNode) -> [Int]? {
 // `app.images(formats:, widths:, quality:, enabled:)` as written; a later
 // call overrides the settings it names, as it does when the app runs, and
 // `None` keeps a setting.
-jet_cli_web_images_apply: fn(tables: ASTTables, args: [CallArg], settings: &JetCLIWebImageSettings) {
+jet_cli_web_images_apply: fn(tables: ASTTables, args: [CallArg], settings: ^JetCLIWebImageSettings) {
     loop argument in args {
         name: if argument.label == .Val(given) -> "{given.name}" else -> ""
         if name == {
@@ -881,7 +881,7 @@ jet_cli_web_const_bool: fn(tables: ASTTables, expression: ExprNode) -> Bool? {
     None
 }
 
-jet_cli_web_walk_run: fn(tables: ASTTables, run: Func, walk: &JetCLIWebWalk, functions: [Func]) {
+jet_cli_web_walk_run: fn(tables: ASTTables, run: Func, walk: ^JetCLIWebWalk, functions: [Func]) {
     loop statement in run.body {
         if ast_stmt(tables, statement) == {
             .Expr(expression) -> { jet_cli_web_walk(tables, expression, walk, functions) }
@@ -904,7 +904,7 @@ jet_cli_web_walk_run: fn(tables: ASTTables, run: Func, walk: &JetCLIWebWalk, fun
 
 // `.routes(from:)`: every `page: fn` file under a found root, in path order,
 // with the render mode in force at the end of the chain.
-jet_cli_web_expand_roots: fn(walk: &JetCLIWebWalk, roots: [AppRouteRoot]) {
+jet_cli_web_expand_roots: fn(walk: ^JetCLIWebWalk, roots: [AppRouteRoot]) {
     render: walk.render.copy()
     override_mode: walk.next_override.copy()
     sources: walk.graph.routes_from.copy()
@@ -948,7 +948,7 @@ jet_cli_web_marker_route: fn(tables: ASTTables, marker: Marker) -> [String]? {
 
 // `mount(value)`: each marked method of the value's struct is one row under
 // the mount prefix, in the struct's method order, written where it is marked.
-jet_cli_web_expand_mounts: fn(modules: [JetDriverDocModule], table: &[JetCLIWebRow]) {
+jet_cli_web_expand_mounts: fn(modules: [JetDriverDocModule], table: ^[JetCLIWebRow]) {
     expanded := [JetCLIWebRow]{}
     loop row in table {
         if row.form != "marked" || row.mounted == "" {
@@ -1021,7 +1021,7 @@ jet_cli_web_route_function: fn(modules: [JetDriverDocModule], route: JetCLIWebRo
 
 // Path parameters by name, then one search binding: a struct record (its
 // fields under the JSON codec) or a `search`/`query` input.
-jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFunction, route: &JetCLIWebRoute) {
+jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFunction, route: ^JetCLIWebRoute) {
     function: handler.function
     used := [Int]{}
     loop part in sema_app_route_parts(route.path) {
@@ -1055,7 +1055,7 @@ jet_cli_web_route_inputs: fn(modules: [JetDriverDocModule], handler: JetCLIWebFu
     }
 }
 
-jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func], graph: &JetCLIWebGraph) {
+jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func], graph: ^JetCLIWebGraph) {
     loop index in 0..<graph.routes.len() {
         path: graph.routes[index].path
         handler: graph.routes[index].handler
@@ -1079,14 +1079,14 @@ jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func]
     }
 }
 
-jet_cli_web_sort_routes: fn(routes: &[JetCLIWebRoute]) {
+jet_cli_web_sort_routes: fn(routes: ^[JetCLIWebRoute]) {
     routes = loop fresh_item in routes -> fresh_item
     routes.sort_by(fn(left: JetCLIWebRoute, right: JetCLIWebRoute) { (sema_app_route_static_parts(right.path) <=> sema_app_route_static_parts(left.path)).then(sema_app_route_parts(right.path).len() <=> sema_app_route_parts(left.path).len()).then(left.path <=> right.path).then(left.handler <=> right.handler) })
 }
 
 jet_cli_web_effect_root: fn(effect_name: String) -> String { effect_name.split(".").to_list()[0] }
 
-jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: String, functions: [Func], serializable: [String], graph: &JetCLIWebGraph) {
+jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: String, functions: [Func], serializable: [String], graph: ^JetCLIWebGraph) {
     policy_cache := String?{None}
     loop policy in graph.cache {
         if jet_cli_web_cache_parse(policy) == .Val(cache) -> policy_cache = Val(cache)
@@ -1351,7 +1351,7 @@ JetCLIWebUses: struct {
     images: [JetCLIWebImage],
 }
 
-jet_cli_web_note_use: fn(tables: ASTTables, uses: &JetCLIWebUses, node: ExprNode, modules: [JetDriverDocModule], functions: [Func], source: String) {
+jet_cli_web_note_use: fn(tables: ASTTables, uses: ^JetCLIWebUses, node: ExprNode, modules: [JetDriverDocModule], functions: [Func], source: String) {
     expression: ast_expr(tables, node)
     if jet_cli_web_query(tables, node, source) == .Val(fact) -> uses.queries.push(fact)
     if jet_cli_web_store(tables, node, source) == .Val(fact) -> uses.stores.push(fact)
@@ -1376,7 +1376,7 @@ jet_cli_web_note_use: fn(tables: ASTTables, uses: &JetCLIWebUses, node: ExprNode
 
 // Each user module's functions are walked over that module's AST tables, in
 // jet_cli_web_user_functions order.
-jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], graph: &JetCLIWebGraph) {
+jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], graph: ^JetCLIWebGraph) {
     uses := JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}, images: [JetCLIWebImage]{}}
     loop doc_module in modules {
         if doc_module.alias != "" -> next

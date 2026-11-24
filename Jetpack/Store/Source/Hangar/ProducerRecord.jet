@@ -44,7 +44,7 @@ ProducerRecord: struct {
     // Bind the producer record to the exact cache admission facts. These
     // values are part of the immutable record, so a cache hit can rederive
     // the action, builder, policy, and output identity before using bytes.
-    bind_cache_provenance: fn(&self, reference: String, output: String, identity: CacheIdentity, references: [String]) Never! {
+    bind_cache_provenance: fn(^self, reference: String, output: String, identity: CacheIdentity, references: [String]) Never! {
         // Providers keep the detailed recipe in the replay plan. The cache
         // admission fact is the stable recipe fingerprint shared by the
         // expectation, local proof, and signed narinfo.
@@ -189,7 +189,7 @@ store_cache_action_identity: fn(producer: ProducerRecord, reference: String, ide
 // realization it just recorded in the project lock. The lock digest is part
 // of the action key, so leaving the pre-publication digest in the closure
 // record would let a later replay accept stale provenance.
-store_refresh_lock_digest: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
+store_refresh_lock_digest: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
     if lock_digest == "" {
         return Err(StoreError.InvalidData("cannot refresh a producer with an empty project lock digest"))
     }
@@ -367,7 +367,7 @@ store_validate_cached_adapter_hook: fn(entry: StoreEntry, plan: AdapterPlan, tab
     store_validate_adapter_hook_producer(producer, plan, table, expectation, false)
 }
 
-store_bind_adapter_hook_identity: fn(realized: &Realized, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, ctx: ProviderCtx) StoreError! {
+store_bind_adapter_hook_identity: fn(realized: ^Realized, plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation, ctx: ProviderCtx) StoreError! {
     if plan.recipe == {
         .Build(_) -> {}
         .Copy | .Prebuilt(_, _) -> return

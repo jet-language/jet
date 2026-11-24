@@ -383,7 +383,7 @@ NativeEvalCode: struct {
 }
 
 // `mov r11, word`.
-native_eval_r11: fn(out: &[U8], word: Int) Never! {
+native_eval_r11: fn(out: ^[U8], word: Int) Never! {
     native_place_emit(out, [Int]{0x49, 0xbb})
     native_place_word(out, word, 8)
 }
@@ -1033,7 +1033,7 @@ native_eval_view_here: fn(image: NativeImage, trace: X64Trace, room: Int, words:
 // view failed (a system call, a fault, a trap or its budget; one that
 // failed part way may keep values of the program's alive that it took
 // references to) or its items can't be read. `fresh` as NativeEvalCall's.
-native_eval_view: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, view: Int, ty: Int, items: Int, list: Int, passed: [U8], self_at: Int, fresh: Bool) -> {run: NativeEvalRun, shown: String?} Never! {
+native_eval_view: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalRoom, view: Int, ty: Int, items: Int, list: Int, passed: [U8], self_at: Int, fresh: Bool) -> {run: NativeEvalRun, shown: String?} Never! {
     run := native_eval_start(image, trace, entered, NativeEvalCall{entry: view, words: [Int]{list, self_at}, drop: items, cell: list, fresh: fresh}, passed, None, 0)
     shown := String?{None}
     if run.middle {
@@ -1104,7 +1104,7 @@ native_eval_enter: fn(trace: X64Trace, room: Int, words: [Int], placed: [NativeP
 
 // Write `bytes` at `address` in the stopped program's code, the bytes it
 // held pushed on `lifted`: false when they couldn't be read or written.
-native_eval_change: fn(trace: X64Trace, lifted: &[NativeCode], address: Int, bytes: [U8]) -> Bool Never! {
+native_eval_change: fn(trace: X64Trace, lifted: ^[NativeCode], address: Int, bytes: [U8]) -> Bool Never! {
     now: x64_trace_read(trace, address, bytes.len()) ?? [U8]{}
     if now.len() != bytes.len() || !x64_trace_write(trace, address, bytes) -> return false
     lifted.push(NativeCode{address: address, bytes: now})
@@ -1174,7 +1174,7 @@ native_eval_swap: fn(trace: X64Trace, words: [Int], values: [Int]) -> [Int]? Nev
 // driven (native_eval_drive) to its middle stop or its end. `plan` and
 // `base` place the evaluation's code, which names the runtime function a
 // trap of its own stands for (native_fix_absent_at).
-native_eval_start: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, call: NativeEvalCall, passed: [U8], plan: NativeFixPlan?, base: Int) -> NativeEvalRun Never! {
+native_eval_start: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalRoom, call: NativeEvalCall, passed: [U8], plan: NativeFixPlan?, base: Int) -> NativeEvalRun Never! {
     run := NativeEvalRun{done: true}
     room: entered.room
     arena: room + NATIVE_EVAL_ROOM_ARENA
@@ -1231,7 +1231,7 @@ native_eval_kept: fn(count: Int) -> String Never! {
 // watch's debug status clear. It returns at the middle stop
 // (`run.middle`), where the caller reads the call's result and drives it
 // on, and once the call is done, failed or the program ended.
-native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: &NativeEvalRoom, plan: NativeFixPlan?, base: Int, run: &NativeEvalRun) Never! {
+native_eval_drive: fn(image: NativeImage, trace: X64Trace, entered: ^NativeEvalRoom, plan: NativeFixPlan?, base: Int, run: ^NativeEvalRun) Never! {
     room: entered.room
     loop _ in 0..<NATIVE_EVAL_MOST_STOPS {
         // The tail makes no system call.
@@ -1376,7 +1376,7 @@ native_eval_here_value: fn(image: NativeImage, trace: X64Trace, code: NativeEval
 // byte is `original`, and plant the trap again: "" when the instruction
 // ran, else why the evaluation fails there. A `syscall` there is the
 // call's system call, which the step would make.
-native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, original: Int, entered: &NativeEvalRoom, run: &NativeEvalRun) -> String Never! {
+native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, original: Int, entered: ^NativeEvalRoom, run: ^NativeEvalRun) -> String Never! {
     registers := x64_trace_registers(trace) ?? return "couldn't read the program's registers"
     if !x64_trace_write(trace, address, [U8]{U8{original}}) {
         return "couldn't step over a breakpoint at {native_eval_place(image, address)}"
@@ -1418,7 +1418,7 @@ native_eval_step_over: fn(image: NativeImage, trace: X64Trace, address: Int, ori
 // Take the budget's SIGSTOP, which came after the call ended, so the
 // program doesn't stop on it: it stops the thread before any instruction
 // runs. Any other signal on its way is held for the program.
-native_eval_absorb: fn(trace: X64Trace, entered: &NativeEvalRoom) Never! {
+native_eval_absorb: fn(trace: X64Trace, entered: ^NativeEvalRoom) Never! {
     loop _ in 0..<8 {
         if !x64_trace_resume(trace, X64TraceResume.Run, 0) {
             return

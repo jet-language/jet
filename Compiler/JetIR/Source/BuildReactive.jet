@@ -45,7 +45,7 @@ ir_reactive_kind: fn(p: IRProgram, ty: Type) -> String? Never! {
 ir_reactive_type: fn(p: IRProgram, ty: Type) -> Bool Never! { ir_reactive_kind(p, ty) != None }
 
 // The owned handle row: a copy shares the cell (or adds an Effect owner).
-ir_reactive_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+ir_reactive_row: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int Never! {
     tid: ir_intern_tid(m, p, ty)
     if (ir_reactive_kind(p, ty) ?? "") == "Effect" {
         return ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, tid, "jet_rt_handle_drop_jet_reactive_effect", "jet_rt_handle_clone_jet_reactive_effect"))
@@ -60,7 +60,7 @@ ir_reactive_element: fn(ty: Type) -> Type Never! {
 }
 
 // The address of an owned copy of `value` the runtime takes over.
-ir_reactive_moved_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+ir_reactive_moved_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
     owned: if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
     if ir_failed(b) -> return -1
     b.fresh[owned] = false
@@ -69,7 +69,7 @@ ir_reactive_moved_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int
 
 // A new cell over the value of node `value` at version `version` (an exact
 // Int slot the runtime borrows).
-ir_reactive_cell_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, version: Int, span: Span) -> Int Never! {
+ir_reactive_cell_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, version: Int, span: Span) -> Int Never! {
     row: ir_reactive_row(m, p, ty)
     element: ir_reactive_element(ty)
     slot := ir_word_const(m, b, 0)
@@ -95,7 +95,7 @@ ir_reactive_field_value: fn(fields: [BodyStructFieldValue], name: String) -> Int
 
 // `Signal<T>{value, version}` and its Derived/Computed kin build a new cell;
 // `Effect{last, active}` a bodiless observer.
-ir_reactive_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [BodyStructFieldValue], span: Span) -> Int Never! {
+ir_reactive_literal: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, fields: [BodyStructFieldValue], span: Span) -> Int Never! {
     kind: ir_reactive_kind(p, ty) ?? return ir_fail_slot(b, span, "struct literal of {ir_type_name(ty)}")
     if kind == "Effect" {
         last_node: ir_reactive_field_value(fields, "last") ?? return ir_fail_slot(b, span, "Effect literal without last")
@@ -120,7 +120,7 @@ ir_reactive_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fie
 }
 
 // A value the runtime writes to frame storage through `export(handle, out)`.
-ir_reactive_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, handle: Int, export: String, span: Span) -> Int Never! {
+ir_reactive_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, handle: Int, export: String, span: Span) -> Int Never! {
     if ir_unit_type(ty) {
         zero: ir_word_const(m, b, 0)
         _: ir_runtime(m, b, export, [Int]{handle, zero}, -1)
@@ -145,7 +145,7 @@ ir_reactive_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, handle
 
 // `.value` / `.version` of a cell and `.last` / `.active` of an Effect:
 // untracked reads.
-ir_reactive_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, field: String, span: Span) -> Int Never! {
+ir_reactive_field: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, field: String, span: Span) -> Int Never! {
     kind: ir_reactive_kind(p, ir_ty(m, p, b, receiver)) ?? return ir_fail_slot(b, span, "field: struct {field}")
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -175,7 +175,7 @@ ir_reactive_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
 // The body closure of `executable` handed to the runtime: (env, invoke,
 // release), where invoke is the lazy helper `role` builds for the closure
 // (lazy.callback for a body the runtime runs as it is).
-ir_reactive_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, role: String, span: Span) -> [Int] Never! {
+ir_reactive_body: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, executable: BodyLambda, role: String, span: Span) -> [Int] Never! {
     closure_ty: ir_lambda_function_type(executable)
     env: ir_lambda(m, p, b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return [Int]{}
@@ -188,7 +188,7 @@ ir_reactive_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: Body
 }
 
 // `reactive.derived(body)` / `reactive.computed(body)`.
-ir_reactive_derived: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
+ir_reactive_derived: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
     kind: ir_reactive_kind(p, ty) ?? ""
     if kind != "Derived" && kind != "Computed" {
         return ir_fail_slot(b, span, "reactive.derived producing {ir_type_name(ty)}")
@@ -205,7 +205,7 @@ ir_reactive_derived: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, exe
 }
 
 // `reactive.autorun(body)`: the Effect handle owning the observer.
-ir_reactive_effect: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
+ir_reactive_effect: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
     if (ir_reactive_kind(p, ty) ?? "") != "Effect" {
         return ir_fail_slot(b, span, "reactive.autorun producing {ir_type_name(ty)}")
     }
@@ -219,7 +219,7 @@ ir_reactive_effect: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, exec
 
 // `#Reactive { body }` and `ui.reactive_render(body)`: an effect the thread
 // retains, re-run whenever a signal its last run read changes.
-ir_reactive_rooted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, span: Span) -> Int Never! {
+ir_reactive_rooted: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, executable: BodyLambda, span: Span) -> Int Never! {
     body: ir_reactive_body(m, p, b, executable, "callback", span)
     if body.len() != 3 -> return -1
     _: ir_runtime(m, b, "jet_reactive_effect_rooted", body, -1)
@@ -231,7 +231,7 @@ ir_reactive_rooted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: Bo
 // { … })`: the runtime registry `export` names keeps the handler with the
 // invoke helper `role` builds; its slot Int names the button's click, the
 // input's drop, or its change (a click slot whose handler takes the text).
-ir_ui_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, export: String, role: String, span: Span) -> Int Never! {
+ir_ui_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, executable: BodyLambda, export: String, role: String, span: Span) -> Int Never! {
     body: ir_reactive_body(m, p, b, executable, role, span)
     if body.len() != 3 -> return -1
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -244,7 +244,7 @@ ir_ui_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: 
 // on the item a web host's drop carries (jet_ui_web_drop), a Text (kind 0)
 // or URI (kind 1) item over `text`, which it takes over. The item ends after
 // the call.
-ir_ui_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_ui_drop_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     a.f.result = word_row
@@ -281,7 +281,7 @@ ir_ui_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: S
 
 // The Signal/Derived/Computed `get`/`set` and Effect `unsubscribe` /
 // `is_active` handle methods; None leaves any other to ir_handle_method.
-ir_reactive_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+ir_reactive_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     if operation == {
         .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod -> {}
         .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> return None

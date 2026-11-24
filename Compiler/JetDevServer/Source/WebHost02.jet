@@ -18,7 +18,7 @@ WEB_HOST_RECORDING_TICKS: 25
 
 // A host for `file` serving the output root `root` under `policy`; it
 // listens once web_host_bind binds it.
-web_host_new: fn(file: String, root: String, verbose: Bool, policy: &&JetReleaseDevtoolsPolicy) -> Shared<WebHostState> WebHostError! {
+web_host_new: fn(file: String, root: String, verbose: Bool, policy: ^^JetReleaseDevtoolsPolicy) -> Shared<WebHostState> WebHostError! {
     canonical: webhost_files.canonicalize(root) ?? return Err(WebHostError{message: "error: couldn't open static output `{root}`: {err}"})
     secret: webhost_random.token_hex(WEB_HOST_SECRET_BYTES) ?? return Err(WebHostError{message: "error: couldn't make the dev session secret: {err}"})
     session: ResidentDevSession.new(file, 0, 0) ?? return Err(WebHostError{message: "error: couldn't start the dev session for `{file}`: {err}"})
@@ -186,7 +186,7 @@ web_host_publish: fn(state: Shared<WebHostState>, staging: String, out_dir: Stri
 }
 
 impl WebHostState {
-    step: fn(&self, clock: String) -> String {
+    step: fn(^self, clock: String) -> String {
         self.apply_clients()
         loop envelope in self.envelopes {
             if self.session.ingest_devtools_envelope(envelope) == .Err(error) {
@@ -227,7 +227,7 @@ impl WebHostState {
 
     // A clean drop is a closed page; a lease that runs out with no page left
     // is a lost connection.
-    apply_clients: fn(&self) {
+    apply_clients: fn(^self) {
         clean := false
         loop client in self.noted -> self.session.note_client(client)
         loop client in self.dropped {
@@ -249,7 +249,7 @@ impl WebHostState {
 
     // `jet perf --browser` asks for the trace; the next pages load with the
     // perf script.
-    take_trace_request: fn(&self) {
+    take_trace_request: fn(^self) {
         taken: browser_trace_take_request() ?? false
         if !taken {
             return
@@ -260,7 +260,7 @@ impl WebHostState {
         self.dirty = true
     }
 
-    open_relay: fn(&self) {
+    open_relay: fn(^self) {
         self.close_relay()
         manifest: read_web_manifest(self.root) ?? return
         relay: BrowserTraceRelay.new(manifest) ?? return
@@ -268,13 +268,13 @@ impl WebHostState {
         self.relays.push(relay)
     }
 
-    close_relay: fn(&self) {
+    close_relay: fn(^self) {
         loop relay in self.relays -> relay.close()
         self.relays = [BrowserTraceRelay]{}
         self.nonce = ""
     }
 
-    refill_frames: fn(&self) {
+    refill_frames: fn(^self) {
         if self.commands == None {
             frame: if self.session.browser_game_control_frame() == {
                 .Ok(body) -> WebHostFrame{status: 200, body: "{body}"}
@@ -289,17 +289,17 @@ impl WebHostState {
         }
     }
 
-    note_log: fn(&self, text: String) {
+    note_log: fn(^self, text: String) {
         if self.verbose -> self.log.push("{text}")
     }
 
-    log_rebuild: fn(&self, clock: String, outcome: String) {
+    log_rebuild: fn(^self, clock: String, outcome: String) {
         if self.verbose -> self.log.push("{clock}  save {self.facts.file}  →  {outcome}")
     }
 
     // The status: a block redrawn in place on a terminal, otherwise a line per
     // change and a failed build's diagnostic as the compiler wrote it.
-    render: fn(&self) -> String {
+    render: fn(^self) -> String {
         words: self.facts.words()
         line: if self.color -> format_line_colored(words.word, words.rest) else -> format_line_plain(words.word, words.rest)
         failed: self.facts.state == "error"

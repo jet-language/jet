@@ -94,7 +94,7 @@ sha256_word: fn(bytes: View<U8>, offset: Int) -> U32 Never! {
     (U32{bytes[offset]} << 24) | (U32{bytes[offset + 1]} << 16) | (U32{bytes[offset + 2]} << 8) | U32{bytes[offset + 3]}
 }
 
-sha256_compress: fn(state: &[U32], words: &[U32], k: [U32], block: View<U8>, offset: Int) Never! {
+sha256_compress: fn(state: ^[U32], words: ^[U32], k: [U32], block: View<U8>, offset: Int) Never! {
     loop index in 0..<16 -> words[index] = sha256_word(block, offset + index * 4)
     loop index in 16..<64 {
         s0: ((words[index - 15].rotate_right(7)) ~ words[index - 15].rotate_right(18)) ~ (words[index - 15] >> 3)

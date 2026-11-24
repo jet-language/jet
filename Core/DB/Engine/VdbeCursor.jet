@@ -30,7 +30,7 @@ use {
 // Helpers.
 
 // The handler's error tail: abort_due_to_error with rc.
-fail: fn(r: &Run, rc: Int) -> Int Never! {
+fail: fn(r: ^Run, rc: Int) -> Int Never! {
     r.rc = rc
     GO_ERROR
 }
@@ -57,17 +57,17 @@ regs: fn(v: conn.Vdbe, first: Int, n: Int) -> [base.Mem] Never! {
 
 // Take sorter cursor ci's sorter out of its slot to work on it; sorter_put
 // puts it back.
-sorter_take: fn(v: &conn.Vdbe, ci: Int) -> sorter.VdbeSorter Never! {
+sorter_take: fn(v: ^conn.Vdbe, ci: Int) -> sorter.VdbeSorter Never! {
     s: v.csr[ci].sorter ?? sorter.sorter_new(v.csr[ci].key_info ?? no_key_info(), 0)
     v.csr[ci].sorter = None
     s
 }
 
-sorter_put: fn(v: &conn.Vdbe, ci: Int, s: sorter.VdbeSorter) Never! { v.csr[ci].sorter = Val(s) }
+sorter_put: fn(v: ^conn.Vdbe, ci: Int, s: sorter.VdbeSorter) Never! { v.csr[ci].sorter = Val(s) }
 
 // The bytes cursor ci's current record lies in (VdbeCursor.row_kind) and,
 // in at, where the record starts there.
-row_bytes: fn(db: conn.Conn, v: conn.Vdbe, ci: Int, at: &Int) -> [U8] Never! {
+row_bytes: fn(db: conn.Conn, v: conn.Vdbe, ci: Int, at: ^Int) -> [U8] Never! {
     k: v.csr[ci].row_kind
     if k == conn.ROW_PAGE {
         at = v.csr[ci].row_off
@@ -80,7 +80,7 @@ row_bytes: fn(db: conn.Conn, v: conn.Vdbe, ci: Int, at: &Int) -> [U8] Never! {
 
 // op_column_corrupt: to the corruption handler of an integrity check
 // program (aOp[0].p3), else SQLITE_CORRUPT.
-column_corrupt: fn(v: conn.Vdbe, r: &Run) -> Int Never! {
+column_corrupt: fn(v: conn.Vdbe, r: ^Run) -> Int Never! {
     if v.ops[0].p3 > 0 {
         r.pc = v.ops[0].p3 - 1
         return GO_NEXT
@@ -105,7 +105,7 @@ column_placeholder: fn(t: Int, enc: Int) -> base.Mem Never! {
 
 // REAL affinity of a register that stayed an integer: an IntReal when it
 // fits the 6-byte form, else the REAL.
-real_of_int: fn(m: &base.Mem, clear_str: Bool) Never! {
+real_of_int: fn(m: ^base.Mem, clear_str: Bool) Never! {
     if m.i <= 140737488355327 && m.i >= -140737488355328 {
         m.flags = clear_bits(m.flags | MEM_INT_REAL, MEM_INT)
     } else {
@@ -119,7 +119,7 @@ real_of_int: fn(m: &base.Mem, clear_str: Bool) Never! {
 // Records.
 
 // OP_IfNullRow: a cursor on its NULL row sets P3 to NULL and jumps.
-op_if_null_row: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_if_null_row: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].live && v.csr[ci].null_row {
         run.reg_null(v, v.mem_base + r.p3)
@@ -130,7 +130,7 @@ op_if_null_row: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Column: column P2 of cursor P1's row into P3 (P4's value, else NULL,
 // when the record has fewer columns).
-op_column: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_column: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci := v.csr_base + r.p1
     p2 := r.p2
     dest: v.mem_base + r.p3
@@ -267,7 +267,7 @@ STD_TYPES: ["ANY", "BLOB", "INT", "INTEGER", "REAL", "TEXT"]
 
 // OP_TypeCheck: the registers from P1 against the columns of STRICT table
 // P4 (P3: the generated columns are absent).
-op_type_check: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_type_check: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     tab := 0
     if v.ops[r.pc].p4 == .Table(t) -> tab = t
     i := v.mem_base + r.p1
@@ -309,7 +309,7 @@ op_type_check: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_Affinity: the affinities of P4, one a register from P1.
-op_affinity: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_affinity: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     aff: run.p4_text(v, r.pc) ?? [U8]{}
     i := v.mem_base + r.p1
     loop k in 0..<aff.len() {
@@ -325,7 +325,7 @@ op_affinity: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_MakeRecord: the record of the P2 registers from P1 into P3, with the
 // affinities of P4 applied first. Zero-blob bytes at the end stay a
 // MEM_Zero count.
-op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_make_record: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     first: v.mem_base + r.p1
     n_field: r.p2
     if v.ops[r.pc].p4 == .Text(aff) {
@@ -399,7 +399,7 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_Count: the rows of cursor P1's table or index into P2 (P3: an
 // estimate will do).
-op_count: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_count: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     n := 0
@@ -418,7 +418,7 @@ op_count: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_Savepoint: P1 SAVEPOINT_BEGIN opens savepoint P4, RELEASE and
 // ROLLBACK end the newest one of that name and those opened after it.
-op_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_savepoint: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     p1: r.p1
     name: run.p4_text(v, r.pc) ?? [U8]{}
     rc := base.OK
@@ -525,7 +525,7 @@ op_savepoint: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
 
 // OP_AutoCommit: autocommit becomes P1 (COMMIT, or ROLLBACK when P2), or
 // BEGIN clears it; the statement then halts.
-op_auto_commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_auto_commit: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     desired: r.p1
     i_rollback: r.p2
     cur: if db.auto_commit -> 1 else -> 0
@@ -564,7 +564,7 @@ op_auto_commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]
 // OP_Transaction: begin a read (P2 0) or write (P2 1) or exclusive (P2 2)
 // transaction on database P1; with P5, a schema cookie other than P3 or a
 // schema generation other than P4 expires the statement.
-op_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_transaction: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if r.p2 != 0 && db.flags & (conn.SQLITE_QUERY_ONLY | conn.SQLITE_CORRUPT_RD_ONLY) != 0 {
         if db.flags & conn.SQLITE_QUERY_ONLY != 0 -> return fail(r, base.READONLY)
         return fail(r, base.CORRUPT)
@@ -610,7 +610,7 @@ op_transaction: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]
 }
 
 // OP_ReadCookie: meta value P3 of database P1 into P2.
-op_read_cookie: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_read_cookie: fn(db: conn.Conn, v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     i_meta: btree.btree_get_meta(db.btrees[db.dbs[r.p1].bt], r.p3)
     o: v.mem_base + r.p2
     run.out2(v, o)
@@ -620,7 +620,7 @@ op_read_cookie: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_SetCookie: meta value P2 of database P1 becomes P3 (the schema
 // cookie P3 - P5 in memory).
-op_set_cookie: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_set_cookie: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     rc: btree.btree_update_meta(db.btrees[db.dbs[r.p1].bt], r.p2, r.p3)
     s: db.dbs[r.p1].schema
     if r.p2 == btree.BTREE_SCHEMA_VERSION {
@@ -643,7 +643,7 @@ op_set_cookie: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // OP_ReopenIdx, OP_OpenRead, OP_OpenWrite: cursor P1 on the btree rooted
 // at page P2 (a register with OPFLAG_P2ISREG) of database P3, an index
 // when P4 is its KeyInfo, else a table of P4 columns.
-op_open_read: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_open_read: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci0: v.csr_base + r.p1
     hints: r.p5 & (conn.OPFLAG_BULKCSR | conn.OPFLAG_SEEKEQ)
     if r.op == opc.OP_REOPEN_IDX && v.csr[ci0].live && v.csr[ci0].pgno_root == r.p2 {
@@ -695,7 +695,7 @@ op_open_read: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> 
 }
 
 // OP_OpenDup: cursor P1 on the ephemeral table of cursor P2.
-op_open_dup: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_open_dup: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     orig: v.csr_base + r.p2
     ci: run.alloc_cursor<H>(h, db, v, r.p1, v.csr[orig].n_field, conn.CURTYPE_BTREE)
     v.csr[ci].null_row = true
@@ -717,7 +717,7 @@ op_open_dup: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 // OP_OpenEphemeral, OP_OpenAutoindex: cursor P1 on a new temporary table
 // of P2 columns (an index when P4 is its KeyInfo). A cursor already open
 // on one is emptied instead. P3 names a register to clear.
-op_open_ephemeral: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_open_ephemeral: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if r.p3 > 0 -> v.mem[v.mem_base + r.p3].z = [U8]{}
     ci0: v.csr_base + r.p1
     rc := base.OK
@@ -772,7 +772,7 @@ op_open_ephemeral: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[
 }
 
 // OP_SorterOpen: cursor P1 on a new sorter of records under KeyInfo P4.
-op_sorter_open: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_sorter_open: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: run.alloc_cursor<H>(h, db, v, r.p1, r.p2, conn.CURTYPE_SORTER)
     if v.ops[r.pc].p4 == .KeyInfo(k) {
         v.csr[ci].key_info = Val(k.copy())
@@ -783,7 +783,7 @@ op_sorter_open: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]
 
 // OP_SequenceTest: jump when cursor P1's sequence counter was 0, counting
 // it up.
-op_sequence_test: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_sequence_test: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     was: v.csr[ci].seq_count
     v.csr[ci].seq_count = was + 1
@@ -792,7 +792,7 @@ op_sequence_test: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_OpenPseudo: cursor P1 on the record register P2 holds, of P3 columns.
-op_open_pseudo: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_open_pseudo: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: run.alloc_cursor<H>(h, db, v, r.p1, r.p3, conn.CURTYPE_PSEUDO)
     v.csr[ci].null_row = true
     v.csr[ci].pseudo_reg = v.mem_base + r.p2
@@ -801,7 +801,7 @@ op_open_pseudo: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]
 }
 
 // OP_Close.
-op_close: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_close: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].live -> aux.free_cursor<H>(h, db, v, ci)
     GO_NEXT
@@ -814,7 +814,7 @@ op_close: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int 
 // entry past the key (the rowid in P3, or the P4 registers from P3) in the
 // op's direction; jump to P2 when there is none. A SEEKEQ index seek that
 // lands on the key skips the OP_IdxLT/GT after it.
-op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_seek: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     oc := r.op
     eq_only := false
@@ -893,7 +893,7 @@ op_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // OP_SeekScan: before the OP_SeekGE after it, step cursor forward up to P1
 // times looking for its key; on the key, past the seek to P2; past the key
 // (or at the end), to the seek's P2.
-op_seek_scan: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_seek_scan: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     nxt: r.pc + 1
     ci: v.csr_base + v.ops[nxt].p1
     bt: v.csr[ci].bt
@@ -925,7 +925,7 @@ op_seek_scan: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 }
 
 // OP_SeekHit: cursor P1's seek_hit clamped into P2..P3.
-op_seek_hit: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_seek_hit: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].seek_hit < r.p2 -> v.csr[ci].seek_hit = r.p2 else if v.csr[ci].seek_hit > r.p3 {
         v.csr[ci].seek_hit = r.p3
@@ -934,7 +934,7 @@ op_seek_hit: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_IfNotOpen: jump when cursor P1 is closed or on its NULL row.
-op_if_not_open: fn(v: conn.Vdbe, r: &Run) -> Int Never! {
+op_if_not_open: fn(v: conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     if !v.csr[ci].live || v.csr[ci].null_row -> return GO_JUMP_CHECK
     GO_NEXT
@@ -944,7 +944,7 @@ op_if_not_open: fn(v: conn.Vdbe, r: &Run) -> Int Never! {
 // to the key in the P4 registers from P3 (the record P3 holds when P4 is
 // 0) and jump on whether it is there: Found when it is, the others when it
 // is not (NoConflict also when the key has a NULL).
-op_found: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_found: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     n_field: run.p4_int(v, r.pc)
     if r.op == opc.OP_IF_NO_HOPE && v.csr[ci].seek_hit >= n_field -> return GO_NEXT
@@ -987,7 +987,7 @@ op_found: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // OP_SeekRowid, OP_NotExists: move table cursor P1 to rowid P3, jumping
 // to P2 when it is not there (SeekRowid also when P3 is no integer).
 // NotExists with P2 0 finds a missing row corrupt.
-op_seek_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_seek_rowid: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     i3: v.mem_base + r.p3
     i_key := v.mem[i3].i
     if r.op == opc.OP_SEEK_ROWID && v.mem[i3].flags & (MEM_INT | MEM_INT_REAL) == 0 {
@@ -1013,7 +1013,7 @@ op_seek_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 }
 
 // OP_Sequence: cursor P1's sequence counter into P2, counting it up.
-op_sequence: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_sequence: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     o: v.mem_base + r.p2
     run.out2(v, o)
@@ -1028,7 +1028,7 @@ op_sequence: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 // OP_NewRowid: a rowid not in table cursor P1 into P2: one past the
 // largest, at least one past the AUTOINCREMENT register P3 of the
 // statement's own program; random once the largest is taken.
-op_new_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_new_rowid: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     ci: v.csr_base + r.p1
@@ -1076,7 +1076,7 @@ op_new_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_Insert: the record P2 as row P3 of table cursor P1, reported to the
 // update hook for table P4.
-op_insert: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_insert: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     di: v.mem_base + r.p2
     ki: v.mem_base + r.p3
     ci: v.csr_base + r.p1
@@ -1108,7 +1108,7 @@ op_insert: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
 
 // OP_RowCell: copy the row cursor P2 is on into cursor P1 as row P3
 // (VACUUM and the xfer optimization).
-op_row_cell: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_row_cell: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     dest: v.csr_base + r.p1
     src: v.csr_base + r.p2
     i_key: if r.p3 != 0 -> v.mem[v.mem_base + r.p3].i else -> 0
@@ -1124,7 +1124,7 @@ op_row_cell: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_Delete: delete the row cursor P1 is on; with OPFLAG_NCHANGE it counts
 // and goes to the update hook for table P4.
-op_delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_delete: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     btc: v.csr[ci].btc
@@ -1153,7 +1153,7 @@ op_delete: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int
 }
 
 // OP_ResetCount: the statement's change count becomes the connection's.
-op_reset_count: fn(db: &conn.Conn, v: &conn.Vdbe) -> Int Never! {
+op_reset_count: fn(db: ^conn.Conn, v: ^conn.Vdbe) -> Int Never! {
     aux.set_changes(db, v.n_change)
     v.n_change = 0
     GO_NEXT
@@ -1161,7 +1161,7 @@ op_reset_count: fn(db: &conn.Conn, v: &conn.Vdbe) -> Int Never! {
 
 // OP_SorterCompare: jump when the first P4 fields of sorter P1's record
 // differ from record P3.
-op_sorter_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_sorter_compare: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     s := sorter_take(v, ci)
     res: sorter.sorter_compare(s, v.csr[ci].key_info ?? no_key_info(), v.mem[v.mem_base + r.p3].z, run.p4_int(v, r.pc))
@@ -1171,7 +1171,7 @@ op_sorter_compare: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_SorterData: sorter P1's record into P2; pseudo cursor P3 rereads it.
-op_sorter_data: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_sorter_data: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     s := sorter_take(v, ci)
     key: sorter.sorter_key(s)
@@ -1182,7 +1182,7 @@ op_sorter_data: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 }
 
 // OP_RowData: the record cursor P1 is on into P2.
-op_row_data: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_row_data: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     ci: v.csr_base + r.p1
@@ -1200,7 +1200,7 @@ op_row_data: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_Rowid: the rowid of the row cursor P1 is on into P2 (NULL on its
 // NULL row).
-op_rowid: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_rowid: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     o: v.mem_base + r.p2
     run.out2(v, o)
     ci: v.csr_base + r.p1
@@ -1227,7 +1227,7 @@ op_rowid: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int 
 
 // OP_NullRow: cursor P1 (opened as an empty pseudo cursor when closed) is
 // on its NULL row.
-op_null_row: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_null_row: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci := v.csr_base + r.p1
     if !v.csr[ci].live {
         ci = run.alloc_cursor<H>(h, db, v, r.p1, 1, conn.CURTYPE_PSEUDO)
@@ -1248,7 +1248,7 @@ op_null_row: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> I
 
 // OP_SeekEnd, OP_Last: move cursor P1 to its last entry (Last jumps to P2,
 // when set, on an empty table; SeekEnd keeps a cursor already on a row).
-op_last: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_last: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     btc: v.csr[ci].btc
@@ -1268,7 +1268,7 @@ op_last: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_IfSmaller: jump when cursor P1's table is empty or has fewer than
 // about 10^(P3/10) rows.
-op_if_smaller: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_if_smaller: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     btc: v.csr[ci].btc
@@ -1285,7 +1285,7 @@ op_if_smaller: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_SorterSort, OP_Sort, OP_Rewind: move cursor P1 to its first entry,
 // jumping to P2 when there is none.
-op_rewind: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_rewind: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if r.op != opc.OP_REWIND {
         v.counters[conn.STMTSTATUS_SORT] = v.counters[conn.STMTSTATUS_SORT] + 1
     }
@@ -1309,7 +1309,7 @@ op_rewind: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_SorterNext, OP_Prev, OP_Next: step cursor P1 and jump to P2 while it
 // is on an entry, counting the step in counter P5.
-op_next: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_next: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     rc := base.OK
     if r.op == opc.OP_SORTER_NEXT {
@@ -1335,7 +1335,7 @@ op_next: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_IdxInsert: the index record P2 into cursor P1, its P4 fields
 // unpacked in the registers from P3.
-op_idx_insert: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_idx_insert: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     i2: v.mem_base + r.p2
     if r.p5 & conn.OPFLAG_NCHANGE != 0 -> v.n_change += 1
@@ -1350,7 +1350,7 @@ op_idx_insert: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 }
 
 // OP_SorterInsert: the record P2 into sorter P1.
-op_sorter_insert: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
+op_sorter_insert: fn(v: ^conn.Vdbe, r: ^Run) -> Int Never! {
     ci: v.csr_base + r.p1
     i2: v.mem_base + r.p2
     mem.expand_blob(v.mem[i2])
@@ -1362,7 +1362,7 @@ op_sorter_insert: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 
 // OP_IdxDelete: delete the entry of index cursor P1 whose key is the P3
 // registers from P2; with P5 a missing entry is a corrupt index.
-op_idx_delete: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_idx_delete: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     bt: v.csr[ci].bt
     btc: v.csr[ci].btc
@@ -1385,7 +1385,7 @@ op_idx_delete: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 // entry: DeferredSeek defers table cursor P3's seek to it (P4 maps table
 // columns to index columns OP_Column reads instead), IdxRowid writes it
 // to P2.
-op_idx_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_idx_rowid: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     rc := aux.cursor_restore(db, v, ci)
     if rc != base.OK -> return fail(r, rc)
@@ -1413,7 +1413,7 @@ op_idx_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 }
 
 // OP_FinishSeek: do cursor P1's deferred seek.
-op_finish_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_finish_seek: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     if v.csr[ci].deferred_moveto {
         rc: aux.finish_moveto(db, v, ci)
@@ -1424,7 +1424,7 @@ op_finish_seek: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
 
 // OP_IdxLE, OP_IdxGT, OP_IdxLT, OP_IdxGE: jump when index cursor P1's
 // entry, without its rowid, compares so with the P4 registers from P3.
-op_idx_compare: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+op_idx_compare: fn(db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     ci: v.csr_base + r.p1
     key := regs_key(v, ci, v.mem_base + r.p3, run.p4_int(v, r.pc))
     key.default_rc = if r.op < opc.OP_IDX_LT -> -1 else -> 0

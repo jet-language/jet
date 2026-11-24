@@ -11,7 +11,7 @@ use jet_lsp.[
     lsp_update_document,
 ]
 
-lsp_test_change: fn(state: &LSPDiagnosticState, uri: String, version: Int, changes: String) -> String? Never! {
+lsp_test_change: fn(state: ^LSPDiagnosticState, uri: String, version: Int, changes: String) -> String? Never! {
     params: lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":{changes}}}")
     lsp_update_document(state, Val(params), is_open: false)
 }

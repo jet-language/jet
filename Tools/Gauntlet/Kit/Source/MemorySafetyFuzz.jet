@@ -308,7 +308,7 @@ or_null_text: fn(value: String?) -> Dyn {
 }
 
 // Sets `key` of `out` to the member of `tree` at `path` when it is set.
-copy_member: fn(out: &Dyn, key: String, tree: Dyn, path: String) {
+copy_member: fn(out: ^Dyn, key: String, tree: Dyn, path: String) {
     put_present(out, key, member(tree, path))
 }
 
@@ -511,7 +511,7 @@ findings_tree: fn(findings: [Finding], pass: AxisPass, probes: [Dyn]) -> Dyn {
 // Files `finding` under the receipt of its signature (a wrong answer's is
 // the expected and actual digests, another finding's its normalized
 // detail), opening the receipt on its first occurrence.
-record_finding: fn(receipts: &[FindingReceipt], finding: Finding, runner: Dyn, process: Dyn, pass: AxisPass, command: Dyn) {
+record_finding: fn(receipts: ^[FindingReceipt], finding: Finding, runner: Dyn, process: Dyn, pass: AxisPass, command: Dyn) {
     signature: if finding.kind == "wrong-output" -> "{finding.kind}:{sha256_text(pass.expected)}:{sha256_text(text_or_empty(process, "stdout"))}" else -> "{finding.kind}:{normalize_finding_text(finding.detail, pass.run, 500)}"
     key: sha256_text("memory_safety_fuzz{NUL}{finding.kind}{NUL}{signature}")
     wanted: key.copy()
@@ -612,7 +612,7 @@ stage_failure: fn(stage: String, reason: Dyn) -> Dyn {
 
 // Marks the runner failed at `stage` for `reason`, keeping what the stage
 // already recorded (its command and process) and the command it ran.
-mark_runner_failure: fn(result: &Dyn, stage: String, command: Dyn, reason: String) {
+mark_runner_failure: fn(result: ^Dyn, stage: String, command: Dyn, reason: String) {
     found: dyn_at(result, stage)
     entry := if found == .Object(_) -> found else -> Dyn.object()
     entry["status"] = "failed"
@@ -636,7 +636,7 @@ stage_record: fn(command: [String], evidence: Evidence) -> Dyn {
     out
 }
 
-fail_runner: fn(result: &Dyn, reason: String) {
+fail_runner: fn(result: ^Dyn, reason: String) {
     result["status"] = "failed"
     result["reason"] = reason
 }
@@ -645,7 +645,7 @@ fail_runner: fn(result: &Dyn, reason: String) {
 // its compile and run stages, recording each into `result`. A runner that
 // cannot go on records why and stops; a host error is the caller's to
 // charge to `progress.stage`.
-run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: &Dyn, progress: &RunnerProgress) -[FS, Exec]> Err! {
+run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: ^Dyn, progress: ^RunnerProgress) -[FS, Exec]> Err! {
     runner_dir: files.join(pass.axis_dir, Regex{"[^A-Za-z0-9_.-]"}.replace(text_or_empty(runner, "id"), "_"))
     files.create_dir_all(runner_dir)
     staged: host.stage_files(runner_dir, dyn_at(runner, "files"))

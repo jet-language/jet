@@ -44,7 +44,7 @@ dc_has: fn(values: [String], value: String) -> Bool {
     false
 }
 
-dc_add: fn(values: &[String], value: String) {
+dc_add: fn(values: ^[String], value: String) {
     if !dc_has(values, value) -> values.push(value.copy())
 }
 
@@ -59,7 +59,7 @@ dc_slice: fn(text: String, start: Int, end: Int) -> String {
 // and a dot directory such as `.jet/` holds build output (the packages suite
 // assembles the whole Jetpack engine, tests included, under
 // Jetpack/Bootstrap/.jet/test), so the scan must not depend on what ran first.
-dc_walk: fn(directory: String, out: &[String]) {
+dc_walk: fn(directory: String, out: ^[String]) {
     if !dc_files.exists(directory) {
         return
     }

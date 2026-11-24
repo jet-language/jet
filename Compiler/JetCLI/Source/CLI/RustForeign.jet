@@ -297,7 +297,7 @@ jet_cli_rust_foreign_metadata: fn(text: String, crate_name: String) -> Bool JetD
 
 // Canonical native Linux process plan. Only immutable system/tool inputs are
 // mounted; host HOME and the shared target directory are never writable mounts.
-jet_cli_rust_foreign_mount: fn(args: &[String], source: String, destination: String) -[FS]> JetDriverRustForeignError! {
+jet_cli_rust_foreign_mount: fn(args: ^[String], source: String, destination: String) -[FS]> JetDriverRustForeignError! {
     info: cli_files.stat(source) ?? return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is unavailable: {err}"))
     if info.is_symlink {
         return Err(jet_cli_rust_foreign_sandbox_error("sandbox mount `{source}` is a symlink"))
@@ -313,7 +313,7 @@ jet_cli_rust_foreign_mount: fn(args: &[String], source: String, destination: Str
 // the host's fetched crates; its writes (newly fetched crates, unpacked
 // sources) land in a layer in the sandbox's memory that ends with the
 // sandbox. The host registry is never written and never copied.
-jet_cli_rust_foreign_overlay: fn(args: &[String], registry: String, destination: String) -[FS]> JetDriverRustForeignError! {
+jet_cli_rust_foreign_overlay: fn(args: ^[String], registry: String, destination: String) -[FS]> JetDriverRustForeignError! {
     info: cli_files.stat(registry) ?? return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is unavailable: {err}"))
     if info.is_symlink || !info.is_dir {
         return Err(jet_cli_rust_foreign_sandbox_error("sandbox overlay `{registry}` is not a real directory"))
@@ -455,7 +455,7 @@ jet_cli_rust_foreign_run: fn(bwrap: String, cargo: String, source: String, outpu
 
 // Private-copy publication rejects symlinks, devices and non-Unicode names.
 // Cargo's legitimate internal hardlinks are checked for private-tree coverage.
-jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: &[String:Int], links: &[String:Int]) -[FS]> JetDriverRustForeignError! {
+jet_cli_rust_foreign_output_rows: fn(directory: cli_files.Directory, counts: ^[String:Int], links: ^[String:Int]) -[FS]> JetDriverRustForeignError! {
     entries: directory.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
         if !entry.name_is_unicode {
@@ -650,7 +650,7 @@ JetCLIRustForeignWorkspace: struct {
     retain: Bool,
 
     impl Close {
-        close: fn(&&self) -[FS]> {
+        close: fn(^^self) -[FS]> {
             if !self.retain {
                 cli_files.remove_all(self.path).drop("a leftover private FFI workspace only holds scratch output")
             }

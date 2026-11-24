@@ -284,7 +284,7 @@ ir_range_length_load: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     ir_untag(ir_module_row_ty(m, row)) == .List(_)
 }
 
-ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
+ir_opt_int_facts: fn(m: IRModule, f: ^IRFunction, s: ^IRSsa) -> Int Never! {
     count: s.val_slot.len()
     if count == 0 || count > IR_RANGE_VALUES -> return 0
     r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, inline: [Bool]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}, lengths: [Bool]{}}
@@ -483,7 +483,7 @@ ir_range_readers: fn(f: IRFunction, s: IRSsa, r: IRRanges, count: Int) -> IRRang
 
 // The reads of operand `used` (-1: none) by `reader`: the operand's range
 // and, when a condition compares it, the ranges compared with it.
-ir_range_reads: fn(s: IRSsa, r: IRRanges, compared: IRRangeReaders, used: Int, reader: Int, from: &[Int], to: &[Int]) Never! {
+ir_range_reads: fn(s: IRSsa, r: IRRanges, compared: IRRangeReaders, used: Int, reader: Int, from: ^[Int], to: ^[Int]) Never! {
     if used < 0 {
         return
     }
@@ -519,7 +519,7 @@ ir_range_rows: fn(from: [Int], to: [Int], count: Int) -> IRRangeReaders Never! {
 // After `value`'s range changed to cover `got`: its readers are stale, and
 // so is `value` itself while evaluating it again (to the same `got`) would
 // still change its inline mark.
-ir_range_changed: fn(r: IRRanges, readers: IRRangeReaders, stale: &[Bool], value: Int, got: IRRange) Never! {
+ir_range_changed: fn(r: IRRanges, readers: IRRangeReaders, stale: ^[Bool], value: Int, got: IRRange) Never! {
     loop k in readers.start[value]..<readers.start[value + 1] -> stale[readers.rows[k]] = true
     if (ir_range_inline(ir_range_so_far(r, value)) && ir_range_inline(got)) != r.inline[value] {
         stale[value] = true
@@ -534,7 +534,7 @@ IRRangeFound: struct {
     inline: [Bool],
 }
 
-ir_range_found_set: fn(found: &IRRangeFound, value: Int, got: IRRange) Never! {
+ir_range_found_set: fn(found: ^IRRangeFound, value: Int, got: IRRange) Never! {
     found.known[value] = got.known
     found.lo[value] = got.lo
     found.hi[value] = got.hi
@@ -544,7 +544,7 @@ ir_range_found_set: fn(found: &IRRangeFound, value: Int, got: IRRange) Never! {
 // Descending rounds: each value's range narrowed to what it evaluates to.
 // Only a `stale` value (one a range it reads changed since its last
 // evaluation) is evaluated again; any other gives what it `found`.
-ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int, readers: IRRangeReaders, found: &IRRangeFound, stale: &[Bool]) Never! {
+ir_range_descend: fn(f: IRFunction, s: IRSsa, r: ^IRRanges, count: Int, readers: IRRangeReaders, found: ^IRRangeFound, stale: ^[Bool]) Never! {
     loop _ in 0..<IR_RANGE_NARROW {
         loop value in 0..<count {
             if !r.ranged[value] || !r.known[value] || ir_ssa_find(s, value) != value -> next
@@ -578,7 +578,7 @@ ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int, readers:
 // accumulator within d's range, so after k passes the accumulator lies
 // within its entry value plus k times d's range. Returns whether any
 // accumulator was bounded.
-ir_range_counted: fn(f: IRFunction, s: IRSsa, r: &IRRanges) -> Bool Never! {
+ir_range_counted: fn(f: IRFunction, s: IRSsa, r: ^IRRanges) -> Bool Never! {
     found := false
     loop value in 0..<r.ranged.len() {
         if !ir_range_counted_phi(s, r, value) || ir_range_bounded(ir_range_so_far(r, value)) -> next
@@ -763,7 +763,7 @@ ir_range_held: fn(f: IRFunction, s: IRSsa, r: IRRanges, value_in: Int) -> Int Ne
 // Each block entered through a decided branch: an If's arms, a BrIf's
 // fall-through; then each block's nearest deciding dominator (blocks are
 // numbered after their immediate dominators).
-ir_range_conditions: fn(f: IRFunction, s: IRSsa, r: &IRRanges) Never! {
+ir_range_conditions: fn(f: IRFunction, s: IRSsa, r: ^IRRanges) Never! {
     loop at in 0..<f.op.len() {
         if s.block[at] < 0 || at + 1 >= f.op.len() -> next
         op: f.op[at]
@@ -790,7 +790,7 @@ ir_range_conditions: fn(f: IRFunction, s: IRSsa, r: &IRRanges) Never! {
 
 // Block `at`'s entry decides `cond`; the values the comparison under its
 // Nots compares are tested (ir_range_narrow reads through the same Nots).
-ir_range_decide: fn(f: IRFunction, s: IRSsa, r: &IRRanges, at: Int, cond: Int, holds: Bool) Never! {
+ir_range_decide: fn(f: IRFunction, s: IRSsa, r: ^IRRanges, at: Int, cond: Int, holds: Bool) Never! {
     block: s.block[at]
     if block <= 0 || s.preds[block].len() != 1 {
         return
@@ -1238,7 +1238,7 @@ ir_range_open: fn(a: IRRange) -> IRRange Never! {
 }
 
 // The rewrites the ranges prove (the header comment).
-ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int Never! {
+ir_range_rewrite: fn(m: IRModule, f: ^IRFunction, s: ^IRSsa, r: IRRanges) -> Int Never! {
     to_i64: ir_interned_name(m, "jet_int_owned_to_i64") ?? -2
     clone: ir_interned_name(m, "jet_rt_int_clone") ?? -2
     fixed: ir_interned_name(m, "jet_int_checked_fixed") ?? -2
@@ -1479,7 +1479,7 @@ ir_range_strictly_by: fn(f: IRFunction, s: IRSsa, value: Int, rel: IROp, cond_in
 
 // Per value, the first load of the same word of a parameter aggregate whose
 // word nothing in the function writes (-1: none). Only Loads, and Stores to
-// other words, reach such a parameter, so no one else (a `&` parameter is
+// other words, reach such a parameter, so no one else (a `^` parameter is
 // exclusive) writes its bytes while the function runs, and two loads of
 // one offset read one value (a list's length tested by a loop and again by
 // an index check). A load of any other word is the value a Store put there
@@ -1788,7 +1788,7 @@ ir_range_implies: fn(rel: IROp, op: IROp) -> Bool Never! {
 // The stop point at `at` (Build.jet ir_stop_point: the call of `key`, the
 // trap or the stop poll, then the If on what it returned, with no Else), if
 // one is there, becomes Nops.
-ir_range_drop_point: fn(f: &IRFunction, key: Int, at: Int) Never! {
+ir_range_drop_point: fn(f: ^IRFunction, key: Int, at: Int) Never! {
     if key < 0 || at + 1 >= f.op.len() || f.op[at] != .Call || f.a[at] != key || f.dst[at] < 0 {
         return
     }

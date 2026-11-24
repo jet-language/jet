@@ -83,7 +83,7 @@ JetCLICanvasProfiles: struct {
     dir: String,
 
     // Remove the last recording, if any.
-    release: fn(&self) {
+    release: fn(^self) {
         if self.dir != "" -> canvas_debug_remove(self.dir)
         self.dir = ""
     }
@@ -97,7 +97,7 @@ jet_cli_canvas_profile_error: fn(kind: String, message: String) -> JetCLICanvasP
 
 // Answer one profile request the listener handed the dev loop. A refused
 // request is a 409 carrying its jet.canvas.profile error.
-jet_cli_canvas_profile_answer: fn(profiles: &JetCLICanvasProfiles, file: String, source_id: String, taken: CanvasHostEdit) {
+jet_cli_canvas_profile_answer: fn(profiles: ^JetCLICanvasProfiles, file: String, source_id: String, taken: CanvasHostEdit) {
     if jet_cli_canvas_profile_payload(profiles, file, source_id, taken.body) == {
         .Ok(payload) -> {
             taken.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.profile", true, payload)})
@@ -115,7 +115,7 @@ jet_cli_canvas_profile_error_json: fn(kind: String, message: String) -> String N
 
 // The jet.canvas.profile document answering `body`, a request about the
 // entry `file` (whose source id is `entry_source`).
-jet_cli_canvas_profile_payload: fn(profiles: &JetCLICanvasProfiles, file: String, entry_source: String, body: String) -> String JetCLICanvasProfileError! {
+jet_cli_canvas_profile_payload: fn(profiles: ^JetCLICanvasProfiles, file: String, entry_source: String, body: String) -> String JetCLICanvasProfileError! {
     parsed: foundation_json_parse(body) ?? return Err(jet_cli_canvas_profile_error("bad_request", "Canvas profile request is not JSON: {err.message}"))
     request: jet_cli_canvas_profile_request(parsed.move())
     if request.schema_version != JET_CLI_CANVAS_PROFILE_SCHEMA {
@@ -161,7 +161,7 @@ jet_cli_canvas_profile_instructions: fn(trace: CanonicalJSON, path: String, want
 }
 
 // The request `value` is, taken out of it.
-jet_cli_canvas_profile_request: fn(value: &&Dyn) -> JetCLICanvasProfileRequest Never! {
+jet_cli_canvas_profile_request: fn(value: ^^Dyn) -> JetCLICanvasProfileRequest Never! {
     request := JetCLICanvasProfileRequest{schema_version: -1, revision: None, source_id: None, trace: None, from_ns: None, to_ns: None, width: None, instructions: None}
     fields := jet_cli_dap_members(value.move())
     fields.reverse()
@@ -201,7 +201,7 @@ jet_cli_canvas_profile_named: fn(file: String, named: String) -> String JetCLICa
 // Profile the entry with this `jet`, as `jet perf run` does, into a scratch
 // trace that replaces the last one. A program that does not build or fails
 // answers its own report.
-jet_cli_canvas_profile_run: fn(profiles: &JetCLICanvasProfiles, file: String) -> String JetCLICanvasProfileError! {
+jet_cli_canvas_profile_run: fn(profiles: ^JetCLICanvasProfiles, file: String) -> String JetCLICanvasProfileError! {
     profiles.release()
     dir: cli_files.tmpdir("jet-canvas-profile") ?? return Err(jet_cli_canvas_profile_error("io", "couldn't create the Canvas profile directory: {err}"))
     profiles.dir = dir

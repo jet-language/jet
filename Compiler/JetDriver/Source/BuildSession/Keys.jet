@@ -9,7 +9,7 @@ use {
     core.build.[BuildGraphInputDigest, BuildGraphNode]
 }
 
-build_key_number: fn(bytes: &[U8], value: Int) Never! {
+build_key_number: fn(bytes: ^[U8], value: Int) Never! {
     divisor := 72057594037927936
     loop _ in 0..<8 {
         bytes.push(U8{(value /% divisor) % 256})
@@ -17,20 +17,20 @@ build_key_number: fn(bytes: &[U8], value: Int) Never! {
     }
 }
 
-build_key_text: fn(bytes: &[U8], value: String) Never! {
+build_key_text: fn(bytes: ^[U8], value: String) Never! {
     raw: value.bytes()
     build_key_number(bytes, raw.len())
     loop byte in raw -> bytes.push(byte)
 }
 
-build_key_bool: fn(bytes: &[U8], value: Bool) Never! { bytes.push(if value -> U8{1} else -> U8{0}) }
+build_key_bool: fn(bytes: ^[U8], value: Bool) Never! { bytes.push(if value -> U8{1} else -> U8{0}) }
 
-build_key_texts: fn(bytes: &[U8], values: [String]) Never! {
+build_key_texts: fn(bytes: ^[U8], values: [String]) Never! {
     build_key_number(bytes, values.len())
     loop value in values -> build_key_text(bytes, value)
 }
 
-build_key_map: fn(bytes: &[U8], values: [String:String]) Never! {
+build_key_map: fn(bytes: ^[U8], values: [String:String]) Never! {
     keys := values.keys().collect()
     keys.sort()
     build_key_number(bytes, keys.len())
@@ -40,13 +40,13 @@ build_key_map: fn(bytes: &[U8], values: [String:String]) Never! {
     }
 }
 
-build_key_declared_provenance: fn(bytes: &[U8]) Never! {
+build_key_declared_provenance: fn(bytes: ^[U8]) Never! {
     build_key_text(bytes, "user-declared")
     build_key_text(bytes, "fn build")
     build_key_bool(bytes, false)
 }
 
-build_key_toolchain: fn(bytes: &[U8], toolchain: BuildSessionToolchain) Never! {
+build_key_toolchain: fn(bytes: ^[U8], toolchain: BuildSessionToolchain) Never! {
     values: [String]{toolchain.name, toolchain.role, toolchain.host_triple, toolchain.target_triple}
     loop value in values -> build_key_text(bytes, value)
     build_key_bool(bytes, toolchain.sdk != None)
@@ -77,7 +77,7 @@ build_key_toolchain: fn(bytes: &[U8], toolchain: BuildSessionToolchain) Never! {
     } else { build_key_declared_provenance(bytes) }
 }
 
-build_key_probe: fn(bytes: &[U8], state: BuildSessionState, probe: BuildSessionProbe) Never! {
+build_key_probe: fn(bytes: ^[U8], state: BuildSessionState, probe: BuildSessionProbe) Never! {
     build_key_text(bytes, probe.name)
     kind: if probe.kind == {
         "find_program" -> "find-program"

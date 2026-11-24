@@ -242,7 +242,7 @@ session_path: fn(address: String, runtime: String) -> String DbusError! {
 }
 
 // Authenticates as `uid` on a connected `stream` and says Hello.
-start: fn(stream: &&net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> DbusConnection DbusError! {
+start: fn(stream: ^^net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> DbusConnection DbusError! {
     c := DbusConnection{stream: stream.move(), serial: 0, name: "", inbox: [U8]{}, queued: [DbusMessage]{}, served: [String]{}, calls: [DbusMessage]{}}
     deadline: now() + timeout_ns
     // The credentials byte, then the EXTERNAL mechanism with the uid as
@@ -271,7 +271,7 @@ start: fn(stream: &&net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> Dbu
 }
 
 // One CRLF-ended line from the bus, before BEGIN.
-read_line: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
+read_line: fn(c: ^DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
     loop {
         loop i in 1..<c.inbox.len() {
             if (Int{c.inbox[i - 1]}) == 13 && (Int{c.inbox[i]}) == 10 {
@@ -292,11 +292,11 @@ read_line: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> String DbusError!
 
 // Calls `member` and waits at most `timeout_ns` for its reply; an error
 // reply is `.Failed`. Signals that arrive meanwhile are queued.
-call: fn(c: &DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], timeout_ns: Int) -[Net, Time]> DbusMessage DbusError! {
+call: fn(c: ^DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], timeout_ns: Int) -[Net, Time]> DbusMessage DbusError! {
     call_until(c, destination, path, interface, member, body, now() + timeout_ns)
 }
 
-call_until: fn(c: &DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], deadline: Int) -[Net, Time]> DbusMessage DbusError! {
+call_until: fn(c: ^DbusConnection, destination: String, path: String, interface: String, member: String, body: [DbusValue], deadline: Int) -[Net, Time]> DbusMessage DbusError! {
     message := blank(DbusKind.Call)
     message.path = path
     message.interface = interface
@@ -326,7 +326,7 @@ call_until: fn(c: &DbusConnection, destination: String, path: String, interface:
 }
 
 // Sends `message` under the connection's next serial, which it returns.
-send: fn(c: &DbusConnection, message: DbusMessage) -[Net, Time]> Int DbusError! {
+send: fn(c: ^DbusConnection, message: DbusMessage) -[Net, Time]> Int DbusError! {
     c.serial = if c.serial >= 4294967295 -> 1 else -> c.serial + 1
     bytes: encode(message, c.serial) ?? return Err(err)
     send_bytes(c, bytes) ?? return Err(err)
@@ -334,14 +334,14 @@ send: fn(c: &DbusConnection, message: DbusMessage) -[Net, Time]> Int DbusError! 
 }
 
 // Asks the bus for the signals `rule` matches.
-add_match: fn(c: &DbusConnection, rule: String, timeout_ns: Int) -[Net, Time]> DbusError! {
+add_match: fn(c: ^DbusConnection, rule: String, timeout_ns: Int) -[Net, Time]> DbusError! {
     _: call(c, BUS_NAME, BUS_PATH, BUS_NAME, "AddMatch", [DbusValue]{DbusValue.Text(rule)}, timeout_ns) ?? return Err(err)
     Ok()
 }
 
 // The signals queued and those that arrive within `timeout_ns` (0: only
 // what is already here), oldest first.
-signals: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] DbusError! {
+signals: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] DbusError! {
     gather(c, if c.queued.len() > 0 -> 0 else -> timeout_ns) ?? return Err(err)
     out: c.queued.copy()
     c.queued.clear()
@@ -350,7 +350,7 @@ signals: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] Dbu
 
 // Reads what arrives within `timeout_ns` (0: only what is already here) and
 // sets each whole message aside (`set_aside`).
-gather: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
+gather: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
     ready: net.unix_wait(c.stream, timeout_ns) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
     if ready -> take_bytes(c) ?? return Err(err)
     loop {
@@ -372,7 +372,7 @@ gather: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
 // A message that is no reply being waited for: a signal is queued, a call
 // to a served object waits for `next_call`, any other call that wants a
 // reply hears that no method is here, and the rest go.
-set_aside: fn(c: &DbusConnection, m: DbusMessage) -[Net, Time]> DbusError! {
+set_aside: fn(c: ^DbusConnection, m: DbusMessage) -[Net, Time]> DbusError! {
     if m.kind == .Signal {
         if c.queued.len() >= QUEUE_MAX -> c.queued = c.queued[1..<c.queued.len()].copy()
         c.queued.push(m.copy())
@@ -392,13 +392,13 @@ set_aside: fn(c: &DbusConnection, m: DbusMessage) -[Net, Time]> DbusError! {
 // Keeps the calls made to the object at `path` for `next_call`, which this
 // connection answers (`answer`, `refuse`), instead of saying no method is
 // there.
-serve: fn(c: &DbusConnection, path: String) {
+serve: fn(c: ^DbusConnection, path: String) {
     if !c.served.contains(path) -> c.served.push(path.copy())
 }
 
 // Asks the bus for the well-known `name`, waiting at most `timeout_ns`;
 // true when this connection owns it now, false when another does.
-request_name: fn(c: &DbusConnection, name: String, timeout_ns: Int) -[Net, Time]> Bool DbusError! {
+request_name: fn(c: ^DbusConnection, name: String, timeout_ns: Int) -[Net, Time]> Bool DbusError! {
     reply: call(c, BUS_NAME, BUS_PATH, BUS_NAME, "RequestName", [DbusValue]{DbusValue.Text(name), DbusValue.Uint32(DO_NOT_QUEUE)}, timeout_ns) ?? return Err(err)
     if reply.body.len() == 1 {
         if reply.body[0] == .Uint32(code) {
@@ -410,7 +410,7 @@ request_name: fn(c: &DbusConnection, name: String, timeout_ns: Int) -[Net, Time]
 
 // The oldest call to a served object that is here or arrives within
 // `timeout_ns` (0: only what is already here); None when none came.
-next_call: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
+next_call: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
     gather(c, if c.calls.len() > 0 -> 0 else -> timeout_ns) ?? return Err(err)
     if c.calls.len() == 0 -> return Ok(None)
     first: c.calls[0].copy()
@@ -420,7 +420,7 @@ next_call: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusMessage? Db
 
 // Answers the call `m` with `body`; a call that asked for no reply gets
 // none.
-answer: fn(c: &DbusConnection, m: DbusMessage, body: [DbusValue]) -[Net, Time]> DbusError! {
+answer: fn(c: ^DbusConnection, m: DbusMessage, body: [DbusValue]) -[Net, Time]> DbusError! {
     if m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
     reply := blank(DbusKind.Return)
     reply.flags = NO_REPLY_EXPECTED
@@ -433,7 +433,7 @@ answer: fn(c: &DbusConnection, m: DbusMessage, body: [DbusValue]) -[Net, Time]> 
 
 // Answers the call `m` with the error `name`, which `text` explains; a call
 // that asked for no reply gets none.
-refuse: fn(c: &DbusConnection, m: DbusMessage, name: String, text: String) -[Net, Time]> DbusError! {
+refuse: fn(c: ^DbusConnection, m: DbusMessage, name: String, text: String) -[Net, Time]> DbusError! {
     if m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
     reply := blank(DbusKind.Error)
     reply.flags = NO_REPLY_EXPECTED
@@ -447,7 +447,7 @@ refuse: fn(c: &DbusConnection, m: DbusMessage, name: String, text: String) -[Net
 
 // Sends the signal `member` of `interface` from the object at `path` to
 // whoever's match rules ask for it.
-emit: fn(c: &DbusConnection, path: String, interface: String, member: String, body: [DbusValue]) -[Net, Time]> DbusError! {
+emit: fn(c: ^DbusConnection, path: String, interface: String, member: String, body: [DbusValue]) -[Net, Time]> DbusError! {
     message := blank(DbusKind.Signal)
     message.flags = NO_REPLY_EXPECTED
     message.path = path
@@ -482,7 +482,7 @@ blank: fn(kind: DbusKind) -> DbusMessage {
 }
 
 // The next whole message read, if one is here.
-next_message: fn(c: &DbusConnection) -> DbusMessage? DbusError! {
+next_message: fn(c: ^DbusConnection) -> DbusMessage? DbusError! {
     loop {
         decoded: decode(c.inbox) ?? return Err(err)
         if decoded.used == 0 -> return Ok(None)
@@ -493,7 +493,7 @@ next_message: fn(c: &DbusConnection) -> DbusMessage? DbusError! {
 }
 
 // Waits until `deadline` for bytes from the bus and adds them to the inbox.
-receive_some: fn(c: &DbusConnection, deadline: Int, what: String) -[Net, Time]> DbusError! {
+receive_some: fn(c: ^DbusConnection, deadline: Int, what: String) -[Net, Time]> DbusError! {
     left: deadline - now()
     if left <= 0 -> return Err(DbusError.Timeout("the bus did not answer {what} in time"))
     ready: net.unix_wait(c.stream, left) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
@@ -502,14 +502,14 @@ receive_some: fn(c: &DbusConnection, deadline: Int, what: String) -[Net, Time]> 
 }
 
 // Reads what the socket holds into the inbox; descriptors are dropped.
-take_bytes: fn(c: &DbusConnection) -[Net, Time]> DbusError! {
+take_bytes: fn(c: ^DbusConnection) -[Net, Time]> DbusError! {
     got: net.unix_receive(c.stream, RECEIVE_MAX) ?? return Err(DbusError.Connect("reading from the bus failed: {err}"))
     if got.bytes.len() == 0 -> return Err(DbusError.Closed)
     loop b in got.bytes -> c.inbox.push(b)
     Ok()
 }
 
-send_bytes: fn(c: &DbusConnection, bytes: [U8]) -[Net, Time]> DbusError! {
+send_bytes: fn(c: ^DbusConnection, bytes: [U8]) -[Net, Time]> DbusError! {
     net.unix_send(c.stream, bytes, [sys.Fd]{}) ?? return Err(DbusError.Connect("writing to the bus failed: {err}"))
     Ok()
 }
@@ -591,7 +591,7 @@ signature_of: fn(value: DbusValue) -> String {
 
 // Appends `value` aligned as the wire wants it; offsets count from the
 // message's first byte, which `out` starts at.
-marshal: fn(out: &[U8], value: DbusValue) {
+marshal: fn(out: ^[U8], value: DbusValue) {
     if value == {
         .Byte(n) -> { out.push(U8{n & 255}) }
         .Bool(flag) -> {
@@ -636,32 +636,32 @@ marshal: fn(out: &[U8], value: DbusValue) {
     }
 }
 
-put_aligned: fn(out: &[U8], value: Int, size: Int) {
+put_aligned: fn(out: ^[U8], value: Int, size: Int) {
     pad(out, size)
     put_word(out, value, size)
 }
 
 // `size` little-endian bytes of `value`, two's complement when negative.
-put_word: fn(out: &[U8], value: Int, size: Int) {
+put_word: fn(out: ^[U8], value: Int, size: Int) {
     v: if value < 0 -> value + 18446744073709551616 else -> value
     loop i in 0..<size -> out.push(U8{(v >> (8 * i)) & 255})
 }
 
-put_text: fn(out: &[U8], text: String) {
+put_text: fn(out: ^[U8], text: String) {
     bytes: text.bytes()
     put_aligned(out, bytes.len(), 4)
     loop b in bytes -> out.push(b)
     out.push(U8{0})
 }
 
-put_signature: fn(out: &[U8], text: String) {
+put_signature: fn(out: ^[U8], text: String) {
     bytes: text.bytes()
     out.push(U8{bytes.len() & 255})
     loop b in bytes -> out.push(b)
     out.push(U8{0})
 }
 
-pad: fn(out: &[U8], alignment: Int) {
+pad: fn(out: ^[U8], alignment: Int) {
     loop out.len() %% alignment != 0 -> out.push(U8{0})
 }
 
@@ -723,7 +723,7 @@ decode: fn(bytes: [U8]) -> Decoded DbusError! {
 }
 
 // Stores one header field in `m`; unknown codes are skipped.
-header_value: fn(m: &DbusMessage, field: DbusValue) DbusError! {
+header_value: fn(m: ^DbusMessage, field: DbusValue) DbusError! {
     code: field_code(field)
     value: field_value(field) ?? return Err(DbusError.Protocol("a header field is not a code and a variant"))
     if code == 9 {
@@ -809,7 +809,7 @@ kind_name: fn(kind: DbusKind) -> String {
 
 // Reads the value of the complete type at `sig[at]`; `depth` counts the
 // containers it sits in.
-read_value: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+read_value: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
     if depth > NESTING_MAX * 2 {
         return Err(DbusError.Protocol("values nest deeper than {NESTING_MAX * 2}"))
     }
@@ -827,7 +827,7 @@ read_value: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErro
 }
 
 // A byte, boolean, integer or double: as wide as it is aligned.
-read_fixed: fn(r: &Reader, code: Int) -> DbusValue DbusError! {
+read_fixed: fn(r: ^Reader, code: Int) -> DbusValue DbusError! {
     size: if code == 121 -> 1 else -> alignment_of(code)
     start: field(r, size) ?? return Err(err)
     n: word(r.bytes, start, size)
@@ -847,7 +847,7 @@ read_fixed: fn(r: &Reader, code: Int) -> DbusValue DbusError! {
 // The two's-complement value of the `bits`-wide word `n`.
 signed: fn(n: Int, bits: Int) -> Int { if n >= 1 << (bits - 1) -> n - (1 << bits) else -> n }
 
-read_string: fn(r: &Reader, code: Int) -> DbusValue DbusError! {
+read_string: fn(r: ^Reader, code: Int) -> DbusValue DbusError! {
     start: field(r, 4) ?? return Err(err)
     length: word(r.bytes, start, 4)
     text: read_text(r, length) ?? return Err(err)
@@ -856,12 +856,12 @@ read_string: fn(r: &Reader, code: Int) -> DbusValue DbusError! {
     Ok(DbusValue.Path(text))
 }
 
-read_signature_value: fn(r: &Reader) -> DbusValue DbusError! {
+read_signature_value: fn(r: ^Reader) -> DbusValue DbusError! {
     text: read_signature(r) ?? return Err(err)
     Ok(DbusValue.Signature(text))
 }
 
-read_variant: fn(r: &Reader, depth: Int) -> DbusValue DbusError! {
+read_variant: fn(r: ^Reader, depth: Int) -> DbusValue DbusError! {
     text: read_signature(r) ?? return Err(err)
     inner: text.bytes()
     if inner.len() == 0 || type_end(inner, 0, 0, 0) != inner.len() {
@@ -871,7 +871,7 @@ read_variant: fn(r: &Reader, depth: Int) -> DbusValue DbusError! {
     Ok(DbusValue.Variant(value))
 }
 
-read_array: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+read_array: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
     start: field(r, 4) ?? return Err(err)
     length: word(r.bytes, start, 4)
     if length > ARRAY_MAX {
@@ -893,7 +893,7 @@ read_array: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErro
     Ok(DbusValue.Array{signature: element_text, items: items})
 }
 
-read_struct: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+read_struct: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
     align(r, 8) ?? return Err(err)
     fields := [DbusValue]{}
     i := at + 1
@@ -906,7 +906,7 @@ read_struct: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErr
 }
 
 // One array element: a dict entry when the element type opens with `{`.
-read_element: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
+read_element: fn(r: ^Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
     if (Int{sig[at]}) != 123 -> return read_value(r, sig, at, depth)
     align(r, 8) ?? return Err(err)
     key: read_value(r, sig, at + 1, depth + 1) ?? return Err(err)
@@ -915,7 +915,7 @@ read_element: fn(r: &Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusEr
 }
 
 // Moves to the next `alignment` boundary over zero padding.
-align: fn(r: &Reader, alignment: Int) DbusError! {
+align: fn(r: ^Reader, alignment: Int) DbusError! {
     loop r.at %% alignment != 0 {
         if r.at >= r.end -> return Err(truncated())
         if (Int{r.bytes[r.at]}) != 0 {
@@ -927,7 +927,7 @@ align: fn(r: &Reader, alignment: Int) DbusError! {
 }
 
 // The offset of an aligned `size`-byte field, which the reader moves past.
-field: fn(r: &Reader, size: Int) -> Int DbusError! {
+field: fn(r: ^Reader, size: Int) -> Int DbusError! {
     align(r, size) ?? return Err(err)
     if size > r.end - r.at -> return Err(truncated())
     start: r.at
@@ -936,7 +936,7 @@ field: fn(r: &Reader, size: Int) -> Int DbusError! {
 }
 
 // `length` bytes of UTF-8 and their NUL.
-read_text: fn(r: &Reader, length: Int) -> String DbusError! {
+read_text: fn(r: ^Reader, length: Int) -> String DbusError! {
     if length >= r.end - r.at -> return Err(truncated())
     start: r.at
     r.at += length + 1
@@ -950,7 +950,7 @@ read_text: fn(r: &Reader, length: Int) -> String DbusError! {
     Ok(text)
 }
 
-read_signature: fn(r: &Reader) -> String DbusError! {
+read_signature: fn(r: ^Reader) -> String DbusError! {
     start: field(r, 1) ?? return Err(err)
     length: Int{r.bytes[start]}
     text: read_text(r, length) ?? return Err(err)
@@ -1127,7 +1127,7 @@ default_appearance: fn() -> PortalAppearance {
 
 // Reads org.freedesktop.appearance from the portal; a portal that is not
 // running is `.Failed` with org.freedesktop.DBus.Error.ServiceUnknown.
-appearance: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAppearance DbusError! {
+appearance: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAppearance DbusError! {
     namespaces: DbusValue.Array{signature: "s", items: [DbusValue]{DbusValue.Text(APPEARANCE)}}
     reply: call(c, PORTAL_NAME, PORTAL_PATH, SETTINGS, "ReadAll", [DbusValue]{namespaces}, timeout_ns) ?? return Err(err)
     if reply.body.len() != 1 -> return Err(DbusError.Protocol("ReadAll answered {reply.signature}"))
@@ -1155,14 +1155,14 @@ appearance: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAppearan
 
 // Asks the bus for the appearance's SettingChanged signals and for the
 // portal's comings and goings.
-watch_appearance: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
+watch_appearance: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
     q: ascii(39)
     add_match(c, "type={q}signal{q},interface={q}{SETTINGS}{q},member={q}SettingChanged{q},path={q}{PORTAL_PATH}{q},arg0={q}{APPEARANCE}{q}", timeout_ns) ?? return Err(err)
     add_match(c, "type={q}signal{q},sender={q}{BUS_NAME}{q},interface={q}{BUS_NAME}{q},member={q}NameOwnerChanged{q},arg0={q}{PORTAL_NAME}{q}", timeout_ns)
 }
 
 // Applies an appearance SettingChanged signal to `look`: whether it changed.
-apply_signal: fn(look: &PortalAppearance, m: DbusMessage) -> Bool {
+apply_signal: fn(look: ^PortalAppearance, m: DbusMessage) -> Bool {
     if m.kind != .Signal || m.interface != SETTINGS || m.member != "SettingChanged" || m.body.len() != 3 {
         return false
     }
@@ -1184,7 +1184,7 @@ portal_restarted: fn(m: DbusMessage) -> Bool {
 // Sets one appearance key from its value (a variant, once or twice wrapped
 // as older portals' Read gave it): whether `look` changed. Values out of
 // the portal's range read as unset.
-apply_setting: fn(look: &PortalAppearance, key: String, value: DbusValue) -> Bool {
+apply_setting: fn(look: ^PortalAppearance, key: String, value: DbusValue) -> Bool {
     plain := value.copy()
     loop _ in 0..<2 {
         unwrapped: if plain == .Variant(inner) -> inner.copy() else -> plain.copy()
@@ -1199,7 +1199,7 @@ apply_setting: fn(look: &PortalAppearance, key: String, value: DbusValue) -> Boo
 }
 
 // color-scheme: 1 dark, 2 light, anything else no preference.
-set_scheme: fn(look: &PortalAppearance, n: Int) -> Bool {
+set_scheme: fn(look: ^PortalAppearance, n: Int) -> Bool {
     scheme: PortalScheme.from_int(n) ?? PortalScheme.NoPreference
     if scheme == look.scheme -> return false
     look.scheme = scheme
@@ -1207,14 +1207,14 @@ set_scheme: fn(look: &PortalAppearance, n: Int) -> Bool {
 }
 
 // contrast: 1 high, anything else normal.
-set_contrast: fn(look: &PortalAppearance, n: Int) -> Bool {
+set_contrast: fn(look: ^PortalAppearance, n: Int) -> Bool {
     high: n == 1
     if high == look.high_contrast -> return false
     look.high_contrast = high
     true
 }
 
-set_accent: fn(look: &PortalAppearance, accent: [Float]) -> Bool {
+set_accent: fn(look: ^PortalAppearance, accent: [Float]) -> Bool {
     if accent == look.accent -> return false
     look.accent = accent
     true
@@ -1267,7 +1267,7 @@ PortalAnswer: enum {
 
 // Asks the portal for the camera and waits at most `timeout_ns` for the
 // person's answer. A machine with no camera is `.Absent` without asking.
-portal_camera: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
+portal_camera: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
     deadline: now() + timeout_ns
     present: call_until(c, PORTAL_NAME, PORTAL_PATH, PROPERTIES, "Get", [DbusValue]{DbusValue.Text(CAMERA), DbusValue.Text("IsCameraPresent")}, deadline) ?? return Err(err)
     if present.body.len() != 1 || present.body[0] != DbusValue.Variant(DbusValue.Bool(true)) {
@@ -1283,7 +1283,7 @@ portal_camera: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswe
 // Asks the portal for the device's location and waits at most `timeout_ns`
 // for the person's answer: a location session is made and started, which
 // is when the person is asked, and closed once they answer.
-portal_location: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
+portal_location: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
     fix: located(c, timeout_ns, false) ?? return Err(err)
     Ok(fix.answer)
 }
@@ -1306,11 +1306,11 @@ PortalFix: struct {
 // Asks for the device's location as `portal_location` does and, once the
 // person allows it, waits for the first location the session reports; the
 // session is closed after it, or once `timeout_ns` ran out.
-portal_place: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalFix DbusError! {
+portal_place: fn(c: ^DbusConnection, timeout_ns: Int) -[Net, Time]> PortalFix DbusError! {
     located(c, timeout_ns, true)
 }
 
-located: fn(c: &DbusConnection, timeout_ns: Int, wants_place: Bool) -[Net, Time]> PortalFix DbusError! {
+located: fn(c: ^DbusConnection, timeout_ns: Int, wants_place: Bool) -[Net, Time]> PortalFix DbusError! {
     deadline: now() + timeout_ns
     opened: open_location(c, wants_place, timeout_ns) ?? return Err(err)
     place := PortalPlace?{None}
@@ -1338,7 +1338,7 @@ PortalSession: struct {
 // once the person allows it, it reports where the device is each time it
 // moves, until `close_location` closes it. With `follows`, the bus is
 // asked for those reports first.
-open_location: fn(c: &DbusConnection, follows: Bool, timeout_ns: Int) -[Net, Time]> PortalSession DbusError! {
+open_location: fn(c: ^DbusConnection, follows: Bool, timeout_ns: Int) -[Net, Time]> PortalSession DbusError! {
     deadline: now() + timeout_ns
     watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
     if follows -> watch(c, LOCATION, "LocationUpdated", "", deadline) ?? return Err(err)
@@ -1355,7 +1355,7 @@ open_location: fn(c: &DbusConnection, follows: Bool, timeout_ns: Int) -[Net, Tim
 // Closes the location session at `session`, so the portal stops locating
 // the device for it. The bus drops the connection's match rules when the
 // connection closes.
-close_location: fn(c: &DbusConnection, session: String) -[Net, Time]> {
+close_location: fn(c: ^DbusConnection, session: String) -[Net, Time]> {
     _: call(c, PORTAL_NAME, session, SESSION, "Close", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
 }
 
@@ -1366,7 +1366,7 @@ CLOSE_WAIT_NS: 1000000000
 // `path`, or from any when it is "": the portal sends each request's
 // Response and each location session's LocationUpdated to the caller, and
 // the reader picks out its own.
-watch: fn(c: &DbusConnection, interface: String, member: String, path: String, deadline: Int) -[Net, Time]> DbusError! {
+watch: fn(c: ^DbusConnection, interface: String, member: String, path: String, deadline: Int) -[Net, Time]> DbusError! {
     q: ascii(39)
     from: if path == "" -> "" else -> ",path={q}{path}{q}"
     rule: "type={q}signal{q},interface={q}{interface}{q},member={q}{member}{q}{from}"
@@ -1376,7 +1376,7 @@ watch: fn(c: &DbusConnection, interface: String, member: String, path: String, d
 
 // The next LocationUpdated signal of the session at `session` that is here
 // or arrives within `timeout_ns`, read as a place; `None` when none came.
-next_place: fn(c: &DbusConnection, session: String, timeout_ns: Int) -[Net, Time]> PortalPlace? DbusError! {
+next_place: fn(c: ^DbusConnection, session: String, timeout_ns: Int) -[Net, Time]> PortalPlace? DbusError! {
     found: if next_signal(c, LOCATION, "LocationUpdated", "", DbusValue.Path(session), timeout_ns) == {
         .Err(err) -> {
             return Err(err)
@@ -1394,7 +1394,7 @@ next_place: fn(c: &DbusConnection, session: String, timeout_ns: Int) -[Net, Time
 // first argument is `first`, here or arriving within
 // `timeout_ns`. The signals before it go; those after it stay queued, in
 // order, for the next read.
-next_signal: fn(c: &DbusConnection, interface: String, member: String, path: String, first: DbusValue, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
+next_signal: fn(c: ^DbusConnection, interface: String, member: String, path: String, first: DbusValue, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
     deadline: now() + timeout_ns
     wait := 0
     loop {
@@ -1480,7 +1480,7 @@ sensor_site: fn(sensor: Sensor) -> SensorSite {
 // `None`, with nothing claimed, when the device has no such sensor. Each
 // change after comes in a PropertiesChanged signal, which `sensor_change`
 // reads, until `release_sensor` gives the sensor back.
-claim_sensor: fn(c: &DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Time]> DbusValue? DbusError! {
+claim_sensor: fn(c: ^DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Time]> DbusValue? DbusError! {
     deadline: now() + timeout_ns
     site: sensor_site(sensor)
     has: call_until(c, SENSOR_PROXY, site.path, PROPERTIES, "Get", [DbusValue]{DbusValue.Text(site.interface), DbusValue.Text("Has{site.name}")}, deadline) ?? return Err(err)
@@ -1499,7 +1499,7 @@ claim_sensor: fn(c: &DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Tim
 // The next reading of the claimed `sensor` that is here or arrives within
 // `timeout_ns`: the new value of its property in a PropertiesChanged
 // signal of the proxy's; `None` when none came.
-sensor_change: fn(c: &DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Time]> DbusValue? DbusError! {
+sensor_change: fn(c: ^DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Time]> DbusValue? DbusError! {
     deadline: now() + timeout_ns
     site: sensor_site(sensor)
     loop {
@@ -1518,13 +1518,13 @@ sensor_change: fn(c: &DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Ti
 
 // Gives `sensor` back to the proxy, so it stops reading it for this
 // connection.
-release_sensor: fn(c: &DbusConnection, sensor: Sensor) -[Net, Time]> {
+release_sensor: fn(c: ^DbusConnection, sensor: Sensor) -[Net, Time]> {
     site: sensor_site(sensor)
     _: call(c, SENSOR_PROXY, site.path, site.interface, "Release{site.name}", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
 }
 
 // A token for the next request's object path, unique on this connection.
-request_token: fn(c: &DbusConnection) -> String { "jet{c.serial + 1}" }
+request_token: fn(c: ^DbusConnection) -> String { "jet{c.serial + 1}" }
 
 // A portal call's options: one string, `name`.
 string_option: fn(name: String, value: String) -> DbusValue {
@@ -1552,7 +1552,7 @@ answered_path: fn(reply: DbusMessage, member: String) -> String DbusError! {
 // Waits until `deadline` for the Response signal of the request at
 // `request` and reads its code; no answer by then is `.Ended`. The other
 // signals it reads stay queued, in order, for their own readers.
-response: fn(c: &DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalAnswer DbusError! {
+response: fn(c: ^DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalAnswer DbusError! {
     got: reply(c, request, deadline) ?? return Err(err)
     Ok(got.answer)
 }
@@ -1565,7 +1565,7 @@ PortalReply: struct {
 }
 
 // Waits as `response` does, and reads the Response's results too.
-reply: fn(c: &DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalReply DbusError! {
+reply: fn(c: ^DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalReply DbusError! {
     wait := 0
     others := [DbusMessage]{}
     loop {
@@ -1616,14 +1616,14 @@ FileFilter: struct {
 // first one chosen), and waits at most `timeout_ns` for the person. Gives
 // the `file://` URI of the file they chose, for the caller to read, or None
 // when they canceled or chose nothing in time.
-portal_open_file: fn(c: &DbusConnection, title: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+portal_open_file: fn(c: ^DbusConnection, title: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     file_dialog(c, "OpenFile", title, [DbusValue]{}, filters, timeout_ns)
 }
 
 // Shows the portal's open dialog, titled `title`, asking for a folder, and
 // waits at most `timeout_ns` for the person. Gives the `file://` URI of the
 // folder they chose, or None when they canceled or chose nothing in time.
-portal_open_folder: fn(c: &DbusConnection, title: String, timeout_ns: Int) -[Net, Time]> String? DbusError! {
+portal_open_folder: fn(c: ^DbusConnection, title: String, timeout_ns: Int) -[Net, Time]> String? DbusError! {
     file_dialog(c, "OpenFile", title, [DbusValue]{entry_of("directory", DbusValue.Bool(true))}, [FileFilter]{}, timeout_ns)
 }
 
@@ -1632,14 +1632,14 @@ portal_open_folder: fn(c: &DbusConnection, title: String, timeout_ns: Int) -[Net
 // waits at most `timeout_ns` for the person. Gives the `file://` URI of
 // the file they chose, for the caller to write, or None when they
 // canceled or chose nothing in time.
-portal_save_file: fn(c: &DbusConnection, title: String, suggested: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+portal_save_file: fn(c: ^DbusConnection, title: String, suggested: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     file_dialog(c, "SaveFile", title, [DbusValue]{entry_of("current_name", DbusValue.Text(suggested))}, filters, timeout_ns)
 }
 
 // Shows the FileChooser dialog `member` with the options `named` beside
 // its handle token and `filters`, and gives the URI of the one file or
 // folder the person chose, or None when they chose none in time.
-file_dialog: fn(c: &DbusConnection, member: String, title: String, named: [DbusValue], filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+file_dialog: fn(c: ^DbusConnection, member: String, title: String, named: [DbusValue], filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     deadline: now() + timeout_ns
     watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
     options := [DbusValue]{entry_of("handle_token", DbusValue.Text(request_token(c)))}
@@ -1694,7 +1694,7 @@ OPEN_ACTION: "default"
 // in it. A click on the notification invokes its `OPEN_ACTION`. Before it
 // shows anything, it asks the bus for the service's ActionInvoked and
 // NotificationClosed signals, which `notification_end` reads.
-notify: fn(c: &DbusConnection, app: String, desktop_id: String, title: String, body: String, timeout_ns: Int) -[Net, Time]> Int DbusError! {
+notify: fn(c: ^DbusConnection, app: String, desktop_id: String, title: String, body: String, timeout_ns: Int) -[Net, Time]> Int DbusError! {
     deadline: now() + timeout_ns
     watch(c, NOTIFICATIONS, "ActionInvoked", NOTIFICATIONS_PATH, deadline) ?? return Err(err)
     watch(c, NOTIFICATIONS, "NotificationClosed", NOTIFICATIONS_PATH, deadline) ?? return Err(err)
@@ -1716,7 +1716,7 @@ notify: fn(c: &DbusConnection, app: String, desktop_id: String, title: String, b
     Err(DbusError.Protocol("Notify answered {shown.signature}, not a notification ID"))
 }
 
-// `text` as notification markup shows it: `&`, `<` and `>` escaped.
+// `text` as notification markup shows it: `^`, `<` and `>` escaped.
 markup_text: fn(text: String) -> String {
     text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
@@ -1725,7 +1725,7 @@ markup_text: fn(text: String) -> String {
 // arrives within `timeout_ns`: true when the person clicked the
 // notification itself (its `OPEN_ACTION`), false when it closed or they
 // chose another action, and `None` when neither came.
-notification_end: fn(c: &DbusConnection, id: Int, timeout_ns: Int) -[Net, Time]> Bool? DbusError! {
+notification_end: fn(c: ^DbusConnection, id: Int, timeout_ns: Int) -[Net, Time]> Bool? DbusError! {
     deadline: now() + timeout_ns
     loop {
         found: if next_signal(c, NOTIFICATIONS, "", NOTIFICATIONS_PATH, DbusValue.Uint32(id), deadline - now()) == {
@@ -1766,7 +1766,7 @@ DEFAULT_COLLECTION: "/org/freedesktop/secrets/aliases/default"
 // with `attributes`, in place of any item with the same attributes,
 // waiting at most `timeout_ns`. When the collection is locked the desktop
 // may ask the person to unlock it; a dismissed prompt keeps nothing.
-secret_store: fn(c: &DbusConnection, label: String, attributes: [String:String], secret: String, timeout_ns: Int) -[Net, Time]> DbusError! {
+secret_store: fn(c: ^DbusConnection, label: String, attributes: [String:String], secret: String, timeout_ns: Int) -[Net, Time]> DbusError! {
     deadline: now() + timeout_ns
     session: secret_session(c, deadline) ?? return Err(err)
     properties: options_of([DbusValue]{entry_of("org.freedesktop.Secret.Item.Label", DbusValue.Text(label)), entry_of("org.freedesktop.Secret.Item.Attributes", attributes_of(attributes))})
@@ -1781,7 +1781,7 @@ secret_store: fn(c: &DbusConnection, label: String, attributes: [String:String],
 // The secret of the item with `attributes`, waiting at most `timeout_ns`;
 // `None` when there is no such item. A locked item is unlocked first, and
 // the desktop may ask the person to: a dismissed prompt fails.
-secret_lookup: fn(c: &DbusConnection, attributes: [String:String], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+secret_lookup: fn(c: ^DbusConnection, attributes: [String:String], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     deadline: now() + timeout_ns
     item: if secret_item(c, attributes, deadline) == {
         .Err(err) -> {
@@ -1811,7 +1811,7 @@ secret_lookup: fn(c: &DbusConnection, attributes: [String:String], timeout_ns: I
 
 // Deletes the item with `attributes`, if there is one, waiting at most
 // `timeout_ns`.
-secret_clear: fn(c: &DbusConnection, attributes: [String:String], timeout_ns: Int) -[Net, Time]> DbusError! {
+secret_clear: fn(c: ^DbusConnection, attributes: [String:String], timeout_ns: Int) -[Net, Time]> DbusError! {
     deadline: now() + timeout_ns
     item: if secret_item(c, attributes, deadline) == {
         .Err(err) -> {
@@ -1828,7 +1828,7 @@ secret_clear: fn(c: &DbusConnection, attributes: [String:String], timeout_ns: In
 }
 
 // Opens a "plain" session with the Secret Service and gives its path.
-secret_session: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
+secret_session: fn(c: ^DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
     opened: call_until(c, SECRETS, SECRETS_PATH, SECRET_SERVICE, "OpenSession", [DbusValue]{DbusValue.Text("plain"), DbusValue.Variant(DbusValue.Text(""))}, deadline) ?? return Err(err)
     if opened.body.len() == 2 {
         if opened.body[1] == .Path(path) -> return Ok(path.copy())
@@ -1839,7 +1839,7 @@ secret_session: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> String DbusE
 // The path of the first item with `attributes`, unlocked: an item the
 // service holds locked is unlocked first, and a dismissed prompt fails.
 // `None` when there is none.
-secret_item: fn(c: &DbusConnection, attributes: [String:String], deadline: Int) -[Net, Time]> String? DbusError! {
+secret_item: fn(c: ^DbusConnection, attributes: [String:String], deadline: Int) -[Net, Time]> String? DbusError! {
     searched: call_until(c, SECRETS, SECRETS_PATH, SECRET_SERVICE, "SearchItems", [DbusValue]{attributes_of(attributes)}, deadline) ?? return Err(err)
     if searched.body.len() != 2 {
         return Err(DbusError.Protocol("SearchItems answered {searched.signature}, not its unlocked and locked items"))
@@ -1873,7 +1873,7 @@ first_path: fn(value: DbusValue) -> String? {
 // Shows the prompt at `prompt` that `member` answered, unless it is "/"
 // (none), and waits until `deadline` for it to complete: a dismissed
 // prompt fails.
-prompted: fn(c: &DbusConnection, prompt: String, member: String, deadline: Int) -[Net, Time]> DbusError! {
+prompted: fn(c: ^DbusConnection, prompt: String, member: String, deadline: Int) -[Net, Time]> DbusError! {
     if prompt == "/" -> return Ok()
     watch(c, SECRET_PROMPT, "Completed", prompt, deadline) ?? return Err(err)
     _: call_until(c, SECRETS, prompt, SECRET_PROMPT, "Prompt", [DbusValue]{DbusValue.Text("")}, deadline) ?? return Err(err)
@@ -1983,7 +1983,7 @@ Tray: struct {
 // its menu, and registers the item with the desktop's
 // StatusNotifierWatcher; a desktop with no tray has none, and that call
 // fails. `tray_answer` answers what the desktop then asks.
-tray_start: fn(c: &DbusConnection, title: String, icon: String, pid: Int, timeout_ns: Int) -[Net, Time]> Tray DbusError! {
+tray_start: fn(c: ^DbusConnection, title: String, icon: String, pid: Int, timeout_ns: Int) -[Net, Time]> Tray DbusError! {
     deadline: now() + timeout_ns
     name: "{ITEM}-{pid}-1"
     owned: request_name(c, name, timeout_ns) ?? return Err(err)
@@ -1999,7 +1999,7 @@ tray_start: fn(c: &DbusConnection, title: String, icon: String, pid: Int, timeou
 // Serves a menu at MENU_PATH, empty until `menu_show`: a tray's, or a
 // window's menu bar, which the window names by this connection's unique
 // name and the path. `menu_answer` answers what the desktop then asks.
-menu_start: fn(c: &DbusConnection) -> ServedMenu {
+menu_start: fn(c: ^DbusConnection) -> ServedMenu {
     serve(c, MENU_PATH)
     ServedMenu{entries: [MenuEntry]{}, revision: 1}
 }
@@ -2007,7 +2007,7 @@ menu_start: fn(c: &DbusConnection) -> ServedMenu {
 // Makes `entries` the menu's. When they differ from the entries it has,
 // the layout's revision grows and the desktop hears LayoutUpdated, so it
 // reads the menu again.
-menu_show: fn(c: &DbusConnection, menu: &ServedMenu, entries: [MenuEntry]) -[Net, Time]> DbusError! {
+menu_show: fn(c: ^DbusConnection, menu: ^ServedMenu, entries: [MenuEntry]) -[Net, Time]> DbusError! {
     if entries == menu.entries -> return Ok()
     menu.entries = entries
     menu.revision += 1
@@ -2017,7 +2017,7 @@ menu_show: fn(c: &DbusConnection, menu: &ServedMenu, entries: [MenuEntry]) -[Net
 // Answers `m`, a call the desktop made to the tray's item or its menu, and
 // gives the index in `menu_entries` of the entry the person chose when `m`
 // says they clicked one they can choose.
-tray_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+tray_answer: fn(c: ^DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> Int? DbusError! {
     if m.path == ITEM_PATH && m.interface == PROPERTIES && (m.member == "GetAll" || (m.member == "Get" && m.body.len() == 2)) {
         answer_properties(c, m, tray_item_properties(tray)) ?? return Err(err)
         return Ok(None)
@@ -2035,7 +2035,7 @@ tray_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> In
 // Answers `m`, a call the desktop made to the menu, and gives the index in
 // `menu_entries` of the entry the person chose when `m` says they clicked
 // one they can choose: enabled, and no separator or submenu.
-menu_answer: fn(c: &DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+menu_answer: fn(c: ^DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]> Int? DbusError! {
     if m.path == MENU_PATH && m.interface == PROPERTIES && (m.member == "GetAll" || (m.member == "Get" && m.body.len() == 2)) {
         answer_properties(c, m, menu_properties()) ?? return Err(err)
         return Ok(None)
@@ -2046,14 +2046,14 @@ menu_answer: fn(c: &DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Tim
 }
 
 // Answers a Properties GetAll or Get call with `props` (`a{sv}` entries).
-answer_properties: fn(c: &DbusConnection, m: DbusMessage, props: [DbusValue]) -[Net, Time]> DbusError! {
+answer_properties: fn(c: ^DbusConnection, m: DbusMessage, props: [DbusValue]) -[Net, Time]> DbusError! {
     if m.member == "GetAll" -> return answer(c, m, [DbusValue]{options_of(props)})
     name: string_of(m.body[1])
     answer_property(c, m, props, name, "no property {name} here")
 }
 
 // Answers a dbusmenu call; see `menu_answer`.
-menu_call: fn(c: &DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+menu_call: fn(c: ^DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]> Int? DbusError! {
     flat: menu_entries(menu.entries)
     if m.member == "GetLayout" && m.body.len() == 3 {
         parent: int_of(m.body[0]) ?? -1
@@ -2126,7 +2126,7 @@ on: fn(m: DbusMessage, interface: String) -> Bool { m.interface == interface || 
 
 // Answers the call `m` with the property `name` of `props` (`a{sv}`
 // entries), as a variant, else with InvalidArgs saying `missing`.
-answer_property: fn(c: &DbusConnection, m: DbusMessage, props: [DbusValue], name: String, missing: String) -[Net, Time]> DbusError! {
+answer_property: fn(c: ^DbusConnection, m: DbusMessage, props: [DbusValue], name: String, missing: String) -[Net, Time]> DbusError! {
     found: option_value(options_of(props), name) ?? return refuse(c, m, INVALID_ARGS, missing)
     answer(c, m, [DbusValue]{DbusValue.Variant(found)})
 }
@@ -2258,12 +2258,12 @@ test_bus: fn(name: String) -[Env, Net, Time]> TestBus {
 }
 
 // What the fake bus will answer, written before the client asks.
-bus_says: fn(server: &net.UnixStream, bytes: [U8]) -[Net, Time]> {
+bus_says: fn(server: ^net.UnixStream, bytes: [U8]) -[Net, Time]> {
     net.unix_send(server, bytes, [sys.Fd]{}) ?? panic("the fake bus could not write: {err}")
 }
 
 // Everything the client has written to the fake bus.
-bus_heard: fn(server: &net.UnixStream) -[Net, Time]> [U8] {
+bus_heard: fn(server: ^net.UnixStream) -[Net, Time]> [U8] {
     out := [U8]{}
     loop net.unix_wait(server, 0) ?? panic("the fake bus could not wait: {err}") {
         got: net.unix_receive(server, RECEIVE_MAX) ?? panic("the fake bus could not read: {err}")
@@ -2312,7 +2312,7 @@ hex_bytes: fn(hex: String) -> [U8] {
     out
 }
 
-append: fn(out: &[U8], bytes: [U8]) {
+append: fn(out: ^[U8], bytes: [U8]) {
     loop b in bytes -> out.push(b)
 }
 
@@ -2360,7 +2360,7 @@ error_kind: fn(problem: DbusError) -> String {
     }
 }
 
-start_error: fn(stream: &&net.UnixStream, timeout_ns: Int) -[Net, Time]> String {
+start_error: fn(stream: ^^net.UnixStream, timeout_ns: Int) -[Net, Time]> String {
     if start(stream.move(), 1000, timeout_ns) == {
         .Ok(_) -> "connected"
         .Err(err) -> error_kind(err)
@@ -3271,14 +3271,14 @@ found_value: fn(got: DbusValue? DbusError!) -> DbusValue? {
 
 // The interface and member of each call the client made after it
 // authenticated as uid 1000.
-calls_heard: fn(server: &net.UnixStream) -[Net, Time]> [String] {
+calls_heard: fn(server: ^net.UnixStream) -[Net, Time]> [String] {
     out := [String]{}
     loop m in messages_heard(server) -> out.push("{m.interface}.{m.member}")
     out
 }
 
 // Each message the client sent after it authenticated as uid 1000.
-messages_heard: fn(server: &net.UnixStream) -[Net, Time]> [DbusMessage] {
+messages_heard: fn(server: ^net.UnixStream) -[Net, Time]> [DbusMessage] {
     heard: bus_heard(server)
     rest := heard[(1 + "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes().len())..<heard.len()].copy()
     out := [DbusMessage]{}

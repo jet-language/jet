@@ -517,7 +517,7 @@ type_canonical_word: fn(table: Interner, word: U32) -> U32 Never! {
 }
 
 // Canonical identity TypeID for a newly inserted row `row`.
-type_compute_canonical: fn(table: &Interner, row: Int, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
+type_compute_canonical: fn(table: ^Interner, row: Int, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
     none: U32{0}
     if kind == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> return U32{row}
@@ -623,7 +623,7 @@ type_compute_canonical: fn(table: &Interner, row: Int, kind: TypeKind, a: U32, b
 }
 
 // Fast 0-child type interner: allocates no child list.
-type_intern_scalar: fn(table: &Interner, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID Never! {
+type_intern_scalar: fn(table: ^Interner, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID Never! {
     hash: type_row_hash_scalar(kind, a, b, side)
     slot: type_slot_scalar(table.types, hash, kind, a, b, side)
     entry: table.types.slots[slot]
@@ -654,7 +654,7 @@ type_find_scalar: fn(table: Interner, kind: TypeKind, a: U32, b: U32, side: U32)
 
 // The id of the type the operands give, added on first sight. Its operand
 // ids and side rows must be the interner's.
-type_intern: fn(table: &Interner, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+type_intern: fn(table: ^Interner, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
     if children.len() == 0 -> return type_intern_scalar(table, kind, a, b, side)
     hash: type_row_hash(kind, a, b, side, children)
     slot: type_slot(table.types, hash, kind, a, b, side, children)
@@ -757,11 +757,11 @@ type_id_identity_equal: fn(table: Interner, left: TypeID, right: TypeID) -> Bool
     false
 }
 
-type_columns_grow: fn(table: &TypeColumns) Never! {
+type_columns_grow: fn(table: ^TypeColumns) Never! {
     type_columns_grow_from(table, 1)
 }
 
-type_columns_grow_from: fn(table: &TypeColumns, first_row: Int) Never! {
+type_columns_grow_from: fn(table: ^TypeColumns, first_row: Int) Never! {
     capacity: table.slots.len() * 2
     mask: capacity - 1
     slots := [Int]{}
@@ -795,7 +795,7 @@ type_sides_slot: fn<T: Equatable>(sides: TypeSides<T>, value: T, hash: Int) -> I
 }
 
 // Adds `value` as a new row at its empty slot `slot`; returns its side row.
-type_sides_add: fn<T>(sides: &TypeSides<T>, slot: Int, value: &&T, hash: Int) -> U32 Never! {
+type_sides_add: fn<T>(sides: ^TypeSides<T>, slot: Int, value: ^^T, hash: Int) -> U32 Never! {
     row: sides.rows.len()
     sides.rows.push(value)
     sides.hashes.push(hash)
@@ -805,7 +805,7 @@ type_sides_add: fn<T>(sides: &TypeSides<T>, slot: Int, value: &&T, hash: Int) ->
 }
 
 // The side row (index plus one) of `value`, added on first sight.
-type_sides_intern: fn<T: Equatable>(sides: &TypeSides<T>, value: T, hash: Int) -> U32 Never! {
+type_sides_intern: fn<T: Equatable>(sides: ^TypeSides<T>, value: T, hash: Int) -> U32 Never! {
     slot: type_sides_slot(sides, value, hash)
     entry: sides.slots[slot]
     if entry != 0 -> return U32{entry & 0xffffffff}
@@ -813,7 +813,7 @@ type_sides_intern: fn<T: Equatable>(sides: &TypeSides<T>, value: T, hash: Int) -
     type_sides_add(sides, slot, value.copy(), hash)
 }
 
-type_sides_grow: fn<T>(sides: &TypeSides<T>) Never! {
+type_sides_grow: fn<T>(sides: ^TypeSides<T>) Never! {
     capacity: sides.slots.len() * 2
     mask: capacity - 1
     slots := [Int]{}
@@ -864,7 +864,7 @@ type_tag_hash: fn(marker: TagMarker) -> Int Never! {
 
 // The id of the written type `ty`: each part interned, names into the
 // interner's NameTable.
-type_intern_syntax: fn(table: &Interner, ty: Type) -> TypeID Never! {
+type_intern_syntax: fn(table: ^Interner, ty: Type) -> TypeID Never! {
     none: U32{0}
     if ty == {
         .Int -> TYPE_ID_INT
@@ -1103,7 +1103,7 @@ type_remap_side: fn(side: U32, mark: Int, rows: [U32]) -> U32 Never! {
 
 // Adds the worker's own side rows (from `mark` on) to `into` in row order,
 // taking them out of the worker, and returns each one's row there.
-type_sides_merge: fn<T: Equatable>(into: &TypeSides<T>, worker: &TypeSides<T>, mark: Int) -> [U32] Never! {
+type_sides_merge: fn<T: Equatable>(into: ^TypeSides<T>, worker: ^TypeSides<T>, mark: Int) -> [U32] Never! {
     // The own rows, last first.
     own := [T]{}
     loop worker.rows.len() > mark {
@@ -1125,7 +1125,7 @@ type_sides_merge: fn<T: Equatable>(into: &TypeSides<T>, worker: &TypeSides<T>, m
 // order, and returns their ids there; the worker's own side rows move out.
 // Merging the workers in a fixed order gives every name and type the same
 // id on any thread count.
-interner_merge: fn(into: &Interner, worker: &Interner) -> InternerRemap Never! {
+interner_merge: fn(into: ^Interner, worker: ^Interner) -> InternerRemap Never! {
     marks: worker.from
     remap := InternerRemap{marks: marks, names: name_table_merge(into.names, worker.names, marks.names), types: [TypeID]{}}
     key_spans: type_sides_merge(into.key_spans, worker.key_spans, marks.key_spans)
@@ -1171,27 +1171,27 @@ type_merged_name: fn(remap: InternerRemap, word: U32) -> U32 Never! {
 }
 
 // Fast TypeID constructors and predicates over Interner.
-type_id_list: fn(table: &Interner, element: TypeID) -> TypeID Never! {
+type_id_list: fn(table: ^Interner, element: TypeID) -> TypeID Never! {
     type_intern_scalar(table, TypeKind.List, element.id, U32{0}, U32{0})
 }
 
-type_id_option: fn(table: &Interner, inner: TypeID) -> TypeID Never! {
+type_id_option: fn(table: ^Interner, inner: TypeID) -> TypeID Never! {
     type_intern_scalar(table, TypeKind.Option, inner.id, U32{0}, U32{0})
 }
 
-type_id_shared: fn(table: &Interner, inner: TypeID) -> TypeID Never! {
+type_id_shared: fn(table: ^Interner, inner: TypeID) -> TypeID Never! {
     type_intern_scalar(table, TypeKind.Shared, inner.id, U32{0}, U32{0})
 }
 
-type_id_result: fn(table: &Interner, ok: TypeID, err: TypeID) -> TypeID Never! {
+type_id_result: fn(table: ^Interner, ok: TypeID, err: TypeID) -> TypeID Never! {
     type_intern_scalar(table, TypeKind.Result, ok.id, err.id, U32{0})
 }
 
-type_id_map: fn(table: &Interner, key: TypeID, value: TypeID) -> TypeID Never! {
+type_id_map: fn(table: ^Interner, key: TypeID, value: TypeID) -> TypeID Never! {
     type_intern_scalar(table, TypeKind.Map, key.id, value.id, U32{0})
 }
 
-type_id_named: fn(table: &Interner, name: String) -> TypeID Never! {
+type_id_named: fn(table: ^Interner, name: String) -> TypeID Never! {
     if name == "Unit" -> return TYPE_ID_UNIT
     if name == "Never" -> return TYPE_ID_NEVER
     name_id: name_intern(table.names, name)
@@ -1228,7 +1228,7 @@ type_id_base_name: fn(table: Interner, id: TypeID) -> String? Never! {
 
 // --- Zero-copy InternerDelta operations ---
 
-delta_name_intern: fn(shared: Interner, delta: &InternerDelta, text: String) -> Name Never! {
+delta_name_intern: fn(shared: Interner, delta: ^InternerDelta, text: String) -> Name Never! {
     hash: name_text_hash(text)
     if name_find_hashed(shared.names, text, hash) == .Val(found) -> return found
     own: name_intern_hashed(delta.names, text, hash)
@@ -1242,7 +1242,7 @@ delta_name_text: fn(shared: Interner, delta: InternerDelta, name: Name) -> Strin
     name_text(delta.names, Name{id: U32{row - delta.base.names + 1}})
 }
 
-delta_sides_intern: fn<T: Equatable>(shared: TypeSides<T>, own: &TypeSides<T>, base_mark: Int, value: T, hash: Int) -> U32 Never! {
+delta_sides_intern: fn<T: Equatable>(shared: TypeSides<T>, own: ^TypeSides<T>, base_mark: Int, value: T, hash: Int) -> U32 Never! {
     shared_slot: type_sides_slot(shared, value, hash)
     shared_entry: shared.slots[shared_slot]
     if shared_entry != 0 -> return U32{shared_entry & 0xffffffff}
@@ -1353,7 +1353,7 @@ delta_a_in_shared: fn(kind: TypeKind, a: U32, base: InternerMarks) -> Bool Never
     }
 }
 
-delta_compute_canonical: fn(shared: Interner, delta: &InternerDelta, own_row: Int, full_id: U32, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
+delta_compute_canonical: fn(shared: Interner, delta: ^InternerDelta, own_row: Int, full_id: U32, kind: TypeKind, a: U32, b: U32, side: U32) -> U32 Never! {
     none: U32{0}
     if kind == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN | .Named | .Measure | .TraitObject -> return full_id
@@ -1458,7 +1458,7 @@ delta_compute_canonical: fn(shared: Interner, delta: &InternerDelta, own_row: In
     }
 }
 
-delta_type_intern_scalar: fn(shared: Interner, delta: &InternerDelta, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID Never! {
+delta_type_intern_scalar: fn(shared: Interner, delta: ^InternerDelta, kind: TypeKind, a: U32, b: U32, side: U32) -> TypeID Never! {
     hash: type_row_hash_scalar(kind, a, b, side)
     b_row: Int{b}
     if delta_a_in_shared(kind, a, delta.base) && (!type_b_is_type(kind) || b_row < delta.base.types) && delta_side_in_shared(kind, side, delta.base) {
@@ -1486,7 +1486,7 @@ delta_type_intern_scalar: fn(shared: Interner, delta: &InternerDelta, kind: Type
     TypeID{id: full_id}
 }
 
-delta_type_intern: fn(shared: Interner, delta: &InternerDelta, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
+delta_type_intern: fn(shared: Interner, delta: ^InternerDelta, kind: TypeKind, a: U32, b: U32, side: U32, children: [U32]) -> TypeID Never! {
     if children.len() == 0 -> return delta_type_intern_scalar(shared, delta, kind, a, b, side)
     hash: type_row_hash(kind, a, b, side, children)
     b_row: Int{b}
@@ -1527,7 +1527,7 @@ delta_type_intern: fn(shared: Interner, delta: &InternerDelta, kind: TypeKind, a
     TypeID{id: full_id}
 }
 
-delta_type_intern_syntax: fn(shared: Interner, delta: &InternerDelta, ty: Type) -> TypeID Never! {
+delta_type_intern_syntax: fn(shared: Interner, delta: ^InternerDelta, ty: Type) -> TypeID Never! {
     none: U32{0}
     if ty == {
         .Int -> TYPE_ID_INT
@@ -1723,7 +1723,7 @@ delta_type_syntax: fn(shared: Interner, delta: InternerDelta, id: TypeID) -> Typ
 }
 
 // Deterministically merges a worker's zero-copy InternerDelta into `into`.
-interner_merge_delta: fn(into: &Interner, delta: &InternerDelta) -> InternerRemap Never! {
+interner_merge_delta: fn(into: ^Interner, delta: ^InternerDelta) -> InternerRemap Never! {
     marks: delta.base
     remap := InternerRemap{marks: marks, names: name_table_merge(into.names, delta.names, 1), types: [TypeID]{}}
     key_spans: type_sides_merge(into.key_spans, delta.key_spans, 0)

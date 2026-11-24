@@ -14,7 +14,7 @@ use {
 // The host's system call: number and six arguments.
 WEB_SYSCALL_SIG: "lllllll:l"
 
-web_host_syscall: fn(e: &WebEmitter, st: &WebState) Never! {
+web_host_syscall: fn(e: ^WebEmitter, st: ^WebState) Never! {
     web_call(e, web_ref(st, "host", "syscall", WEB_SYSCALL_SIG))
 }
 
@@ -23,7 +23,7 @@ web_host_syscall: fn(e: &WebEmitter, st: &WebState) Never! {
 WEB_SWITCH_SIG: "ll:l"
 
 // t3 := the scratch bytes' address.
-web_scratch: fn(e: &WebEmitter) Never! {
+web_scratch: fn(e: ^WebEmitter) Never! {
     web_global_get(e, WEB_GLOBAL_SP)
     web_i64(e, WEB_SCRATCH)
     web_op(e, 0x7d)
@@ -32,13 +32,13 @@ web_scratch: fn(e: &WebEmitter) Never! {
 }
 
 // Pushes local `local` (an i64 address) as an i32 address.
-web_at: fn(e: &WebEmitter, local: Int) Never! {
+web_at: fn(e: ^WebEmitter, local: Int) Never! {
     web_get(e, local)
     web_wrap(e)
 }
 
 // Scratch word `offset` := local `local`.
-web_scratch_put: fn(e: &WebEmitter, offset: Int, local: Int) Never! {
+web_scratch_put: fn(e: ^WebEmitter, offset: Int, local: Int) Never! {
     scratch: e.t3
     web_at(e, scratch)
     web_get(e, local)
@@ -46,7 +46,7 @@ web_scratch_put: fn(e: &WebEmitter, offset: Int, local: Int) Never! {
 }
 
 // Scratch word `offset` := `value`.
-web_scratch_const: fn(e: &WebEmitter, offset: Int, value: Int) Never! {
+web_scratch_const: fn(e: ^WebEmitter, offset: Int, value: Int) Never! {
     scratch: e.t3
     web_at(e, scratch)
     web_i64(e, value)
@@ -54,7 +54,7 @@ web_scratch_const: fn(e: &WebEmitter, offset: Int, value: Int) Never! {
 }
 
 // Zeroes `count` scratch bytes.
-web_scratch_zero: fn(e: &WebEmitter, count: Int) Never! {
+web_scratch_zero: fn(e: ^WebEmitter, count: Int) Never! {
     scratch: e.t3
     web_at(e, scratch)
     web_i32(e, 0)
@@ -63,7 +63,7 @@ web_scratch_zero: fn(e: &WebEmitter, count: Int) Never! {
 }
 
 // Word `to` at local `output` := scratch word `from`.
-web_scratch_out: fn(e: &WebEmitter, output: Int, to: Int, from: Int) Never! {
+web_scratch_out: fn(e: ^WebEmitter, output: Int, to: Int, from: Int) Never! {
     web_at(e, output)
     scratch: e.t3
     web_at(e, scratch)
@@ -72,12 +72,12 @@ web_scratch_out: fn(e: &WebEmitter, output: Int, to: Int, from: Int) Never! {
 }
 
 // Pushes `count` zero arguments.
-web_zeros: fn(e: &WebEmitter, count: Int) Never! {
+web_zeros: fn(e: ^WebEmitter, count: Int) Never! {
     loop _ in 0..<count -> web_i64(e, 0)
 }
 
 // Pushes `old` := the word at local `address` and leaves it in t0.
-web_read_old: fn(e: &WebEmitter, address: Int) Never! {
+web_read_old: fn(e: ^WebEmitter, address: Int) Never! {
     web_at(e, address)
     web_mem(e, 0x29, 0)
     old: e.t0
@@ -86,7 +86,7 @@ web_read_old: fn(e: &WebEmitter, address: Int) Never! {
 
 // The leaf `name` over argument locals `args` (each an i64): its value on
 // the stack when `result`. False when the web target has no form of it.
-web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: Bool) -> Bool Never! {
+web_leaf: fn(e: ^WebEmitter, st: ^WebState, name: String, args: [Int], result: Bool) -> Bool Never! {
     if name.starts_with("os_call") -> return web_leaf_call(e, st, args, result)
     // The scratch address (web_scratch) and the old word (web_read_old).
     scratch: e.t3
@@ -381,7 +381,7 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
 
 // A call through code address `args[0]` with the other arguments. Every
 // table function returns a word (web_slot_sig); a call without a result drops it.
-web_leaf_call: fn(e: &WebEmitter, st: &WebState, args: [Int], result: Bool) -> Bool Never! {
+web_leaf_call: fn(e: ^WebEmitter, st: ^WebState, args: [Int], result: Bool) -> Bool Never! {
     if args.len() == 0 -> return false
     letters := ""
     loop index in 1..<args.len() {
@@ -396,7 +396,7 @@ web_leaf_call: fn(e: &WebEmitter, st: &WebState, args: [Int], result: Bool) -> B
 
 // An asm leaf's own body, for its address or a call the selector does not
 // inline: the leaf over its parameters.
-web_leaf_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
+web_leaf_body: fn(st: ^WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     e := web_emitter(m, f)
     args := [Int]{}
     loop slot in 0..<f.param_count -> args.push(e.locals[slot])
@@ -414,7 +414,7 @@ web_leaf_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
 // scheduler_check_loops) on the bits its routine takes (JetIR IR.jet
 // ir_stop_attention), its routine's (ir_stop_routine) delivered stop as a
 // Bool, else 0.
-web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
+web_poll_body: fn(st: ^WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     e := web_emitter(m, f)
     web_global_get(e, WEB_GLOBAL_TLS)
     web_wrap(e)
@@ -446,7 +446,7 @@ web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
 }
 
 // `if word == 0 { return 0 }`.
-web_poll_quiet_unless: fn(e: &WebEmitter, word: Int) Never! {
+web_poll_quiet_unless: fn(e: ^WebEmitter, word: Int) Never! {
     web_get(e, word)
     web_op(e, 0x50)
     web_if(e)

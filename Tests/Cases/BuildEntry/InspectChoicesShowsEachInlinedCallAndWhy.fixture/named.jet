@@ -13,7 +13,7 @@ Inner: struct {
     id: Int,
 
     impl Close {
-        close: fn(&&self) { print("inner {self.id} closed") }
+        close: fn(^^self) { print("inner {self.id} closed") }
     }
 }
 
@@ -21,7 +21,7 @@ Outer: struct {
     inner: Inner,
 
     impl Close {
-        #Inline(Always) close: fn(&&self) { close(self.inner) }
+        #Inline(Always) close: fn(^^self) { close(self.inner) }
     }
 }
 

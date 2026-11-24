@@ -97,7 +97,7 @@ x509_csr_new: fn() -> X509CSR Never! {
 }
 
 // x509_csr_get_version: an INTEGER, v1 (0) when absent.
-x509_csr_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
+x509_csr_get_version: fn(data: [U8], p: ^Int, end: Int) -> Int x509.X509Error! {
     if asn1.get_int(data, p, end) == {
         .Ok(ver) -> Ok(ver)
         .Err(e) -> {
@@ -110,7 +110,7 @@ x509_csr_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
 // x509_csr_parse_extensions: the Extensions of an extensionRequest. The
 // extensions mbedtls knows may each appear once; an unknown one goes to
 // the callback, or fails the parse when it is critical.
-x509_csr_parse_extensions: fn(csr: &X509CSR, data: [U8], p: &Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
+x509_csr_parse_extensions: fn(csr: ^X509CSR, data: [U8], p: ^Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
     loop p < end {
         len := asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
         end_ext_data: p + len
@@ -171,7 +171,7 @@ x509_csr_parse_extensions: fn(csr: &X509CSR, data: [U8], p: &Int, end: Int, cb: 
 
 // x509_csr_parse_attributes: the [0] Attributes, of which only an
 // extensionRequest is read.
-x509_csr_parse_attributes: fn(csr: &X509CSR, data: [U8], start: Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
+x509_csr_parse_attributes: fn(csr: ^X509CSR, data: [U8], start: Int, end: Int, cb: X509CSRExtCallback?) x509.X509Error! {
     p := start
     loop p < end {
         len := asn1.get_tag(data, p, end, X509CSR_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))

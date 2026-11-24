@@ -117,7 +117,7 @@ FlakeGraph: struct {
     // flake stays the authority for URI and follows spelling; the lock
     // contributes only the exact node identity. Missing or malformed lock
     // data is a hard error instead of an apparently exact lock.
-    apply_flake_lock: fn(&self, text: String) TrustError! {
+    apply_flake_lock: fn(^self, text: String) TrustError! {
         parsed: trust_json_parse_lenient(text)
         document: parsed.tree() ?? return Err(TrustError.IO("flake.lock is invalid: {parsed.reason()}"))
         nodes: trust_json_object_field(document, "nodes") ?? return Err(TrustError.IO("flake.lock has no nodes map"))
@@ -179,7 +179,7 @@ FlakeGraph: struct {
     }
 
     // An input that follows another takes the revision its chain resolves to.
-    propagate_follows: fn(&self) TrustError! {
+    propagate_follows: fn(^self) TrustError! {
         facts := [String:FlakeInput]{}
         loop input in self.inputs -> facts[input.name] = input.copy()
         loop index in 0..<self.inputs.len() {
@@ -462,7 +462,7 @@ FlakeGraph: struct {
     // sorted unique `path<TAB>sha256` fingerprints on the composition and
     // the modules' outputs among the graph's outputs. A graph without a
     // composition is unchanged.
-    attach_module_facts: fn(&self, module_sources: [String], imported_outputs: [FlakeOutput]) Never! {
+    attach_module_facts: fn(^self, module_sources: [String], imported_outputs: [FlakeOutput]) Never! {
         composition := self.composition ?? return
         composition.module_sources = pkg_overlay_sorted_unique(module_sources)
         self.composition = Val(composition)
@@ -511,7 +511,7 @@ FlakeGraph: struct {
     // each file once), fingerprint each one, and fold its outputs into the
     // graph. Root modules must be relative paths without `..`; every module
     // must resolve to a regular file inside the flake project.
-    attach_composition_sources: fn(&self, path: String) -[FS, Env]> TrustError! {
+    attach_composition_sources: fn(^self, path: String) -[FS, Env]> TrustError! {
         composition: self.composition ?? return
         project_dir: trust_flake_project_dir(path)
         project_root: files.canonicalize(project_dir) ?? return Err(TrustError.IO("couldn't resolve flake-parts project root `{project_dir}`: {err}"))
@@ -668,7 +668,7 @@ trust_flake_module_source: fn(source_name: String, bytes: [U8]) -> String Never!
 // unqualified module output expands across the declared systems with the
 // module path as its provenance, without evaluating arbitrary Nix. Outputs
 // already in `imported` (by name, kind, system, and attribute) are skipped.
-trust_flake_module_outputs: fn(module_text: String, source_name: String, composition: FlakeComposition, imported: &[FlakeOutput]) Never! {
+trust_flake_module_outputs: fn(module_text: String, source_name: String, composition: FlakeComposition, imported: ^[FlakeOutput]) Never! {
     loop assignment in trust_nix_output_assignments(module_text) {
         systems := [String]{}
         if {

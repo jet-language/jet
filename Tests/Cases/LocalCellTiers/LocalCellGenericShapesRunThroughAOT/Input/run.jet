@@ -6,7 +6,7 @@ CellResultError: enum {
 Box: struct<T> {
     value: T,
 
-    new: fn(value: &&T) -> Box<T> { return Box<T>{value: value} }
+    new: fn(value: ^^T) -> Box<T> { return Box<T>{value: value} }
 }
 
 Number: struct {
@@ -18,7 +18,7 @@ Reverse: struct<Value, Alpha> {
     second: Alpha,
 }
 
-keep_result: fn(value: &&Int CellResultError!) {
+keep_result: fn(value: ^^Int CellResultError!) {
     cell: Cell.new(value)
     print(cell.read(fn(result) { result ?? 0 }))
 }

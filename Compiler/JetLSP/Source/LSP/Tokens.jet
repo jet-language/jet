@@ -349,7 +349,7 @@ lsp_semantic_full_data: fn(server: LSPServer, view: LSPView) -> [Int] {
 }
 
 // Keeps `data` as the document's last full answer under a new result id.
-lsp_semantic_keep: fn(server: &LSPServer, uri: String, data: &&[Int]) -> String Never! {
+lsp_semantic_keep: fn(server: ^LSPServer, uri: String, data: ^^[Int]) -> String Never! {
     server.semantic_serial += 1
     server.semantic_results[uri] = LSPSemanticResult{id: "{server.semantic_serial}", data: data.move()}
     "{server.semantic_serial}"
@@ -374,7 +374,7 @@ lsp_semantic_tokens_edits: fn(before: [Int], after: [Int]) -> String Never! {
 
 // A full answer carries a result id and is kept, so a later `full/delta`
 // naming that id gets only the edit to the current tokens.
-lsp_semantic_tokens_response: fn(server: &LSPServer, params: Dyn?, id: Dyn) -> String {
+lsp_semantic_tokens_response: fn(server: ^LSPServer, params: Dyn?, id: Dyn) -> String {
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     data: lsp_semantic_full_data(server, view)
     tokens: lsp_semantic_ints(data)
@@ -385,7 +385,7 @@ lsp_semantic_tokens_response: fn(server: &LSPServer, params: Dyn?, id: Dyn) -> S
 // A delta naming the document's kept result answers the edit from it; one
 // naming any other id, as after a restart, answers the full tokens. Either
 // way the current tokens are kept under a new id.
-lsp_semantic_tokens_delta_response: fn(server: &LSPServer, params: Dyn?, id: Dyn) -> String {
+lsp_semantic_tokens_delta_response: fn(server: ^LSPServer, params: Dyn?, id: Dyn) -> String {
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     previous_id: lsp_text_member(params ?? return lsp_response(id, "null"), "previousResultId") ?? ""
     data: lsp_semantic_full_data(server, view)

@@ -129,7 +129,7 @@ effect_projection_json: fn(projection: SemEffectProjection) -> String Never! {
     "{{\"required_effects\":[{json_strs(projection.required)}],\"granted_effects\":[{json_strs(projection.granted)}],\"denied_effects\":[{json_strs(projection.denied)}],\"authority\":{json_str(projection.authority)}}}"
 }
 
-collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, items: [Item], owner: String?, sink: &GraphSink) {
+collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, items: [Item], owner: String?, sink: ^GraphSink) {
     loop item in items {
         if item == {
             .Func(f) -> {
@@ -161,7 +161,7 @@ collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, i
     }
 }
 
-add_function_graph: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, f: Func, ledger_name: String, sink: &GraphSink) {
+add_function_graph: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, f: Func, ledger_name: String, sink: ^GraphSink) {
     graph: project_func(index, doc.tables, doc.path, doc.source, f)
     loop inline in graph.inline_exprs {
         sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
@@ -200,7 +200,7 @@ enum_catalog_json: fn(modules: [JetDriverDocModule]) -> String Never! {
     "{{{entries.join(",")}}}"
 }
 
-collect_enum_variants: fn(items: [Item], catalog: &[String:[String]]) {
+collect_enum_variants: fn(items: [Item], catalog: ^[String:[String]]) {
     loop item in items {
         if item == {
             .Enum(def) -> {
@@ -232,7 +232,7 @@ pattern_catalog_json: fn(modules: [JetDriverDocModule]) -> String Never! {
     "{{{entries.join(",")}}}"
 }
 
-collect_pattern_variants: fn(items: [Item], catalog: &[String:[String]]) {
+collect_pattern_variants: fn(items: [Item], catalog: ^[String:[String]]) {
     loop item in items {
         if item == {
             .Enum(def) -> {
@@ -284,7 +284,7 @@ project_func: fn(index: SemIndex, tables: ASTTables, module_display: String, mod
     g
 }
 
-collect_node_refs: fn(graph: GraphBuilder, out: &[NodeQueryRef]) {
+collect_node_refs: fn(graph: GraphBuilder, out: ^[NodeQueryRef]) {
     loop node in graph.nodes {
         out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: node.id, kind: node.kind, title: node.title, span: node.span})
     }

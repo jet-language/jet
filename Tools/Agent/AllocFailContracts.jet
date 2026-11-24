@@ -204,7 +204,7 @@ previous_visible: fn(bytes: [U8], at: Int) -> Int Never! {
     byte(bytes, index)
 }
 
-blank: fn(bytes: &[U8], start: Int, end: Int) Never! {
+blank: fn(bytes: ^[U8], start: Int, end: Int) Never! {
     loop index in start..<end {
         if index < bytes.len() && (Int{bytes[index]}) != 10 -> bytes[index] = U8{32}
     }
@@ -625,7 +625,7 @@ directory: fn(path: String) -> String {
 
 // Adds `edit` to `source`'s edits in offset order; an insertion at an offset
 // already edited goes after the earlier one.
-put_edit: fn(edits: &[Int:[Edit]], source: Int, edit: Edit) {
+put_edit: fn(edits: ^[Int:[Edit]], source: Int, edit: Edit) {
     if !edits.has_key(source) -> edits[source] = [Edit]{}
     index := edits[source].len()
     loop index > 0 && edits[source][index - 1].start > edit.start -> index -= 1
@@ -664,7 +664,7 @@ whole_statement: fn(code: [U8], start: Int, end: Int) -> Bool Never! {
 }
 
 // The handler insertions in one `Never!` body, and the sites left over.
-handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String:Bool], fallible: [String:Bool], edits: &[Int:[Edit]], manual: &[String]) -> Int {
+handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String:Bool], fallible: [String:Bool], edits: ^[Int:[Edit]], manual: ^[String]) -> Int {
     code: source.code
     handled := 0
     at := decl.open
@@ -966,32 +966,32 @@ rewrite: fn(text: String, domains: String, never: String) -> String {
 }
 
 #Test("a message struct with impl blocks converts; other fields stay for a hand choice") {
-    text: "P: struct {{\n    message: String,\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n"
-    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String,\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl P.From(AllocError) {{\n    from: fn(error: AllocError) -> P {{ P{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n")
-    reason: "R: struct {{ reason: String }}\nf: fn(xs: &[Int]) R! {{\n    xs.push(1)\n}}\n"
+    text: "P: struct {{\n    message: String,\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\nf: fn(xs: ^[Int]) P! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String,\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl P.From(AllocError) {{\n    from: fn(error: AllocError) -> P {{ P{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: ^[Int]) P! {{\n    xs.push(1)\n}}\n")
+    reason: "R: struct {{ reason: String }}\nf: fn(xs: ^[Int]) R! {{\n    xs.push(1)\n}}\n"
     assert_eq(rewrite(reason, "convert", ""), reason)
     assert_eq(rewrite(rewrite(text, "convert", ""), "convert", ""), rewrite(text, "convert", ""))
 }
 
 #Test("admit widens a typed domain that reaches growth") {
-    text: "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) -> Int E! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n"
-    assert_eq(rewrite(text, "admit", ""), "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) -> Int (E | AllocError)! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n")
-    union: "h: fn(xs: &[Int]) (A | B)! {{\n    xs.push(1)\n}}\n"
-    assert_eq(rewrite(union, "convert", ""), "h: fn(xs: &[Int]) (A | B | AllocError)! {{\n    xs.push(1)\n}}\n")
+    text: "E: enum {{\n    A,\n}}\nf: fn(xs: ^[Int]) -> Int E! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n"
+    assert_eq(rewrite(text, "admit", ""), "E: enum {{\n    A,\n}}\nf: fn(xs: ^[Int]) -> Int (E | AllocError)! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n")
+    union: "h: fn(xs: ^[Int]) (A | B)! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(union, "convert", ""), "h: fn(xs: ^[Int]) (A | B | AllocError)! {{\n    xs.push(1)\n}}\n")
 }
 
 #Test("convert adds a case and one impl per domain type") {
-    text: "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n"
-    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A,\n    OutOfMemory,\n}}\n\nimpl E.From(AllocError) {{\n    from: fn(error: AllocError) -> E {{ E.OutOfMemory }}\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n")
-    message: "S: struct {{ message: String }}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n"
-    assert_eq(rewrite(message, "convert", ""), "S: struct {{ message: String }}\n\nimpl S.From(AllocError) {{\n    from: fn(error: AllocError) -> S {{ S{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n")
-    assert_eq(rewrite(text, "mix", ""), "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) (E | AllocError)! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) (E | AllocError)! {{\n    f(xs)\n}}\n")
+    text: "E: enum {{\n    A,\n}}\nf: fn(xs: ^[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: ^[Int]) E! {{\n    f(xs)\n}}\n"
+    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A,\n    OutOfMemory,\n}}\n\nimpl E.From(AllocError) {{\n    from: fn(error: AllocError) -> E {{ E.OutOfMemory }}\n}}\nf: fn(xs: ^[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: ^[Int]) E! {{\n    f(xs)\n}}\n")
+    message: "S: struct {{ message: String }}\nf: fn(xs: ^[Int]) S! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(message, "convert", ""), "S: struct {{ message: String }}\n\nimpl S.From(AllocError) {{\n    from: fn(error: AllocError) -> S {{ S{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: ^[Int]) S! {{\n    xs.push(1)\n}}\n")
+    assert_eq(rewrite(text, "mix", ""), "E: enum {{\n    A,\n}}\nf: fn(xs: ^[Int]) (E | AllocError)! {{\n    xs.push(1)\n}}\ng: fn(xs: ^[Int]) (E | AllocError)! {{\n    f(xs)\n}}\n")
 }
 
 #Test("never modes drop the contract or handle each whole statement") {
-    text: "f: fn(xs: &[Int]) -> Int Never! {{\n    xs.push(1)\n    if true -> xs.push(2)\n    n: g(xs.push(3))\n    0\n}}\n"
-    assert_eq(rewrite(text, "", "drop"), "f: fn(xs: &[Int]) -> Int {{\n    xs.push(1)\n    if true -> xs.push(2)\n    n: g(xs.push(3))\n    0\n}}\n")
-    assert_eq(rewrite(text, "", "handle"), "f: fn(xs: &[Int]) -> Int Never! {{\n    xs.push(1) ?? panic(\"no memory\")\n    if true -> xs.push(2) ?? panic(\"no memory\")\n    n: g(xs.push(3))\n    0\n}}\n")
+    text: "f: fn(xs: ^[Int]) -> Int Never! {{\n    xs.push(1)\n    if true -> xs.push(2)\n    n: g(xs.push(3))\n    0\n}}\n"
+    assert_eq(rewrite(text, "", "drop"), "f: fn(xs: ^[Int]) -> Int {{\n    xs.push(1)\n    if true -> xs.push(2)\n    n: g(xs.push(3))\n    0\n}}\n")
+    assert_eq(rewrite(text, "", "handle"), "f: fn(xs: ^[Int]) -> Int Never! {{\n    xs.push(1) ?? panic(\"no memory\")\n    if true -> xs.push(2) ?? panic(\"no memory\")\n    n: g(xs.push(3))\n    0\n}}\n")
     handled: rewrite(text, "", "handle")
     assert_eq(rewrite(handled, "", "handle"), handled)
 }

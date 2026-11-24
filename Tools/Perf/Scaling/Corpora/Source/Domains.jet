@@ -57,7 +57,7 @@ unit: fn(entry: String, helpers: [String], text: String) -> Cluster {
 
 // A call into a random earlier unit's helper, or a constant expression
 // while there is none.
-call: fn(r: &Seeded, h: [String], x: String) -> String {
+call: fn(r: ^Seeded, h: [String], x: String) -> String {
     if h.len() == 0 -> return "({x}) % {M}"
     "{r.pick(h)}({x})"
 }
@@ -71,7 +71,7 @@ table_rows: fn(values: [Int]) -> String {
     rows.join("\n")
 }
 
-draws: fn(r: &Seeded, count: Int, hi: Int) -> [Int] {
+draws: fn(r: ^Seeded, count: Int, hi: Int) -> [Int] {
     values := [Int]{}
     loop _ in 0..<count -> values.push(r.int(0, hi))
     values
@@ -108,7 +108,7 @@ float_literals: fn(line: String, rules: FloatRules) -> String {
 }
 
 // The package of `domain` at `target` code lines.
-domain_files: fn(name: String, target: Int, r: &Seeded) -> [String:String] {
+domain_files: fn(name: String, target: Int, r: ^Seeded) -> [String:String] {
     rules: float_rules()
     domain: all().find(fn(domain) { domain.name == name }) ?? panic("no domain {name}")
     units: [String:fn(Int, Int, [String]) -> Cluster]{
@@ -225,7 +225,7 @@ api_error_text: fn(error: APIError) -> String {{
 
 """
 
-web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+web: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             a: r.int(2, 97)
@@ -370,9 +370,9 @@ web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 }}
 
                 impl Query{i} {{
-                    where_eq: fn(&self, column: String, value: Int) {{ self.filters.push("{{column}} = {{value}}") }}
+                    where_eq: fn(^self, column: String, value: Int) {{ self.filters.push("{{column}} = {{value}}") }}
 
-                    order_by: fn(&self, column: String) {{ self.order = column }}
+                    order_by: fn(^self, column: String) {{ self.order = column }}
 
                     to_sql: fn(self) -> String {{
                         clause := ""
@@ -473,7 +473,7 @@ Behavior: trait {{
 
 """
 
-game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+game: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -710,7 +710,7 @@ pad_right: fn(text: String, width: Int) -> String {{
 
 """
 
-cli: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+cli: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -888,7 +888,7 @@ variance: fn(values: [Float]) -> Float {{
 
 """
 
-data: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+data: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -1022,7 +1022,7 @@ rect_contains: fn(rect: Rect, px: Int, py: Int) -> Bool {{ px >= rect.x && py >=
 
 """
 
-gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+gui: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -1196,7 +1196,7 @@ read_field: fn(value: Int, shift: Int, mask: Int) -> Int {{ (value >> shift) & m
 
 """
 
-embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+embedded: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -1236,7 +1236,7 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 }}
 
                 impl Ring{i} {{
-                    push: fn(&self, value: Int) {{
+                    push: fn(^self, value: Int) {{
                         self.data[(self.head + self.count) % 16] = value
                         if self.count < 16 -> self.count += 1 else -> self.head = (self.head + 1) % 16
                     }}
@@ -1337,7 +1337,7 @@ symbol_weight: fn(symbol: Symbol) -> Int {{ symbol.name.len() + symbol.slot * 4 
 
 """
 
-compiler: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+compiler: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -1574,7 +1574,7 @@ absf: fn(v: Float) -> Float {{ if v < 0.0 -> 0.0 - v else -> v }}
 
 """
 
-scientific: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+scientific: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             coefficients := [String]{}
@@ -1734,7 +1734,7 @@ fold_ints: fn<T>(items: [T], start: Int, f: fn(Int, T) -> Int) -> Int {{
 
 """
 
-generic_lib: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+generic_lib: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             unit(
@@ -1794,7 +1794,7 @@ generic_lib: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 
 // ------------------------------------------------------------ generated
 
-generated: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
+generated: fn(k: Int, i: Int, r: ^Seeded, h: [String]) -> Cluster {
     kinds: [fn() -> Cluster]{
         fn() {
             types: ["Int", "String", "Bool"]
@@ -1906,7 +1906,7 @@ generated: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
             gets := [String]{}
             loop (index, name) in names {
                 fields.push("    {name}: Int,")
-                accessors.extend(["    get_{name}: fn(self) -> Int {{ self.{name} }}", "    set_{name}: fn(&self, value: Int) {{ self.{name} = value }}"])
+                accessors.extend(["    get_{name}: fn(self) -> Int {{ self.{name} }}", "    set_{name}: fn(^self, value: Int) {{ self.{name} = value }}"])
                 values.push("{name}: {index}")
                 sets.push("    record.set_{name}(seed + {index})")
                 gets.push("record.get_{name}()")

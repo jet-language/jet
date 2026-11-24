@@ -123,7 +123,7 @@ DBPoolReceipt: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { pool_receipt_text(self) }
+        debug: fn(^^self) -> String { pool_receipt_text(self) }
     }
 }
 
@@ -185,7 +185,7 @@ DBError: enum {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.message() }
+        debug: fn(^^self) -> String { self.message() }
     }
 }
 
@@ -844,7 +844,7 @@ priv DBState: struct {
     // the commit would leave that old result stored as current. `rows` are
     // the stored rows the write replaced, removed or added, or None when it
     // does not name them (DBWritten).
-    priv wrote: fn(&self, table: String, rows: [String]?) Never! {
+    priv wrote: fn(^self, table: String, rows: [String]?) Never! {
         self.writes += 1
         kept := [DBLooked]{}
         loop looked in self.looked {
@@ -891,7 +891,7 @@ priv DBLooked: struct {
 // narrowed by a condition over the field columns (`__query_filter`) that
 // holds for one of `rows` that the write changed, before or after it. With no
 // `rows` named, every binding that read the table re-runs.
-priv db_live_wrote: fn(driver: &DBDriver, table: String, rows: [String]?) Never! {
+priv db_live_wrote: fn(driver: ^DBDriver, table: String, rows: [String]?) Never! {
     source: live_source(table)
     changed: rows ?? return app.__live_invalidate_all(source)
     reads: app.live_reads.narrowed(source)
@@ -957,7 +957,7 @@ Store: struct {
     // `guard` gives it one. With `search`, the table keeps a search index:
     // the words of the text `search` gives for each row, which
     // `Table.search` looks words up in.
-    table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K, search: &&(fn(T) -[]> String)?{None}) -> Table<K, T> Never! {
+    table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: ^^fn(T) -[]> K, search: ^^(fn(T) -[]> String)?{None}) -> Table<K, T> Never! {
         Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), search_of: search.move(), policy: None, policy_join: None}
     }
 
@@ -1041,12 +1041,12 @@ DBScope: struct {
     priv state: Shared<DBState>,
     priv number: Int,
 
-    commit: fn(&&self) -[DB]> DBError! { db_commit(self.state) }
+    commit: fn(^^self) -[DB]> DBError! { db_commit(self.state) }
 
-    rollback: fn(&&self) -[DB]> DBError! { db_rollback(self.state) }
+    rollback: fn(^^self) -[DB]> DBError! { db_rollback(self.state) }
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if !db_open_is(self.state, self.number) {
                 return
             }
@@ -1142,14 +1142,14 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     priv policy_join: TablePolicyJoin?,
 
     // This table judged by the row policy `policy`, in place of any it had.
-    guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
+    guard: fn(self, policy: ^^fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
         Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: Val(policy.move()), policy_join: None}
     }
 
     // Compiler lowering target for `Table.guard(policy)`: carries the policy
     // name and compiled SQL join plan (or per-row reason) so queries run
     // key-lookup policies in SQL and `jet inspect choices` names every policy.
-    __guard_plan: fn(self, _policy_name: String, join_spec: String, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
+    __guard_plan: fn(self, _policy_name: String, join_spec: String, policy: ^^fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
         Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: Val(policy.move()), policy_join: table_parse_policy_join(join_spec)}
     }
 
@@ -1836,7 +1836,7 @@ priv search_word_byte: fn(byte: Int) -> Bool Never! {
 // Makes `terms` the words the search index of table `name` keeps for the row
 // under the key `cells`, creating the index on its first write, and answers
 // whether they changed.
-priv table_index: fn(driver: &DBDriver, name: String, cells: [{column: String, value: DBValue}], terms: [String]) -> Bool DBError! {
+priv table_index: fn(driver: ^DBDriver, name: String, cells: [{column: String, value: DBValue}], terms: [String]) -> Bool DBError! {
     index: table_index_name(name)
     columns := [String]{}
     loop cell in cells -> columns.push("\"{cell.column}\"")
@@ -1866,7 +1866,7 @@ priv table_index: fn(driver: &DBDriver, name: String, cells: [{column: String, v
 
 // Removes the words the search index of table `name` keeps for the row
 // under the key `cells`.
-priv table_unindex: fn(driver: &DBDriver, name: String, cells: [{column: String, value: DBValue}]) DBError! {
+priv table_unindex: fn(driver: ^DBDriver, name: String, cells: [{column: String, value: DBValue}]) DBError! {
     index: table_index_name(name)
     if !table_exists(driver, index) -> return Ok()
     _: __driver_execute(driver, "DELETE FROM \"{index}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
@@ -2014,7 +2014,7 @@ priv table_fields: fn(row: Dyn) -> [{column: String, value: DBValue}] Never! {
 // the first row written to it, as it was created; one created before it kept
 // field columns has none, and a condition over a column it lacks reads the
 // whole table (`table_rows`).
-priv table_columns: fn(driver: &DBDriver, name: String, fields: [{column: String, value: DBValue}]) -> [{column: String, value: DBValue}] DBError! {
+priv table_columns: fn(driver: ^DBDriver, name: String, fields: [{column: String, value: DBValue}]) -> [{column: String, value: DBValue}] DBError! {
     known: __driver_query(driver, "PRAGMA table_info(\"{name}\")", [DBValue]{}) ?? return Err(err)
     names := [String]{}
     loop column in known -> names.push(row_text(column, "name") ?? "")
@@ -2077,7 +2077,7 @@ priv table_name_error: fn(name: String) -> DBError Never! {
     db_error("`{name}` is not a table name: use letters, digits and `_`")
 }
 
-priv table_exists: fn(driver: &DBDriver, name: String) -> Bool Never! {
+priv table_exists: fn(driver: ^DBDriver, name: String) -> Bool Never! {
     found: __driver_query(driver, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [DBValue]{.Text(name.copy())}) ?? return false
     found.len() > 0
 }
@@ -2087,7 +2087,7 @@ priv table_exists: fn(driver: &DBDriver, name: String) -> Bool Never! {
 // first (app.live_reads), even before the table exists, so the write that
 // creates it re-runs the binding: as the whole table, or as the table
 // narrowed by the stored-row `condition` that selects what it reads.
-priv table_read: fn(driver: &DBDriver, name: String, sql: String, values: [DBValue], narrowed: {condition: String, values: [String]}?) -> [[String:DBValue]] DBError! {
+priv table_read: fn(driver: ^DBDriver, name: String, sql: String, values: [DBValue], narrowed: {condition: String, values: [String]}?) -> [[String:DBValue]] DBError! {
     if app.live_reads.running() {
         if narrowed == .Val(read) {
             app.live_reads.record_where(live_source(name), read.condition, read.values)
@@ -2242,7 +2242,7 @@ priv db_waited: fn() -> DBError Never! {
 // has run that delivery or that run already, or keeps a reply under the
 // call's request key, the call is repeated, every later statement of it
 // fails at once, and the framework rolls it back and drops it.
-priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
+priv db_join: fn(held: ^DBState, state: Shared<DBState>, call: Int) DBError! {
     if driver_closed(held.driver) -> return Err(db_closed())
     if call == 0 -> return Ok()
     if app.transactions.repeated(call) -> return Err(db_repeated())
@@ -2278,7 +2278,7 @@ priv db_repeated: fn() -> DBError Never! {
 // (`db_delivered`), the schedule's run (`db_scheduled`) or the request
 // (`db_requested`) it is; when not, records a delivery or a run in the
 // call's transaction. False for any other call.
-priv db_ran: fn(driver: &DBDriver, call: Int) -> Bool DBError! {
+priv db_ran: fn(driver: ^DBDriver, call: Int) -> Bool DBError! {
     if app.transactions.delivery(call) == .Val(delivery) -> return db_delivered(driver, delivery)
     if app.transactions.tick(call) == .Val(tick) -> return db_scheduled(driver, tick)
     if app.transactions.request(call) == .Val(request) -> return db_requested(driver, call, request)
@@ -2290,7 +2290,7 @@ priv db_ran: fn(driver: &DBDriver, call: Int) -> Bool DBError! {
 // open transaction. The table `__jet_schedules` keeps one row per schedule.
 // A rollback forgets it with the rest of the run, so a failed run is run
 // again when a server starts while it is still the latest due.
-priv db_scheduled: fn(driver: &DBDriver, tick: app.CallTick) -> Bool DBError! {
+priv db_scheduled: fn(driver: ^DBDriver, tick: app.CallTick) -> Bool DBError! {
     _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS __jet_schedules (name TEXT PRIMARY KEY, due INTEGER NOT NULL)", [DBValue]{}) ?? return Err(err)
     if __driver_query_one(driver, "SELECT due FROM __jet_schedules WHERE name = ?", [DBValue]{.Text(tick.schedule.copy())}) == {
         .Ok(found) -> {
@@ -2314,7 +2314,7 @@ priv DB_DELIVERY_KEPT: 2592000
 // not, records it, in the open transaction, as run when it came, and forgets
 // the deliveries kept longer. A rollback forgets it with the rest of the
 // call, so a failed run is run again when the sender delivers it again.
-priv db_delivered: fn(driver: &DBDriver, delivery: app.CallDelivery) -> Bool DBError! {
+priv db_delivered: fn(driver: ^DBDriver, delivery: app.CallDelivery) -> Bool DBError! {
     _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS __jet_deliveries (id TEXT PRIMARY KEY, at INTEGER NOT NULL)", [DBValue]{}) ?? return Err(err)
     _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS __jet_deliveries_at ON __jet_deliveries (at)", [DBValue]{}) ?? return Err(err)
     _: __driver_execute(driver, "DELETE FROM __jet_deliveries WHERE at < ?", [DBValue]{.Int(delivery.at - DB_DELIVERY_KEPT)}) ?? return Err(err)
@@ -2339,7 +2339,7 @@ priv DB_REQUESTS_TABLE: "CREATE TABLE IF NOT EXISTS __jet_requests (account TEXT
 // Whether the store keeps a reply under `request`'s account and key from
 // the 24 hours before it came; when it does, gives call `call` that reply.
 // Forgets the replies kept longer.
-priv db_requested: fn(driver: &DBDriver, call: Int, request: app.CallRequest) -> Bool DBError! {
+priv db_requested: fn(driver: ^DBDriver, call: Int, request: app.CallRequest) -> Bool DBError! {
     _: __driver_execute(driver, DB_REQUESTS_TABLE, [DBValue]{}) ?? return Err(err)
     _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS __jet_requests_at ON __jet_requests (at)", [DBValue]{}) ?? return Err(err)
     _: __driver_execute(driver, "DELETE FROM __jet_requests WHERE at < ?", [DBValue]{.Int(request.at - DB_REQUEST_KEPT)}) ?? return Err(err)
@@ -2601,7 +2601,7 @@ priv db_kept_keep: fn(state: Shared<DBState>, key: String, reply: String, max_ag
 // changed, and marks the write's instant under the key "", so a run that
 // began before it keeps nothing (`db_kept_keep`). A file that keeps no
 // replies is left as it is.
-priv db_kept_written: fn(held: &DBState) Never! {
+priv db_kept_written: fn(held: ^DBState) Never! {
     app.reply_cache.written()
     if driver_closed(held.driver) || !table_exists(held.driver, "__jet_kept_replies") {
         return
@@ -2979,7 +2979,7 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
 // policy. db.migrate's steps (`allow_schema`) may change any table, so they
 // pass; a statement that does not compile is left for its run to report.
 // policy_apply has already refused every other statement kind.
-priv scope_confine: fn(driver: &DBDriver, policy: RowPolicy, scoped: SQL, allow_schema: Bool) -> DBError? Never! {
+priv scope_confine: fn(driver: ^DBDriver, policy: RowPolicy, scoped: SQL, allow_schema: Bool) -> DBError? Never! {
     if policy.table == "" || allow_schema -> return None
     tokens: sql_tokens(scoped.text.bytes())
     if tokens.len() == 0 -> return None
@@ -3072,7 +3072,7 @@ priv LIVE_WATCH: Shared{[LiveWatch]{}}
 // its version now, before the read, so every later write reaches the poll.
 // Starts the file's poll on its first table. A connection inside a
 // transaction, or a busy file, leaves it to a later read.
-priv db_live_watch: fn(held: &DBState, state: Shared<DBState>, table: String) Never! {
+priv db_live_watch: fn(held: ^DBState, state: Shared<DBState>, table: String) Never! {
     if held.path == ":memory:" || held.open != 0 || held.call != 0 {
         return
     }
@@ -3104,7 +3104,7 @@ priv db_live_watch: fn(held: &DBState, state: Shared<DBState>, table: String) Ne
 
 // `table`'s version in the map of the file `driver` holds; None when the
 // map has no row for it.
-priv db_live_version: fn(driver: &DBDriver, table: String) -> Int? Never! {
+priv db_live_version: fn(driver: ^DBDriver, table: String) -> Int? Never! {
     rows: __driver_query(driver, "SELECT version FROM {LIVE_VERSIONS} WHERE name = ?", [DBValue]{.Text(table.copy())}) ?? return None
     if rows.len() == 0 -> return None
     Val(row_int(rows[0], "version") ?? return None)
@@ -3113,7 +3113,7 @@ priv db_live_version: fn(driver: &DBDriver, table: String) -> Int? Never! {
 // Adds one to `table`'s version in the map of the file `held` reads, once a
 // write to it committed, when some process polls the table. This process
 // counts the write as its own, so its poll skips it.
-priv db_live_bump: fn(held: &DBState, table: String) Never! {
+priv db_live_bump: fn(held: ^DBState, table: String) Never! {
     if held.path == ":memory:" || !table_exists(held.driver, LIVE_VERSIONS) {
         return
     }
@@ -3863,7 +3863,7 @@ priv LeaseState: struct {
     drivers: [DBDriver],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             drivers := self.drivers.move()
             loop drivers.len() > 0 {
                 driver: drivers.remove(0, .Slot) ?? panic("database lease lost its connection")
@@ -3880,7 +3880,7 @@ priv PoolWaiter: struct {
     ticket: Int,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if self.ticket < 0 {
                 return
             }
@@ -3940,13 +3940,13 @@ priv pool_receipt: fn(state: PoolState) -> DBPoolReceipt Never! {
     }
 }
 
-priv pool_mark_drained: fn(state: &PoolState) Never! {
+priv pool_mark_drained: fn(state: ^PoolState) Never! {
     if state.lifecycle == .Draining && state.available.len() == 0 && state.leased == 0 && state.opening == 0 {
         state.lifecycle = .Drained
     }
 }
 
-priv pool_remove_waiter: fn(state: &PoolState, ticket: Int) Never! {
+priv pool_remove_waiter: fn(state: ^PoolState, ticket: Int) Never! {
     loop index in 0..<state.waiters.len() {
         if state.waiters[index] == ticket {
             _: state.waiters.remove(index, .Slot)
@@ -3955,7 +3955,7 @@ priv pool_remove_waiter: fn(state: &PoolState, ticket: Int) Never! {
     }
 }
 
-priv pool_replace_one: fn(state: &PoolState) Never! {
+priv pool_replace_one: fn(state: ^PoolState) Never! {
     if state.lifecycle != .Open || state.available.len() + state.leased + state.opening >= state.max {
         return
     }
@@ -3973,7 +3973,7 @@ priv pool_replace_one: fn(state: &PoolState) Never! {
     state.replacements += 1
 }
 
-priv pool_release: fn(pool: Shared<PoolState>, driver: &&DBDriver) Never! {
+priv pool_release: fn(pool: Shared<PoolState>, driver: ^^DBDriver) Never! {
     held := driver.move()
     fit: __driver_reset(held)
     guard := pool.guard_edit()
@@ -4181,7 +4181,7 @@ priv DBDriver: struct {
     priv statements: Int{0},
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if !self.live {
                 return
             }
@@ -4226,7 +4226,7 @@ priv __driver_open: fn(path: String) -> DBDriver? Never! {
 }
 
 // Finalize every cached statement, oldest first.
-priv driver_finalize_cache: fn(driver: &DBDriver) Never! {
+priv driver_finalize_cache: fn(driver: ^DBDriver) Never! {
     loop driver.cache.len() > 0 {
         statement: driver.cache.remove(0, .Slot) ?? panic("SQLite cache lost a statement")
         _: prep.finalize_stmt(driver.database, statement.stmt)
@@ -4235,7 +4235,7 @@ priv driver_finalize_cache: fn(driver: &DBDriver) Never! {
 
 // Shut a shared connection down in place: later operations see it closed and
 // the driver's own Close then does nothing.
-priv __driver_shutdown: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_shutdown: fn(driver: ^DBDriver) -> Bool Never! {
     if !driver.live -> return false
     driver_finalize_cache(driver)
     _: prep.close_v2(driver.database)
@@ -4243,33 +4243,33 @@ priv __driver_shutdown: fn(driver: &DBDriver) -> Bool Never! {
     true
 }
 
-control: fn(driver: &DBDriver, sql: String) -> Bool Never! {
+control: fn(driver: ^DBDriver, sql: String) -> Bool Never! {
     prep.exec_sql(driver.database, sql.bytes()) == base.OK
 }
 
-priv __driver_begin: fn(driver: &DBDriver) -> Bool Never! { control(driver, "BEGIN") }
+priv __driver_begin: fn(driver: ^DBDriver) -> Bool Never! { control(driver, "BEGIN") }
 
-priv __driver_begin_immediate: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_begin_immediate: fn(driver: ^DBDriver) -> Bool Never! {
     control(driver, "BEGIN IMMEDIATE")
 }
 
-priv __driver_commit: fn(driver: &DBDriver) -> Bool Never! { control(driver, "COMMIT") }
+priv __driver_commit: fn(driver: ^DBDriver) -> Bool Never! { control(driver, "COMMIT") }
 
-priv __driver_rollback: fn(driver: &DBDriver) -> Bool Never! { control(driver, "ROLLBACK") }
+priv __driver_rollback: fn(driver: ^DBDriver) -> Bool Never! { control(driver, "ROLLBACK") }
 
-priv __driver_reset: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_reset: fn(driver: ^DBDriver) -> Bool Never! {
     if prep.get_autocommit(driver.database) -> return true
     __driver_rollback(driver)
 }
 
-prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
+prepare: fn(driver: ^DBDriver, sql: String) -> CachedStatement DBError! {
     driver.statements += 1
     driver_compile(driver, sql)
 }
 
 // The tables `sql` reads or writes, from its compiled statement, which goes
 // back to the cache for the run that follows. It counts no statement.
-priv driver_tables: fn(driver: &DBDriver, sql: String) -> [String] DBError! {
+priv driver_tables: fn(driver: ^DBDriver, sql: String) -> [String] DBError! {
     statement: driver_compile(driver, sql) ?? return Err(err)
     tables: statement.tables.copy()
     release(driver, statement)
@@ -4278,7 +4278,7 @@ priv driver_tables: fn(driver: &DBDriver, sql: String) -> [String] DBError! {
 
 // The cached statement for `sql`, or a new one compiled under the engine's
 // table-recording authorizer.
-priv driver_compile: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
+priv driver_compile: fn(driver: ^DBDriver, sql: String) -> CachedStatement DBError! {
     // An unchanged template hits without allocating a trimmed String. Only a
     // different spelling needs the canonical trimmed-key comparison below.
     loop index in 0..<driver.cache.len() {
@@ -4317,7 +4317,7 @@ priv driver_compile: fn(driver: &DBDriver, sql: String) -> CachedStatement DBErr
     Ok(CachedStatement{stmt: prepared.stmt, sql: key, tables: tables})
 }
 
-release: fn(driver: &DBDriver, statement: &&CachedStatement) Never! {
+release: fn(driver: ^DBDriver, statement: ^^CachedStatement) Never! {
     if statement.stmt < 0 {
         return
     }
@@ -4332,12 +4332,12 @@ release: fn(driver: &DBDriver, statement: &&CachedStatement) Never! {
 }
 
 // sqlite3_step(NULL) is SQLITE_MISUSE; empty SQL prepares no statement.
-step_statement: fn(driver: &DBDriver, statement: Int) -> Int Never! {
+step_statement: fn(driver: ^DBDriver, statement: Int) -> Int Never! {
     if statement < 0 -> return base.MISUSE
     prep.step(driver.database, statement)
 }
 
-bind: fn(driver: &DBDriver, statement: Int, params: [DBValue]) -> DBError? Never! {
+bind: fn(driver: ^DBDriver, statement: Int, params: [DBValue]) -> DBError? Never! {
     needed: if statement < 0 -> 0 else -> api.bind_parameter_count(driver.database, statement)
     if params.len() != needed {
         return Val(db_error("Wrong number of parameters passed to query. Got {params.len()}, needed {needed}"))
@@ -4378,7 +4378,7 @@ bind: fn(driver: &DBDriver, statement: Int, params: [DBValue]) -> DBError? Never
     None
 }
 
-priv __driver_execute: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> Int DBError! {
+priv __driver_execute: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> Int DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
@@ -4435,7 +4435,7 @@ cell_wire_width: fn(value: DBValue) -> Int Never! {
     tagged_width(payload)
 }
 
-priv __driver_query: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [[String:DBValue]] DBError! {
+priv __driver_query: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [[String:DBValue]] DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
@@ -4502,14 +4502,14 @@ priv __driver_query: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [[
     Ok(rows)
 }
 
-priv __driver_query_one: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [String:DBValue]? DBError! {
+priv __driver_query_one: fn(driver: ^DBDriver, sql: String, params: [DBValue]) -> [String:DBValue]? DBError! {
     rows := __driver_query(driver, sql, params) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     first: rows.remove(0, .Slot) ?? panic("SQLite first row disappeared")
     Ok(Val(first))
 }
 
-priv __driver_health: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_health: fn(driver: ^DBDriver) -> Bool Never! {
     if __driver_query_one(driver, "SELECT 1", [DBValue]{}) == {
         .Ok(found) -> found != None
         .Err(_) -> false

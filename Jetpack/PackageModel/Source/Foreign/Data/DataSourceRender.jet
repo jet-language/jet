@@ -121,14 +121,14 @@ SchemaBuilder: struct {
 
     // Reserve a record name and its slot; fields arrive later so nested
     // records can be declared after their parent.
-    begin_record: fn(&self, preferred: String) -> {name: String, index: Int} Never! {
+    begin_record: fn(^self, preferred: String) -> {name: String, index: Int} Never! {
         name: pkg_bind_unique_name(self.used_type_names, pkg_data_type_name(preferred))
         index: self.records.len()
         self.records.push(BoundRecord{name: name, fields: [BoundField]{}})
         {index: index, name: name}
     }
 
-    set_fields: fn(&self, index: Int, seeds: [FieldSeed]) Never! {
+    set_fields: fn(^self, index: Int, seeds: [FieldSeed]) Never! {
         used := [String]{}
         fields := [BoundField]{}
         loop seed in seeds {

@@ -209,7 +209,7 @@ build_owner_executable: fn(path: String) -[FS]> Bool BuildIOError! {
 // hashed where it lies); one that leads out of the folder is refused. The
 // `.jet` and `.git` folders and what a `.gitignore` excludes are skipped.
 // The folder is bound into the work tree, so no byte is copied.
-build_snapshot_folders: fn(stamps: &StampTable, base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputSnapshot] BuildIOError! {
+build_snapshot_folders: fn(stamps: ^StampTable, base: String, action: HermeticBuildAction) -[FS, Env]> [ActionInputSnapshot] BuildIOError! {
     snapshots := [ActionInputSnapshot]{}
     loop folder in action.folders {
         root: build_folder_source(base, folder) ?? return Err(err)

@@ -6,7 +6,7 @@
 // exact, case-sensitive catalog name) is checked first and copies real
 // `.jet` source into `./components/` instead; source names are always
 // lowercase, so an exact-case `Button`-style name can only be a component.
-cli_cmd_add: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_add: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "add")
     raw: parsed.positional.get(0) ?? {
@@ -50,7 +50,7 @@ cli_cmd_add: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
 }
 
 // Record the resolved ref in the env file and pin its source channels.
-cli_add_record_ref: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, dir: String, spec: RefSpec) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_add_record_ref: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, dir: String, spec: RefSpec) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     edited: EnvFile.add(dir, spec) ?? {
         theme.error("could not edit the env file", err.message(), "check write permissions here.")
         return EXIT_USER_ERROR
@@ -75,7 +75,7 @@ cli_add_record_ref: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: 
 
 // Where a `--adapt` source's bytes come from, or the refusal for a source
 // that names a registry package rather than a source tree.
-cli_adapter_source: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
+cli_adapter_source: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
     if raw.contains(REF_PROVIDER_AT) {
         if ProviderRef.classify(raw) == {
             .Ok(reference) -> return Val(reference.raw)
@@ -137,7 +137,7 @@ cli_trim_end_matches: fn(text: String, suffix: String) -> String Never! {
 }
 
 // U20: print a `Pkg.adapt(...)` declaration draft instead of editing env.jet.
-cli_add_adapt: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+cli_add_adapt: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
     source: cli_adapter_source(cache, theme, raw) ?? return EXIT_USAGE
     // The last non-empty `/ : @ #` segment names the adapter.
     last := ""

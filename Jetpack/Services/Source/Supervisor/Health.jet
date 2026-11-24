@@ -32,7 +32,7 @@ ServiceHealth: enum {
 }
 
 // One-shot readiness check; it neither waits nor retries.
-services_health_one: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
+services_health_one: fn(project_dir: String, env: ^ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
     if services_validate_service_name(plan.name) == .Err(_) -> return ServiceHealth.NotRunning
     if !plan.enable -> return ServiceHealth.Disabled
     dir: services_service_dir(project_dir, plan.name)
@@ -47,12 +47,12 @@ services_health_one: fn(project_dir: String, env: &ShellEnv, plan: DevServicePla
 
 // The shell spelling of a readiness command, in the project directory with
 // the service's environment.
-services_probe_shell: fn(command: String, resolved: ServiceResolved, env: &ShellEnv) -[FS, Env, Exec, Time, Time.Wait]> Bool Never! {
+services_probe_shell: fn(command: String, resolved: ServiceResolved, env: ^ShellEnv) -[FS, Env, Exec, Time, Time.Wait]> Bool Never! {
     spec: env.apply_to(process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)) ?? return false
     services_run_bounded_probe(spec, SERVICES_MAX_READY_PROBE_MS)
 }
 
-services_probe_ready: fn(resolved: ServiceResolved, env: &ShellEnv) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+services_probe_ready: fn(resolved: ServiceResolved, env: ^ShellEnv) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if resolved.ready_probe == .Val(probe) {
         return if probe == {
             .Exec(command) -> services_probe_shell(command, resolved, env)
@@ -138,7 +138,7 @@ services_probe_http_status: fn(address: net.SocketAddr, host: String, path: Stri
 
 // Poll readiness until it passes or `timeout` elapses; false on timeout
 // (the caller renders E1261).
-services_wait_healthy: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+services_wait_healthy: fn(project_dir: String, env: ^ShellEnv, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if !plan.enable -> return true
     // With no readiness probe and no port, a service is healthy only after
     // it stays alive for one bounded window, so a fast exit that a detached

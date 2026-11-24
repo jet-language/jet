@@ -242,7 +242,7 @@ all_pass: fn(rows: [Row]) -> Bool Never! {
     rows.len() > 0 && rows.all(fn(row) { row.status == "PASS" })
 }
 
-record: fn(state: &Verify, row: Row) -[FS, Exec, IO]> () {
+record: fn(state: ^Verify, row: Row) -[FS, Exec, IO]> () {
     state.rows.push(row.copy())
     publish(state)
 }
@@ -255,7 +255,7 @@ spawn: fn(spec: ProcessSpec) -[Env, Exec, FS, IO, Time, Time.Wait]> ProcessRecei
 
 // Run one child in the pinned source with the verification environment. Once a
 // child has been unsafe, nothing else runs: the row is BLOCKED.
-run_child: fn(state: &Verify, scope: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+run_child: fn(state: ^Verify, scope: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     log: "{state.evidence}/{scope}.log"
     if state.unsafe != "" -> return Ran{row: blocked_row(scope, state.unsafe, log), output: ""}
     spec := process.cmd(argv).cwd(state.repo).timeout(time.duration_ms(state.timeout_ms)).output_limit(134217728)
@@ -287,7 +287,7 @@ run_child: fn(state: &Verify, scope: String, argv: [String]) -[Env, Exec, FS, IO
 
 // Pin the source: to the commit of an inherited ../source.manifest.json, or to
 // HEAD exported through ProofSource.jet, whose output becomes the source.
-pin_source: fn(state: &Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
+pin_source: fn(state: ^Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
     inherited: "{files.dirname(state.repo)}/source.manifest.json"
     if files.exists(inherited) {
         text: files.read(inherited) ?? return abort("verify-full: `{inherited}` cannot be read: {err}")
@@ -330,7 +330,7 @@ shard_suites: fn(state: Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] 
     suites
 }
 
-check_pin: fn(state: &Verify, scope: String) -[FS, Exec, IO]> Bool Never! {
+check_pin: fn(state: ^Verify, scope: String) -[FS, Exec, IO]> Bool Never! {
     log: "{state.evidence}/{scope}.log"
     pin: state.pin ?? ""
     problem: pinned_source_problem(state.repo, pin)
@@ -398,14 +398,14 @@ read_document: fn(path: String) -[FS]> Dyn? Never! {
     Val(tree)
 }
 
-fail_row: fn(row: &Row, reason: String) Never! {
+fail_row: fn(row: ^Row, reason: String) Never! {
     row.status = "FAIL"
     row.reason = Val(reason.copy())
 }
 
 // A testkit suite passes only when its report names this compiler and every
 // case of that suite is PASS.
-testkit_verdict: fn(row: &Row, report: String, binary: String, suite: String) -[FS]> () {
+testkit_verdict: fn(row: ^Row, report: String, binary: String, suite: String) -[FS]> () {
     tree: read_document(report) ?? return fail_row(row, "testkit report `{report}` is missing or not JSON")
     results: array_field(tree, "results")
     if text_field(tree, "jet") != binary || results.len() == 0 || results.any(fn(result) { text_field(result, "status") != "PASS" || text_field(result, "suite") != suite }) {
@@ -417,7 +417,7 @@ testkit_verdict: fn(row: &Row, report: String, binary: String, suite: String) -[
 
 // The registry manifest must be pinned to this source and complete; the run
 // receipt, when given, must pass every manifest entry with this compiler.
-registry_verdict: fn(row: &Row, manifest_path: String, receipt_path: String?, head: String, root: String, binary: String) -[FS]> () {
+registry_verdict: fn(row: ^Row, manifest_path: String, receipt_path: String?, head: String, root: String, binary: String) -[FS]> () {
     manifest: read_document(manifest_path) ?? return fail_row(row, "registry manifest `{manifest_path}` is missing or not JSON")
     entries: array_field(manifest, "entries")
     complete: if field(manifest, "completeCompilerRegistries") == .Bool(flag) -> flag else -> false

@@ -32,7 +32,7 @@ holder: fn() -> [[Int]] AllocError! { List.try_with_capacity(64) }
 // Takes the largest lists that still fit, halving down to 4 KB, so under
 // 4 KB of the cap is left. `ballast` holds every list it takes; its capacity
 // is reserved, so pushing to it allocates nothing.
-fill: fn(ballast: &[[Int]]) {
+fill: fn(ballast: ^[[Int]]) {
     count := 8_388_608
     loop count >= 512 {
         if reserve(count) == {

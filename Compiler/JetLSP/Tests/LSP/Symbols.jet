@@ -57,11 +57,11 @@ lsp_test_symbol_rows: fn(rows: [Dyn]) -> [String] Never! {
     assert_eq(lsp_test_text(lsp_test_field(rows[0], "location"), "uri"), LSP_TEST_MAIN_URI)
 }
 
-lsp_test_workspace_rows: fn(server: &LSPServer) -> [Dyn] {
+lsp_test_workspace_rows: fn(server: ^LSPServer) -> [Dyn] {
     lsp_test_rows(lsp_test_result(server, "workspace/symbol", "{{\"query\":\"\"}}"))
 }
 
-lsp_test_change_folders: fn(server: &LSPServer, added: String, removed: String) Never! {
+lsp_test_change_folders: fn(server: ^LSPServer, added: String, removed: String) Never! {
     lsp_change_workspace_folders(server, Val(lsp_test_json("{{\"event\":{{\"added\":[{added}],\"removed\":[{removed}]}}}}")))
 }
 
@@ -312,7 +312,7 @@ Pixel: struct {
 `
 
 // The actions for the whole of line `line`.
-lsp_test_action_rows: fn(server: &LSPServer, uri: String, line: Int) -> [Dyn] {
+lsp_test_action_rows: fn(server: ^LSPServer, uri: String, line: Int) -> [Dyn] {
     params: "{{{lsp_test_text_document(uri)},\"range\":{{\"start\":{{\"line\":{line},\"character\":0}},\"end\":{{\"line\":{line + 1},\"character\":0}}}},\"context\":{{\"diagnostics\":[]}}}}"
     lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", params))
 }

@@ -297,7 +297,7 @@ registry_cli_test_fetch: fn(root: String, consumer: String, bare: String, store:
     spec.env_remove("JET_ADVISORY_DB").env_remove("JET_ADVISORY_TRUST").env_remove("JET_ADVISORY_PUBLIC_KEY").run() ?? panic("fetch at {now}")
 }
 
-registry_cli_test_entry_with: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, provenance: String) -> StoreEntry? {
+registry_cli_test_entry_with: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, version: String, provenance: String) -> StoreEntry? {
     found := StoreEntry?{None}
     loop stored in store_list(verification, roots) {
         if found == None && stored.name == name && stored.version == version && stored.envelope.provenance.contains(provenance) {

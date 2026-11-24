@@ -73,7 +73,7 @@ SemaAliasGlobals: struct {
 // name every module sees reads the inputs' top-level types, counted once and
 // kept as each module's bindings are rewritten, not walked over every input
 // for each name.
-sema_alias_classify_inputs: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) Never! {
+sema_alias_classify_inputs: fn(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) Never! {
     rows := [U32:Int]{}
     pending := [Int]{}
     globals := SemaAliasGlobals{names: name_table_sized(64), types: [Int]{0}, seen: [Int]{0}, stamp: 0}
@@ -95,7 +95,7 @@ sema_alias_classify_inputs: fn(inputs: &[SemaRegistrationModuleInput], edges: [S
 
 // Adds `delta` to the count of each name whose first declaration among
 // `items`, one input's top level, is a type.
-sema_alias_globals_add: fn(globals: &SemaAliasGlobals, items: [Item], delta: Int) Never! {
+sema_alias_globals_add: fn(globals: ^SemaAliasGlobals, items: [Item], delta: Int) Never! {
     globals.stamp += 1
     loop item in items {
         name: sema_alias_item_name(item)
@@ -186,7 +186,7 @@ sema_alias_key: fn(definition: ConstDef) -> String Never! {
     "{definition.name_span.start}:{definition.name_span.end}:{definition.name}"
 }
 
-sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, index: Int, items: [Item], scope: [String], keys: &[String]) Never! {
+sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, index: Int, items: [Item], scope: [String], keys: ^[String]) Never! {
     loop item_index in 0..<items.len() {
         if items[item_index] == .Const(definition) {
             path: sema_alias_binding_path(definition) ?? next

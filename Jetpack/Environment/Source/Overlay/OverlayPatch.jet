@@ -177,7 +177,7 @@ env_overlay_strip_carriage_return: fn(line: String) -> String Never! {
 }
 
 // Stage one unified diff against `source`; repeated files compose in order.
-env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text: String, stage: &OverlayStage) -[FS, Env]> [PatchApplication] OverlayError! {
+env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text: String, stage: ^OverlayStage) -[FS, Env]> [PatchApplication] OverlayError! {
     applications := [PatchApplication]{}
     lines: env_overlay_lines(patch_text)
     at := 0
@@ -303,7 +303,7 @@ env_overlay_has_control: fn(raw: String) -> Bool Never! {
 // Commit changed files in path order; on failure restore the ones already
 // written and report both the commit and any rollback failure. `after_commit`
 // borrows the committed path; the stage retains all of its descriptor owners.
-env_overlay_commit_staged: fn(source: OverlayAuthority, stage: &OverlayStage, after_commit: fn(String) -[FS]> Never!) -[FS, Env, Rand]> OverlayError! {
+env_overlay_commit_staged: fn(source: OverlayAuthority, stage: ^OverlayStage, after_commit: fn(String) -[FS]> Never!) -[FS, Env, Rand]> OverlayError! {
     root: source.resolver.checked_directory(".") ?? return Err(OverlayError.IO("could not validate source authority: {err.message()}"))
     root_handle: source.resolver.directory_handle(root)
     committed := [String]{}
@@ -401,7 +401,7 @@ env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Director
 // The file is durable before publication. The directory sync after the
 // rename is best effort, so a reporting failure cannot claim a failed commit
 // after the destination already changed.
-env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: &FileWriter, temporary: String, bytes: [U8]) -[FS]> IOError! {
+env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: ^FileWriter, temporary: String, bytes: [U8]) -[FS]> IOError! {
     file.write_bytes(bytes)
     file.set_mode(entry.mode)
     file.fsync()

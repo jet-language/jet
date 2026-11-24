@@ -128,7 +128,7 @@ WatchEvents: struct {
         events
     }
 
-    refresh: fn(&self, paths: [String]) {
+    refresh: fn(^self, paths: [String]) {
         directories: watch_directories(paths)
         if directories == self.directories && self.handles.len() > 0 {
             return
@@ -266,14 +266,14 @@ WatchGraph: struct {
         paths
     }
 
-    upsert: fn(&self, path: String, kind: RootKind) { self.upsert_with_dir_hint(path, kind, false) }
+    upsert: fn(^self, path: String, kind: RootKind) { self.upsert_with_dir_hint(path, kind, false) }
 
-    upsert_with_dir_hint: fn(&self, path: String, kind: RootKind, dir_hint: Bool) {
+    upsert_with_dir_hint: fn(^self, path: String, kind: RootKind, dir_hint: Bool) {
         is_dir: dir_hint || watch_files.is_dir(path)
         self.nodes[path] = WatchNode{path: path, kind: kind, stamp: watch_stamp_capture(path), is_dir: is_dir}
     }
 
-    set_stamp: fn(&self, path: String, stamp: PathStamp) {
+    set_stamp: fn(^self, path: String, stamp: PathStamp) {
         if self.nodes.get(path) == .Val(node) {
             updated := node
             updated.stamp = stamp
@@ -283,7 +283,7 @@ WatchGraph: struct {
 
     // A node that exists now takes its current shape; a directory becomes an
     // asset sentinel.
-    reshape: fn(&self, path: String, is_dir: Bool, as_asset: Bool) {
+    reshape: fn(^self, path: String, is_dir: Bool, as_asset: Bool) {
         if self.nodes.get(path) == .Val(node) {
             updated := node
             updated.is_dir = is_dir
@@ -299,7 +299,7 @@ WatchGraph: struct {
         0
     }
 
-    link: fn(&self, source_path: String, target_path: String) {
+    link: fn(^self, source_path: String, target_path: String) {
         targets := self.forward.get(source_path) ?? [String:Bool]{}
         targets[target_path] = true
         self.forward[source_path] = targets
@@ -308,26 +308,26 @@ WatchGraph: struct {
         self.reverse[target_path] = sources
     }
 
-    link_from_entry: fn(&self, path: String) {
+    link_from_entry: fn(^self, path: String) {
         entry: self.entry_path() ?? return
         self.link(entry, path)
     }
 
-    set_entry: fn(&self, entry: String) {
+    set_entry: fn(^self, entry: String) {
         self.entry = Val(entry)
         self.upsert(entry, RootKind.Import)
     }
 
-    mark_runtime_root: fn(&self, path: String) { self.runtime_input_roots[path] = true }
+    mark_runtime_root: fn(^self, path: String) { self.runtime_input_roots[path] = true }
 
-    register_asset_root: fn(&self, raw_path: String) {
+    register_asset_root: fn(^self, raw_path: String) {
         root: watch_canonicalize_loose(raw_path)
         self.asset_roots[root] = true
         visited := [String:Bool]{}
         self.add_asset_tree(root, visited)
     }
 
-    add_asset_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+    add_asset_tree: fn(^self, raw_path: String, visited: ^[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
         if visited.has_key(path) {
             return
@@ -340,14 +340,14 @@ WatchGraph: struct {
         loop child in watch_children(path) -> self.add_asset_tree(child, visited)
     }
 
-    discover_asset_tree: fn(&self) {
+    discover_asset_tree: fn(^self) {
         roots := self.asset_roots.keys().to_list()
         roots.sort()
         visited := [String:Bool]{}
         loop root in roots -> self.add_new_asset_tree(root, visited)
     }
 
-    add_new_asset_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+    add_new_asset_tree: fn(^self, raw_path: String, visited: ^[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
         if visited.has_key(path) {
             return
@@ -366,14 +366,14 @@ WatchGraph: struct {
         loop child in watch_children(path) -> self.add_new_asset_tree(child, visited)
     }
 
-    discover_runtime_input_trees: fn(&self) {
+    discover_runtime_input_trees: fn(^self) {
         roots := self.runtime_input_roots.keys().to_list()
         roots.sort()
         visited := [String:Bool]{}
         loop root in roots -> self.add_new_runtime_tree(root, visited)
     }
 
-    add_new_runtime_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+    add_new_runtime_tree: fn(^self, raw_path: String, visited: ^[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
         if visited.has_key(path) {
             return
@@ -420,7 +420,7 @@ WatchGraph: struct {
         result
     }
 
-    refresh_stamps: fn(&self) {
+    refresh_stamps: fn(^self) {
         loop path in self.watched_paths() -> self.set_stamp(path, watch_stamp_capture(path))
     }
 
@@ -479,7 +479,7 @@ WatchGraph: struct {
 
     // A manifest, lock or shell is watched before it exists; the rest only
     // once they do.
-    add_extra: fn(&self, path: String, kind: RootKind) {
+    add_extra: fn(^self, path: String, kind: RootKind) {
         expected: kind == RootKind.Manifest || kind == RootKind.Lock || kind == RootKind.HTML
         if !expected && !watch_files.exists(path) {
             return
@@ -502,7 +502,7 @@ WatchGraph: struct {
         WatchGraph.from_entry(entry, dependencies)
     }
 
-    scan_runtime_inputs: fn(&self) {
+    scan_runtime_inputs: fn(^self) {
         sources := [String]{}
         nodes: self.node_list()
         loop node in nodes.move() {
@@ -529,7 +529,7 @@ WatchGraph: struct {
         }
     }
 
-    add_runtime_input_node: fn(&self, raw_path: String, visited: &[String:Bool], dir_hint: Bool, register_root: Bool) {
+    add_runtime_input_node: fn(^self, raw_path: String, visited: ^[String:Bool], dir_hint: Bool, register_root: Bool) {
         path: watch_canonicalize_loose(raw_path)
         if visited.has_key(path) {
             return
@@ -553,12 +553,12 @@ WatchGraph: struct {
         }
     }
 
-    scan_html_references: fn(&self, roots: [String]) {
+    scan_html_references: fn(^self, roots: [String]) {
         visited := [String:Bool]{}
         loop root in roots -> self.add_reference_tree(root, visited)
     }
 
-    add_reference_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+    add_reference_tree: fn(^self, raw_path: String, visited: ^[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
         if visited.has_key(path) {
             return
@@ -698,7 +698,7 @@ watch_runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] Never! {
     out
 }
 
-watch_scan_method: fn(bytes: [U8], method: String, is_dir: Bool, inputs: &[String:Bool]) Never! {
+watch_scan_method: fn(bytes: [U8], method: String, is_dir: Bool, inputs: ^[String:Bool]) Never! {
     marker: ".{method}".bytes()
     offset := 0
     loop {
@@ -781,7 +781,7 @@ watch_referenced_paths: fn(path: String, source: String) -> [String] Never! {
 
 // Every value that follows `keyword` (and the `delimiter` byte, when it is
 // not 0), quoted or bare, compared without case.
-watch_extract_values: fn(source: String, keyword: String, delimiter: Int, optional_parentheses: Bool, split_srcset: Bool, out: &[String]) Never! {
+watch_extract_values: fn(source: String, keyword: String, delimiter: Int, optional_parentheses: Bool, split_srcset: Bool, out: ^[String]) Never! {
     bytes: source.bytes()
     lower: watch_ascii_lower(source).bytes()
     needle: keyword.bytes()
@@ -873,12 +873,12 @@ WatchSession: struct {
         WatchSession.from_graph(WatchGraph.discover(entry, checker))
     }
 
-    from_graph: fn(graph: &&WatchGraph) -> WatchSession {
+    from_graph: fn(graph: ^^WatchGraph) -> WatchSession {
         events: WatchEvents.open(graph.watched_paths())
         WatchSession{graph: graph.move(), generation: 0, applied_generation: 0, coalesce_ms: WATCH_COALESCE_MS, edit_started: None, events: events}
     }
 
-    reopen: fn(&self, entry: String, checker: LSPChecker) {
+    reopen: fn(^self, entry: String, checker: LSPChecker) {
         graph: WatchGraph.discover(entry, checker)
         self.events.refresh(graph.watched_paths())
         self.graph = graph
@@ -887,14 +887,14 @@ WatchSession: struct {
         self.edit_started = None
     }
 
-    register_asset_root: fn(&self, path: String) {
+    register_asset_root: fn(^self, path: String) {
         self.graph.register_asset_root(path)
         self.events.refresh(self.graph.watched_paths())
     }
 
-    mark_edit_started: fn(&self) { self.edit_started = Val(watch_time.start()) }
+    mark_edit_started: fn(^self) { self.edit_started = Val(watch_time.start()) }
 
-    wait_for_change_for: fn(&self, timeout_ms: Int?) -> Bool {
+    wait_for_change_for: fn(^self, timeout_ms: Int?) -> Bool {
         self.events.refresh(self.graph.watched_paths())
         self.events.wait(timeout_ms)
     }
@@ -902,7 +902,7 @@ WatchSession: struct {
     // The receipt of what changed since the last poll, once the saves settle;
     // None when nothing did. A generation the host already applied comes
     // back stale, with no closure.
-    poll: fn(&self) -> InvalidationReceipt? {
+    poll: fn(^self) -> InvalidationReceipt? {
         self.graph.discover_asset_tree()
         self.graph.discover_runtime_input_trees()
         self.events.refresh(self.graph.watched_paths())
@@ -1022,7 +1022,7 @@ WatchSession: struct {
 
     // Acknowledges `receipt` with the dependencies its rebuild loaded; a
     // change to the set of imports rediscovers the graph.
-    acknowledge_with_dependencies: fn(&self, receipt: InvalidationReceipt, dependencies: [String], checker: LSPChecker) {
+    acknowledge_with_dependencies: fn(^self, receipt: InvalidationReceipt, dependencies: [String], checker: LSPChecker) {
         entry: self.graph.entry_path() ?? {
             self.acknowledge(receipt, checker)
             return
@@ -1060,7 +1060,7 @@ WatchSession: struct {
         self.events.refresh(self.graph.watched_paths())
     }
 
-    acknowledge: fn(&self, receipt: InvalidationReceipt, checker: LSPChecker) {
+    acknowledge: fn(^self, receipt: InvalidationReceipt, checker: LSPChecker) {
         if receipt.generation > self.applied_generation {
             self.applied_generation = receipt.generation
         }
@@ -1083,7 +1083,7 @@ WatchSession: struct {
         self.events.refresh(self.graph.watched_paths())
     }
 
-    recover: fn(&self) {
+    recover: fn(^self) {
         self.graph.refresh_stamps()
         self.edit_started = None
     }
@@ -1091,7 +1091,7 @@ WatchSession: struct {
 
 // A deletion beside a creation of the same kind in the same directory is a
 // rename.
-watch_detect_renames: fn(changes: &[WatchChange], graph: WatchGraph) {
+watch_detect_renames: fn(changes: ^[WatchChange], graph: WatchGraph) {
     loop deleted_index in 0..<changes.len() {
         if changes[deleted_index].kind != ChangeKind.Deleted -> next
         deleted_path: changes[deleted_index].path

@@ -1,23 +1,23 @@
 // A later argument that the call keeps holding, moves, or writes still
-// conflicts with a `&` argument of the same place, and so does the place
+// conflicts with a `^` argument of the same place, and so does the place
 // passed on to a nested call or taken by a nested receiver.
 Bag: struct {
     items: [Int],
 
-    drain: fn(&&self) -> Int { self.items.len() }
+    drain: fn(^^self) -> Int { self.items.len() }
 }
 
-grow: fn(items: &[Int], extra: [Int]) { items.push(extra.len()) }
+grow: fn(items: ^[Int], extra: [Int]) { items.push(extra.len()) }
 
-grow_taken: fn(items: &[Int], extra: &&[Int]) { items.push(extra.len()) }
+grow_taken: fn(items: ^[Int], extra: ^^[Int]) { items.push(extra.len()) }
 
-grow_both: fn(items: &[Int], more: &[Int]) { items.push(more.len()) }
+grow_both: fn(items: ^[Int], more: ^[Int]) { items.push(more.len()) }
 
-count: fn(items: &&[Int]) -> Int { items.len() }
+count: fn(items: ^^[Int]) -> Int { items.len() }
 
-grow_by: fn(items: &[Int], extra: Int) { items.push(extra) }
+grow_by: fn(items: ^[Int], extra: Int) { items.push(extra) }
 
-fill: fn(bag: &Bag, extra: Int) { bag.items.push(extra) }
+fill: fn(bag: ^Bag, extra: Int) { bag.items.push(extra) }
 
 run: fn() {
     xs := [1, 2, 3]

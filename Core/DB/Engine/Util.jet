@@ -224,12 +224,12 @@ get4: fn(buf: [U8], at: Int) -> Int Never! {
     (Int{buf[at]} << 24) | (Int{buf[at + 1]} << 16) | (Int{buf[at + 2]} << 8) | Int{buf[at + 3]}
 }
 
-put2: fn(buf: &[U8], at: Int, value: Int) Never! {
+put2: fn(buf: ^[U8], at: Int, value: Int) Never! {
     buf[at] = U8{(value >> 8) & 255}
     buf[at + 1] = U8{value & 255}
 }
 
-put4: fn(buf: &[U8], at: Int, value: Int) Never! {
+put4: fn(buf: ^[U8], at: Int, value: Int) Never! {
     buf[at] = U8{(value >> 24) & 255}
     buf[at + 1] = U8{(value >> 16) & 255}
     buf[at + 2] = U8{(value >> 8) & 255}
@@ -286,7 +286,7 @@ varint_len: fn(value: Int) -> Int Never! {
 }
 
 // sqlite3PutVarint: append the varint encoding of a signed 64-bit `value`.
-put_varint: fn(out: &[U8], value: Int) Never! {
+put_varint: fn(out: ^[U8], value: Int) Never! {
     if value >= 0 && value < 128 {
         out.push(U8{value})
         return
@@ -423,7 +423,7 @@ utf8_read_limited: fn(z: [U8], at: Int, n_in: Int) -> UTFChar Never! {
 }
 
 // WRITE_UTF8.
-write_utf8: fn(out: &[U8], c: Int) Never! {
+write_utf8: fn(out: ^[U8], c: Int) Never! {
     if c < 128 -> out.push(U8{c & 255}) else if c < 2048 {
         out.push(U8{192 + ((c >> 6) & 31)})
         out.push(U8{128 + (c & 63)})
@@ -440,7 +440,7 @@ write_utf8: fn(out: &[U8], c: Int) Never! {
 }
 
 // WRITE_UTF16LE / WRITE_UTF16BE.
-write_utf16: fn(out: &[U8], c: Int, enc: Int) Never! {
+write_utf16: fn(out: ^[U8], c: Int, enc: Int) Never! {
     if c <= 65535 {
         lo: c & 255
         hi: (c >> 8) & 255

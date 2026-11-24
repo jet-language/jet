@@ -9,7 +9,7 @@ use jet_foundation.[AST_NODE_GENERATED, Expr, Func, Item, NameTable, Param, Para
 
 // Expands `program`'s trait-bounded variadic functions in place; a program
 // without one is left untouched (not copied).
-sema_variadic_bounds_expand: fn(program: &Program) {
+sema_variadic_bounds_expand: fn(program: ^Program) {
     declared := name_table_sized(2)
     loop item in program.items {
         if item == .Trait(definition) -> _ := name_intern(declared, definition.name)
@@ -77,7 +77,7 @@ sema_variadic_bound_traits: fn(function: Func, declared: NameTable) -> [String]?
 
 // The arity function a call of variadic `name` with `arity` trailing
 // arguments names; the first call of each arity notes it.
-sema_inline_note_variadic_arity: fn(rewrite: &SemaInlineRewrite, name: String, arity: Int) -> String Never! {
+sema_inline_note_variadic_arity: fn(rewrite: ^SemaInlineRewrite, name: String, arity: Int) -> String Never! {
     id: name_index(name_intern(rewrite.variadic_keys, name))
     loop rewrite.variadic_arities.len() <= id -> rewrite.variadic_arities.push([Int]{})
     loop known in rewrite.variadic_arities[id] {

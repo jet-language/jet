@@ -28,7 +28,7 @@ TIMEOUT_MS: 600000
 
 FAMILIES: ["openai", "anthropic"]
 
-SUBJECTS: ["## 1. Program shape", "## 2. Dot rule and common calls", "## 3. Memory and ownership verbs", "## 4. Effects and outcomes", "## 5. Forty common library verbs", "## 6. Ten runnable canonical programs", "## 7. Cold-agent rules", "&T", "&&T", "value.copy()", "-[", "Ok(value)", "Err(error)", "None", "??"]
+SUBJECTS: ["## 1. Program shape", "## 2. Dot rule and common calls", "## 3. Memory and ownership verbs", "## 4. Effects and outcomes", "## 5. Forty common library verbs", "## 6. Ten runnable canonical programs", "## 7. Cold-agent rules", "^T", "^^T", "value.copy()", "-[", "Ok(value)", "Err(error)", "None", "??"]
 
 VERBS: [
     "term.print",
@@ -689,7 +689,7 @@ base_row: fn(adapter: Adapter, context: String, task: Task, source: String?) -> 
 // Writes the case's package, fixtures and candidate, then checks it: whether
 // it compiles (the row records the compile score or the error). A file it
 // cannot write fails the whole run, as the evaluation cannot go on.
-compile_case: fn(task: Task, source: String, dir: String, prefix: [String], row: &Dyn) -> Bool Failure! {
+compile_case: fn(task: Task, source: String, dir: String, prefix: [String], row: ^Dyn) -> Bool Failure! {
     files.write("{dir}/package.jet", "name: \"cold-agent-case\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ allow: [Env, Exec, FS, Net, IO, Mem.Alloc, Mem.Rc, Time] }}\n") ?? return Err(usage_error("{err}"))
     loop fixture in task.files {
         target: "{dir}/{fixture.name}"
@@ -709,7 +709,7 @@ compile_case: fn(task: Task, source: String, dir: String, prefix: [String], row:
 
 // Scores the finished program `ran`: it passes when it exits 0 with
 // `expected` (or nothing) on stdout and nothing on stderr.
-judge: fn(row: &Dyn, ran: Outcome, expected: String?) {
+judge: fn(row: ^Dyn, ran: Outcome, expected: String?) {
     row["stdout_sha256"] = Dyn.Text(crypto.sha256(ran.output.bytes()).hex())
     row["stderr_sha256"] = Dyn.Text(crypto.sha256(ran.errors.bytes()).hex())
     if expected == .Val(want) {
@@ -727,7 +727,7 @@ judge: fn(row: &Dyn, ran: Outcome, expected: String?) {
     }
 }
 
-run_batch: fn(task: Task, dir: String, prefix: [String], row: &Dyn) {
+run_batch: fn(task: Task, dir: String, prefix: [String], row: ^Dyn) {
     judge(row, run_command(jet_spec(prefix.concat(["run", "--profile=debug", "candidate.jet", "--"]).concat(task.args), dir), task.stdin ?? ""), Val(task.expected))
 }
 
@@ -756,7 +756,7 @@ exits_within: fn(child: ProcessChild, ms: Int) -> Bool {
     }
 }
 
-run_http: fn(task: Task, dir: String, prefix: [String], row: &Dyn) {
+run_http: fn(task: Task, dir: String, prefix: [String], row: ^Dyn) {
     port: free_port()
     child: jet_spec(prefix.concat(["run", "--profile=debug", "candidate.jet", "--", port]), dir).stdin(.Stream).spawn() ?? {
         row["error"] = "run:readiness"
@@ -771,7 +771,7 @@ run_http: fn(task: Task, dir: String, prefix: [String], row: &Dyn) {
     }
 }
 
-serve_case: fn(task: Task, port: String, child: ProcessChild, row: &Dyn) {
+serve_case: fn(task: Task, port: String, child: ProcessChild, row: ^Dyn) {
     watch: time.instant()
     ready := false
     loop !ready && watch.elapsed().ns < 60000000000 {

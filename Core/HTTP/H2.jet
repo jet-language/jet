@@ -466,7 +466,7 @@ h2_start: fn(method: String, scheme: String, authority: String, path: String, he
 /// bytes before them is handled, and what it calls for is queued in `out`.
 /// Fails when the server broke the protocol, reset the stream or went away
 /// before it.
-h2_feed: fn(x: &H2Exchange, bytes: [U8]) H2Error! {
+h2_feed: fn(x: ^H2Exchange, bytes: [U8]) H2Error! {
     x.input.extend(bytes.copy())
     loop x.input.len() - x.input_at >= 9 {
         at: x.input_at
@@ -490,7 +490,7 @@ h2_feed: fn(x: &H2Exchange, bytes: [U8]) H2Error! {
 }
 
 /// Takes one frame of the server's.
-priv h2_frame_take: fn(x: &H2Exchange, kind: Int, flags: Int, stream: Int, payload: [U8]) H2Error! {
+priv h2_frame_take: fn(x: ^H2Exchange, kind: Int, flags: Int, stream: Int, payload: [U8]) H2Error! {
     if x.block_stream != 0 && (kind != H2_CONTINUATION || stream != x.block_stream) {
         return Err(h2_fail("the server interrupted a header block with a frame of type {kind}"))
     }
@@ -541,7 +541,7 @@ priv h2_frame_take: fn(x: &H2Exchange, kind: Int, flags: Int, stream: Int, paylo
 
 /// A DATA frame: its data joins the body, and the windows it used open
 /// again.
-priv h2_data: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
+priv h2_data: fn(x: ^H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
     if stream != H2_STREAM {
         return Err(h2_fail("the server sent DATA on stream {stream}, which the client never opened"))
     }
@@ -568,7 +568,7 @@ priv h2_data: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error
 
 /// A HEADERS frame: the start of a header block, whole when it ends the
 /// headers.
-priv h2_headers_take: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
+priv h2_headers_take: fn(x: ^H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
     if stream != H2_STREAM {
         return Err(h2_fail("the server sent HEADERS on stream {stream}, which the client never opened"))
     }
@@ -583,7 +583,7 @@ priv h2_headers_take: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8])
 
 /// A whole header block: the response's head (after any informational
 /// ones) or its trailers.
-priv h2_block_end: fn(x: &H2Exchange) H2Error! {
+priv h2_block_end: fn(x: ^H2Exchange) H2Error! {
     x.block_bytes += x.block.len()
     if x.block_bytes > H2_HEADER_BLOCK_MAX {
         return Err(h2_fail("the response's header fields are longer than {H2_HEADER_BLOCK_MAX} bytes"))
@@ -616,7 +616,7 @@ priv h2_block_end: fn(x: &H2Exchange) H2Error! {
 }
 
 /// A SETTINGS frame: the server's limits, acked.
-priv h2_settings: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
+priv h2_settings: fn(x: ^H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
     if stream != 0 -> return Err(h2_fail("the server sent SETTINGS on stream {stream}"))
     if flags & H2_ACK != 0 {
         if payload.len() != 0 -> return Err(h2_fail("the server acked SETTINGS with a payload"))
@@ -651,7 +651,7 @@ priv h2_settings: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2E
 }
 
 /// A WINDOW_UPDATE frame: a window opens, and more of the body may go.
-priv h2_window_update: fn(x: &H2Exchange, stream: Int, payload: [U8]) H2Error! {
+priv h2_window_update: fn(x: ^H2Exchange, stream: Int, payload: [U8]) H2Error! {
     if payload.len() != 4 -> return Err(h2_fail("the server sent a malformed WINDOW_UPDATE frame"))
     increment: h2_u32(payload, 0) & H2_MAX_WINDOW
     if increment == 0 -> return Err(h2_fail("the server opened a window by 0"))
@@ -672,7 +672,7 @@ priv h2_window_update: fn(x: &H2Exchange, stream: Int, payload: [U8]) H2Error! {
 
 /// Queues as much of the request body as the windows and the largest
 /// frame allow; the last DATA frame ends the stream.
-priv h2_send_body: fn(x: &H2Exchange) Never! {
+priv h2_send_body: fn(x: ^H2Exchange) Never! {
     total: x.request_body.len()
     loop x.sent < total && x.connection_window > 0 && x.stream_window > 0 {
         size := total - x.sent
@@ -721,7 +721,7 @@ priv h2_status: fn(value: String) -> Int H2Error! {
 }
 
 /// Appends a frame: its 9-byte head and `payload`.
-h2_frame: fn(out: &[U8], kind: Int, flags: Int, stream: Int, payload: [U8]) Never! {
+h2_frame: fn(out: ^[U8], kind: Int, flags: Int, stream: Int, payload: [U8]) Never! {
     size: payload.len()
     out.push(U8{(size >> 16) & 255})
     out.push(U8{(size >> 8) & 255})
@@ -734,7 +734,7 @@ h2_frame: fn(out: &[U8], kind: Int, flags: Int, stream: Int, payload: [U8]) Neve
 
 /// Appends a header block as a HEADERS frame and the CONTINUATION frames
 /// that carry what does not fit in `max_frame` bytes.
-h2_headers: fn(out: &[U8], stream: Int, block: [U8], end_stream: Bool, max_frame: Int) Never! {
+h2_headers: fn(out: ^[U8], stream: Int, block: [U8], end_stream: Bool, max_frame: Int) Never! {
     end: if end_stream -> H2_END_STREAM else -> 0
     if block.len() <= max_frame {
         h2_frame(out, H2_HEADERS, end + H2_END_HEADERS, stream, block)
@@ -750,13 +750,13 @@ h2_headers: fn(out: &[U8], stream: Int, block: [U8], end_stream: Bool, max_frame
 }
 
 /// Appends one setting: its 16-bit id and 32-bit value.
-h2_setting: fn(out: &[U8], id: Int, value: Int) Never! {
+h2_setting: fn(out: ^[U8], id: Int, value: Int) Never! {
     out.push(U8{(id >> 8) & 255})
     out.push(U8{id & 255})
     h2_put_u32(out, value)
 }
 
-priv h2_put_u32: fn(out: &[U8], value: Int) Never! {
+priv h2_put_u32: fn(out: ^[U8], value: Int) Never! {
     out.push(U8{(value >> 24) & 255})
     out.push(U8{(value >> 16) & 255})
     out.push(U8{(value >> 8) & 255})
@@ -799,14 +799,14 @@ hpack_encode: fn(fields: [H2Header]) -> [U8] Never! {
 }
 
 /// Appends a string literal without Huffman coding.
-priv hpack_string: fn(out: &[U8], raw: [U8]) Never! {
+priv hpack_string: fn(out: ^[U8], raw: [U8]) Never! {
     hpack_integer(out, 0, 7, raw.len())
     out.extend(raw.copy())
 }
 
 /// Appends `value` as an HPACK integer with an `prefix`-bit prefix, the
 /// first byte's high bits being `high` (RFC 7541 section 5.1).
-hpack_integer: fn(out: &[U8], high: Int, prefix: Int, value: Int) Never! {
+hpack_integer: fn(out: ^[U8], high: Int, prefix: Int, value: Int) Never! {
     mask: (1 << prefix) - 1
     if value < mask {
         out.push(U8{high + value})
@@ -828,7 +828,7 @@ hpack_decoder: fn(limit: Int) -> HpackDecoder Never! {
 
 /// The header fields of the header block `block`, read in order; the
 /// dynamic table changes as the block says.
-hpack_decode: fn(d: &HpackDecoder, block: [U8]) -> [H2Header] H2Error! {
+hpack_decode: fn(d: ^HpackDecoder, block: [U8]) -> [H2Header] H2Error! {
     fields := [H2Header]{}
     at := 0
     loop at < block.len() {
@@ -900,7 +900,7 @@ priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H
 
 /// Reads the literal field at `at` whose index has a `prefix`-bit prefix:
 /// a name from the tables (index above 0) or a literal one, then a value.
-priv hpack_literal: fn(d: &HpackDecoder, block: [U8], at: Int, prefix: Int) -> HpackLiteral H2Error! {
+priv hpack_literal: fn(d: ^HpackDecoder, block: [U8], at: Int, prefix: Int) -> HpackLiteral H2Error! {
     index: hpack_read_integer(block, at, prefix) ?? return Err(err)
     next := index.next
     name := ""
@@ -914,7 +914,7 @@ priv hpack_literal: fn(d: &HpackDecoder, block: [U8], at: Int, prefix: Int) -> H
 }
 
 /// Reads the string literal at `at`, Huffman-decoded when it says so.
-priv hpack_read_string: fn(d: &HpackDecoder, block: [U8], at: Int) -> HpackString H2Error! {
+priv hpack_read_string: fn(d: ^HpackDecoder, block: [U8], at: Int) -> HpackString H2Error! {
     if at >= block.len() -> return Err(h2_fail("a header block ends before a string"))
     huffman: Int{block[at]} >= 128
     length: hpack_read_integer(block, at, 7) ?? return Err(err)
@@ -940,7 +940,7 @@ priv hpack_entry: fn(d: HpackDecoder, index: Int) -> H2Header H2Error! {
 
 /// Adds `field` to the dynamic table, evicting the oldest entries it needs
 /// room from; a field larger than the table empties it.
-priv hpack_add: fn(d: &HpackDecoder, field: H2Header) Never! {
+priv hpack_add: fn(d: ^HpackDecoder, field: H2Header) Never! {
     size: hpack_size(field)
     hpack_evict(d, size)
     if size <= d.max {
@@ -951,7 +951,7 @@ priv hpack_add: fn(d: &HpackDecoder, field: H2Header) Never! {
 
 /// Evicts the oldest entries until `room` bytes fit within the table's
 /// maximum size.
-priv hpack_evict: fn(d: &HpackDecoder, room: Int) Never! {
+priv hpack_evict: fn(d: ^HpackDecoder, room: Int) Never! {
     drop := 0
     loop drop < d.dynamic.len() && d.size + room > d.max {
         d.size -= hpack_size(d.dynamic[drop])

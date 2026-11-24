@@ -87,7 +87,7 @@ message_whole: fn(text: String) -> Bool {
 }
 
 // Reads one HTTP message from `stream`, whole.
-read_message: fn(stream: &net.TCPStream) -> String {
+read_message: fn(stream: ^net.TCPStream) -> String {
     text := ""
     loop !message_whole(text) {
         chunk: stream.read_bytes(65536, deadline: 5s) ?? panic("read")

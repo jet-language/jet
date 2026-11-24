@@ -33,7 +33,7 @@ DashboardAlternateScreen: struct {
     }
 
     impl Close {
-        close: fn(&&self) -[IO]> {
+        close: fn(^^self) -[IO]> {
             if self.active -> cli_dashboard_write_stdout(cli_dashboard_screen_leave_sequence())
         }
     }
@@ -299,7 +299,7 @@ cli_dashboard_fit: fn(value: String, width: Int) -> String Never! {
 }
 
 // One indented line fitted to the width left after the indent.
-cli_dashboard_push_line: fn(out: &[String], width: Int, indent: Int, value: String) Never! {
+cli_dashboard_push_line: fn(out: ^[String], width: Int, indent: Int, value: String) Never! {
     available: if width > indent -> width - indent else -> 0
     text: if value.contains(terminal_esc()) -> terminal_fit_line(value, available) else -> cli_dashboard_fit(value, available)
     out.push("{" ".repeat(indent)}{text}\n")

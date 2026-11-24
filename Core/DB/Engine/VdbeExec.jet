@@ -26,7 +26,7 @@ use {
 // registers from Vdbe.result_row, SQLITE_DONE when it halts, SQLITE_BUSY
 // when a lock it needs is held elsewhere, SQLITE_ERROR (or another code)
 // when it fails, with Vdbe.rc and Vdbe.err_msg saying how.
-exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
+exec: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe) -[DB]> Int Never! {
     r := run.run_new(db.enc)
     if db.n_progress_ops > 0 {
         prior: v.counters[conn.STMTSTATUS_VM_STEP]
@@ -62,7 +62,7 @@ exec: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
 // The progress handler's turns that are due (the loop of check_for_interrupt
 // and vdbe_return), one every Conn.n_progress_ops ops: true when one asks to
 // interrupt, after which it is not called again in this run.
-progress_interrupts: fn<H: Host>(h: &H, db: &conn.Conn, r: &Run) -[DB]> Bool Never! {
+progress_interrupts: fn<H: Host>(h: ^H, db: ^conn.Conn, r: ^Run) -[DB]> Bool Never! {
     loop r.n_vm_step >= r.n_progress_limit && db.n_progress_ops > 0 {
         r.n_progress_limit += db.n_progress_ops
         if h.progress(db) {
@@ -76,7 +76,7 @@ progress_interrupts: fn<H: Host>(h: &H, db: &conn.Conn, r: &Run) -[DB]> Bool Nev
 // The tails of sqlite3VdbeExec for the handler's answer: no_mem, too_big
 // and abort_due_to_interrupt into abort_due_to_error (GO_ERROR, with Run.rc
 // the code), then vdbe_return (GO_RETURN, with Run.rc the result).
-exec_return: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run, answer: Int) -[DB]> Int Never! {
+exec_return: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run, answer: Int) -[DB]> Int Never! {
     rc := r.rc
     abort := answer != GO_RETURN
     if answer == GO_NO_MEM {
@@ -102,7 +102,7 @@ exec_return: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run, answer: 
 // abort_due_to_error: the statement fails with code rc. It records the
 // code and its message, halts (rolling back as the code demands) and
 // answers SQLITE_ERROR.
-abort_due_to_error: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: Run, code: Int) -[DB]> Int Never! {
+abort_due_to_error: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: Run, code: Int) -[DB]> Int Never! {
     rc := code
     if db.malloc_failed -> rc = base.NOMEM else if rc == base.IOERR_CORRUPTFS -> rc = base.CORRUPT
     if v.err_msg == None && rc != base.IOERR_NOMEM {
@@ -125,7 +125,7 @@ abort_due_to_error: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: Run, co
 // OP_Abortable, OP_ColumnsUsed, OP_TableLock (a no-op without shared
 // cache), OP_CursorHint, OP_ReleaseReg, OP_Permutation (read by the
 // OP_Compare after it) and OP_Offset (without SQLITE_ENABLE_OFFSET_SQL_FUNC).
-exec_op: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
+exec_op: fn<H: Host>(h: ^H, db: ^conn.Conn, v: ^conn.Vdbe, r: ^Run) -[DB]> Int Never! {
     if r.op == {
         opc.OP_GOTO -> GO_JUMP_CHECK
         opc.OP_GOSUB -> vd.op_gosub(v, r)
@@ -272,7 +272,7 @@ exec_op: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int N
 
 // A ready statement of the ops `ops` (no P4) after the OP_Init that
 // vdbe_create starts it with, over n_mem registers, running.
-exec_test_stmt: fn(db: &conn.Conn, ops: [{op: Int, p1: Int, p2: Int, p3: Int}], n_mem: Int) -> conn.Vdbe Never! {
+exec_test_stmt: fn(db: ^conn.Conn, ops: [{op: Int, p1: Int, p2: Int, p3: Int}], n_mem: Int) -> conn.Vdbe Never! {
     v := aux.vdbe_create(db)
     loop o in ops -> _: aux.add_op3(db, v, o.op, o.p1, o.p2, o.p3)
     aux.make_ready(db, v, 0, n_mem, 0, 0, false)

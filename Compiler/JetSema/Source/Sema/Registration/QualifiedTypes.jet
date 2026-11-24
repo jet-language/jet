@@ -24,7 +24,7 @@ use jet_foundation.[
 // are read off the graph alone, each module's by itself, so both run as graph
 // scans (sema_graph_scan), claimed largest source first; each module's
 // rewritten types then move into its rows, the same for any thread count.
-sema_registration_canonicalize_qualified_types: fn(graph: &&SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
+sema_registration_canonicalize_qualified_types: fn(graph: ^^SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
     owned := graph.move()
     count: owned.modules.len()
     rows := [Int]{}
@@ -84,7 +84,7 @@ sema_registration_qualified_scan: fn(graph: SemaRegistrationGraph, module_index:
 }
 
 // A graph scan's qualified findings, by position.
-sema_registration_qualified_take: fn(found: &&[SemaGraphScanFound?]) -> [SemaQualifiedFound] {
+sema_registration_qualified_take: fn(found: ^^[SemaGraphScanFound?]) -> [SemaQualifiedFound] {
     slots := found.move()
     slots.reverse()
     taken := [SemaQualifiedFound]{}
@@ -123,7 +123,7 @@ sema_registration_qualified_types: fn(graph: SemaRegistrationGraph, module_index
     slots
 }
 
-sema_registration_qualified_function_types: fn(functions: [SemaRegistrationFunction], jobs: SemaQualifiedJobs, source: Int, slots: &[Type?]) Never! {
+sema_registration_qualified_function_types: fn(functions: [SemaRegistrationFunction], jobs: SemaQualifiedJobs, source: Int, slots: ^[Type?]) Never! {
     loop function in functions {
         slots.push(sema_registration_canonical_type(function.signature, jobs.keys[source]))
         loop parameter in function.parameters {
@@ -143,7 +143,7 @@ sema_registration_qualified_symbol_type: fn(symbol: Symbol, jobs: SemaQualifiedJ
 // keeps its rows untouched, so rows another holder shares are not copied;
 // within a module, only a row a slot rewrites is written, so a list whose
 // rows keep their types is not copied either.
-sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_index: Int, types: &&[Type?]) {
+sema_registration_qualified_apply: fn(graph: ^SemaRegistrationGraph, module_index: Int, types: ^^[Type?]) {
     slots := types.move()
     if !sema_registration_qualified_rewrites(slots) {
         return
@@ -178,7 +178,7 @@ sema_registration_qualified_rewrites: fn(slots: [Type?]) -> Bool Never! {
     false
 }
 
-sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFunction], slots: &[Type?]) {
+sema_registration_qualified_apply_functions: fn(functions: ^[SemaRegistrationFunction], slots: ^[Type?]) {
     loop row in 0..<functions.len() {
         if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].signature = ty
         loop parameter in 0..<functions[row].parameters.len() {
@@ -190,7 +190,7 @@ sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFun
 }
 
 // The next slot's rewritten type, None to keep the row's own.
-sema_registration_qualified_next: fn(slots: &[Type?]) -> Type? {
+sema_registration_qualified_next: fn(slots: ^[Type?]) -> Type? {
     slots.pop() ?? panic("a module's rewritten types ran out before its rows")
 }
 
@@ -282,7 +282,7 @@ sema_registration_function_spells_parameter: fn(function: SemaRegistrationFuncti
     false
 }
 
-sema_registration_function_qualified_names: fn(function: SemaRegistrationFunction, names: &[String]) Never! {
+sema_registration_function_qualified_names: fn(function: SemaRegistrationFunction, names: ^[String]) Never! {
     sema_registration_type_qualified_names(function.signature, names)
     loop parameter in function.parameters {
         sema_registration_type_qualified_names(parameter.ty, names)
@@ -346,7 +346,7 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
 // The alias-qualified and bare type names in `ty`: `Named` types and generic
 // heads (`alias.Name`, `alias.Name<T>`), canonical keys among them
 // (sema_registration_canonical_spelling).
-sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
+sema_registration_type_qualified_names: fn(ty: Type, names: ^[String]) Never! {
     if ty == {
         .Named(name) -> sema_registration_push_qualified_name(name, names)
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> {
@@ -379,6 +379,6 @@ sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
 }
 
 // An alias-qualified name, a bare one an import may bind, or a canonical key.
-sema_registration_push_qualified_name: fn(name: String, names: &[String]) Never! {
+sema_registration_push_qualified_name: fn(name: String, names: ^[String]) Never! {
     if name != "" && !name.starts_with("type:") && !names.contains(name) -> names.push(name.copy())
 }

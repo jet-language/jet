@@ -6,7 +6,7 @@ use jet_foundation.[Span, TIntegerBounds, TNumericOp, Type]
 // `value.as(Name)` and the other conversions into a distinct type: a cast
 // reaches the base first; a fallible cast with a range checks it, one
 // without is Ok; every other conversion is the numeric method's.
-ir_distinct_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool, span: Span) -> Int Never! {
+ir_distinct_convert: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool, span: Span) -> Int Never! {
     if operation == {
         .CastAs(_) -> {}
         .Predicate(_) | .BitCount(_, _) | .CheckedIntToFloat(_, _, _) | .CheckedIntToFixed(_, _) | .FixedNarrow(_, _) | .TryFrom(_) | .FloatExact(_, _) | .FloatNarrow | .InlineRange(_, _, _) | .ToShow | .EuclideanDiv | .EuclideanRem | .CharFromScalar -> return ir_numeric_method(m, p, b, ty, argument, operation, span)
@@ -38,7 +38,7 @@ ir_distinct_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg
     cast
 }
 
-ir_distinct_in_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, low: Int, high: Int, span: Span) -> Int Never! {
+ir_distinct_in_range: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, low: Int, high: Int, span: Span) -> Int Never! {
     int_row: ir_type_row(m, Type.Int) ?? 0
     lo: ir_int_constant(m, b, int_row, low)
     hi: ir_int_constant(m, b, int_row, high)

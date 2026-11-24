@@ -204,7 +204,7 @@ CRecordDefinitions: struct {
         self.is_record_type_with_stack(ty, stack)
     }
 
-    is_record_type_with_stack: fn(self, ty: Type, stack: &[String]) -> Bool Never! {
+    is_record_type_with_stack: fn(self, ty: Type, stack: ^[String]) -> Bool Never! {
         name: pkg_ffi_named(ty) ?? return false
         if self.names.has_key(name) -> return true
         base: self.aliases.get(name) ?? return false
@@ -220,7 +220,7 @@ CRecordDefinitions: struct {
         self.rust_type_with_stack(ty, stack)
     }
 
-    rust_type_with_stack: fn(self, ty: Type, stack: &[String]) -> String? Never! {
+    rust_type_with_stack: fn(self, ty: Type, stack: ^[String]) -> String? Never! {
         if ty == {
             .Int -> Val("i64")
             .Float -> Val("f64")
@@ -236,13 +236,13 @@ CRecordDefinitions: struct {
         }
     }
 
-    fixed_list_rust_type: fn(self, elem: Type, len: Measure, stack: &[String]) -> String? Never! {
+    fixed_list_rust_type: fn(self, elem: Type, len: Measure, stack: ^[String]) -> String? Never! {
         length: pkg_ffi_fixed_length(len) ?? return None
         element: self.rust_type_with_stack(elem, stack) ?? return None
         Val("[{element}; {length}]")
     }
 
-    named_rust_type: fn(self, name: String, stack: &[String]) -> String? Never! {
+    named_rust_type: fn(self, name: String, stack: ^[String]) -> String? Never! {
         builtin: pkg_ffi_builtin_rust_name(name)
         if builtin != None -> return builtin
         if self.names.get(name) == .Val(rust_name) -> return Val(rust_name)
@@ -389,7 +389,7 @@ pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [Exte
 // import row is Rust Sema `guest_import_function_signature`: the parser-bound
 // C symbol, the written parameters and return; its wrapper is Rust
 // `guest_import_wrapper_name` (`jet_ffi_guest.<owner|root>.<name>`, mangled).
-pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out: &[ExternEntry]) Never! {
+pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out: ^[ExternEntry]) Never! {
     if parser_guest_import_symbol(function) == .Val(symbol) {
         names := [String]{}
         loop index in 0..<function.params.len() -> names.push("arg{index}")
@@ -444,7 +444,7 @@ pkg_ffi_inline_asm_contract: fn(function: Func, target: String) -> InlineAsmCont
 
 // The hidden crate carries every checked C row. Primitive and handle rows use
 // the scalar bridge; C-layout records use the typed repr(C) trampoline.
-pkg_ffi_collect_c_module: fn(c_module: CModule, out: &[ExternEntry]) Never! {
+pkg_ffi_collect_c_module: fn(c_module: CModule, out: ^[ExternEntry]) Never! {
     functions: c_module.functions
     loop function in functions {
         out.push(
@@ -508,7 +508,7 @@ pkg_ffi_owner_key: fn(owner: String, name: String) -> String Never! {
     if owner == "" -> name else -> "{owner}::{name}"
 }
 
-pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecordDecl], names: &[String:String], aliases: &[String:Type]) Never! {
+pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: ^[CRecordDecl], names: ^[String:String], aliases: ^[String:Type]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> { pkg_ffi_collect_record(definition, owner, records, names) }
@@ -527,7 +527,7 @@ pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecor
     }
 }
 
-pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRecordDecl], names: &[String:String]) Never! {
+pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: ^[CRecordDecl], names: ^[String:String]) Never! {
     layout: definition.layout ?? return
     if !pkg_ffi_struct_layout_is_c(layout) {
         return
@@ -543,7 +543,7 @@ pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRec
 }
 
 // A qualified alias key plus a bare-name entry that the first owner claims.
-pkg_ffi_record_alias: fn(owner: String, name: String, base: Type, aliases: &[String:Type]) Never! {
+pkg_ffi_record_alias: fn(owner: String, name: String, base: Type, aliases: ^[String:Type]) Never! {
     aliases[pkg_ffi_owner_key(owner, name)] = base
     if !aliases.has_key(name) -> aliases[name] = base
 }

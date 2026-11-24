@@ -28,8 +28,8 @@ K_NONE: #run none()
 K_SMALL: #run wrap(-3)
 
 // Write windows into an inline Int?: a write parameter, a field, a variable.
-grow: fn(o: &Int?, by: Int) {
-    if &o == {
+grow: fn(o: ^Int?, by: Int) {
+    if ^o == {
         .Val(n) -> { n += by }
         None -> {}
     }
@@ -37,7 +37,7 @@ grow: fn(o: &Int?, by: Int) {
 
 windows: fn() {
     local := wrap(4611686018427387903)
-    if &local == {
+    if ^local == {
         .Val(n) -> { n += 1 }
         None -> {}
     }
@@ -45,7 +45,7 @@ windows: fn() {
     grow(local, 1)
     print("window param {show(local)}")
     rec := Rec{name: "w", count: wrap(-4611686018427387904)}
-    if &rec.count == {
+    if ^rec.count == {
         .Val(n) -> { n -= 1 }
         None -> {}
     }
@@ -54,7 +54,7 @@ windows: fn() {
     grow(empty, 5)
     print("window none {show(empty)}")
     loop _ in 0..<3 {
-        if &local == {
+        if ^local == {
             .Val(n) -> { n -= 4611686018427387904 }
             None -> {}
         }

@@ -22,7 +22,7 @@ matches: fn(condition: RuleCondition, value: Int) -> Bool {
     }
 }
 
-apply: fn(action: RuleAction, facts: &[String:Int], key: String) -> String {
+apply: fn(action: RuleAction, facts: ^[String:Int], key: String) -> String {
     if action == {
         .Add(delta) -> {
             next: (facts.get(key.copy()) ?? 0) + delta
@@ -36,7 +36,7 @@ apply: fn(action: RuleAction, facts: &[String:Int], key: String) -> String {
     }
 }
 
-fire: fn(facts: &[String:Int], rules: [Rule]) -> [String] {
+fire: fn(facts: ^[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
         value: facts.get(rule.fact.copy()) ?? 0

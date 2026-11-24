@@ -112,13 +112,13 @@ no_nix_test_elf64: fn(body: [U8]) -> [U8] {
 }
 
 // Make the image's one program header PT_INTERP over `size` bytes at `offset`.
-no_nix_test_interp: fn(bytes: &[U8], offset: Int, size: Int) {
+no_nix_test_interp: fn(bytes: ^[U8], offset: Int, size: Int) {
     no_nix_test_put(bytes, 64, 4, 3)
     no_nix_test_put(bytes, 72, 8, offset)
     no_nix_test_put(bytes, 96, 8, size)
 }
 
-no_nix_test_put: fn(bytes: &[U8], offset: Int, width: Int, value: Int) {
+no_nix_test_put: fn(bytes: ^[U8], offset: Int, width: Int, value: Int) {
     rest := value
     loop i in 0..<width {
         bytes[offset + i] = U8{rest % 256}

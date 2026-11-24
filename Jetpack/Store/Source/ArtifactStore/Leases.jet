@@ -108,7 +108,7 @@ ArtifactLease: struct {
     }
 
     impl Close {
-        close: fn(&&self) -[FS]> {
+        close: fn(^^self) -[FS]> {
             expected: self.owner_value.owner_line("lease").bytes()
             bytes: files.read_bytes(self.path_value) ?? return
             if !pkg_bytes_starts_with(bytes, 0, expected) {
@@ -126,7 +126,7 @@ ArtifactStoreLock: struct {
     owner_line: [U8],
 
     impl Close {
-        close: fn(&&self) -[FS]> {
+        close: fn(^^self) -[FS]> {
             bytes: files.read_bytes(self.path) ?? return
             if bytes != self.owner_line {
                 return

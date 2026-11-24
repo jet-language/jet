@@ -210,7 +210,7 @@ Body: struct {
 
     /// Write the body to `writer` when it has at most `limit` bytes; the
     /// count written.
-    copy_to: fn(self, writer: &&FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
+    copy_to: fn(self, writer: ^^FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
         raw: body_bytes_within(self, limit) ?? return Err(err)
         out := writer.move()
         out.write_bytes(raw) ?? return Err(.IO{operation: "copy body"})
@@ -500,7 +500,7 @@ HTTPResponse: struct {
         out
     }
 
-    trailers: fn(self, fields: &&Headers) -[Net]> HTTPResponse HTTPError! {
+    trailers: fn(self, fields: ^^Headers) -[Net]> HTTPResponse HTTPError! {
         loop field in fields.fields {
             if !client_header_name(field.name) || !client_header_value(field.value) {
                 return Err(.InvalidHeader)
@@ -533,7 +533,7 @@ HTTPBodyChunks: struct {
     impl Iterable {
         Iter: HTTPBodyCursor,
 
-        iter: fn(&&self) -> HTTPBodyCursor {
+        iter: fn(^^self) -> HTTPBodyCursor {
             HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false, live: self.__live}
         }
     }
@@ -550,7 +550,7 @@ priv HTTPBodyCursor: struct {
     impl Iterator {
         Item: [U8] HTTPError!,
 
-        next: fn(&self) -[Net]> ([U8] HTTPError!)? {
+        next: fn(^self) -[Net]> ([U8] HTTPError!)? {
             if self.done -> return None
             if self.error == .Val(error) {
                 self.done = true
@@ -650,7 +650,7 @@ priv server_request: fn(method: String, path: String, body: Body, fields: Header
     HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(Shared{HTTPBodyCell{taken: false}})}
 }
 
-priv make_response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Never! {
+priv make_response: fn(status: Int, body: ^^Body, fields: ^^Headers) -> HTTPResponse Never! {
     HTTPResponse{status: status, body: body, headers: fields, __cell: Val(Shared{HTTPBodyCell{taken: false}})}
 }
 
@@ -753,7 +753,7 @@ HTTPRouter: struct {
     // registers in the router's route table, so duplicates, matching and
     // `web.openapi` are the table's; the handler keeps its `Net`-only type.
     // `at` is the registering call's place, handed on to the table.
-    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -[Net]> Never! {
+    __route: fn(self, method: String, pattern: String, handler: ^^fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -[Net]> Never! {
         state: self.__state
         index: router_handler_count(self.__state)
         routes.route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
@@ -1114,7 +1114,7 @@ body_bytes: fn(bytes: [U8]) -> Body Never! {
 }
 
 // A client response's body still on its connection.
-priv body_live: fn(live: &&provider.LiveBody) -> Body Never! {
+priv body_live: fn(live: ^^provider.LiveBody) -> Body Never! {
     Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}}
 }
 
@@ -1137,14 +1137,14 @@ body_json: fn<T: Encode>(value: T) -> Body Never! {
 }
 
 /// The reader's bytes to end of file, at most 1 GiB (BodyTooLarge past it).
-body_reader: fn(reader: &&FileReader) -[FS.Read, Time.Wait]> Body HTTPError! {
+body_reader: fn(reader: ^^FileReader) -[FS.Read, Time.Wait]> Body HTTPError! {
     source := reader.move()
     body_read(source, -1)
 }
 
 /// Exactly `length` (at most 1 GiB) of the reader's bytes. A negative length,
 /// or a reader that ends short, is InvalidFraming.
-body_reader_sized: fn(reader: &&FileReader, length: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
+body_reader_sized: fn(reader: ^^FileReader, length: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
     source := reader.move()
     if length < 0 -> return Err(.InvalidFraming)
     if length > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_CONSUME_BYTES})
@@ -1152,7 +1152,7 @@ body_reader_sized: fn(reader: &&FileReader, length: Int) -[FS.Read, Time.Wait]> 
 }
 
 // Up to `want` bytes of `source` (to end of file when `want` is -1).
-priv body_read: fn(source: &FileReader, want: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
+priv body_read: fn(source: ^FileReader, want: Int) -[FS.Read, Time.Wait]> Body HTTPError! {
     cap: if want >= 0 -> want else -> C_MAX_CONSUME_BYTES + 1
     out := [U8]{}
     loop out.len() < cap {

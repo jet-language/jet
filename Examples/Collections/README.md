@@ -7,7 +7,7 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 ## Lessons
 
 - [ArrowOwnership](ArrowOwnership.jet)
-- [DynamicArrayView](DynamicArrayView.jet) — A bare range place is a checked read window, `&place` is an exclusive write window, and `place.copy()` makes independent owned storage.
+- [DynamicArrayView](DynamicArrayView.jet) — A bare range place is a checked read window, `^place` is an exclusive write window, and `place.copy()` makes independent owned storage.
 - [FixedArrays](FixedArrays.jet)
 - [FnDispatchMap](FnDispatchMap.jet)
 - [IndexedMutation](IndexedMutation.jet)

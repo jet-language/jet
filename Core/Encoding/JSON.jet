@@ -214,14 +214,14 @@ stringify: fn<T: Encode>(value: T, indent: Int{0}) -> String Never! {
 /// pull engine owns framing, limits and sticky errors; text already in memory
 /// uses `parse` and `events`. A repeated key in one object is a sticky
 /// `Syntax` error.
-reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONReader<R> EncodingError! {
+reader: fn<R: Reader>(input: ^^R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONReader<R> EncodingError! {
     source: stream.json_reader<R>(input, limits, false) ?? return Err(err)
     Ok(JSONReader<R>{input: source.move()})
 }
 
 /// The duplicate-permitting reader reports each key occurrence as its own
 /// `Key` event.
-reader_allow_duplicates: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONReader<R> EncodingError! {
+reader_allow_duplicates: fn<R: Reader>(input: ^^R, limits: EncodingLimits{EncodingLimits.safe()}) -> JSONReader<R> EncodingError! {
     source: stream.json_reader<R>(input, limits, true) ?? return Err(err)
     Ok(JSONReader<R>{input: source.move()})
 }
@@ -229,7 +229,7 @@ reader_allow_duplicates: fn<R: Reader>(input: &&R, limits: EncodingLimits{Encodi
 JSONReader: struct<R: Reader> {
     input: stream.JSONPull<R>,
 
-    next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
+    next: fn(^self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
 
 /// Bounded event output to a consumed byte sink: a `files.FileWriter.move()`,
@@ -238,14 +238,14 @@ JSONReader: struct<R: Reader> {
 JSONWriter: struct<W: Writer> {
     output: stream.JSONPush<W>,
 
-    write: fn(&self, event: &&DataEvent) -[IO]> EncodingError! { self.output.write(event) }
+    write: fn(^self, event: ^^DataEvent) -[IO]> EncodingError! { self.output.write(event) }
 
-    flush: fn(&self) -[IO]> EncodingError! { self.output.flush() }
+    flush: fn(^self) -[IO]> EncodingError! { self.output.flush() }
 
-    finish: fn(&self) -[IO]> EncodingError! { self.output.finish() }
+    finish: fn(^self) -[IO]> EncodingError! { self.output.finish() }
 }
 
-writer: fn<W: Writer>(target: &&W, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -> JSONWriter<W> EncodingError! {
+writer: fn<W: Writer>(target: ^^W, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -> JSONWriter<W> EncodingError! {
     output: stream.json_writer<W>(target, limits, canonical) ?? return Err(err)
     Ok(JSONWriter<W>{output: output.move()})
 }
@@ -421,7 +421,7 @@ Parser: struct {
         Val(self.bytes[self.index])
     }
 
-    bump: fn(&self) -> U8? {
+    bump: fn(^self) -> U8? {
         b: self.peek() ?? return None
         self.index += 1
         if b == (U8{10}) {
@@ -444,7 +444,7 @@ Parser: struct {
 
     // A repeated object name's error: at the repeat, naming the key and where
     // the Object opened at `object_at` first names it.
-    __duplicate: fn(&self, object_at: Int, key: String) -> EncodingError Never! {
+    __duplicate: fn(^self, object_at: Int, key: String) -> EncodingError Never! {
         first: self.__first_name(object_at, key)
         self.err("duplicate object key `{key}` (first at {first})")
     }
@@ -453,7 +453,7 @@ Parser: struct {
     // in the Object whose `{` is at `object_at`. It reads that Object's
     // members again and then puts the parser back where it was, so only a
     // failing parse pays for it.
-    __first_name: fn(&self, object_at: Int, key: String) -> String Never! {
+    __first_name: fn(^self, object_at: Int, key: String) -> String Never! {
         index: self.index
         line: self.line
         column: self.column
@@ -483,7 +483,7 @@ Parser: struct {
     // Whitespace is read in place, without a per-byte `U8?`; false when the
     // index went negative. It returns no Result, so the hot cursor reads
     // build none.
-    __ws_scan: fn(&self) -> Bool Never! {
+    __ws_scan: fn(^self) -> Bool Never! {
         if self.index < 0 -> return false
         loop self.index < self.bytes.len() {
             n: Int{self.bytes[self.index]}
@@ -497,18 +497,18 @@ Parser: struct {
         true
     }
 
-    skip_ws: fn(&self) -> Bool EncodingError! {
+    skip_ws: fn(^self) -> Bool EncodingError! {
         if !self.__ws_scan() -> return Err(self.err("JSON parser index became negative"))
         true
     }
 
-    expect: fn(&self, want: U8) -> Bool Never! {
+    expect: fn(^self, want: U8) -> Bool Never! {
         got: self.bump()
         b: got ?? return false
         b == want
     }
 
-    parse_value: fn(&self) -> Dyn EncodingError! {
+    parse_value: fn(^self) -> Dyn EncodingError! {
         self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         b: self.peek() ?? return Err(
             truncated_error(
@@ -545,7 +545,7 @@ Parser: struct {
         Ok(value)
     }
 
-    parse_literal: fn(&self, spelling: String, value: Dyn) -> Dyn EncodingError! {
+    parse_literal: fn(^self, spelling: String, value: Dyn) -> Dyn EncodingError! {
         loop b in spelling.bytes() {
             got: self.bump() ?? return Err(self.err("input ended inside `{spelling}`"))
             if got != b -> return Err(self.err("expected `{spelling}`"))
@@ -556,7 +556,7 @@ Parser: struct {
     // A string at the cursor whose bytes up to its closing quote are all
     // printable ASCII, with no escape: read with one copy and no UTF-8 pass.
     // Any other string is left at the cursor (None) for parse_string.
-    __plain_string: fn(&self) -> String? Never! {
+    __plain_string: fn(^self) -> String? Never! {
         text: stream.plain_quoted(self.bytes, self.index) ?? return None
         width: text.count_bytes() + 2
         self.column += width
@@ -564,7 +564,7 @@ Parser: struct {
         Val(text)
     }
 
-    parse_string: fn(&self) -> String EncodingError! {
+    parse_string: fn(^self) -> String EncodingError! {
         if self.__plain_string() == .Val(plain) -> return Ok(plain)
         if !self.expect(U8{34}) -> return Err(self.err("expected a string opening quote"))
         out := [U8]{}
@@ -642,7 +642,7 @@ Parser: struct {
         }
     }
 
-    parse_hex4: fn(&self) -> Int EncodingError! {
+    parse_hex4: fn(^self) -> Int EncodingError! {
         n := 0
         loop _ in 0..<4 {
             b: self.bump() ?? return Err(self.err("truncated \\u escape"))
@@ -652,7 +652,7 @@ Parser: struct {
         Ok(n)
     }
 
-    parse_number: fn(&self) -> Dyn EncodingError! {
+    parse_number: fn(^self) -> Dyn EncodingError! {
         start: self.index
         if (self.peek() ?? (U8{0})) == (U8{45}) -> _: self.bump()
         first: self.peek() ?? return Err(self.err("input ended inside a number"))
@@ -716,7 +716,7 @@ Parser: struct {
         Ok(Dyn.Int(n))
     }
 
-    parse_array: fn(&self) -> Dyn EncodingError! {
+    parse_array: fn(^self) -> Dyn EncodingError! {
         if !self.expect(U8{91}) -> return Err(self.err("expected '['"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
         items := [Dyn]{}
@@ -749,7 +749,7 @@ Parser: struct {
         }
     }
 
-    parse_object: fn(&self) -> Dyn EncodingError! {
+    parse_object: fn(^self) -> Dyn EncodingError! {
         object_at: self.index
         if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
@@ -817,7 +817,7 @@ Parser: struct {
         }
     }
 
-    enter: fn(&self) -> Bool Never! {
+    enter: fn(^self) -> Bool Never! {
         self.depth += 1
         self.depth <= self.max_depth
     }
@@ -829,12 +829,12 @@ Parser: struct {
 
     // Latches the first syntax error. The cursor helpers are reserved: only
     // the generated decode reads through them.
-    __cursor_fail: fn(&self, error: EncodingError) Never! {
+    __cursor_fail: fn(^self, error: EncodingError) Never! {
         if self.failure == None -> self.failure = Val(error)
     }
 
     // Whitespace read; false once a syntax error is latched.
-    __cursor_ws: fn(&self) -> Bool Never! {
+    __cursor_ws: fn(^self) -> Bool Never! {
         if self.failure != None -> return false
         if self.__ws_scan() -> return true
         self.__cursor_fail(self.err("failed while scanning JSON whitespace"))
@@ -842,7 +842,7 @@ Parser: struct {
     }
 
     // The cursor is at a value's first byte.
-    __cursor_value: fn(&self) -> Bool Never! {
+    __cursor_value: fn(^self) -> Bool Never! {
         if !self.__cursor_ws() -> return false
         if self.eof() {
             self.__cursor_fail(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, "/{self.path.join("/")}"))
@@ -852,7 +852,7 @@ Parser: struct {
     }
 
     // Opens a container whose bracket is at the cursor.
-    __cursor_open: fn(&self, object: Bool) -> Bool Never! {
+    __cursor_open: fn(^self, object: Bool) -> Bool Never! {
         _: self.bump()
         if !self.enter() {
             self.__cursor_fail(self.err("nesting exceeds max_depth ({self.max_depth})"))
@@ -866,7 +866,7 @@ Parser: struct {
     }
 
     // Closes the innermost container, its bracket read.
-    __cursor_close: fn(&self) Never! {
+    __cursor_close: fn(^self) Never! {
         top: self.open.len() - 1
         base: self.seen_base[top]
         loop self.seen.len() > base -> _ := self.seen.pop()
@@ -882,7 +882,7 @@ Parser: struct {
     }
 
     // Whether the innermost Object already has `key`; records it if not.
-    __cursor_repeated: fn(&self, key: String) -> Bool Never! {
+    __cursor_repeated: fn(^self, key: String) -> Bool Never! {
         top: self.open.len() - 1
         base: self.seen_base[top]
         if self.seen.len() - base < JSON_SEEN_SCAN {
@@ -905,7 +905,7 @@ Parser: struct {
     }
 
     // The value at the cursor as a tree, decoded to `Target`.
-    __cursor_decode: fn<Target: Decode>(&self) -> Target [FieldError]! {
+    __cursor_decode: fn<Target: Decode>(^self) -> Target [FieldError]! {
         tree: self.capture()
         if self.failure != None -> return Err([FieldError]{})
         value: tree.decode<Target>() ?? return Err(err)
@@ -914,7 +914,7 @@ Parser: struct {
 
     // After the target's read: the rest of every open container, then
     // nothing but whitespace.
-    __cursor_finish: fn(&self) Never! {
+    __cursor_finish: fn(^self) Never! {
         loop self.failure == None && self.open.len() > 0 {
             more: if self.open[self.open.len() - 1] -> self.next_key() else -> self.next_item()
             if more -> self.skip()
@@ -927,7 +927,7 @@ Parser: struct {
 
     // A value no read takes, read with parse_value's checks in its order and
     // kept nowhere: skipping a member builds no tree of it.
-    __cursor_skip: fn(&self) EncodingError! {
+    __cursor_skip: fn(^self) EncodingError! {
         self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         b: self.peek() ?? return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, "/{self.path.join("/")}"))
         if b == (U8{91}) -> return self.__cursor_skip_array()
@@ -937,7 +937,7 @@ Parser: struct {
     }
 
     // parse_array, keeping no item.
-    __cursor_skip_array: fn(&self) EncodingError! {
+    __cursor_skip_array: fn(^self) EncodingError! {
         if !self.expect(U8{91}) -> return Err(self.err("expected '['"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
         self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -969,7 +969,7 @@ Parser: struct {
     }
 
     // parse_object, keeping only the member names, for its duplicate check.
-    __cursor_skip_object: fn(&self) EncodingError! {
+    __cursor_skip_object: fn(^self) EncodingError! {
         object_at: self.index
         if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
@@ -1016,7 +1016,7 @@ Parser: struct {
     // A failed read's result never surfaces: the decode fails with the latched
     // syntax error instead.
     impl __DecodeSource {
-        begin_object: fn(&self) -> Bool Never! {
+        begin_object: fn(^self) -> Bool Never! {
             if !self.__cursor_value() || self.bytes[self.index] != (U8{123}) -> return false
             self.__cursor_open(true)
         }
@@ -1025,7 +1025,7 @@ Parser: struct {
         // would read each member twice.
         object_members: fn(self) -> Int Never! { -1 }
 
-        next_key: fn(&self) -> Bool Never! {
+        next_key: fn(^self) -> Bool Never! {
             if !self.__cursor_ws() -> return false
             top: self.open.len() - 1
             if top < 0 -> return false
@@ -1091,12 +1091,12 @@ Parser: struct {
 
         key_text: fn(self) -> String Never! { self.key.copy() }
 
-        begin_array: fn(&self) -> Bool Never! {
+        begin_array: fn(^self) -> Bool Never! {
             if !self.__cursor_value() || self.bytes[self.index] != (U8{91}) -> return false
             self.__cursor_open(false)
         }
 
-        next_item: fn(&self) -> Bool Never! {
+        next_item: fn(^self) -> Bool Never! {
             if !self.__cursor_ws() -> return false
             top: self.open.len() - 1
             if top < 0 -> return false
@@ -1132,7 +1132,7 @@ Parser: struct {
             true
         }
 
-        take_null: fn(&self) -> Bool Never! {
+        take_null: fn(^self) -> Bool Never! {
             if !self.__cursor_value() -> return true
             if self.bytes[self.index] != (U8{110}) -> return false
             if self.parse_literal("null", Dyn.Null) == {
@@ -1142,7 +1142,7 @@ Parser: struct {
             true
         }
 
-        skip: fn(&self) Never! {
+        skip: fn(^self) Never! {
             if self.failure != None {
                 return
             }
@@ -1152,7 +1152,7 @@ Parser: struct {
             }
         }
 
-        capture: fn(&self) -> Dyn Never! {
+        capture: fn(^self) -> Dyn Never! {
             value := Dyn.Null
             if self.failure != None -> return value
             if self.parse_value() == {
@@ -1164,7 +1164,7 @@ Parser: struct {
 
         // An integer lexeme of at most 18 digits reads in place; any other value
         // decodes as its tree.
-        read_int: fn(&self) -> Int [FieldError]! {
+        read_int: fn(^self) -> Int [FieldError]! {
             if !self.__cursor_value() -> return Err([FieldError]{})
             start: self.index
             at := start
@@ -1190,7 +1190,7 @@ Parser: struct {
             Ok(if negative -> 0 - value else -> value)
         }
 
-        read_bool: fn(&self) -> Bool [FieldError]! {
+        read_bool: fn(^self) -> Bool [FieldError]! {
             if !self.__cursor_value() -> return Err([FieldError]{})
             n: self.bytes[self.index]
             if n != (U8{116}) && n != (U8{102}) -> return self.__cursor_decode<Bool>()
@@ -1205,9 +1205,9 @@ Parser: struct {
             Ok(truth)
         }
 
-        read_float: fn(&self) -> Float [FieldError]! { self.__cursor_decode<Float>() }
+        read_float: fn(^self) -> Float [FieldError]! { self.__cursor_decode<Float>() }
 
-        read_string: fn(&self) -> String [FieldError]! {
+        read_string: fn(^self) -> String [FieldError]! {
             if !self.__cursor_value() -> return Err([FieldError]{})
             if self.bytes[self.index] != (U8{34}) -> return self.__cursor_decode<String>()
             if self.__plain_string() == .Val(plain) -> return Ok(plain)
@@ -1294,7 +1294,7 @@ typed_parse_error: fn(error: EncodingError, first_line: Int) -> [FieldError] Nev
 // both read; blank lines between values are skipped. Every failed value is
 // listed, under the line it starts on, in the one `Err` it fails with
 // (core.encoding.__input_failure).
-priv __input_json: fn<Row: Decode>(lines: &&Iter<String>) -> [Row] Err! {
+priv __input_json: fn<Row: Decode>(lines: ^^Iter<String>) -> [Row] Err! {
     values := [Row]{}
     failures := [FieldError]{}
     pending := ""
@@ -1446,7 +1446,7 @@ value_error: fn(kind: EncodingErrorKind, path: String, reason: String) -> Encodi
     }
 }
 
-write_canonical: fn(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool EncodingError! {
+write_canonical: fn(out: ^[U8], value: Dyn, path: ^[String], depth: Int) -> Bool EncodingError! {
     if depth > safe_limits().max_depth {
         return Err(value_error(EncodingErrorKind.Limit, pointer_text(path, path.len()), "max_depth {safe_limits().max_depth} exceeded"))
     }
@@ -1524,7 +1524,7 @@ write_canonical: fn(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool
     true
 }
 
-write_json: fn(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! {
+write_json: fn(out: ^[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! {
     if value == {
         .Null -> { write_ascii(out, "null") }
         .Number(text) -> { write_ascii(out, text) }
@@ -1587,7 +1587,7 @@ write_json: fn(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError!
     Ok()
 }
 
-write_json_float: fn(out: &[U8], n: Float) EncodingError! {
+write_json_float: fn(out: ^[U8], n: Float) EncodingError! {
     if !math.is_finite(n) {
         return Err(value_error(EncodingErrorKind.Unsupported, "$", "JSON cannot encode a non-finite Float"))
     }
@@ -1603,7 +1603,7 @@ write_json_float: fn(out: &[U8], n: Float) EncodingError! {
 /// write_stringify(out, Dyn.Array([Dyn]{Dyn.Bool(true), Dyn.Null, Dyn.Int(3)}), 0, 0)
 /// String.from_bytes_lossy(out) == "[true,null,3]" // => true
 /// ```
-write_stringify: fn(out: &[U8], value: Dyn, step: Int, depth: Int) Never! {
+write_stringify: fn(out: ^[U8], value: Dyn, step: Int, depth: Int) Never! {
     if value == {
         .Null -> { write_ascii(out, "null") }
         .Bool(v) -> { write_ascii(out, if v -> "true" else -> "false") }
@@ -1652,7 +1652,7 @@ write_stringify: fn(out: &[U8], value: Dyn, step: Int, depth: Int) Never! {
 /// write_stringify_number(out, math.NAN)
 /// String.from_bytes_lossy(out) == "1e+21null" // => true
 /// ```
-write_stringify_number: fn(out: &[U8], n: Float) Never! {
+write_stringify_number: fn(out: ^[U8], n: Float) Never! {
     if math.is_finite(n) -> write_ascii(out, stream.jcs_number(n)) else -> write_ascii(out, "null")
 }
 
@@ -1665,7 +1665,7 @@ write_stringify_number: fn(out: &[U8], n: Float) Never! {
 /// write_stringify_break(out, 0, 3)
 /// out.len() // => 5
 /// ```
-write_stringify_break: fn(out: &[U8], step: Int, depth: Int) Never! {
+write_stringify_break: fn(out: ^[U8], step: Int, depth: Int) Never! {
     if step == 0 {
         return
     }
@@ -1674,7 +1674,7 @@ write_stringify_break: fn(out: &[U8], step: Int, depth: Int) Never! {
 }
 
 // Bytes render as their byte values, `[1,255]`, the same text every tier writes.
-write_json_bytes: fn(out: &[U8], bytes: [U8]) Never! {
+write_json_bytes: fn(out: ^[U8], bytes: [U8]) Never! {
     out.push(U8{91})
     loop i in 0..<bytes.len() {
         if i > 0 -> out.push(U8{44})
@@ -1683,9 +1683,9 @@ write_json_bytes: fn(out: &[U8], bytes: [U8]) Never! {
     out.push(U8{93})
 }
 
-write_ascii: fn(out: &[U8], text: String) Never! { out.extend(text.bytes()) }
+write_ascii: fn(out: ^[U8], text: String) Never! { out.extend(text.bytes()) }
 
-write_indent: fn(out: &[U8], n: Int) Never! {
+write_indent: fn(out: ^[U8], n: Int) Never! {
     loop _ in 0..<n {
         out.push(U8{32})
         out.push(U8{32})
@@ -1693,7 +1693,7 @@ write_indent: fn(out: &[U8], n: Int) Never! {
 }
 
 // A string with nothing to escape is appended whole; otherwise byte by byte.
-write_json_string: fn(out: &[U8], text: String) Never! {
+write_json_string: fn(out: ^[U8], text: String) Never! {
     bytes: text.bytes()
     out.push(U8{34})
     if !bytes.any(fn(b) { b == (U8{34}) || b == (U8{92}) || b < (U8{32}) }) {

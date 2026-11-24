@@ -86,7 +86,7 @@ sema_kernel_declaration_failure: fn(func: Func, kernel: KernelMarker, method: Bo
 // The header obligations of `func`'s kernel: the declaration, then every
 // parameter and the declared result as a sendable kernel boundary value.
 // False when one fails, reported.
-sema_kernel_check_declaration: fn(func: Func, kernel: KernelMarker, method: Bool, params: [TParameter], result: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_kernel_check_declaration: fn(func: Func, kernel: KernelMarker, method: Bool, params: [TParameter], result: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if sema_kernel_declaration_failure(func, kernel, method) == .Val(failure) {
         diagnostics.push(sema_kernel_failure(failure.obligation, failure.span))
         return false
@@ -122,7 +122,7 @@ sema_kernel_pending: fn(func: Func, body: [Stmt], compute_aliases: [String]) -> 
     Val(SemaKernelPending{span: kernel.span, declared_effects: declared, body_failure: body_failure})
 }
 
-sema_kernel_prove_statement: fn(statement: Stmt, names: &[String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
+sema_kernel_prove_statement: fn(statement: Stmt, names: ^[String], compute_aliases: [String]) -> SemaKernelFailure? Never! {
     if statement == {
         .Expr(value) -> return sema_kernel_prove_expr(value, names, compute_aliases)
         .Return(value, _) -> return if value == .Val(returned) -> sema_kernel_prove_expr(returned, names, compute_aliases) else -> None
@@ -197,7 +197,7 @@ sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [
 // A Panic stop alone (an index, a slice, a `panic` call) always
 // comes with a body failure at its own site ("statically proved bounds", a
 // call), so that failure is the report rather than the effect row.
-sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: &[Diagnostic]) -> Bool {
+sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: ^[Diagnostic]) -> Bool {
     effect_edges := call_edges.len()
     if pending.body_failure != None {
         effect_edges = 0

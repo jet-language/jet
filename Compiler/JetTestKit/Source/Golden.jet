@@ -346,7 +346,7 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
 // (kit_golden_step_invoke): the build comes first when no step before it
 // builds, and the direct tier runs the entry through `jet run`. The spawn
 // is a case action the golden hooks never see, so it can't build itself.
-kit_golden_spawned_built: fn(steps: &&[KitStep], tier: KitTier, entry: String) -> [KitStep] {
+kit_golden_spawned_built: fn(steps: ^^[KitStep], tier: KitTier, entry: String) -> [KitStep] {
     rebuilt := [KitStep]{}
     built := false
     loop step in steps.move() {
@@ -505,7 +505,7 @@ kit_golden_step_check: fn(step: KitStep, index: Int, context: KitStepCtx, state:
     kit_steps_check(checked, context, state, kit_golden_source_name(golden.entry))
 }
 
-kit_golden_mark_tier_splits: fn(results: &[KitCaseResult]) {
+kit_golden_mark_tier_splits: fn(results: ^[KitCaseResult]) {
     loop i in 0..<results.len() {
         loop j in 0..<i {
             if results[i].case != results[j].case -> next

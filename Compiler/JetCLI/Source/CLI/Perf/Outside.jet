@@ -391,7 +391,7 @@ jet_cli_perf_outside_sample: fn(pid: Int, window_ms: Int) -[FS.Read, Time, FFI.A
 // last samples are folded. The command shares jet's terminal, and its exit
 // code is the attach's. The trace's recorded argv takes the command's
 // words once the run has started.
-jet_cli_perf_attach_sampled: fn(command: &&[String], out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+jet_cli_perf_attach_sampled: fn(command: ^^[String], out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     name: command[0]
     path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
     cpus: jet_cli_perf_outside_cpus() ?? return jet_cli_perf_failed("Jet can't run `{name}`: {err.message}", color)
@@ -545,7 +545,7 @@ jet_cli_perf_outside_sweep: fn(stem: String) -[FS, Env]> Never! {
 // the working directory (Core's, `<corelib>/…`, below either as `Core/…`).
 // Its coverage is complete when every sample is in a row and the kernel
 // lost none.
-jet_cli_perf_outside_profile: fn(fold: &JetCLIPerfOutsideFold, taken: X64Samples, program: String) -[FS.Read]> JetCLIPerfOutsideProfile Never! {
+jet_cli_perf_outside_profile: fn(fold: ^JetCLIPerfOutsideFold, taken: X64Samples, program: String) -[FS.Read]> JetCLIPerfOutsideProfile Never! {
     roots := [String]{}
     dir := perf_files.canonicalize(program) ?? program
     loop {
@@ -682,7 +682,7 @@ jet_cli_perf_outside_fold: fn() -[FS.Read]> JetCLIPerfOutsideFold Never! {
 // that has ended still names its frames; else the process's /proc files. A
 // process whose executable or mappings can't be read has no code there, and
 // the first such failure is the fold's.
-jet_cli_perf_outside_read: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> Int Never! {
+jet_cli_perf_outside_read: fn(fold: ^JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> Int Never! {
     slot: fold.processes.len()
     mapped := jet_cli_perf_outside_recorded(fold, pid)
     if mapped.len() == 0 {
@@ -702,7 +702,7 @@ jet_cli_perf_outside_read: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.Read]
 // The slot of process `pid` for a sample taken at `time`: for one taken
 // before the process's last execve, its slot from before it; else its
 // current one, read now when it has none.
-jet_cli_perf_outside_slot: fn(fold: &JetCLIPerfOutsideFold, pid: Int, time: Int) -[FS.Read]> Int Never! {
+jet_cli_perf_outside_slot: fn(fold: ^JetCLIPerfOutsideFold, pid: Int, time: Int) -[FS.Read]> Int Never! {
     exec: fold.execs[pid, or: -1]
     if exec >= 0 && time < exec -> return fold.before[pid, or: -1]
     slot: fold.slots[pid, or: -1]
@@ -713,7 +713,7 @@ jet_cli_perf_outside_slot: fn(fold: &JetCLIPerfOutsideFold, pid: Int, time: Int)
 // Read process `pid`'s mappings into its current `slot` again, at most once
 // a drain, for a frame they missed: code the process mapped since they
 // were read. Whether they were read again.
-jet_cli_perf_outside_reread: fn(fold: &JetCLIPerfOutsideFold, pid: Int, slot: Int) -[FS.Read]> Bool Never! {
+jet_cli_perf_outside_reread: fn(fold: ^JetCLIPerfOutsideFold, pid: Int, slot: Int) -[FS.Read]> Bool Never! {
     if fold.slots[pid, or: -1] != slot || fold.read_at[slot] >= fold.drains -> return false
     fold.read_at[slot] = fold.drains
     recorded: jet_cli_perf_outside_recorded(fold, pid)
@@ -734,7 +734,7 @@ jet_cli_perf_outside_reread: fn(fold: &JetCLIPerfOutsideFold, pid: Int, slot: In
 // unless an earlier mapping's were; a file none can be read of (an
 // anonymous mapping's, the vDSO's) names none of its code. None when the
 // kernel reported no mapping that names its code.
-jet_cli_perf_outside_recorded: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> [JetCLIPerfOutsideRange] Never! {
+jet_cli_perf_outside_recorded: fn(fold: ^JetCLIPerfOutsideFold, pid: Int) -[FS.Read]> [JetCLIPerfOutsideRange] Never! {
     ranges := [JetCLIPerfOutsideRange]{}
     owner := pid
     // Each step goes to a parent, so a pid reused as an ancestor's ends it.
@@ -757,7 +757,7 @@ jet_cli_perf_outside_recorded: fn(fold: &JetCLIPerfOutsideFold, pid: Int) -[FS.R
 // Whether the images of file `path` are in `images`, read now when no
 // earlier mapping's were, unless the file is `unreadable`, as it is once
 // its own image can't be read.
-jet_cli_perf_outside_known: fn(images: &[JetCLIPerfOutsideImage], unreadable: &[String:Bool], path: String) -[FS.Read]> Bool Never! {
+jet_cli_perf_outside_known: fn(images: ^[JetCLIPerfOutsideImage], unreadable: ^[String:Bool], path: String) -[FS.Read]> Bool Never! {
     if unreadable[path, or: false] -> return false
     if jet_cli_perf_outside_load(images, path, path) != "" {
         unreadable[path] = true
@@ -771,7 +771,7 @@ jet_cli_perf_outside_known: fn(images: &[JetCLIPerfOutsideImage], unreadable: &[
 // jet listed when that code holds the frame (jet_cli_perf_outside_listed),
 // and empty them; their totals stay. An execve's process names its later
 // samples by its new executable.
-jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) -[FS.Read]> Never! {
+jet_cli_perf_outside_take: fn(fold: ^JetCLIPerfOutsideFold, taken: ^X64Samples) -[FS.Read]> Never! {
     fold.drains += 1
     at := 0
     loop at + 1 < taken.execs.len() {
@@ -884,7 +884,7 @@ jet_cli_perf_outside_take: fn(fold: &JetCLIPerfOutsideFold, taken: &X64Samples) 
 // (jet_cli_perf_outside_depth), or `broken` anywhere else, where a frame
 // pointer was lost. The `timeline` section says when
 // (jet_cli_perf_outside_timeline), timed from `origin_unix_ns`.
-jet_cli_perf_outside_sections: fn(fold: &JetCLIPerfOutsideFold, taken: X64Samples, processes: Int, threads: Int, window_ms: Int, exited_ms: Int?, origin_unix_ns: Int, phases: [JetCLIPerfOutsidePhase]) -> JetCLIPerfOutsideSections Never! {
+jet_cli_perf_outside_sections: fn(fold: ^JetCLIPerfOutsideFold, taken: X64Samples, processes: Int, threads: Int, window_ms: Int, exited_ms: Int?, origin_unix_ns: Int, phases: [JetCLIPerfOutsidePhase]) -> JetCLIPerfOutsideSections Never! {
     stacks: jet_cli_perf_outside_folded(fold.tree, fold.rows, taken.samples)
     // Before the rows are sorted: the timeline names them by index. It
     // sorts the samples by their time, as the phases' sweep needs.
@@ -1004,7 +1004,7 @@ jet_cli_perf_outside_phase_samples: fn(timeline: [JetCLIPerfOutsideMoment], phas
 // and its innermost node (-1 for a stack with no named frame). `dropped`
 // counts the samples past JET_CLI_PERF_OUTSIDE_TIMELINE, which the
 // `functions` section still counts.
-jet_cli_perf_outside_timeline: fn(fold: &JetCLIPerfOutsideFold, origin_unix_ns: Int) -> TraceReceiptSection Never! {
+jet_cli_perf_outside_timeline: fn(fold: ^JetCLIPerfOutsideFold, origin_unix_ns: Int) -> TraceReceiptSection Never! {
     fold.timeline.sort_by(fn(left: JetCLIPerfOutsideMoment, right: JetCLIPerfOutsideMoment) { (left.us <=> right.us).then(left.node <=> right.node) })
     nodes := [CanonicalJSON]{}
     loop (node, row) in fold.tree.rows {
@@ -1109,7 +1109,7 @@ jet_cli_perf_outside_placed: fn(name: String, file: String, line: Int) -> JetCLI
 // there. A listing that misses `pc` is read again, at most once a drain:
 // the jet lists each batch before it runs, so one loaded since the last
 // read is listed by then.
-jet_cli_perf_outside_listed: fn(fold: &JetCLIPerfOutsideFold, pid: Int, pc: Int) -[FS.Read]> Int Never! {
+jet_cli_perf_outside_listed: fn(fold: ^JetCLIPerfOutsideFold, pid: Int, pc: Int) -[FS.Read]> Int Never! {
     if fold.code == "" -> return -1
     slot := fold.listed[pid, or: -1]
     if slot < 0 {
@@ -1189,7 +1189,7 @@ jet_cli_perf_outside_depth: fn() -[FS.Read]> Int Never! {
 
 // Add a sample's stack, its frames' rows `chain` (the innermost first), to
 // `tree`: its innermost node, -1 for an empty chain.
-jet_cli_perf_outside_tree_add: fn(tree: &JetCLIPerfOutsideTree, chain: [Int]) -> Int Never! {
+jet_cli_perf_outside_tree_add: fn(tree: ^JetCLIPerfOutsideTree, chain: [Int]) -> Int Never! {
     node := -1
     at := chain.len()
     loop at > 0 {
@@ -1273,7 +1273,7 @@ jet_cli_perf_outside_family: fn(pid: Int) -[FS.Read]> [Int] Never! {
 // Where process `pid`'s code is mapped in it, by the images of its
 // executable file, read into `images` unless an earlier process runs the
 // same file.
-jet_cli_perf_outside_process: fn(pid: Int, images: &[JetCLIPerfOutsideImage]) -[FS.Read]> [JetCLIPerfOutsideRange] JetCLIReadError! {
+jet_cli_perf_outside_process: fn(pid: Int, images: ^[JetCLIPerfOutsideImage]) -[FS.Read]> [JetCLIPerfOutsideRange] JetCLIReadError! {
     exe: perf_files.read_link("/proc/{pid}/exe") ?? return Err(jet_cli_read_error("process {pid}'s executable can't be found: {jet_cli_io_error_text(err)}"))
     // A replaced executable's link says so; its mappings name the path alone.
     path: if exe.ends_with(" (deleted)") -> exe.slice(0..<exe.len() - 10) else -> exe
@@ -1290,7 +1290,7 @@ jet_cli_perf_outside_process: fn(pid: Int, images: &[JetCLIPerfOutsideImage]) -[
 // `images` unless an earlier process runs the same file: its own, then
 // each part it holds whose functions can be read. Why its own can't be
 // read, "" when it can.
-jet_cli_perf_outside_load: fn(images: &[JetCLIPerfOutsideImage], file: String, path: String) -[FS.Read]> String Never! {
+jet_cli_perf_outside_load: fn(images: ^[JetCLIPerfOutsideImage], file: String, path: String) -[FS.Read]> String Never! {
     loop image in images {
         if image.path == path -> return ""
     }
@@ -1584,7 +1584,7 @@ jet_cli_perf_outside_flame: fn(value: CanonicalJSON) -> [String] Never! {
 
 // Push `nodes` onto the depth-first `pending` at `depth`, so the one with
 // the most samples is shown first.
-jet_cli_perf_outside_flame_push: fn(pending: &[Int], depths: &[Int], nodes: [Int], totals: [Int], depth: Int) Never! {
+jet_cli_perf_outside_flame_push: fn(pending: ^[Int], depths: ^[Int], nodes: [Int], totals: [Int], depth: Int) Never! {
     order := [Int]{}
     loop node in nodes -> order.push(node)
     order.sort_by(fn(left: Int, right: Int) { (totals[left] <=> totals[right]).then(right <=> left) })

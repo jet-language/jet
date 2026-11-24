@@ -41,7 +41,7 @@ IR_LAZY_INLINE_OPTION: 4294967296
 // The descriptor kind word the runtime dispatches show, equality and ordering
 // on. A fixed-width integer carries its bit width in the high 32 bits; 11 is
 // a zero-size payload.
-ir_lazy_kind: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+ir_lazy_kind: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Int Never! {
     if ir_type_size(m, p, ty) == 0 -> return 11
     if ty == {
         .Int -> return 1
@@ -75,13 +75,13 @@ ir_lazy_can_clone_cached: fn(m: IRModule, row: Int) -> Int Never! {
     0
 }
 
-ir_lazy_can_clone_store: fn(m: &IRModule, row: Int, can_clone: Bool) Never! {
+ir_lazy_can_clone_store: fn(m: ^IRModule, row: Int, can_clone: Bool) Never! {
     if row < 0 -> return
     loop m.lazy_can_clone.len() <= row -> m.lazy_can_clone.push(0)
     m.lazy_can_clone[row] = if can_clone -> 1 else -> -1
 }
 
-ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &NameTable) -> Bool Never! {
+ir_lazy_can_clone: fn(m: ^IRModule, p: IRProgram, ty: Type, seen: ^NameTable) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .List(inner) | .Option(inner) -> return ir_lazy_can_clone(m, p, inner, seen)
@@ -162,7 +162,7 @@ ir_lazy_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type, seen: &NameTable) ->
     true
 }
 
-ir_lazy_type_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+ir_lazy_type_can_clone: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -185,7 +185,7 @@ ir_lazy_type_can_clone: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! 
 
 // The id of lazy helper `role` for `ty`, built on first use; -1 with `b`
 // failed when its body cannot be built.
-ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
+ir_lazy_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
     key: "lazy.{role}<{type_carrier_identity(ty)}>"
     if ir_keyed_function(m, key) == .Val(known) {
         if known < 0 -> return ir_fail_slot(b, span, "lazy.{role} of {ir_type_name(ty)}")
@@ -221,7 +221,7 @@ ir_lazy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: 
     id
 }
 
-ir_lazy_address: fn(m: &IRModule, b: &IRBuilder, id: Int) -> Int Never! {
+ir_lazy_address: fn(m: ^IRModule, b: ^IRBuilder, id: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     address: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.FunctionAddress, address, id, -1, -1, b.line)
@@ -230,7 +230,7 @@ ir_lazy_address: fn(m: &IRModule, b: &IRBuilder, id: Int) -> Int Never! {
 
 // lazy.clone(source, target): a copy of the stored value that owns its own
 // storage.
-ir_lazy_clone_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_lazy_clone_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     source: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "source"))
     target: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "target"))
@@ -244,7 +244,7 @@ ir_lazy_clone_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span
 }
 
 // lazy.drop(slot): drops the stored value.
-ir_lazy_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_lazy_drop_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     source: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "slot"))
     row: ir_value_type(m, p, ty) ?? return ir_fail(a, span, "type {ir_type_name(ty)}")
@@ -258,7 +258,7 @@ ir_lazy_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span:
 // owner of a value with no variable of its own (the cell of a Shared, the
 // storage of a core.mem allocator) runs it; lazy.drop alone never runs a Close
 // method.
-ir_lazy_retire_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_lazy_retire_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     source: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "slot"))
     row: ir_value_type(m, p, ty) ?? return ir_fail(a, span, "type {ir_type_name(ty)}")
@@ -275,7 +275,7 @@ ir_lazy_retire_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, spa
 }
 
 // lazy.equal(left, right) -> Bool.
-ir_lazy_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_lazy_equal_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
@@ -293,7 +293,7 @@ ir_lazy_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span
 
 // lazy.show(slot) -> String: the value rendered for display in an owned
 // String; lazy.debug renders it through Debug.
-ir_lazy_show_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, mode: IRRender, span: Span) Never! {
+ir_lazy_show_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, mode: IRRender, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     string_row: ir_string_row(m)
     a.f.result = string_row
@@ -310,7 +310,7 @@ ir_lazy_show_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, mode:
 }
 
 // lazy.compare(left, right) -> -1, 0 or 1.
-ir_lazy_compare_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_lazy_compare_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     a.f.result = word_row
@@ -370,7 +370,7 @@ ir_lazy_access: fn(ty: Type, index: Int) -> AccessConvention Never! {
 // Shared or Cell lends in place). `unwrap` (the lazy.carried role): a closure
 // value of a `T Never!` function hands back its Result carrier, and `out`
 // gets its Ok payload (ir_lazy_closure_method's items are the success type).
-ir_lazy_callback_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, lend_write: Bool, unwrap: Bool, span: Span) Never! {
+ir_lazy_callback_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, lend_write: Bool, unwrap: Bool, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     a.f.result = word_row
@@ -429,7 +429,7 @@ ir_lazy_callback_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, l
 // lazy.indexed(env, index, item, out) -> consumed mask: the (idx, item) pair
 // of type `ty` for the index and item the enumerate adapter lends, each
 // copied into `out` (the adapter ends both after the call). The mask is 0.
-ir_lazy_indexed_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_lazy_indexed_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     a.f.result = word_row
@@ -472,7 +472,7 @@ ir_host_write_metadata: fn(p: IRProgram, b: IRBuilder, callback: Int) -> Functio
 // ---------------------------------------------------------------------------
 // Descriptors.
 
-ir_lazy_store_word: fn(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, value: Int) Never! {
+ir_lazy_store_word: fn(m: ^IRModule, b: ^IRBuilder, base: Int, offset: Int, value: Int) Never! {
     word: ir_word_const(m, b, value)
     ir_emit(b.f, IROp.Store, -1, base, offset, word, b.line)
 }
@@ -482,7 +482,7 @@ ir_lazy_store_word: fn(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, valu
 // element's descriptor, a Result its Ok and Err ones. The runtime copies the
 // tree before the frame goes away. -1 with `b` failed when `ty` has no
 // layout.
-ir_lazy_meta: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+ir_lazy_meta: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     pointer_row: ir_pointer_row(m)
     descriptor: ir_temp(m, b, pointer_row)
@@ -542,7 +542,7 @@ ir_lazy_meta: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span
 
 // Registers the `role` trait bridge (show, equal or compare) of descriptor
 // `meta`; only a checked operation requiring it does.
-ir_lazy_meta_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, meta: Int, ty: Type, role: String, span: Span) Never! {
+ir_lazy_meta_trait: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, meta: Int, ty: Type, role: String, span: Span) Never! {
     offset: if role == "show" || role == "debug" -> 24 else if role == "equal" -> 32 else -> 40
     id: ir_lazy_helper(m, p, b, role, ty, span)
     if id < 0 {
@@ -558,7 +558,7 @@ ir_lazy_meta_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, meta: Int, ty:
 // The runtime took over the Iter in `slot`: a fresh temporary is no longer
 // the frame's to drop; a variable moved into the route is cleared, so its
 // scope-end drop (jet_rt_native_iter_drop, null-safe) does nothing.
-ir_lazy_consumed: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+ir_lazy_consumed: fn(m: ^IRModule, b: ^IRBuilder, slot: Int) Never! {
     if slot < 0 {
         return
     }
@@ -572,7 +572,7 @@ ir_lazy_consumed: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
 // A runtime route that takes over the Iter in `taken` (-1: none), whatever
 // its outcome: the slot is cleared (ir_lazy_consumed) before the route's stop
 // check, so a stop edge never drops an Iter the runtime already owns.
-ir_lazy_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int, taken: Int) -> Int Never! {
+ir_lazy_runtime: fn(m: ^IRModule, b: ^IRBuilder, symbol: String, args: [Int], ty: Int, taken: Int) -> Int Never! {
     dst: if ty >= 0 -> ir_fresh_temp(m, b, ty) else -> -1
     start: ir_args(b.f, args)
     ir_emit(b.f, IROp.CallRuntime, dst, ir_intern_name(m, symbol), start, args.len(), b.line)
@@ -583,7 +583,7 @@ ir_lazy_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty
 
 // A count operand as a native word: an exact Int narrowed; the List receiver
 // of `indexes()` gives its length.
-ir_lazy_count: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+ir_lazy_count: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
     if value < 0 -> return ir_fail_slot(b, span, "Iter count without a value")
     kind: ir_kind_of(m, b, value)
     if kind == .Aggregate {
@@ -598,7 +598,7 @@ ir_lazy_count: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: S
 
 // The address of a value the runtime reads by address: an aggregate is its
 // own, any other value is written into frame storage.
-ir_lazy_value_slot: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+ir_lazy_value_slot: fn(m: ^IRModule, b: ^IRBuilder, value: Int) -> Int Never! {
     if value >= 0 && ir_kind_of(m, b, value) == .Aggregate -> return value
     size: if value >= 0 -> m.types[b.f.slot_type[value]].size else -> 0
     pointer_row: ir_pointer_row(m)
@@ -610,7 +610,7 @@ ir_lazy_value_slot: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 
 // The `by_value` flag for an owned operand: 1 for a fresh value the runtime
 // takes over (no longer the frame's to drop), 0 for one it copies.
-ir_lazy_moved: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+ir_lazy_moved: fn(m: ^IRModule, b: ^IRBuilder, value: Int) -> Int Never! {
     fresh: value >= 0 && b.fresh[value]
     flag: ir_word_const(m, b, if fresh -> 1 else -> 0)
     if fresh -> b.fresh[value] = false
@@ -620,7 +620,7 @@ ir_lazy_moved: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 // Whether the type of `row` is a List whose items have no clone glue (a
 // handle without a clone, a single-use value, an Iter, or a value holding
 // one): such a List is uniquely owned by construction.
-ir_list_items_lack_clone: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_list_items_lack_clone: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if ir_untag(ir_row_ty(m, p, row)) == {
         .List(inner) -> !ir_lazy_type_can_clone(m, p, inner)
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -629,7 +629,7 @@ ir_list_items_lack_clone: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never
 
 // Whether the type of `row` has no clone glue: a handle without a clone, a
 // single-use value, an Iter, or a List, struct or tuple holding one.
-ir_row_lacks_clone: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_row_lacks_clone: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     ty: ir_untag(ir_row_ty(m, p, row))
     !ir_lazy_type_can_clone(m, p, ty)
 }
@@ -639,7 +639,7 @@ ir_row_lacks_clone: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // Items without clone glue have no clone path: their List is uniquely owned
 // by construction (sema), so lowering one that is not fresh is an internal
 // error (I2), never a runtime call through a null clone.
-ir_lazy_iter_from_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Type, meta: Int, row: Int, span: Span) -> Int Never! {
+ir_lazy_iter_from_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, list: Int, element: Type, meta: Int, row: Int, span: Span) -> Int Never! {
     if !(list >= 0 && b.fresh[list]) && !ir_lazy_type_can_clone(m, p, element) {
         return ir_fail_slot(b, span, "an Iter over a shared [{ir_type_name(element)}], whose items have no clone")
     }
@@ -655,7 +655,7 @@ ir_lazy_slot_type: fn(m: IRModule, p: IRProgram, b: IRBuilder, slot: Int) -> Typ
 // `list.lazy()`: an Iter over the List's elements; a fresh List's header is
 // taken over, any other's elements are cloned. An inline `[T#N]` gives a
 // fresh List copy of it (ir_list_operand).
-ir_lazy_from_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, lent: Int, row: Int, span: Span) -> Int Never! {
+ir_lazy_from_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, lent: Int, row: Int, span: Span) -> Int Never! {
     list: ir_list_operand(m, p, b, lent, span)
     list_ty: ir_lazy_slot_type(m, p, b, list)
     element := Type?{None}
@@ -702,7 +702,7 @@ ir_lazy_symbol: fn(symbol: String, source_ty: Type) -> Bool Never! {
 // A static Core call of an Iter route: its arguments as checked, without the
 // I64 narrowing of other Core operands (ir_lazy_route narrows counts). None
 // when `symbol` is not one.
-ir_lazy_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: Type, args: [Int], span: Span) -> Int? Never! {
+ir_lazy_core_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, ty: Type, args: [Int], span: Span) -> Int? Never! {
     source_ty: if args.len() > 0 -> ir_ty(m, p, b, args[0]) else -> Type.Named{name: "Unit"}
     if !ir_lazy_symbol(symbol, source_ty) -> return None
     operands := [Int]{}
@@ -718,7 +718,7 @@ ir_lazy_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
 // Iter: `xs.last_index_of(item)` scans the List from its end
 // (ir_list_route), and `xs.cycle(n).to_list()` on a List of scalars fills
 // the List in place (ir_lazy_cycle_list). None for any other builtin.
-ir_lazy_fused: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int? Never! {
+ir_lazy_fused: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int? Never! {
     if operation == .IterLastIndexOf && args.len() == 1 && ir_body_node(p, b, receiver).kind == .BuiltinMethod(list_value, lazy_operation, _) {
         if lazy_operation == .ListLazy && ir_untag(ir_ty(m, p, b, list_value)) == .List(element) && ir_type_size(m, p, element) > 0 {
             list: ir_expr(m, p, b, list_value)
@@ -739,7 +739,7 @@ ir_lazy_fused: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
 }
 
 // Whether values of `ty` are scalars: copies no drop can observe.
-ir_lazy_scalar: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+ir_lazy_scalar: fn(m: ^IRModule, p: IRProgram, ty: Type) -> Bool Never! {
     row: ir_value_type(m, p, ty) ?? return false
     kind: m.types[row].kind
     kind == .Bool || kind == .Int || kind == .Word || kind == .Float || kind == .Float32 || kind == .Char
@@ -752,7 +752,7 @@ ir_lazy_scalar: fn(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
 // element, read once: the buffer is a fresh allocation, so no store to it
 // changes xs. Each store has the one value (OptReduce.jet's fill), and a
 // List whose length is a constant keeps only its own arm.
-ir_lazy_cycle_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list_value: Int, count_value: Int, element: Type, ty: Type, span: Span) -> Int Never! {
+ir_lazy_cycle_list: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, list_value: Int, count_value: Int, element: Type, ty: Type, span: Span) -> Int Never! {
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     row: ir_value_type(m, p, element) ?? return ir_type_fail(b, span, element)
     list: ir_expr(m, p, b, list_value)
@@ -827,7 +827,7 @@ ir_lazy_cycle_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list_value: In
 // An Iter route over evaluated operands, the source first. Every route takes
 // the source Iter over; other owned operands go by value when fresh, borrowed
 // ones are released afterwards.
-ir_lazy_route: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: Type, operands: [Int], span: Span) -> Int Never! {
+ir_lazy_route: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, symbol: String, ty: Type, operands: [Int], span: Span) -> Int Never! {
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
@@ -1050,7 +1050,7 @@ ir_iter_walks: fn(receiver_ty: Type, operation: TClosureOp) -> Bool Never! {
 
 // Opens a walk over the items of `source`, of row `row`: a List's elements
 // (ir_walk_open) or an Iter's items as they are pulled (ir_pull_open).
-ir_items_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: Int, span: Span) -> IRWalk Never! {
+ir_items_open: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, source: Int, row: Int, span: Span) -> IRWalk Never! {
     if ir_iter_element(ir_lazy_slot_type(m, p, b, source)) != None {
         return ir_pull_open(m, p, b, source, row, span)
     }
@@ -1063,7 +1063,7 @@ ir_items_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: I
 // and a body that breaks out of the loop ends it first (ir_walk_leave). No
 // item is pulled after a break, so no later item reaches an upstream adapter
 // callback.
-ir_pull_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: Int, span: Span) -> IRWalk Never! {
+ir_pull_open: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, source: Int, row: Int, span: Span) -> IRWalk Never! {
     slot_ty: Type.Option{inner: ir_row_ty(m, p, row)}
     slot_row := ir_pointer_row(m)
     if ir_value_type(m, p, slot_ty) == .Val(known) -> slot_row = known else {
@@ -1090,7 +1090,7 @@ ir_pull_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int, row: In
 // (taken over), numbering each item as it is pulled. Its lazy.indexed helper
 // makes each (idx, item) pair; it has no closure, so no environment and no
 // release.
-ir_lazy_indexed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, iter_ty: Type, source: Int, span: Span) -> Int Never! {
+ir_lazy_indexed: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, iter_ty: Type, source: Int, span: Span) -> Int Never! {
     result_row: ir_value_type(m, p, iter_ty) ?? return ir_type_fail(b, span, iter_ty)
     pair_ty: ir_iter_element(iter_ty) ?? return ir_fail_slot(b, span, "indexed producing {ir_type_name(iter_ty)}")
     meta: ir_lazy_meta(m, p, b, pair_ty, span)
@@ -1108,7 +1108,7 @@ ir_lazy_indexed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, iter_ty: Type, so
 // descriptor. A closure value of a `T Never!` function returns its Result
 // carrier: the adapter sees the Ok payload (lazy.carried), and a checked
 // `Iter<U> Never!` (a map over it) is the adapter in an Ok box.
-ir_lazy_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
+ir_lazy_closure_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, checked_ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     result_ty: ir_never_carrier_success(checked_ty) ?? checked_ty
     receiver_type: ir_ty(m, p, b, receiver)
     receiver_ty: receiver_type
@@ -1233,7 +1233,7 @@ ir_lazy_searches: fn(operation: TClosureOp) -> Bool Never! {
 // its Option box dropped; the first decision ends the pulls, so no later item
 // reaches an upstream adapter callback, and a count pulls every item. A fresh
 // Iter is dropped afterwards; a held one stays its owner's.
-ir_lazy_search: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
+ir_lazy_search: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(m, p, b, receiver)
     element_ty: ir_iter_element(receiver_ty) ?? return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_ty)}")
     if args.len() != 1 {
@@ -1335,7 +1335,7 @@ ir_lazy_place: fn(p: IRProgram, b: IRBuilder, value: Int) -> Int Never! {
 // `iter.next()`: the next item in an Option box, pulled through the shared
 // handle the variable keeps. The pull changes the handle's state, not the
 // owner's pointer: nothing is written back.
-ir_lazy_next: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
+ir_lazy_next: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     place: ir_lazy_place(p, b, receiver)
     place_ty: ir_ty(m, p, b, place)
     if ir_iter_element(place_ty) == None {
@@ -1365,7 +1365,7 @@ ir_lazy_next: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
 // drops. With no stride, `loop x in text.split(sep)` cuts its pieces in place
 // (ir_text_walk) and `loop line in input` reads its lines in place
 // (ir_input_lines_walk).
-ir_lazy_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, body: [Int], span: Span) Never! {
+ir_lazy_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     collection_ty: ir_ty(m, p, b, collection)
     element_ty: ir_iter_element(collection_ty) ?? return ir_fail(b, span, "loop over {ir_type_name(collection_ty)}")
     row: ir_value_type(m, p, element_ty) ?? return ir_fail(b, span, "type {ir_type_name(element_ty)}")
@@ -1392,7 +1392,7 @@ ir_lazy_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
 
 // Whether `text` is a String operand, so `loop x in text.split(sep)` and
 // `loop line in text.lines()` with no stride lower as ir_text_walk.
-ir_text_walk_receiver: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, text: Int) -> Bool Never! {
+ir_text_walk_receiver: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, text: Int) -> Bool Never! {
     text_tid: ir_ty_id(m, p, b, text)
     (ir_value_type_id(m, p, text_tid) ?? -1) == ir_string_row(m)
 }
@@ -1405,7 +1405,7 @@ ir_text_walk_receiver: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, text: Int) 
 // and the separator (a kept one is cloned, as the split Iter clones it), so
 // the body may reassign their variables. The frame cell holds the cut's
 // cursor, zeroed here, then the piece word.
-ir_text_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, text_node: Int, sep_node: Int, body: [Int], span: Span) Never! {
+ir_text_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, text_node: Int, sep_node: Int, body: [Int], span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -1491,7 +1491,7 @@ ir_text_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
 // can't share such a value with the List (a byte copy shares the handle
 // uncounted, so both would close it, #6415); the walk moves each item out
 // instead (ir_list_walk_taken).
-ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty: Type, list: Int, row: Int, by_value: Bool, span: Span) -> Bool Never! {
+ir_list_walk_takes: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, collection_ty: Type, list: Int, row: Int, by_value: Bool, span: Span) -> Bool Never! {
     // A `[T#N]` whose items are not plain is carried as the List of them.
     listed: if ir_untag(collection_ty) == {
         .List(_) -> true
@@ -1512,7 +1512,7 @@ ir_list_walk_takes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty:
 // step's scope closes and drops what is left. The items a `break`, `return`
 // or stop leaves in the Iter close as a scope end would close them (the
 // descriptor's drop is lazy.retire), when the cursor drops.
-ir_list_walk_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection_ty: Type, list: Int, row: Int, stride: Int, by_value: Bool, body: [Int], span: Span) Never! {
+ir_list_walk_taken: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection_ty: Type, list: Int, row: Int, stride: Int, by_value: Bool, body: [Int], span: Span) Never! {
     element: ir_row_ty(m, p, row)
     ir_close_disarm(b, list)
     // A consuming walk moves the variable's List as `xs.move()` would: the
@@ -1554,7 +1554,7 @@ ir_list_walk_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
 // handle is borrowed (iter_line_source), and both read lazily, a line per
 // pull. A kept process stream is cloned at init, so the Iter holds the
 // shared pipe and reads it lazily.
-ir_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, export: String, body: [Int], span: Span) Never! {
+ir_lines_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, export: String, body: [Int], span: Span) Never! {
     row: ir_string_row(m)
     handle_ty: ir_ty(m, p, b, ir_lazy_place(p, b, collection))
     handle: ir_expr(m, p, b, collection)
@@ -1588,7 +1588,7 @@ ir_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, var
 // other Iter. An Aggregate receiver lives in frame storage, so it moves into
 // a heap box the source owns and the Iter may outlive the frame;
 // lazy.line_release_boxed drops and frees that box when the Iter drops.
-ir_lines_iter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
+ir_lines_iter: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, span: Span) -> Int Never! {
     handle_ty: ir_ty(m, p, b, receiver)
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -1610,7 +1610,7 @@ ir_lines_iter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span
 // `loop line in input` with no stride: the fresh receiver (core.term
 // __InputLines) stays in this frame and is read in place
 // (ir_line_next_walk), and dropped as the loop's scope closes.
-ir_input_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, receiver: Int, body: [Int], span: Span) Never! {
+ir_input_lines_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, receiver: Int, body: [Int], span: Span) Never! {
     handle_ty: ir_ty(m, p, b, receiver)
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 {
@@ -1626,7 +1626,7 @@ ir_input_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
 // read error, already reported) end the loop. An `owned` handle is dropped as
 // the loop's scope closes, on every exit; any other is borrowed and stays its
 // owner's. With `variable_two` the first binding counts the lines from 0.
-ir_line_next_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, handle_ty: Type, handle: Int, owned: Bool, body: [Int], span: Span) Never! {
+ir_line_next_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, handle_ty: Type, handle: Int, owned: Bool, body: [Int], span: Span) Never! {
     next_helper: ir_lazy_helper(m, p, b, "line_next", handle_ty, span)
     if next_helper < 0 {
         return
@@ -1691,7 +1691,7 @@ ir_line_next_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?,
 // adapter32 (IterSources.jet) of the payload, lazy.line_next, lazy.`release`
 // and, for a process stream only, lazy.line_clone. `moved` is 1 when the
 // source owns the payload, 0 when it borrows it. -1 with `b` failed.
-ir_lines_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_ty: Type, payload: Int, moved: Int, export: String, release: String, span: Span) -> Int Never! {
+ir_lines_source: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, handle_ty: Type, payload: Int, moved: Int, export: String, release: String, span: Span) -> Int Never! {
     iter_ty: Type.Apply{name: "Iter", args: [Type]{Type.String}}
     iter_row: ir_value_type(m, p, iter_ty) ?? return ir_fail_slot(b, span, "type {ir_type_name(iter_ty)}")
     next_helper: ir_lazy_helper(m, p, b, "line_next", handle_ty, span)
@@ -1726,7 +1726,7 @@ ir_lines_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_ty: Type, 
 // iter_source_pull reads only the status, so an edge that left the last call's
 // result there (a pending stop makes the line reader return at once) read as 1
 // and the eager drain of a kept handle pushed unwritten slots without end.
-ir_line_next_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, span: Span) Never! {
+ir_line_next_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, handle_ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     a.f.result = word_row
@@ -1824,7 +1824,7 @@ ir_line_next_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type
 // The IOError type Core StdinHandle.read_line returns when `handle_ty` is
 // StdinHandle and that error is one word, which jet_stdin_lines_next hands
 // over; None otherwise (the Core read_line call).
-ir_stdin_line_error: fn(m: &IRModule, p: IRProgram, handle_ty: Type) -> Type? Never! {
+ir_stdin_line_error: fn(m: ^IRModule, p: IRProgram, handle_ty: Type) -> Type? Never! {
     if ir_line_reader_owner(handle_ty) != "StdinHandle" -> return None
     row: ir_function_row(p, ir_line_reader_key(p.functions, handle_ty)) ?? return None
     ir_line_word_error(m, p, row)
@@ -1832,7 +1832,7 @@ ir_stdin_line_error: fn(m: &IRModule, p: IRProgram, handle_ty: Type) -> Type? Ne
 
 // The error type of the line reader at function row `reader` when it is one
 // word, as jet_stdin_lines_next's IOError record is; None otherwise.
-ir_line_word_error: fn(m: &IRModule, p: IRProgram, reader: Int) -> Type? Never! {
+ir_line_word_error: fn(m: ^IRModule, p: IRProgram, reader: Int) -> Type? Never! {
     returned: ir_executable_return(p.functions[reader]) ?? return None
     if ir_untag(returned) == .Result(_, failure_ty) {
         error_row: ir_value_type(m, p, failure_ty) ?? return None
@@ -1847,7 +1847,7 @@ ir_line_word_error: fn(m: &IRModule, p: IRProgram, reader: Int) -> Type? Never! 
 // StdinHandle.read_line, so this reads it as ir_leaf_line_next does and
 // returns. A receiver with files falls through to the read_line call that
 // follows. False when the build failed.
-ir_input_stdin_line_next: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, payload: Int, output: Int, reader: Int, span: Span) -> Bool Never! {
+ir_input_stdin_line_next: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, payload: Int, output: Int, reader: Int, span: Span) -> Bool Never! {
     failure_ty: ir_line_word_error(m, p, reader) ?? return true
     member: ir_member_of(m, p, a, payload, "paths") ?? return true
     paths: ir_member_read(m, a, payload, member)
@@ -1865,7 +1865,7 @@ ir_input_stdin_line_next: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, payload:
 // jet_stdin_lines_next's or jet_file_reader_lines_next's 0 (end) and 1 (the
 // line moved into `output`) are the helper's result; its 2 panics
 // (ir_stdin_line_panic) and returns -1.
-ir_leaf_line_next: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, reader: Int, output: Int, error_ty: Type, span: Span) Never! {
+ir_leaf_line_next: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, reader: Int, output: Int, error_ty: Type, span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     error_slot: ir_temp(m, a, pointer_row)
@@ -1888,7 +1888,7 @@ ir_leaf_line_next: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, reader: Int, ou
 // value (ir_record_in, which drops the record), panics with its display at
 // <core.prelude>:0, as a read error of any line source does
 // (ir_line_next_body). False when the build failed.
-ir_stdin_line_panic: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, error_slot: Int, error_ty: Type, span: Span) -> Bool Never! {
+ir_stdin_line_panic: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, error_slot: Int, error_ty: Type, span: Span) -> Bool Never! {
     error_row: ir_value_type(m, p, error_ty) ?? return false
     pointer_row: ir_pointer_row(m)
     record: ir_load_at(m, b, error_slot, 0, pointer_row)
@@ -1912,7 +1912,7 @@ ir_stdin_line_panic: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, error_slot: I
 // straight into the binding, with no Iter, cursor or line_next call between
 // the read and the body. A read error panics (ir_stdin_line_panic) and the
 // loop ends.
-ir_stdin_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, error_ty: Type, body: [Int], span: Span) Never! {
+ir_stdin_lines_walk: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, error_ty: Type, body: [Int], span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -1976,7 +1976,7 @@ ir_stdin_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
 // once, when the Iter is dropped (IterSources.jet release16). With `boxed`
 // (lazy.line_release_boxed) the payload is the heap box ir_lines_iter moved
 // an Aggregate handle into, freed after the drop.
-ir_line_release_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, boxed: Bool, span: Span) Never! {
+ir_line_release_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, handle_ty: Type, boxed: Bool, span: Span) Never! {
     handle_row: ir_value_type(m, p, handle_ty) ?? return ir_fail(a, span, "type {ir_type_name(handle_ty)}")
     payload: ir_new_slot(a, handle_row, IRSlotKind.Param, ir_intern_name(m, "payload"))
     if ir_has_drop(m, a, payload) -> ir_emit(a.f, IROp.Drop, -1, payload, -1, -1, a.line)
@@ -1991,7 +1991,7 @@ ir_line_release_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: T
 // lazy.line_clone(payload) -> payload: the line source's own reference to a
 // kept process stream, taken at init (IterSources.jet clone24). The source
 // then holds the shared pipe, and line_release drops this reference.
-ir_line_clone_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, span: Span) Never! {
+ir_line_clone_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, handle_ty: Type, span: Span) Never! {
     handle_row: ir_value_type(m, p, handle_ty) ?? return ir_fail(a, span, "type {ir_type_name(handle_ty)}")
     a.f.result = handle_row
     payload: ir_new_slot(a, handle_row, IRSlotKind.Param, ir_intern_name(m, "payload"))
@@ -2004,7 +2004,7 @@ ir_line_clone_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Typ
 // With a `stride` slot (`loop x in items, n`) the body runs on every n-th
 // item from the first; the items between are still pulled, as step_by pulls
 // them.
-ir_lazy_walk_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: Int, row: Int, stride: Int, body: [Int], span: Span) Never! {
+ir_lazy_walk_source: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: Int, row: Int, stride: Int, body: [Int], span: Span) Never! {
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -2083,7 +2083,7 @@ ir_lazy_walk_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
 // after the source, else -1. A stride other than a literal (Sema rejects a
 // literal below 1 with E0123) is checked before the first pull: below 1 it
 // stops the program with the same rule's code.
-ir_walk_stride: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, step: Int?) -> Int Never! {
+ir_walk_stride: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, step: Int?) -> Int Never! {
     node: step ?? return -1
     stride: ir_expr(m, p, b, node)
     if ir_failed(b) || stride < 0 -> return stride
@@ -2102,14 +2102,14 @@ ir_walk_stride: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, step: Int?) -> Int
 // body runs on, from 0, so the body runs on every n-th item from the first
 // as ir_lazy_walk_source does; -1 without a stride. Every item is still
 // taken and its binding dropped as without a stride.
-ir_walk_countdown: fn(m: &IRModule, b: &IRBuilder, stride: Int) -> Int Never! {
+ir_walk_countdown: fn(m: ^IRModule, b: ^IRBuilder, stride: Int) -> Int Never! {
     if stride < 0 -> return -1
     ir_word_const(m, b, 0)
 }
 
 // Opens the guard of a step's body: it runs when the countdown is 0, which
 // restarts it at the stride. ir_walk_stride_leave closes it.
-ir_walk_stride_enter: fn(m: &IRModule, b: &IRBuilder, countdown: Int, stride: Int) Never! {
+ir_walk_stride_enter: fn(m: ^IRModule, b: ^IRBuilder, countdown: Int, stride: Int) Never! {
     if countdown < 0 {
         return
     }
@@ -2119,12 +2119,12 @@ ir_walk_stride_enter: fn(m: &IRModule, b: &IRBuilder, countdown: Int, stride: In
     ir_emit(b.f, IROp.Copy, countdown, stride, -1, -1, b.line)
 }
 
-ir_walk_stride_leave: fn(b: &IRBuilder, countdown: Int) Never! {
+ir_walk_stride_leave: fn(b: ^IRBuilder, countdown: Int) Never! {
     if countdown >= 0 -> ir_end(b.f, b.line)
 }
 
 // After each step, whether its body ran or not.
-ir_walk_stride_tick: fn(m: &IRModule, b: &IRBuilder, countdown: Int) Never! {
+ir_walk_stride_tick: fn(m: ^IRModule, b: ^IRBuilder, countdown: Int) Never! {
     if countdown < 0 {
         return
     }
@@ -2143,7 +2143,7 @@ ir_walk_stride_tick: fn(m: &IRModule, b: &IRBuilder, countdown: Int) Never! {
 // descriptor's drop role, or lazy.retire when the value closes (a Close of
 // the value or of a part), so the cell closes its value exactly once, when
 // it retires.
-ir_shared_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], shared_ty: Type, span: Span) -> Int Never! {
+ir_shared_new: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inputs: [Int], shared_ty: Type, span: Span) -> Int Never! {
     cell_inner: ir_local_cell_inner(shared_ty)
     inner: if ir_untag(shared_ty) == .Shared(value) -> value else if cell_inner == .Val(value) -> value else -> {
         return ir_fail_slot(b, span, "Shared.new producing {ir_type_name(shared_ty)}")
@@ -2185,7 +2185,7 @@ ir_shared_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], shar
 // `shared.guard_read()` / `shared.guard_edit()`: the runtime takes the lock
 // and hands back the permit; the guard's checked read/edit provenance must
 // match the method.
-ir_shared_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, span: Span) -> Int Never! {
+ir_shared_guard: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, editable: Bool, span: Span) -> Int Never! {
     if ir_shared_guard_editable(ty) != Val((editable)) {
         return ir_fail_slot(b, span, "Shared guard acquisition without its checked read/edit provenance")
     }
@@ -2201,7 +2201,7 @@ ir_shared_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 // / `guard_edit_within(limit)`: the guard when the runtime takes the permit
 // within `limit` (no argument: only if it is free now), else None. The
 // guard's checked read/edit provenance must match the method.
-ir_shared_guard_within: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, args: [Int], span: Span) -> Int Never! {
+ir_shared_guard_within: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, editable: Bool, args: [Int], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     guard_ty: if ir_untag(ty) == .Option(inner) -> inner else -> {
         return ir_fail_slot(b, span, "Shared guard attempt producing {ir_type_name(ty)}")
@@ -2264,7 +2264,7 @@ ir_shared_snapshot_args: fn(ty: Type) -> [Type]? Never! {
 // `shared.capture()` / `shared.capture(value -> projection)`: under one read
 // permit, an owned copy of the value (or the projection's result) paired
 // with the committed revision it was read at.
-ir_shared_capture: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_shared_capture: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     snapshot_args: ir_shared_snapshot_args(ty) ?? return ir_fail_slot(b, span, "Shared capture producing {ir_type_name(ty)}")
     captured_ty: snapshot_args[1].copy()
     receiver_ty: ir_ty(m, p, b, receiver)
@@ -2317,7 +2317,7 @@ ir_shared_capture: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
 // revision (jet_rt_native_shared_try_replace); a rejected value is dropped
 // here. The snapshot is consumed either way. Exhausted revisions stop in the
 // runtime, so the result is always `Ok`.
-ir_shared_try_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+ir_shared_try_replace: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 2 {
         return ir_fail_slot(b, span, "Shared try_replace with {args.len()} arguments")
     }
@@ -2365,7 +2365,7 @@ ir_shared_try_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, r
 // storage. A local Cell's `cell.read`/`cell.edit` runs the same over its
 // native cell, a Cell guard's `read`/`edit` through `runtime`
 // jet_rt_native_cell_guard_with over the value its token lends.
-ir_shared_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, args: [Int], access: String, runtime: String, span: Span) -> Int Never! {
+ir_shared_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, result_ty: Type, receiver: Int, args: [Int], access: String, runtime: String, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "{access} with {args.len()} arguments")
     closure_ty: ir_ty(m, p, b, args[0])
     arity: if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) -> params.len() else -> -1
@@ -2408,7 +2408,7 @@ ir_shared_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, r
 
 // `a.same(b)` over two `Shared<T>` handles: one cell exactly when the handles
 // are equal.
-ir_shared_same: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, other: Int, span: Span) -> Int Never! {
+ir_shared_same: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, receiver: Int, other: Int, span: Span) -> Int Never! {
     other_ty: ir_ty(m, p, b, other)
     other_shared: if ir_untag(other_ty) == .Shared(_) -> true else -> false
     if !other_shared -> return ir_fail_slot(b, span, "Shared.same with {ir_type_name(other_ty)}")
@@ -2426,7 +2426,7 @@ ir_shared_same: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, oth
 // jet_rt_native_shared_downgrade takes one weak count and hands back the
 // cell as the `Shared.Weak<T>`; jet_rt_shared_owner_strong_count answers
 // the live strong owners as a native word, made an exact Int.
-ir_shared_owner_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, span: Span) -> Int Never! {
+ir_shared_owner_word: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, method: String, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     shared: ir_expr(m, p, b, receiver)
     if ir_failed(b) || shared < 0 -> return -1
@@ -2445,7 +2445,7 @@ ir_shared_owner_word: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
 // `weak.upgrade()`: a new strong owner of the cell while a strong owner
 // lives (jet_rt_native_shared_weak_upgrade writes it to `out` and answers
 // true), else None.
-ir_shared_upgrade: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
+ir_shared_upgrade: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     shared_ty: if ir_untag(ty) == .Option(inner) -> inner else -> {
         return ir_fail_slot(b, span, "Shared.Weak.upgrade producing {ir_type_name(ty)}")
@@ -2472,7 +2472,7 @@ ir_shared_upgrade: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
 
 // `guard.value`: the permit's payload is the cell's slot, read in place (an
 // aggregate is its address); the guard keeps owning it.
-ir_shared_guard_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, span: Span) -> Int Never! {
+ir_shared_guard_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, guard: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     payload: ir_shared_guard_payload(m, p, b, guard, span)
     if payload < 0 -> return -1
@@ -2483,7 +2483,7 @@ ir_shared_guard_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, g
 // a spelled `SharedGuard<T>` parameter, result or field reads and edits its
 // slot as the guard acquired from guard_read/guard_edit does. -1 with `b`
 // failed on an error.
-ir_shared_guard_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: Int, span: Span) -> Int Never! {
+ir_shared_guard_payload: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, guard: Int, span: Span) -> Int Never! {
     if ir_shared_guard_inner(ir_ty(m, p, b, guard)) == None {
         return ir_fail_slot(b, span, "Shared guard dereference of a value that is not a SharedGuard")
     }
@@ -2508,18 +2508,18 @@ ir_shared_guard_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: In
 // A cell guard token over the cell `cell` for one access, released by
 // ir_cell_access_end as soon as the access is done (never held across a
 // callback, so a nested access cannot wait on it).
-ir_cell_access: fn(m: &IRModule, b: &IRBuilder, cell: Int, editable: Bool) -> Int Never! {
+ir_cell_access: fn(m: ^IRModule, b: ^IRBuilder, cell: Int, editable: Bool) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     mode: ir_word_const(m, b, if editable -> 1 else -> 0)
     ir_runtime(m, b, "jet_rt_native_cell_guard", [Int]{cell, mode}, pointer_row)
 }
 
-ir_cell_access_end: fn(m: &IRModule, b: &IRBuilder, token: Int) Never! {
+ir_cell_access_end: fn(m: ^IRModule, b: ^IRBuilder, token: Int) Never! {
     _: ir_runtime(m, b, "jet_rt_native_cell_guard_drop", [Int]{token}, -1)
 }
 
 // The address of the value the cell guard token `token` lends (borrowed).
-ir_cell_address: fn(m: &IRModule, b: &IRBuilder, token: Int) -> Int Never! {
+ir_cell_address: fn(m: ^IRModule, b: ^IRBuilder, token: Int) -> Int Never! {
     pointer_row: ir_pointer_row(m)
     address: ir_runtime(m, b, "jet_rt_native_cell_guard_address", [Int]{token}, pointer_row)
     b.fresh[address] = false
@@ -2528,7 +2528,7 @@ ir_cell_address: fn(m: &IRModule, b: &IRBuilder, token: Int) -> Int Never! {
 
 // A method of a local Cell, or of a Cell guard when ir_cell_guard_editable
 // answers for the receiver.
-ir_cell_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
+ir_cell_method: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(m, p, b, receiver)
     guard: ir_cell_guard_editable(receiver_ty)
     inner: ir_cell_value_type(receiver_ty) ?? return ir_fail_slot(b, span, "Cell method {method} of {ir_type_name(receiver_ty)}")
@@ -2555,7 +2555,7 @@ ir_cell_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 }
 
 // `cell.guard_read()` / `cell.guard_edit()`: an owned guard token.
-ir_cell_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, span: Span) -> Int Never! {
+ir_cell_guard: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, editable: Bool, span: Span) -> Int Never! {
     if ir_cell_guard_editable(ty) != (Val(editable)) {
         return ir_fail_slot(b, span, "Cell guard producing {ir_type_name(ty)}")
     }
@@ -2570,7 +2570,7 @@ ir_cell_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
 
 // `cell.get()` / `guard.get()`: a copy of the value, read under a read
 // access of its own (a guard reads under the permit it holds).
-ir_cell_get: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, guarded: Bool, span: Span) -> Int Never! {
+ir_cell_get: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, guarded: Bool, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     holder: ir_expr(m, p, b, receiver)
     if ir_failed(b) || holder < 0 -> return -1
@@ -2586,7 +2586,7 @@ ir_cell_get: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
 // `cell.set(value)` / `guard.set(value)` drop the value they overwrite;
 // `replace` moves it out to its caller. The value is built before the edit
 // access is taken.
-ir_cell_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inner: Type, receiver: Int, value: Int, guarded: Bool, replace: Bool, span: Span) -> Int Never! {
+ir_cell_store: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, inner: Type, receiver: Int, value: Int, guarded: Bool, replace: Bool, span: Span) -> Int Never! {
     row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
     value_ty: ir_ty(m, p, b, value)
     slot: ir_value_as(m, p, b, value, row, span)
@@ -2616,7 +2616,7 @@ ir_cell_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inner: Type, receiv
 // `cell.get_or_set(make)` on a `Cell<T?>`: an absent value is made by the
 // callback with no access held (it may read the cell), then stored; the
 // result is a copy of the present payload.
-ir_cell_get_or_set: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: Type, receiver: Int, initializer: Int, span: Span) -> Int Never! {
+ir_cell_get_or_set: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, inner: Type, receiver: Int, initializer: Int, span: Span) -> Int Never! {
     option_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     cell: ir_expr(m, p, b, receiver)
@@ -2654,7 +2654,7 @@ ir_cell_get_or_set: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inne
 // receiver's one permit (jet_rt_native_cell_guard_project); `split` pairs
 // two. The receiver's own token releases here, the permit with the last
 // projection.
-ir_cell_guard_project: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, paths: [[String]], span: Span) -> Int Never! {
+ir_cell_guard_project: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, receiver: Int, paths: [[String]], span: Span) -> Int Never! {
     receiver_ty: ir_ty(m, p, b, receiver)
     inner: ir_cell_value_type(receiver_ty) ?? return ir_fail_slot(b, span, "Cell guard projection of {ir_type_name(receiver_ty)}")
     inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)

@@ -70,7 +70,7 @@ ssl_serialized_context_header: fn() -> [U8] Never! {
 
 // `src` then zeros up to `n` bytes: C's fixed-size arrays (id[32],
 // master[48], randbytes[64]) copied whole.
-ssl_ser_push_fixed: fn(out: &[U8], src: [U8], n: Int) Never! {
+ssl_ser_push_fixed: fn(out: ^[U8], src: [U8], n: Int) Never! {
     loop i in 0..<n {
         b: if i < src.len() -> src[i] else -> U8{0}
         out.push(b)
@@ -87,7 +87,7 @@ ssl_ser_get_time: fn(buf: [U8], off: Int) -> Int Never! {
 }
 
 // MBEDTLS_PUT_UINT64_BE of a U64 counter.
-ssl_ser_push_u64: fn(out: &[U8], v: U64) Never! {
+ssl_ser_push_u64: fn(out: ^[U8], v: U64) Never! {
     loop i in 0..<8 { out.push(ssldefs.ssl_byte(Int{(v >> (56 - 8 * i)) & U64{0xFF}})) }
 }
 
@@ -101,7 +101,7 @@ ssl_ser_get_u64: fn(buf: [U8], off: Int) -> U64 Never! {
 /// Free a session's state (mbedtls_ssl_session_free): its secrets are
 /// wiped and its fields cleared. A pool slot stays allocated, as C's
 /// session struct does.
-ssl_ser_session_free: fn(session: &ssldefs.SSLSession) Never! {
+ssl_ser_session_free: fn(session: ^ssldefs.SSLSession) Never! {
     valid: session.valid
     ssldefs.ssl_session_wipe(session)
     session = ssldefs.SSLSession{valid: valid}
@@ -115,7 +115,7 @@ ssl_ser_session_free: fn(session: &ssldefs.SSLSession) Never! {
 /// certificate, the client's ticket and its lifetime or the server's
 /// ticket creation time, then the max_fragment_length code and the
 /// encrypt-then-MAC flag.
-ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) Never! {
+ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: ^[U8]) Never! {
     ssldefs.ssl_push_u64(out, session.start)
     out.push(ssldefs.ssl_byte(session.id.len()))
     ssl_ser_push_fixed(out, session.id, 32)
@@ -156,7 +156,7 @@ ssl_tls12_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) Never! {
 /// Read a TLS 1.2 session from buf[start..<start+len]
 /// (ssl_tls12_session_load); the data must fill it exactly. The endpoint
 /// is already read.
-ssl_tls12_session_load: fn(session: &ssldefs.SSLSession, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
+ssl_tls12_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
     p := start
     end: start + len
     if 8 > end - p -> return Err(.BadInputData)
@@ -223,7 +223,7 @@ ssl_tls12_session_load: fn(session: &ssldefs.SSLSession, buf: [U8], start: Int, 
 /// add and flags and the resumption key, then the server's ticket creation
 /// time, or the client's host name, ticket reception time, lifetime and
 /// ticket. A resumption key over 48 bytes is BAD_INPUT_DATA.
-ssl_tls13_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) ssldefs.SSLError! {
+ssl_tls13_session_save: fn(session: ssldefs.SSLSession, out: ^[U8]) ssldefs.SSLError! {
     if session.resumption_key.len() > ssldefs.SSL_TLS1_3_TICKET_RESUMPTION_KEY_LEN {
         return Err(.BadInputData)
     }
@@ -260,7 +260,7 @@ ssl_tls13_session_save: fn(session: ssldefs.SSLSession, out: &[U8]) ssldefs.SSLE
 /// Read a TLS 1.3 session from buf[start..<start+len]
 /// (ssl_tls13_session_load); the data must fill it exactly. The endpoint
 /// is already read.
-ssl_tls13_session_load: fn(session: &ssldefs.SSLSession, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
+ssl_tls13_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
     p := start
     end: start + len
     if end - p < 6 -> return Err(.BadInputData)
@@ -347,7 +347,7 @@ ssl_session_save: fn(session: ssldefs.SSLSession) -> [U8] ssldefs.SSLError! {
 /// Read a session from buf[start..<start+len] (ssl_session_load): a
 /// header that is not this version's and format is VERSION_MISMATCH, and a
 /// TLS version other than 1.2 and 1.3 is BAD_INPUT_DATA.
-ssl_session_load_int: fn(session: &ssldefs.SSLSession, omit_header: Bool, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
+ssl_session_load_int: fn(session: ^ssldefs.SSLSession, omit_header: Bool, buf: [U8], start: Int, len: Int) ssldefs.SSLError! {
     p := start
     end: start + len
     if !omit_header {
@@ -372,7 +372,7 @@ ssl_session_load_int: fn(session: &ssldefs.SSLSession, omit_header: Bool, buf: [
 
 /// Read a session with its header (mbedtls_ssl_session_load); on an error
 /// the session is freed.
-ssl_session_load: fn(session: &ssldefs.SSLSession, buf: [U8]) ssldefs.SSLError! {
+ssl_session_load: fn(session: ^ssldefs.SSLSession, buf: [U8]) ssldefs.SSLError! {
     if ssl_session_load_int(session, false, buf, 0, buf.len()) == {
         .Ok(_) -> {}
         .Err(e) -> {
@@ -401,7 +401,7 @@ ssl_tls12prf_from_cs: fn(ciphersuite_id: Int) -> hashes.Md? Never! {
 /// without its header, the randoms, the connection IDs, the bad-MAC count,
 /// the anti-replay window, datagram packing, the outgoing record counter,
 /// the MTU and the chosen ALPN protocol.
-ssl_context_save: fn(ssl: &ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
+ssl_context_save: fn(ssl: ^ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
     if !sslmsg.ssl_is_handshake_over(ssl) -> return Err(.BadInputData)
     if ssl.has_handshake -> return Err(.BadInputData)
     if ssl.transform < 0 || ssl.session < 0 -> return Err(.BadInputData)
@@ -444,7 +444,7 @@ ssl_context_save: fn(ssl: &ssldefs.SSLContext) -> [U8] ssldefs.SSLError! {
 
 // The configured ALPN protocol buf[p..<p+len] names, as alpn_chosen
 // (mbedtls_ssl_context_load's search of conf->alpn_list).
-ssl_ser_load_alpn: fn(ssl: &ssldefs.SSLContext, buf: [U8], p: Int, len: Int) Never! {
+ssl_ser_load_alpn: fn(ssl: ^ssldefs.SSLContext, buf: [U8], p: Int, len: Int) Never! {
     ours: ssl.conf.alpn_list ?? return
     loop alpn in ours {
         alpn_bytes: alpn.bytes()
@@ -460,7 +460,7 @@ ssl_ser_load_alpn: fn(ssl: &ssldefs.SSLContext, buf: [U8], p: Int, len: Int) Nev
 /// DTLS, TLS 1.2 and renegotiation disabled. A header that is not this
 /// version's and format is VERSION_MISMATCH; anything else wrong is
 /// BAD_INPUT_DATA, as is an ALPN protocol the configuration lacks.
-ssl_context_load_int: fn(ssl: &ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! {
+ssl_context_load_int: fn(ssl: ^ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! {
     if ssl.state != ssldefs.SSL_HELLO_REQUEST || ssl.session >= 0 -> return Err(.BadInputData)
     if ssl.conf.disable_renegotiation != ssldefs.SSL_RENEGOTIATION_DISABLED {
         return Err(.BadInputData)
@@ -577,7 +577,7 @@ ssl_context_load_int: fn(ssl: &ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! 
 
 /// Restore a saved connection (mbedtls_ssl_context_load); on an error the
 /// context is freed.
-ssl_context_load: fn(ssl: &ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! {
+ssl_context_load: fn(ssl: ^ssldefs.SSLContext, buf: [U8]) ssldefs.SSLError! {
     if ssl_context_load_int(ssl, buf) == {
         .Ok(_) -> {}
         .Err(e) -> {

@@ -254,13 +254,13 @@ JetEvalIRState: struct {
     overflow_at: Int{-1},
 }
 
-jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
+jet_eval_native_session: fn(file: String, reader: ^^JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
     image: Shared{JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: [[U8]]{}, at: 0, stamp: [Int]{}, gap_at: 0, gap: 0}}
     Shared{JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}}
 }
 
 // Reads the runtime image file on the first call.
-jet_eval_native_image_read: fn(image: &JetEvalNativeImage) Never! {
+jet_eval_native_image_read: fn(image: ^JetEvalNativeImage) Never! {
     if image.read {
         return
     }
@@ -288,12 +288,12 @@ jet_eval_native_image_present: fn(session: JetEvalNativeSession) -> Bool Never! 
 // (Image/Loader.jet x64_executable_image_head); an image with no file
 // identity it keeps whole. None when the image can't be read. The cell
 // stays locked for the bind, so a bind of the other child waits for it.
-jet_eval_native_bind: fn(session: JetEvalNativeSession, object: &&[U8]) -> X64BindResult? Never! {
+jet_eval_native_bind: fn(session: JetEvalNativeSession, object: ^^[U8]) -> X64BindResult? Never! {
     permit := session.image.guard_edit()
     jet_eval_native_bind_image(permit.value, object.move())
 }
 
-jet_eval_native_bind_image: fn(image: &JetEvalNativeImage, object: &&[U8]) -> X64BindResult? Never! {
+jet_eval_native_bind_image: fn(image: ^JetEvalNativeImage, object: ^^[U8]) -> X64BindResult? Never! {
     jet_eval_native_image_read(image)
     // The cell holds the image alone, or nothing when it can't be read.
     runtime: image.bytes.pop() ?? return None
@@ -322,7 +322,7 @@ jet_eval_native_bind_image: fn(image: &JetEvalNativeImage, object: &&[U8]) -> X6
 // the image already. With `debug` it binds with its debug facts
 // (x64_bind_functions_debug_at), whose loaded bytes are the same. None when
 // the image can't be read.
-jet_eval_native_bind_batch: fn(session: JetEvalNativeSession, built: &&IRX64Program, base: Int, debug: Bool{false}) -> X64BindResult? Never! {
+jet_eval_native_bind_batch: fn(session: JetEvalNativeSession, built: ^^IRX64Program, base: Int, debug: Bool{false}) -> X64BindResult? Never! {
     permit := session.image.guard_edit()
     jet_eval_native_image_read(permit.value)
     runtime: permit.value.bytes.pop() ?? return None
@@ -365,7 +365,7 @@ jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
 // the session's image once, then each spawn runs it with effects refused
 // (unless `stdout`, the runtime child's standard output). False with
 // `c.failure`.
-jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession, stdout: Bool) -> Bool {
+jet_eval_native_start: fn(c: ^JetEvalNativeChild, session: JetEvalNativeSession, stdout: Bool) -> Bool {
     if c.child.pid > 0 -> return true
     if c.stub.tail.len() == 0 {
         entry := jet_eval_native_entry_module()
@@ -464,7 +464,7 @@ jet_eval_native_entry_module: fn() -> IRModule {
 }
 
 // Adds `f` to `m`; its function id.
-jet_eval_native_add: fn(m: &IRModule, f: &&IRFunction) -> Int Never! {
+jet_eval_native_add: fn(m: ^IRModule, f: ^^IRFunction) -> Int Never! {
     owned := f.move()
     id: m.functions.len()
     ir_function_bind(m, owned.key, id)
@@ -480,7 +480,7 @@ jet_eval_native_add: fn(m: &IRModule, f: &&IRFunction) -> Int Never! {
 // `threads` lint and select the batch as they do a program's
 // (ir_x64_compile_module admits them by its instruction count): the code is
 // the same for any thread count.
-jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, threads: CompilerThreads{compiler_threads_single()}) -> JetEvalNativeProgram {
+jet_eval_native_load: fn(built: ^^JetEvalIRComptime, config: JetEvalConfig, threads: CompilerThreads{compiler_threads_single()}) -> JetEvalNativeProgram {
     owned := built.move()
     code := owned.code.move()
     layouts := owned.layouts.move()
@@ -660,7 +660,7 @@ jet_eval_native_loaded: fn(session: JetEvalNativeSession, pid: Int, listing: Str
 // With `table` as well, the wrapper is `(cell, table)`: the params'
 // addresses are the words of `table`, in order, for more captures than a
 // call's registers hold.
-jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int], result: Int, pointer: Int, loads: Bool{false}, table: Bool{false}) -> IRFunction {
+jet_eval_native_wrapper: fn(code: ^IRModule, name: String, id: Int, params: [Int], result: Int, pointer: Int, loads: Bool{false}, table: Bool{false}) -> IRFunction {
     w := ir_function_new(name, name, name, "", 0)
     cell: ir_slot(w, pointer, IRSlotKind.Param, ir_intern_name(code, "cell"), 0)
     listed: if loads && table -> ir_slot(w, pointer, IRSlotKind.Param, ir_intern_name(code, "table"), 0) else -> -1
@@ -710,7 +710,7 @@ jet_eval_native_wrapper: fn(code: &IRModule, name: String, id: Int, params: [Int
 // it was before the batch ran, and the rest of the batch binds. The image is
 // asked once for each name the batch calls (x64_runtime_image_defines), as
 // its bind looks the name up.
-jet_eval_native_missing: fn(code: &IRModule, session: JetEvalNativeSession) {
+jet_eval_native_missing: fn(code: ^IRModule, session: JetEvalNativeSession) {
     own := name_table_sized(64)
     loop id in 0..<code.functions.len() {
         _ := name_intern(own, code.functions[id].symbol)
@@ -789,7 +789,7 @@ jet_eval_native_missing: fn(code: &IRModule, session: JetEvalNativeSession) {
     }
 }
 
-jet_eval_native_missing_stub: fn(code: &IRModule, name: String, symbol: String, params: [Int], result: Int) -> IRFunction {
+jet_eval_native_missing_stub: fn(code: ^IRModule, name: String, symbol: String, params: [Int], result: Int) -> IRFunction {
     f := ir_function_new(name, name, name, "", 0)
     loop (index, row) in params {
         _ := ir_slot(f, row, IRSlotKind.Param, ir_intern_name(code, "a{index}"), 0)
@@ -818,7 +818,7 @@ jet_eval_native_missing_stub: fn(code: &IRModule, name: String, symbol: String, 
 
 // Runs item `item` of `program` on `args` (a fn-build or fn-dev entry's
 // context; none for a constant).
-jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
+jet_eval_native_run: fn(program: ^JetEvalNativeProgram, item: Int, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetEvalIRResult {
     s := JetEvalIRState{
         child: X64ComptimeChild{},
         pages: [[U8]]{},
@@ -900,7 +900,7 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
     jet_eval_ir_result(s, value)
 }
 
-jet_eval_native_call: fn(s: &JetEvalIRState, program: JetEvalNativeProgram, item: Int, args: [TComptimeValue]) -> TComptimeValue? {
+jet_eval_native_call: fn(s: ^JetEvalIRState, program: JetEvalNativeProgram, item: Int, args: [TComptimeValue]) -> TComptimeValue? {
     rows: program.params[item]
     if args.len() > 0 && args.len() != rows.len() {
         jet_eval_ir_problem(s, "the entry takes {rows.len()} parameters, given {args.len()}")
@@ -944,7 +944,7 @@ jet_eval_native_call: fn(s: &JetEvalIRState, program: JetEvalNativeProgram, item
 
 // Answers the child until the call's DONE: true then, false once the call
 // failed (its failure recorded).
-jet_eval_native_serve: fn(s: &JetEvalIRState) -> Bool {
+jet_eval_native_serve: fn(s: ^JetEvalIRState) -> Bool {
     loop {
         reply: x64_comptime_receive(s.child) ?? {
             jet_eval_native_ended(s)
@@ -990,7 +990,7 @@ jet_eval_native_serve: fn(s: &JetEvalIRState) -> Bool {
 // outside jet (jet_eval_native_outside_signal), which is no defect of jet's
 // and no failure of the code: the build stops with E3007, whose command
 // ends with 128 plus the signal.
-jet_eval_native_ended: fn(s: &JetEvalIRState) {
+jet_eval_native_ended: fn(s: ^JetEvalIRState) {
     if jet_eval_ir_failed(s) {
         return
     }
@@ -1055,7 +1055,7 @@ JET_EVAL_NATIVE_UNNAMED_AT: "`??` at 0x"
 // without the address the child names its function by; the call's end
 // names it from the batch (jet_eval_native_overflow_name). False when
 // `report` is no E3012 stop.
-jet_eval_native_overflow: fn(s: &JetEvalIRState, report: String) -> Bool Never! {
+jet_eval_native_overflow: fn(s: ^JetEvalIRState, report: String) -> Bool Never! {
     lines: report.split("\n").to_list()
     if lines.len() == 0 -> return false
     stop: diagnostic_stop_parse(lines[0]) ?? return false
@@ -1087,7 +1087,7 @@ jet_eval_native_overflow_error: fn(span: Span, what: String) -> JetEvalError Nev
 
 // A call's unnamed stack overflow (JetEvalIRState.overflow_at) names the
 // batch function whose code holds its address.
-jet_eval_native_overflow_name: fn(s: &JetEvalIRState, program: JetEvalNativeProgram) Never! {
+jet_eval_native_overflow_name: fn(s: ^JetEvalIRState, program: JetEvalNativeProgram) Never! {
     id: x64_comptime_function_at(program.functions, s.overflow_at) ?? return
     if id >= program.function_names.len() || program.function_names[id] == "" {
         return
@@ -1097,7 +1097,7 @@ jet_eval_native_overflow_name: fn(s: &JetEvalIRState, program: JetEvalNativeProg
 
 // A runtime stop (JetRuntime Trap.jet) of kind `kind` and its words; the
 // child keeps serving above the stopped frames.
-jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d: Int) {
+jet_eval_native_stop: fn(s: ^JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d: Int) {
     if kind == X64_COMPTIME_STOP_STEPS {
         _ := jet_eval_ir_out_of_fuel(s)
         return
@@ -1170,7 +1170,7 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
 // so folding it would bake one build-time result into every run (E3410).
 // The refusal names the item's effectful call (s.effect_call) when sema found
 // one, else the effect's class.
-jet_eval_native_refused: fn(s: &JetEvalIRState, number: Int, first: Int) {
+jet_eval_native_refused: fn(s: ^JetEvalIRState, number: Int, first: Int) {
     class: jet_eval_native_refused_class(number, first)
     if s.runtime_execution && !s.eval_entry && s.impure_sites == 0 {
         jet_eval_ir_unsupported(s, class)
@@ -1207,7 +1207,7 @@ jet_eval_native_refused_class: fn(number: Int, first: Int) -> String {
 // A comptime evaluation's refusal of host effect `what` (`nondeterministic`:
 // ambient time or randomness); `jet eval` refuses every one as its evaluator
 // mode does.
-jet_eval_ir_effect_refused: fn(s: &JetEvalIRState, what: String, nondeterministic: Bool) Never! {
+jet_eval_ir_effect_refused: fn(s: ^JetEvalIRState, what: String, nondeterministic: Bool) Never! {
     if s.failure != None {
         return
     }
@@ -1246,7 +1246,7 @@ jet_eval_ir_result: fn(s: JetEvalIRState, value: TComptimeValue?) -> JetEvalIRRe
 // `operands` are its answer row's key, then its operands (JetIR
 // ir_host_route); the answer is the RETURN word, an aggregate or Float one
 // written to `result`.
-jet_eval_native_host: fn(s: &JetEvalIRState, kind: Int, operands: Int, count: Int, result: Int) -> Int? {
+jet_eval_native_host: fn(s: ^JetEvalIRState, kind: Int, operands: Int, count: Int, result: Int) -> Int? {
     if count < 1 || count > 4096 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_host")
     bytes: jet_eval_ir_bytes(s, operands, 8 * count) ?? return None
     words := [Int]{}
@@ -1288,13 +1288,13 @@ jet_eval_native_host: fn(s: &JetEvalIRState, kind: Int, operands: Int, count: In
 }
 
 // The type row whose intern key is the String at `key`.
-jet_eval_native_answer_row: fn(s: &JetEvalIRState, types_cell: Shared<IRModule>, key: Int) -> Int? {
+jet_eval_native_answer_row: fn(s: ^JetEvalIRState, types_cell: Shared<IRModule>, key: Int) -> Int? {
     reads: types_cell.guard_read()
     jet_eval_ir_host_row(reads.value, s, key)
 }
 
 // A host route called with operands it doesn't take: a compiler defect.
-jet_eval_ir_primitive_shape: fn(s: &JetEvalIRState, name: String) -> Int? Never! {
+jet_eval_ir_primitive_shape: fn(s: ^JetEvalIRState, name: String) -> Int? Never! {
     jet_eval_ir_problem(s, "host primitive {name} called with the wrong operands")
     None
 }
@@ -1303,7 +1303,7 @@ jet_eval_ir_primitive_shape: fn(s: &JetEvalIRState, name: String) -> Int? Never!
 // operand is the trace line's String, which the compiler prints while
 // compiling (JetEvalIRResult.debug_trace), so it is no output of the
 // evaluated code's own.
-jet_eval_ir_debug_trace_route: fn(s: &JetEvalIRState, args: [Int]) -> Int? {
+jet_eval_ir_debug_trace_route: fn(s: ^JetEvalIRState, args: [Int]) -> Int? {
     if args.len() != 1 -> return jet_eval_ir_primitive_shape(s, "jet_comptime_debug_trace")
     line: jet_eval_ir_text(s, args[0]) ?? return None
     s.debug_trace = "{s.debug_trace}{line}\n"
@@ -1318,7 +1318,7 @@ jet_eval_ir_debug_trace_route: fn(s: &JetEvalIRState, args: [Int]) -> Int? {
 // runs as runtime code with the build file's input host installed, so it
 // reads through the same host. A running program has no input host: there
 // the route is E0956, as check-time refuses a runtime path to the input.
-jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int, result: Int{0}) -> Int? {
+jet_eval_ir_comptime_input_route: fn(s: ^JetEvalIRState, args: [Int], dst_row: Int, result: Int{0}) -> Int? {
     if args.len() != 2 && args.len() != 3 {
         return jet_eval_ir_primitive_shape(s, "jet_comptime_input")
     }
@@ -1369,7 +1369,7 @@ jet_eval_ir_comptime_input_read: fn(adapter: JetEvalComptimeInputAdapter, builti
 // comptime input produces: a String, the bytes of a [U8], a [String]. Texts
 // and buffers are the runtime's own, so the program owns and drops them as
 // any other.
-jet_eval_ir_store_data: fn(s: &JetEvalIRState, value: TComptimeValue, row: Int, target: Int{0}) -> Int? {
+jet_eval_ir_store_data: fn(s: ^JetEvalIRState, value: TComptimeValue, row: Int, target: Int{0}) -> Int? {
     if value == {
         .String(text) -> return jet_eval_ir_store_text(s, text)
         .Bytes(bytes) -> {
@@ -1409,7 +1409,7 @@ jet_eval_ir_store_data: fn(s: &JetEvalIRState, value: TComptimeValue, row: Int, 
 }
 
 // A List header {len, cap, data} in `target` (or fresh storage when 0).
-jet_eval_ir_list_header: fn(s: &JetEvalIRState, data: Int, length: Int, target: Int{0}) -> Int? {
+jet_eval_ir_list_header: fn(s: ^JetEvalIRState, data: Int, length: Int, target: Int{0}) -> Int? {
     header: if target != 0 -> target else -> jet_eval_native_alloc(s, 24, 8) ?? return None
     words := [U8]{}
     x64_comptime_put_word(words, length)
@@ -1420,7 +1420,7 @@ jet_eval_ir_list_header: fn(s: &JetEvalIRState, data: Int, length: Int, target: 
 }
 
 // A runtime String of `text`'s bytes.
-jet_eval_ir_store_text: fn(s: &JetEvalIRState, text: String) -> Int? {
+jet_eval_ir_store_text: fn(s: ^JetEvalIRState, text: String) -> Int? {
     bytes: text.bytes()
     if s.child.shm_ready && bytes.len() <= X64_COMPTIME_SHM_SIZE - 8 {
         jet_eval_native_forget(s)
@@ -1432,14 +1432,14 @@ jet_eval_ir_store_text: fn(s: &JetEvalIRState, text: String) -> Int? {
 }
 
 // An Int word: inline, or a runtime node built from its decimal text.
-jet_eval_ir_host_int: fn(s: &JetEvalIRState, number: Int) -> Int? {
+jet_eval_ir_host_int: fn(s: ^JetEvalIRState, number: Int) -> Int? {
     if jet_eval_ir_inline(number) -> return Val(number)
     decimal: "{number}".bytes()
     jet_eval_native_ask(s, X64_COMPTIME_INT, [Int]{decimal.len()}, decimal)
 }
 
 // A runtime box of `bytes` bytes (the builder's ir_box_alloc).
-jet_eval_ir_host_alloc: fn(s: &JetEvalIRState, bytes: Int) -> Int? {
+jet_eval_ir_host_alloc: fn(s: ^JetEvalIRState, bytes: Int) -> Int? {
     jet_eval_native_alloc(s, ir_align8(bytes), 8)
 }
 
@@ -1447,7 +1447,7 @@ jet_eval_ir_host_alloc: fn(s: &JetEvalIRState, bytes: Int) -> Int? {
 // The child's memory.
 
 // Sends a command; the pages read before it may change, so they go.
-jet_eval_native_command: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payload: [U8]) -> Bool {
+jet_eval_native_command: fn(s: ^JetEvalIRState, kind: Int, operands: [Int], payload: [U8]) -> Bool {
     jet_eval_native_forget(s)
     x64_comptime_send(s.child, x64_comptime_frame(kind, operands), payload)
 }
@@ -1457,11 +1457,11 @@ jet_eval_native_command: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payl
 // otherwise: an admitted file call runs natively, as the same call does at
 // run time. Sema checked the block's authority, so a denied effect never
 // reaches the child. False once the child is gone.
-jet_eval_native_admit: fn(s: &JetEvalIRState) -> Bool {
+jet_eval_native_admit: fn(s: ^JetEvalIRState) -> Bool {
     x64_comptime_admit(s.child, open: s.host_held && !s.eval_entry && (s.impure || s.impure_sites > 0))
 }
 
-jet_eval_native_forget: fn(s: &JetEvalIRState) {
+jet_eval_native_forget: fn(s: ^JetEvalIRState) {
     if s.pages.len() == 0 {
         return
     }
@@ -1472,7 +1472,7 @@ jet_eval_native_forget: fn(s: &JetEvalIRState) {
 }
 
 // Command `kind`'s DONE word.
-jet_eval_native_ask: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payload: [U8]) -> Int? {
+jet_eval_native_ask: fn(s: ^JetEvalIRState, kind: Int, operands: [Int], payload: [U8]) -> Int? {
     if !jet_eval_native_command(s, kind, operands, payload) {
         jet_eval_native_lost(s, "command {kind}")
         return None
@@ -1490,7 +1490,7 @@ jet_eval_native_ask: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payload:
 }
 
 // The child ended while the compiler worked on its memory.
-jet_eval_native_lost: fn(s: &JetEvalIRState, during: String) {
+jet_eval_native_lost: fn(s: ^JetEvalIRState, during: String) {
     report: String.from_bytes_lossy(s.child.stderr).trim()
     detail: if report == "" -> "" else -> ": {report}"
     status: s.child.status
@@ -1498,12 +1498,12 @@ jet_eval_native_lost: fn(s: &JetEvalIRState, during: String) {
 }
 
 // `size` bytes of the child's runtime heap, aligned to `align`.
-jet_eval_native_alloc: fn(s: &JetEvalIRState, size: Int, align: Int) -> Int? {
+jet_eval_native_alloc: fn(s: ^JetEvalIRState, size: Int, align: Int) -> Int? {
     jet_eval_native_ask(s, X64_COMPTIME_ALLOC, [Int]{if size < 8 -> 8 else -> size, align}, [U8]{})
 }
 
 // Whether `count` bytes from `pointer` may be child memory.
-jet_eval_native_address: fn(s: &JetEvalIRState, pointer: Int, count: Int) -> Bool Never! {
+jet_eval_native_address: fn(s: ^JetEvalIRState, pointer: Int, count: Int) -> Bool Never! {
     if pointer > 0 && count <= JET_EVAL_NATIVE_READ_MAX && pointer + count <= JET_EVAL_NATIVE_USER_END {
         return true
     }
@@ -1512,7 +1512,7 @@ jet_eval_native_address: fn(s: &JetEvalIRState, pointer: Int, count: Int) -> Boo
 }
 
 // The row of the page at `page` in the read pages, read now if it isn't.
-jet_eval_native_page: fn(s: &JetEvalIRState, page: Int) -> Int? {
+jet_eval_native_page: fn(s: ^JetEvalIRState, page: Int) -> Int? {
     if s.last_page == page -> return Val(s.last_page_row)
     found: s.page_rows.get(page) ?? -1
     if found >= 0 {
@@ -1533,12 +1533,12 @@ jet_eval_native_page: fn(s: &JetEvalIRState, page: Int) -> Int? {
 }
 
 // A READ the child died on: the page is not its memory.
-jet_eval_native_unreadable: fn(s: &JetEvalIRState, page: Int) {
+jet_eval_native_unreadable: fn(s: ^JetEvalIRState, page: Int) {
     jet_eval_ir_problem(s, "the compiler read the child's memory through a word that is not an address (page {page})")
 }
 
 // The bytes at `pointer`.
-jet_eval_ir_bytes: fn(s: &JetEvalIRState, pointer: Int, count: Int) -> [U8]? {
+jet_eval_ir_bytes: fn(s: ^JetEvalIRState, pointer: Int, count: Int) -> [U8]? {
     bytes := [U8]{}
     if count <= 0 -> return Val(bytes)
     if !jet_eval_native_address(s, pointer, count) -> return None
@@ -1562,19 +1562,19 @@ jet_eval_ir_bytes: fn(s: &JetEvalIRState, pointer: Int, count: Int) -> [U8]? {
 }
 
 // The unsigned little-endian value of `width` bytes at `pointer`.
-jet_eval_ir_read: fn(s: &JetEvalIRState, pointer: Int, width: Int) -> Int? {
+jet_eval_ir_read: fn(s: ^JetEvalIRState, pointer: Int, width: Int) -> Int? {
     jet_eval_ir_read_as(s, pointer, width, false)
 }
 
 // The signed 64-bit word at `pointer`.
-jet_eval_ir_read_word: fn(s: &JetEvalIRState, pointer: Int) -> Int? {
+jet_eval_ir_read_word: fn(s: ^JetEvalIRState, pointer: Int) -> Int? {
     jet_eval_ir_read_as(s, pointer, 8, true)
 }
 
 // The little-endian value of `width` bytes at `pointer`: two's complement
 // when `signed`, else unsigned. Every word of a value read back passes here,
 // so a read within one page takes its bytes from the page in place.
-jet_eval_ir_read_as: fn(s: &JetEvalIRState, pointer: Int, width: Int, signed: Bool) -> Int? {
+jet_eval_ir_read_as: fn(s: ^JetEvalIRState, pointer: Int, width: Int, signed: Bool) -> Int? {
     if width <= 0 -> return Val(0)
     if !jet_eval_native_address(s, pointer, width) -> return None
     page: pointer - pointer % JET_EVAL_NATIVE_PAGE
@@ -1608,7 +1608,7 @@ jet_eval_ir_bytes_value: fn(bytes: [U8], at: Int, width: Int, signed: Bool) -> I
 }
 
 // Writes `bytes` at `pointer` in the child.
-jet_eval_native_put: fn(s: &JetEvalIRState, pointer: Int, bytes: [U8]) -> Bool {
+jet_eval_native_put: fn(s: ^JetEvalIRState, pointer: Int, bytes: [U8]) -> Bool {
     if bytes.len() == 0 -> return true
     if !jet_eval_native_address(s, pointer, bytes.len()) -> return false
     if bytes.len() >= 4096 && s.child.shm_ready && bytes.len() <= X64_COMPTIME_SHM_SIZE - 8 {
@@ -1624,7 +1624,7 @@ jet_eval_native_put: fn(s: &JetEvalIRState, pointer: Int, bytes: [U8]) -> Bool {
     false
 }
 
-jet_eval_ir_write: fn(s: &JetEvalIRState, pointer: Int, width: Int, value: Int) -> Bool {
+jet_eval_ir_write: fn(s: ^JetEvalIRState, pointer: Int, width: Int, value: Int) -> Bool {
     bytes := [U8]{}
     bits := if value < 0 -> value + 18446744073709551616 else -> value
     loop _ in 0..<width {
@@ -1635,7 +1635,7 @@ jet_eval_ir_write: fn(s: &JetEvalIRState, pointer: Int, width: Int, value: Int) 
 }
 
 // The text of the String whose header is at `header`.
-jet_eval_ir_text: fn(s: &JetEvalIRState, header: Int) -> String? {
+jet_eval_ir_text: fn(s: ^JetEvalIRState, header: Int) -> String? {
     data: jet_eval_ir_read_word(s, header) ?? return None
     length: jet_eval_ir_read_word(s, header + 8) ?? return None
     bytes: jet_eval_ir_bytes(s, data, length) ?? return None
@@ -1653,19 +1653,19 @@ jet_eval_ir_failed: fn(s: JetEvalIRState) -> Bool Never! {
 // no interpreter, and the IR in these names is the JetIR program the child
 // runs. Each caller names the native run around the message (#6725), so it
 // carries no prefix of its own.
-jet_eval_ir_problem: fn(s: &JetEvalIRState, message: String) Never! {
+jet_eval_ir_problem: fn(s: ^JetEvalIRState, message: String) Never! {
     if s.internal_problem == None {
         s.internal_problem = Val(JetEvalInternalProblem{span: Val(s.span), message: message})
     }
 }
 
-jet_eval_ir_source_fail: fn(s: &JetEvalIRState, what: String) Never! {
+jet_eval_ir_source_fail: fn(s: ^JetEvalIRState, what: String) Never! {
     if s.failure == None {
         s.failure = Val(jet_eval_source_error(s.runtime_execution, s.span, what))
     }
 }
 
-jet_eval_ir_unsupported: fn(s: &JetEvalIRState, operation: String) Never! {
+jet_eval_ir_unsupported: fn(s: ^JetEvalIRState, operation: String) Never! {
     if s.failure == None {
         s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Unsupported, s.span, "compile-time evaluation does not implement `{operation}`", "this operation has no compiler-time evaluator yet", "do not treat the incomplete evaluation as successful"))
     }
@@ -1673,14 +1673,14 @@ jet_eval_ir_unsupported: fn(s: &JetEvalIRState, operation: String) Never! {
 
 // E1020: the value read back is a function that running code made (a
 // closure, or a function a call returned), shown as `shown`.
-jet_eval_ir_function_value_refused: fn(s: &JetEvalIRState, shown: String) Never! {
+jet_eval_ir_function_value_refused: fn(s: ^JetEvalIRState, shown: String) Never! {
     if s.failure == None {
         row: diagnostic_registry_row("E1020") ?? panic("E1020 has no registry row")
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Unsupported, diagnostic: diagnostic_from_registry("E1020", Val(s.span), row.what.replace("{{type}}", shown), row.why, row.fix)})
     }
 }
 
-jet_eval_ir_out_of_fuel: fn(s: &JetEvalIRState) -> Int? Never! {
+jet_eval_ir_out_of_fuel: fn(s: ^JetEvalIRState) -> Int? Never! {
     if s.failure == None {
         s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time code ran past its step limit of {s.step_limit} steps", "compile-time code runs under a step limit, 10000000 steps unless its binding sets another, so a runaway loop can't stall the build", "split the work so it fits; a binding computed while building raises its own limit above {s.step_limit} with `#StepLimit(n)`"))
     }
@@ -1715,7 +1715,7 @@ jet_eval_ir_inline: fn(word: Int) -> Bool Never! {
 
 // The exact integer an Int word holds: inline, or its runtime node's u32
 // base-1e9 limbs (Int.jet: negative@16, limbs@24, len@32).
-jet_eval_ir_int_value: fn(s: &JetEvalIRState, word: Int) -> Int? {
+jet_eval_ir_int_value: fn(s: ^JetEvalIRState, word: Int) -> Int? {
     if jet_eval_ir_inline(word) -> return Val(word)
     node: word & JET_EVAL_IR_INLINE_MAX
     negative: jet_eval_ir_read(s, node + 16, 8) ?? return None
@@ -1773,7 +1773,7 @@ jet_eval_ir_width: fn(ty: IRType) -> Int Never! {
 
 // The canonical word of the `width` bytes of `ty` at `pointer`: a signed
 // kind's sign-extended, any other's unsigned.
-jet_eval_ir_load: fn(s: &JetEvalIRState, ty: IRType, pointer: Int, width: Int) -> Int? {
+jet_eval_ir_load: fn(s: ^JetEvalIRState, ty: IRType, pointer: Int, width: Int) -> Int? {
     signed: ty.kind == .Int || ty.kind == .Float || (ty.kind == .Word && ty.signed)
     jet_eval_ir_read_as(s, pointer, width, signed)
 }

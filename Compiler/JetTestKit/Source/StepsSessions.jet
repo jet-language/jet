@@ -88,7 +88,7 @@ kit_steps_recv_valid: fn(text: String) -> Bool {
 }
 
 // One chunk to the session's reader; a refused send means the reader is gone.
-kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: &&[U8]) Err! { out.send(chunk) }
+kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: ^^[U8]) Err! { out.send(chunk) }
 
 // Drains the child's captured stdout into `out`; an empty chunk marks its end.
 // Cancellation also ends the read empty, so only the task's own return (not a
@@ -395,7 +395,7 @@ kit_steps_send_result: fn(step: KitStep, context: KitStepCtx, state: KitStepStat
 
 // One report to the parallel group's collector; a refused send means the
 // collector is gone.
-kit_steps_send_message: fn(sender: Sender<String>, message: &&String) Err! { sender.send(message) }
+kit_steps_send_message: fn(sender: Sender<String>, message: ^^String) Err! { sender.send(message) }
 
 kit_steps_send_report: fn(step: KitStep, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
     kit_steps_send_message(sender, kit_steps_send_result(step, context, state)).drop("nobody collects a gone group")

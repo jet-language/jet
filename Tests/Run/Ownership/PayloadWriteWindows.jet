@@ -1,4 +1,4 @@
-// Matching on a write window (`&place`) binds each payload name as a write
+// Matching on a write window (`^place`) binds each payload name as a write
 // window into the matched place: edits through the binding land in the
 // owner's storage, like Rust `if let Some(s) = &mut x`.
 
@@ -22,14 +22,14 @@ Slot: enum {
     Held(Int),
 }
 
-bump: fn(machine: &Machine) -> Bool {
+bump: fn(machine: ^Machine) -> Bool {
     machine.n += 1
     machine.log.push("bumped")
     true
 }
 
-retire: fn(result: &Res) -> Bool {
-    if &result.session == {
+retire: fn(result: ^Res) -> Bool {
+    if ^result.session == {
         None -> return false
         .Val(session) -> {
             if !bump(session.machine) -> return false
@@ -39,15 +39,15 @@ retire: fn(result: &Res) -> Bool {
     true
 }
 
-tick: fn(result: &Res) {
-    if &result.count == {
+tick: fn(result: ^Res) {
+    if ^result.count == {
         .Val(count) -> { count += 10 }
         None -> {}
     }
 }
 
-double: fn(slot: &Slot) {
-    if &slot == {
+double: fn(slot: ^Slot) {
+    if ^slot == {
         .Held(value) -> { value *= 2 }
         ._Empty -> {}
     }

@@ -136,7 +136,7 @@ CodecOut: struct {
 // function whose name starts with HAND_PUT. When the target imports from a
 // package, the hand files are that package's, and every top-level name they
 // declare is `imported`.
-read_hand: fn(out: &CodecOut, path: String, target: CodecTarget) -[FS]> BodyCodecError! {
+read_hand: fn(out: ^CodecOut, path: String, target: CodecTarget) -[FS]> BodyCodecError! {
     imported: target.package != ""
     text: files.read(path) ?? return Err(codec_fail("cannot read {path}: {err}"))
     loop line in text.split("\n") {
@@ -165,7 +165,7 @@ word_scalar: fn(piece: String) -> Bool Never! {
 // The struct, enum and alias declarations of every file under `dir`; when
 // the target imports from a package and `dir` is not its own, those it adds
 // are that package's.
-read_shapes: fn(out: &CodecOut, dir: String, target: CodecTarget) -[FS]> BodyCodecError! {
+read_shapes: fn(out: ^CodecOut, dir: String, target: CodecTarget) -[FS]> BodyCodecError! {
     imported: target.package != "" && dir != target.own_dir
     entries: files.walk_files(dir).list() ?? return Err(codec_fail("cannot list {dir}: {err}"))
     paths := [String]{}
@@ -191,7 +191,7 @@ read_shapes: fn(out: &CodecOut, dir: String, target: CodecTarget) -[FS]> BodyCod
     Ok()
 }
 
-add_item: fn(out: &CodecOut, item: &&Item) Never! {
+add_item: fn(out: ^CodecOut, item: ^^Item) Never! {
     if item == .Struct(_) {
         if item.move() == .Struct(def) -> add_struct(out, def.move())
         return
@@ -207,7 +207,7 @@ empty_shape: fn() -> CodecShape Never! {
     CodecShape{is_enum: false, alias: None, fields: [CodecField]{}, variants: [CodecVariant]{}, twice: false, generic: false, ends: false, fallback: 0, empty: false, imported: false}
 }
 
-add_struct: fn(out: &CodecOut, def: &&StructDef) Never! {
+add_struct: fn(out: ^CodecOut, def: ^^StructDef) Never! {
     shape := empty_shape()
     shape.generic = def.type_params.len() > 0
     loop field in def.fields.move() {
@@ -217,7 +217,7 @@ add_struct: fn(out: &CodecOut, def: &&StructDef) Never! {
     add_shape(out, def.name.move(), shape.move())
 }
 
-add_enum: fn(out: &CodecOut, def: &&EnumDef) Never! {
+add_enum: fn(out: ^CodecOut, def: ^^EnumDef) Never! {
     shape := empty_shape()
     shape.is_enum = true
     shape.generic = def.type_params.len() > 0
@@ -240,7 +240,7 @@ add_enum: fn(out: &CodecOut, def: &&EnumDef) Never! {
     add_shape(out, def.name.move(), shape.move())
 }
 
-add_alias: fn(out: &CodecOut, def: &&TypeAliasDef) Never! {
+add_alias: fn(out: ^CodecOut, def: ^^TypeAliasDef) Never! {
     shape := empty_shape()
     shape.generic = def.type_params.len() > 0 || def.choices.len() > 0
     shape.alias = Val(def.target.move())
@@ -249,7 +249,7 @@ add_alias: fn(out: &CodecOut, def: &&TypeAliasDef) Never! {
 
 // The first declaration of a name keeps its place; another one marks it
 // declared twice.
-add_shape: fn(out: &CodecOut, name: &&String, shape: &&CodecShape) Never! {
+add_shape: fn(out: ^CodecOut, name: ^^String, shape: ^^CodecShape) Never! {
     if out.index.get(name) == .Val(at) {
         out.shapes[at].twice = true
         return
@@ -322,7 +322,7 @@ mangled: fn(ty: Type) -> String Never! {
 }
 
 // Every named type `ty` reaches, added to `out.reached` once each.
-reach: fn(out: &CodecOut, ty: Type, at: String) BodyCodecError! {
+reach: fn(out: ^CodecOut, ty: Type, at: String) BodyCodecError! {
     if ty == .List(element) -> return reach(out, element, at)
     if ty == .Option(inner) -> return reach(out, inner, at)
     if ty == .Map(key, _, value) {
@@ -335,7 +335,7 @@ reach: fn(out: &CodecOut, ty: Type, at: String) BodyCodecError! {
 
 // The named type `name` and every named type its fields reach, added to
 // `out.reached` once each.
-reach_named: fn(out: &CodecOut, name: String, at: String) BodyCodecError! {
+reach_named: fn(out: ^CodecOut, name: String, at: String) BodyCodecError! {
     if is_hand_written(out, name) || out.seen.get(name) != None -> return Ok()
     out.seen["{name}"] = true
     out.reached.push("{name}")
@@ -383,7 +383,7 @@ type_empty: fn(out: CodecOut, ty: Type) -> Bool Never! {
 // Marks which reached shapes end on a failed read, and each enum's fallback
 // variant (the first with no payload, else the first whose fields all end),
 // until nothing changes; a shape that never ends is refused.
-settle: fn(out: &CodecOut) BodyCodecError! {
+settle: fn(out: ^CodecOut) BodyCodecError! {
     loop name in out.reached {
         position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
         shape: out.shapes[position]
@@ -452,7 +452,7 @@ get_call: fn(ty: Type) -> String Never! { "body_codec_get_{mangled(ty)}(bytes, i
 
 // The put and get functions of the list, option or map type `ty`, and of
 // those its parts are, once each.
-write_container: fn(out: &CodecOut, ty: Type) Never! {
+write_container: fn(out: ^CodecOut, ty: Type) Never! {
     name: mangled(ty)
     if ty == .Named(_) || ty == .Int || ty == .Float || ty == .Bool || ty == .Char || ty == .String || ty == .IntN(_, _) {
         return
@@ -468,16 +468,16 @@ write_container: fn(out: &CodecOut, ty: Type) Never! {
 }
 
 // The put and get functions of the list type `text` of `element`.
-write_list: fn(out: &CodecOut, name: String, text: String, element: Type) Never! {
+write_list: fn(out: ^CodecOut, name: String, text: String, element: Type) Never! {
     write_container(out, element)
     least: if type_empty(out, element) -> 0 else -> 1
     lines := [String]{}
-    lines.push("body_codec_put_{name}: fn(out: &BodyCodecOut, values: {text}) Never! {{")
+    lines.push("body_codec_put_{name}: fn(out: ^BodyCodecOut, values: {text}) Never! {{")
     lines.push("    body_codec_put_count(out, values.len())")
     lines.push("    loop value in values -> {put_call(element, "value")}")
     lines.push("}}")
     lines.push("")
-    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: &BodyCodecIn) -> {text} Never! {{")
+    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: ^BodyCodecIn) -> {text} Never! {{")
     lines.push("    count: body_codec_get_count(bytes, input, {least})")
     lines.push("    values := {text}{{}}")
     lines.push("    loop _ in 0..<count -> values.push({get_call(element)})")
@@ -487,10 +487,10 @@ write_list: fn(out: &CodecOut, name: String, text: String, element: Type) Never!
 }
 
 // The put and get functions of the option type `text` of `inner`.
-write_option: fn(out: &CodecOut, name: String, text: String, inner: Type) Never! {
+write_option: fn(out: ^CodecOut, name: String, text: String, inner: Type) Never! {
     write_container(out, inner)
     lines := [String]{}
-    lines.push("body_codec_put_{name}: fn(out: &BodyCodecOut, value: {text}) Never! {{")
+    lines.push("body_codec_put_{name}: fn(out: ^BodyCodecOut, value: {text}) Never! {{")
     lines.push("    if value == .Val(inner) {{")
     lines.push("        body_codec_put_bool(out, true)")
     lines.push("        {put_call(inner, "inner")}")
@@ -499,7 +499,7 @@ write_option: fn(out: &CodecOut, name: String, text: String, inner: Type) Never!
     lines.push("    body_codec_put_bool(out, false)")
     lines.push("}}")
     lines.push("")
-    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: &BodyCodecIn) -> {text} Never! {{")
+    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: ^BodyCodecIn) -> {text} Never! {{")
     lines.push("    if body_codec_get_bool(bytes, input) -> return Val({get_call(inner)})")
     lines.push("    None")
     lines.push("}}")
@@ -507,11 +507,11 @@ write_option: fn(out: &CodecOut, name: String, text: String, inner: Type) Never!
 }
 
 // The put and get functions of the map type `text` from `key` to `value`.
-write_map: fn(out: &CodecOut, name: String, text: String, key: Type, value: Type) Never! {
+write_map: fn(out: ^CodecOut, name: String, text: String, key: Type, value: Type) Never! {
     write_container(out, key)
     write_container(out, value)
     lines := [String]{}
-    lines.push("body_codec_put_{name}: fn(out: &BodyCodecOut, values: {text}) Never! {{")
+    lines.push("body_codec_put_{name}: fn(out: ^BodyCodecOut, values: {text}) Never! {{")
     lines.push("    body_codec_put_count(out, values.len())")
     lines.push("    loop (key, value) in values {{")
     lines.push("        {put_call(key, "key")}")
@@ -519,7 +519,7 @@ write_map: fn(out: &CodecOut, name: String, text: String, key: Type, value: Type
     lines.push("    }}")
     lines.push("}}")
     lines.push("")
-    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: &BodyCodecIn) -> {text} Never! {{")
+    lines.push("body_codec_get_{name}: fn(bytes: [U8], input: ^BodyCodecIn) -> {text} Never! {{")
     lines.push("    count: body_codec_get_count(bytes, input, 1)")
     lines.push("    values := {text}{{}}")
     lines.push("    loop _ in 0..<count {{")
@@ -533,23 +533,23 @@ write_map: fn(out: &CodecOut, name: String, text: String, key: Type, value: Type
 
 // The put and get functions of the reached struct `name`, whose shape is
 // `shape`.
-write_struct: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
+write_struct: fn(out: ^CodecOut, name: String, shape: CodecShape) Never! {
     function: name.lower()
     lines := [String]{}
     if shape.fields.len() == 0 {
         // Each unused parameter keeps a name of its own: two parameters
         // may not publish one label (E0770), `_` included.
-        lines.push("body_codec_put_{function}: fn(_out: &BodyCodecOut, _value: {name}) Never! {{}}")
+        lines.push("body_codec_put_{function}: fn(_out: ^BodyCodecOut, _value: {name}) Never! {{}}")
         lines.push("")
-        lines.push("body_codec_get_{function}: fn(_bytes: [U8], _input: &BodyCodecIn) -> {name} Never! {{ {name}{{}} }}")
+        lines.push("body_codec_get_{function}: fn(_bytes: [U8], _input: ^BodyCodecIn) -> {name} Never! {{ {name}{{}} }}")
         out.blocks.push(lines.join("\n"))
         return
     }
-    lines.push("body_codec_put_{function}: fn(out: &BodyCodecOut, value: {name}) Never! {{")
+    lines.push("body_codec_put_{function}: fn(out: ^BodyCodecOut, value: {name}) Never! {{")
     loop field in shape.fields -> lines.push("    {put_call(field.ty, "value.{field.name}")}")
     lines.push("}}")
     lines.push("")
-    lines.push("body_codec_get_{function}: fn(bytes: [U8], input: &BodyCodecIn) -> {name} Never! {{")
+    lines.push("body_codec_get_{function}: fn(bytes: [U8], input: ^BodyCodecIn) -> {name} Never! {{")
     built := [String]{}
     loop (index, field) in shape.fields {
         lines.push("    f{index}: {get_call(field.ty)}")
@@ -579,10 +579,10 @@ variant_read: fn(name: String, variant: CodecVariant, indent: String) -> [String
 // `shape`. A get reads the variant's position (body_codec_get_tag), and a
 // position past the last variant, or any read once one failed, reads the
 // shape's fallback variant.
-write_enum: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
+write_enum: fn(out: ^CodecOut, name: String, shape: CodecShape) Never! {
     function: name.lower()
     lines := [String]{}
-    lines.push("body_codec_put_{function}: fn(out: &BodyCodecOut, value: {name}) Never! {{")
+    lines.push("body_codec_put_{function}: fn(out: ^BodyCodecOut, value: {name}) Never! {{")
     lines.push("    if value == {{")
     loop (index, variant) in shape.variants {
         if variant.unit {
@@ -600,7 +600,7 @@ write_enum: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
     lines.push("    }}")
     lines.push("}}")
     lines.push("")
-    lines.push("body_codec_get_{function}: fn(bytes: [U8], input: &BodyCodecIn) -> {name} Never! {{")
+    lines.push("body_codec_get_{function}: fn(bytes: [U8], input: ^BodyCodecIn) -> {name} Never! {{")
     if shape.variants.len() == 1 {
         lines.push("    body_codec_skip_tag(bytes, input, 1)")
         // A one-line read is the value; a longer one is a block, whose
@@ -630,7 +630,7 @@ write_enum: fn(out: &CodecOut, name: String, shape: CodecShape) Never! {
 
 // The put and get functions of the reached struct or enum `name`, after
 // those of the list, option and map types its fields are.
-write_shape: fn(out: &CodecOut, name: String) BodyCodecError! {
+write_shape: fn(out: ^CodecOut, name: String) BodyCodecError! {
     position: out.index.get(name) ?? return Err(codec_fail("no struct or enum {name}"))
     shape: out.shapes[position]
     loop field in shape.fields -> write_container(out, field.ty)

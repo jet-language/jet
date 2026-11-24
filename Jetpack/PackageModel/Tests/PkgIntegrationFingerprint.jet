@@ -17,7 +17,7 @@ use jet_pkg_model.[pkg_lock_compute_fingerprint]
 // Public capability spelling is verbatim.
 #Test("pkg integration fingerprint_changes_with_capability_digest") {
     fp_read: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{}, "pkg\nscale: fn(v: Vec3)")
-    fp_write: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{}, "pkg\nscale: fn(v: &Vec3)")
+    fp_write: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{}, "pkg\nscale: fn(v: ^Vec3)")
     assert(fp_read != fp_write)
     fp_none_a: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{"sha256-x"}, "")
     fp_none_b: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{"sha256-x"}, "")

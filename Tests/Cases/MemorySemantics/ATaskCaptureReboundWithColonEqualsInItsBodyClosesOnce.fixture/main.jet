@@ -1,4 +1,4 @@
-// A `task &&owned` capture hands the value to the task, so moving it into a
+// A `task ^^owned` capture hands the value to the task, so moving it into a
 // `name := value` binding inside the body is the task's own last use. It
 // checks clean, the value closes exactly once, and its Shared context is
 // released once: the count is back to the caller's own after the join.
@@ -11,14 +11,14 @@ Res: struct {
     _context: Shared<Context>,
 
     impl Close {
-        close: fn(&&self) { print("close {self.name}") }
+        close: fn(^^self) { print("close {self.name}") }
     }
 }
 
 run: fn() {
     s := Shared{Context{_id: 1}}
     owned := Res{name: "task", _context: s.copy()}
-    child: task &&owned {
+    child: task ^^owned {
         other := owned
         other.name = "{other.name}!"
         other.name.len()

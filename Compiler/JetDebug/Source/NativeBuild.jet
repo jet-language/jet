@@ -110,7 +110,7 @@ NativeBuild: struct {
 
     // A new breakpoint on `line` of `file`, placed at once in each batch
     // loaded with code there: whether it was.
-    add: fn(&self, file: String, line: Int) -> Bool Never! {
+    add: fn(^self, file: String, line: Int) -> Bool Never! {
         self.numbered += 1
         placed := false
         loop at in 0..<self.batches.len() {
@@ -122,7 +122,7 @@ NativeBuild: struct {
 
     // Trap the code of `line` of `file` in batch `at` for breakpoint
     // `number`: whether the batch has code there and it was trapped.
-    place: fn(&self, at: Int, file: String, line: Int, number: Int) -> Bool Never! {
+    place: fn(^self, at: Int, file: String, line: Int, number: Int) -> Bool Never! {
         addresses: native_build_starts(self.batches[at], file, line)
         if addresses.len() == 0 -> return false
         pid: self.batches[at].pid
@@ -136,7 +136,7 @@ NativeBuild: struct {
 
     // Trace every thread of the child `pid` unless it is traced: each is
     // seized, stopped and let go on.
-    hold: fn(&self, pid: Int) -> Bool Never! {
+    hold: fn(^self, pid: Int) -> Bool Never! {
         if self.owners.has_key(pid) -> return true
         tasks: build_files.list_dir("/proc/{pid}/task") ?? {
             self.notes = "{self.notes}couldn't list the threads of the compile-time child {pid}: {err}\n"
@@ -157,7 +157,7 @@ NativeBuild: struct {
 
     // Write a trap byte at `address` of the child `pid`, unless one is
     // there; false when its code can't be read or written.
-    trap: fn(&self, pid: Int, address: Int, number: Int) -> Bool Never! {
+    trap: fn(^self, pid: Int, address: Int, number: Int) -> Bool Never! {
         if self.site_at(pid, address) >= 0 -> return true
         code: x64_trace_of(self.trace, pid)
         byte: x64_trace_read(code, address, 1) ?? return false
@@ -178,7 +178,7 @@ NativeBuild: struct {
     // Take one of the build's events: a batch loaded (its breakpoints are
     // placed, then the build goes on), a call starting, or a marker body
     // reaching a line a breakpoint waits on, which is a stop.
-    receive: fn(&self, event: &&BuildDebugEvent) -> NativeBuildStop? Never! {
+    receive: fn(^self, event: ^^BuildDebugEvent) -> NativeBuildStop? Never! {
         taken: event.move()
         if taken.kind == BuildDebugKind.Calling {
             self.limits[taken.pid] = taken.limit
@@ -209,7 +209,7 @@ NativeBuild: struct {
     // Read the batch `event` names, loaded into its child, and place each
     // breakpoint with code in it. Batches the child kept at the same
     // addresses before are gone, and so are their traps.
-    load: fn(&self, event: BuildDebugEvent) Never! {
+    load: fn(^self, event: BuildDebugEvent) Never! {
         image := native_image_read(event.facts) ?? return
         if self.trace.scratch == 0 {
             self.trace = x64_trace_attach(event.pid)
@@ -252,7 +252,7 @@ NativeBuild: struct {
     // Drop the batches of the child `pid` whose code lay in [low, high),
     // and their traps; every one of its batches when `high` is 0 (the
     // child has ended).
-    forget: fn(&self, pid: Int, low: Int, high: Int) Never! {
+    forget: fn(^self, pid: Int, low: Int, high: Int) Never! {
         k := self.batches.len()
         loop k > 0 {
             k -= 1
@@ -273,7 +273,7 @@ NativeBuild: struct {
 
     // The next stop at a trap, after letting every other stop of the
     // traced threads go on with its signal; None when no thread waits.
-    poll: fn(&self) -> NativeBuildStop? Never! {
+    poll: fn(^self) -> NativeBuildStop? Never! {
         if self.trace.channel < 0 || self.owners.len() == 0 -> return None
         loop {
             stop: x64_trace_wait_now(self.trace) ?? return None
@@ -301,7 +301,7 @@ NativeBuild: struct {
     // The stop of `thread` of the child `pid` at one of its traps: its
     // code reads as compiled again and it is rewound to the trap's address.
     // None when the SIGTRAP is not at a trap of the session's.
-    hit: fn(&self, pid: Int, thread: Int) -> NativeBuildStop? Never! {
+    hit: fn(^self, pid: Int, thread: Int) -> NativeBuildStop? Never! {
         stopped: x64_trace_of(self.trace, thread)
         registers := x64_trace_registers(stopped) ?? return None
         address: registers[X64_TRACE_RIP] - 1
@@ -318,7 +318,7 @@ NativeBuild: struct {
     // as the child's step word counts them: the build's call into the
     // child set it to the call's limit (the latest Calling event, which the
     // console takes before it measures), and each step takes one.
-    measure: fn(self, stop: &NativeBuildStop) Never! {
+    measure: fn(self, stop: ^NativeBuildStop) Never! {
         if stop.what == "marker" -> return
         stop.what = self.whats.get(stop.pid) ?? "prep"
         at: native_build_batch_at(self.batches, stop.pid, stop.site)
@@ -331,7 +331,7 @@ NativeBuild: struct {
 
     // Take breakpoint `number` out, and its traps; the traps another
     // breakpoint shared go back in.
-    remove: fn(&self, number: Int) -> Bool Never! {
+    remove: fn(^self, number: Int) -> Bool Never! {
         k := self.sites.len()
         loop k > 0 {
             k -= 1
@@ -358,7 +358,7 @@ NativeBuild: struct {
     // Let the build go on from `stop`: a marker body's is answered; a
     // trap's thread runs its one instruction as compiled, the trap is
     // written back, and the thread goes on.
-    resume: fn(&self, stop: &&NativeBuildStop) Never! {
+    resume: fn(^self, stop: ^^NativeBuildStop) Never! {
         held: stop.move()
         if held.ask != None {
             asked: held.ask ?? return
@@ -382,7 +382,7 @@ NativeBuild: struct {
 
     // End the session: each trap still in a running child is taken out,
     // and the helper ends, which lets every traced thread go on.
-    close: fn(&self) Never! {
+    close: fn(^self) Never! {
         loop site in self.sites {
             _ := x64_trace_write(x64_trace_of(self.trace, site.pid), site.address, [U8]{site.byte})
         }

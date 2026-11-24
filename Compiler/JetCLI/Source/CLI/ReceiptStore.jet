@@ -15,7 +15,7 @@ jet_cli_receipt_lookup_bytes: fn(bytes: [U8]?, claim: JetDriverRunReceiptClaim, 
     Ok(Val(jet_cli_receipt_merge_sections(receipt, claim, published_sections)))
 }
 
-jet_cli_receipt_merge_sections: fn(original: &&JetDriverRunReceipt, claim: JetDriverRunReceiptClaim, published_sections: [JetCLIReceiptSectionRecord]) -> JetDriverRunReceipt JetCLIReadError! {
+jet_cli_receipt_merge_sections: fn(original: ^^JetDriverRunReceipt, claim: JetDriverRunReceiptClaim, published_sections: [JetCLIReceiptSectionRecord]) -> JetDriverRunReceipt JetCLIReadError! {
     receipt := original.move()
     loop record in published_sections {
         if record.claim_key != claim.key || record.parent_digest != receipt.digest {

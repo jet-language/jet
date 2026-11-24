@@ -63,7 +63,7 @@ sema_generic_crossing_same: fn(left: SemaGenericCrossing, right: SemaGenericCros
 }
 
 // Adds `crossing` unless `crossings` holds it; true when it was new.
-sema_generic_crossing_add: fn(crossings: &[SemaGenericCrossing], crossing: &&SemaGenericCrossing) -> Bool Never! {
+sema_generic_crossing_add: fn(crossings: ^[SemaGenericCrossing], crossing: ^^SemaGenericCrossing) -> Bool Never! {
     loop existing in crossings {
         if sema_generic_crossing_same(existing, crossing) -> return false
     }
@@ -73,7 +73,7 @@ sema_generic_crossing_add: fn(crossings: &[SemaGenericCrossing], crossing: &&Sem
 
 // A crossing site in a generic body: `ty` crosses `crossing`, and the site
 // either gives the value away (`moved`) or captures it (`captured`).
-sema_generic_crossing_note: fn(ty: Type, crossing: SemaSendCrossing, moved: Bool, captured: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) {
+sema_generic_crossing_note: fn(ty: Type, crossing: SemaSendCrossing, moved: Bool, captured: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext) {
     if context.generic_params.len() == 0 {
         return
     }
@@ -91,7 +91,7 @@ sema_generic_crossing_plain: fn(ty: Type) -> Bool Never! {
 }
 
 // A call to generic function `callee` whose type arguments are settled.
-sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInferenceBinding], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) {
+sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInferenceBinding], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext) {
     arguments := [SemaGenericCallArgument]{}
     loop binding in substitutions {
         if sema_generic_crossing_plain(binding.ty) -> next
@@ -222,7 +222,7 @@ sema_generic_crossings_id: fn(keys: NameTable, key: String) -> Int Never! {
 }
 
 // The id of function key `key`, interned with an empty crossing row when new.
-sema_generic_crossings_slot: fn(keys: &NameTable, crossings: &[[SemaGenericCrossing]], key: String) -> Int Never! {
+sema_generic_crossings_slot: fn(keys: ^NameTable, crossings: ^[[SemaGenericCrossing]], key: String) -> Int Never! {
     id: name_index(name_intern(keys, key))
     if id == crossings.len() -> crossings.push([SemaGenericCrossing]{})
     id

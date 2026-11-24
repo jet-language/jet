@@ -1326,7 +1326,7 @@ normalize: fn(name: String) -> String Never! {
     String.from_bytes_lossy(out)
 }
 
-add_keys: fn(index: &[String:[String]], key: String, keys: [String]) {
+add_keys: fn(index: ^[String:[String]], key: String, keys: [String]) {
     known := index.get(key) ?? [String]{}
     loop other in keys {
         if !known.contains(other) -> known.push(other.copy())
@@ -1531,7 +1531,7 @@ ReceiverTables: struct {
     sema_names: [String:Bool],
 }
 
-record_name: fn(table: &[String:[String]], key: String, name: String) {
+record_name: fn(table: ^[String:[String]], key: String, name: String) {
     known := table.get(key) ?? [String]{}
     if !known.contains(name) -> known.push(name.copy())
     table[key] = known
@@ -1557,7 +1557,7 @@ IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_
 
 METHOD_HEADER: Regex{"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\x7B"}
 
-walk_sema: fn(root: String, directory: String, spelled: &[String:Bool]) -[FS]> Int LedgerError! {
+walk_sema: fn(root: String, directory: String, spelled: ^[String:Bool]) -[FS]> Int LedgerError! {
     listed: files.list_dir("{root}/{directory}") ?? return Err(fail("cannot list {directory}: {err}"))
     names := loop entry in listed -> entry.name.copy()
     names.sort()
@@ -2057,7 +2057,7 @@ JetSide: struct {
     domain_keys: [[String:Bool]],
 }
 
-add_member: fn(side: &JetSide, container: String, member: String) {
+add_member: fn(side: ^JetSide, container: String, member: String) {
     at := side.position.get(container) ?? -1
     if at < 0 {
         at = side.containers.len()
@@ -2068,7 +2068,7 @@ add_member: fn(side: &JetSide, container: String, member: String) {
     side.members[at].push(member.copy())
 }
 
-cover_keys: fn(names: Synonyms, side: &JetSide) {
+cover_keys: fn(names: Synonyms, side: ^JetSide) {
     loop at in 0..<side.containers.len() -> side.prefixes.push(container_prefixes(side.members[at]))
     loop at in 0..<side.containers.len() {
         container: side.containers[at]
@@ -2486,7 +2486,7 @@ competitor_rows: fn(names: Synonyms, surfaces: [LanguageSurface], jet: JetRows) 
     rows
 }
 
-apply_ratified_declines: fn(rows: &[Row]) -> Int LedgerError! {
+apply_ratified_declines: fn(rows: ^[Row]) -> Int LedgerError! {
     seen := [String:Bool]{}
     loop at in 0..<rows.len() {
         loop entry in RATIFIED_DECLINES {
@@ -2948,7 +2948,7 @@ file_digest: fn(path: String) -[FS]> String LedgerError! {
     Ok(crypto.sha256(bytes).hex())
 }
 
-walk_fixture_input: fn(root: String, current: String, found: &[String]) -[FS]> Int LedgerError! {
+walk_fixture_input: fn(root: String, current: String, found: ^[String]) -[FS]> Int LedgerError! {
     listed: files.list_dir(current) ?? return Err(fail("cannot list {current}: {err}"))
     keyed := loop entry in listed -> {name: entry.name.copy(), is_dir: entry.is_dir}
     keyed.sort_by(fn(left: {name: String, is_dir: Bool}, right: {name: String, is_dir: Bool}) { compare_bytes(left.name.bytes(), right.name.bytes()) })
@@ -3537,7 +3537,7 @@ MetricsCache: struct {
     metrics: [Metrics],
 }
 
-cached_metrics: fn(root: String, cache: &MetricsCache, path: String) -[FS]> Metrics LedgerError! {
+cached_metrics: fn(root: String, cache: ^MetricsCache, path: String) -[FS]> Metrics LedgerError! {
     if cache.paths.index_of(path) == .Val(at) -> return Ok(cache.metrics[at].copy())
     source: read_source(root, path) ?? return Err(err)
     metrics: source_metrics(source)
@@ -3546,7 +3546,7 @@ cached_metrics: fn(root: String, cache: &MetricsCache, path: String) -[FS]> Metr
     Ok(metrics)
 }
 
-source_boundary_counts: fn(root: String, cache: &MetricsCache, paths: [String], cases: [String]) -[FS]> Dyn LedgerError! {
+source_boundary_counts: fn(root: String, cache: ^MetricsCache, paths: [String], cases: [String]) -[FS]> Dyn LedgerError! {
     source_paths: sorted_unique(paths)
     tokens := 0
     statements := 0
@@ -3589,7 +3589,7 @@ jet_sources: fn(row: Row) -> [String] Never! {
     out
 }
 
-core_api_inventory_evidence: fn(root: String, cache: &MetricsCache, row: Row, surfaces: [LanguageSurface], cases: [String]) -[FS]> Dyn LedgerError! {
+core_api_inventory_evidence: fn(root: String, cache: ^MetricsCache, row: Row, surfaces: [LanguageSurface], cases: [String]) -[FS]> Dyn LedgerError! {
     sources: jet_sources(row)
     arms := Dyn.object()
     if sources.len() > 0 {
@@ -3832,12 +3832,12 @@ core_module_paths: fn(core: Dyn) -> [String:[String]] Never! {
 }
 
 // Field `key` of `from` onto `into`, unless `from` has no such field.
-copy_field: fn(into: &Dyn, from: Dyn, key: String, as_key: String) {
+copy_field: fn(into: ^Dyn, from: Dyn, key: String, as_key: String) {
     if has_field(from, key) -> into[as_key] = field(from, key)
 }
 
 // A totals count, null when the surface records no totals.
-totals_count: fn(into: &Dyn, surface: Dyn, key: String, as_key: String) {
+totals_count: fn(into: ^Dyn, surface: Dyn, key: String, as_key: String) {
     if !has_field(surface, "totals") || field(surface, "totals") == .Null {
         into[as_key] = Dyn.Null
         return

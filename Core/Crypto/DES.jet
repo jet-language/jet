@@ -46,7 +46,7 @@ DESKey: struct {
     sk: [U32],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             sk := self.sk.move()
             loop i in 0..<sk.len() -> sk[i] = U32{0}
         }
@@ -604,7 +604,7 @@ WEAK_KEYS: [U8]{
 
 /// Set every byte of an 8-byte key to odd parity, keeping its top seven
 /// bits (mbedtls_des_key_set_parity).
-des_key_set_parity: fn(key: &[U8]) Never! {
+des_key_set_parity: fn(key: ^[U8]) Never! {
     loop i in 0..<key.len() -> key[i] = ODD_PARITY[Int{key[i]} >> 1]
 }
 
@@ -635,7 +635,7 @@ get_be32: fn(b: [U8], off: Int) -> U32 Never! {
     (U32{b[off]} << 24) | U32{b[off + 1]} << 16 | U32{b[off + 2]} << 8 | U32{b[off + 3]}
 }
 
-put_be32: fn(out: &[U8], at: Int, w: U32) Never! {
+put_be32: fn(out: ^[U8], at: Int, w: U32) Never! {
     out[at] = wrapping(U8{w >> 24})
     out[at + 1] = wrapping(U8{w >> 16})
     out[at + 2] = wrapping(U8{w >> 8})
@@ -657,7 +657,7 @@ rhs: fn(x: U32, shift: Int) -> U32 Never! {
 
 // The 32 subkey words of one 8-byte key at key[off..], into sk[at..]
 // (mbedtls_des_setkey).
-setkey: fn(sk: &[U32], at: Int, key: [U8], off: Int) Never! {
+setkey: fn(sk: ^[U32], at: Int, key: [U8], off: Int) Never! {
     x := get_be32(key, off)
     y := get_be32(key, off + 4)
     // Permuted Choice 1.
@@ -721,7 +721,7 @@ des_setkey_dec: fn(key: [U8]) -> DESKey DESError! {
 
 // The encryption and decryption schedules of a two-key (K1 K2 K1) Triple-DES
 // key (des3_set2key).
-set2key: fn(esk: &[U32], dsk: &[U32], key: [U8]) Never! {
+set2key: fn(esk: ^[U32], dsk: ^[U32], key: [U8]) Never! {
     setkey(esk, 0, key, 0)
     setkey(dsk, 32, key, 8)
     loop i in 0..<16 {
@@ -739,7 +739,7 @@ set2key: fn(esk: &[U32], dsk: &[U32], key: [U8]) Never! {
 
 // The encryption and decryption schedules of a three-key Triple-DES key
 // (des3_set3key).
-set3key: fn(esk: &[U32], dsk: &[U32], key: [U8]) Never! {
+set3key: fn(esk: ^[U32], dsk: ^[U32], key: [U8]) Never! {
     setkey(esk, 0, key, 0)
     setkey(dsk, 32, key, 8)
     setkey(esk, 64, key, 16)
@@ -797,7 +797,7 @@ des_round: fn(sk: [U32], at: Int, x: U32, y: U32) -> U32 Never! {
 
 // The 8-byte block src[off..] through every pass of the key into out[at..]
 // (mbedtls_des_crypt_ecb, mbedtls_des3_crypt_ecb).
-crypt_block: fn(k: DESKey, src: [U8], off: Int, out: &[U8], at: Int) Never! {
+crypt_block: fn(k: DESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
     x := get_be32(src, off)
     y := get_be32(src, off + 4)
     // The initial permutation (DES_IP).
@@ -867,7 +867,7 @@ des_crypt_ecb: fn(k: DESKey, block: [U8]) -> [U8] DESError! {
 /// CBC over whole 8-byte blocks with a DES or Triple-DES key; `iv` carries
 /// the chaining value to the next call (mbedtls_des_crypt_cbc,
 /// mbedtls_des3_crypt_cbc). The key's schedule must match `mode`.
-des_crypt_cbc: fn(k: DESKey, mode: DESMode, iv: &[U8], input: [U8]) -> [U8] DESError! {
+des_crypt_cbc: fn(k: DESKey, mode: DESMode, iv: ^[U8], input: [U8]) -> [U8] DESError! {
     if input.len() %% DES_BLOCK_SIZE != 0 || iv.len() != DES_BLOCK_SIZE {
         return Err(.InvalidInputLength)
     }

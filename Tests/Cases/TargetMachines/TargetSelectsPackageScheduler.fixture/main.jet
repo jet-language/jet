@@ -30,12 +30,12 @@ Lifo: struct {
     held: [QueuedTask]{[QueuedTask]{}},
 
     impl Scheduler {
-        push: fn(&self, task: QueuedTask) Never! {
+        push: fn(^self, task: QueuedTask) Never! {
             self.held.push(task.copy())
             TAKEN.pushes += 1
         }
 
-        pop: fn(&self) -> QueuedTask? Never! { self.held.pop() }
+        pop: fn(^self) -> QueuedTask? Never! { self.held.pop() }
     }
 }
 

@@ -177,7 +177,7 @@ Diagnostic: struct {
     outside_signal: Int?{None},
 }
 
-diagnostic_with_source_path: fn(diagnostic: &&Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
+diagnostic_with_source_path: fn(diagnostic: ^^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -185,7 +185,7 @@ diagnostic_with_source_path: fn(diagnostic: &&Diagnostic, source_path: String, a
     updated
 }
 
-diagnostic_with_source_mapping: fn(diagnostic: &&Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
+diagnostic_with_source_mapping: fn(diagnostic: ^^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -198,13 +198,13 @@ diagnostic_with_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic N
     diagnostic_registry_with_edit(diagnostic.copy(), edit)
 }
 
-diagnostic_with_origin: fn(diagnostic: &&Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
+diagnostic_with_origin: fn(diagnostic: ^^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
     updated := diagnostic
     updated.origin = Val(origin)
     updated
 }
 
-diagnostic_with_cause: fn(diagnostic: &&Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
+diagnostic_with_cause: fn(diagnostic: ^^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
     updated := diagnostic
     updated.cause.push(cause.copy())
     updated
@@ -212,7 +212,7 @@ diagnostic_with_cause: fn(diagnostic: &&Diagnostic, cause: DiagnosticCause) -> D
 
 // Put the nearest wrapped report first, followed by its own causes in their
 // existing order.
-diagnostic_caused_by: fn(diagnostic: &&Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
+diagnostic_caused_by: fn(diagnostic: ^^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
     updated := diagnostic
     updated.cause.push(DiagnosticCause{code: cause.code.copy(), span: cause.span, origin: cause.origin.copy()})
     loop link in cause.cause -> updated.cause.push(link.copy())
@@ -236,7 +236,7 @@ diagnostic_cause_is_pending: fn(diagnostic: Diagnostic, pending: [Diagnostic]) -
 // Put root diagnostics before reports that name them as causes. The stable pass
 // keeps source order among independent reports and breaks a cycle by leaving
 // the remaining reports in their original order.
-diagnostic_order_root_first: fn(diagnostics: &&[Diagnostic]) -> [Diagnostic] Never! {
+diagnostic_order_root_first: fn(diagnostics: ^^[Diagnostic]) -> [Diagnostic] Never! {
     pending := diagnostics
     ordered := [Diagnostic]{}
     loop pending.len() > 0 {
@@ -260,7 +260,7 @@ diagnostic_order_root_first: fn(diagnostics: &&[Diagnostic]) -> [Diagnostic] Nev
 // A label's types print by the shared display rule
 // (diagnostic_display_identities), as the message's do, with clashes judged
 // over the label.
-diagnostic_with_label: fn(diagnostic: &&Diagnostic, span: Span, message: String) -> Diagnostic Never! {
+diagnostic_with_label: fn(diagnostic: ^^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
     shown: diagnostic_display_identities(message, diagnostic_identity_clashes(message.bytes()))
     updated.labels.push(DiagnosticLabel{span: span, message: shown})
@@ -273,7 +273,7 @@ diagnostic_with_edit_grade: fn(diagnostic: Diagnostic, edit: TextEdit, applicabi
 }
 
 // The diagnostic with no fix: no edit, no grade and no pending rewrite.
-diagnostic_without_fix: fn(diagnostic: &&Diagnostic) -> Diagnostic Never! {
+diagnostic_without_fix: fn(diagnostic: ^^Diagnostic) -> Diagnostic Never! {
     updated := diagnostic
     updated.edit = None
     updated.fix_edits = [TextEdit]{}
@@ -303,13 +303,13 @@ diagnostic_with_alternative_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> 
     diagnostic_registry_with_alternative_edit(diagnostic.copy(), edit)
 }
 
-diagnostic_with_detail: fn(diagnostic: &&Diagnostic, detail: String) -> Diagnostic Never! {
+diagnostic_with_detail: fn(diagnostic: ^^Diagnostic, detail: String) -> Diagnostic Never! {
     updated := diagnostic
     updated.detail = Val(detail)
     updated
 }
 
-diagnostic_with_rights: fn(diagnostic: &&Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
+diagnostic_with_rights: fn(diagnostic: ^^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
     updated := diagnostic
     updated.denial_kind = Val(denial_kind)
     updated.call_chain = call_chain

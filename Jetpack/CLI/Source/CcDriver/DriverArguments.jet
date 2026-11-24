@@ -95,7 +95,7 @@ DriverOptions: struct {
     }
 
     // Record a source operand at the next argv slot.
-    add_source: fn(&self, source: String) Never! {
+    add_source: fn(^self, source: String) Never! {
         self.sources.push(source.copy())
         self.source_indices.push(self.argv.len())
         self.argv.push(source.copy())
@@ -277,7 +277,7 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
 
 // One argument that is not an exact driver spelling: an attached-value
 // option, a flag, or a source operand. The table keeps the Rust arm order.
-cli_cc_parse_prefixed_argument: fn(value: String, options: &DriverOptions) CLIToolError! {
+cli_cc_parse_prefixed_argument: fn(value: String, options: ^DriverOptions) CLIToolError! {
     length: value.bytes().len()
     attached: cli_cc_attached_path_prefix(value)
     if {
@@ -351,7 +351,7 @@ cli_cc_parse_prefixed_argument: fn(value: String, options: &DriverOptions) CLITo
 }
 
 // The value after the option at `index`; advances past both.
-cli_cc_next_value: fn(args: [String], index: &Int, option: String) -> String CLIToolError! {
+cli_cc_next_value: fn(args: [String], index: ^Int, option: String) -> String CLIToolError! {
     value: args.get(index + 1) ?? return Err(CLIToolError.new("`{option}` needs a value"))
     if value.starts_with("-") -> return Err(CLIToolError.new("`{option}` needs a value"))
     index += 2
@@ -530,7 +530,7 @@ CcResponseExpansion: struct {
         Ok(expansion.expanded)
     }
 
-    expand: fn(&self, args: [String], base_dir: String, scope_roots: [String], depth: Int) -[FS]> CLIToolError! {
+    expand: fn(^self, args: [String], base_dir: String, scope_roots: [String], depth: Int) -[FS]> CLIToolError! {
         if depth > CC_MAX_RESPONSE_DEPTH {
             return Err(CLIToolError.new("response-file nesting exceeds {CC_MAX_RESPONSE_DEPTH} levels"))
         }
@@ -670,7 +670,7 @@ cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLITool
     Ok(words)
 }
 
-cli_cc_push_response_word: fn(words: &[String], word: [U8]) CLIToolError! {
+cli_cc_push_response_word: fn(words: ^[String], word: [U8]) CLIToolError! {
     if word.len() > CC_MAX_RESPONSE_BYTES {
         return Err(CLIToolError.new("one response-file argument exceeds the response-file bound"))
     }

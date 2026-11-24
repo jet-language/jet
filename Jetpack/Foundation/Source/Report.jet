@@ -147,7 +147,7 @@ StatusFields: struct {
         Ok(fields)
     }
 
-    insert: fn(&self, name: String, value: Dyn) ReportError! {
+    insert: fn(^self, name: String, value: Dyn) ReportError! {
         if name == "" || foundation_text_has_control(name) {
             return Err(ReportError.new("status field names must be non-empty and printable"))
         }
@@ -157,7 +157,7 @@ StatusFields: struct {
         self.entries.push(StatusField{name: name, value: value})
     }
 
-    extend: fn(&self, fields: StatusFields) ReportError! {
+    extend: fn(^self, fields: StatusFields) ReportError! {
         loop entry in fields.entries -> self.insert(entry.name, entry.value)
     }
 
@@ -395,7 +395,7 @@ ReportOrigin: struct {
 
 // A span and its origin: both null without a span, and the origin null when
 // the report holds no snapshot of its text.
-report_placed_span: fn(object: &[String:Dyn], span: ReportSpan?, origin: ReportOrigin?) Never! {
+report_placed_span: fn(object: ^[String:Dyn], span: ReportSpan?, origin: ReportOrigin?) Never! {
     if span == .Val(found) {
         object["span"] = found.to_tree()
         object["origin"] = if origin == .Val(placed) -> placed.to_tree() else -> Dyn.Null
@@ -524,7 +524,7 @@ ReportEnvelope: struct {
         }
     }
 
-    push_fix_edit: fn(&self, edit: ReportEdit) ReportError! {
+    push_fix_edit: fn(^self, edit: ReportEdit) ReportError! {
         if self.no_fix_reason != None {
             return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
         }
@@ -537,7 +537,7 @@ ReportEnvelope: struct {
         Ok(report)
     }
 
-    set_no_fix_reason: fn(&self, reason: NoFixReason) ReportError! {
+    set_no_fix_reason: fn(^self, reason: NoFixReason) ReportError! {
         reason.validate()
         if self.fix_edits.len() > 0 {
             return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
@@ -628,7 +628,7 @@ ReportEnvelope: struct {
 }
 
 // The extension's fields, appended after `clears`.
-report_extension_fields: fn(object: &[String:Dyn], extension: ReportExtension) Never! {
+report_extension_fields: fn(object: ^[String:Dyn], extension: ReportExtension) Never! {
     if extension == {
         .Crypto(crypto) -> {
             object["reason"] = Dyn.Text(crypto.reason)

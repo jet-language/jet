@@ -282,7 +282,7 @@ comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
 
 // Rust `walk_expr_nodes` under `WalkOpts.PLAIN`; `calls` picks the visited
 // node kind (Call names, else Ident reads).
-ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: ^[ComptimeNameSite]) Never! {
     if expr == {
         .Ident(name, span, _) -> {
             if !calls -> sites.push(ComptimeNameSite{name: name, span: span})
@@ -428,7 +428,7 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
     }
 }
 
-ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: ^[ComptimeNameSite]) Never! {
     if pattern == {
         .Or(alternatives, _) -> {
             loop alternative in alternatives -> ast_comptime_walk_pattern(alternative, calls, sites)
@@ -455,7 +455,7 @@ ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: &[ComptimeNa
     }
 }
 
-ast_comptime_walk_pattern_slot: fn(slot: PatSlot, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_pattern_slot: fn(slot: PatSlot, calls: Bool, sites: ^[ComptimeNameSite]) Never! {
     if slot == {
         .Value(value) -> { ast_comptime_walk_expr(value, calls, sites) }
         .Nested(inner) -> { ast_comptime_walk_pattern(inner, calls, sites) }
@@ -464,14 +464,14 @@ ast_comptime_walk_pattern_slot: fn(slot: PatSlot, calls: Bool, sites: &[Comptime
     }
 }
 
-ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: ^[ComptimeNameSite]) Never! {
     loop statement in body -> ast_comptime_walk_stmt(statement, calls, sites)
 }
 
 // Rust `walk_stmt_expr_nodes` under `WalkOpts.PLAIN`: `#Impure` and
 // `#AssumeDet` bodies and switched-off statements are skipped; `#run`
 // blocks are crossed.
-ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: ^[ComptimeNameSite]) Never! {
     if statement == {
         .Expr(value) | .DeferClose(value, _) | .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> {
             ast_comptime_walk_expr(value, calls, sites)

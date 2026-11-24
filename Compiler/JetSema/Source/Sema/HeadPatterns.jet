@@ -52,7 +52,7 @@ sema_head_pattern_payload_types: fn(payload: VariantPayload) -> [Type] Never! {
     types
 }
 
-sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic]) -> Func {
+sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: ^[Diagnostic]) -> Func {
     folded := heads[0]
     enum_name := String?{None}
     invalid := false
@@ -172,7 +172,7 @@ sema_head_pattern_fold_function: fn(heads: [Func], variants: [SemaHeadPatternVar
 // into one function over the enum its heads name, at the first head's
 // position. Variants come from the module's enums. Items without a head
 // pattern are left in place, uncopied.
-sema_head_patterns_fold_items: fn(items: &[Item], diagnostics: &[Diagnostic]) Never! {
+sema_head_patterns_fold_items: fn(items: ^[Item], diagnostics: ^[Diagnostic]) Never! {
     has_heads := false
     variants := [SemaHeadPatternVariant]{}
     loop item in items {

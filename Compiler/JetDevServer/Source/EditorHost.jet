@@ -134,7 +134,7 @@ EditorSessionIdentity: struct {
     source_path: String,
     revision: String,
 
-    new: fn(session_id: &&String, source_id: &&String, source_path: &&String, revision: &&String) -> EditorSessionIdentity EditorHostError! {
+    new: fn(session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String) -> EditorSessionIdentity EditorHostError! {
         editor_validate_stable_text(session_id, "session_id")
         editor_validate_source_identity(source_id)
         path: editor_clean_source_path(source_path)
@@ -152,12 +152,12 @@ EditorFactValue: enum {
     Array([EditorFactValue]),
     Object([String:EditorFactValue]),
 
-    text: fn(value: &&String) -> EditorFactValue EditorHostError! {
+    text: fn(value: ^^String) -> EditorFactValue EditorHostError! {
         editor_validate_stable_text(value, "fact text")
         Ok(.Text(value))
     }
 
-    render: fn(self, out: &[U8]) Never! {
+    render: fn(self, out: ^[U8]) Never! {
         if self == {
             .Null -> { editor_append(out, "null") }
             .Bool(value) -> { editor_append(out, if value -> "true" else -> "false") }
@@ -186,7 +186,7 @@ EditorStreamEvent: struct {
     fields: [String:EditorFactValue],
     payload: [String:EditorFactValue]?,
 
-    new: fn(sequence: U64, timestamp_ms: U64, source: &&String, kind: &&String, entity: &&String, fields: &&[String:EditorFactValue], payload: &&[String:EditorFactValue]?) -> EditorStreamEvent EditorHostError! {
+    new: fn(sequence: U64, timestamp_ms: U64, source: ^^String, kind: ^^String, entity: ^^String, fields: ^^[String:EditorFactValue], payload: ^^[String:EditorFactValue]?) -> EditorStreamEvent EditorHostError! {
         event: EditorStreamEvent{sequence, timestamp_ms, source: source, kind: kind, entity: entity, fields: fields, payload: payload.move()}
         event.validate()
         Ok(event)
@@ -203,7 +203,7 @@ EditorStreamEvent: struct {
         if self.payload == .Val(payload) -> editor_validate_fact_object(payload, "event payload")
     }
 
-    render: fn(self, out: &[U8]) Never! {
+    render: fn(self, out: ^[U8]) Never! {
         editor_append(out, "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":")
         editor_render_string(self.source, out)
         editor_append(out, ",\"kind\":")
@@ -371,7 +371,7 @@ EditorWorkbenchOpenRequest: struct {
     item_key: String?,
     cursor: U64?,
 
-    new: fn(host: EditorHost, session_id: &&String, source_id: &&String, source_path: &&String, revision: &&String) -> EditorWorkbenchOpenRequest Never! {
+    new: fn(host: EditorHost, session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String) -> EditorWorkbenchOpenRequest Never! {
         EditorWorkbenchOpenRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, panel_id: None, item_key: None, cursor: None}
     }
 
@@ -397,7 +397,7 @@ EditorReconnectRequest: struct {
     revision: String,
     cursor: U64?,
 
-    new: fn(host: EditorHost, session_id: &&String, source_id: &&String, source_path: &&String, revision: &&String, cursor: U64?) -> EditorReconnectRequest Never! {
+    new: fn(host: EditorHost, session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String, cursor: U64?) -> EditorReconnectRequest Never! {
         EditorReconnectRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, cursor}
     }
 }
@@ -411,7 +411,7 @@ EditorSourceNavigationRequest: struct {
     line: U32,
     column: U32,
 
-    new: fn(host: EditorHost, session_id: &&String, source_id: &&String, source_path: &&String, revision: &&String, line: U32, column: U32) -> EditorSourceNavigationRequest Never! {
+    new: fn(host: EditorHost, session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String, line: U32, column: U32) -> EditorSourceNavigationRequest Never! {
         EditorSourceNavigationRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, line, column}
     }
 }
@@ -435,7 +435,7 @@ EditorCommandRequest: struct {
     command: EditorCommand,
     arguments: [String],
 
-    new: fn(host: EditorHost, session_id: &&String, source_id: &&String, source_path: &&String, revision: &&String, command: EditorCommand) -> EditorCommandRequest Never! {
+    new: fn(host: EditorHost, session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String, command: EditorCommand) -> EditorCommandRequest Never! {
         EditorCommandRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, command, arguments: [String]{}}
     }
 }
@@ -452,7 +452,7 @@ EditorHostTransport: struct {
     started_at_ms: U64,
     shared_view: JetDevtoolsViewState,
 
-    new: fn(workbench_url: &&String, session_id: &&String, source_id: &&String, source_path: &&String, revision: &&String, grants: [String]) -> EditorHostTransport EditorHostError! {
+    new: fn(workbench_url: ^^String, session_id: ^^String, source_id: ^^String, source_path: ^^String, revision: ^^String, grants: [String]) -> EditorHostTransport EditorHostError! {
         editor_validate_loopback_url(workbench_url)
         identity: EditorSessionIdentity.new(session_id, source_id, source_path, revision)
         set := [String:Bool]{}
@@ -496,11 +496,11 @@ EditorHostTransport: struct {
         panic("occupied editor event ring slot")
     }
 
-    push_event: fn(&self, event: &&EditorStreamEvent) Never! {
+    push_event: fn(^self, event: ^^EditorStreamEvent) Never! {
         editor_ring_push(self.events, self.head, self.count, event)
     }
 
-    append_event: fn(&self, event: &&EditorStreamEvent) EditorHostError! {
+    append_event: fn(^self, event: ^^EditorStreamEvent) EditorHostError! {
         event.validate()
         if self.latest_cursor() == .Val(previous) {
             if event.sequence <= previous {
@@ -567,7 +567,7 @@ EditorHostTransport: struct {
         }
     }
 
-    open: fn(&self, request: EditorWorkbenchOpenRequest) -> EditorWorkbenchSnapshot EditorHostError! {
+    open: fn(^self, request: EditorWorkbenchOpenRequest) -> EditorWorkbenchSnapshot EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
         stream: self.stream_after(request.cursor)
         panel := "build"
@@ -597,7 +597,7 @@ EditorHostTransport: struct {
         Ok(EditorSourceNavigation{host: request.host, identity: self.session_identity.copy(), line: request.line, column: request.column, source_url: editor_source_url(self.workbench, self.session_identity.source_id, request.line, request.column)})
     }
 
-    select_panel: fn(&self, request: EditorPanelSelectionRequest) -> JetDevtoolsSelection EditorHostError! {
+    select_panel: fn(^self, request: EditorPanelSelectionRequest) -> JetDevtoolsSelection EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
         panel: editor_ensure_panel(request.panel_id)
         if request.item_key == .Val(value) {
@@ -620,11 +620,11 @@ EditorHostTransport: struct {
         Ok(EditorCommandReceipt{host: request.host, identity: self.session_identity.copy(), command: request.command, required_grant: grant})
     }
 
-    snapshot: fn(self, host: EditorHost, stream: &&EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
+    snapshot: fn(self, host: EditorHost, stream: ^^EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
         EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench.copy(), identity: self.session_identity.copy(), started_at_ms: self.started_at_ms, panels: self.panel_catalog(), panel_availability: self.panel_availability(), selection: (self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)).copy(), events: stream.events.move(), resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: editor_wire_cursor(self.shared_view.cursor)}
     }
 
-    replace_projection: fn(&self, projection: DevtoolsProjection) EditorHostError! {
+    replace_projection: fn(^self, projection: DevtoolsProjection) EditorHostError! {
         if projection.protocol != JET_DEVTOOLS_PROTOCOL {
             return Err(EditorHostError.InvalidEnvelope("projection protocol does not match jet.devtools.v1"))
         }
@@ -651,7 +651,7 @@ EditorHostTransport: struct {
         }
     }
 
-    check_projection_identity: fn(&self, session_id: String, source_id: String?, revision: String?) EditorHostError! {
+    check_projection_identity: fn(^self, session_id: String, source_id: String?, revision: String?) EditorHostError! {
         if session_id != self.session_identity.session_id {
             return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session_id.copy()})
         }
@@ -667,7 +667,7 @@ EditorHostTransport: struct {
         }
     }
 
-    sync_session: fn(&self, session: ResidentDevSession) EditorHostError! {
+    sync_session: fn(^self, session: ResidentDevSession) EditorHostError! {
         if session.id() != self.session_identity.session_id {
             return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session.id().copy()})
         }
@@ -675,7 +675,7 @@ EditorHostTransport: struct {
         self.replace_projection(projection)
     }
 
-    replace_devtools_json: fn(&self, payload: String) EditorHostError! {
+    replace_devtools_json: fn(^self, payload: String) EditorHostError! {
         // Sole wire decoder belongs to WebHost/Foundation, not this transport.
         decoded: decode_devtools_envelope(payload) ?? return Err(EditorHostError.InvalidEnvelope("{err}"))
         if decoded == {
@@ -721,7 +721,7 @@ EditorHostTransport: struct {
         }
     }
 
-    handle_lsp_json: fn(&self, payload: String) -> String EditorHostError! {
+    handle_lsp_json: fn(^self, payload: String) -> String EditorHostError! {
         root: foundation_parse_protocol_json_with_limit(payload, EDITOR_MAX_TEXT_BYTES) ?? return Err(EditorHostError.InvalidRequest("request is not valid bounded JSON"))
         if !editor_is_object(root) {
             return Err(EditorHostError.InvalidRequest("JSON-RPC request must be an object"))
@@ -789,7 +789,7 @@ editor_empty_ring: fn() -> [EditorStreamEvent?] Never! {
     slots
 }
 
-editor_ring_push: fn(slots: &[EditorStreamEvent?], head: &Int, count: &Int, event: &&EditorStreamEvent) Never! {
+editor_ring_push: fn(slots: ^[EditorStreamEvent?], head: ^Int, count: ^Int, event: ^^EditorStreamEvent) Never! {
     slot: (head + count) % EDITOR_MAX_EVENTS
     slots[slot] = Val(event)
     if count == EDITOR_MAX_EVENTS -> head = (head + 1) % EDITOR_MAX_EVENTS else -> count += 1
@@ -942,11 +942,11 @@ editor_source_url: fn(workbench_url: String, source_id: String, line: U32, colum
     loop index in 0..<end -> out.push(bytes[index])
     editor_append(out, "?source_id=")
     editor_percent_encode(source_id, out)
-    editor_append(out, "&line={line}&column={column}")
+    editor_append(out, "^line={line}&column={column}")
     editor_finish(out)
 }
 
-editor_percent_encode: fn(value: String, out: &[U8]) Never! {
+editor_percent_encode: fn(value: String, out: ^[U8]) Never! {
     loop byte in value.bytes() {
         code: Int{byte}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 46 || code == 95 || code == 126 {
@@ -1034,19 +1034,19 @@ editor_optional_cursor: fn(params: Dyn) -> U64? EditorHostError! {
     Ok(Val(editor_field_u64(params, "cursor")))
 }
 
-editor_append: fn(out: &[U8], text: String) Never! {
+editor_append: fn(out: ^[U8], text: String) Never! {
     loop byte in text.bytes() -> out.push(byte)
 }
 
-editor_finish: fn(out: &&[U8]) -> String Never! {
+editor_finish: fn(out: ^^[U8]) -> String Never! {
     String.from_bytes(out) ?? panic("editor JSON writer preserves UTF-8")
 }
 
-editor_render_string: fn(value: String, out: &[U8]) Never! {
+editor_render_string: fn(value: String, out: ^[U8]) Never! {
     foundation_json_append(out, foundation_json_quote(value))
 }
 
-editor_render_optional_string: fn(value: String?, out: &[U8]) Never! {
+editor_render_optional_string: fn(value: String?, out: ^[U8]) Never! {
     if value == .Val(text) -> editor_render_string(text, out) else -> editor_append(out, "null")
 }
 
@@ -1077,7 +1077,7 @@ editor_wire_cursor: fn(cursor: Int?) -> U64? Never! {
     None
 }
 
-editor_render_optional_u64: fn(value: U64?, out: &[U8]) Never! {
+editor_render_optional_u64: fn(value: U64?, out: ^[U8]) Never! {
     if value == .Val(number) -> editor_append(out, "{number}") else -> editor_append(out, "null")
 }
 
@@ -1098,7 +1098,7 @@ editor_fact_keys: fn(values: [String:EditorFactValue]) -> [String] Never! {
     keys
 }
 
-editor_render_fact_object: fn(values: [String:EditorFactValue], out: &[U8]) Never! {
+editor_render_fact_object: fn(values: [String:EditorFactValue], out: ^[U8]) Never! {
     out.push(U8{123})
     loop (index, key) in editor_fact_keys(values) {
         if index != 0 -> out.push(U8{44})
@@ -1109,7 +1109,7 @@ editor_render_fact_object: fn(values: [String:EditorFactValue], out: &[U8]) Neve
     out.push(U8{125})
 }
 
-editor_render_selection: fn(selection: JetDevtoolsSelection, out: &[U8]) Never! {
+editor_render_selection: fn(selection: JetDevtoolsSelection, out: ^[U8]) Never! {
     editor_append(out, `{"panel_id":`)
     editor_render_string(selection.panel_id, out)
     editor_append(out, ",\"item_key\":")
@@ -1117,7 +1117,7 @@ editor_render_selection: fn(selection: JetDevtoolsSelection, out: &[U8]) Never! 
     out.push(U8{125})
 }
 
-editor_render_events: fn(events: [EditorStreamEvent], out: &[U8]) Never! {
+editor_render_events: fn(events: [EditorStreamEvent], out: ^[U8]) Never! {
     out.push(U8{91})
     loop (index, event) in events {
         if index != 0 -> out.push(U8{44})
@@ -1126,7 +1126,7 @@ editor_render_events: fn(events: [EditorStreamEvent], out: &[U8]) Never! {
     out.push(U8{93})
 }
 
-editor_render_identity: fn(identity: EditorSessionIdentity, include_path: Bool, out: &[U8]) Never! {
+editor_render_identity: fn(identity: EditorSessionIdentity, include_path: Bool, out: ^[U8]) Never! {
     editor_append(out, ",\"session_id\":")
     editor_render_string(identity.session_id, out)
     editor_append(out, ",\"source_id\":")
@@ -1139,7 +1139,7 @@ editor_render_identity: fn(identity: EditorSessionIdentity, include_path: Bool, 
     editor_render_string(identity.revision, out)
 }
 
-editor_render_response_context: fn(host: EditorHost, identity: EditorSessionIdentity, include_path: Bool, out: &[U8]) Never! {
+editor_render_response_context: fn(host: EditorHost, identity: EditorSessionIdentity, include_path: Bool, out: ^[U8]) Never! {
     editor_append(out, `{"protocol":`)
     editor_render_string(JET_DEVTOOLS_PROTOCOL, out)
     editor_append(out, ",\"editor\":")
@@ -1147,7 +1147,7 @@ editor_render_response_context: fn(host: EditorHost, identity: EditorSessionIden
     editor_render_identity(identity, include_path, out)
 }
 
-editor_render_request_context: fn(host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, out: &[U8]) Never! {
+editor_render_request_context: fn(host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, out: ^[U8]) Never! {
     editor_append(out, `{"editor":`)
     editor_render_string(host.wire_name(), out)
     editor_append(out, ",\"session_id\":")

@@ -2,7 +2,7 @@ use files: core.files
 
 // Resolve all dependencies and publish the machine graph + semantic rationale
 // only after provider verification. Locked mode never writes or refreshes an index.
-pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: Manifest, existing: LockFile?, options: PackageFetchOptions) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchResult PackageFetchError! {
+pkg_fetch: fn(verification: ^StoreVerification, project_root: String, manifest: Manifest, existing: LockFile?, options: PackageFetchOptions) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchResult PackageFetchError! {
     root: files.canonicalize(project_root) ?? return Err(pkg_fetch_error("E1224", "couldn't open project root", "{err}", "restore the package directory"))
     pkg_check_toolchain(manifest, files.join(root, PACKAGE_FILE)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     roots: pkg_resolve_roots()
@@ -62,7 +62,7 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
 // refetch or an update re-resolves its source, and only a build widens the
 // row (pkg_lock_record_effect_rows), so the next build names what the new
 // source gained and `--locked` refuses it (E3513).
-pkg_fetch_carry_effect_rows: fn(lock: &LockFile, previous: LockFile) {
+pkg_fetch_carry_effect_rows: fn(lock: ^LockFile, previous: LockFile) {
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].is_root() -> next
         record: previous.find_package(lock.packages[index].name) ?? next
@@ -141,7 +141,7 @@ pkg_fetch_locked_error: fn(name: String, detail: String) -> PackageFetchError Ne
     pkg_fetch_error("E1204", "locked dependency `{name}` failed source verification", detail, "run `jet fetch` to recreate the lock from the verified dependency source")
 }
 
-pkg_fetch_locked_directories: fn(verification: &StoreVerification, roots: HangarRoots, root: String, manifest: Manifest, lock: LockFile) -[FS, Env, Exec, Net, Time, Time.Wait]> [String:String] PackageFetchError! {
+pkg_fetch_locked_directories: fn(verification: ^StoreVerification, roots: HangarRoots, root: String, manifest: Manifest, lock: LockFile) -[FS, Env, Exec, Net, Time, Time.Wait]> [String:String] PackageFetchError! {
     directories := [String:String]{}
     loop name in pkg_lock_manifest_dependency_names(manifest) {
         package: lock.find_package(name) ?? return Err(pkg_fetch_locked_error(name, "the lock has no matching source identity"))
@@ -229,7 +229,7 @@ pkg_fetch_locked_foreign: fn(roots: HangarRoots, root: String, package: LockedPa
     Ok(output)
 }
 
-pkg_fetch_locked_registry: fn(verification: &StoreVerification, roots: HangarRoots, root: String, manifest: Manifest, lock: LockFile, package: LockedPackage, requirement: String) -[FS, Env, Exec, Net, Time, Time.Wait]> String PackageFetchError! {
+pkg_fetch_locked_registry: fn(verification: ^StoreVerification, roots: HangarRoots, root: String, manifest: Manifest, lock: LockFile, package: LockedPackage, requirement: String) -[FS, Env, Exec, Net, Time, Time.Wait]> String PackageFetchError! {
     name: package.name
     version: publication_parse_semver(package.version) ?? return Err(pkg_fetch_registry_error(name, "invalid locked version"))
     if !publication_matches(pkg_fetch_requirement(name, requirement), version) {

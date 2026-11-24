@@ -1,19 +1,19 @@
-// A `&` parameter passes its write access onward with the same `&` mark: the
+// A `^` parameter passes its write access onward with the same `^` mark: the
 // callee writes the caller's value, never a copy of it.
 Counter: struct {
     count: Int,
 
-    add_to: fn(self, target: &Counter) { target.count += self.count }
+    add_to: fn(self, target: ^Counter) { target.count += self.count }
 }
 
-bump: fn(counter: &Counter) { counter.count += 1 }
+bump: fn(counter: ^Counter) { counter.count += 1 }
 
-bump_twice: fn(counter: &Counter) {
+bump_twice: fn(counter: ^Counter) {
     bump(counter)
     bump(counter)
 }
 
-add_ten: fn(target: &Counter) {
+add_ten: fn(target: ^Counter) {
     ten: Counter{count: 10}
     ten.add_to(target)
 }

@@ -34,7 +34,7 @@ store_canonical_graph_digest: fn(roots: HangarRoots, graph: ClosureGraph, source
 // objects. The logical `/nix/store` names are deterministic projections
 // derived from the locked object digest. They are not host store paths and
 // are never copied into the project lock.
-store_record_locked_nix: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, lock_envelope: LockEnvelope, closure: NixClosureRecord, object_digests: [String], lock_digest: String) -> StoreEntry StoreError! {
+store_record_locked_nix: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, lock_envelope: LockEnvelope, closure: NixClosureRecord, object_digests: [String], lock_digest: String) -> StoreEntry StoreError! {
     closure.validate() ?? return Err(StoreError.Other(err.message()))
     lock_envelope.validate_nix_catalog() ?? return Err(StoreError.Other(err.message()))
     if lock_envelope.catalog_tier != "local-unofficial" {
@@ -178,7 +178,7 @@ store_locked_nix_producer: fn(reference: String, lock_envelope: LockEnvelope, cl
 // Project every Nix output into the Hangar CAS before Store registration.
 // The original `/nix/store` spelling is retained in the producer facts for
 // runtime namespace projection; it is never the durable output root.
-store_project_nix_outputs_unlocked: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, transaction: &AdmissionTransaction) -> {out: String, bin: String, rlib: String} StoreError! {
+store_project_nix_outputs_unlocked: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, transaction: ^AdmissionTransaction) -> {out: String, bin: String, rlib: String} StoreError! {
     projected := [String:String]{}
     seen_sources := [String:String]{}
     loop name in store_sorted_keys(realized.named_outputs) {
@@ -216,7 +216,7 @@ store_remap_nix_member: fn(realized: Realized, projected: [String:String], membe
     member.copy()
 }
 
-store_project_nix_output_unlocked: fn(roots: HangarRoots, source: String, digest: String, transaction: &AdmissionTransaction) -> String StoreError! {
+store_project_nix_output_unlocked: fn(roots: HangarRoots, source: String, digest: String, transaction: ^AdmissionTransaction) -> String StoreError! {
     if digest == "" {
         return Err(StoreError.InvalidData("Nix output projection has an empty content digest"))
     }
@@ -231,7 +231,7 @@ store_project_nix_output_unlocked: fn(roots: HangarRoots, source: String, digest
 
 // Test/support projection entry point. Durable publication is delegated to
 // the same Hangar transaction used by realized registration.
-store_project_external_output_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, source: String, digest: String) -> String StoreError! {
+store_project_external_output_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, source: String, digest: String) -> String StoreError! {
     _: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(verification, roots)
     bytes: store_admission_size(source)
@@ -240,7 +240,7 @@ store_project_external_output_unlocked: fn(verification: &StoreVerification, roo
     Ok(destination)
 }
 
-store_stage_local_output_unlocked: fn(roots: HangarRoots, out: String, bin: String, rlib: String, digest: String, transaction: &AdmissionTransaction) -> {out: String, bin: String, rlib: String} StoreError! {
+store_stage_local_output_unlocked: fn(roots: HangarRoots, out: String, bin: String, rlib: String, digest: String, transaction: ^AdmissionTransaction) -> {out: String, bin: String, rlib: String} StoreError! {
     if digest == "" || store_path_starts_with(out, "/nix/store") {
         return Ok({out: out, bin: bin, rlib: rlib})
     }
@@ -270,7 +270,7 @@ store_remap_local_member: fn(source: String, destination: String, member: String
 }
 
 // Test seam: canonicalize a local output into the Hangar object pool.
-store_canonicalize_local_output_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, out: String, bin: String, rlib: String, digest: String) -> {out: String, bin: String, rlib: String} StoreError! {
+store_canonicalize_local_output_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, out: String, bin: String, rlib: String, digest: String) -> {out: String, bin: String, rlib: String} StoreError! {
     if digest == "" || out.starts_with("/nix/store") -> return Ok({out: out, bin: bin, rlib: rlib})
     _: AdmissionTransaction.recover_unlocked(roots)
     transaction := AdmissionTransaction.new(verification, roots)
@@ -282,7 +282,7 @@ store_canonicalize_local_output_unlocked: fn(verification: &StoreVerification, r
 // Reuse original Nix admission, repair its exact signed-cache closure
 // online, or import explicitly unverified local bytes. Portable bytes alone
 // cannot establish signed index authority.
-store_replay_locked_nix_package: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec) -> VerifiedRealization? RealizeError! {
+store_replay_locked_nix_package: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec) -> VerifiedRealization? RealizeError! {
     project: ctx.project_dir ?? return Ok(None)
     if !files.is_dir(project) -> return Ok(None)
     found: if pkg_lock_locked_nix_package_strict(project, spec.raw) == {
@@ -315,7 +315,7 @@ store_locked_nix_error: fn(text: String) -> RealizeError Never! {
 }
 
 // The recorded-admission leg of locked Nix replay.
-store_replay_recorded_nix: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, project: String, found: {name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope}, candidate: StoreEntry, lock_digest: String) -> VerifiedRealization? RealizeError! {
+store_replay_recorded_nix: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, project: String, found: {name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope}, candidate: StoreEntry, lock_digest: String) -> VerifiedRealization? RealizeError! {
     producer: ProducerRecord.decode(candidate.producer_record) ?? return Err(RealizeError.LockedNix(err))
     bundle: producer.facts.get("nix.project-cas-bundle") ?? return Err(store_locked_nix_error("locked Nix admission lacks its original portable identity"))
     admitted: provider_nix_closure_record(candidate, producer, bundle) ?? return Err(RealizeError.Provider(err))
@@ -416,7 +416,7 @@ store_locked_nix_missing_members: fn(roots: HangarRoots, candidate: StoreEntry) 
 
 // Refresh the producer's lock digest only while the project lock still
 // names the same identity.
-store_refresh_locked_entry: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, project: String, found: {name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope}, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
+store_refresh_locked_entry: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, project: String, found: {name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope}, entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
     _project_lock: env_runtime_project_lock(project, "nix-verified-reuse")
     current: provider_project_lock_digest(Val(project)) ?? return Err(StoreError.Other("{err}"))
     current_package: if pkg_lock_locked_nix_package_strict(project, spec.raw) == {

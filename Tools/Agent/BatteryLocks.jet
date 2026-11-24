@@ -79,7 +79,7 @@ tree_digest: fn(entries: [TreeFile]) -> String {
 
 // The regular files under `directory`, as the tree hash walks them: dot
 // entries, `build` and `target` are not part of a package's identity.
-tree_files: fn(directory: String, relative_dir: String, out: &[TreeFile]) -[FS]> LockError! {
+tree_files: fn(directory: String, relative_dir: String, out: ^[TreeFile]) -[FS]> LockError! {
     entries: files.list_dir(directory) ?? return Err(LockError{message: "cannot list {directory}: {err}"})
     loop entry in entries {
         if entry.name.starts_with(".") || entry.name == "build" || entry.name == "target" -> next

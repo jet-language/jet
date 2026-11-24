@@ -68,7 +68,7 @@ DataErrorKind: enum {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { data_error_kind_text(self) }
+        debug: fn(^^self) -> String { data_error_kind_text(self) }
     }
 }
 
@@ -107,7 +107,7 @@ DataError: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { data_error_text(self) }
+        debug: fn(^^self) -> String { data_error_text(self) }
     }
 
     new: fn(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
@@ -330,7 +330,7 @@ DataWatchStatus: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { data_watch_status_text(self) }
+        debug: fn(^^self) -> String { data_watch_status_text(self) }
     }
 }
 
@@ -444,7 +444,7 @@ Query: struct<T> {
     // Grouped row counts over an `Int` key: runs a single SQL `GROUP BY` query
     // when `column` names a table's field column and the source supports SQL
     // grouping, otherwise reads the query's rows and counts in memory.
-    __count_by_int: fn(self, column: String, key: &&fn(T) -[]> Int) -[DB.Read]> [Int:Int] DataError! {
+    __count_by_int: fn(self, column: String, key: ^^fn(T) -[]> Int) -[DB.Read]> [Int:Int] DataError! {
         if column != "" {
             if query_count_by_sql<T>(self, column, "", [String]{}) == {
                 .Ok(found) -> {
@@ -481,7 +481,7 @@ Query: struct<T> {
         Ok(out)
     }
 
-    __count_by_string: fn(self, column: String, key: &&fn(T) -[]> String) -[DB.Read]> [String:Int] DataError! {
+    __count_by_string: fn(self, column: String, key: ^^fn(T) -[]> String) -[DB.Read]> [String:Int] DataError! {
         if column != "" {
             if query_count_by_sql<T>(self, column, "", [String]{}) == {
                 .Ok(found) -> {
@@ -512,7 +512,7 @@ Query: struct<T> {
         Ok(out)
     }
 
-    __count_by_bool: fn(self, column: String, key: &&fn(T) -[]> Bool) -[DB.Read]> [Bool:Int] DataError! {
+    __count_by_bool: fn(self, column: String, key: ^^fn(T) -[]> Bool) -[DB.Read]> [Bool:Int] DataError! {
         if column != "" {
             if query_count_by_sql<T>(self, column, "", [String]{}) == {
                 .Ok(found) -> {
@@ -866,15 +866,15 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
+priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^^fn() -> [T] DataError!) -> Query<T> Never! {
     query_narrowing<T>(steps, one_shot, limits, fn(_condition: String, _values: [String]) { run() })
 }
 
-priv query_narrowing: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
+priv query_narrowing: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^^fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
     query_narrowing_grouped<T>(steps, one_shot, limits, run.move(), None)
 }
 
-priv query_narrowing_grouped: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn(String, [String]) -> [T] DataError!, count_by: &&(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?) -> Query<T> Never! {
+priv query_narrowing_grouped: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^^fn(String, [String]) -> [T] DataError!, count_by: ^^(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?) -> Query<T> Never! {
     Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move(), count_by: count_by.move()}}, __take: None}
 }
 
@@ -930,7 +930,7 @@ priv query_count_by_sql: fn<T>(query: Query<T>, column: String, condition: Strin
 
 // A reusable query over a source that reads its rows narrowed by a SQL
 // condition (QueryCell): a database table's `query()`.
-priv __query_narrowed: fn<T>(step: String, read: &&fn(String, [String]) -> [T] DataError!, count_by: &&(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?{None}) -> Query<T> Never! {
+priv __query_narrowed: fn<T>(step: String, read: ^^fn(String, [String]) -> [T] DataError!, count_by: ^^(fn(String, String, [String]) -[DB.Read]> [{key: String, count: Int}]? DataError!)?{None}) -> Query<T> Never! {
     query_narrowing_grouped<T>([String]{step}, false, DataLimits.safe(), read.move(), count_by.move())
 }
 
@@ -970,14 +970,14 @@ priv __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
 
 // A stream over a pull source (the file readers of core.files.data): `pull`
 // reads and decodes one row, `None` at the end of input.
-priv __stream_from: fn<T>(pull: &&fn() -> T? DataError!, limits: DataLimits) -> DataStream<T> Never! {
+priv __stream_from: fn<T>(pull: ^^fn() -> T? DataError!, limits: DataLimits) -> DataStream<T> Never! {
     source: Shared{StreamSource<T>{pull: pull, limits: limits, ahead: [T]{}, ahead_index: 0, terminal: None, done: false}}
     DataStream<T>{items: [T]{}, index: 0, canceled: false, __source: Val(source)}
 }
 
 // The next row of a stream: its owned items first, then its pull source.
 // End of input is a stable `None`; a source failure stays latched.
-priv __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
+priv __stream_pull: fn<T>(stream: ^DataStream<T>) -> T? DataError! {
     if stream.canceled {
         return Err(data_error(DataErrorKind.State, "stream was canceled", "data.stream"))
     }
@@ -1021,7 +1021,7 @@ priv __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
 // `stream.collect`: the remaining rows, bounded by the source's
 // `max_output_rows`; crossing fails before the crossing row is kept, and
 // the failure stays latched (Rust `jet_data_stream_collect`).
-priv __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
+priv __stream_collect: fn<T>(stream: ^DataStream<T>) -> [T] DataError! {
     limit: if stream.__source == {
         .Val(source) -> source.guard_read().value.limits.max_output_rows
         .None -> -1
@@ -1133,34 +1133,34 @@ priv PendingWindow: struct<T> {
 }
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
-priv __stream_with_event_time: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
+priv __stream_with_event_time: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: stream_stamp_seconds<T>(stream.move(), event_time)}
 }
 
 // `stream.with_event_time(f)` with a `DateTime` result.
-priv __stream_with_event_datetime: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
+priv __stream_with_event_datetime: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: stream_stamp_datetime<T>(stream.move(), event_time)}
 }
 
-priv stream_stamp_seconds: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
+priv stream_stamp_seconds: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: time.from_unix_seconds(event_time(value))
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-priv stream_stamp_datetime: fn<T>(stream: &&Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
+priv stream_stamp_datetime: fn<T>(stream: ^^Stream<T>, event_time: ^^fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: event_time(value)
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-priv __stream_key_by: fn<K, T>(source: &&StreamEventTime<T>, key: &&fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
+priv __stream_key_by: fn<K, T>(source: ^^StreamEventTime<T>, key: ^^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
     KeyedStream<K, T>{events: stream_keyed<K, T>(source.events.move(), key)}
 }
 
-priv stream_keyed: fn<K, T>(stream: &&Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<KeyedEvent<K, T>> {
+priv stream_keyed: fn<K, T>(stream: ^^Stream<StreamEvent<T>>, key: ^^fn(T) -> K Never!) -> Stream<KeyedEvent<K, T>> {
     loop event in stream {
         yield KeyedEvent<K, T>{key: key(event.value), event: event}
     }
@@ -1169,7 +1169,7 @@ priv stream_keyed: fn<K, T>(stream: &&Stream<StreamEvent<T>>, key: &&fn(T) -> K 
 // A `Stream<T>` function is a generator that yields only from its own body,
 // so `.window()` is this generator itself, with the generator's default
 // failure carrier.
-priv __stream_window: fn<K: Equatable, T>(source: &&KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
+priv __stream_window: fn<K: Equatable, T>(source: ^^KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
     width_ns: width.ns
     lateness_ns: watermark.ns
     if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
@@ -1227,7 +1227,7 @@ priv stream_event_ns: fn(at: DateTime) -> Int Never! {
     at.to_unix_ns() ?? panic("stream event time {at} is outside the Unix nanosecond range")
 }
 
-priv stream_windows_ready: fn<K, T>(keys: [K], pending: &[PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
+priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
     ready := [Window<K, T>]{}
     kept := [PendingWindow<T>]{}
     loop open in pending {
@@ -1260,7 +1260,7 @@ priv __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
 // with `values` bound to its `?`s in order, or `""` when the compiler could
 // not write it so, and then `values` is unused (QueryCell). They come before
 // the predicate, which may take the locals they read.
-priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: &&fn(T) -> Bool) -> Query<T> Never! {
+priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String], predicate: ^^fn(T) -> Bool) -> Query<T> Never! {
     count_by: if condition != "" && query.__take == None -> {
         source: query.copy()
         filter_condition: condition.copy()
@@ -1293,7 +1293,7 @@ priv __query_filter: fn<T>(query: Query<T>, condition: String, values: [String],
 }
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
-priv __query_sort_by: fn<T>(query: Query<T>, key: &&fn(T) -> String) -> Query<T> Never! {
+priv __query_sort_by: fn<T>(query: Query<T>, key: ^^fn(T) -> String) -> Query<T> Never! {
     query_make<T>(query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         limits: query.__limits.copy()
@@ -1376,7 +1376,7 @@ priv query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) ->
     order
 }
 
-priv __query_map: fn<T, U>(query: Query<T>, mapper: &&fn(T) -> U) -> Query<U> Never! {
+priv __query_map: fn<T, U>(query: Query<T>, mapper: ^^fn(T) -> U) -> Query<U> Never! {
     query_make<U>(query_steps(query.__steps, "map"), true, query.__limits.copy(), fn() {
         rows: query_rows<T>(query) ?? return Err(err)
         out := [U]{}
@@ -1389,7 +1389,7 @@ priv __query_map: fn<T, U>(query: Query<T>, mapper: &&fn(T) -> U) -> Query<U> Ne
 }
 
 // The first minimum or maximum key in row order; an empty query has none.
-priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, maximum: Bool) -> Query<V> Never! {
+priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
     step: if maximum -> "max" else -> "min"
     operation: "query.{step}"
     query_make<V>(query_steps(query.__steps, step), true, query.__limits.copy(), fn() {
@@ -1409,15 +1409,15 @@ priv query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, max
     })
 }
 
-priv __query_min: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! {
+priv __query_min: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
     query_extreme<T, V>(query, key, false)
 }
 
-priv __query_max: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! {
+priv __query_max: fn<T, V: Comparable>(query: Query<T>, key: ^^fn(T) -> V) -> Query<V> Never! {
     query_extreme<T, V>(query, key, true)
 }
 
-priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
+priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
     query_make<DataJoin<T, U>>(query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
         left_rows: query_rows<T>(left) ?? return Err(err)
         right_rows: query_rows<U>(right) ?? return Err(err)
@@ -1427,7 +1427,7 @@ priv __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&f
     })
 }
 
-priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
+priv __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^^fn(T) -> String, right_key: ^^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
     query_make<DataJoin<T, U?>>(query_steps(left.__steps, "left_join"), true, left.__limits.copy(), fn() {
         left_rows: query_rows<T>(left) ?? return Err(err)
         right_rows: query_rows<U>(right) ?? return Err(err)
@@ -1448,7 +1448,7 @@ priv query_join_keys: fn<T>(rows: [T], key: fn(T) -> String, side: String, api: 
     Ok(keys)
 }
 
-priv __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
+priv __query_group_by: fn<T, K>(query: Query<T>, key: ^^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
     DataGroupedQuery<T, K>{
         __query: query,
         __key: Shared{QueryKeyCell<T, K>{
@@ -1481,7 +1481,7 @@ priv group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never
     -1 - low
 }
 
-priv group_add: fn<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
+priv group_add: fn<K>(keys: ^[K], order: ^[Int], found: Int, key: K) Never! {
     order.insert(-1 - found, keys.len())
     keys.push(key.copy())
 }
@@ -1521,7 +1521,7 @@ priv __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Que
 
 // Group sums keep the value callback's numeric type; each numeric domain
 // supplies its own addition to the shared reducer.
-priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> V, add: &&fn(V, V) -> V) -> Query<Group<K, V>> Never! {
+priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> V, add: ^^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
     query_make<Group<K, V>>(group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
@@ -1555,51 +1555,51 @@ priv __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value
     })
 }
 
-priv __group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Int) -> Query<Group<K, Int>> Never! {
+priv __group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Int) -> Query<Group<K, Int>> Never! {
     __group_sum<T, K, Int>(grouped, value, fn(left: Int, right: Int) { left + right })
 }
 
-priv __group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+priv __group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     __group_sum<T, K, Float>(grouped, value, fn(left: Float, right: Float) { left + right })
 }
 
-priv __group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> F32) -> Query<Group<K, F32>> Never! {
+priv __group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> F32) -> Query<Group<K, F32>> Never! {
     __group_sum<T, K, F32>(grouped, value, fn(left: F32, right: F32) { left + right })
 }
 
-priv __group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I8) -> Query<Group<K, I8>> Never! {
+priv __group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I8) -> Query<Group<K, I8>> Never! {
     __group_sum<T, K, I8>(grouped, value, fn(left: I8, right: I8) { left + right })
 }
 
-priv __group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I16) -> Query<Group<K, I16>> Never! {
+priv __group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I16) -> Query<Group<K, I16>> Never! {
     __group_sum<T, K, I16>(grouped, value, fn(left: I16, right: I16) { left + right })
 }
 
-priv __group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I32) -> Query<Group<K, I32>> Never! {
+priv __group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I32) -> Query<Group<K, I32>> Never! {
     __group_sum<T, K, I32>(grouped, value, fn(left: I32, right: I32) { left + right })
 }
 
-priv __group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I64) -> Query<Group<K, I64>> Never! {
+priv __group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> I64) -> Query<Group<K, I64>> Never! {
     __group_sum<T, K, I64>(grouped, value, fn(left: I64, right: I64) { left + right })
 }
 
-priv __group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U8) -> Query<Group<K, U8>> Never! {
+priv __group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U8) -> Query<Group<K, U8>> Never! {
     __group_sum<T, K, U8>(grouped, value, fn(left: U8, right: U8) { left + right })
 }
 
-priv __group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U16) -> Query<Group<K, U16>> Never! {
+priv __group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U16) -> Query<Group<K, U16>> Never! {
     __group_sum<T, K, U16>(grouped, value, fn(left: U16, right: U16) { left + right })
 }
 
-priv __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U32) -> Query<Group<K, U32>> Never! {
+priv __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U32) -> Query<Group<K, U32>> Never! {
     __group_sum<T, K, U32>(grouped, value, fn(left: U32, right: U32) { left + right })
 }
 
-priv __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U64) -> Query<Group<K, U64>> Never! {
+priv __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> U64) -> Query<Group<K, U64>> Never! {
     __group_sum<T, K, U64>(grouped, value, fn(left: U64, right: U64) { left + right })
 }
 
-priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+priv __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     query_make<Group<K, Float>>(group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), fn() {
         rows: query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
@@ -1914,7 +1914,7 @@ data_limits_check: fn(limits: DataLimits) DataError! {
 // once `core.files.data.read` reads it) or the offline/value last-good bytes;
 // it parses by format, decodes to `T`, and commits as the new last-good
 // snapshot. Any failure is recorded in the loader status before it returns.
-snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
+snapshot: fn<T: [Encode, Decode]>(loader: ^DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.canceled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before snapshot")))
     }
@@ -2629,7 +2629,7 @@ compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: Stri
     Ok(normalize_zero(result))
 }
 
-sort_pivot_cells: fn(cells: &[DataPivotCell]) Never! {
+sort_pivot_cells: fn(cells: ^[DataPivotCell]) Never! {
     loop i in 1..<cells.len() {
         j := i
         loop j > 0 {
@@ -2727,7 +2727,7 @@ priv quantile_select: module {
     // medians of five). Callers pass finite values, where `<` is a total order up
     // to -0.0 and 0.0, which the callers normalize. On return every value after
     // `rank` in the range is at or above the answer.
-    select_rank: fn(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
+    select_rank: fn(values: ^[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
         start := lo
         end := hi
         loop {
@@ -2759,7 +2759,7 @@ priv quantile_select: module {
 
     // Gathers the median of each group of five at the front of the range and
     // selects the median of those medians.
-    median_of_medians: fn(values: &[Float], lo: Int, hi: Int) -> Float Never! {
+    median_of_medians: fn(values: ^[Float], lo: Int, hi: Int) -> Float Never! {
         count := 0
         start := lo
         loop start < hi {
@@ -2777,7 +2777,7 @@ priv quantile_select: module {
     }
 
     // Insertion sort of a range of at most five values.
-    sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
+    sort_float_range: fn(values: ^[Float], lo: Int, hi: Int) Never! {
         loop i in lo + 1..<hi {
             j := i
             loop j > lo {
@@ -2844,7 +2844,7 @@ priv rank_order: module {
     // Selects over order[lo..<hi]. On return the indices before `rank` in the
     // range name values that are not after the answer, and the indices after it
     // name values that are not before it (the partition law).
-    rank_select_range: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+    rank_select_range: fn<T, E>(values: View<T>, order: ^[Int], lo: Int, hi: Int, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
         start := lo
         end := hi
         loop {
@@ -2884,7 +2884,7 @@ priv rank_order: module {
 
     // Gathers the median of each group of five at the front of the range and
     // answers the input index of the median of those medians.
-    rank_pivot: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+    rank_pivot: fn<T, E>(values: View<T>, order: ^[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) -> Int E! {
         count := 0
         start := lo
         loop start < hi {
@@ -2902,7 +2902,7 @@ priv rank_order: module {
     }
 
     // Insertion sort of at most five indices by their values.
-    rank_sort_small: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) E! {
+    rank_sort_small: fn<T, E>(values: View<T>, order: ^[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) E! {
         loop i in lo + 1..<hi {
             j := i
             loop j > lo {
@@ -2925,12 +2925,12 @@ priv rank_order: module {
         out
     }
 
-    rank_test_before: fn(a: Int, b: Int, calls: &Int) -> Bool Never! {
+    rank_test_before: fn(a: Int, b: Int, calls: ^Int) -> Bool Never! {
         calls += 1
         a < b
     }
 
-    rank_test_refusing: fn(a: Int, b: Int, calls: &Int, stop: Int) -> Bool DataError! {
+    rank_test_refusing: fn(a: Int, b: Int, calls: ^Int, stop: Int) -> Bool DataError! {
         calls += 1
         if calls == stop {
             return Err(data_error(DataErrorKind.InvalidArgument, "comparison {stop} refused", "rank_select"))
@@ -3348,11 +3348,11 @@ upper: fn(text: String) -> String Never! {
 
 // Native `jet_data_loader_canonical_tree` sorts object keys by UTF-8 lexical
 // order, but keeps Debug float spelling and exact Number text.
-data_loader_put_text: fn(out: &[U8], text: String) Never! {
+data_loader_put_text: fn(out: ^[U8], text: String) Never! {
     loop index in 0..<text.count_bytes() -> out.push(encoding_stream.byte_at(text, index))
 }
 
-data_loader_put_control: fn(out: &[U8], value: Int) Never! {
+data_loader_put_control: fn(out: ^[U8], value: Int) Never! {
     out.push(U8{92})
     out.push(U8{117})
     out.push(U8{48})
@@ -3362,7 +3362,7 @@ data_loader_put_control: fn(out: &[U8], value: Int) Never! {
     out.push(encoding_stream.byte_at(hex, value & 15))
 }
 
-data_loader_quote: fn(out: &[U8], text: String) Never! {
+data_loader_quote: fn(out: ^[U8], text: String) Never! {
     out.push(U8{34})
     index := 0
     loop index < text.count_bytes() {
@@ -3384,7 +3384,7 @@ data_loader_quote: fn(out: &[U8], text: String) Never! {
     out.push(U8{34})
 }
 
-data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
+data_loader_render: fn(out: ^[U8], tree: encoding.Dyn) Never! {
     #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
         if tree == .Number(text) {
             data_loader_put_text(out, text)
@@ -3480,7 +3480,7 @@ data_loader_public_text_error: fn(label: String) -> DataError Never! {
 
 // `fail`: the loader status records the failure; a non-value loader releases
 // its pending payload.
-data_loader_fail: fn<T>(loader: &DataLoader<T>, error: DataError) -> DataError Never! {
+data_loader_fail: fn<T>(loader: ^DataLoader<T>, error: DataError) -> DataError Never! {
     cleanup := "payload-released"
     if loader.source.kind == DataLoaderKind.Value -> cleanup = "retained" else {
         loader.payload = None
@@ -3531,7 +3531,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
 // last-good snapshot keeps it and reads nothing; a failed read is recorded in
 // the loader status. `read` only reads, so a program reaches `FS.Read`
 // through it and no other FS capability.
-priv __read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) -[FS.Read]> DataError! {
+priv __read_file: fn<T>(loader: ^DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) -[FS.Read]> DataError! {
     if loader.canceled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before read")))
     }
@@ -3743,7 +3743,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     DataSchema{identity: identity, format: format, columns: columns, projection: None}
 }
 
-data_schema_absorb: fn(fields: &[{name: String, type_name: String, nullable: Bool}], name: String, value: Dyn, nullable: Bool) Never! {
+data_schema_absorb: fn(fields: ^[{name: String, type_name: String, nullable: Bool}], name: String, value: Dyn, nullable: Bool) Never! {
     current: data_schema_value_type(value)
     loop index in 0..<fields.len() {
         if fields[index].name == name {

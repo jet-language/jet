@@ -42,19 +42,19 @@ store_output_digest_key: fn(path: String, hangar_root: String?, allow_semantic_x
 
 store_file_digest_key: fn(path: String) -> String Never! { "file\n{path}" }
 
-store_note_verified_digest_miss: fn(verification: &StoreVerification, path: String) Never! {
+store_note_verified_digest_miss: fn(verification: ^StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.verified_digest_hash_counts[path] = (permit.value.verified_digest_hash_counts.get(path) ?? 0) + 1
 }
 
-store_reset_verified_digest_hash_count: fn(verification: &StoreVerification, path: String) Never! {
+store_reset_verified_digest_hash_count: fn(verification: ^StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.verified_digest_hash_counts.remove(path).drop("a path may have no recorded digest misses")
 }
 
-store_verified_digest_hash_count: fn(verification: &StoreVerification, path: String) -> Int Never! {
+store_verified_digest_hash_count: fn(verification: ^StoreVerification, path: String) -> Int Never! {
     state: verification.state
     permit: state.guard_read()
     permit.value.verified_digest_hash_counts.get(path) ?? 0
@@ -66,11 +66,11 @@ VerificationStatus: struct {
     reseal_needed: Bool,
 }
 
-store_try_entry_output_hash: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env]> String StoreError! {
+store_try_entry_output_hash: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env]> String StoreError! {
     store_try_entry_output_hash_with_options(verification, roots, entry, false)
 }
 
-store_try_entry_output_hash_with_options: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, force_full: Bool) -[FS, Env]> String StoreError! {
+store_try_entry_output_hash_with_options: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, force_full: Bool) -[FS, Env]> String StoreError! {
     hangar: roots.hangar_dir()
     canonical_hangar: files.canonicalize(hangar) ?? hangar
     hangar_root: if store_path_starts_with(entry.out, hangar) || store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
@@ -87,7 +87,7 @@ store_try_entry_output_hash_with_options: fn(verification: &StoreVerification, r
 }
 
 // Memoized canonical output digest for staging and compatibility helpers.
-store_verified_output_hash: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
+store_verified_output_hash: fn(verification: ^StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
     stamp: store_object_stamp(files.stat(path))
     key: store_output_digest_key(path, store_normalize_memo_root(hangar_root), allow_semantic_xattrs)
     memo: store_verified_digest_get(verification, key)
@@ -104,18 +104,18 @@ store_verified_output_hash: fn(verification: &StoreVerification, path: String, h
 // Verify a Hangar output through its sealed stat manifest. A missing,
 // malformed, or drifting seal takes the full canonical hash path and writes
 // a fresh seal only when that hash agrees with the canonical object name.
-store_verified_output_hash_persistent: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
+store_verified_output_hash_persistent: fn(verification: ^StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
     Ok(store_verified_output_hash_persistent_with_status(verification, path, hangar_root, allow_semantic_xattrs, false).digest)
 }
 
 // Full cryptographic verification for `jetpack hangar verify`: bypasses the
 // seal and the memo, then refreshes the seal after a clean hash.
-store_full_verified_output_hash: fn(verification: &StoreVerification, path: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
+store_full_verified_output_hash: fn(verification: ^StoreVerification, path: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
     Ok(store_verified_output_hash_persistent_with_status(verification, path, Val(hangar_root), allow_semantic_xattrs, true).digest)
 }
 
 // Doctor's read-only form of the seal decision: never mutates the Hangar.
-store_read_only_output_hash: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
+store_read_only_output_hash: fn(verification: ^StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> String StoreError! {
     if hangar_root == .Val(root) && store_check_seal(verification, path, root) == .Val(digest) {
         return Ok(digest)
     }
@@ -127,11 +127,11 @@ VerifiedOutputHash: struct {
     status: VerificationStatus,
 }
 
-store_verified_output_hash_persistent_with_status: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, force_full: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
+store_verified_output_hash_persistent_with_status: fn(verification: ^StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, force_full: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
     store_verified_output_hash_with_options(verification, path, hangar_root, allow_semantic_xattrs, force_full, true)
 }
 
-store_verified_output_hash_with_options: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, force_full: Bool, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
+store_verified_output_hash_with_options: fn(verification: ^StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, force_full: Bool, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
     if !force_full && hangar_root == .Val(root) && store_check_seal(verification, path, root) == .Val(digest) {
         return Ok(VerifiedOutputHash{digest: digest, status: VerificationStatus{reused: true, resealed: false, reseal_needed: false}})
     }
@@ -158,7 +158,7 @@ store_hash_output_content: fn(path: String, hangar_root: String?, allow_semantic
 }
 
 // Memoized `sha256-<hex>` of one regular file.
-store_verified_file_hash: fn(verification: &StoreVerification, path: String) -[FS]> String StoreError! {
+store_verified_file_hash: fn(verification: ^StoreVerification, path: String) -[FS]> String StoreError! {
     stamp: store_object_stamp(files.stat(path))
     key: store_file_digest_key(path)
     memo: store_verified_digest_get(verification, key)
@@ -172,13 +172,13 @@ store_verified_file_hash: fn(verification: &StoreVerification, path: String) -[F
     Ok(digest)
 }
 
-store_refresh_verified_digest: fn(verification: &StoreVerification, path: String, hangar_root: String, allow_semantic_xattrs: Bool, digest: String) -[FS, Env]> StoreError! {
+store_refresh_verified_digest: fn(verification: ^StoreVerification, path: String, hangar_root: String, allow_semantic_xattrs: Bool, digest: String) -[FS, Env]> StoreError! {
     stamp: store_object_stamp(files.stat(path))
     key: store_output_digest_key(path, store_normalize_memo_root(Val(hangar_root)), allow_semantic_xattrs)
     store_verified_digest_put(verification, key, VerifiedDigestMemo{path: path, stamp: stamp, digest: digest})
 }
 
-store_invalidate_verified_digest: fn(verification: &StoreVerification, path: String) Never! {
+store_invalidate_verified_digest: fn(verification: ^StoreVerification, path: String) Never! {
     state: verification.state
     permit := state.guard_edit()
     stale := [String]{}
@@ -190,20 +190,20 @@ store_invalidate_verified_digest: fn(verification: &StoreVerification, path: Str
     }
 }
 
-store_verified_digest_get: fn(verification: &StoreVerification, key: String) -> VerifiedDigestMemo? Never! {
+store_verified_digest_get: fn(verification: ^StoreVerification, key: String) -> VerifiedDigestMemo? Never! {
     state: verification.state
     permit: state.guard_read()
     permit.value.verified_digests.get(key)
 }
 
-store_verified_digest_put: fn(verification: &StoreVerification, key: String, memo: VerifiedDigestMemo) Never! {
+store_verified_digest_put: fn(verification: ^StoreVerification, key: String, memo: VerifiedDigestMemo) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.verified_digests[key] = memo
 }
 
 // Remember the canonical digest a producer just took of the tree at `path`.
-store_remember_output_digest: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, digest: String) -[FS, Env]> StoreError! {
+store_remember_output_digest: fn(verification: ^StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, digest: String) -[FS, Env]> StoreError! {
     stamp: store_object_stamp(files.stat(path))
     key: store_output_digest_key(path, store_normalize_memo_root(hangar_root), allow_semantic_xattrs)
     store_verified_digest_put(verification, key, VerifiedDigestMemo{path: path, stamp: stamp, digest: digest})
@@ -213,7 +213,7 @@ store_remember_output_digest: fn(verification: &StoreVerification, path: String,
 // keeps its stamp, so a memo for `source` holds for `destination` under the
 // Hangar root. A digest taken without a Hangar root admits no CAS peers, so
 // it implies the Hangar-rooted one.
-store_carry_verified_digest: fn(verification: &StoreVerification, source: String, destination: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> StoreError! {
+store_carry_verified_digest: fn(verification: ^StoreVerification, source: String, destination: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> StoreError! {
     stamp: store_object_stamp(files.stat(destination))
     root: store_normalize_memo_root(Val(hangar_root))
     keys: [String]{store_output_digest_key(source, None, allow_semantic_xattrs), store_output_digest_key(source, root, allow_semantic_xattrs)}
@@ -233,14 +233,14 @@ store_content_digest_key: fn(stamp: DigestStamp) -> String Never! {
 }
 
 // Remember the content SHA-256 hex a producer took from a file's bytes.
-store_remember_content_digest: fn(verification: &StoreVerification, path: String, digest_hex: String) -[FS]> StoreError! {
+store_remember_content_digest: fn(verification: ^StoreVerification, path: String, digest_hex: String) -[FS]> StoreError! {
     stamp: store_object_stamp(files.stat(path))
     store_verified_digest_put(verification, store_content_digest_key(stamp), VerifiedDigestMemo{path: path, stamp: stamp, digest: digest_hex})
 }
 
 // The content SHA-256 hex of each file. Remembered digests are reused; the
 // rest are hashed on worker tasks at once.
-store_content_digests: fn(verification: &StoreVerification, paths: [String], infos: [files.Stat]) -[FS, Env]> [String] StoreError! {
+store_content_digests: fn(verification: ^StoreVerification, paths: [String], infos: [files.Stat]) -[FS, Env]> [String] StoreError! {
     digests := [String]{}
     missing := [String]{}
     sizes := [Int]{}
@@ -380,7 +380,7 @@ MovePathPermissions: struct {
     // Rust `Default`: nothing made writable yet.
     default: fn() -> MovePathPermissions Never! { MovePathPermissions{original: [MovedPathMode]{}} }
 
-    make_writable: fn(&self, path: String, root: String) -[FS]> StoreError! {
+    make_writable: fn(^self, path: String, root: String) -[FS]> StoreError! {
         if !store_path_starts_with(path, root) {
             return Err(StoreError.Other("quarantine path escapes Hangar root"))
         }
@@ -407,7 +407,7 @@ MovePathPermissions: struct {
         Err(StoreError.Other("quarantine path has no Hangar parent"))
     }
 
-    renamed: fn(&self, from: String, to: String) Never! {
+    renamed: fn(^self, from: String, to: String) Never! {
         loop index in 0..<self.original.len() {
             path: self.original[index].path
             suffix: store_path_strip_prefix(path, from) ?? next
@@ -415,7 +415,7 @@ MovePathPermissions: struct {
         }
     }
 
-    restore: fn(&self) -[FS]> StoreError! {
+    restore: fn(^self) -[FS]> StoreError! {
         first_error := StoreError?{None}
         index := self.original.len() - 1
         loop index >= 0 {
@@ -443,7 +443,7 @@ STORE_QUARANTINE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 // Remove an invalid local cache candidate so provider realization cannot
 // mistake the same tampered directory for a fresh hit. Never removes external
 // outputs such as `/nix/store`; their provider must realize them again.
-store_quarantine_invalid_entry: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) -[IO, FS, Env, Time]> StoreError! {
+store_quarantine_invalid_entry: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation) -[IO, FS, Env, Time]> StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     expected_id: store_expected_entry_id(entry)
     if entry.id != expected_id || !store_is_single_component(entry.id) {
@@ -499,7 +499,7 @@ store_quarantine_invalid_entry: fn(verification: &StoreVerification, roots: Hang
     if restore_failure == .Val(restore) -> return Err(restore)
 }
 
-store_quarantine_move: fn(verification: &StoreVerification, roots: HangarRoots, current: StoreEntry, expectation: CacheExpectation, quarantine_output: Bool, permissions: &MovePathPermissions) -[FS, Env, Time]> StoreError! {
+store_quarantine_move: fn(verification: ^StoreVerification, roots: HangarRoots, current: StoreEntry, expectation: CacheExpectation, quarantine_output: Bool, permissions: ^MovePathPermissions) -[FS, Env, Time]> StoreError! {
     hangar: roots.hangar_dir()
     permissions.make_writable(hangar, hangar)
     quarantine: files.join(hangar, "quarantine")
@@ -668,18 +668,18 @@ store_require_real_directory: fn(path: String, label: String) -[FS]> StoreError!
 // Atomic staged ingest: no-follow copy, path-law and canonical digest,
 // fsync/rename into `hangar/objects/<digest>/`, package record, referrers.
 // The same primary digest reuses the object (path-independent dedupe).
-store_ingest_tree: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest) -[FS, Env, Time]> IngestedObject IngestError! {
+store_ingest_tree: fn(verification: ^StoreVerification, roots: HangarRoots, request: IngestRequest) -[FS, Env, Time]> IngestedObject IngestError! {
     store_ingest_tree_observed(verification, roots, request, None)
 }
 
 // `store_ingest_tree` with a hook run after each copied child source path
 // (Rust's test-only `with_after_child_copy_hook`, made an explicit argument).
-store_ingest_tree_observed: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
+store_ingest_tree_observed: fn(verification: ^StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_ingest_tree_unlocked(verification, roots, request, after_child_copy)
 }
 
-store_ingest_tree_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
+store_ingest_tree_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, request: IngestRequest, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     if !request.outputs.has_key("out") {
         return Err(IngestError.Invalid("ingest requires a named output `out`"))
     }
@@ -738,7 +738,7 @@ store_ingest_scrub_failed_stage: fn(hangar: String, stage: String, stamp: String
     }
 }
 
-store_ingest_stage_and_commit: fn(verification: &StoreVerification, roots: HangarRoots, request: IngestRequest, output_names: [String], stage: String, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
+store_ingest_stage_and_commit: fn(verification: ^StoreVerification, roots: HangarRoots, request: IngestRequest, output_names: [String], stage: String, after_child_copy: (fn(String) -[FS]>)?) -[FS, Env, Time]> IngestedObject IngestError! {
     hangar: roots.hangar_dir()
     named_digests := [String:String]{}
     staged_outs := [String:String]{}

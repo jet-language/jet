@@ -33,7 +33,7 @@ parser_authority_effect_path: fn(expr: Expr) -> String? {
 // `Net("api.example.com")`) or, under the `!` prefix, a bounded memory
 // denial `Mem.Alloc(above: N)` or `Mem.Stack(above: N)`. A malformed entry is
 // reported here and gives None.
-parser_authority_effect_entry: fn(state: &JetParserState, marker: Marker, expr: Expr, prefix: String) -> String? {
+parser_authority_effect_entry: fn(state: ^JetParserState, marker: Marker, expr: Expr, prefix: String) -> String? {
     if parser_authority_effect_path(expr) == .Val(path) {
         name: parser_authority_effect_unprefixed(path)
         if name == "Mem.Stack" {
@@ -64,7 +64,7 @@ parser_authority_effect_entry: fn(state: &JetParserState, marker: Marker, expr: 
 // The entry `base(args)`: `base` with one plain string scope, or a bounded
 // memory denial when `base` is `Mem.Alloc` or `Mem.Stack`. A bad scope is
 // reported at its argument, as the row parser reports it.
-parser_authority_scoped_entry: fn(state: &JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
+parser_authority_scoped_entry: fn(state: ^JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
     if parser_memory_bounded(base) {
         return parser_authority_memory_denial(state, base, args, span, prefix)
     }
@@ -94,7 +94,7 @@ parser_authority_scoped_entry: fn(state: &JetParserState, base: String, args: [C
     Val(effect_scope_name(base, scope))
 }
 
-parser_authority_effect_unprefixed: fn(path: &&String) -> String {
+parser_authority_effect_unprefixed: fn(path: ^^String) -> String {
     if path.starts_with("Effect.") -> return path.slice(7, path.len())
     path
 }
@@ -102,7 +102,7 @@ parser_authority_effect_unprefixed: fn(path: &&String) -> String {
 // `Mem.Alloc(above: N)` or `Mem.Stack(above: N)`, a bounded memory denial, as
 // the row parser reads it: one `above:` argument, a positive integer byte
 // ceiling, and only under the `!` prefix.
-parser_authority_memory_denial: fn(state: &JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
+parser_authority_memory_denial: fn(state: ^JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
     labeled := false
     if args.len() == 1 && !args[0].spread && args[0].label == .Val(label) {
         labeled = label.name == "above"
@@ -135,7 +135,7 @@ parser_authority_path_span: fn(expr: Expr) -> Span {
     expr_span(expr)
 }
 
-parser_authority_scope_stmt: fn(state: &JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
+parser_authority_scope_stmt: fn(state: ^JetParserState, marker: Marker, args: [CallArg], body: [Stmt], span: Span) -> Stmt? {
     caps := [NamedSpan]{}
     loop argument in args {
         name: parser_authority_effect_entry(state, marker, argument.expr, "") ?? return None

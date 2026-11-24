@@ -161,7 +161,7 @@ env_process_error: fn(name: String, error: EnvError) -> IOError Never! {
     )
 }
 
-remove_process_entries: fn(entries: &[{name: [U8], value: [U8]}], name: [U8]) Never! {
+remove_process_entries: fn(entries: ^[{name: [U8], value: [U8]}], name: [U8]) Never! {
     loop {
         if !remove_entry(entries, name) {
             return
@@ -194,14 +194,14 @@ read_entry: fn(entries: [{name: [U8], value: [U8]}], key: [U8]) -> String? Never
     Val(String.from_bytes(entries[index].value) ?? return None)
 }
 
-remove_entry: fn(entries: &[{name: [U8], value: [U8]}], key: [U8]) -> Bool Never! {
+remove_entry: fn(entries: ^[{name: [U8], value: [U8]}], key: [U8]) -> Bool Never! {
     index: entry_index(entries, key)
     if index < 0 -> return false
     _: entries.remove(index, .Slot)
     true
 }
 
-replace_entry: fn(entries: &[{name: [U8], value: [U8]}], key: [U8], value: [U8]) Never! {
+replace_entry: fn(entries: ^[{name: [U8], value: [U8]}], key: [U8], value: [U8]) Never! {
     _: remove_entry(entries, key)
     entries.push({name: key, value: value})
 }
@@ -599,7 +599,7 @@ EnvScope: struct {
 /// bad := EnvLine{raw: "1X=y".bytes(), at: 0}
 /// env_line(bad, scope) != None // => true
 /// ```
-env_line: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
+env_line: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
     loop {
         env_blanks(line)
         if line.at >= line.raw.len() || line.raw[line.at] == (U8{35}) -> return None
@@ -622,7 +622,7 @@ env_line: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
 /// command := EnvLine{raw: "A=1 echo".bytes(), at: 0}
 /// env_command(command, scope) != None // => true
 /// ```
-env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
+env_command: fn(line: ^EnvLine, scope: ^EnvScope) -> String? Never! {
     keyword: env_keyword(line)
     later := [{name: String, value: String?}]{}
     count := 0
@@ -687,7 +687,7 @@ env_command: fn(line: &EnvLine, scope: &EnvScope) -> String? Never! {
 /// assignment := EnvLine{raw: "export=1".bytes(), at: 0}
 /// env_keyword(assignment) == "" && assignment.at == 0 // => true
 /// ```
-env_keyword: fn(line: &EnvLine) -> String Never! {
+env_keyword: fn(line: ^EnvLine) -> String Never! {
     loop keyword in ([String]{"export", "readonly"}) {
         end: line.at + keyword.len()
         if end > line.raw.len() || slice_ascii(line.raw, line.at, end) != keyword -> next
@@ -706,7 +706,7 @@ env_keyword: fn(line: &EnvLine) -> String Never! {
 /// env_assign(scope, "A", "1") == None && scope.assigned.get("A") == Val("1") // => true
 /// env_assign(scope, "R", "1") == Val("R: readonly variable") // => true
 /// ```
-env_assign: fn(scope: &EnvScope, name: String, value: String) -> String? Never! {
+env_assign: fn(scope: ^EnvScope, name: String, value: String) -> String? Never! {
     if scope.readonly.contains(name) -> return Val("{name}: readonly variable")
     scope.assigned[name] = value
     None
@@ -727,7 +727,7 @@ env_assign: fn(scope: &EnvScope, name: String, value: String) -> String? Never! 
 /// joined := [U8]{}
 /// env_word(paths, scope, joined, true, false) == None && String.from_bytes_lossy(joined) == "/h/a:/h/b" && paths.at == 7 // => true
 /// ```
-env_word: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+env_word: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: Bool) -> String? Never! {
     first: line.at
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
@@ -785,7 +785,7 @@ env_word: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: B
 /// user := EnvLine{raw: "~ada/x".bytes(), at: 0}
 /// env_tilde(user, scope, out, true, false) != None // => true
 /// ```
-env_tilde: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: Bool) -> String? Never! {
+env_tilde: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool, braced: Bool) -> String? Never! {
     line.at += 1
     if line.at < line.raw.len() {
         c: line.raw[line.at]
@@ -811,7 +811,7 @@ env_tilde: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool, braced: 
 /// open := EnvLine{raw: "no end".bytes(), at: 0}
 /// env_double(open, scope, out, true) != None // => true
 /// ```
-env_double: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+env_double: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
     loop line.at < line.raw.len() {
         c: line.raw[line.at]
         if c == (U8{34}) {
@@ -847,7 +847,7 @@ env_double: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
 /// command := EnvLine{raw: "$(date)".bytes(), at: 0}
 /// env_dollar(command, scope, out, true) != None // => true
 /// ```
-env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+env_dollar: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
     after: if line.at + 1 < line.raw.len() -> line.raw[line.at + 1] else -> U8{32}
     if after == (U8{123}) {
         line.at += 2
@@ -893,7 +893,7 @@ env_dollar: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
 /// required := EnvLine{raw: "MISSING?is required}}".bytes(), at: 0}
 /// env_braced(required, scope, out, true) == Val("MISSING: is required") // => true
 /// ```
-env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> String? Never! {
+env_braced: fn(line: ^EnvLine, scope: ^EnvScope, out: ^[U8], live: Bool) -> String? Never! {
     forms: "only `${{NAME}}` and `${{NAME` with `:-`, `-`, `:=`, `=`, `:+`, `+`, `:?` or `?` and a word expand here"
     start: line.at
     argument: line.at < line.raw.len() && env_digit(line.raw[line.at])
@@ -950,7 +950,7 @@ env_braced: fn(line: &EnvLine, scope: &EnvScope, out: &[U8], live: Bool) -> Stri
 /// scope := EnvScope{vars: [String: String]{"A": "env", "B": "env"}, assigned: [String: String]{"A": "file"}, readonly: [String]{}}
 /// env_lookup("A", scope) == Val("file") && env_lookup("B", scope) == Val("env") && env_lookup("C", scope) == None // => true
 /// ```
-env_lookup: fn(name: String, scope: &EnvScope) -> String? Never! {
+env_lookup: fn(name: String, scope: ^EnvScope) -> String? Never! {
     if scope.assigned.get(name) == .Val(value) -> return Val(value.copy())
     if scope.vars.get(name) == .Val(value) -> return Val(value.copy())
     None
@@ -963,7 +963,7 @@ env_lookup: fn(name: String, scope: &EnvScope) -> String? Never! {
 /// env_blanks(line)
 /// line.at // => 3
 /// ```
-env_blanks: fn(line: &EnvLine) Never! {
+env_blanks: fn(line: ^EnvLine) Never! {
     loop line.at < line.raw.len() && env_blank(line.raw[line.at]) -> line.at += 1
 }
 
@@ -1517,7 +1517,7 @@ Fd: struct {
     priv token: Int,
 
     impl Close {
-        close: fn(&&self) { sys_rt.fd_close(self.token) }
+        close: fn(^^self) { sys_rt.fd_close(self.token) }
     }
 
     // At most `max` bytes, 1 B to 16 MiB, from byte `offset` of the file
@@ -1616,13 +1616,13 @@ SharedMemory: struct {
     priv size: Int,
 
     impl Close {
-        close: fn(&&self) { sys_rt.fd_close(self.token) }
+        close: fn(^^self) { sys_rt.fd_close(self.token) }
     }
 
     len: fn(self) -> Int { self.size }
 
     // Copies `bytes` in at byte `offset`.
-    write: fn(&self, offset: Int(0..1073741824), bytes: [U8]) -[Env]> IOError! {
+    write: fn(^self, offset: Int(0..1073741824), bytes: [U8]) -[Env]> IOError! {
         count: Int(0..1073741824).from_int(bytes.len()) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         if !shared_range_valid(self, offset, count) {
             return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
@@ -1645,7 +1645,7 @@ SharedMemory: struct {
     // the conversion happens in place, so presenting a frame allocates
     // nothing and costs only its damage. An image side is at most 16384
     // pixels, so its stride is at most 65536 bytes.
-    write_pixels: fn(&self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) -[Env]> IOError! {
+    write_pixels: fn(^self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) -[Env]> IOError! {
         row: Int{stride}
         if row %% 4 != 0 {
             return Err(syscall_input(.Write, None, "an RGBA row is a whole number of 4-byte pixels"))
@@ -1667,7 +1667,7 @@ SharedMemory: struct {
 
     // Stores `count` little-endian copies of the 32-bit `value` from byte
     // `offset`: a solid run of pixels.
-    fill_u32: fn(&self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) -[Env]> IOError! {
+    fill_u32: fn(^self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) -[Env]> IOError! {
         bytes: Int(0..1073741824).from_int(wrapping(count * 4)) ?? return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
         if !shared_range_valid(self, offset, bytes) {
             return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
@@ -1690,7 +1690,7 @@ SharedMemory: struct {
     }
 
     // Stores `value` atomically into the word at byte `offset`.
-    store: fn(&self, offset: Int(0..1073741816), value: Int) -[Env]> IOError! {
+    store: fn(^self, offset: Int(0..1073741816), value: Int) -[Env]> IOError! {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         }
@@ -1702,7 +1702,7 @@ SharedMemory: struct {
 
     // Atomically replaces the word at byte `offset` with `replacement` if it
     // holds `expected`; whether it did.
-    compare_exchange: fn(&self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
+    compare_exchange: fn(^self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
         if !shared_word_valid(self, offset) {
             return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         }
@@ -2549,7 +2549,7 @@ config_allowed: fn(name: String, allow: [String]) -> Bool Never! {
     false
 }
 
-config_put: fn(values: &[ConfigValue], name: String, value: String) Never! {
+config_put: fn(values: ^[ConfigValue], name: String, value: String) Never! {
     folded: ascii_upper(name)
     loop index in 0..<values.len() {
         if values[index].folded == folded {
@@ -2652,7 +2652,7 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [{
     Ok(out)
 }
 
-config_insert: fn(tree: &&ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
+config_insert: fn(tree: ^^ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
     owned: tree.move()
     if owned.move() == {
         .Object(pairs) -> {
@@ -2680,7 +2680,7 @@ config_insert: fn(tree: &&ConfigTree, segments: [String], at: Int, value: String
     }
 }
 
-config_tree: fn(tree: &&ConfigTree) -> Dyn Never! {
+config_tree: fn(tree: ^^ConfigTree) -> Dyn Never! {
     owned: tree.move()
     if owned.move() == {
         .Text(text) -> Dyn.Text(text)

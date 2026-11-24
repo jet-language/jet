@@ -163,7 +163,7 @@ get: fn(tensor: Tensor, index: [Int]) -> Float ComputeError! {
     Ok(tensor.data[at])
 }
 
-set: fn(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
+set: fn(tensor: ^Tensor, index: [Int], value: Float) ComputeError! {
     if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
     if tensor.numeric_profile == PROFILE_F32 && !f32_exact(value) {
         return Err(ComputeError.Arithmetic)
@@ -489,7 +489,7 @@ priv reference_operands: fn(kernel: String) -> [Tensor] Never! {
     [Tensor]{reference_matrix([1.5, 2.0, 3.0, 4.0]), right}
 }
 
-priv reference_matrix: fn(values: &&[Float]) -> Tensor Never! {
+priv reference_matrix: fn(values: ^^[Float]) -> Tensor Never! {
     Tensor{shape: [Int]{2, 2}, data: values, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
 }
 
@@ -955,7 +955,7 @@ butterfly_f32: fn(cosine: Float, sine: Float, even_real: Float, even_imaginary: 
 
 // In-order iterative radix-2 transform of a power-of-two length; `inverse`
 // turns the twiddles and scales by 1/n.
-radix2: fn(real_in: &&[Float], imaginary_in: &&[Float], inverse: Bool, f32: Bool) -> Spectrum ComputeError! {
+radix2: fn(real_in: ^^[Float], imaginary_in: ^^[Float], inverse: Bool, f32: Bool) -> Spectrum ComputeError! {
     real := real_in
     imaginary := imaginary_in
     n: real.len()
@@ -1113,7 +1113,7 @@ filled: fn(shape: [Int], value: Float, requested: String) -> Tensor ComputeError
 
 // A result tensor of `shape` and `data` with `source`'s placement and no
 // transfer receipt.
-like: fn(source: Tensor, shape: &&[Int], data: &&[Float]) -> Tensor Never! {
+like: fn(source: Tensor, shape: ^^[Int], data: ^^[Float]) -> Tensor Never! {
     Tensor{shape: shape, data: data, device: source.device.copy(), numeric_profile: source.numeric_profile.copy(), requested: source.requested.copy(), reason: source.reason.copy(), transfer: "", node: -1}
 }
 

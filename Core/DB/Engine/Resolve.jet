@@ -45,21 +45,21 @@ nc_new: fn(src: Int, flags: Int) -> cg.NameContext Never! {
 }
 
 // Push a NameContext on the Parse's stack; its index.
-nc_push: fn(p: &cg.Parse, nc: cg.NameContext) -> Int Never! {
+nc_push: fn(p: ^cg.Parse, nc: cg.NameContext) -> Int Never! {
     p.ncs.push(nc.copy())
     p.ncs.len() - 1
 }
 
 // Pop the NameContexts pushed since the stack was `mark` long.
-nc_release: fn(p: &cg.Parse, mark: Int) Never! {
+nc_release: fn(p: ^cg.Parse, mark: Int) Never! {
     loop p.ncs.len() > mark -> _: p.ncs.pop()
 }
 
 nc_has: fn(p: cg.Parse, nc: Int, f: Int) -> Bool Never! { p.ncs[nc].nc_flags & f != 0 }
 
-nc_set: fn(p: &cg.Parse, nc: Int, f: Int) Never! { p.ncs[nc].nc_flags = p.ncs[nc].nc_flags | f }
+nc_set: fn(p: ^cg.Parse, nc: Int, f: Int) Never! { p.ncs[nc].nc_flags = p.ncs[nc].nc_flags | f }
 
-nc_clear: fn(p: &cg.Parse, nc: Int, f: Int) Never! {
+nc_clear: fn(p: ^cg.Parse, nc: Int, f: Int) Never! {
     p.ncs[nc].nc_flags = util.clear_bits(p.ncs[nc].nc_flags, f)
 }
 
@@ -91,7 +91,7 @@ is_rowid: fn(z: [U8]) -> Bool Never! {
 
 // sqlite3ExprFunctionUsable: a function with SQLITE_FUNC_DIRECT, or any
 // function outside a trusted schema, may not be called from the schema.
-expr_function_usable: fn(p: cg.Parse, a: &ast.AST, e: Int, d: conn.FuncDef) Never! {
+expr_function_usable: fn(p: cg.Parse, a: ^ast.AST, e: Int, d: conn.FuncDef) Never! {
     if !ast.has(a, e, ast.EP_FROM_DDL) {
         return
     }
@@ -103,7 +103,7 @@ expr_function_usable: fn(p: cg.Parse, a: &ast.AST, e: Int, d: conn.FuncDef) Neve
 }
 
 // sqlite3SrcItemColumnUsed: mark column `col` of a nested-FROM item used.
-src_item_column_used: fn(a: &ast.AST, si: Int, col: Int) Never! {
+src_item_column_used: fn(a: ^ast.AST, si: Int, col: Int) Never! {
     if !a.items[si].is_nested_from {
         return
     }
@@ -112,7 +112,7 @@ src_item_column_used: fn(a: &ast.AST, si: Int, col: Int) Never! {
 }
 
 // sqlite3SelectWrongNumTermsError.
-select_wrong_num_terms_error: fn(a: &ast.AST, s: Int) Never! {
+select_wrong_num_terms_error: fn(a: ^ast.AST, s: Int) Never! {
     if a.selects[s].sel_flags & ast.SF_VALUES != 0 {
         ast.error(a, "all VALUES must have the same number of terms")
     } else {
@@ -131,7 +131,7 @@ RefSrcWalker: struct {
 
     impl SQLWalker {
         // exprRefToSrcList.
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             op: a.exprs[e].op
             if op != tk.TK_COLUMN && op != tk.TK_AGG_COLUMN -> return ast.WRC_CONTINUE
             cur: a.exprs[e].itable
@@ -148,10 +148,10 @@ RefSrcWalker: struct {
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
         // selectRefEnter.
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! {
             src: a.selects[s].src
             loop i in 0..<ast.src_len(a, src) {
                 self.exclude.push(a.items[ast.src_item(a, src, i)].cursor)
@@ -159,10 +159,10 @@ RefSrcWalker: struct {
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { true }
 
         // selectRefLeave.
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {
             n := ast.src_len(a, a.selects[s].src)
             loop n > 0 && self.exclude.len() > 0 {
                 _: self.exclude.pop()
@@ -170,14 +170,14 @@ RefSrcWalker: struct {
             }
         }
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // sqlite3ReferencesSrcList: 1 when aggregate `e` refers to a table of FROM
 // list `src`, 0 when it refers to a table neither there nor in its own
 // subqueries, -1 when it refers to no table outside its subqueries.
-references_src_list: fn(a: &ast.AST, e: Int, src: Int) -> Int Never! {
+references_src_list: fn(a: ^ast.AST, e: Int, src: Int) -> Int Never! {
     refs := [Int]{}
     loop i in 0..<ast.src_len(a, src) -> refs.push(a.items[ast.src_item(a, src, i)].cursor)
     w := RefSrcWalker{refs: refs, exclude: [Int]{}, code: 0}
@@ -195,7 +195,7 @@ references_src_list: fn(a: &ast.AST, e: Int, src: Int) -> Int Never! {
 // of the named window it refers to from WINDOW list `list` (or chains to
 // its base), is checked, and the built-in window functions that fix their
 // own frame get it. pWFunc becomes `d`, kept in p.wfuncs.
-window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDef) Never! {
+window_update: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, win: Int, d: conn.FuncDef) Never! {
     if a.windows[win].name != None && a.windows[win].frm_type == 0 {
         nm: a.windows[win].name ?? [U8]{}
         w2: ast.window_find(a, list, nm)
@@ -279,25 +279,25 @@ IncrAggDepthWalker: struct {
     n: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if a.exprs[e].op == tk.TK_AGG_FUNCTION -> a.exprs[e].op2 = a.exprs[e].op2 + self.n
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // incrAggFunctionDepth.
-incr_agg_function_depth: fn(a: &ast.AST, e: Int, n: Int) Never! {
+incr_agg_function_depth: fn(a: ^ast.AST, e: Int, n: Int) Never! {
     if n <= 0 {
         return
     }
@@ -308,7 +308,7 @@ incr_agg_function_depth: fn(a: &ast.AST, e: Int, n: Int) Never! {
 // resolveAlias: expression `e` becomes a copy of result-set term `i_col`
 // of list `elist`, keeping its COLLATE, its aggregates moved
 // `n_subquery` levels out.
-resolve_alias: fn(a: &ast.AST, elist: Int, i_col: Int, e: Int, n_subquery: Int) Never! {
+resolve_alias: fn(a: ^ast.AST, elist: Int, i_col: Int, e: Int, n_subquery: Int) Never! {
     orig: ast.list_expr(a, elist, i_col)
     dup := ast.expr_dup(a, orig, 0)
     incr_agg_function_depth(a, dup, n_subquery)
@@ -403,7 +403,7 @@ expr_col_used: fn(db: conn.Conn, a: ast.AST, e: Int) -> Int Never! {
 
 // extendFJMatch: append FULL JOIN match column `i_column` of FROM item
 // `si` to list `list`; the list.
-extend_fj_match: fn(a: &ast.AST, list: Int, si: Int, i_column: Int) -> Int Never! {
+extend_fj_match: fn(a: ^ast.AST, list: Int, si: Int, i_column: Int) -> Int Never! {
     e: ast.expr_alloc(a, tk.TK_COLUMN, None, false)
     a.exprs[e].itable = a.items[si].cursor
     a.exprs[e].icolumn = i_column
@@ -434,7 +434,7 @@ mask32: fn(i_col: Int) -> Int Never! { if i_col >= 32 -> 4294967295 else -> 1 <<
 // against name context `nc0` and the contexts outside it, turning `e` into
 // a TK_COLUMN, TK_TRIGGER, TK_REGISTER, a copy of a result-set alias, or
 // (with an error) TK_NULL. WRC_PRUNE on success, WRC_ABORT on failure.
-lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col: [U8], nc0: Int, e: Int) -[DB]> Int Never! {
+lookup_name: fn(p: ^cg.Parse, a: ^ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col: [U8], nc0: Int, e: Int) -[DB]> Int Never! {
     z_db := db_name0
     cnt := 0
     cnt_tab := 0
@@ -723,7 +723,7 @@ lookup_name: fn(p: &cg.Parse, a: &ast.AST, db_name0: [U8]?, z_tab: [U8]?, z_col:
 
 // lookupName's lookupname_end on a match: the authorizer's read check, and
 // a reference counted in every context from `top_nc` out to `nc`.
-lookup_name_end: fn(p: &cg.Parse, a: &ast.AST, e: Int, schema: Int, nc: Int, top_nc: Int) -[DB]> Int Never! {
+lookup_name_end: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, schema: Int, nc: Int, top_nc: Int) -[DB]> Int Never! {
     op: a.exprs[e].op
     if p.db.has_auth && (op == tk.TK_COLUMN || op == tk.TK_TRIGGER) {
         src: p.ncs[nc].src
@@ -740,7 +740,7 @@ lookup_name_end: fn(p: &cg.Parse, a: &ast.AST, e: Int, schema: Int, nc: Int, top
 
 // sqlite3CreateColumnExpr: a TK_COLUMN for column `i_col` of FROM item
 // `i_src` of list `src`, its use recorded in the item's colUsed.
-create_column_expr: fn(db: conn.Conn, a: &ast.AST, src: Int, i_src: Int, i_col: Int) -> Int Never! {
+create_column_expr: fn(db: conn.Conn, a: ^ast.AST, src: Int, i_src: Int, i_col: Int) -> Int Never! {
     e: ast.expr_alloc(a, tk.TK_COLUMN, None, false)
     si: ast.src_item(a, src, i_src)
     t: a.items[si].tab
@@ -761,7 +761,7 @@ create_column_expr: fn(db: conn.Conn, a: &ast.AST, src: Int, i_src: Int, i_col: 
 
 // notValidImpl: `msg` is not allowed in the context's kind of expression;
 // `e`, when given, becomes NULL; expression `at` locates the error.
-not_valid_impl: fn(p: cg.Parse, a: &ast.AST, nc: Int, msg: String, e: Int, at: Int) Never! {
+not_valid_impl: fn(p: cg.Parse, a: ^ast.AST, nc: Int, msg: String, e: Int, at: Int) Never! {
     f: p.ncs[nc].nc_flags
     z_in := "partial index WHERE clauses"
     if f & ast.NC_IDX_EXPR != 0 -> z_in = "index expressions" else if f & ast.NC_IS_CHECK != 0 {
@@ -773,7 +773,7 @@ not_valid_impl: fn(p: cg.Parse, a: &ast.AST, nc: Int, msg: String, e: Int, at: I
 }
 
 // sqlite3ResolveNotValid: notValidImpl when the context has a flag of `mask`.
-resolve_not_valid: fn(p: cg.Parse, a: &ast.AST, nc: Int, msg: String, mask: Int, e: Int, at: Int) Never! {
+resolve_not_valid: fn(p: cg.Parse, a: ^ast.AST, nc: Int, msg: String, mask: Int, e: Int, at: Int) Never! {
     if p.ncs[nc].nc_flags & mask != 0 -> not_valid_impl(p, a, nc, msg, e, at)
 }
 
@@ -786,7 +786,7 @@ expr_probability: fn(a: ast.AST, e: Int) -> Int Never! {
 }
 
 // The row-value size check of resolveExprStep's comparison operators.
-check_row_value: fn(a: &ast.AST, e: Int) Never! {
+check_row_value: fn(a: ^ast.AST, e: Int) Never! {
     n_left: ast.vector_size(a, a.exprs[e].left)
     n_right := 0
     if a.exprs[e].op == tk.TK_BETWEEN {
@@ -802,7 +802,7 @@ check_row_value: fn(a: &ast.AST, e: Int) Never! {
 
 // resolveExprStep: the walk's expression callback, in the name context of
 // the innermost walk.
-resolve_expr_step: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+resolve_expr_step: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
     nc: p.walks[cg.walk_top(p)].u
     op: a.exprs[e].op
     if op == tk.TK_ROW {
@@ -887,7 +887,7 @@ resolve_expr_step: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
 
 // resolveExprStep's TK_FUNCTION case: find the function, check where it
 // may be used, and resolve its arguments, ORDER BY, window and FILTER.
-resolve_function: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
+resolve_function: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
     list: a.exprs[e].x
     n: ast.list_len(a, list)
     no_such_func := false
@@ -1031,7 +1031,7 @@ resolve_as_name: fn(a: ast.AST, elist: Int, e: Int) -> Int Never! {
 // resolveOrderByTermToExprList: the 1-based term of the result set of
 // SELECT `sel` that compound ORDER BY term `e` matches once resolved
 // (silently) against it, else 0.
-resolve_order_by_term_to_expr_list: fn(p: &cg.Parse, a: &ast.AST, sel: Int, e: Int) -[DB]> Int Never! {
+resolve_order_by_term_to_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, e: Int) -[DB]> Int Never! {
     elist: a.selects[sel].elist
     mark: p.ncs.len()
     ctx := nc_new(a.selects[sel].src, ast.NC_ALLOW_AGG | ast.NC_UELIST | ast.NC_NO_SELECT)
@@ -1062,7 +1062,7 @@ ordinal: fn(v: Int) -> String Never! {
 }
 
 // resolveOutOfRangeError.
-resolve_out_of_range_error: fn(a: &ast.AST, z_type: String, i: Int, mx: Int, at: Int) Never! {
+resolve_out_of_range_error: fn(a: ^ast.AST, z_type: String, i: Int, mx: Int, at: Int) Never! {
     off: ast.expr_offset(a, at)
     ast.error_at(a, "{ordinal(i)} {z_type} BY term out of range - should be between 1 and {mx}", off)
 }
@@ -1070,7 +1070,7 @@ resolve_out_of_range_error: fn(a: &ast.AST, z_type: String, i: Int, mx: Int, at:
 // resolveCompoundOrderBy: turn each ORDER BY term of compound SELECT `s0`
 // into the number of the result column it names, matching terms against
 // the leftmost SELECT first. Nonzero on error.
-resolve_compound_order_by: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
+resolve_compound_order_by: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Never! {
     ob: a.selects[s0].order_by
     if ob < 0 -> return 0
     if ast.list_len(a, ob) > p.db.limits[ast.LIMIT_COLUMN] {
@@ -1148,7 +1148,7 @@ resolve_compound_order_by: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Nev
 // sqlite3ResolveOrderGroupBy: each ORDER BY or GROUP BY term of `ob` that
 // names a result column (iOrderByCol) becomes a copy of that column's
 // expression. Nonzero on error.
-resolve_order_group_by: fn(p: &cg.Parse, a: &ast.AST, sel: Int, ob: Int, z_type: String) -> Int Never! {
+resolve_order_group_by: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, ob: Int, z_type: String) -> Int Never! {
     if ob < 0 || p.db.malloc_failed || ast.in_rename(a) -> return 0
     if ast.list_len(a, ob) > p.db.limits[ast.LIMIT_COLUMN] {
         ast.error(a, "too many terms in {z_type} BY clause")
@@ -1175,25 +1175,25 @@ RemoveWindowsWalker: struct {
     sel: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if ast.has(a, e, ast.EP_WIN_FUNC) -> ast.window_unlink_from_select(a, a.exprs[e].y)
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // windowRemoveExprFromSelect: the windows of `e` leave SELECT `sel`'s list.
-window_remove_expr_from_select: fn(a: &ast.AST, sel: Int, e: Int) Never! {
+window_remove_expr_from_select: fn(a: ^ast.AST, sel: Int, e: Int) Never! {
     if a.selects[sel].win < 0 {
         return
     }
@@ -1205,7 +1205,7 @@ window_remove_expr_from_select: fn(a: &ast.AST, sel: Int, e: Int) Never! {
 // `sel` in context `nc`: AS names and integers name result columns, other
 // terms resolve normally and name the result column they equal. Nonzero
 // on error.
-resolve_order_group_by_nc: fn(p: &cg.Parse, a: &ast.AST, nc: Int, sel: Int, ob: Int, z_type: String) -[DB]> Int Never! {
+resolve_order_group_by_nc: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, sel: Int, ob: Int, z_type: String) -[DB]> Int Never! {
     n_result: ast.list_len(a, a.selects[sel].elist)
     loop i in 0..<ast.list_len(a, ob) {
         pe: ast.list_expr(a, ob, i)
@@ -1241,7 +1241,7 @@ resolve_order_group_by_nc: fn(p: &cg.Parse, a: &ast.AST, nc: Int, sel: Int, ob: 
 }
 
 // resolveSelectStep: the walk's SELECT callback.
-resolve_select_step: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
+resolve_select_step: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) -[DB]> Int Never! {
     if a.selects[s0].sel_flags & ast.SF_RESOLVED != 0 -> return ast.WRC_PRUNE
     outer: p.walks[cg.walk_top(p)].u
     if a.selects[s0].sel_flags & ast.SF_EXPANDED == 0 {
@@ -1259,7 +1259,7 @@ resolve_select_step: fn(p: &cg.Parse, a: &ast.AST, s0: Int) -[DB]> Int Never! {
 }
 
 // resolveSelectStep's loop over the compound's terms, with sNC context `nc`.
-resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int) -[DB]> Int Never! {
+resolve_select_body: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int, outer: Int, nc: Int) -[DB]> Int Never! {
     is_compound: if a.selects[s0].prior >= 0 -> 1 else -> 0
     n_compound := 0
     s := s0
@@ -1391,19 +1391,19 @@ ResolveWalker: struct {
     select: Bool,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             resolve_expr_step(p, a, e)
         }
 
         has_select: fn(self) -[]> Bool Never! { self.select }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             resolve_select_step(p, a, s)
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -1415,7 +1415,7 @@ NC_AGG_FLAGS: 134254608
 
 // sqlite3ResolveExprNames: resolve the names of expression `e` in context
 // `nc`; nonzero on error.
-resolve_expr_names: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
+resolve_expr_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, e: Int) -[DB]> Int Never! {
     if e < 0 -> return base.OK
     saved: p.ncs[nc].nc_flags & NC_AGG_FLAGS
     nc_clear(p, nc, NC_AGG_FLAGS)
@@ -1433,7 +1433,7 @@ resolve_expr_names: fn(p: &cg.Parse, a: &ast.AST, nc: Int, e: Int) -[DB]> Int Ne
 }
 
 // sqlite3ResolveExprListNames: resolve every expression of `list`.
-resolve_expr_list_names: fn(p: &cg.Parse, a: &ast.AST, nc: Int, list: Int) -[DB]> Int Never! {
+resolve_expr_list_names: fn(p: ^cg.Parse, a: ^ast.AST, nc: Int, list: Int) -[DB]> Int Never! {
     if list < 0 -> return ast.WRC_CONTINUE
     saved := 0
     nc_clear(p, nc, NC_AGG_FLAGS)
@@ -1461,7 +1461,7 @@ resolve_expr_list_names: fn(p: &cg.Parse, a: &ast.AST, nc: Int, list: Int) -[DB]
 
 // sqlite3ResolveSelectNames: resolve SELECT `s`, its compound terms and
 // its subqueries, inside context `outer_nc` (-1 for none).
-resolve_select_names: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
+resolve_select_names: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
     w := ResolveWalker{select: true}
     cg.walk_push(p, w, outer_nc)
     _: cg.pwalk_select(p, a, s)
@@ -1472,7 +1472,7 @@ resolve_select_names: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]
 // alone (-1 for no table): a CHECK constraint, partial index WHERE, index
 // expression or generated column as `typ` says (NC_IsCheck, NC_PartIdx,
 // NC_IdxExpr, NC_GenCol), or a VACUUM INTO argument (0).
-resolve_self_reference: fn(p: &cg.Parse, a: &ast.AST, t: Int, typ: Int, e: Int, list: Int) -[DB]> Int Never! {
+resolve_self_reference: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, typ: Int, e: Int, list: Int) -[DB]> Int Never! {
     flags := typ
     // The fake one-item SrcList over the table (an empty one without).
     src: ast.new_src_list(a)
@@ -1501,39 +1501,39 @@ ResolveTestGen: struct {
     calls: Int,
 
     impl Gen {
-        read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }
+        read_schema: fn(self, p: ^cg.Parse, a: ^ast.AST) -[DB]> Int Never! { base.OK }
 
-        authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+        authorize: fn(self, p: ^cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
             base.OK
         }
 
-        nested_parse: fn(self, p: &cg.Parse, a: &ast.AST, sql: [U8]) -[DB]> Never! {}
+        nested_parse: fn(self, p: ^cg.Parse, a: ^ast.AST, sql: [U8]) -[DB]> Never! {}
 
-        select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+        select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> Int Never! {
             0
         }
 
-        select_prep: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {}
+        select_prep: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {}
 
-        select_expand: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        select_expand: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
-        result_set_of_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
+        result_set_of_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int, aff: Int) -[DB]> Int Never! {
             -1
         }
 
-        view_get_column_names: fn(self, p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Int Never! { 0 }
+        view_get_column_names: fn(self, p: ^cg.Parse, a: ^ast.AST, t: Int) -[DB]> Int Never! { 0 }
 
-        eponymous_table: fn(self, p: &cg.Parse, a: &ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
+        eponymous_table: fn(self, p: ^cg.Parse, a: ^ast.AST, name: [U8]) -[DB]> Int Never! { -1 }
 
-        vtab_overload_function: fn(self, p: &cg.Parse, a: &ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
+        vtab_overload_function: fn(self, p: ^cg.Parse, a: ^ast.AST, def: conn.FuncDef, n_arg: Int, e: Int) -[DB]> conn.FuncDef Never! {
             def.copy()
         }
 
-        vtab_best_index: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, info: &conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
+        vtab_best_index: fn(self, p: ^cg.Parse, a: ^ast.AST, t: Int, info: ^conn.IndexInfo) -[DB]> {rc: Int, err: [U8]?} Never! {
             {rc: base.ERROR, err: None}
         }
 
-        vtab_find_function: fn(self, p: &cg.Parse, a: &ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
+        vtab_find_function: fn(self, p: ^cg.Parse, a: ^ast.AST, t: Int, n_arg: Int, name: [U8]) -[DB]> Int Never! {
             0
         }
     }
@@ -1560,7 +1560,7 @@ resolve_test_parse: fn() -> cg.Parse Never! {
 }
 
 // The FROM list "t, u" over resolve_test_parse's tables (cursors 0 and 1).
-resolve_test_src: fn(a: &ast.AST) -> Int Never! {
+resolve_test_src: fn(a: ^ast.AST) -> Int Never! {
     src := ast.src_list_append(a, -1, Val("t".bytes()), None)
     src = ast.src_list_append(a, src, Val("u".bytes()), None)
     loop i in 0..<2 {
@@ -1646,7 +1646,7 @@ resolve_test_src: fn(a: &ast.AST) -> Int Never! {
 
 // A call of function `name` with `n_args` arguments, each column a of
 // resolve_test_src's tables.
-resolve_test_call: fn(a: &ast.AST, name: String, n_args: Int) -> Int Never! {
+resolve_test_call: fn(a: ^ast.AST, name: String, n_args: Int) -> Int Never! {
     list := -1
     loop _ in 0..<n_args {
         col: ast.expr(a, tk.TK_ID, "a".bytes())

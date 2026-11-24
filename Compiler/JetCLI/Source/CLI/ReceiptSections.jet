@@ -55,7 +55,7 @@ jet_cli_receipt_section_record_encode: fn(record: JetCLIReceiptSectionRecord) ->
     Ok(bytes)
 }
 
-jet_cli_receipt_section_record_text: fn(cursor: &JetDriverRunReceiptCursor, label: String) -> String JetCLIReadError! {
+jet_cli_receipt_section_record_text: fn(cursor: ^JetDriverRunReceiptCursor, label: String) -> String JetCLIReadError! {
     bytes: jet_driver_run_receipt_take(cursor)
     Ok(String.from_bytes(bytes) ?? return Err(jet_cli_read_error("receipt section {label} is not UTF-8")))
 }
@@ -103,7 +103,7 @@ jet_cli_receipt_field_diff_render: fn(diff: JetCLIReceiptFieldDiff) -> String Ne
     "{jet_cli_receipt_field_path(diff)}: {jet_cli_receipt_diff_value(diff.before)} -> {jet_cli_receipt_diff_value(diff.after)}"
 }
 
-jet_cli_receipt_missing_fields: fn(section: String, prefix: String, value: CanonicalJSON, removed: Bool, diffs: &[JetCLIReceiptFieldDiff]) Never! {
+jet_cli_receipt_missing_fields: fn(section: String, prefix: String, value: CanonicalJSON, removed: Bool, diffs: ^[JetCLIReceiptFieldDiff]) Never! {
     if value == .Object(fields) && fields.len() > 0 {
         loop field in fields {
             path: if prefix == "" -> field.key else -> "{prefix}.{field.key}"
@@ -114,7 +114,7 @@ jet_cli_receipt_missing_fields: fn(section: String, prefix: String, value: Canon
     diffs.push(JetCLIReceiptFieldDiff{section: section, field: if prefix == "" -> "$" else -> prefix, before: if removed -> Val(value) else -> None, after: if removed -> None else -> Val(value)})
 }
 
-jet_cli_receipt_diff_fields: fn(section: String, prefix: String, before: CanonicalJSON, after: CanonicalJSON, diffs: &[JetCLIReceiptFieldDiff]) Never! {
+jet_cli_receipt_diff_fields: fn(section: String, prefix: String, before: CanonicalJSON, after: CanonicalJSON, diffs: ^[JetCLIReceiptFieldDiff]) Never! {
     if before == .Object(before_fields) && after == .Object(after_fields) {
         left := 0
         right := 0

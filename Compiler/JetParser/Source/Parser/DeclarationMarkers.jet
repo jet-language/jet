@@ -62,7 +62,7 @@ parser_split_type_markers: fn(markers: [Marker]) -> {derives: [NamedSpan], serde
     {derives: derives.move(), serde_markers: serde.move()}
 }
 
-parser_apply_struct_type_markers: fn(state: &JetParserState, value: &StructDef, markers: [Marker]) Never! {
+parser_apply_struct_type_markers: fn(state: ^JetParserState, value: ^StructDef, markers: [Marker]) Never! {
     value.type_markers = markers.copy()
     {derives, serde_markers} := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
@@ -71,7 +71,7 @@ parser_apply_struct_type_markers: fn(state: &JetParserState, value: &StructDef, 
     parser_apply_type_markers(state, value, markers)
 }
 
-parser_apply_enum_type_markers: fn(state: &JetParserState, value: &EnumDef, markers: [Marker]) Never! {
+parser_apply_enum_type_markers: fn(state: ^JetParserState, value: ^EnumDef, markers: [Marker]) Never! {
     value.type_markers = markers.copy()
     {derives, serde_markers} := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
@@ -92,7 +92,7 @@ parser_apply_enum_type_markers: fn(state: &JetParserState, value: &EnumDef, mark
 
 // `marker_argument_shape_error`: E0930 names the rule's registered signature at
 // the marker span without its `#`, as sema's shape error does.
-parser_marker_shape_error: fn(state: &JetParserState, marker: Marker) {
+parser_marker_shape_error: fn(state: ^JetParserState, marker: Marker) {
     expected: "{marker.name}{marker_registered_signature(marker.name)}"
     parser_add_error_code(state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
@@ -105,7 +105,7 @@ parser_marker_shape_error: fn(state: &JetParserState, marker: Marker) {
 // identifier is an enum's C tag width, and `packed` and the first-argument
 // `align` stay reserved. Sema owns positivity, power-of-two, and target facts.
 // None when there is no layout fact.
-parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped: Bool, is_enum: Bool) -> StructLayout? {
+parser_layout_marker_fact: fn(state: ^JetParserState, markers: [Marker], grouped: Bool, is_enum: Bool) -> StructLayout? {
     marker: loop candidate in markers {
         if candidate.name == "Layout" {
             break candidate
@@ -196,7 +196,7 @@ parser_layout_marker_fact: fn(state: &JetParserState, markers: [Marker], grouped
     None
 }
 
-parser_layout_refusal: fn(state: &JetParserState, fatal: Bool, span: Span, what: String, why: String, fix: String) {
+parser_layout_refusal: fn(state: ^JetParserState, fatal: Bool, span: Span, what: String, why: String, fix: String) {
     if fatal -> parser_add_fatal_code(state, "E1105", span, what, why, fix) else {
         parser_add_error_code(state, "E1105", span, what, why, fix)
     }
@@ -204,7 +204,7 @@ parser_layout_refusal: fn(state: &JetParserState, fatal: Bool, span: Span, what:
 
 // A first `#Layout` argument that names no supported layout: `packed` and
 // a first-argument `align` are reserved, anything else is unknown.
-parser_layout_variant_refusal: fn(state: &JetParserState, variant: String, span: Span, fatal: Bool) {
+parser_layout_variant_refusal: fn(state: ^JetParserState, variant: String, span: Span, fatal: Bool) {
     if variant == "packed" || variant == "align" {
         parser_layout_refusal(state, fatal, span, "`#Layout({variant})` is reserved and not yet supported", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "use `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
         return
@@ -216,7 +216,7 @@ parser_layout_variant_refusal: fn(state: &JetParserState, variant: String, span:
 // what the name is: an integer type is an enum's tag width, `packed` is the
 // reserved packed layout, and any other name is no layout argument. Only
 // `align(N)` or `align(target, N)` may follow on a struct.
-parser_layout_struct_bare_argument: fn(state: &JetParserState, name: String, span: Span, marker_span: Span, fatal: Bool) {
+parser_layout_struct_bare_argument: fn(state: ^JetParserState, name: String, span: Span, marker_span: Span, fatal: Bool) {
     if jet_layout_integer_backing_name(name) {
         parser_layout_refusal(state, fatal, marker_span, "A tag width applies only to enums.", "Structs have fields and padding but no discriminant tag.", "Remove `tag: …`, or put this layout on an enum.")
         return
@@ -230,7 +230,7 @@ parser_layout_struct_bare_argument: fn(state: &JetParserState, name: String, spa
 
 // `#Layout(…)` inside a `#[…]` list. Its arguments are read positionally and
 // its refusals do not end the declaration.
-parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: Bool) -> StructLayout? {
+parser_layout_grouped_fact: fn(state: ^JetParserState, marker: Marker, is_enum: Bool) -> StructLayout? {
     second: parser_marker_expression(marker, 1)
     if is_enum {
         if second == .Val(value) && parser_layout_align_call(value) != None {
@@ -386,7 +386,7 @@ parser_marker_bindings: fn(marker: Marker, names: [String]) -> [Expr?]? {
     Val(values)
 }
 
-parser_bind_marker_arguments: fn(state: &JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? {
+parser_bind_marker_arguments: fn(state: ^JetParserState, marker: Marker, names: [String], required: Int) -> [Expr?]? {
     values: parser_marker_bindings(marker, names) ?? {
         parser_marker_shape_error(state, marker)
         return None
@@ -445,7 +445,7 @@ parser_marker_target_path: fn(target: Expr) -> String? {
 
 // A marker whose arguments do not bind ends its declaration (Rust returns the
 // `marker_argument_shape_error` from the applicator).
-parser_marker_shape_fatal: fn(state: &JetParserState, marker: Marker) {
+parser_marker_shape_fatal: fn(state: ^JetParserState, marker: Marker) {
     expected: "{marker.name}{marker_registered_signature(marker.name)}"
     parser_add_fatal_code(state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
@@ -463,7 +463,7 @@ parser_maturity_tag: fn(value: Expr) -> MaturityTag? Never! {
 // Rust `meta_attr_from_marker`: `#Meta(category:, tunable:, maturity:)` as typed
 // fields. A bare `tunable` is the flag; a maturity outside the closed scale is
 // E0352. None after arguments that do not bind (fatal E0930).
-parser_meta_attr_from_marker: fn(state: &JetParserState, marker: Marker) -> MetaAttr? {
+parser_meta_attr_from_marker: fn(state: ^JetParserState, marker: Marker) -> MetaAttr? {
     names: [String]{"category", "tunable", "maturity"}
     slots: parser_marker_binding_slots(marker, names, [String]{"tunable"}) ?? {
         parser_marker_shape_fatal(state, marker)
@@ -497,7 +497,7 @@ parser_meta_attr_from_marker: fn(state: &JetParserState, marker: Marker) -> Meta
     Val(MetaAttr{fields: fields, span: marker.span})
 }
 
-parser_job_metadata_error: fn(state: &JetParserState, field: String, expected: String, span: Span) {
+parser_job_metadata_error: fn(state: ^JetParserState, field: String, expected: String, span: Span) {
     parser_add_error_code(state, "E1330", span, "task metadata {field} has the wrong shape", "{field} is {expected}", "write {field}: as {expected}")
 }
 
@@ -532,7 +532,7 @@ parser_job_static_word: fn(value: Expr) -> String? {
     }
 }
 
-parser_job_string_list: fn(state: &JetParserState, marker: Marker, field: String, value: Expr?) -> [String]? {
+parser_job_string_list: fn(state: ^JetParserState, marker: Marker, field: String, value: Expr?) -> [String]? {
     expression: value ?? return Val([String]{})
     if expression == {
         .ListLit(values, _, _) -> {
@@ -556,7 +556,7 @@ parser_job_string_list: fn(state: &JetParserState, marker: Marker, field: String
     }
 }
 
-parser_job_skip: fn(state: &JetParserState, marker: Marker, expression: Expr) -> JobSkip? {
+parser_job_skip: fn(state: ^JetParserState, marker: Marker, expression: Expr) -> JobSkip? {
     word := parser_job_word(expression)
     if word != None {
         reason: word ?? ""
@@ -616,7 +616,7 @@ parser_job_skip: fn(state: &JetParserState, marker: Marker, expression: Expr) ->
     }
 }
 
-parser_job_limits: fn(state: &JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? {
+parser_job_limits: fn(state: ^JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? {
     if expression == {
         .MapLit(entries, _, _) -> {
             limits := [StringMapEntry]{}
@@ -657,7 +657,7 @@ parser_job_limits: fn(state: &JetParserState, marker: Marker, expression: Expr) 
     }
 }
 
-parser_job_parallel: fn(state: &JetParserState, marker: Marker, expression: Expr) -> Int? {
+parser_job_parallel: fn(state: ^JetParserState, marker: Marker, expression: Expr) -> Int? {
     word := parser_job_word(expression)
     if word != None {
         reason: word ?? ""
@@ -677,7 +677,7 @@ parser_job_parallel: fn(state: &JetParserState, marker: Marker, expression: Expr
 // schedule.
 PARSER_JOB_PARAMETERS: ["scope", "packages", "cwd", "inputs", "outputs", "skip", "cache", "limits", "after", "parallel", "every"]
 
-parser_job_metadata_from_marker: fn(state: &JetParserState, marker: Marker) -> JobMetadata? {
+parser_job_metadata_from_marker: fn(state: ^JetParserState, marker: Marker) -> JobMetadata? {
     if marker.args.len() == 0 -> return None
     values: parser_bind_marker_arguments(state, marker, PARSER_JOB_PARAMETERS, 0) ?? return None
     metadata := ast_job_metadata()
@@ -759,7 +759,7 @@ parser_job_every_from_marker: fn(marker: Marker) -> EveryMarker? {
     Val(EveryMarker{arg: arg, span: marker.span, resolved: None})
 }
 
-parser_project_function_job_markers: fn(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
+parser_project_function_job_markers: fn(state: ^JetParserState, function: ^Func, markers: [Marker]) -> Bool {
     valid := true
     loop marker in markers {
         if marker.name == MARKER_JOB {

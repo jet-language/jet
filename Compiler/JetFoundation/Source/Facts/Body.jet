@@ -47,7 +47,7 @@ body_tree_new: fn() -> BodyTree Never! {
 // A checked body's tree, sealed (body_flat_function): its rows stop growing,
 // so each row list moves to a buffer of exactly its length and the symbol
 // keys drop their slots (symbol_local_keys_seal).
-body_tree_sealed: fn(tree: &&BodyTree, nodes_fitted: Bool{false}, stmts_fitted: Bool{false}) -> BodyTree Never! {
+body_tree_sealed: fn(tree: ^^BodyTree, nodes_fitted: Bool{false}, stmts_fitted: Bool{false}) -> BodyTree Never! {
     sealed := tree
     if !nodes_fitted {
         sealed.nodes = body_rows_fitted(sealed.nodes.move())
@@ -65,7 +65,7 @@ body_tree_sealed: fn(tree: &&BodyTree, nodes_fitted: Bool{false}, stmts_fitted: 
 
 // `rows` in a buffer of exactly their count: reserving from empty takes
 // exactly the room asked for. `rows` itself when the buffer can't be had.
-body_rows_fitted: fn<T>(rows: &&[T]) -> [T] Never! {
+body_rows_fitted: fn<T>(rows: ^^[T]) -> [T] Never! {
     if rows.len() == 0 -> return rows
     fitted := [T]{}
     fitted.try_reserve(rows.len()) ?? return rows
@@ -144,7 +144,7 @@ body_type_id: fn(tree: BodyTree, id: Int) -> TypeID Never! {
 }
 
 // Renumbers every worker-local TypeID in `tree.expr_types` through `remap`.
-body_tree_remap_types: fn(tree: &BodyTree, remap: InternerRemap) Never! {
+body_tree_remap_types: fn(tree: ^BodyTree, remap: InternerRemap) Never! {
     if remap.types.len() == 0 -> return
     mark: remap.marks.types
     loop i in 0..<tree.expr_types.len() {

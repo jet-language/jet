@@ -1696,11 +1696,11 @@ ssl_bytes_of: fn(src: [U8], off: Int, len: Int) -> [U8] Never! {
     out
 }
 
-ssl_copy_into: fn(dst: &[U8], doff: Int, src: [U8], soff: Int, len: Int) Never! {
+ssl_copy_into: fn(dst: ^[U8], doff: Int, src: [U8], soff: Int, len: Int) Never! {
     loop i in 0..<len -> dst[doff + i] = src[soff + i]
 }
 
-ssl_move_within: fn(buf: &[U8], doff: Int, soff: Int, len: Int) Never! {
+ssl_move_within: fn(buf: ^[U8], doff: Int, soff: Int, len: Int) Never! {
     if len <= 0 || doff == soff {
         return
     }
@@ -1715,11 +1715,11 @@ ssl_move_within: fn(buf: &[U8], doff: Int, soff: Int, len: Int) Never! {
     }
 }
 
-ssl_fill: fn(buf: &[U8], off: Int, len: Int, value: U8) Never! {
+ssl_fill: fn(buf: ^[U8], off: Int, len: Int, value: U8) Never! {
     loop i in 0..<len -> buf[off + i] = value
 }
 
-ssl_push_all: fn(out: &[U8], bytes: [U8]) Never! {
+ssl_push_all: fn(out: ^[U8], bytes: [U8]) Never! {
     loop b in bytes -> out.push(b)
 }
 
@@ -1737,43 +1737,43 @@ ssl_get_u32: fn(buf: [U8], off: Int) -> Int Never! {
 
 ssl_byte: fn(v: Int) -> U8 Never! { U8{v & 0xFF} }
 
-ssl_put_u16: fn(buf: &[U8], off: Int, v: Int) Never! {
+ssl_put_u16: fn(buf: ^[U8], off: Int, v: Int) Never! {
     buf[off] = ssl_byte(v >> 8)
     buf[off + 1] = ssl_byte(v)
 }
 
-ssl_put_u24: fn(buf: &[U8], off: Int, v: Int) Never! {
+ssl_put_u24: fn(buf: ^[U8], off: Int, v: Int) Never! {
     buf[off] = ssl_byte(v >> 16)
     buf[off + 1] = ssl_byte(v >> 8)
     buf[off + 2] = ssl_byte(v)
 }
 
-ssl_put_u32: fn(buf: &[U8], off: Int, v: Int) Never! {
+ssl_put_u32: fn(buf: ^[U8], off: Int, v: Int) Never! {
     buf[off] = ssl_byte(v >> 24)
     buf[off + 1] = ssl_byte(v >> 16)
     buf[off + 2] = ssl_byte(v >> 8)
     buf[off + 3] = ssl_byte(v)
 }
 
-ssl_push_u16: fn(out: &[U8], v: Int) Never! {
+ssl_push_u16: fn(out: ^[U8], v: Int) Never! {
     out.push(ssl_byte(v >> 8))
     out.push(ssl_byte(v))
 }
 
-ssl_push_u24: fn(out: &[U8], v: Int) Never! {
+ssl_push_u24: fn(out: ^[U8], v: Int) Never! {
     out.push(ssl_byte(v >> 16))
     out.push(ssl_byte(v >> 8))
     out.push(ssl_byte(v))
 }
 
-ssl_push_u32: fn(out: &[U8], v: Int) Never! {
+ssl_push_u32: fn(out: ^[U8], v: Int) Never! {
     out.push(ssl_byte(v >> 24))
     out.push(ssl_byte(v >> 16))
     out.push(ssl_byte(v >> 8))
     out.push(ssl_byte(v))
 }
 
-ssl_push_u64: fn(out: &[U8], v: Int) Never! {
+ssl_push_u64: fn(out: ^[U8], v: Int) Never! {
     ssl_push_u32(out, v >> 32)
     ssl_push_u32(out, v)
 }
@@ -1789,7 +1789,7 @@ ssl_range_eq: fn(a: [U8], aoff: Int, b: [U8], boff: Int, len: Int) -> Bool Never
     true
 }
 
-ssl_wipe: fn(buf: &[U8]) Never! {
+ssl_wipe: fn(buf: ^[U8]) Never! {
     loop i in 0..<buf.len() -> buf[i] = U8{0}
 }
 
@@ -1811,7 +1811,7 @@ ssl_ms_time: fn() -> Int Never! { rt.clock_mono_ns() /% 1000000 }
 // Pools: C's session and transform pointers.
 
 /// A fresh transform slot (mbedtls_calloc + mbedtls_ssl_transform_init).
-ssl_transform_alloc: fn(ssl: &SSLContext) -> Int Never! {
+ssl_transform_alloc: fn(ssl: ^SSLContext) -> Int Never! {
     loop i in 0..<ssl.tpool.len() {
         if !ssl.tpool[i].valid {
             ssl.tpool[i] = SSLTransform{valid: true}
@@ -1824,7 +1824,7 @@ ssl_transform_alloc: fn(ssl: &SSLContext) -> Int Never! {
 
 /// mbedtls_ssl_transform_free + mbedtls_free: wipes the keys and frees the
 /// slot. -1 is NULL and does nothing.
-ssl_transform_release: fn(ssl: &SSLContext, t: Int) Never! {
+ssl_transform_release: fn(ssl: ^SSLContext, t: Int) Never! {
     if t < 0 {
         return
     }
@@ -1833,7 +1833,7 @@ ssl_transform_release: fn(ssl: &SSLContext, t: Int) Never! {
 }
 
 /// mbedtls_ssl_transform_free on a transform: its secrets are wiped.
-ssl_transform_wipe: fn(t: &SSLTransform) Never! {
+ssl_transform_wipe: fn(t: ^SSLTransform) Never! {
     ssl_wipe(t.iv_enc)
     ssl_wipe(t.iv_dec)
     t.md_enc = None
@@ -1842,7 +1842,7 @@ ssl_transform_wipe: fn(t: &SSLTransform) Never! {
     t.cipher_dec = None
 }
 
-ssl_session_alloc: fn(ssl: &SSLContext) -> Int Never! {
+ssl_session_alloc: fn(ssl: ^SSLContext) -> Int Never! {
     loop i in 0..<ssl.spool.len() {
         if !ssl.spool[i].valid {
             ssl.spool[i] = SSLSession{valid: true}
@@ -1854,7 +1854,7 @@ ssl_session_alloc: fn(ssl: &SSLContext) -> Int Never! {
 }
 
 /// mbedtls_ssl_session_free + mbedtls_free on a pool slot.
-ssl_session_release: fn(ssl: &SSLContext, s: Int) Never! {
+ssl_session_release: fn(ssl: ^SSLContext, s: Int) Never! {
     if s < 0 {
         return
     }
@@ -1864,7 +1864,7 @@ ssl_session_release: fn(ssl: &SSLContext, s: Int) Never! {
 
 /// mbedtls_ssl_session_free: the session's secrets are wiped and it is
 /// reset.
-ssl_session_wipe: fn(s: &SSLSession) Never! {
+ssl_session_wipe: fn(s: ^SSLSession) Never! {
     ssl_wipe(s.master)
     ssl_wipe(s.resumption_key)
     ssl_wipe(s.app_secrets.client_application_traffic_secret_n)

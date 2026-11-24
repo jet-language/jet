@@ -80,7 +80,7 @@ JetCLILSPChecker: struct {
 
         // A stage whose program does not check answers nothing; the client's
         // log shows why.
-        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+        stage: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
             run := jet_cli_tool_stage_run(entry, overlays.move(), stage, bodies, program)
             if run.stop == .Val(stop) {
                 lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {diagnostic_headline(stop.code, stop.what)}").drop("standard error is the log; a failed log write has nowhere to go")
@@ -90,7 +90,7 @@ JetCLILSPChecker: struct {
 
         // A document that already declares the policy writes its own marks;
         // the second declaration refuses the prepended copy, so it gets none.
-        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+        failure_marks: fn(self, entry: String, overlays: ^^[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
             shift: JET_CLI_FMT_EXPLICIT_FAILURES_POLICY.count_bytes()
@@ -142,7 +142,7 @@ JetCLILSPChecker: struct {
 
 // The source offset of a failure mark the policy's `?`/`?)` insertion
 // `edit` writes, shifted back past the prepended policy; each site once.
-jet_cli_failure_mark: fn(sites: &[Int], edit: TextEdit, shift: Int, length: Int) Never! {
+jet_cli_failure_mark: fn(sites: ^[Int], edit: TextEdit, shift: Int, length: Int) Never! {
     if edit.span.start != edit.span.end || (edit.new_text != "?" && edit.new_text != "?)") -> return
     site: edit.span.start - shift
     if site >= 0 && site <= length && !sites.contains(site) -> sites.push(site)
@@ -160,7 +160,7 @@ jet_cli_lsp_reports: fn(entry: String, given: [JetDriverSourceDocument], slot: I
 // the Core sources a compile of `entry` reads: the module's own source,
 // without its private parts. Core read from a toolchain tree also gives each
 // such source's file, where a definition of one of its functions goes.
-jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule], declared: &[SemDeclared], files: &[LSPDeclaredFile]) {
+jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule], declared: ^[SemDeclared], files: ^[LSPDeclaredFile]) {
     if !semindex_imports(modules, "core.") -> return
     toolchain: jet_cli_named_toolchain(entry)
     if jet_cli_core_sources(entry) == .Loaded(rows) {

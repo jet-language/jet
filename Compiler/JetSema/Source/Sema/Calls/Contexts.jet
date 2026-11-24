@@ -26,11 +26,11 @@ sema_call_gate_is_unshadowed: fn(name: String, scopes: SemaScopeTable) -> Bool N
     sema_scope_resolve_index(scopes, name) == None
 }
 
-sema_call_enter_gate: fn(scopes: &SemaScopeTable, gate: SemaKnowledgeGate) -> SemaCallKnowledgeScope Never! {
+sema_call_enter_gate: fn(scopes: ^SemaScopeTable, gate: SemaKnowledgeGate) -> SemaCallKnowledgeScope Never! {
     SemaCallKnowledgeScope{previous: sema_scope_push_knowledge_gate(scopes, gate)}
 }
 
-sema_call_leave_gate: fn(scopes: &SemaScopeTable, scope: SemaCallKnowledgeScope) Never! {
+sema_call_leave_gate: fn(scopes: ^SemaScopeTable, scope: SemaCallKnowledgeScope) Never! {
     sema_scope_pop_knowledge_gate(scopes, scope.previous)
 }
 

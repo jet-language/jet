@@ -37,10 +37,10 @@ use {
 JetcFd: struct {
     priv fd: Int,
 
-    // Close reads the consumed receiver in place. Rebinding it (`owner: &&self`)
+    // Close reads the consumed receiver in place. Rebinding it (`owner: ^^self`)
     // would make a second owner whose scope-end Close re-enters this one.
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if self.fd >= 0 -> _: builtin.jetc_close(self.fd)
         }
     }
@@ -52,7 +52,7 @@ JetcTemp: struct {
     path: String?,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             // Best-effort cleanup: Close cannot fail, so a removal error is dropped.
             if self.path == .Val(path) {
                 rt.remove_raw(path).drop("temp removal at close is best-effort")
@@ -67,7 +67,7 @@ JetcBytes: struct {
     bytes: [U8],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             bytes := self.bytes.move()
             core.crypto.wipe(bytes)
         }
@@ -370,7 +370,7 @@ jetc_revalidate: fn(parent: JetcParent) FileCryptoError! {
 // Publishes through the caller's temporary, which stays its one owner: a
 // rebound `JetcTemp.move()` parameter became a second owner that closed the same
 // descriptor (and removed the same path) again at scope end.
-jetc_publish: fn(output: &JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
+jetc_publish: fn(output: ^JetcTemp, parent: JetcParent, operation: String) FileCryptoError! {
     jetc_cancel_checkpoint()
     if parent.linux {
         jetc_sync(output.file, "{operation}-output-fsync")
@@ -476,7 +476,7 @@ jetc_cancel_checkpoint: fn() FileCryptoError! {
 }
 
 // Consumes the writer: its file key becomes the verifying reader's key.
-jetc_verify_output: fn(input: JetcFd, writer: &&jetc.Writer, length: Int) FileCryptoError! {
+jetc_verify_output: fn(input: JetcFd, writer: ^^jetc.Writer, length: Int) FileCryptoError! {
     jetc_seek(input, .OpenFailed)
     metadata: jetc_stat(input, .OpenFailed)
     if metadata.len != writer.prefix.len() + (jetc.body_length(length) ?? return Err(.OpenFailed)) {

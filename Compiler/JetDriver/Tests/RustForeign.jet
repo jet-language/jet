@@ -63,7 +63,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
 }
 
 #Test("safe ownership signatures do not invent unsupported native trampolines") {
-    facts: rust_foreign_test_facts("extern rust \"std\" {{\n    consume: fn(s: &&String) -> String = \"std::convert::identity\"\n    modify: fn(s: &String) = \"std::string::String::clear\"\n}}\n")
+    facts: rust_foreign_test_facts("extern rust \"std\" {{\n    consume: fn(s: ^^String) -> String = \"std::convert::identity\"\n    modify: fn(s: &String) = \"std::string::String::clear\"\n}}\n")
     source: jet_driver_rust_foreign_source(facts)
     assert(source.contains("pub fn jet_ffi_consume(p0: String)"))
     assert(source.contains("pub fn jet_ffi_modify(p0: &mut String)"))

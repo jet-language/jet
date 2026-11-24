@@ -35,7 +35,7 @@ JetCLIToolStageRun: struct {
     stop: Diagnostic?,
 }
 
-jet_cli_tool_stage_run: fn(document: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -> JetCLIToolStageRun Never! {
+jet_cli_tool_stage_run: fn(document: String, overlays: ^^[JetDriverSourceDocument], stage: String, bodies: [Span], program: ^^String) -> JetCLIToolStageRun Never! {
     if bodies.len() == 0 {
         return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, stop: None}
     }
@@ -56,7 +56,7 @@ JetCLIToolStageValues: struct {
     stop: Diagnostic?,
 }
 
-jet_cli_tool_stage_values: fn(document: String, overlays: &&[JetDriverSourceDocument], program: &&String) -> JetCLIToolStageValues Never! {
+jet_cli_tool_stage_values: fn(document: String, overlays: ^^[JetDriverSourceDocument], program: ^^String) -> JetCLIToolStageValues Never! {
     given := overlays.move()
     given.push(JetDriverSourceDocument{path: jet_cli_tool_stage_file(document), source: program.move()})
     if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
@@ -126,7 +126,7 @@ jet_cli_tool_stage_memo: fn() -> JetCLIToolStageMemo Never! {
 // The markers of the `stage` hooks in the snapshot a compile of `document`
 // with `overlays` sees; the members of one package share it, so `memo`
 // keeps it for the rest of the run. A script or a loose file takes its own.
-jet_cli_tool_stage_markers: fn(document: String, overlays: [JetDriverSourceDocument], stage: String, memo: &JetCLIToolStageMemo) -[FS, Env]> [String] Never! {
+jet_cli_tool_stage_markers: fn(document: String, overlays: [JetDriverSourceDocument], stage: String, memo: ^JetCLIToolStageMemo) -[FS, Env]> [String] Never! {
     root: jet_cli_tool_stage_package_root(document, overlays)
     key: "{stage}\n{root}"
     if root != "" && memo.markers.get(key) == .Val(known) -> return known
@@ -158,7 +158,7 @@ jet_cli_tool_stage_package_root: fn(document: String, overlays: [JetDriverSource
 // markers (`memo` keeps those per package) runs hooks: a Doc check of `text`
 // finds them among the modules it imports. Hooks that do not run, or an
 // answer that leaves the file unreadable, stop the file as written.
-jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool, memo: &JetCLIToolStageMemo) -> JetCLIFmtSource {
+jet_cli_fmt_block_hooks: fn(text: ^^String, origin: String, color: Bool, memo: ^JetCLIToolStageMemo) -> JetCLIFmtSource {
     blocks: jet_driver_tool_stage_blocks(text)
     if blocks.len() == 0 || !jet_cli_tool_stage_imports_package(text) || !cli_files.is_file(origin) {
         return jet_cli_fmt_formatted(text.move())

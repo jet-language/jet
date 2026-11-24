@@ -28,7 +28,7 @@ AuthorityResolver: struct {
     // Upward discovery crosses unrelated parents; they are discovery space,
     // and shared directories such as `/tmp` are never pinned. `cache` is the
     // discovery session's, which lists each directory once.
-    open_for_authority_walk: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> AuthorityResolver? AuthorityError! {
+    open_for_authority_walk: fn(cache: ^WorkspaceDeclarationCache, root: String) -[FS, Env]> AuthorityResolver? AuthorityError! {
         effective: pkg_authority_effective_root(root)
         info: pkg_authority_inspect_root(effective)
         if pkg_authority_is_shared_directory(info) || !cache.has_candidate(effective) {
@@ -213,7 +213,7 @@ AuthorityResolver: struct {
     // Complete a member from an already-open checked directory and manifest.
     // Config paths and a Package's own membership are relative to that
     // Package root; the checked directory carries its opened handle.
-    complete_checked_package: fn(self, member: &&CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
+    complete_checked_package: fn(self, member: ^^CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
         facts := member.manifest.facts
         manifest_path: member.manifest.file.path
         facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
@@ -324,7 +324,7 @@ AuthorityResolver: struct {
     // A Package root with `members:` owns
     // membership; the declaration-resolved workspace source remains below
     // only while a root still waits for its list to fold into package.jet.
-    resolve_workspace_source: fn(self, cache: &WorkspaceDeclarationCache) -[FS, Env]> WorkspaceSource? AuthorityError! {
+    resolve_workspace_source: fn(self, cache: ^WorkspaceDeclarationCache) -[FS, Env]> WorkspaceSource? AuthorityError! {
         self.revalidate_root()
         if self.checked_manifest(".") == {
             .Ok(manifest) -> {
@@ -445,7 +445,7 @@ AuthorityResolver: struct {
         Ok(false)
     }
 
-    discover_source_files_from: fn(self, path: String, found: &[CheckedFile], budget: &AuthorityWalkBudget, depth: Int) -[FS, Env]> AuthorityError! {
+    discover_source_files_from: fn(self, path: String, found: ^[CheckedFile], budget: ^AuthorityWalkBudget, depth: Int) -[FS, Env]> AuthorityError! {
         if depth > PKG_MAX_TREE_DEPTH {
             return Err(pkg_authority_limit_error(pkg_authority_join(self.root, path), "authority source walk exceeds the {PKG_MAX_TREE_DEPTH}-level depth bound"))
         }

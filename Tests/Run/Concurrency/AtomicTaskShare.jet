@@ -1,7 +1,7 @@
 // A `task.group` child shares the Atomic cells it reads with their owner: an
 // Atomic argument, one several tasks add to, an Atomic a task block captures
 // and the Atomics a struct holds inline are each the one cell the owner
-// reads after the join. A task that takes its cell (`task &&cell`) owns it,
+// reads after the join. A task that takes its cell (`task ^^cell`) owns it,
 // and a Shared cell is shared through its handle by any task. A task outside
 // a group can't borrow a cell (Tests/UI/atomic_task_capture_outlives_its_cell).
 package: {
@@ -61,7 +61,7 @@ run: fn() {
     }
 
     word: Atomic<Int>.try_new(3) ?? panic("no word")
-    owned: task &&word {
+    owned: task ^^word {
         _: word.add(4)
         word.load()
     }

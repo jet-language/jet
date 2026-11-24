@@ -88,7 +88,7 @@ jettrace_test_text: fn(value: TraceSkeleton) -> String Never! {
     String.from_bytes(jettrace_test_bytes(value)) ?? panic("UTF8")
 }
 
-jettrace_test_set: fn(value: &CanonicalJSON, key: String, replacement: &&CanonicalJSON) Never! {
+jettrace_test_set: fn(value: ^CanonicalJSON, key: String, replacement: ^^CanonicalJSON) Never! {
     if value == {
         .Object(original) -> {
             fields := original.copy()
@@ -105,11 +105,11 @@ jettrace_test_set: fn(value: &CanonicalJSON, key: String, replacement: &&Canonic
     }
 }
 
-jettrace_test_wrap: fn(content: &&CanonicalJSON) -> [U8] Never! {
+jettrace_test_wrap: fn(content: ^^CanonicalJSON) -> [U8] Never! {
     canonical_json_bytes(jettrace_artifact(content) ?? panic(err.message))
 }
 
-jettrace_test_task: fn(id: U64, parent: U64, state: &&String, wait: &&String) -> TraceTask Never! {
+jettrace_test_task: fn(id: U64, parent: U64, state: ^^String, wait: ^^String) -> TraceTask Never! {
     TraceTask{id: id, parent: parent, state: state.move(), wait: wait.move(), canceled: false, symbol: jettrace_test_symbol()}
 }
 
@@ -138,7 +138,7 @@ jettrace_test_array_item: fn(value: CanonicalJSON, index: Int) -> CanonicalJSON 
     assert_eq(jettrace_test_wrapper_lookup(wrapper, "version") ?? panic(err.message), CanonicalJSON.Integer("{version}"))
 }
 
-jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never! {
+jettrace_test_window: fn(status: ^^String, wall: U64?, cpu: U64?) -> Bool Never! {
     skeleton := jettrace_sample_skeleton()
     skeleton.profile.window_status = status.move()
     skeleton.profile.window_wall_ns = wall

@@ -15,7 +15,7 @@ MAX_DEBUG_CHILD_OUTPUT_BYTES: 67108864
 
 // The live Canvas debug sessions, and the paused-stop adapter of each one
 // paused, by id. The devserver serves Canvas requests on one task, so the
-// store is plain state mutated through `&self`.
+// store is plain state mutated through `^self`.
 DebugSessions: struct {
     debugs: CanvasDebugSessions,
     adapters: [String:PausedDebugSessionAdapter],
@@ -26,7 +26,7 @@ DebugSessions: struct {
     // stop a request moved or stopped ends, a run that pauses gives its
     // session the adapter of its new stop, and a session the request ended
     // ends its adapter, stale when the source changed under it.
-    answer: fn(&self, host: &PausedEvaluateHost, debug_host: CanvasDebugHost, state: Shared<CanvasHostState>, path: String, source_id: String, request: String) -> String CanvasDebugError! {
+    answer: fn(^self, host: ^PausedEvaluateHost, debug_host: CanvasDebugHost, state: Shared<CanvasHostState>, path: String, source_id: String, request: String) -> String CanvasDebugError! {
         requested: json_string_field(request, "session_id")
         answered: if canvas_debug_payload(self.debugs, debug_host, state, path, source_id, request) == {
             .Ok(found) -> found
@@ -75,7 +75,7 @@ DebugSessions: struct {
     }
 
     // The program of session `id` ended.
-    clear_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) {
+    clear_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String) {
         adapter := self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return
@@ -84,7 +84,7 @@ DebugSessions: struct {
     }
 
     // The program of session `id` runs on from its stop.
-    resume_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) {
+    resume_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String) {
         adapter := self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return
@@ -93,7 +93,7 @@ DebugSessions: struct {
     }
 
     // Session `id` ended because its source changed.
-    stale_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) {
+    stale_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String) {
         adapter := self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return
@@ -101,7 +101,7 @@ DebugSessions: struct {
         adapter.stale(host)
     }
 
-    cancel_paused_session: fn(&self, host: &PausedEvaluateHost, id: String, reason: String) CanvasDebugError! {
+    cancel_paused_session: fn(^self, host: ^PausedEvaluateHost, id: String, reason: String) CanvasDebugError! {
         adapter := self.adapters.remove(id) ?? {
             debug_clear_host_session(host, id)
             return Ok()
@@ -110,7 +110,7 @@ DebugSessions: struct {
         Ok()
     }
 
-    cancel_all_paused_sessions: fn(&self, host: &PausedEvaluateHost, reason: String) CanvasDebugError! {
+    cancel_all_paused_sessions: fn(^self, host: ^PausedEvaluateHost, reason: String) CanvasDebugError! {
         ids := [String]{}
         loop entry in self.adapters -> ids.push(entry.key)
         loop id in ids -> self.cancel_paused_session(host, id, reason) ?? return Err(err)
@@ -123,7 +123,7 @@ debug_sessions: fn(jet: String) -> DebugSessions Never! {
     DebugSessions{debugs: canvas_debug_sessions(jet), adapters: [String:PausedDebugSessionAdapter]{}}
 }
 
-debug_clear_host_session: fn(host: &PausedEvaluateHost, id: String) Never! {
+debug_clear_host_session: fn(host: ^PausedEvaluateHost, id: String) Never! {
     if host.session == .Val(injected) {
         if injected.identity.session_id == id -> host.clear_session()
     }

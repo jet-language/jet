@@ -340,7 +340,7 @@ american_tokens1_trace_same_meaning: fn(old_bytes: [U8], new_bytes: [U8]) -[]> S
 
 // `content` with the `from` key of each row of its `tasks` named `to`,
 // counting the renamed keys in `renamed`.
-american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: String, renamed: &Int) -[]> CanonicalJSON {
+american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: String, renamed: ^Int) -[]> CanonicalJSON {
     fields: american_tokens1_object(content) ?? return content
     out := [CanonicalJSONField]{}
     loop field in fields {
@@ -357,7 +357,7 @@ american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: Strin
 }
 
 // `row` with its `from` key named `to`, its keys in canonical order.
-american_tokens1_rename: fn(row: CanonicalJSON, from: String, to: String, renamed: &Int) -[]> CanonicalJSON {
+american_tokens1_rename: fn(row: CanonicalJSON, from: String, to: String, renamed: ^Int) -[]> CanonicalJSON {
     fields: american_tokens1_object(row) ?? return row
     out := [CanonicalJSONField]{}
     loop field in fields {
@@ -434,7 +434,7 @@ american_tokens1_binding_same_meaning: fn(before: String, after: String) -[]> St
 // `stamp` with each marshaled model (a field whose value is `from`) spelled
 // `to`, counting them in `renamed`, and, when one was, its contract version
 // `from_version` set to `to_version`.
-american_tokens1_stamp: fn(stamp: String, from: String, to: String, from_version: String, to_version: String, renamed: &Int) -[]> String {
+american_tokens1_stamp: fn(stamp: String, from: String, to: String, from_version: String, to_version: String, renamed: ^Int) -[]> String {
     fields := stamp.split(";").to_list()
     old_version: "version={from_version}"
     version := -1
@@ -537,7 +537,7 @@ american_tokens1_store_parse: fn(text: String) -[]> AmericanTokensStore? {
 // record's `sleep_from` sleep and `wire_from` outcome spelled `sleep_to`
 // and `wire_to`, counting them in `renamed`; None when a record does not
 // parse.
-american_tokens1_store_text: fn(store: AmericanTokensStore, workflows: Bool, magic: String, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: &Int) -[]> String? {
+american_tokens1_store_text: fn(store: AmericanTokensStore, workflows: Bool, magic: String, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: ^Int) -[]> String? {
     parts := [String]{"{magic}\n"}
     loop index in 1..<store.header.len() -> parts.push("{store.header[index]}\n")
     version: store.header[3].removeprefix("version:")
@@ -555,7 +555,7 @@ american_tokens1_store_text: fn(store: AmericanTokensStore, workflows: Bool, mag
 // A record's payload, in a workflow log with its `sleep_from` sleep or its
 // activity's `wire_from` outcome spelled `sleep_to` or `wire_to`, counting
 // them in `renamed`; None when an activity record's fields do not parse.
-american_tokens1_workflow: fn(payload: String, workflows: Bool, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: &Int) -[]> String? {
+american_tokens1_workflow: fn(payload: String, workflows: Bool, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: ^Int) -[]> String? {
     if !workflows -> return Val(payload)
     if payload.starts_with(sleep_from) {
         renamed += 1
@@ -746,7 +746,7 @@ american_tokens1_is_record: fn(members: [AmericanTokensMember]) -[]> Bool {
 
 // Rewrites a `status` member holding a version 1 word to the current word
 // for the status it named.
-american_tokens1_status_edit: fn(bytes: [U8], members: [AmericanTokensMember], edits: &[AmericanTokensEdit]) -[]> {
+american_tokens1_status_edit: fn(bytes: [U8], members: [AmericanTokensMember], edits: ^[AmericanTokensEdit]) -[]> {
     word: american_tokens1_word(bytes, members) ?? return
     status: american_tokens1_status_v1(word) ?? return
     current: comparison_status_as_str(status)

@@ -46,7 +46,7 @@ sema_state_types_owners: fn() -> SemaStateTypeOwners Never! {
 }
 
 // The id of `name` in `owners`, its row grown to it.
-sema_state_types_owner_id: fn(owners: &SemaStateTypeOwners, name: String) -> Int Never! {
+sema_state_types_owner_id: fn(owners: ^SemaStateTypeOwners, name: String) -> Int Never! {
     id: name_index(name_intern(owners.names, name))
     loop owners.owners.len() <= id -> owners.owners.push(None)
     id
@@ -62,7 +62,7 @@ sema_state_types_owner_named: fn(owners: SemaStateTypeOwners, name: String) -> S
 // refers to is the type of that name in the same module, else the one type of
 // that name across all modules. Inputs whose items name no owner are left
 // untouched.
-sema_state_types_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput]) Never! {
+sema_state_types_rewrite_inputs: fn(inputs: ^[SemaRegistrationModuleInput]) Never! {
     local := [SemaStateTypeOwners]{}
     loop index in 0..<inputs.len() {
         owners := sema_state_types_owners()
@@ -103,7 +103,7 @@ sema_state_types_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput]) Neve
     }
 }
 
-sema_state_types_collect: fn(items: [Item], owners: &SemaStateTypeOwners) Never! {
+sema_state_types_collect: fn(items: [Item], owners: ^SemaStateTypeOwners) Never! {
     loop item in items {
         if item == .Struct(definition) {
             if definition.state == .Val(state) {
@@ -131,7 +131,7 @@ sema_state_types_owner: fn(state: StateDecl) -> SemaStateTypeOwner Never! {
 }
 
 // A group named twice keeps its last members.
-sema_state_types_group_put: fn(groups: &[SemaStateTypeGroup], name: String, members: [String]) Never! {
+sema_state_types_group_put: fn(groups: ^[SemaStateTypeGroup], name: String, members: [String]) Never! {
     loop index in 0..<groups.len() {
         if groups[index].name != name -> next
         groups[index].members = members
@@ -275,7 +275,7 @@ sema_state_types_split: fn(ty: Type, owners: SemaStateTypeOwners) -> SemaStateTy
     None
 }
 
-sema_state_types_expand: fn(owner: SemaStateTypeOwner, name: String, states: &[String]) Never! {
+sema_state_types_expand: fn(owner: SemaStateTypeOwner, name: String, states: ^[String]) Never! {
     loop group in owner.groups {
         if group.name != name -> next
         loop member in group.members {

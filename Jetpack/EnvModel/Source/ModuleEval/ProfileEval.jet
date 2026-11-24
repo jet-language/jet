@@ -29,7 +29,7 @@ ProfileField: enum {
 
 // Plan the `extends` value of a `profile.<name>` contribution written as an
 // expression; any other shape is refused when the profile is evaluated.
-envmodel_plan_package_profile_expr: fn(plan: &EnvValueProgram, value: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_package_profile_expr: fn(plan: ^EnvValueProgram, value: Expr, globals: [String:CtValue]) EnvModelEvalError! {
     if envmodel_record_literal(value) == .Val(record) {
         envmodel_plan_package_profile_expr(plan, record, globals)
         return
@@ -45,7 +45,7 @@ envmodel_plan_package_profile_expr: fn(plan: &EnvValueProgram, value: Expr, glob
 
 // Plan the `extends` value of a package generation; `packages` and
 // `collisions` are read from their source text.
-envmodel_plan_package_profile_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_package_profile_fields: fn(plan: ^EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
     loop field in fields {
         if field.name == PROFILE_FIELD_EXTENDS {
             envmodel_value_plan(plan, field.value, [String:String]{}, globals)

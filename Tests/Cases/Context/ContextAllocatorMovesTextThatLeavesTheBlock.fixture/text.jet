@@ -9,7 +9,7 @@ Reuser: struct {
     given: Int,
 
     impl mem.Allocator {
-        allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        allocate: fn(^self, size: Int, align: Int) -> mem.Block mem.AllocError! {
             self.taken += 1
             loop i in 0..<self.kept.len() {
                 if self.kept[i].size() >= size && self.kept[i].address() & align - 1 == 0 {
@@ -20,12 +20,12 @@ Reuser: struct {
             Ok(block)
         }
 
-        release: fn(&self, block: &&mem.Block) Never! {
+        release: fn(^self, block: ^^mem.Block) Never! {
             self.given += 1
             self.kept.push(block)
         }
 
-        resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        resize: fn(^self, block: ^mem.Block, new_size: Int) -> Bool Never! {
             if new_size <= 0 || new_size >= block.size() -> return false
             self.kept.push(block.split(new_size))
             true
@@ -45,7 +45,7 @@ counted: fn(n: Int) -> String {
     out
 }
 
-returned: fn(reuser: &Reuser) -> String {
+returned: fn(reuser: ^Reuser) -> String {
     #Context(allocator: reuser) {
         text: "{counted(4)}end"
         if text.len() > 0 -> return text
@@ -54,7 +54,7 @@ returned: fn(reuser: &Reuser) -> String {
 }
 
 // Fills the blocks the earlier blocks released with other text.
-scribble: fn(reuser: &Reuser) -> Int {
+scribble: fn(reuser: ^Reuser) -> Int {
     filled := 0
     #Context(allocator: reuser) {
         loop round in 0..<40 {

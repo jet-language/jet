@@ -16,12 +16,12 @@ byte: fn(n: Int) -> U8 Never! {
 
 int: fn(b: U8) -> Int Never! { Int{b} }
 
-put16: fn(out: &[U8], n: Int) Never! {
+put16: fn(out: ^[U8], n: Int) Never! {
     out.push(byte(n))
     out.push(byte(n >> 8))
 }
 
-put32: fn(out: &[U8], n: Int) Never! {
+put32: fn(out: ^[U8], n: Int) Never! {
     out.push(byte(n))
     out.push(byte(n >> 8))
     out.push(byte(n >> 16))
@@ -34,7 +34,7 @@ repeated: fn(b: Int, count: Int) -> [U8] Never! {
     out
 }
 
-bits_write: fn(bits: &BitWriter, value: Int, count: Int) Never! {
+bits_write: fn(bits: ^BitWriter, value: Int, count: Int) Never! {
     loop offset in 0..<count {
         if bits.bit == 0 -> bits.bytes.push(U8{0})
         if (value >> offset) & 1 != 0 {
@@ -197,7 +197,7 @@ gzip_crc: fn(gzip: [U8]) -> Int Never! {
     int(gzip[n - 8]) | int(gzip[n - 7]) << 8 | int(gzip[n - 6]) << 16 | int(gzip[n - 5]) << 24
 }
 
-tar_bomb_octal: fn(header: &[U8], start: Int, width: Int, value: Int) Never! {
+tar_bomb_octal: fn(header: ^[U8], start: Int, width: Int, value: Int) Never! {
     n := value
     loop index in start..<(start + width - 1) -> header[index] = U8{48}
     header[start + width - 1] = U8{0}
@@ -209,7 +209,7 @@ tar_bomb_octal: fn(header: &[U8], start: Int, width: Int, value: Int) Never! {
     }
 }
 
-append_tar_bomb_record: fn(output: &[U8], name: [U8], payload: [U8], kind: Int) Never! {
+append_tar_bomb_record: fn(output: ^[U8], name: [U8], payload: [U8], kind: Int) Never! {
     header := repeated(0, 512)
     loop index in 0..<name.len() -> header[index] = name[index]
     tar_bomb_octal(header, 100, 8, 420)
@@ -231,7 +231,7 @@ append_tar_bomb_record: fn(output: &[U8], name: [U8], payload: [U8], kind: Int) 
     loop output.len() % 512 != 0 -> output.push(U8{0})
 }
 
-tar_end: fn(output: &[U8]) Never! {
+tar_end: fn(output: ^[U8]) Never! {
     loop _ in 0..<1024 -> output.push(U8{0})
 }
 

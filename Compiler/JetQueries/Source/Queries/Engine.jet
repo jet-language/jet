@@ -115,7 +115,7 @@ QueryEngine: struct<T> {
     }
 
     // Rust set_input: identical text neither advances revision nor prunes.
-    set_input: fn(&self, key: InputKey, text: String) -> Bool Never! {
+    set_input: fn(^self, key: InputKey, text: String) -> Bool Never! {
         if self.inputs.get(key) == .Val(cell) {
             if cell.text == text -> return false
         }
@@ -127,7 +127,7 @@ QueryEngine: struct<T> {
 
     // Rust remove_input: purge invalid counters and same-subject history even
     // when invalidate_kind previously removed its memo.
-    remove_input: fn(&self, key: InputKey) -> Bool Never! {
+    remove_input: fn(^self, key: InputKey) -> Bool Never! {
         if !self.inputs.has_key(key) -> return false
         _: self.inputs.remove(key)
         self.revision += 1
@@ -141,7 +141,7 @@ QueryEngine: struct<T> {
     }
 
     // Rust input_text/record_dep: missing inputs are dependencies too.
-    input_text: fn(&self, key: InputKey) -> String? Never! {
+    input_text: fn(^self, key: InputKey) -> String? Never! {
         self.record_dep(QueryDepKey{is_input: true, kind: "", subject: key.subject})
         if self.inputs.get(key) == {
             .Val(cell) -> Val(cell.text.copy())
@@ -154,7 +154,7 @@ QueryEngine: struct<T> {
     // match Val(hit), or compute on None and balance it with finish_query.
     // expected_result_kind is a carrier/type discriminator, NOT query identity.
     // Always record the parent edge, including a child served from its memo.
-    query: fn(&self, key: QueryKey, expected_result_kind: String) -> T? Never! {
+    query: fn(^self, key: QueryKey, expected_result_kind: String) -> T? Never! {
         self.record_dep(QueryDepKey{is_input: false, kind: key.kind, subject: key.subject})
         visiting := [QueryKey:Bool]{}
         if self.memo.get(key) == .Val(entry) {
@@ -170,7 +170,7 @@ QueryEngine: struct<T> {
 
     // Rust query's completion half / finish_deps. Only finish the innermost
     // demand; caller-owned handle copying is the equivalent of Rust Arc clone.
-    finish_query: fn(&self, key: QueryKey, result_kind: String, value: &&T) -> T Never! {
+    finish_query: fn(^self, key: QueryKey, result_kind: String, value: ^^T) -> T Never! {
         frame: (self.dep_stack.pop()) ?? panic("query computation has no frame")
         assert(frame.key == key && frame.result_kind == result_kind)
         seen := [QueryDepKey:Bool]{}
@@ -215,7 +215,7 @@ QueryEngine: struct<T> {
     }
 
     // Rust invalidate_kind does NOT eagerly prune dependent memos/counters.
-    invalidate_kind: fn(&self, kind: String) Never! {
+    invalidate_kind: fn(^self, kind: String) Never! {
         dead := [QueryKey]{}
         loop (key, _) in self.memo {
             if key.kind == kind -> dead.push(key.copy())
@@ -224,7 +224,7 @@ QueryEngine: struct<T> {
     }
 
     // Rust invalidate: prune dependents only when the memo existed.
-    invalidate: fn(&self, key: QueryKey) Never! {
+    invalidate: fn(^self, key: QueryKey) Never! {
         if !self.memo.has_key(key) {
             return
         }
@@ -232,12 +232,12 @@ QueryEngine: struct<T> {
         self.prune_invalid_memos(false)
     }
 
-    remove_memo: fn(&self, key: QueryKey) Never! {
+    remove_memo: fn(^self, key: QueryKey) Never! {
         _: self.memo.remove(key)
         _: self.values.remove(key)
     }
 
-    record_dep: fn(&self, key: QueryDepKey) Never! {
+    record_dep: fn(^self, key: QueryDepKey) Never! {
         if self.dep_stack.len() == 0 {
             return
         }
@@ -246,7 +246,7 @@ QueryEngine: struct<T> {
 
     // Rust memo_entry_valid/memo_key_valid: generations are per-key recompute
     // counts, and revisiting a key returns true (not a new cycle error).
-    memo_entry_valid: fn(self, entry: QueryMemoEntry, visiting: &[QueryKey:Bool]) -> Bool Never! {
+    memo_entry_valid: fn(self, entry: QueryMemoEntry, visiting: ^[QueryKey:Bool]) -> Bool Never! {
         loop dep in entry.deps {
             if dep == {
                 .Input(key, revision) -> {
@@ -265,7 +265,7 @@ QueryEngine: struct<T> {
         true
     }
 
-    memo_key_valid: fn(self, key: QueryKey, visiting: &[QueryKey:Bool]) -> Bool Never! {
+    memo_key_valid: fn(self, key: QueryKey, visiting: ^[QueryKey:Bool]) -> Bool Never! {
         if visiting.has_key(key) -> return true
         visiting[key] = true
         valid := false
@@ -276,7 +276,7 @@ QueryEngine: struct<T> {
 
     // Rust prune_invalid_memos: discover all dead keys against the same graph
     // before removing any entries; normal edits keep cumulative key counters.
-    prune_invalid_memos: fn(&self, purge_counters: Bool) Never! {
+    prune_invalid_memos: fn(^self, purge_counters: Bool) Never! {
         dead := [QueryKey]{}
         loop (key, _) in self.memo {
             visiting := [QueryKey:Bool]{}

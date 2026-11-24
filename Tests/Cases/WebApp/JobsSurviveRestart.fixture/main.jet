@@ -118,7 +118,7 @@ Board: struct {
 
 // Serves `board` on a task of its own; serving starts its schedule and
 // takes the jobs' rows no server holds.
-serve_board: fn(board: &&Board) {
+serve_board: fn(board: ^^Board) {
     server: web.app().mount(board).bind("127.0.0.1:0") ?? panic("bind the board")
     serving: task { server.serve() }
     serving.detach()

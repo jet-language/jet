@@ -53,7 +53,7 @@ use {
 
 IR_OPT_SIMPLIFY_ROUNDS: 8
 
-ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
+ir_opt_simplify: fn(m: IRModule, f: ^IRFunction, report: ^IROptReport) Never! {
     round := 0
     fixed: ir_interned_name(m, "jet_int_checked_fixed") ?? -2
     texts: OptTextRoutes{clone: ir_interned_name(m, "jet_rt_string_clone") ?? -2, scalars: ir_interned_name(m, "jet_char_len") ?? -2}
@@ -205,14 +205,14 @@ ir_opt_fold_value: fn(ty: IRX64Shape, op: IROp, left: Int, right: Int, trap: Boo
     ir_opt_word(ty, exact, trap)
 }
 
-ir_opt_set_const: fn(f: &IRFunction, at: Int, value: Int) Never! {
+ir_opt_set_const: fn(f: ^IRFunction, at: Int, value: Int) Never! {
     f.op[at] = .Const
     f.a[at] = value
     f.b[at] = -1
     f.c[at] = -1
 }
 
-ir_opt_set_copy: fn(f: &IRFunction, at: Int, source: Int) Never! {
+ir_opt_set_copy: fn(f: ^IRFunction, at: Int, source: Int) Never! {
     if f.dst[at] == source -> return ir_opt_kill(f, at)
     f.op[at] = .Copy
     f.a[at] = source
@@ -241,7 +241,7 @@ ir_opt_text_scalars: fn(bytes: [U8]) -> Int Never! {
 // A clone of an immortal String is that String (the runtime's clone returns
 // it), and its scalar count is the count of its data row, noted in
 // `report.text_lengths`. Returns whether instruction `at` folded.
-ir_opt_fold_text: fn(m: IRModule, f: &IRFunction, facts: OptFacts, texts: OptTextRoutes, at: Int, report: &IROptReport) -> Bool Never! {
+ir_opt_fold_text: fn(m: IRModule, f: ^IRFunction, facts: OptFacts, texts: OptTextRoutes, at: Int, report: ^IROptReport) -> Bool Never! {
     route: f.a[at]
     if (route != texts.clone && route != texts.scalars) || f.c[at] != 1 || f.dst[at] < 0 {
         return false
@@ -264,7 +264,7 @@ ir_opt_fold_text: fn(m: IRModule, f: &IRFunction, facts: OptFacts, texts: OptTex
     true
 }
 
-ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, texts: OptTextRoutes, report: &IROptReport) -> Int Never! {
+ir_opt_fold: fn(m: IRModule, f: ^IRFunction, facts: OptFacts, fixed: Int, texts: OptTextRoutes, report: ^IROptReport) -> Int Never! {
     // Only folding an If reads the nesting. The folds before the first one
     // change no Block, Loop, If, Else or End, so it is taken there.
     nesting := OptNesting{end: [Int]{}, els: [Int]{}}
@@ -393,7 +393,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, texts:
 // and k's constant is read by the Mul only (it becomes -k). The FloorDiv,
 // then unread, goes as dead code. The BitAnd of an Int is exact
 // (OptRange.jet proves its operands inline); of a word it cannot overflow.
-ir_opt_floor_multiple: fn(f: &IRFunction, facts: OptFacts, at: Int, ty: IRX64Shape) -> Bool Never! {
+ir_opt_floor_multiple: fn(f: ^IRFunction, facts: OptFacts, at: Int, ty: IRX64Shape) -> Bool Never! {
     if ty.kind != .Int && !(ty.kind == .Word && ty.signed) -> return false
     loop side in 0..<2 {
         quotient: if side == 0 -> f.a[at] else -> f.b[at]
@@ -458,7 +458,7 @@ ir_opt_fixed_high: fn(kind: Int) -> Int Never! {
 }
 
 // An If or BrIf at `at` whose condition is the constant `taken`.
-ir_opt_fold_branch: fn(f: &IRFunction, nesting: OptNesting, at: Int, taken: Bool) Never! {
+ir_opt_fold_branch: fn(f: ^IRFunction, nesting: OptNesting, at: Int, taken: Bool) Never! {
     if f.op[at] == .BrIf {
         if !taken -> return ir_opt_kill(f, at)
         depth: f.b[at]
@@ -490,7 +490,7 @@ ir_opt_fold_branch: fn(f: &IRFunction, nesting: OptNesting, at: Int, taken: Bool
 // ---------------------------------------------------------------------------
 // Unreachable code.
 
-ir_opt_unreachable: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
+ir_opt_unreachable: fn(f: ^IRFunction, report: ^IROptReport) -> Int Never! {
     removed := 0
     at := 0
     loop at < f.op.len() {
@@ -527,7 +527,7 @@ ir_opt_unreachable: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // reads what the compare read, so the compare of an inlined verdict
 // function (`!ok(diff)`) stays in that function's site rather than moving
 // to the caller's code with the Not.
-ir_opt_fuse_compares: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+ir_opt_fuse_compares: fn(m: IRModule, f: ^IRFunction, facts: OptFacts, report: ^IROptReport) -> Int Never! {
     changed := 0
     pairs := [Int]{}
     loop _ in 0..<f.slot_type.len() -> pairs.push(0)
@@ -611,7 +611,7 @@ ir_opt_fused_def: fn(f: IRFunction, at: Int) -> Int Never! {
 // `facts` is ir_opt_simplify's buffer: each pass that finds a candidate
 // refills it in place (ir_opt_facts_refill), the first one only when they
 // are not `fresh` (the function as it is).
-ir_opt_short_circuits: fn(f: &IRFunction, facts: &OptFacts, fresh: Bool, report: &IROptReport) -> Int Never! {
+ir_opt_short_circuits: fn(f: ^IRFunction, facts: ^OptFacts, fresh: Bool, report: ^IROptReport) -> Int Never! {
     exposed := [Int]{}
     total := ir_opt_short_pass(f, facts, report, exposed, true, fresh)
     loop exposed.len() > 0 {
@@ -626,7 +626,7 @@ ir_opt_short_circuits: fn(f: &IRFunction, facts: &OptFacts, fresh: Bool, report:
 // those whose negated branch tests an r in `exposed`. `exposed` comes back
 // as the r of each rewritten short circuit whose c2 is a Not of the short
 // circuit ending right before it.
-ir_opt_short_pass: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport, exposed: &[Int], first: Bool, fresh: Bool) -> Int Never! {
+ir_opt_short_pass: fn(f: ^IRFunction, facts: ^OptFacts, report: ^IROptReport, exposed: ^[Int], first: Bool, fresh: Bool) -> Int Never! {
     count: f.op.len()
     // A short circuit's If has the Copy or Move of its test right before
     // it (ir_opt_short_circuit_copy): without one there is nothing to find,
@@ -774,7 +774,7 @@ OptRows: struct {
     line: [Int],
 }
 
-ir_opt_row: fn(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
+ir_opt_row: fn(rows: ^OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
     rows.op.push(op.copy())
     rows.dst.push(dst)
     rows.a.push(a)
@@ -787,7 +787,7 @@ ir_opt_row: fn(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line:
 // range `shift` constructs deeper on top of what the ranges around it
 // (`levels`, outermost first) shift it, and each short circuit whose Copy
 // is among them rewritten.
-ir_opt_short_moved: fn(rows: &OptRows, f: &IRFunction, plan: OptShortPlan, levels: &[OptShift], from: Int, to: Int, shift: Int) Never! {
+ir_opt_short_moved: fn(rows: ^OptRows, f: ^IRFunction, plan: OptShortPlan, levels: ^[OptShift], from: Int, to: Int, shift: Int) Never! {
     if from >= to {
         return
     }
@@ -822,14 +822,14 @@ ir_opt_short_depth: fn(plan: OptShortPlan, levels: [OptShift], k: Int, depth: In
 }
 
 // A fresh Bool temporary of `like`'s type.
-ir_opt_bool_temp: fn(f: &IRFunction, like: Int) -> Int Never! {
+ir_opt_bool_temp: fn(f: ^IRFunction, like: Int) -> Int Never! {
     ir_slot(f, f.slot_type[like], IRSlotKind.Temp, -1, 0)
 }
 
 // Short circuit If `at` rewritten onto `rows`; returns the instruction
 // after its branch. Its Bools come first, as rewriting it alone would make
 // them before any short circuit inside it.
-ir_opt_short_circuit_rewrite: fn(rows: &OptRows, f: &IRFunction, plan: OptShortPlan, levels: &[OptShift], at: Int) -> Int Never! {
+ir_opt_short_circuit_rewrite: fn(rows: ^OptRows, f: ^IRFunction, plan: OptShortPlan, levels: ^[OptShift], at: Int) -> Int Never! {
     seed: ir_opt_short_circuit_copy(f, at)
     is_or: seed != at - 1
     r: f.dst[seed]
@@ -927,7 +927,7 @@ ir_opt_short_circuit_rewrite: fn(rows: &OptRows, f: &IRFunction, plan: OptShortP
 // branch on c1 then follows its comparison directly, so the comparison's
 // flags feed the branch (X64Select ir_x64_fusable). A Block opener runs
 // nothing, so the rows it now encloses run as before.
-ir_opt_short_blocks: fn(rows: &OptRows, count: Int, c1: Int, line: Int) Never! {
+ir_opt_short_blocks: fn(rows: ^OptRows, count: Int, c1: Int, line: Int) Never! {
     total: rows.op.len()
     tail := total
     if tail > 0 && rows.op[tail - 1] == .Not && rows.a[tail - 1] == c1 -> tail -= 1
@@ -962,7 +962,7 @@ ir_opt_short_blocks: fn(rows: &OptRows, count: Int, c1: Int, line: Int) Never! {
 // (the `r2 = r` an outer short circuit leaves between an inner one's End
 // and the branch on it).
 
-ir_opt_propagate: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+ir_opt_propagate: fn(m: IRModule, f: ^IRFunction, facts: OptFacts, report: ^IROptReport) -> Int Never! {
     count: f.slot_type.len()
     replace := [Int]{}
     loop _ in 0..<count -> replace.push(-1)
@@ -1038,7 +1038,7 @@ ir_opt_propagate_adjacent: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
 // (IRFunction.binds), and a bind into a replaced slot follows it, when that
 // source is written once (a parameter: never), so it holds the value
 // wherever the debugger reads it; otherwise the bind goes.
-ir_opt_propagate_binds: fn(f: &IRFunction, facts: OptFacts, replace: [Int]) Never! {
+ir_opt_propagate_binds: fn(f: ^IRFunction, facts: OptFacts, replace: [Int]) Never! {
     kept := [Int]{}
     pair := 0
     loop pair + 1 < f.binds.len() {
@@ -1062,7 +1062,7 @@ ir_opt_propagate_binds: fn(f: &IRFunction, facts: OptFacts, replace: [Int]) Neve
 
 // Renames `from` to `to` among the slots IRFunction.binds locates named
 // slots in.
-ir_opt_rebind: fn(f: &IRFunction, from: Int, to: Int) Never! {
+ir_opt_rebind: fn(f: ^IRFunction, from: Int, to: Int) Never! {
     loop k in 0..<(f.binds.len() /% 2) {
         if f.binds[2 * k + 1] == from -> f.binds[2 * k + 1] = to
     }
@@ -1072,7 +1072,7 @@ ir_opt_rebind: fn(f: &IRFunction, from: Int, to: Int) Never! {
 }
 
 // Rewrites the slots instruction `at` reads through `replace` (-1: kept).
-ir_opt_rename_reads: fn(f: &IRFunction, at: Int, replace: [Int]) Never! {
+ir_opt_rename_reads: fn(f: ^IRFunction, at: Int, replace: [Int]) Never! {
     op: f.op[at]
     if op == {
         .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf -> {
@@ -1117,7 +1117,7 @@ ir_opt_renamed: fn(replace: [Int], slot: Int) -> Int Never! {
 // first already. The table keeps per (op, fields) the latest instruction,
 // so a twin in an arm the later one cannot see gives way to it.
 
-ir_opt_common: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
+ir_opt_common: fn(m: IRModule, f: ^IRFunction, facts: OptFacts) -> Int Never! {
     seen := [Int:Int]{}
     changed := 0
     loop at in 0..<f.op.len() {
@@ -1195,7 +1195,7 @@ ir_opt_holds: fn(f: IRFunction, facts: OptFacts, slot: Int, twin: Int, at: Int) 
 // header's length through p is marked IR_LOAD_LENGTH first: its address no
 // longer names the List, and OptRange bounds the length by the mark.
 
-ir_opt_addresses: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
+ir_opt_addresses: fn(m: IRModule, f: ^IRFunction, facts: OptFacts) -> Int Never! {
     changed := 0
     loop at in 0..<f.op.len() {
         op: f.op[at]
@@ -1238,7 +1238,7 @@ ir_opt_address_def: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> In
 // ---------------------------------------------------------------------------
 // Coalescing.
 
-ir_opt_coalesce: fn(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+ir_opt_coalesce: fn(f: ^IRFunction, facts: OptFacts, report: ^IROptReport) -> Int Never! {
     changed := 0
     reads := [Int]{}
     loop at in 0..<f.op.len() {
@@ -1292,7 +1292,7 @@ ir_opt_coalesce: fn(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> In
 // straight-line run, so the program means the same on every target.
 // Instructions are visited last first: a move shifts only instructions after
 // the one moved. `keys` are the module's function keys by id.
-ir_opt_sink_addresses: fn(m: IRModule, keys: [String], f: &IRFunction) -> Int Never! {
+ir_opt_sink_addresses: fn(m: IRModule, keys: [String], f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 3 -> return 0
     first_cand := -1
@@ -1325,7 +1325,7 @@ ir_opt_sink_addresses: fn(m: IRModule, keys: [String], f: &IRFunction) -> Int Ne
 }
 
 // The reader instruction `at` moves next to (ir_opt_sink_addresses), else -1.
-ir_opt_sink_target: fn(m: IRModule, keys: [String], f: IRFunction, facts: OptFacts, at: Int, reads: &[Int]) -> Int Never! {
+ir_opt_sink_target: fn(m: IRModule, keys: [String], f: IRFunction, facts: OptFacts, at: Int, reads: ^[Int]) -> Int Never! {
     op: f.op[at]
     step: ir_x64_pointer_copy(m, f, at)
     if !step && ((op != .Add && op != .Mul) || f.c[at] != IR_OVERFLOW_WRAP) -> return -1
@@ -1396,7 +1396,7 @@ ir_opt_plain: fn(keys: [String], f: IRFunction, k: Int) -> Bool Never! {
 }
 
 // Moves instruction `from` to `to` (> from); the ones between move up one.
-ir_opt_rotate: fn(f: &IRFunction, from: Int, to: Int) Never! {
+ir_opt_rotate: fn(f: ^IRFunction, from: Int, to: Int) Never! {
     op: f.op[from]
     dst: f.dst[from]
     a: f.a[from]
@@ -1447,7 +1447,7 @@ ir_opt_removable: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 
 // `facts` are the function's as it is now; each sweep after one that removed
 // something reads new ones, refilled in place (ir_opt_facts_refill).
-ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: &OptFacts, report: &IROptReport) -> Int Never! {
+ir_opt_dead: fn(m: IRModule, f: ^IRFunction, facts: ^OptFacts, report: ^IROptReport) -> Int Never! {
     total := ir_opt_dead_sweep(m, f, facts)
     removed := total
     loop removed > 0 {
@@ -1459,7 +1459,7 @@ ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: &OptFacts, report: &IROptRep
     total
 }
 
-ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
+ir_opt_dead_sweep: fn(m: IRModule, f: ^IRFunction, facts: OptFacts) -> Int Never! {
     removed := 0
     clone: ir_interned_name(m, "jet_rt_string_clone") ?? -2
     enter: ir_interned_name(m, "jet_rt_cleanup_enter") ?? -2
@@ -1530,7 +1530,7 @@ ir_opt_next_live: fn(f: IRFunction, from: Int) -> Int Never! {
     at
 }
 
-ir_opt_structure: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
+ir_opt_structure: fn(f: ^IRFunction, report: ^IROptReport) -> Int Never! {
     changed := 0
     open := [Int]{}
     at := 0
@@ -1581,7 +1581,7 @@ ir_opt_structure: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // A Block no Br targets is only nesting: it goes, and every Br inside it
 // that leaves past it counts one construct fewer. One Block at a time, in
 // order, each over the depths the previous ones left.
-ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
+ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
     has_block := false
     loop op in f.op {
         if op == .Block {

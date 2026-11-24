@@ -385,7 +385,7 @@ PerfCompileAggregate: struct {
 }
 
 // Rust validate_compile_record.
-perf_validate_compile_record: fn(value: CanonicalJSON, root: [CanonicalJSONField], aggregate: &PerfCompileAggregate) PerfBudgetError! {
+perf_validate_compile_record: fn(value: CanonicalJSON, root: [CanonicalJSONField], aggregate: ^PerfCompileAggregate) PerfBudgetError! {
     _: perf_report_unsigned(root[perf_report_index(root, "workload_bytes")].value, "compile.workload_bytes")
     perf_report_object(value, "compile sample record", [String]{"backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "elapsed_ns", "host", "linker", "peak_rss_bytes", "phase_totals", "profile", "source_tree_sha256", "target", "workload_bytes"})
     if value == .Object(f) {
@@ -497,7 +497,7 @@ perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetE
 }
 
 // Rust frame / wire_text.
-perf_report_frame: fn(input: &[U8], value: String) Never! {
+perf_report_frame: fn(input: ^[U8], value: String) Never! {
     bytes: value.bytes()
     perf_push_u64(input, bytes.len())
     loop byte in bytes -> input.push(byte)

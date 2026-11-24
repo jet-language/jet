@@ -197,7 +197,7 @@ LockParser: struct {
     }
 
     // Consume one trimmed line.
-    accept: fn(&self, line: String, number: Int) LockError! {
+    accept: fn(^self, line: String, number: Int) LockError! {
         if line == "" || line.starts_with("#") {
             return
         }
@@ -257,7 +257,7 @@ LockParser: struct {
         }
     }
 
-    assign_build_stamp: fn(&self, key: String, value: String) LockError! {
+    assign_build_stamp: fn(^self, key: String, value: String) LockError! {
         stamp := self.build_stamp ?? BuildStamp.default()
         if key == {
             "git" -> stamp.git = Val(pkg_lock_unescape(value))
@@ -277,7 +277,7 @@ LockParser: struct {
         self.build_stamp = Val(stamp)
     }
 
-    assign_root: fn(&self, key: String, value: String) LockError! {
+    assign_root: fn(^self, key: String, value: String) LockError! {
         if key == {
             "dependencies" -> self.root_dependencies = pkg_lock_parse_string_array(value)
             "authority" -> {
@@ -294,7 +294,7 @@ LockParser: struct {
     }
 
     // Finish the record of the current section and return to the preamble.
-    close_section: fn(&self) LockError! {
+    close_section: fn(^self) LockError! {
         if self.section == {
             .ComptimeInput -> {
                 if self.comptime_input.finish() == {
@@ -344,7 +344,7 @@ LockParser: struct {
         self.section = LockParseSection.Preamble
     }
 
-    finish: fn(&self) -> LockFile LockError! {
+    finish: fn(^self) -> LockFile LockError! {
         self.close_section()
         policy: pkg_lock_build_workspace_overlay_policy(self.overlays, self.overlay_packages, self.build_grants, self.policy_allow_unfree, self.policy_build_deny)
         version: self.version ?? return Err(LockError.Invalid("lock is missing top-level `version`"))
@@ -382,7 +382,7 @@ PartialComptimeInput: struct {
     path: String?{None},
     hash: String?{None},
 
-    assign: fn(&self, key: String, value: String) Never! {
+    assign: fn(^self, key: String, value: String) Never! {
         if key == {
             "path" -> self.path = Val(pkg_lock_unescape(value))
             "hash" -> self.hash = Val(pkg_lock_trim_quotes(value))
@@ -407,7 +407,7 @@ PartialBuildContribution: struct {
     source: String?{None},
     reason: String?{None},
 
-    assign: fn(&self, key: String, value: String) LockError! {
+    assign: fn(^self, key: String, value: String) LockError! {
         text: pkg_lock_unescape(value)
         if key == {
             "package" -> self.package = Val(text)
@@ -447,7 +447,7 @@ PartialWorkspaceMember: struct {
     canonical_path: String?{None},
     package_digest: String?{None},
 
-    assign: fn(&self, key: String, value: String) Never! {
+    assign: fn(^self, key: String, value: String) Never! {
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "path" -> self.path = Val(pkg_lock_unescape(value))
@@ -480,7 +480,7 @@ PartialWorkspaceOverlay: struct {
     provider: String?{None},
     channel: String?{None},
 
-    assign: fn(&self, key: String, value: String) LockError! {
+    assign: fn(^self, key: String, value: String) LockError! {
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "provider" -> self.provider = Val(pkg_lock_unescape(value))
@@ -510,7 +510,7 @@ PartialWorkspaceOverlayPackage: struct {
     patches: [String]{[String]{}},
     allow_unfree: Bool{false},
 
-    assign: fn(&self, key: String, value: String) LockError! {
+    assign: fn(^self, key: String, value: String) LockError! {
         if key == {
             "overlay" -> self.overlay = Val(pkg_lock_unescape(value))
             "package" -> self.package = Val(pkg_lock_unescape(value))
@@ -552,7 +552,7 @@ PartialWorkspaceBuildGrant: struct {
     package: String?{None},
     effects: [String]{[String]{}},
 
-    assign: fn(&self, key: String, value: String) LockError! {
+    assign: fn(^self, key: String, value: String) LockError! {
         if key == {
             "package" -> self.package = Val(pkg_lock_unescape(value))
             "effects" -> self.effects = pkg_lock_parse_string_array(value)
@@ -669,7 +669,7 @@ PartialPackage: struct {
     receipt: String?{None},
     provenance: DependencyProvenance?{None},
 
-    assign: fn(&self, key: String, value: String) LockError! {
+    assign: fn(^self, key: String, value: String) LockError! {
         if key.starts_with("nix-") -> return self.assign_nix_closure(key, value)
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
@@ -716,7 +716,7 @@ PartialPackage: struct {
         }
     }
 
-    assign_nix_closure: fn(&self, key: String, value: String) LockError! {
+    assign_nix_closure: fn(^self, key: String, value: String) LockError! {
         closure := self.nix_closure ?? PartialNixClosure{}
         if key == {
             "nix-channel" -> closure.channel = Val(pkg_lock_unescape(value))
@@ -854,7 +854,7 @@ PartialToolchain: struct {
     version: String?{None},
     envelope: LockEnvelope{LockEnvelope.empty()},
 
-    assign: fn(&self, key: String, value: String) Never! {
+    assign: fn(^self, key: String, value: String) Never! {
         if key == {
             "id" -> self.id = Val(pkg_lock_unescape(value))
             "channel" -> self.channel = Val(pkg_lock_unescape(value))
@@ -878,7 +878,7 @@ PartialBrowser: struct {
     driver_size: Int{0},
     envelope: LockEnvelope{LockEnvelope.empty()},
 
-    assign: fn(&self, key: String, value: String) LockError! {
+    assign: fn(^self, key: String, value: String) LockError! {
         if key == {
             "engine" -> self.engine = Val(pkg_lock_unescape(value))
             "version" -> self.version = Val(pkg_lock_unescape(value))
@@ -914,7 +914,7 @@ PartialSourceChannel: struct {
     channel: String?{None},
     exact: String?{None},
 
-    assign: fn(&self, key: String, value: String) Never! {
+    assign: fn(^self, key: String, value: String) Never! {
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "channel" -> self.channel = Val(pkg_lock_unescape(value))
@@ -936,7 +936,7 @@ pkg_lock_is_envelope_key: fn(key: String) -> Bool Never! {
 }
 
 // Fill one envelope field; other keys are ignored.
-pkg_lock_assign_envelope: fn(envelope: &LockEnvelope, key: String, value: String) Never! {
+pkg_lock_assign_envelope: fn(envelope: ^LockEnvelope, key: String, value: String) Never! {
     if key == {
         "output-hash" -> envelope.output_hash = pkg_lock_unescape(value)
         "platform" -> envelope.platform = pkg_lock_unescape(value)

@@ -68,14 +68,14 @@ JetDriverComptimeBodyResult: struct {
 }
 
 // `result` with the registration graph moved back into it.
-jet_driver_comptime_body_returning: fn(result: &&JetDriverComptimeBodyResult, registration: &&SemaRegistrationGraph) -> JetDriverComptimeBodyResult Never! {
+jet_driver_comptime_body_returning: fn(result: ^^JetDriverComptimeBodyResult, registration: ^^SemaRegistrationGraph) -> JetDriverComptimeBodyResult Never! {
     owned := result.move()
     owned.registration = Val(registration.move())
     owned
 }
 
 jet_driver_comptime_body_result: fn(
-    graph: &&SemaGraphResult,
+    graph: ^^SemaGraphResult,
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
@@ -94,7 +94,7 @@ jet_driver_comptime_body_result: fn(
 }
 
 jet_driver_comptime_body_failure: fn(
-    graph: &&SemaGraphResult,
+    graph: ^^SemaGraphResult,
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
@@ -106,7 +106,7 @@ jet_driver_comptime_body_failure: fn(
 }
 
 // Moves the text of `addition` onto `target`.
-jet_driver_comptime_trace_append: fn(target: &JetDriverCompileTrace, addition: &JetDriverCompileTrace) Never! {
+jet_driver_comptime_trace_append: fn(target: ^JetDriverCompileTrace, addition: ^JetDriverCompileTrace) Never! {
     target.stdout.extend(addition.stdout.move())
     target.stderr.extend(addition.stderr.move())
     if addition.exit_code != None -> target.exit_code = addition.exit_code
@@ -139,7 +139,7 @@ jet_driver_comptime_diagnostic_key: fn(diagnostic: Diagnostic) -> String Never! 
 // rules' answers is reported in its place in the source, not after the
 // rest. The keys of the existing diagnostics are taken once per call
 // instead of recomputing every existing key for each addition.
-jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [Diagnostic]) Never! {
+jet_driver_comptime_diagnostics_add: fn(diagnostics: ^[Diagnostic], incoming: [Diagnostic]) Never! {
     if incoming.len() == 0 {
         return
     }
@@ -215,15 +215,15 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [D
 }
 
 // A run returns its one graph on every exit, with later edits in its trail.
-jet_driver_comptime_take_registration: fn(finished: &&SemaRegistrationGraph?, partial: &&SemaRegistrationGraph?) -> SemaRegistrationGraph Never! {
+jet_driver_comptime_take_registration: fn(finished: ^^SemaRegistrationGraph?, partial: ^^SemaRegistrationGraph?) -> SemaRegistrationGraph Never! {
     if finished == .Val(graph) -> return graph.move()
     partial.move() ?? panic("a comptime run lost its registration graph")
 }
 
 // `known` holds the `module\nkey` of every source already added.
 jet_driver_comptime_body_source_add: fn(
-    sources: &[SemaComptimeItemSource],
-    known: &NameTable,
+    sources: ^[SemaComptimeItemSource],
+    known: ^NameTable,
     source: SemaComptimeBodySource,
 ) Never! {
     item := sema_comptime_body_item_source(source)
@@ -310,8 +310,8 @@ jet_driver_comptime_reads_names: fn(graph: SemaGraphResult, values: [SemaComptim
 
 jet_driver_comptime_body_stage: fn(
     stage: SemaComptimeDeclarationStage,
-    graph: &&SemaGraphResult,
-    sources: &&[SemaComptimeItemSource],
+    graph: ^^SemaGraphResult,
+    sources: ^^[SemaComptimeItemSource],
 ) -> SemaComptimeDeclarationStage Never! {
     // The successful evaluation retired the old graph; its resolved modules
     // now belong to the recheck stage, never to a second copied graph. The
@@ -334,15 +334,15 @@ jet_driver_comptime_body_stage: fn(
 // `registration` of the result (every exit returns it). The run's values,
 // closures and trace move in too; the result hands them back.
 jet_driver_orchestrate_comptime_bodies: fn(
-    graph: &&SemaRegistrationGraph,
+    graph: ^^SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
-    initial_graph: &&SemaGraphResult,
-    initial_values: &&[SemaComptimeItemValue],
-    initial_functions: &&[SemaComptimeFunctionResult],
-    initial_trace: &&JetDriverCompileTrace,
+    initial_graph: ^^SemaGraphResult,
+    initial_values: ^^[SemaComptimeItemValue],
+    initial_functions: ^^[SemaComptimeFunctionResult],
+    initial_trace: ^^JetDriverCompileTrace,
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) -> JetDriverComptimeBodyResult {
     jet_driver_comptime_body_pass(
         graph,
@@ -362,15 +362,15 @@ jet_driver_orchestrate_comptime_bodies: fn(
 // them into rechecking. Like pure folding, passes thread ownership through
 // calls instead of copying a graph across a loop backedge.
 jet_driver_comptime_body_pass: fn(
-    graph: &&SemaRegistrationGraph,
+    graph: ^^SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
-    initial_graph: &&SemaGraphResult,
-    initial_values: &&[SemaComptimeItemValue],
-    initial_functions: &&[SemaComptimeFunctionResult],
-    initial_trace: &&JetDriverCompileTrace,
+    initial_graph: ^^SemaGraphResult,
+    initial_values: ^^[SemaComptimeItemValue],
+    initial_functions: ^^[SemaComptimeFunctionResult],
+    initial_trace: ^^JetDriverCompileTrace,
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
     completed_passes: Int,
 ) -> JetDriverComptimeBodyResult {
     registration := graph.move()
@@ -639,7 +639,7 @@ jet_driver_recheck_graph_rows: fn(graph: SemaGraphResult) -> String Never! {
 // The bodies of module `name` that differ between the splice (`ours`) and
 // the recheck (`theirs`), into `differences`: each body by its key, or, when
 // the two checked different bodies, each body only one of them checked.
-jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [FnBody], differences: &[String]) Never! {
+jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [FnBody], differences: ^[String]) Never! {
     if ours.len() == theirs.len() {
         loop index in 0..<ours.len() {
             if "{ours[index]:Debug}" != "{theirs[index]:Debug}" {
@@ -667,15 +667,15 @@ jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [F
 // As jet_driver_orchestrate_comptime_bodies: the registration graph moves in
 // and comes back in `registration` of the result.
 jet_driver_validate_checked_text: fn(
-    graph: &&SemaRegistrationGraph,
+    graph: ^^SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
-    initial_graph: &&SemaGraphResult,
+    initial_graph: ^^SemaGraphResult,
     initial_values: [SemaComptimeItemValue],
     initial_functions: [SemaComptimeFunctionResult],
     initial_trace: JetDriverCompileTrace,
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
+    diagnostics: ^[Diagnostic],
 ) -> JetDriverComptimeBodyResult {
     registration := graph.move()
     sources := [SemaComptimeItemSource]{}
@@ -742,11 +742,11 @@ jet_driver_validate_checked_text: fn(
 // recording its edits on `trail`; the graph comes back in the result's
 // `registration_graph` with the edits still applied (the caller undoes them).
 jet_driver_recheck_comptime_bodies: fn(
-    graph: &&SemaRegistrationGraph,
-    trail: &SemaGraphTrail,
+    graph: ^^SemaRegistrationGraph,
+    trail: ^SemaGraphTrail,
     stage: SemaComptimeDeclarationStage,
-    semantic_graph: &&SemaGraphResult,
-    body_sources: &&[SemaComptimeItemSource],
+    semantic_graph: ^^SemaGraphResult,
+    body_sources: ^^[SemaComptimeItemSource],
     values: [SemaComptimeItemValue],
     comptime_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
@@ -801,15 +801,15 @@ JetDriverLanding: struct {
 // earlier's sites again. The registration graph moves in and comes back with
 // no edit; `values`, `functions` and `trace` take what the landed passes add.
 jet_driver_land_local_values: fn(
-    graph: &&SemaRegistrationGraph,
-    bodies: &SemaFinalizeBodies,
+    graph: ^^SemaRegistrationGraph,
+    bodies: ^SemaFinalizeBodies,
     into: SemaLocalSpliceInto,
     stage: SemaComptimeDeclarationStage,
-    values: &[SemaComptimeItemValue],
-    functions: &[SemaComptimeFunctionResult],
-    trace: &JetDriverCompileTrace,
+    values: ^[SemaComptimeItemValue],
+    functions: ^[SemaComptimeFunctionResult],
+    trace: ^JetDriverCompileTrace,
     request: JetDriverCompileRequest,
-    landing: &JetDriverLanding,
+    landing: ^JetDriverLanding,
 ) -> SemaRegistrationGraph {
     registration := graph.move()
     if landing.stopped -> return registration
@@ -954,7 +954,7 @@ JetDriverLentFacts: struct {
 
 // Moves the facts out of `carried` (sema_finalize_pass_close) for a
 // comptime run. An empty `carried` lends nothing: an empty slot and None.
-jet_driver_carried_lend: fn(carried: &[SemaPassFacts]) -> JetDriverLentFacts Never! {
+jet_driver_carried_lend: fn(carried: ^[SemaPassFacts]) -> JetDriverLentFacts Never! {
     lent := JetDriverLentFacts{memory_plan: [SemaFunctionMemoryPlan]{}, graph_facts: None, fixed_length_write_params: [String]{}}
     facts: carried.pop() ?? return lent
     lent.memory_plan.push(facts.memory_plan.move())
@@ -966,7 +966,7 @@ jet_driver_carried_lend: fn(carried: &[SemaPassFacts]) -> JetDriverLentFacts Nev
 // Moves the facts jet_driver_carried_lend lent to a comptime run back into
 // `carried`, with the graph facts the run handed back (`returned`), which a
 // run hands back on every exit.
-jet_driver_carried_return: fn(carried: &[SemaPassFacts], lent: &&JetDriverLentFacts, returned: &&SemaComptimeGraphFacts?) Never! {
+jet_driver_carried_return: fn(carried: ^[SemaPassFacts], lent: ^^JetDriverLentFacts, returned: ^^SemaComptimeGraphFacts?) Never! {
     owned := lent.move()
     plan: owned.memory_plan.pop() ?? return
     graph_facts: returned.move() ?? panic("a comptime run lost the finalization's boxed edges and copy facts")
@@ -1013,15 +1013,15 @@ jet_driver_local_sources_only: fn(modules: [SemaGraphModuleResult], rows: [JetDr
 // checked the Core bodies themselves), as the first one did. The
 // registration graph moves in without staged edits and comes back the same.
 jet_driver_verify_landed_values: fn(
-    graph: &&SemaRegistrationGraph,
+    graph: ^^SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
     landed: SemaGraphResult,
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
-    start: &&SemaLocalSpliceDemand,
-    stand_ins: &&SemaCoreSeal?,
+    start: ^^SemaLocalSpliceDemand,
+    stand_ins: ^^SemaCoreSeal?,
     request: JetDriverCompileRequest,
-    problem: &String?,
+    problem: ^String?,
 ) -> SemaRegistrationGraph {
     registration := graph.move()
     held := sema_local_splice_demand_swap(registration, start)

@@ -28,9 +28,9 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins jetc_write Int,[u8],Int,Int JetcRaw
     jet_builtins jetc_stat Int JetcStat
     jet_builtins jetc_link Int,Int,String JetcRaw
-    core.crypto __sha256_blocks &[U32],[u8],Int,Int Bool
-    core.crypto __aes_blocks [u8],Int,Int,&[u8],[u8],Int,Int,&[u8] Bool
-    core.crypto __ghash_blocks [u8],&[u8],[u8],Int,Int Bool
+    core.crypto __sha256_blocks ^[U32],[u8],Int,Int Bool
+    core.crypto __aes_blocks [u8],Int,Int,^[u8],[u8],Int,Int,^[u8] Bool
+    core.crypto __ghash_blocks [u8],^[u8],[u8],Int,Int Bool
     core.files scope Authority FileScope
     core.files read Union<String,Path> Result<String,IOError>
     core.files read_bytes Union<String,Path> Result<[u8],IOError>
@@ -302,8 +302,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.math.random gammavariate|betavariate|lognormvariate|weibullvariate|vonmisesvariate Float,Float Float
     core.math.random paretovariate Float Float
     core.math.random rng|split Int RNG
-    core.crypto __wipe &[u8] -
-    core.crypto __secret_keep &[u8] -
+    core.crypto __wipe ^[u8] -
+    core.crypto __secret_keep ^[u8] -
     core.time sleep Duration -
     core.time sleep_until Instant -
     core.time start - Stopwatch
@@ -331,7 +331,7 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks interval Duration Receiver<Int>
     core.tasks after Duration,T Receiver<T> T
     core.tasks yield_now - Unit
-    core.game run &GameScene,GameReplay?,GameBackend?,Int? String
+    core.game run ^GameScene,GameReplay?,GameBackend?,Int? String
     core.event __scope_new - EventScope
     core.event __policy_sync - EventPolicy
     core.event __event_with_policy EventPolicy Event<T> T
@@ -357,8 +357,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.encoding.csv to_string [[String]] String
     core.encoding.csv rows String,String,Bool,Bool Result<[CSVRow],String>
     jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
-    core.net __ip_from_bytes &&[u8] IPAddr
-    core.net __socket_from_parts &&IPAddr,U16,U32,U32 SocketAddr
+    core.net __ip_from_bytes ^^[u8] IPAddr
+    core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr
     core.service __active_endpoint String Result<ServiceEndpoint,ServiceError>
     core.service __endpoint_authority ServiceEndpoint String
     core.service __authority_signing_key String Result<[u8],ServiceError>

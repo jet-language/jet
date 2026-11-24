@@ -23,7 +23,7 @@ IR_GENERATOR_ENV_HEADER: 16
 
 // The element `T` of a generator `function`: one declared `Stream<T>`, or a
 // Result carrier whose success is one.
-ir_generator_element: fn(p: IRProgram, b: &IRBuilder, function: FnBody) -> Type? Never! {
+ir_generator_element: fn(p: IRProgram, b: ^IRBuilder, function: FnBody) -> Type? Never! {
     written: function.ret ?? return None
     declared: ir_untag(ir_fact(p, b, written, function.source_span))
     stream := declared.copy()
@@ -37,7 +37,7 @@ ir_generator_element: fn(p: IRProgram, b: &IRBuilder, function: FnBody) -> Type?
 // The factory of generator `function` with element `element`, its
 // parameters already bound in `b`: the env, the producer and release
 // helpers, then the iterator returned (in an `Ok` where the carrier wants one).
-ir_build_generator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody, element: Type) Never! {
+ir_build_generator: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody, element: Type) Never! {
     span: function.source_span
     moves := [Bool]{}
     if ir_receiver_access(function.kind) != "static" {
@@ -52,7 +52,7 @@ ir_build_generator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBo
         }
         row: b.f.slot_type[binding.slot]
         if !binding.owned && m.types[row].drop != "" && m.types[row].kind != .Aggregate && m.types[row].clone == "" {
-            return ir_fail(b, span, "generator `{function.name}` reads parameter `{binding.name}` of {ir_type_name(ir_row_ty(m, p, row))}, which has no copy; take it by move (`&&`)")
+            return ir_fail(b, span, "generator `{function.name}` reads parameter `{binding.name}` of {ir_type_name(ir_row_ty(m, p, row))}, which has no copy; take it by move (`^^`)")
         }
         captures.push(IRGeneratorCapture{name: binding.name.copy(), row: row, offset: offset, moved: index < moves.len() && moves[index]})
         size: m.types[row].size
@@ -117,7 +117,7 @@ ir_build_generator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBo
 
 // The producer(env, result) of generator `function`: the body, run as the
 // generator's child task over the parameters it takes from the env.
-ir_generator_producer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody, captures: [IRGeneratorCapture]) -> Int Never! {
+ir_generator_producer: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody, captures: [IRGeneratorCapture]) -> Int Never! {
     id: m.functions.len()
     m.functions.push(ir_hashed_function("{b.f.name}.generator", "{b.f.key}#generator", "jet_ir_generator_", b.f.source_file, function.line))
     a := ir_builder_new(m.functions[id].copy())
@@ -171,7 +171,7 @@ ir_generator_producer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: F
 // The release(env) of generator `function`: a producer that never started
 // left the parameters in the env, so they close and drop here; the env,
 // `bytes` bytes, is freed either way.
-ir_generator_release: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody, captures: [IRGeneratorCapture], bytes: Int) -> Int Never! {
+ir_generator_release: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, function: FnBody, captures: [IRGeneratorCapture], bytes: Int) -> Int Never! {
     key: "{b.f.key}#generator.release"
     known: ir_keyed_function(m, key) ?? -1
     if known >= 0 -> return known
@@ -213,7 +213,7 @@ ir_generator_release: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: Fn
 // `yield value` in a producer body: the value moves to the consumer through
 // the runtime, which returns at the next pull, or delivers the cancel of a
 // dropped stream (the stop check after the call unwinds the body).
-ir_generator_yield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+ir_generator_yield: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, value: Int, span: Span) -> Int Never! {
     if b.generator < 0 -> return ir_fail_slot(b, span, "`yield` outside a generator body")
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) -> return -1

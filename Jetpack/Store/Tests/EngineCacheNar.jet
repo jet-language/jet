@@ -5,7 +5,7 @@ use {
 
 // Exact public engine NAR claims; PENDING-SEAM(package-tests), no runtime proof claimed.
 // Independent original u64 little-endian framing; do not use the production NAR encoder.
-engine_cache_nar_string: fn(out: &[U8], value: String) {
+engine_cache_nar_string: fn(out: ^[U8], value: String) {
     bytes: value.bytes()
     length: bytes.len()
     loop shift in 0..<8 -> out.push(U8{(length >> (8 * shift)) & 255})
@@ -14,7 +14,7 @@ engine_cache_nar_string: fn(out: &[U8], value: String) {
     loop _ in 0..<padding -> out.push(U8{0})
 }
 
-engine_cache_nar_regular_entry: fn(out: &[U8], name: String) {
+engine_cache_nar_regular_entry: fn(out: ^[U8], name: String) {
     fields: [String]{"entry", "(", "name", name, "node", "(", "type", "regular", "contents", "", ")", ")"}
     loop field in fields -> engine_cache_nar_string(out, field)
 }

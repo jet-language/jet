@@ -125,7 +125,7 @@ startup_receipt: fn(text: String) -> Receipt MeasureError! {
 }
 
 // startupInputHash's walk: [name, sha256] of every regular file in name order.
-walk_inputs: fn(root: String, relative: String, out: &[String]) -[FS]> MeasureError! {
+walk_inputs: fn(root: String, relative: String, out: ^[String]) -[FS]> MeasureError! {
     listed: files.list_dir(files.join(root, relative)) ?? return Err(measure_error("{err}"))
     names := [String]{}
     loop entry in listed -> names.push(entry.name.copy())

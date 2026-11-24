@@ -26,7 +26,7 @@ sema_function_reactive_contains: fn(values: [String], value: String) -> Bool Nev
     false
 }
 
-sema_function_reactive_append_unique: fn(values: &[SymbolID], value: SymbolID) Never! {
+sema_function_reactive_append_unique: fn(values: ^[SymbolID], value: SymbolID) Never! {
     if !values.contains(value) -> values.push(value.copy())
 }
 
@@ -38,7 +38,7 @@ sema_function_reactive_is_shared: fn(context: SemaCheckContext, symbol: SymbolID
     context.reactive_shared_ids.contains(symbol)
 }
 
-sema_function_reactive_note_upgrade: fn(context: &SemaCheckContext, name: String, ty: Type, crossing: String) Never! {
+sema_function_reactive_note_upgrade: fn(context: ^SemaCheckContext, name: String, ty: Type, crossing: String) Never! {
     if !sema_function_reactive_contains(context.reactive_upgrade_names, name) {
         context.reactive_upgrade_names.push(name.copy())
     }
@@ -48,7 +48,7 @@ sema_function_reactive_note_upgrade: fn(context: &SemaCheckContext, name: String
     }
 }
 
-sema_function_reactive_note_channel: fn(context: &SemaCheckContext, value: Expr, ty: Type) Never! {
+sema_function_reactive_note_channel: fn(context: ^SemaCheckContext, value: Expr, ty: Type) Never! {
     if !sema_function_reactive_handle_type(ty) {
         return
     }
@@ -59,7 +59,7 @@ sema_function_reactive_note_channel: fn(context: &SemaCheckContext, value: Expr,
     sema_function_reactive_note_upgrade(context, name, ty, "channel")
 }
 
-sema_function_reactive_record_binding: fn(context: &SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) Never! {
+sema_function_reactive_record_binding: fn(context: ^SemaCheckContext, binding: Binding, symbol: Symbol, ty: Type) Never! {
     is_local := false
     is_shared := false
     loop marker in binding.markers {
@@ -73,7 +73,7 @@ sema_function_reactive_record_binding: fn(context: &SemaCheckContext, binding: B
     }
 }
 
-sema_function_reactive_note_parallel_lambda: fn(context: &SemaCheckContext, lambda: TLambda) Never! {
+sema_function_reactive_note_parallel_lambda: fn(context: ^SemaCheckContext, lambda: TLambda) Never! {
     loop capture in lambda.captures {
         if sema_function_reactive_contains(lambda.capture_facts.mutable, capture.source) -> next
         if !sema_function_reactive_handle_type(capture.ty) -> next
@@ -83,7 +83,7 @@ sema_function_reactive_note_parallel_lambda: fn(context: &SemaCheckContext, lamb
     }
 }
 
-sema_function_reactive_note_task_lambda: fn(context: &SemaCheckContext, lambda: TLambda) Never! {
+sema_function_reactive_note_task_lambda: fn(context: ^SemaCheckContext, lambda: TLambda) Never! {
     loop capture in lambda.captures {
         if !sema_function_reactive_handle_type(capture.ty) -> next
         symbol: capture.local.symbol_id ?? next

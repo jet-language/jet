@@ -44,7 +44,7 @@ sorter_new: fn(info: record.KeyInfo, n_field: Int) -> VdbeSorter Never! {
 
 // sqlite3VdbeSorterReset: drop every record (OP_SorterOpen on a reused
 // cursor, OP_ResetSorter).
-sorter_reset: fn(s: &VdbeSorter) Never! {
+sorter_reset: fn(s: ^VdbeSorter) Never! {
     s.records = [[U8]]{}
     s.next = [Int]{}
     s.head = -1
@@ -52,14 +52,14 @@ sorter_reset: fn(s: &VdbeSorter) Never! {
 }
 
 // sqlite3VdbeSorterWrite: add a record at the head of the list.
-sorter_write: fn(s: &VdbeSorter, rec: [U8]) Never! {
+sorter_write: fn(s: ^VdbeSorter, rec: [U8]) Never! {
     s.records.push(rec.copy())
     s.next.push(s.head)
     s.head = s.records.len() - 1
 }
 
 // vdbeSorterMerge: merge the sorted lists from p1 and p2; ties take p1.
-sorter_merge: fn(s: &VdbeSorter, p1_in: Int, p2_in: Int) -> Int Never! {
+sorter_merge: fn(s: ^VdbeSorter, p1_in: Int, p2_in: Int) -> Int Never! {
     p1 := p1_in
     p2 := p2_in
     first := -1
@@ -94,7 +94,7 @@ sorter_merge: fn(s: &VdbeSorter, p1_in: Int, p2_in: Int) -> Int Never! {
 }
 
 // vdbeSorterSort: sort the list from `head`.
-sorter_sort: fn(s: &VdbeSorter) Never! {
+sorter_sort: fn(s: ^VdbeSorter) Never! {
     slots := [Int]{}
     loop _ in 0..<64 -> slots.push(-1)
     p := s.head
@@ -119,25 +119,25 @@ sorter_sort: fn(s: &VdbeSorter) Never! {
 }
 
 // sqlite3VdbeSorterRewind: sort the records; true when there are none.
-sorter_rewind: fn(s: &VdbeSorter) -> Bool Never! {
+sorter_rewind: fn(s: ^VdbeSorter) -> Bool Never! {
     if s.head < 0 -> return true
     sorter_sort(s)
     false
 }
 
 // sqlite3VdbeSorterNext: step to the next record, base.DONE past the last.
-sorter_next: fn(s: &VdbeSorter) -> Int Never! {
+sorter_next: fn(s: ^VdbeSorter) -> Int Never! {
     s.head = s.next[s.head]
     if s.head >= 0 -> base.OK else -> base.DONE
 }
 
 // The current record (vdbeSorterRowkey).
-sorter_key: fn(s: &VdbeSorter) -> [U8] Never! { s.records[s.head] }
+sorter_key: fn(s: ^VdbeSorter) -> [U8] Never! { s.records[s.head] }
 
 // sqlite3VdbeSorterCompare: compare the record `val` with the first
 // n_key_col fields of the current record; a current record with a NULL in
 // those fields is below `val`.
-sorter_compare: fn(s: &VdbeSorter, cursor_info: record.KeyInfo, val: [U8], n_key_col: Int) -> Int Never! {
+sorter_compare: fn(s: ^VdbeSorter, cursor_info: record.KeyInfo, val: [U8], n_key_col: Int) -> Int Never! {
     r2 := s.cmp_unpacked ?? {
         fresh := record.unpacked_record_alloc(cursor_info)
         fresh.n_field = n_key_col

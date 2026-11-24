@@ -65,7 +65,7 @@ fill: fn<T>(to: *T, value: T, count: Int) Never! { core.mem.fill<T>(to, value, c
 // was, when `count` is negative or the growth fails; a count of zero appends
 // nothing.
 #Unsafe("`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append")
-list_append: fn<T>(values: &[T], from: *T, count: Int) -> Bool Never! {
+list_append: fn<T>(values: ^[T], from: *T, count: Int) -> Bool Never! {
     core.mem.list_append<T>(values, from, count)
 }
 
@@ -88,7 +88,7 @@ alloc_raw: fn(size: Int, align: Int) -> mem.Ptr<U8>? Never! { core.mem.alloc_raw
 // Releases the storage `alloc_raw` gave `pointer`; the pointer is taken, so
 // the binding is gone after the call.
 #Unsafe("`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after")
-free_raw: fn(pointer: &&mem.Ptr<U8>) Never! { core.mem.free_raw(pointer) }
+free_raw: fn(pointer: ^^mem.Ptr<U8>) Never! { core.mem.free_raw(pointer) }
 
 // The memory sentry's account of an OS mapping, kept by the kernel's mapping
 // primitives alone (Region's reserve and close here, and JetBackend's
@@ -129,7 +129,7 @@ priv __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Nev
 // eight-byte values), else an ordinary store. For a large output written
 // once and not read again soon. The writes are ordered before the next
 // call and the function's return.
-stream_store: fn<T>(dst: &T, value: T) Never! { core.mem.stream_store<T>(dst, value) }
+stream_store: fn<T>(dst: ^T, value: T) Never! { core.mem.stream_store<T>(dst, value) }
 
 // The raw List layout operations Core's encoding and crypto storage measure
 // and grow its Lists with: T's List stride in bytes, a List's capacity, and
@@ -146,7 +146,7 @@ priv __type_size: fn<T>() -> Int Never! { __type_size<T>() }
 
 priv __list_capacity: fn<T>(values: [T]) -> Int Never! { __list_capacity<T>(values) }
 
-priv __list_reserve_exact: fn<T>(values: &[T], additional: Int) -> Bool Never! {
+priv __list_reserve_exact: fn<T>(values: ^[T], additional: Int) -> Bool Never! {
     __list_reserve_exact<T>(values, additional)
 }
 
@@ -215,7 +215,7 @@ Region: struct {
     /// The next `size` bytes at a multiple of `align`, which must be a power
     /// of two. None when the size or alignment is invalid, or the region has
     /// no room left.
-    claim: fn(&self, size: Int, align: Int) -> Block? Never! {
+    claim: fn(^self, size: Int, align: Int) -> Block? Never! {
         if size <= 0 || align <= 0 || align & align - 1 != 0 -> return None
         mask: align - 1
         limit: self.base + self.size
@@ -228,7 +228,7 @@ Region: struct {
     }
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if !self.mapped {
                 return
             }
@@ -255,7 +255,7 @@ Region: struct {
 
     /// Keeps the first `at` bytes and returns the rest as a new block.
     /// `at` must lie strictly inside the block.
-    split: fn(&self, at: Int) -> Block Never! {
+    split: fn(^self, at: Int) -> Block Never! {
         if at <= 0 || at >= self.size {
             panic("mem.Block.split: the split point {at} is outside a block of {self.size} bytes")
         }
@@ -265,7 +265,7 @@ Region: struct {
     }
 
     /// Grows the block over `next`, which must start where this block ends.
-    join: fn(&self, next: &&Block) Never! {
+    join: fn(^self, next: ^^Block) Never! {
         if self.address + self.size != next.address {
             panic("mem.Block.join: the blocks at {self.address} and {next.address} are not neighbors")
         }
@@ -282,9 +282,9 @@ Region: struct {
 /// on false the block is unchanged. Neither fails: the runtime calls
 /// `release` for a `#Context(allocator:)` block inside a drop.
 Allocator: trait {
-    allocate: fn(&self, size: Int, align: Int) -> Block AllocError!,
-    release: fn(&self, block: &&Block) Never!,
-    resize: fn(&self, block: &Block, new_size: Int) -> Bool Never!,
+    allocate: fn(^self, size: Int, align: Int) -> Block AllocError!,
+    release: fn(^self, block: ^^Block) Never!,
+    resize: fn(^self, block: ^Block, new_size: Int) -> Bool Never!,
 }
 
 // The runtime's call into `allocator` for a `#Context(allocator:)` block
@@ -297,7 +297,7 @@ Allocator: trait {
 // address was taken in this function's frame, which has returned by then.
 // The closure's type has no failure: the runtime takes its result as a bare
 // Int, and `-> Int Never!` here would make it a failure-carrying result.
-priv __allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int {
+priv __allocator_handler: fn<A: Allocator>(allocator: ^A) -> fn(Int, Int, Int) -> Int {
     address := 0
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
         address = mem.address_of(allocator)
@@ -337,21 +337,21 @@ priv __context_room: fn(address: Int) -> Int Never! { __context_room(address) }
 // `#Context(allocator:)` block's, else the program heap.
 priv __ContextAllocator: struct {
     impl Allocator {
-        allocate: fn(&self, size: Int, align: Int) -> Block AllocError! {
+        allocate: fn(^self, size: Int, align: Int) -> Block AllocError! {
             if size <= 0 -> return Err(AllocError{requested_bytes: size, allocator: "context"})
             address: __context_take(size, align)
             if address == 0 -> return Err(AllocError{requested_bytes: size, allocator: "context"})
             Ok(Block{address: address, size: size})
         }
 
-        release: fn(&self, block: &&Block) Never! {
+        release: fn(^self, block: ^^Block) Never! {
             __context_give(block.address, block.size)
             #Unsafe("the block's bytes went back to the allocator that served them") {
                 consume(block)
             }
         }
 
-        resize: fn(&self, block: &Block, new_size: Int) -> Bool Never! {
+        resize: fn(^self, block: ^Block, new_size: Int) -> Bool Never! {
             if new_size <= 0 || new_size > __context_room(block.address) -> return false
             block.size = new_size
             true

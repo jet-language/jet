@@ -1,9 +1,9 @@
-choose: fn<T>(value: &&T, ok: Bool) -> T {
+choose: fn<T>(value: ^^T, ok: Bool) -> T {
     if ok -> return value
     return Err("bad")
 }
 
-choose_text: fn(value: &&String, ok: Bool) -> String {
+choose_text: fn(value: ^^String, ok: Bool) -> String {
     if ok -> return value
     return Err("bad")
 }
@@ -12,7 +12,7 @@ owned: fn(ok: Bool) -> String {
     return if choose_text("owned", ok) == { .Ok(success) -> success, .Err(_failure) -> "bad" }
 }
 
-generic: fn<T>(value: &&T, ok: Bool) -> T {
+generic: fn<T>(value: ^^T, ok: Bool) -> T {
     return if choose<T>(value, ok) == {
         .Ok(success) -> success
         .Err(_failure) -> {

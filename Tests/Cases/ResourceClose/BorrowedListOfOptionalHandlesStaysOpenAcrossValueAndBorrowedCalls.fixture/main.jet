@@ -26,11 +26,11 @@ names: fn(executables: [SnapshotFile]) -> Int {
     total
 }
 
-digest: fn(executables: &[SnapshotFile]) -> Int IOError! {
+digest: fn(executables: ^[SnapshotFile]) -> Int IOError! {
     total := 0
     loop index in 0..<executables.len() {
         if executables[index].file == None -> return Ok(-2)
-        if &executables[index].file == .Val(input) {
+        if ^executables[index].file == .Val(input) {
             input.seek(0)
             loop {
                 chunk: input.read_bytes(4)

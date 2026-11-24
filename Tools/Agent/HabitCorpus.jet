@@ -174,7 +174,7 @@ habit_edits: fn(output: String, file: String) -> [HabitEdit] Never! {
 }
 
 // Adds `edit` in last-first order unless it overlaps one already kept.
-insert_edit: fn(edits: &[HabitEdit], edit: &&HabitEdit) Never! {
+insert_edit: fn(edits: ^[HabitEdit], edit: ^^HabitEdit) Never! {
     at := 0
     loop at < edits.len() && edits[at].start > edit.start -> at += 1
     if at > 0 && edit.end > edits[at - 1].start {

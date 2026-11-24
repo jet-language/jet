@@ -13,7 +13,7 @@ ExprPlacement: enum {
     Data,
 }
 
-connect_expr_to_input: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
+connect_expr_to_input: fn(g: ^GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
     inline_span: ast_expr_span(g.tables, expr)
     connect_expr_to_input_with_span(g, index, src, expr, inline_span, ordinal, role, owner_node_id, input_pin, x, y)
 }
@@ -48,7 +48,7 @@ binding_init_span: fn(tables: ASTTables, src: String, binding: Binding) -> Span 
     Span{start: start, end: end}
 }
 
-connect_expr_to_input_with_span: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, inline_span: Span, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
+connect_expr_to_input_with_span: fn(g: ^GraphBuilder, index: SemIndex, src: String, expr: ExprNode, inline_span: Span, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
     provider_y: data_provider_y(y, ordinal)
     if project_value_node(g, index, src, expr, ordinal, role, x, provider_y) == .Val(out) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span)
@@ -89,7 +89,7 @@ data_provider_y: fn(y: Int, ordinal: Int) -> Int Never! { y + 96 + (ordinal % 2)
 
 // The getter or constant node that provides `expr`, or None when `expr` is
 // not a plain value.
-project_value_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, role: String, x: Int, y: Int) -> String? {
+project_value_node: fn(g: ^GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, role: String, x: Int, y: Int) -> String? {
     if ast_expr(g.tables, expr) == {
         .Place(inner, _, _, _) -> project_value_node(g, index, src, inner, ordinal, role, x, y)
         .Ident(name, span, _) -> {
@@ -172,7 +172,7 @@ game_assets_receiver: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
     }
 }
 
-project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, x: Int, y: Int, placement: ExprPlacement) -> String? {
+project_expr_node: fn(g: ^GraphBuilder, index: SemIndex, src: String, expr: ExprNode, ordinal: Int, x: Int, y: Int, placement: ExprPlacement) -> String? {
     if ast_expr(g.tables, expr) == {
         .Binary(op, left, right, span, _) -> {
             node_id: "{g.graph_id}:expr:{ordinal}:operator:{span.start}-{span.end}"

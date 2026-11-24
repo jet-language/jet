@@ -195,7 +195,7 @@ compiler_event_payload_name: fn(name: String) -> String Never! {
 
 // The value of payload struct `payload`: its row's fields, in row order,
 // holding the values of `values` in turn.
-compiler_event_payload: fn(payload: String, values: &&[TComptimeValue]) -> TComptimeValue Never! {
+compiler_event_payload: fn(payload: String, values: ^^[TComptimeValue]) -> TComptimeValue Never! {
     at := -1
     loop (index, row) in COMPILER_EVENT_PAYLOADS {
         if row.name == payload -> at = index
@@ -214,13 +214,13 @@ compiler_event_payload: fn(payload: String, values: &&[TComptimeValue]) -> TComp
 
 // The record of the moment `name`, its payload's field values given in the
 // payload row's field order.
-compiler_event_record: fn(name: String, values: &&[TComptimeValue]) -> CompilerEventRecord Never! {
+compiler_event_record: fn(name: String, values: ^^[TComptimeValue]) -> CompilerEventRecord Never! {
     CompilerEventRecord{name: name, data: compiler_event_payload(compiler_event_payload_name(name), values.move())}
 }
 
 // The `core.compiler.Event` of the moment `name` with payload `data`: the
 // variant its row names, carrying `data` as its one field.
-compiler_event_stage: fn(name: String, data: &&TComptimeValue) -> TComptimeValue Never! {
+compiler_event_stage: fn(name: String, data: ^^TComptimeValue) -> TComptimeValue Never! {
     variant := ""
     loop row in COMPILER_EVENTS {
         if row.name == name -> variant = row.variant

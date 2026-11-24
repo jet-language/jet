@@ -502,7 +502,7 @@ apply_transaction_payload: fn(checker: LSPChecker, path: String, request: String
 // The answer to the Canvas debug request `request` about `entry`: its
 // sessions are `sessions`, a session it opens evaluates with `debug_host`,
 // and `host` is the devtools' paused evaluation.
-debug_session_json_for_entry_with_sessions_and_host: fn(checker: LSPChecker, entry: String, request: String, sessions: &DebugSessions, host: &PausedEvaluateHost, debug_host: CanvasDebugHost) -> String Err! {
+debug_session_json_for_entry_with_sessions_and_host: fn(checker: LSPChecker, entry: String, request: String, sessions: ^DebugSessions, host: ^PausedEvaluateHost, debug_host: CanvasDebugHost) -> String Err! {
     path: resolve_entry_source_path(entry, json_string_field(request, "source_id")) ?? return Err(canvas_machine_error("canvas.debug", err.message))
     payload: debug_session_payload(checker, path, request, sessions, host, debug_host) ?? return Err(canvas_machine_error("canvas.debug", canvas_debug_error_json(err.kind, err.message)))
     Ok(canvas_machine_success("canvas.debug", payload))
@@ -510,7 +510,7 @@ debug_session_json_for_entry_with_sessions_and_host: fn(checker: LSPChecker, ent
 
 // The overlay's stop is placed on the graph of the source `path` as it
 // projects now; a source that doesn't project places it on no graph.
-debug_session_payload: fn(checker: LSPChecker, path: String, request: String, sessions: &DebugSessions, host: &PausedEvaluateHost, debug_host: CanvasDebugHost) -> String CanvasDebugError! {
+debug_session_payload: fn(checker: LSPChecker, path: String, request: String, sessions: ^DebugSessions, host: ^PausedEvaluateHost, debug_host: CanvasDebugHost) -> String CanvasDebugError! {
     source_id: json_string_field(request, "source_id") ?? ""
     state: canvas_host_new(path, source_id, "127.0.0.1") ?? return Err(canvas_debug_error("io", err.message))
     if source_id != "" && read_source_without_symlinks(path) == .Ok(src) && project_file(checker, path) == .Ok(projection) {

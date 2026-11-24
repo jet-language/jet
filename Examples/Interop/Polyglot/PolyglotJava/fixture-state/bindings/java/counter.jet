@@ -13,7 +13,7 @@ Handle: struct {
     priv value: Int,
 
     impl Close {
-        close: fn(&&self) { abi.close(self.value) }
+        close: fn(^^self) { abi.close(self.value) }
     }
 }
 
@@ -27,7 +27,7 @@ new: fn(arg0: Int) -[FFI.Java]> Handle JavaError! {
     return Ok(Handle{value: value})
 }
 
-close: fn(handle: &&Handle) -[FFI.Java]> {}
+close: fn(handle: ^^Handle) -[FFI.Java]> {}
 
 add: fn(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
     value: abi.add(handle.value, arg0)

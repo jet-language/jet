@@ -22,7 +22,7 @@ Screen: struct {
 
     new: fn() -> Screen { Screen{rows: [[String]]{[String]{}}, row: 0, col: 0} }
 
-    put: fn(&self, cell: String) {
+    put: fn(^self, cell: String) {
         loop self.rows[self.row].len() < self.col -> self.rows[self.row].push(" ")
         if {
             self.col < self.rows[self.row].len() -> self.rows[self.row][self.col] = cell.copy()
@@ -31,14 +31,14 @@ Screen: struct {
         self.col += 1
     }
 
-    newline: fn(&self) {
+    newline: fn(^self) {
         self.row += 1
         self.col = 0
         loop self.rows.len() <= self.row -> self.rows.push([String]{})
     }
 
     // Erase the cursor's row from the cursor to its end.
-    erase_right: fn(&self) {
+    erase_right: fn(^self) {
         kept := [String]{}
         loop at in 0..<self.rows[self.row].len() {
             if at < self.col -> kept.push(self.rows[self.row][at].copy())
@@ -46,7 +46,7 @@ Screen: struct {
         self.rows[self.row] = kept
     }
 
-    control: fn(&self, final: String, parameter: String) {
+    control: fn(^self, final: String, parameter: String) {
         count: Int.parse(parameter) ?? 1
         if {
             final == "F" || final == "A" -> {

@@ -99,7 +99,7 @@ jet_cli_setting_commands: fn() -> [JetCLISettingCommand] Never! {
     commands
 }
 
-jet_cli_setting_command_add: fn(commands: &[JetCLISettingCommand], word: String) Never! {
+jet_cli_setting_command_add: fn(commands: ^[JetCLISettingCommand], word: String) Never! {
     path: jet_cli_setting_command_path(word)
     loop known in commands {
         if known.path == path {
@@ -309,7 +309,7 @@ jet_cli_command_settings_words: fn(word: String, written: [String], layers: [Jet
 
 // A later layer's value of a flag replaces an earlier one's; a list is never
 // merged.
-jet_cli_setting_choose: fn(chosen: &[JetCLISettingChosen], long: String, words: [String]) Never! {
+jet_cli_setting_choose: fn(chosen: ^[JetCLISettingChosen], long: String, words: [String]) Never! {
     found := -1
     loop (index, flag) in chosen {
         if flag.long == long -> found = index

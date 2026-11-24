@@ -238,7 +238,7 @@ KIT_FREE_PORT_PROBES: 8
 // scratch, never in the shared tree, so parallel cases do not race on one build output. The ports go to
 // `ports`; a probe that fails is the row's verdict: TIMEOUT with its limit and the time it used when a
 // limit stopped it, else ERROR with its exit and first stderr line.
-kit_steps_free_ports: fn(context: KitStepCtx, count: Int, ports: &[Int], locks: &[files.FileLock]) -> KitVerdict? {
+kit_steps_free_ports: fn(context: KitStepCtx, count: Int, ports: ^[Int], locks: ^[files.FileLock]) -> KitVerdict? {
     directory: files.join(context.scratch, "free-port")
     files.create_dir_all(directory) ?? return Val(kit_expect_verdict("ERROR", "free-port probe directory: {err}"))
     source: files.join(context.env.root, "Compiler/JetTestKit/Probes")

@@ -8,17 +8,17 @@ use {
 
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length (-1 when absent) and its bytes.
-live_inspect_u64: fn(out: &[U8], value: U64) Never! {
+live_inspect_u64: fn(out: ^[U8], value: U64) Never! {
     loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)) & U64{255}}})
 }
 
-live_inspect_word: fn(out: &[U8], word: Int) Never! {
+live_inspect_word: fn(out: ^[U8], word: Int) Never! {
     if word < 0 {
         live_inspect_u64(out, U64{word + 9223372036854775807 + 1} + U64{9223372036854775808})
     } else { live_inspect_u64(out, U64{word}) }
 }
 
-live_inspect_put: fn(out: &[U8], text: String?) Never! {
+live_inspect_put: fn(out: ^[U8], text: String?) Never! {
     if text == .Val(present) {
         live_inspect_word(out, present.bytes().len())
         loop byte in present.bytes() -> out.push(byte)
@@ -26,7 +26,7 @@ live_inspect_put: fn(out: &[U8], text: String?) Never! {
 }
 
 // A present text, written from the caller's bytes.
-live_inspect_text: fn(out: &[U8], text: String) Never! {
+live_inspect_text: fn(out: ^[U8], text: String) Never! {
     live_inspect_word(out, text.bytes().len())
     loop byte in text.bytes() -> out.push(byte)
 }

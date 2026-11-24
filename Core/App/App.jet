@@ -435,7 +435,7 @@ NOTICE_STORE: "app.notices"
 
 priv notice_cell_load: fn() -> [U8] { device_cell_load(NOTICE_STORE, NOTICE_CELL) }
 
-priv notice_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+priv notice_cell_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool {
     device_cell_replace(NOTICE_STORE, NOTICE_CELL, expected, replacement)
 }
 
@@ -453,7 +453,7 @@ priv device_cell_load: fn(store: String, cell: Shared<LiveCell>) -> [U8] Never! 
 
 // Replaces the bytes of the store `store` (`device_cell_load`) with
 // `replacement` only while they still equal `expected`; gives whether it did.
-priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U8], replacement: &&[U8]) -> Bool Never! {
+priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U8], replacement: ^^[U8]) -> Bool Never! {
     if world_rt.world_store_replace(store, expected, replacement) == .Val(replaced) {
         return replaced
     }
@@ -539,7 +539,7 @@ REMOTE_MAX_REPLY: 16777216
 // The Remote of a service the server holds: each call through it runs the
 // marked method on `service` directly. `client` names the client that holds
 // it, which a test can cut off (`disconnect`); "" names none.
-remote: fn<S>(service: &&S, client: String{""}) -> Remote<S> Never! {
+remote: fn<S>(service: ^^S, client: String{""}) -> Remote<S> Never! {
     Remote<S>{service: Val(service), address: "", client: client, local: false}
 }
 
@@ -580,7 +580,7 @@ priv links_load: fn() -> [U8] Never! {
     LINKS_CELL.bytes
 }
 
-priv links_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+priv links_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool Never! {
     if world_rt.world_store_replace("app.links", expected, replacement) == .Val(replaced) {
         return replaced
     }
@@ -671,7 +671,7 @@ priv QUEUE_STORE: "app.queue"
 
 priv queue_load: fn() -> [U8] Never! { device_cell_load(QUEUE_STORE, QUEUE_CELL) }
 
-priv queue_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
+priv queue_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool Never! {
     device_cell_replace(QUEUE_STORE, QUEUE_CELL, expected, replacement)
 }
 
@@ -687,7 +687,7 @@ priv queue_decode: fn(raw: [U8]) -> [QueuedWrite] Never! {
     writes
 }
 
-priv queue_put: fn(out: &[U8], write: QueuedWrite) Never! {
+priv queue_put: fn(out: ^[U8], write: QueuedWrite) Never! {
     live_put(out, write.client)
     live_put(out, write.address)
     live_put(out, if write.local -> "1" else -> "0")
@@ -1462,13 +1462,13 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 
 // `live(source, args...)`: `args` are the encoded arguments. The binding
 // runs as this task's caller.
-priv __live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+priv __live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     acting: acting_now(tasks.current_task())
     Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), 0), run: run, acting: acting}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
-priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^^fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     acting: acting_now(tasks.current_task())
@@ -2181,7 +2181,7 @@ priv(package) transactions: module {
 
     // Joins one store's transaction, which `end` finishes, and that store's
     // outbox to call `call`.
-    join: fn(call: Int, end: &&fn(Bool) -[]> Bool Never!, outbox: &&CallOutbox) Never! {
+    join: fn(call: Int, end: ^^fn(Bool) -[]> Bool Never!, outbox: ^^CallOutbox) Never! {
         runs := CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
@@ -2192,7 +2192,7 @@ priv(package) transactions: module {
     }
 
     // Queues `job` in call `call`, to run once the call commits.
-    enqueue: fn(call: Int, job: &&CallJob) Never! {
+    enqueue: fn(call: Int, job: ^^CallJob) Never! {
         runs := CALLS.guard_edit()
         loop index in 0..<runs.value.runs.len() {
             if runs.value.runs[index].id == call {
@@ -2383,7 +2383,7 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
 // Keeps `run`'s reply under its request key in the first store it joined,
 // in call `call`'s transaction there, or on its own for call 0; true when
 // the run carries no key, has no reply or joined no store.
-priv calls_answered: fn(run: &CallRun, call: Int) -> Bool Never! {
+priv calls_answered: fn(run: ^CallRun, call: Int) -> Bool Never! {
     if run.joins.len() == 0 -> return true
     if run.request == .Val(request) {
         if run.reply == .Val(reply) -> return run.joins[0].outbox.answered(call, request, reply)
@@ -2432,7 +2432,7 @@ priv PUSH_REGISTRY: Shared{PushRegistry{stores: [Shared<PushDevices>]{}}}
 // the devices any named store holds.
 priv(package) push: module {
     // Names a store; a store named again replaces the one of its name.
-    store: fn(devices: &&PushDevices) Never! {
+    store: fn(devices: ^^PushDevices) Never! {
         registry := PUSH_REGISTRY.guard_edit()
         loop index in 0..<registry.value.stores.len() {
             if push_store_name(registry.value.stores[index]) == devices.store {
@@ -2557,7 +2557,7 @@ App: struct {
     // does, and `address` gives a state's fields' address text in the order
     // of `names` (`__address_arg`). The sitemap asks `list` each time it is
     // read (`sitemap.addresses`).
-    __sitemap: fn<V>(self, state: String, names: [String], list: &&fn() -> [V] Never!, address: &&fn(App, V) -> [String] Never!) -> App Never! {
+    __sitemap: fn<V>(self, state: String, names: [String], list: ^^fn() -> [V] Never!, address: ^^fn(App, V) -> [String] Never!) -> App Never! {
         graph: self.copy()
         opens: state.copy()
         fields: names.copy()
@@ -2732,7 +2732,7 @@ App: struct {
     // fails puts its notice in the app's notice list (`notices`): no
     // control shows it. Gives back the graph. Panics when `every` isn't
     // positive.
-    background: fn(self, every: Duration, run: &&fn() Notice!, at_login: Bool{false}) -> App Never! {
+    background: fn(self, every: Duration, run: ^^fn() Notice!, at_login: Bool{false}) -> App Never! {
         if every.ns <= 0 {
             panic("background work runs every positive duration, not every {every.ns}ns")
         }
@@ -2751,7 +2751,7 @@ App: struct {
     // be chosen, with the notice's text. Choosing an item runs it (`item`,
     // `quit_item`). A desktop with no tray leaves a notice in the app's
     // notice list (`notices`). Gives back the graph.
-    tray: fn(self, icon: String, menu: &&fn() -> [MenuItem] Notice!) -> App Never! {
+    tray: fn(self, icon: String, menu: ^^fn() -> [MenuItem] Notice!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.tray = Val(AppTray{icon: icon, menu: Shared{AppTrayMenu{menu: menu.move()}}})
         self.copy()
@@ -2769,7 +2769,7 @@ App: struct {
     // window with exactly an enabled item's key equivalent chooses the
     // item. Choosing an item runs it (`item`, `quit_item`); the Edit and
     // Window menus' items act on the window. Gives back the graph.
-    menu_bar: fn(self, menus: &&fn() -> [Menu] Notice!) -> App Never! {
+    menu_bar: fn(self, menus: ^^fn() -> [Menu] Notice!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.menu_bar = Val(Shared{AppMenuBar{menus: menus.move()}})
         self.copy()
@@ -2789,7 +2789,7 @@ App: struct {
     // `on_resume` fails with shows at the top of the window that came back
     // until a click dismisses it; with no window open it joins the app's
     // notice list (`notices`). Gives back the graph.
-    lifecycle: fn(self, on_resume: &&fn() Notice!) -> App Never! {
+    lifecycle: fn(self, on_resume: ^^fn() Notice!) -> App Never! {
         resume: Shared{AppResume{run: on_resume.move()}}
         held := APP_LIFECYCLE.guard_edit()
         if held.value.scope == None -> held.value.scope = Val(event.scope())
@@ -2887,7 +2887,7 @@ App: struct {
     // the graph's route set, in the order the graph adds it, where
     // `__url_of` finds its address, `__go` opens it, and a renderer walks it
     // (`screens`).
-    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -[Net, FS.Read]> UINode? Never!) -> App Never! {
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: ^^fn(App, [String:String]) -[Net, FS.Read]> UINode? Never!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.screens.push(AppScreen{path: path, state: state, query: query, signed_in: signed_in, open: Shared{AppOpen{run: open.move()}}})
         self.copy()
@@ -2899,7 +2899,7 @@ App: struct {
     // the call from its decoded arguments. A call in this process comes from
     // no network address, so the endpoint's limit of `limit` calls per
     // `window_ns` from one address, which a server keeps, doesn't apply.
-    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -> String [FieldError]!, limit: Int, window_ns: Int) -> App Never! {
+    __remote_public: fn(self, path: String, answer: ^^fn(RemoteArgs) -> String [FieldError]!, limit: Int, window_ns: Int) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.endpoints[path] = AppEndpoint{answer: Val(Shared{AppAnswer{run: answer.move()}})}
         self.copy()
@@ -2915,7 +2915,7 @@ App: struct {
 
     // An `#App.Job` method of a mounted service, declared to this process's
     // jobs (`jobs.know`), so a server serving here runs the job's kept rows.
-    __job: fn(self, name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
+    __job: fn(self, name: String, retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) -> App Never! {
         jobs.know(name, retries, run.move())
         self.copy()
     }
@@ -3040,7 +3040,7 @@ App: struct {
     // `__screen`'s does. `decode` makes a `V` from its address's field
     // texts, as `__current`'s does. The last head given for `V` holds; a
     // page asks it for the address it shows (`heads.of`).
-    __head: fn<V>(self, state: String, decode: &&fn(App, [String:String]) -> V? Never!, head: &&fn(V) -> Head Never!) -> App Never! {
+    __head: fn<V>(self, state: String, decode: ^^fn(App, [String:String]) -> V? Never!, head: ^^fn(V) -> Head Never!) -> App Never! {
         held := APP_HEADS.guard_edit()
         held.value[state.copy()] = Shared{AppHead{
             run: fn(graph: App, fields: [String:String]) {
@@ -3456,7 +3456,7 @@ priv(package) reply_cache: module {
     }
 
     // Names a store; a store named again replaces the one of its name.
-    store: fn(replies: &&KeptReplies) Never! {
+    store: fn(replies: ^^KeptReplies) Never! {
         registry := KEPT_REGISTRY.guard_edit()
         loop index in 0..<registry.value.len() {
             if kept_store_name(registry.value[index]) == replies.store {
@@ -3952,7 +3952,7 @@ priv AppMenuRun: struct {
 // command key, Control on Linux. An item that is not `enabled` shows but
 // can't be chosen. A run that fails puts its notice in the app's notice
 // list (`notices`). Panics on a key equivalent it can't read.
-item: fn(label: String, run: &&fn() Notice!, key: String{""}, enabled: Bool{true}) -> MenuItem Never! {
+item: fn(label: String, run: ^^fn() Notice!, key: String{""}, enabled: Bool{true}) -> MenuItem Never! {
     _: app_menu_shortcut(key)
     MenuItem{label: label, kind: .Item, key: key, enabled: enabled, run: Shared{AppMenuRun{run: run.move()}}}
 }
@@ -4357,7 +4357,7 @@ priv app_launch_serve: fn(graph: App, listener: UnixListener) -[Net, FS.Read, Ti
 
 // The next line `stream` gives, without its end; what came when it ends or
 // goes quiet first.
-priv app_launch_line: fn(stream: &UnixStream) -[Net, Time.Wait]> String Never! {
+priv app_launch_line: fn(stream: ^UnixStream) -[Net, Time.Wait]> String Never! {
     text := ""
     loop !text.contains("\n") {
         if !(net.unix_wait(stream, C_APP_HANDOFF_WAIT_NS) ?? false) -> break
@@ -4914,7 +4914,7 @@ priv app_ask_system: fn(permission: Permission) -[Env, Net, Time]> Grant Never! 
     }
 }
 
-priv app_portal_ask: fn(bus: &dbus.DbusConnection, permission: Permission) -[Net, Time]> dbus.PortalAnswer dbus.DbusError! {
+priv app_portal_ask: fn(bus: ^dbus.DbusConnection, permission: Permission) -[Net, Time]> dbus.PortalAnswer dbus.DbusError! {
     if permission == .Camera -> return dbus.portal_camera(bus, ASK_WAIT_NS)
     dbus.portal_location(bus, ASK_WAIT_NS)
 }
@@ -5041,15 +5041,15 @@ PickedStream: struct {
     priv at: Int,
 
     impl Reader {
-        read_bytes: fn(&self, limit: Int) -[Time.Wait]> [U8] IOError! {
-            if &self.file == .Val(reader) -> return reader.read_bytes(limit)
+        read_bytes: fn(^self, limit: Int) -[Time.Wait]> [U8] IOError! {
+            if ^self.file == .Val(reader) -> return reader.read_bytes(limit)
             part: app_page_read(self.page, self.name, self.at, limit) ?? return Err(err)
             self.at += part.len()
             Ok(part)
         }
 
-        read_into: fn(&self, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! {
-            if &self.file == .Val(reader) -> return reader.read_into(buffer, limit)
+        read_into: fn(^self, buffer: ^[U8], limit: Int) -[Time.Wait]> Int IOError! {
+            if ^self.file == .Val(reader) -> return reader.read_into(buffer, limit)
             part: app_page_read(self.page, self.name, self.at, limit) ?? return Err(err)
             loop byte in part -> buffer.push(byte)
             self.at += part.len()
@@ -5667,7 +5667,7 @@ priv app_page_share: fn(url: String) Never! {
 // keep a notice that says their drop target is not built yet and give
 // `body` back as it is. In a page the browser's drop gives the files
 // (`app_drop_web`), which the page keeps and `read` reads from there.
-drop_files: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode {
+drop_files: fn(body: UINode, types: [FileType], on_drop: ^^fn([PickedFile]) Notice!) -> UINode {
     #if #build.target.os == {
         .Linux -> { return app_drop_target(body, types, on_drop.move()) }
         .MacOS -> { return app_undroppable(body) }
@@ -5694,7 +5694,7 @@ priv AppDropRun: struct {
 
 // `body` as one the window gives the files dropped on it, of a kind in
 // `types`, to `on_drop`.
-priv app_drop_target: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode Never! {
+priv app_drop_target: fn(body: UINode, types: [FileType], on_drop: ^^fn([PickedFile]) Notice!) -> UINode Never! {
     held: APP_DROPS.guard_edit()
     held.value.push(AppDrop{types: types.copy(), run: Shared{AppDropRun{run: on_drop.move()}}})
     body.__taking_files(held.value.len())
@@ -5709,7 +5709,7 @@ priv app_undroppable: fn(body: UINode) -> UINode Never! {
 // `body` as one a page gives the files dropped on it, of a kind in `types`,
 // to `on_drop` (`UINode.__taking_web_files`): a drop of files on it clicks
 // a handler that takes them from the page (`app_drop_web_run`).
-priv app_drop_web: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode Never! {
+priv app_drop_web: fn(body: UINode, types: [FileType], on_drop: ^^fn([PickedFile]) Notice!) -> UINode Never! {
     target: AppDrop{types: types.copy(), run: Shared{AppDropRun{run: on_drop.move()}}}
     body.__taking_web_files(ui.button("", fn() { app_drop_web_run(target) }))
 }
@@ -5962,7 +5962,7 @@ draggable: fn<V: Encode>(body: UINode, value: V, label: String) -> UINode Never!
 // window (`App.window`) delivers the drops, and in a web build the page
 // (`app_zone_web`); the other native targets keep a notice that says
 // their drag and drop is not built yet and give `body` back as it is.
-drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: &&fn(V) Notice!) -> UINode {
+drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: ^^fn(V) Notice!) -> UINode {
     #if #build.target.os == {
         .Linux -> {
             return app_zone_target(body, label, Type{V}, app_zone_decoding<V>(on_drop.move()))
@@ -6022,7 +6022,7 @@ priv APP_LONG_PRESS_NS: 500000000
 priv APP_DRAG_SLOP: 4
 
 // `on_drop` taking the encoded value it is given, decoded as a `V`.
-priv app_zone_decoding: fn<V: Decode>(on_drop: &&fn(V) Notice!) -> (fn(Dyn) Notice!) Never! {
+priv app_zone_decoding: fn<V: Decode>(on_drop: ^^fn(V) Notice!) -> (fn(Dyn) Notice!) Never! {
     run: on_drop.move()
     fn(tree: Dyn) Notice! {
         value: tree.decode<V>() ?? return Err(Notice{text: "Couldn't take what was dropped: {err}"})
@@ -6039,7 +6039,7 @@ priv app_drag_source: fn(body: UINode, value: Dyn, kind: Type, label: String) ->
 
 // `body` as one whose drops of a value of the type `kind` go to
 // `run`.
-priv app_zone_target: fn(body: UINode, label: String, kind: Type, run: &&fn(Dyn) Notice!) -> UINode Never! {
+priv app_zone_target: fn(body: UINode, label: String, kind: Type, run: ^^fn(Dyn) Notice!) -> UINode Never! {
     held: APP_ZONES.guard_edit()
     held.value.push(AppZone{label: label.copy(), kind: kind.copy(), run: Shared{AppZoneRun{run: run.move()}}})
     body.__taking_drops(held.value.len())
@@ -6086,7 +6086,7 @@ priv app_drag_web: fn(body: UINode, value: Dyn, kind: Type, label: String) -> UI
 // `body` as one whose drops in a page of a value of the type `kind` go to
 // `run` (`UINode.__taking_drops_in_page`), through a handler that takes
 // what the move picked up.
-priv app_zone_web: fn(body: UINode, label: String, kind: Type, run: &&fn(Dyn) Notice!) -> UINode Never! {
+priv app_zone_web: fn(body: UINode, label: String, kind: Type, run: ^^fn(Dyn) Notice!) -> UINode Never! {
     target: AppZone{label: label.copy(), kind: kind.copy(), run: Shared{AppZoneRun{run: run.move()}}}
     taker: ui.button("", fn() { app_web_take(target) })
     body.__taking_drops_in_page(taker, app_web_kind(kind), label)
@@ -6275,7 +6275,7 @@ priv app_resumed_draw: fn(frame: ui.Frame, notice: Notice) Never! {
 // Whether the pointer of `frame` is on the bar at the top of the window
 // that shows `back`, the notice a resume failed with; if it is, the notice
 // is dismissed.
-priv app_resumed_dismissed: fn(frame: ui.Frame, back: &Notice?) -> Bool Never! {
+priv app_resumed_dismissed: fn(frame: ui.Frame, back: ^Notice?) -> Bool Never! {
     if back == None || frame.get_mouse_y() >= frame.__pixels(APP_NOTICE_BAR) -> return false
     back = None
     true
@@ -6982,7 +6982,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
 // it can move to (`open`). Space picks up the focused dragged body
 // (`picked`), which then takes the keys (`app_picked_key`). Whether it
 // took the event, which changes what the window shows.
-priv app_window_drag: fn(frame: ui.Frame, tree: UINode, event: ui.UIEvent, focused: Int, pressed: &AppPress?, picked: &AppPicked?, open: &AppOpenMenu?) -[Time]> Bool Never! {
+priv app_window_drag: fn(frame: ui.Frame, tree: UINode, event: ui.UIEvent, focused: Int, pressed: ^AppPress?, picked: ^AppPicked?, open: ^AppOpenMenu?) -[Time]> Bool Never! {
     held: picked ?? AppPicked{drag: 0, zone: 0}
     if held.drag != 0 {
         if event == .KeyDown(key) {
@@ -7041,7 +7041,7 @@ priv app_window_dropped: fn(tree: UINode, frame: ui.Frame, x: Int, y: Int, items
 // text input `focused` of `tree` (`edit_menu`), Minimize on the window,
 // and any other item as the tray runs it (`app_menu_choose`). Whether the
 // tree changed.
-priv app_window_choose: fn(window: ui.Window, frame: ui.Frame, tree: &UINode, focused: &Int, chosen: MenuItem) -[Env, Exec.Exit, Net, Time]> Bool Never! {
+priv app_window_choose: fn(window: ui.Window, frame: ui.Frame, tree: ^UINode, focused: ^Int, chosen: MenuItem) -[Env, Exec.Exit, Net, Time]> Bool Never! {
     if chosen.kind == {
         .Cut -> {
             text: tree.__focused_text(focused) ?? return false
@@ -7258,7 +7258,7 @@ priv app_window_keep: fn(window: ui.Window) Never! {
 // change to the data its screen shows comes (`app_window_wake`): the code
 // that changes data may not touch a file, so it sends on a channel and a
 // task of the window's writes the wake.
-priv app_window_watch: fn(waker: &&sys.Fd?) -[Env, Time.Wait]> Never! {
+priv app_window_watch: fn(waker: ^^sys.Fd?) -[Env, Time.Wait]> Never! {
     fd: waker ?? return
     pair: tasks.__channel_new<Int>()
     held := APP_WINDOW_WAKE.guard_edit()
@@ -7444,7 +7444,7 @@ priv app_window_act: fn(chosen: MenuItem) Never! {
 
 // Sends the window's relay (`app_window_relay`) a wake, unless one waits
 // for the next frame already: what comes meanwhile joins it.
-priv app_window_rouse: fn(wake: &AppWindowWake) Never! {
+priv app_window_rouse: fn(wake: ^AppWindowWake) Never! {
     if wake.woken {
         return
     }
@@ -8471,7 +8471,7 @@ priv __blob_reader_wanted: fn(store: String, table: String, guarded: Bool) -> Bo
 // the row's read policy admits the caller, 0 when rows hold it and none
 // admits the caller, and -1 when no row holds it. The reader of a guarded
 // table is never replaced by one that isn't.
-priv __blob_reader: fn(store: String, table: String, guarded: Bool, read: &&fn(String) -[DB.Read]> Int Never!) Never! {
+priv __blob_reader: fn(store: String, table: String, guarded: Bool, read: ^^fn(String) -[DB.Read]> Int Never!) Never! {
     key: "{store} {table}"
     held := BLOBS.guard_edit()
     if (held.value.guarded.get(key) ?? false) && !guarded {
@@ -8555,7 +8555,7 @@ priv RemoteArgs: struct {
 // arguments and calls the method on a copy of the service. Queued in a call,
 // the job runs once the call commits (`transactions`); queued outside one,
 // it runs at once, on a task of its own.
-priv __enqueue: fn(name: String, args: [String], retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+priv __enqueue: fn(name: String, args: [String], retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
     job: CallJob{name: name, args: "[{args.join(",")}]", retries: retries, run: Shared{CallJobCall{call: run.move()}}}
     call: transactions.current() ?? return job_start(job, "", None, 0)
     transactions.enqueue(call, job)
@@ -8633,7 +8633,7 @@ priv(package) jobs: module {
     // Declares job `name`, run with `run` and retried `retries` times, so a
     // serving server takes its rows by its name. The first declaration of a
     // name stands.
-    know: fn(name: String, retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+    know: fn(name: String, retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
         runtime := JOBS.guard_edit()
         loop known in runtime.value.runners {
             if known.name == name {
@@ -8645,7 +8645,7 @@ priv(package) jobs: module {
 
     // Names a store whose outbox keeps jobs, so a serving server takes the
     // rows no server holds from it.
-    store: fn(outbox: &&CallOutbox) Never! { _: jobs_store(outbox, true) }
+    store: fn(outbox: ^^CallOutbox) Never! { _: jobs_store(outbox, true) }
 
     // A server began serving an App that declares jobs: from now on, each
     // tick takes the rows no server holds from each store.
@@ -8713,7 +8713,7 @@ priv jobs_left: fn(outbox: Shared<CallOutbox>?, key: String) -> Bool Never! {
 // The outbox the process runs jobs from for the store `outbox` names: the
 // one it has, or `outbox`, which it then has; `named` when core.db names
 // the store.
-priv jobs_store: fn(outbox: &&CallOutbox, named: Bool) -> Shared<CallOutbox> Never! {
+priv jobs_store: fn(outbox: ^^CallOutbox, named: Bool) -> Shared<CallOutbox> Never! {
     runtime := JOBS.guard_edit()
     loop index in 0..<runtime.value.stores.len() {
         if runtime.value.stores[index].store != outbox.store -> next
@@ -8727,7 +8727,7 @@ priv jobs_store: fn(outbox: &&CallOutbox, named: Bool) -> Shared<CallOutbox> Nev
 }
 
 // Starts the task that tends the stores (`jobs_tend`) unless it runs.
-priv jobs_tend_start: fn(runtime: &JobRuntime) Never! {
+priv jobs_tend_start: fn(runtime: ^JobRuntime) Never! {
     if runtime.tended {
         return
     }
@@ -8860,7 +8860,7 @@ priv jobs_store_name: fn(outbox: Shared<CallOutbox>) -> String Never! {
 
 // Runs `job` on a task of its own; `outbox` keeps it under key `key` (None:
 // it is kept nowhere), after `runs` runs that failed.
-priv job_start: fn(job: &&CallJob, key: &&String, outbox: &&Shared<CallOutbox>?, runs: Int) Never! {
+priv job_start: fn(job: ^^CallJob, key: ^^String, outbox: ^^Shared<CallOutbox>?, runs: Int) Never! {
     if outbox == .Val(store) -> jobs_running(jobs_store_name(store), key, true)
     runner: task { job_run(job, key, outbox, runs) }
     runner.detach()
@@ -8955,7 +8955,7 @@ priv(package) schedules: module {
     // Starts schedule `name` on a task of its own: it runs `run` at the
     // latest minute the cron line `cron` allows, unless a store records that
     // run, and then at each next one (`schedule_run`).
-    start: fn(name: String, cron: String, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+    start: fn(name: String, cron: String, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
         line: cron_parse(cron) ?? panic("`{cron}` is not a cron line")
         runner: task { schedule_run(name, line, run) }
         runner.detach()
@@ -9428,7 +9428,7 @@ live_cell_load: fn() -> [U8] {
     LIVE_CELL.bytes
 }
 
-live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+live_cell_replace: fn(expected: [U8], replacement: ^^[U8]) -> Bool {
     if world_rt.world_store_replace("app.live", expected, replacement) == .Val(replaced) {
         return replaced
     }
@@ -9728,7 +9728,7 @@ live_encode: fn(registry: LiveRegistry) -> [U8] {
     out
 }
 
-live_put: fn(out: &[U8], text: String) {
+live_put: fn(out: ^[U8], text: String) {
     loop byte in "{text.len()}:".bytes() -> out.push(byte)
     loop byte in text.bytes() -> out.push(byte)
 }

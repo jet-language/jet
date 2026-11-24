@@ -176,19 +176,19 @@ BrokerWireReader: struct {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
     }
 
-    socket: fn(stream: &&UnixStream) -> BrokerWireReader Never! {
+    socket: fn(stream: ^^UnixStream) -> BrokerWireReader Never! {
         BrokerWireReader{stream: Val(stream.move()), bytes: [U8]{}, position: 0}
     }
 
     // Write `bytes` back over this exchange's stream.
-    reply: fn(&self, bytes: [U8]) StoreError! {
-        if &self.stream == .Val(stream) -> return store_broker_send(stream, bytes)
+    reply: fn(^self, bytes: [U8]) StoreError! {
+        if ^self.stream == .Val(stream) -> return store_broker_send(stream, bytes)
         Err(StoreError.Other("an in-memory broker exchange has no stream to reply on"))
     }
 
     // Up to `limit` bytes; an empty list is end of input.
-    read_some: fn(&self, limit: Int) -> [U8] StoreError! {
-        if &self.stream == {
+    read_some: fn(^self, limit: Int) -> [U8] StoreError! {
+        if ^self.stream == {
             .Val(stream) -> Ok(net.unix_read_bytes(stream, limit) ?? return Err(store_broker_net_error(err)))
             .None -> {
                 end: if self.position + limit < self.bytes.len() -> self.position + limit else -> self.bytes.len()
@@ -200,7 +200,7 @@ BrokerWireReader: struct {
     }
 
     // Rust `read_exact`: exactly `count` bytes or UnexpectedEof.
-    read_exact: fn(&self, count: Int) -> [U8] StoreError! {
+    read_exact: fn(^self, count: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < count {
             chunk: self.read_some(count - out.len())
@@ -211,7 +211,7 @@ BrokerWireReader: struct {
     }
 
     // A header read one byte at a time through its terminating blank line.
-    read_header: fn(&self, label: String) -> [U8] StoreError! {
+    read_header: fn(^self, label: String) -> [U8] StoreError! {
         header := [U8]{}
         loop {
             byte: self.read_exact(1)
@@ -228,7 +228,7 @@ BrokerWireReader: struct {
     }
 
     // Rust `take(limit).read_to_end`: at most `limit` bytes, to end of input.
-    read_bounded: fn(&self, limit: Int) -> [U8] StoreError! {
+    read_bounded: fn(^self, limit: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < limit {
             chunk: self.read_some(limit - out.len())
@@ -239,7 +239,7 @@ BrokerWireReader: struct {
     }
 }
 
-store_broker_append: fn(out: &[U8], bytes: [U8]) Never! {
+store_broker_append: fn(out: ^[U8], bytes: [U8]) Never! {
     loop byte in bytes -> out.push(byte)
 }
 
@@ -290,7 +290,7 @@ store_broker_header_fields: fn(header: [U8], label: String, magic: String, allow
 }
 
 // Rust `read_request_header`.
-store_broker_read_request_header: fn(reader: &BrokerWireReader) -> BrokerHeader StoreError! {
+store_broker_read_request_header: fn(reader: ^BrokerWireReader) -> BrokerHeader StoreError! {
     header: reader.read_header("shared-store request")
     fields: store_broker_header_fields(header, "shared-store request", STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
     op: fields.get("op") ?? return Err(store_broker_invalid("shared-store request has no operation"))
@@ -338,7 +338,7 @@ store_broker_write_field: fn(fields: [String:String], key: String) -> String Sto
 }
 
 // Rust `read_request` (the test-facing whole request).
-store_broker_read_request: fn(reader: &BrokerWireReader) -> BrokerRequest StoreError! {
+store_broker_read_request: fn(reader: ^BrokerWireReader) -> BrokerRequest StoreError! {
     if store_broker_read_request_header(reader) == {
         .Write(header) -> {
             archive: reader.read_exact(header.length)
@@ -365,7 +365,7 @@ store_broker_encode_archive_response: fn(archive: [U8]) -> [U8] StoreError! {
 
 // Rust `read_response`: a status-only response to a write. `ok` is true,
 // `missing` false.
-store_broker_read_response: fn(reader: &BrokerWireReader) -> Bool StoreError! {
+store_broker_read_response: fn(reader: ^BrokerWireReader) -> Bool StoreError! {
     bytes: reader.read_bounded(STORE_BROKER_MAX_HEADER_BYTES + 1)
     if bytes.len() > STORE_BROKER_MAX_HEADER_BYTES {
         return Err(store_broker_invalid("shared-store response is too large"))
@@ -394,7 +394,7 @@ store_broker_read_response: fn(reader: &BrokerWireReader) -> Bool StoreError! {
 }
 
 // Rust `read_archive_response`: the archive of a read, or None for missing.
-store_broker_read_archive_response: fn(reader: &BrokerWireReader) -> [U8]? StoreError! {
+store_broker_read_archive_response: fn(reader: ^BrokerWireReader) -> [U8]? StoreError! {
     header: reader.read_header("shared-store response")
     fields: store_broker_header_fields(header, "shared-store response", STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
     status: fields.get("status") ?? return Err(store_broker_invalid("shared-store response has no status"))
@@ -447,7 +447,7 @@ WriterGrant: struct {
     }
 
     // Add one allowlisted value for `key`; a repeat is refused.
-    allow: fn(&self, key: String, value: String) StoreError! {
+    allow: fn(^self, key: String, value: String) StoreError! {
         store_broker_validate_text_field(value, "shared-store writer {key}")
         repeated: if key == {
             "source" -> self.sources.contains(value)

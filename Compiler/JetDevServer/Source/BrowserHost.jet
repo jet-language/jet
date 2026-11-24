@@ -318,7 +318,7 @@ BrowserHost: struct {
         BrowserHost{session_id: session_id, revision: None, sequence: None, observed_at_ms: None, state: .Idle, cursor: None, selection: None, panels: [String:BrowserPanelState]{}, history: [BrowserHostEvent]{}}
     }
 
-    apply_event: fn(&self, event: &&BrowserHostEvent) BrowserHostError! {
+    apply_event: fn(^self, event: ^^BrowserHostEvent) BrowserHostError! {
         event.validate()
         if event.session_id != self.session_id {
             return Err(BrowserHostError.WrongSession{expected: self.session_id, received: event.session_id})
@@ -396,7 +396,7 @@ BrowserHost: struct {
         Val(panel.fact)
     }
 
-    select: fn(&self, panel_id: String, node_id: String?) BrowserHostError! {
+    select: fn(^self, panel_id: String, node_id: String?) BrowserHostError! {
         if self.panels.get(panel_id) == None {
             return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
         }
@@ -404,9 +404,9 @@ BrowserHost: struct {
         self.selection = Val(BrowserSelection{panel_id: panel_id, node_id: node_id})
     }
 
-    clear_selection: fn(&self) { self.selection = None }
+    clear_selection: fn(^self) { self.selection = None }
 
-    dispatch: fn(&self, action: BrowserHostAction) -> BrowserHostEffect BrowserHostError! {
+    dispatch: fn(^self, action: BrowserHostAction) -> BrowserHostEffect BrowserHostError! {
         if action == {
             .OpenPanel(placement, panel_id) -> self.set_panel_open(placement, panel_id, true)
             .ClosePanel(placement, panel_id) -> self.set_panel_open(placement, panel_id, false)
@@ -416,7 +416,7 @@ BrowserHost: struct {
         }
     }
 
-    set_panel_open: fn(&self, placement: BrowserPlacement, panel_id: String, open: Bool) -> BrowserHostEffect BrowserHostError! {
+    set_panel_open: fn(^self, placement: BrowserPlacement, panel_id: String, open: Bool) -> BrowserHostEffect BrowserHostError! {
         panel := self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
         panel.layout[placement.index()].open = open
         self.panels[panel_id] = panel
@@ -427,7 +427,7 @@ BrowserHost: struct {
         BrowserHostEffect.PanelClosed{placement: placement, panel_id: panel_id}
     }
 
-    dock_panel: fn(&self, placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock) -> BrowserHostEffect BrowserHostError! {
+    dock_panel: fn(^self, placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock) -> BrowserHostEffect BrowserHostError! {
         panel := self.panels.get(panel_id) ?? return Err(BrowserHostError.UnknownPanel{panel_id: panel_id})
         panel.layout[placement.index()].dock = dock
         self.panels[panel_id] = panel
@@ -530,7 +530,7 @@ browser_panel_rank: fn(ranks: [String:Int], panel_id: String) -> Int {
     ranks.get(panel_id) ?? BROWSER_UNLISTED_PANEL_RANK
 }
 
-validate_browser_panel: fn(panel: BrowserPanelFact, node_count: &Int) BrowserHostError! {
+validate_browser_panel: fn(panel: BrowserPanelFact, node_count: ^Int) BrowserHostError! {
     validate_browser_text(panel.panel_id, "panel identity", MAX_BROWSER_TEXT)
     validate_browser_text(panel.title, "panel title", MAX_BROWSER_TEXT)
     validate_browser_text(panel.status, "panel status", MAX_BROWSER_TEXT)
@@ -538,7 +538,7 @@ validate_browser_panel: fn(panel: BrowserPanelFact, node_count: &Int) BrowserHos
     loop node in panel.nodes -> validate_browser_node(node, 0, node_count, node_ids)
 }
 
-validate_browser_node: fn(node: BrowserNode, depth: Int, node_count: &Int, node_ids: &[String:Bool]) BrowserHostError! {
+validate_browser_node: fn(node: BrowserNode, depth: Int, node_count: ^Int, node_ids: ^[String:Bool]) BrowserHostError! {
     if depth > MAX_BROWSER_NODE_DEPTH {
         return Err(BrowserHostError.InvalidEvent{message: "browser node tree exceeds the depth bound"})
     }
@@ -621,7 +621,7 @@ browser_stable_fragment: fn(value: String) -> String {
     String.from_bytes(out) ?? "item"
 }
 
-flatten_browser_nodes: fn(placement: BrowserPlacement, panel_id: String, nodes: [BrowserNode], elements: &[BrowserHTMLElement]) {
+flatten_browser_nodes: fn(placement: BrowserPlacement, panel_id: String, nodes: [BrowserNode], elements: ^[BrowserHTMLElement]) {
     loop node in nodes {
         elements.push(BrowserHTMLElement{id: browser_element_id(placement, panel_id, Val(node.id)), kind: node.kind.as_str(), panel_id: Val(panel_id), node_id: Val(node.id), label: node.label, value: node.value, status: node.status})
         flatten_browser_nodes(placement, panel_id, node.children, elements)

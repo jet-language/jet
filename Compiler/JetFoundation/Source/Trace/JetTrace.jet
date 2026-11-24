@@ -40,7 +40,7 @@ JetTraceError: struct {
 
 jettrace_error: fn(message: String) -> JetTraceError Never! { JetTraceError{message: message} }
 
-jettrace_field: fn(key: String, value: &&CanonicalJSON) -> CanonicalJSONField Never! {
+jettrace_field: fn(key: String, value: ^^CanonicalJSON) -> CanonicalJSONField Never! {
     CanonicalJSONField{key: key, value: value.move()}
 }
 
@@ -52,7 +52,7 @@ jettrace_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON JetTraceError
 }
 
 // Fixed wrapper keys are unique; content's canonical LF participates in SHA256.
-jettrace_artifact: fn(content: &&CanonicalJSON) -> CanonicalJSON JetTraceError! {
+jettrace_artifact: fn(content: ^^CanonicalJSON) -> CanonicalJSON JetTraceError! {
     id: canonical_json_sha256(content)
     jettrace_object(
         [CanonicalJSONField]{

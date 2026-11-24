@@ -160,7 +160,7 @@ sema_event_route_symbol: fn(owner: String, method: String) -> String Never! {
     "jet_std.Jet{owner}.{member}"
 }
 
-sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type: sema_call_resolved_type(receiver_value.ty, environment, program)
     owner: sema_event_handle_owner(receiver_type, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     type_args := [Type]{}

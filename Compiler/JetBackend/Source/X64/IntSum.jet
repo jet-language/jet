@@ -245,7 +245,7 @@ x64_int_sum_leaf: fn() -> X64SimdLeaf Never! {
 
 // `jo` to a decline when `reg` is not an inline Int (bits 63 and 62
 // differ), through r11.
-x64_int_sum_test: fn(code: &X64Code, reg: Int, declines: &[Int]) Never! {
+x64_int_sum_test: fn(code: ^X64Code, reg: Int, declines: ^[Int]) Never! {
     x64_mov_rr(code, X64_R11, reg)
     x64_alu_rr(code, X64Alu.Add, X64_R11, X64_R11)
     declines.push(x64_jcc_rel32(code, X64Cond.O))
@@ -253,7 +253,7 @@ x64_int_sum_test: fn(code: &X64Code, reg: Int, declines: &[Int]) Never! {
 
 // The low lane of `xmm`, unbiased (r10 holds the bias), into the total in
 // rcx. Both are inline, so the add cannot wrap; the sum is then tested.
-x64_int_sum_fold: fn(code: &X64Code, xmm: Int, declines: &[Int]) Never! {
+x64_int_sum_fold: fn(code: ^X64Code, xmm: Int, declines: ^[Int]) Never! {
     x64_movq_from_xmm(code, false, X64_R8, xmm)
     x64_alu_rr(code, X64Alu.Sub, X64_R8, X64_R10)
     x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R8)
@@ -261,7 +261,7 @@ x64_int_sum_fold: fn(code: &X64Code, xmm: Int, declines: &[Int]) Never! {
 }
 
 // VEX-encoded fold of one 128-bit xmm (2 biased 64-bit lanes) into rcx.
-x64_int_sum_fold_vex_xmm: fn(code: &X64Code, xmm: Int, declines: &[Int]) Never! {
+x64_int_sum_fold_vex_xmm: fn(code: ^X64Code, xmm: Int, declines: ^[Int]) Never! {
     x64_vmovq_from_xmm(code, X64_R8, xmm)
     x64_alu_rr(code, X64Alu.Sub, X64_R8, X64_R10)
     x64_alu_rr(code, X64Alu.Add, X64_RCX, X64_R8)
@@ -274,7 +274,7 @@ x64_int_sum_fold_vex_xmm: fn(code: &X64Code, xmm: Int, declines: &[Int]) Never! 
 }
 
 // VEX-encoded fold of all four biased 64-bit lanes of `ymm` into rcx (clobbers xmm5).
-x64_int_sum_fold_ymm: fn(code: &X64Code, ymm: Int, declines: &[Int]) Never! {
+x64_int_sum_fold_ymm: fn(code: ^X64Code, ymm: Int, declines: ^[Int]) Never! {
     x64_int_sum_fold_vex_xmm(code, ymm, declines)
     x64_vextracti128(code, 5, ymm, 1)
     x64_int_sum_fold_vex_xmm(code, 5, declines)

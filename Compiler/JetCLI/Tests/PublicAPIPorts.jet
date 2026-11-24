@@ -2,7 +2,7 @@
 // jet_cli_publish_public_api over a one-file package with that name, ApiFreeze
 // snapshots map to the api_version 4 text pkg_api_snapshot_render writes and
 // publication_api_snapshot_items reads back, and diff_public_api maps to
-// publication_diff_public_api. The Rust-era `^T` take sigil is `&&T`. A test
+// publication_diff_public_api. The Rust-era `^T` take sigil is `^^T`. A test
 // marked expected_fail states a behavior the producer does not have yet; its
 // comment names the gap.
 use {
@@ -20,7 +20,7 @@ PapFixtureRoot: struct {
     path: String,
 
     impl Close {
-        close: fn(&&self) -[FS]> { pap_files.remove_all(self.path).drop("test root cleanup") }
+        close: fn(^^self) -[FS]> { pap_files.remove_all(self.path).drop("test root cleanup") }
     }
 }
 
@@ -72,9 +72,9 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     root: pap_root("sigil")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
-    write_api: pap_api(root, "write", "bank", "Account: struct {{ balance: Int }}\ndeposit: fn(a: &Account, amount: Int) -> Int {{\n    a.balance = a.balance + amount\n    a.balance\n}}\n")
+    write_api: pap_api(root, "write", "bank", "Account: struct {{ balance: Int }}\ndeposit: fn(a: ^Account, amount: Int) -> Int {{\n    a.balance = a.balance + amount\n    a.balance\n}}\n")
     deposit: pap_find(write_api, "deposit")
-    assert(deposit.signature.contains("a: &Account"), "the write sigil is frozen onto the parameter type, got `{deposit.signature}`")
+    assert(deposit.signature.contains("a: ^Account"), "the write sigil is frozen onto the parameter type, got `{deposit.signature}`")
     read_api: pap_api(root, "read", "bank", "Account: struct {{ balance: Int }}\ndeposit: fn(a: Account, amount: Int) -> Int {{ a.balance + amount }}\n")
     assert(pap_changes(read_api, write_api).len() > 0, "a read -> write capability drift on a public fn is a breaking change")
 }
@@ -116,9 +116,9 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     shifted_api: pap_api(root, "shifted", "physics", "#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27415/100)\n}}\ntarget: fn() -> CelsiusPoint {{ CelsiusPoint.from_float(20.0) }}\n")
     assert_eq(pap_changes(affine_api, shifted_api).len(), 1)
 
-    length_api: pap_api(root, "length", "physics", "keep: fn<Q: Quantity<Length, .Linear>>(value: &&Q) -> Q {{ value }}\n")
-    time_api: pap_api(root, "time", "physics", "keep: fn<Q: Quantity<Time, .Linear>>(value: &&Q) -> Q {{ value }}\n")
-    assert_eq(pap_find(length_api, "keep").signature, "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) -[]> Q Never!")
+    length_api: pap_api(root, "length", "physics", "keep: fn<Q: Quantity<Length, .Linear>>(value: ^^Q) -> Q {{ value }}\n")
+    time_api: pap_api(root, "time", "physics", "keep: fn<Q: Quantity<Time, .Linear>>(value: ^^Q) -> Q {{ value }}\n")
+    assert_eq(pap_find(length_api, "keep").signature, "fn keep<Q: Quantity<Length, .Linear>>(value: ^^Q) -[]> Q Never!")
     keep_changes: pap_changes(length_api, time_api)
     assert(keep_changes.len() == 1, "{keep_changes.len()} changes\nLength API:\n{pap_text(length_api)}\nTime API:\n{pap_text(time_api)}")
 }

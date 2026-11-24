@@ -134,7 +134,7 @@ x64_count_leaf: fn(stride: Int, exact: Bool) -> X64SimdLeaf Never! {
 }
 
 // AVX2 + POPCNT byte count: 128 bytes/step, then 32 bytes/step into r10.
-x64_count_bytes_avx2: fn(code: &X64Code) Never! {
+x64_count_bytes_avx2: fn(code: ^X64Code) Never! {
     x64_vmovq_to_xmm(code, 7, X64_R8)
     x64_vpbroadcastb(code, true, 7, 7)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 128)
@@ -170,7 +170,7 @@ x64_count_bytes_avx2: fn(code: &X64Code) Never! {
 }
 
 // AVX2 + POPCNT word count: 16 words (128 bytes)/step, then 4 words/step into r10.
-x64_count_words_avx2: fn(code: &X64Code) Never! {
+x64_count_words_avx2: fn(code: ^X64Code) Never! {
     x64_vmovq_to_xmm(code, 7, X64_R8)
     x64_vpbroadcastq(code, true, 7, 7)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 16)
@@ -206,7 +206,7 @@ x64_count_words_avx2: fn(code: &X64Code) Never! {
 }
 
 // AVX-512BW + POPCNT byte count: 256 bytes/step, then 64 bytes/step into r10.
-x64_count_bytes_avx512: fn(code: &X64Code) Never! {
+x64_count_bytes_avx512: fn(code: ^X64Code) Never! {
     x64_evex_vpbroadcastb_gpr(code, 7, X64_R8)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 256)
     to_64: x64_jcc_rel32(code, X64Cond.L)
@@ -239,7 +239,7 @@ x64_count_bytes_avx512: fn(code: &X64Code) Never! {
 }
 
 // AVX-512F + POPCNT word count: 32 words (256 bytes)/step, then 8 words/step into r10.
-x64_count_words_avx512: fn(code: &X64Code) Never! {
+x64_count_words_avx512: fn(code: ^X64Code) Never! {
     x64_evex_vpbroadcastq_gpr(code, 7, X64_R8)
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 32)
     to_8: x64_jcc_rel32(code, X64Cond.L)
@@ -274,7 +274,7 @@ x64_count_words_avx512: fn(code: &X64Code) Never! {
 // Whole 64-byte blocks: up to 63 at a time into xmm1's byte counts, then
 // psadbw (against the zeros of xmm6) adds them into xmm2's two words.
 // Leaves r9 the bytes left (under 64) and rdi the first of them.
-x64_count_bytes: fn(code: &X64Code) Never! {
+x64_count_bytes: fn(code: ^X64Code) Never! {
     outer: code.bytes.len()
     x64_alu_ri(code, X64Alu.Cmp, X64_R9, 64)
     to_tail: x64_jcc_rel32(code, X64Cond.L)
@@ -311,7 +311,7 @@ x64_count_bytes: fn(code: &X64Code) Never! {
 
 // Four words per step into xmm2's two word counts. Leaves r9 the words
 // left (under four) and rdi the first of them.
-x64_count_words: fn(code: &X64Code) Never! {
+x64_count_words: fn(code: ^X64Code) Never! {
     x64_alu_ri(code, X64Alu.Sub, X64_R9, 4)
     to_tail: x64_jcc_rel32(code, X64Cond.L)
     body: code.bytes.len()

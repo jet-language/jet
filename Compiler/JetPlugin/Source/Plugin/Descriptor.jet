@@ -13,29 +13,29 @@ PLUG_DESC_HEADER: 26
 PlugDesc: struct {
     out: [U8],
 
-    word: fn(&self, value: Int) Never! { wasm_put_fixed(self.out, value, 8) }
+    word: fn(^self, value: Int) Never! { wasm_put_fixed(self.out, value, 8) }
 
     // Appends `bytes` padded to a word; returns their offset.
-    bytes: fn(&self, bytes: [U8]) -> Int Never! {
+    bytes: fn(^self, bytes: [U8]) -> Int Never! {
         at: self.out.len()
         loop byte in bytes -> self.out.push(byte)
         loop self.out.len() % 8 != 0 -> self.out.push(U8{0})
         at
     }
 
-    words: fn(&self, values: [Int]) -> Int Never! {
+    words: fn(^self, values: [Int]) -> Int Never! {
         at: self.out.len()
         loop value in values -> self.word(value)
         at
     }
 
     // Sets header word `index`.
-    set: fn(&self, index: Int, value: Int) Never! {
+    set: fn(^self, index: Int, value: Int) Never! {
         loop k in 0..<8 -> self.out[index * 8 + k] = U8{(value >> (8 * k)) & 255}
     }
 
     // Sets header words `index`, `index` + 1 to a text's offset and length.
-    text: fn(&self, index: Int, text: String) Never! {
+    text: fn(^self, index: Int, text: String) Never! {
         raw: text.bytes()
         at: self.bytes(raw)
         self.set(index, at)

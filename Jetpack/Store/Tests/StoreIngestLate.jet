@@ -142,7 +142,7 @@ use {
     store_test_drop_roots(roots)
 }
 
-store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) Never! {
+store_test_validate_hit: fn(verification: ^StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) Never! {
     verified: store_find_verified_by_reference(verification, roots, reference, expectation) ?? panic("entry must verify")
     verified.lease.validate() ?? panic("validate")
     verified.lease.release()

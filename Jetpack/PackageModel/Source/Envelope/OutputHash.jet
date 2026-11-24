@@ -108,7 +108,7 @@ EnvelopeWalkHook: struct {
         EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: pkg_envelope_walk_ignore}
     }
 
-    observe: fn(&self, path: String, stage: EnvelopeWalkStage) -[FS]> Never! {
+    observe: fn(^self, path: String, stage: EnvelopeWalkStage) -[FS]> Never! {
         self.events.push(EnvelopeWalkEvent{path: path.copy(), stage: stage})
         self.react(path, stage)
     }
@@ -128,16 +128,16 @@ EnvelopeArchive: struct {
         envelope_archive
     }
 
-    update: fn(&self, bytes: [U8]) Never! { self.hasher.update(bytes) }
+    update: fn(^self, bytes: [U8]) Never! { self.hasher.update(bytes) }
 
     // A u64 big-endian length prefix, then the bytes.
-    push_bytes: fn(&self, bytes: [U8]) Never! {
+    push_bytes: fn(^self, bytes: [U8]) Never! {
         self.hasher.update(pkg_u64_be_bytes(bytes.len()))
         self.hasher.update(bytes)
     }
 
     // Kind byte, length-prefixed relative path, u32 big-endian mode.
-    record_header: fn(&self, kind: U8, path: [U8], mode: Int) Never! {
+    record_header: fn(^self, kind: U8, path: [U8], mode: Int) Never! {
         self.hasher.update([U8]{kind})
         self.push_bytes(path)
         self.hasher.update(pkg_u32_be_bytes(mode))
@@ -171,12 +171,12 @@ pkg_try_output_hash_of_in_hangar: fn(out: String, hangar_root: String, allow_sem
     pkg_try_output_hash_of_in_hangar_with_policy(out, hangar_root, allow_semantic_xattrs, hook)
 }
 
-pkg_try_output_hash_of_in_hangar_with_policy: fn(out: String, hangar_root: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+pkg_try_output_hash_of_in_hangar_with_policy: fn(out: String, hangar_root: String, allow_semantic_xattrs: Bool, hook: ^EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
     pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, Val(hangar_root), hook)
 }
 
 // Like `pkg_try_output_hash_of`, with an explicit semantic-xattr policy.
-pkg_try_output_hash_of_with_policy: fn(out: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+pkg_try_output_hash_of_with_policy: fn(out: String, allow_semantic_xattrs: Bool, hook: ^EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
     pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, hook)
 }
 
@@ -189,7 +189,7 @@ EnvelopeHardlink: struct {
     cas_key: String,
 }
 
-pkg_try_output_hash_of_with_hook: fn(out: String, allow_semantic_xattrs: Bool, hangar_root: String?, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+pkg_try_output_hash_of_with_hook: fn(out: String, allow_semantic_xattrs: Bool, hangar_root: String?, hook: ^EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
     if !files.lexists(out) -> return Err(EnvelopeError.MissingOutput(out))
     output_info: files.stat(out) ?? return Err(EnvelopeError.Inspect{path: out, detail: "{err}"})
     if output_info.is_symlink {
@@ -283,7 +283,7 @@ pkg_envelope_canonical_real_directory: fn(path: String) -[FS, Env]> String? Neve
     Val(canonical)
 }
 
-pkg_envelope_add_allowed_hangar_root: fn(roots: &[String], candidate: String) {
+pkg_envelope_add_allowed_hangar_root: fn(roots: ^[String], candidate: String) {
     loop root in roots {
         if pkg_authority_path_within(candidate, root) {
             return
@@ -327,7 +327,7 @@ pkg_envelope_count_inode_peers_under_except: fn(root: String, key: FileID, exclu
     count
 }
 
-pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_archive: &EnvelopeArchive, hardlinks: &[EnvelopeHardlink], allow_semantic_xattrs: Bool, allow_nix_store_symlinks: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> EnvelopeError! {
+pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_archive: ^EnvelopeArchive, hardlinks: ^[EnvelopeHardlink], allow_semantic_xattrs: Bool, allow_nix_store_symlinks: Bool, hook: ^EnvelopeWalkHook) -[FS, Env]> EnvelopeError! {
     pkg_validate_rel_path_with_mode(rel, allow_nix_store_symlinks) ?? return Err(EnvelopeError.PathLaw(err))
     info: files.stat(path) ?? return Err(EnvelopeError.Inspect{path: path, detail: "{err}"})
     rel_bytes: rel.bytes()
@@ -493,7 +493,7 @@ pkg_validate_relative_nix_store_symlink_target: fn(target: String, parent_depth:
 // Hash one regular file's bytes from a no-follow handle, refusing a file
 // whose identity drifts before or while it is read. With `want_content`,
 // returns the hex digest of the file content; otherwise "".
-pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_metadata_changes: Bool, want_content: Bool, envelope_archive: &EnvelopeArchive, hook: &EnvelopeWalkHook) -[FS]> String EnvelopeError! {
+pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_metadata_changes: Bool, want_content: Bool, envelope_archive: ^EnvelopeArchive, hook: ^EnvelopeWalkHook) -[FS]> String EnvelopeError! {
     reader := files.open(path, links: .Refuse) ?? return Err(EnvelopeError.OpenNoFollow{path: path, detail: "{err}"})
     before: reader.stat() ?? return Err(EnvelopeError.InspectOpen{path: path, detail: "{err}"})
     if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(expected), allow_hardlink_metadata_changes) {

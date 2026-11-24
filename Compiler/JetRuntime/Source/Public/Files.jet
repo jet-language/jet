@@ -292,17 +292,17 @@ files: module {
     // end of the file), a whole write, and a flush. Like the handles' other
     // methods they only wait: the authority is checked where the handle is
     // opened.
-    #Import(c) priv reader_read: fn(reader: &FileReader, limit: Int) -[Time.Wait]> [U8] IOError! = "jet_std_file_reader_read"
+    #Import(c) priv reader_read: fn(reader: ^FileReader, limit: Int) -[Time.Wait]> [U8] IOError! = "jet_std_file_reader_read"
 
-    #Import(c) priv reader_read_into: fn(reader: &FileReader, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! = "jet_std_file_reader_read_into"
+    #Import(c) priv reader_read_into: fn(reader: ^FileReader, buffer: ^[U8], limit: Int) -[Time.Wait]> Int IOError! = "jet_std_file_reader_read_into"
 
-    #Import(c) priv writer_write_all: fn(writer: &FileWriter, bytes: [U8]) -[Time.Wait]> IOError! = "jet_std_file_writer_write_all"
+    #Import(c) priv writer_write_all: fn(writer: ^FileWriter, bytes: [U8]) -[Time.Wait]> IOError! = "jet_std_file_writer_write_all"
 
-    #Import(c) priv writer_flush: fn(writer: &FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_flush"
+    #Import(c) priv writer_flush: fn(writer: ^FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_flush"
 
-    #Import(c) priv reader_seek: fn(reader: &FileReader, position: Int) -[Time.Wait]> IOError! = "jet_std_file_reader_seek"
+    #Import(c) priv reader_seek: fn(reader: ^FileReader, position: Int) -[Time.Wait]> IOError! = "jet_std_file_reader_seek"
 
-    #Import(c) priv writer_fsync: fn(writer: &FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_fsync"
+    #Import(c) priv writer_fsync: fn(writer: ^FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_fsync"
 
     // The compiler's `Path` handle: its text in and out, the lexical path
     // math of RoutePath.jet, the home directory (HOME) and a recursive walk.
@@ -345,7 +345,7 @@ files: module {
     #Import(c) priv list_dir_raw: fn(path: String) -[FS.Read]> [DirEntry] IOError! = "jet_std_fs_list_dir_raw"
 
     // The reader's bytes up to and including the next newline.
-    #Import(c) priv reader_line_bytes: fn(reader: &FileReader) -[FS.Read]> [U8] IOError! = "jet_file_reader_line_bytes_raw"
+    #Import(c) priv reader_line_bytes: fn(reader: ^FileReader) -[FS.Read]> [U8] IOError! = "jet_file_reader_line_bytes_raw"
 
     // Opens `path` for reading without waiting for a FIFO's writer.
     #Import(c) priv open_reader_nonblocking: fn(path: String) -[FS.Read]> FileReader IOError! = "jet_std_files_open_reader_nonblocking"

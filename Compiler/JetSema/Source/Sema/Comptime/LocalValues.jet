@@ -63,7 +63,7 @@ sema_comptime_local_value: fn(
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
     scopes: SemaScopeTable,
-    context: &SemaCheckContext,
+    context: ^SemaCheckContext,
 ) -> SemaComptimeLocalValue {
     none: SemaComptimeLocalValue{value: None, reason: None}
     if !sema_comptime_local_value_candidate(init.ty, fact_start, reference_start, node_start, program, scopes, context) {
@@ -295,7 +295,7 @@ sema_comptime_local_value_ahead_declares: fn(body: [Stmt], name: String) -> Bool
 
 // Stages each local of `body` (and the blocks it reads, as
 // sema_comptime_local_value_ahead_declares does) to be computed ahead.
-sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], source_module: SemaRegistrationModule, function_key: String, function: Func, function_body: [Stmt], body: [Stmt]) Never! {
+sema_comptime_local_value_ahead_stmts: fn(sources: ^[SemaComptimeItemSource], source_module: SemaRegistrationModule, function_key: String, function: Func, function_body: [Stmt], body: [Stmt]) Never! {
     loop statement in body {
         if statement == {
             .Val(binding) -> {
@@ -354,7 +354,7 @@ SemaComptimeLocalValueAheadScan: struct {
     readable: Bool,
 }
 
-sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_body: [Stmt], scan: &SemaComptimeLocalValueAheadScan) Never! {
+sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, function_body: [Stmt], scan: ^SemaComptimeLocalValueAheadScan) Never! {
     if !scan.readable {
         return
     }

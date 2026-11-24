@@ -72,7 +72,7 @@ VerifiedRealization: struct {
 
     original_reference: fn(self) -> String Never! { self.lease.original_reference() }
 
-    into_parts: fn(&&self) -> {entry: StoreEntry, source_state: SourceState, lease: CacheLease} Never! {
+    into_parts: fn(^^self) -> {entry: StoreEntry, source_state: SourceState, lease: CacheLease} Never! {
         {entry: self.entry, source_state: self.source_state_value, lease: self.lease.move()}
     }
 }
@@ -125,7 +125,7 @@ store_report_integrity: fn(theme: Theme, failure: IntegrityFailure) -[IO, Time.W
 // Rehydrate a previously verified project environment after its composite
 // stamp still matches. This deliberately skips provider and per-entry
 // verification; any stamp mutation falls back to the unchanged cold path.
-store_reuse_verified_environment: fn(verification: &StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
+store_reuse_verified_environment: fn(verification: ^StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 -> return Ok(None)
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     entries: store_list_read_only(roots)
@@ -159,15 +159,15 @@ store_reuse_verified_environment: fn(verification: &StoreVerification, roots: Ha
 
 // Record (or refresh) a store entry; returns the entry with its id filled
 // in. Test seam over the same admission transaction as realized recording.
-store_record: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope) -> StoreEntry StoreError! {
+store_record: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope) -> StoreEntry StoreError! {
     store_record_verified(verification, roots, name, version, reference, out, bin, rlib, envelope, CacheIdentity.empty())
 }
 
-store_record_verified: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity) -> StoreEntry StoreError! {
+store_record_verified: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity) -> StoreEntry StoreError! {
     store_record_verified_mode(verification, roots, name, version, reference, out, bin, rlib, envelope, cache_identity, false)
 }
 
-store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity, canonicalize_local: Bool) -> StoreEntry StoreError! {
+store_record_verified_mode: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, version: String, reference: String, out: String, bin: String, rlib: String, envelope: Envelope, cache_identity: CacheIdentity, canonicalize_local: Bool) -> StoreEntry StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     paths: if canonicalize_local -> store_canonicalize_local_output_unlocked(verification, roots, out, bin, rlib, envelope.output_hash) else -> {out: out, bin: bin, rlib: rlib}
     id: store_entry_id(name, version, reference, paths.out)
@@ -206,17 +206,17 @@ store_record_verified_mode: fn(verification: &StoreVerification, roots: HangarRo
     Ok(batch[0])
 }
 
-store_record_realized_mode: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized) -> StoreEntry StoreError! {
+store_record_realized_mode: fn(verification: ^StoreVerification, roots: HangarRoots, realized: Realized) -> StoreEntry StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_record_realized_mode_unlocked(verification, roots, realized, None)
 }
 
-store_record_realized_mode_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, action_key: String, realized: Realized) -> StoreEntry StoreError! {
+store_record_realized_mode_with_fresh_agreement: fn(verification: ^StoreVerification, roots: HangarRoots, action_key: String, realized: Realized) -> StoreEntry StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_record_realized_mode_unlocked(verification, roots, realized, Val(action_key))
 }
 
-store_record_realized_mode_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, realized: Realized, fresh_action_key: String?) -> StoreEntry StoreError! {
+store_record_realized_mode_unlocked: fn(verification: ^StoreVerification, roots: HangarRoots, realized: Realized, fresh_action_key: String?) -> StoreEntry StoreError! {
     _: ProducerRecord.decode(realized.producer.encode())
     provider_validate_nix_build_facts(realized.producer) ?? return Err(StoreError.Other("{err}"))
     graph: store_closure_graph_structure_unlocked(verification, roots)
@@ -250,7 +250,7 @@ store_record_realized_mode_unlocked: fn(verification: &StoreVerification, roots:
 
 // The staging half of realized recording: project or stage the outputs and
 // build the package record the transaction will commit.
-store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String:String], transaction: &AdmissionTransaction) -> StoreEntry StoreError! {
+store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized, graph: ClosureGraph, captured_outputs: [String:String], transaction: ^AdmissionTransaction) -> StoreEntry StoreError! {
     paths: if realized.producer.provider == "nix" -> store_project_nix_outputs_unlocked(roots, realized, graph, transaction) else -> store_stage_local_output_unlocked(roots, realized.out, realized.bin, realized.rlib, realized.envelope.output_hash, transaction)
     named_outputs := captured_outputs.copy()
     named_outputs["out"] = realized.envelope.output_hash
@@ -310,7 +310,7 @@ store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized,
 // Single realization boundary for every product consumer. Cache reuse,
 // quarantine, provider execution, and recording cannot be bypassed by CLI
 // callers.
-store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -> VerifiedRealization RealizeError! {
+store_realize_verified: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -> VerifiedRealization RealizeError! {
     if request == {
         .Package(spec, _) -> {
             store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
@@ -452,7 +452,7 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
     Ok(registered)
 }
 
-store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, prepared: PreparedRealization) -> VerifiedRealization RealizeError! {
+store_register_prepared: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, prepared: PreparedRealization) -> VerifiedRealization RealizeError! {
     realized := prepared.realized
     if prepared.attestation == {
         .Val(attestation) -> { realized.producer.facts["cache.reproducibility"] = attestation }
@@ -493,7 +493,7 @@ store_register_prepared: fn(verification: &StoreVerification, roots: HangarRoots
 }
 
 // The cache reference, expectation, and Nix replay facts of one request.
-store_realize_request_facts: fn(verification: &StoreVerification, request: RealizeRequest, ctx: ProviderCtx) -> {reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool} RealizeError! {
+store_realize_request_facts: fn(verification: ^StoreVerification, request: RealizeRequest, ctx: ProviderCtx) -> {reference: String, expectation: CacheExpectation?, locked_nix: Bool, indexed_nix_repair: Bool} RealizeError! {
     if request == {
         .Package(spec, table) -> {
             provider_validate_cache_authority(spec, table, ctx) ?? return Err(RealizeError.Provider(err))
@@ -530,7 +530,7 @@ store_validate_adapter_request_hook: fn(request: RealizeRequest, entry: StoreEnt
 // provider executions start in private roots and the first result is not
 // promoted until the second result agrees on action, output, and
 // provenance.
-store_certify_independent_root_build: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions) -> IndependentRootCertification RealizeError! {
+store_certify_independent_root_build: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions) -> IndependentRootCertification RealizeError! {
     if request == {
         .Package(spec, table) -> {
             store_enforce_manifest_provenance_floor(ctx.project_dir, spec.package)
@@ -553,7 +553,7 @@ store_certify_independent_root_build: fn(verification: &StoreVerification, roots
     Ok(certified)
 }
 
-store_certify_prepared: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, options: IndependentRootOptions, prepared: PreparedRealization) -> IndependentRootCertification RealizeError! {
+store_certify_prepared: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, options: IndependentRootOptions, prepared: PreparedRealization) -> IndependentRootCertification RealizeError! {
     action_key: prepared.action_key ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification produced no action identity")))
     if options.canceled == {
         .Val(canceled) -> {
@@ -715,7 +715,7 @@ store_receipt_projection_envelope_matches: fn(package: LockedPackage, output_has
 // fail-closed local-integrity behavior. A bound but unavailable/corrupt
 // cache is a miss, so the deterministic provider path remains the source
 // fallback.
-store_try_substitute_invalid_candidate: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding]) -> Bool StoreError! {
+store_try_substitute_invalid_candidate: fn(verification: ^StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding]) -> Bool StoreError! {
     objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
     if candidate.envelope.output_hash == "" || candidate.envelope.output_hash.contains("/") || candidate.out != files.join(objects, candidate.envelope.output_hash) {
         return Ok(false)
@@ -734,7 +734,7 @@ store_try_substitute_invalid_candidate: fn(verification: &StoreVerification, roo
 
 STORE_SUBSTITUTE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
-store_substitute_into_stage: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding], stage: String) -> Bool StoreError! {
+store_substitute_into_stage: fn(verification: ^StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding], stage: String) -> Bool StoreError! {
     substituted := false
     loop binding in bindings {
         store_discard_substitution_stage(stage)
@@ -762,7 +762,7 @@ store_substitute_into_stage: fn(verification: &StoreVerification, roots: HangarR
     Ok(restored)
 }
 
-store_restore_substituted_candidate: fn(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, stage: String) -> Bool StoreError! {
+store_restore_substituted_candidate: fn(verification: ^StoreVerification, roots: HangarRoots, candidate: StoreEntry, stage: String) -> Bool StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     loop entry in store_list_unlocked(roots) {
         if entry.id == candidate.id -> return Ok(false)
@@ -806,7 +806,7 @@ store_discard_substitution_stage: fn(path: String) StoreError! {
 // Publication is best-effort cache acceleration. The binding's write grant
 // authorizes the operation; a failed mirror never turns a successful source
 // build into a failed realization.
-store_publish_realized_to_bound_caches: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
+store_publish_realized_to_bound_caches: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     producer: ProducerRecord.decode(entry.producer_record) ?? return
     if store_is_private_untrusted_build(producer) {
         return
@@ -823,7 +823,7 @@ store_publish_realized_to_bound_caches: fn(verification: &StoreVerification, roo
 // recipe. Keeping the leases alive for the duration of the adapter build
 // prevents a dependency snapshot from disappearing while the child process
 // is using it.
-store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> {tools: [String:String], leases: [CacheLease]} RealizeError! {
+store_realize_adapter_tools: fn(verification: ^StoreVerification, roots: HangarRoots, ctx: ProviderCtx, plan: AdapterPlan, table: SourceTable) -> {tools: [String:String], leases: [CacheLease]} RealizeError! {
     tools := [String:String]{}
     dependency_leases := [CacheLease]{}
     loop dependency in plan.deps {
@@ -872,7 +872,7 @@ store_realize_adapter_tools: fn(verification: &StoreVerification, roots: HangarR
     Ok({tools: tools, leases: dependency_leases})
 }
 
-store_integrity_failure: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, proof: CacheVerification) -> IntegrityFailure Never! {
+store_integrity_failure: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, expectation: CacheExpectation, proof: CacheVerification) -> IntegrityFailure Never! {
     identity: expectation.identity
     facts: if {
         !proof.output_exists -> {reason: "output existence", expected: entry.envelope.output_hash, actual: "missing output"}

@@ -154,7 +154,7 @@ evidence_completeness_reason: fn(value: EvidenceCompleteness) -> String? Never! 
     }
 }
 
-evidence_completeness_merge: fn(value: &EvidenceCompleteness, other: EvidenceCompleteness) Never! {
+evidence_completeness_merge: fn(value: ^EvidenceCompleteness, other: EvidenceCompleteness) Never! {
     // copy: the merged completeness (owner: `value`, the merged report) takes the more severe state
     // while `other` stays with its record (owner: the caller's record or report, read again
     // afterwards).
@@ -197,19 +197,19 @@ evidence_record_new: fn(identity: EvidenceIdentity, kind: EvidenceKind, producer
     EvidenceRecord{identity: identity, kind: kind, facet: evidence_facet_for_kind(kind), producer: producer, outcome: outcome, expectation: EvidenceExpectation.Ordinary, count: count, source: source, build: build, revision: revision, detail: "", attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: completeness, chain: [EvidenceChainLink]{}, derivation: None}
 }
 
-evidence_record_set_expectation: fn(record: &EvidenceRecord, expectation: EvidenceExpectation) EvidenceExpectationError! {
+evidence_record_set_expectation: fn(record: ^EvidenceRecord, expectation: EvidenceExpectation) EvidenceExpectationError! {
     evidence_expectation_validate(expectation, record.outcome)
     record.expectation = expectation
     return
 }
 
-evidence_record_with_expectation: fn(record: &&EvidenceRecord, expectation: EvidenceExpectation) -> EvidenceRecord EvidenceExpectationError! {
+evidence_record_with_expectation: fn(record: ^^EvidenceRecord, expectation: EvidenceExpectation) -> EvidenceRecord EvidenceExpectationError! {
     value := record
     evidence_record_set_expectation(value, expectation)
     Ok(value)
 }
 
-evidence_record_set_derivation: fn(record: &EvidenceRecord, derivation: DerivationRecord) Never! {
+evidence_record_set_derivation: fn(record: ^EvidenceRecord, derivation: DerivationRecord) Never! {
     record.derivation = Val(derivation_record_reference(derivation))
 }
 
@@ -231,7 +231,7 @@ evidence_report_derivation: fn(report: EvidenceReport, reference: DerivationRef)
 }
 
 // Interns `derivation` in the report's relation, kept in canonical id order.
-evidence_report_intern_derivation: fn(report: &EvidenceReport, derivation: &&DerivationRecord) -> DerivationRef EvidenceMergeError! {
+evidence_report_intern_derivation: fn(report: ^EvidenceReport, derivation: ^^DerivationRecord) -> DerivationRef EvidenceMergeError! {
     if derivation_store_add(report.derivations, derivation) == {
         .Ok(reference) -> {
             derivation_store_sort(report.derivations)
@@ -241,13 +241,13 @@ evidence_report_intern_derivation: fn(report: &EvidenceReport, derivation: &&Der
     }
 }
 
-evidence_report_add_record_with_derivation: fn(report: &EvidenceReport, record: &&EvidenceRecord, derivation: &&DerivationRecord) EvidenceMergeError! {
+evidence_report_add_record_with_derivation: fn(report: ^EvidenceReport, record: ^^EvidenceRecord, derivation: ^^DerivationRecord) EvidenceMergeError! {
     value := record
     value.derivation = Val(evidence_report_intern_derivation(report, derivation))
     evidence_report_add_record(report, value)
 }
 
-evidence_report_add_record: fn(report: &EvidenceReport, record: &&EvidenceRecord) EvidenceMergeError! {
+evidence_report_add_record: fn(report: ^EvidenceReport, record: ^^EvidenceRecord) EvidenceMergeError! {
     if evidence_record_validate(record) == {
         .Err(error) -> return Err(evidence_merge_error_from_expectation(error))
         .Ok(_) -> {}
@@ -279,7 +279,7 @@ evidence_report_add_record: fn(report: &EvidenceReport, record: &&EvidenceRecord
     return
 }
 
-evidence_report_try_from_records: fn(report_id: String, records: &&[EvidenceRecord], derivations: &&[DerivationRecord]) -> EvidenceReport EvidenceMergeError! {
+evidence_report_try_from_records: fn(report_id: String, records: ^^[EvidenceRecord], derivations: ^^[DerivationRecord]) -> EvidenceReport EvidenceMergeError! {
     report := evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
     if records.len() > 0 {
         report.producer = records[0].producer
@@ -301,7 +301,7 @@ evidence_report_try_from_records: fn(report_id: String, records: &&[EvidenceReco
 
 // Infallible construction is an assertion, not a fabricated empty report or a
 // swallowed merge error.
-evidence_report_from_records: fn(report_id: String, records: &&[EvidenceRecord]) -> EvidenceReport Never! {
+evidence_report_from_records: fn(report_id: String, records: ^^[EvidenceRecord]) -> EvidenceReport Never! {
     evidence_report_try_from_records(report_id, records, [DerivationRecord]{}) ?? panic("evidence records in one report must share report identity")
 }
 

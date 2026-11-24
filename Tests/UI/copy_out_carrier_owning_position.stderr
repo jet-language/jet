@@ -4,7 +4,7 @@ Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
  17 |     wrapped := Val(env)
     |                    ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the binding `wrapped`
- Fix: Declare the parameter `env: &&Res` so the caller hands the value over
+ Fix: Declare the parameter `env: ^^Res` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
@@ -13,7 +13,7 @@ Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
  21 | store: fn(env: Res) -> Slot { Slot{held: Val(env)} }
     |                                              ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the struct literal
- Fix: Declare the parameter `env: &&Res` so the caller hands the value over
+ Fix: Declare the parameter `env: ^^Res` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
@@ -22,7 +22,7 @@ Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
  23 | give: fn(env: Res) -> Res? { Val(env) }
     |                                  ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into the returned value
- Fix: Declare the parameter `env: &&Res` so the caller hands the value over
+ Fix: Declare the parameter `env: ^^Res` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker
 
 Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
@@ -31,5 +31,5 @@ Error: Jet.MissingMoveMarker: `env` cannot be moved from borrowed storage
  27 |     kept.push(Val(env))
     |                   ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into `.push()`
- Fix: Declare the parameter `env: &&Res` so the caller hands the value over
+ Fix: Declare the parameter `env: ^^Res` so the caller hands the value over
 More: jet-lang.dev/e/Jet.MissingMoveMarker

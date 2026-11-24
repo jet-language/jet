@@ -60,7 +60,7 @@ HermeticBuildContext: struct {
 
     default_host_toolchain: fn(self) -> ToolchainHandle Never! { self.default_toolchain }
 
-    toolchain: fn(&self, name: String, spec: ToolchainSpec) -> ToolchainHandle HermeticBuildError! {
+    toolchain: fn(^self, name: String, spec: ToolchainSpec) -> ToolchainHandle HermeticBuildError! {
         checked: build_check_name(name, .Toolchain)
         if self.toolchain_names.contains(checked) {
             return Err(HermeticBuildError.DuplicateToolchainName(checked))
@@ -87,7 +87,7 @@ HermeticBuildContext: struct {
         Ok(ToolchainHandle{id: id, context: self.context})
     }
 
-    signing_identity: fn(&self, name: String, spec: SigningIdentitySpec) -> SigningIdentityHandle HermeticBuildError! {
+    signing_identity: fn(^self, name: String, spec: SigningIdentitySpec) -> SigningIdentityHandle HermeticBuildError! {
         checked: build_check_name(name, .SigningIdentity)
         if self.signing_identity_names.contains(checked) {
             return Err(HermeticBuildError.DuplicateSigningIdentityName(checked))
@@ -99,7 +99,7 @@ HermeticBuildContext: struct {
         Ok(SigningIdentityHandle{id: id, context: self.context})
     }
 
-    probe: fn(&self, name: String, spec: ProbeSpec) -> ProbeHandle HermeticBuildError! {
+    probe: fn(^self, name: String, spec: ProbeSpec) -> ProbeHandle HermeticBuildError! {
         checked: build_check_name(name, .Probe)
         if self.probe_names.contains(checked) {
             return Err(HermeticBuildError.DuplicateProbeName(checked))
@@ -113,55 +113,55 @@ HermeticBuildContext: struct {
         Ok(ProbeHandle{id: id, context: self.context})
     }
 
-    find_program: fn(&self, name: String, program: String) -> ProbeHandle HermeticBuildError! {
+    find_program: fn(^self, name: String, program: String) -> ProbeHandle HermeticBuildError! {
         self.probe(name, ProbeSpec.find_program(program))
     }
 
-    pkg_config: fn(&self, name: String, package: String) -> ProbeHandle HermeticBuildError! {
+    pkg_config: fn(^self, name: String, package: String) -> ProbeHandle HermeticBuildError! {
         self.probe(name, ProbeSpec.pkg_config(package))
     }
 
-    header_check: fn(&self, name: String, header: String) -> ProbeHandle HermeticBuildError! {
+    header_check: fn(^self, name: String, header: String) -> ProbeHandle HermeticBuildError! {
         self.probe(name, ProbeSpec.header_check(header))
     }
 
-    compile_check: fn(&self, name: String, check_name: String, includes: [String], code: String) -> ProbeHandle HermeticBuildError! {
+    compile_check: fn(^self, name: String, check_name: String, includes: [String], code: String) -> ProbeHandle HermeticBuildError! {
         self.probe(name, ProbeSpec.compile_check(check_name, includes, code))
     }
 
-    add_executable: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_executable: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Executable, spec)
     }
 
-    add_library: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_library: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Library, spec)
     }
 
-    add_test: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_test: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Test, spec)
     }
 
-    add_asset_bundle: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_asset_bundle: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .AssetBundle, spec)
     }
 
-    add_doc: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_doc: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Doc, spec)
     }
 
-    add_install: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_install: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Install, spec)
     }
 
-    add_package: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_package: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Package, spec)
     }
 
-    add_publish: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    add_publish: fn(^self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         self.push_target(name, .Publish, spec)
     }
 
-    action: fn(&self, name: String, spec: ActionSpec) -> HermeticActionHandle HermeticBuildError! {
+    action: fn(^self, name: String, spec: ActionSpec) -> HermeticActionHandle HermeticBuildError! {
         if self.actions.len() >= BUILD_MAX_ACTIONS {
             return Err(HermeticBuildError.PackagedPlugin("action graph exceeds {BUILD_MAX_ACTIONS} actions"))
         }
@@ -207,7 +207,7 @@ HermeticBuildContext: struct {
         self.snapshot(Val(default))
     }
 
-    push_target: fn(&self, name: String, kind: TargetKind, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+    push_target: fn(^self, name: String, kind: TargetKind, spec: TargetSpec) -> TargetRef HermeticBuildError! {
         checked: build_check_name(name, .Target)
         if self.target_names.contains(checked) {
             return Err(HermeticBuildError.DuplicateTargetName(checked))

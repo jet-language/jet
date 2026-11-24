@@ -212,7 +212,7 @@ plan_measure: fn(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Nev
 
 plan_viewport_state: fn(v: WebVirtualPlanViewport) -> WebVirtualPlan Never! { v.plan }
 
-plan_scroll_to: fn(v: &WebVirtualPlanViewport, scroll_offset: Int) Never! {
+plan_scroll_to: fn(v: ^WebVirtualPlanViewport, scroll_offset: Int) Never! {
     w: window(v.plan.total_count, scroll_offset, v.plan.viewport_height, v.plan.estimated_item_size, v.plan.overscan)
     v.plan.scroll_offset = w.scroll_offset
     v.plan.start = w.start
@@ -222,7 +222,7 @@ plan_scroll_to: fn(v: &WebVirtualPlanViewport, scroll_offset: Int) Never! {
     v.plan.anchor_offset = 0
 }
 
-plan_resize: fn(v: &WebVirtualPlanViewport, viewport_width: Int, viewport_height: Int) Never! {
+plan_resize: fn(v: ^WebVirtualPlanViewport, viewport_width: Int, viewport_height: Int) Never! {
     v.plan.viewport_width = max0(viewport_width)
     v.plan.viewport_height = max0(viewport_height)
     w: window(v.plan.total_count, v.plan.scroll_offset, v.plan.viewport_height, v.plan.estimated_item_size, v.plan.overscan)
@@ -231,7 +231,7 @@ plan_resize: fn(v: &WebVirtualPlanViewport, viewport_width: Int, viewport_height
     v.plan.total_size = w.total_size
 }
 
-plan_viewport_measure: fn(v: &WebVirtualPlanViewport, index: Int, size: Int) Never! {
+plan_viewport_measure: fn(v: ^WebVirtualPlanViewport, index: Int, size: Int) Never! {
     v.plan = plan_measure(v.plan, index, size)
 }
 

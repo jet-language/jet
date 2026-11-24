@@ -373,7 +373,7 @@ title_left: fn(window: Float, start: Float, end: Float, advance: Float) -> Float
 
 // Which of `p.kits` is the kit for `look.active` at `scale120`, made once
 // and kept: the four latest stay.
-kit: fn(p: &Painter, look: FrameLook, scale120: Int) -> Int {
+kit: fn(p: ^Painter, look: FrameLook, scale120: Int) -> Int {
     loop at in 0..<p.kits.len() {
         if p.kits[at].active == look.active && p.kits[at].dark == look.dark && p.kits[at].scale120 == scale120 {
             return at
@@ -475,7 +475,7 @@ bottom_left_cover: fn(scale120: Int) -> [U8] {
 // ---- the header --------------------------------------------------------
 
 // The header of a `width`-pixel-wide window: `width` x px(HEADER) pixels.
-header: fn(p: &Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
+header: fn(p: ^Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     s: Float{scale120} / 120.0
     height: px(HEADER, scale120)
     colors: palette(look)
@@ -562,7 +562,7 @@ title_width: fn(face: font.Face, title: String, size: Float) -> Float {
 // if it fits, else cut at a grapheme boundary, at a word's end when one
 // fits, and ended with an ellipsis; empty when not even the ellipsis fits.
 // Combining sequences stay whole, and the text keeps its logical order.
-fit_title: fn(p: &Painter, title: String, size: Float, room: Float) -> String {
+fit_title: fn(p: ^Painter, title: String, size: Float, room: Float) -> String {
     if title_width(p.face, title, size) <= room -> return title.copy()
     if title_width(p.face, "…", size) > room -> return ""
     parts: text.graphemes(title)
@@ -611,7 +611,7 @@ glyph_stroke: fn(scale120: Int) -> Int { max_int(px(1, scale120), 1) }
 // so the X is drawn 0.15 pixels thinner: then all three carry one stroke's
 // ink per pixel of their length, to a few percent (the last test measures
 // it).
-button_glyph: fn(pixels: &[U8], width: Int, height: Int, look: FrameLook, which: FrameButton, square: UIRect, scale120: Int, color: Int) {
+button_glyph: fn(pixels: ^[U8], width: Int, height: Int, look: FrameLook, which: FrameButton, square: UIRect, scale120: Int, color: Int) {
     g: glyph_side(square.width, scale120)
     w: glyph_stroke(scale120)
     x0: square.x + (square.width - g) /% 2
@@ -644,7 +644,7 @@ button_glyph: fn(pixels: &[U8], width: Int, height: Int, look: FrameLook, which:
 
 // The outline of the `side`-pixel square at pixel (x, y), `line` pixels
 // wide inside it.
-box_lines: fn(pixels: &[U8], width: Int, height: Int, x: Int, y: Int, side: Int, line: Int, color: Int) {
+box_lines: fn(pixels: ^[U8], width: Int, height: Int, x: Int, y: Int, side: Int, line: Int, color: Int) {
     paint(pixels, width, height, rect_mask(x, y, side, line), color)
     paint(pixels, width, height, rect_mask(x, y + side - line, side, line), color)
     paint(pixels, width, height, rect_mask(x, y + line, line, side - 2 * line), color)
@@ -661,7 +661,7 @@ transparent: fn(count: Int) -> [U8] {
 }
 
 // Paints `mask` in `color` onto the `width` x `height` pixels.
-paint: fn(pixels: &[U8], width: Int, height: Int, mask: font.GlyphMask, color: Int) {
+paint: fn(pixels: ^[U8], width: Int, height: Int, mask: font.GlyphMask, color: Int) {
     font.blend(pixels, width, height, width * 4, mask, 0, 0, color, UIRect{x: 0, y: 0, width: width, height: height})
 }
 

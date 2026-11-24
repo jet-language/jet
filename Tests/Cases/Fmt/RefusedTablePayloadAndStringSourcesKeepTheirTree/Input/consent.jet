@@ -10,7 +10,7 @@ CaptureConsentScope: struct {
     default: fn() -> CaptureConsentScope Never! {
         CaptureConsentScope{authorities: [String]{}, hosts: [String]{}, streams: [String]{}, disclosures: [String]{}, destination: "", byte_limit: DEFAULT_CAPTURE_BUDGET_BYTES, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
     }
-    new: fn(authorities: &&[String], hosts: &&[String], streams: &&[String], disclosures: &&[String], destination: &&String, byte_limit: U64) -> CaptureConsentScope Never! {
+    new: fn(authorities: ^^[String], hosts: ^^[String], streams: ^^[String], disclosures: ^^[String], destination: ^^String, byte_limit: U64) -> CaptureConsentScope Never! {
         scope := CaptureConsentScope{authorities: authorities.move(), hosts: hosts.move(), streams: streams.move(), disclosures: disclosures.move(), destination: destination.move(), byte_limit, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
         scope.canonicalize()
         scope
@@ -21,7 +21,7 @@ CaptureConsentScope: struct {
         scope
     }
     // Same-package C3 calls this after applying policy mode and budget.
-    canonicalize: fn(&self) Never! {
+    canonicalize: fn(^self) Never! {
         capture_consent_sort_unique(self.authorities)
         capture_consent_sort_unique(self.hosts)
         capture_consent_sort_unique(self.streams)
@@ -60,7 +60,7 @@ CaptureConsentScope: struct {
         sha256_hex_bytes(sha256_bytes(bytes))
     }
 }
-capture_consent_sort_unique: fn(values: &[String]) Never! {
+capture_consent_sort_unique: fn(values: ^[String]) Never! {
     values.sort()
     count := 0
     loop index in 0..<values.len() {

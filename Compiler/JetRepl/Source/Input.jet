@@ -36,7 +36,7 @@ repl_reanchor_span: fn(span: Span, offset: Int) -> Span Never! {
 }
 
 // Every span a report renders (primary, labels, edit), shifted to the input.
-repl_reanchor: fn(diagnostic: &&Diagnostic, offset: Int) -> Diagnostic Never! {
+repl_reanchor: fn(diagnostic: ^^Diagnostic, offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span == .Val(span) -> updated.span = Val(repl_reanchor_span(span, offset))
     labels := [DiagnosticLabel]{}

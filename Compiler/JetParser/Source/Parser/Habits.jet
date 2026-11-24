@@ -39,7 +39,7 @@ use {
 
 // A habit's E0003: `edit` is the report's own edit and `more` rides along,
 // so the edits together write the Jet spelling.
-parser_add_habit: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String, edit: TextEdit, more: &&[TextEdit]) {
+parser_add_habit: fn(state: ^JetParserState, span: Span, what: String, why: String, fix: String, edit: TextEdit, more: ^^[TextEdit]) {
     if parser_aborting(state) {
         return
     }
@@ -50,7 +50,7 @@ parser_add_habit: fn(state: &JetParserState, span: Span, what: String, why: Stri
 
 // A line habit ends its statement as a fatal error does: nothing more is
 // reported until the enclosing loop resynchronizes.
-parser_habit_abort: fn(state: &JetParserState) Never! {
+parser_habit_abort: fn(state: ^JetParserState) Never! {
     state.abort_mark = state.diagnostics.len()
     state.abort_position = state.position
 }
@@ -109,7 +109,7 @@ parser_colon_block_edits: fn(state: JetParserState, colon: Span) -> [TextEdit] N
 // A Python block header (`if ready:`, `loop item in items:`) where Jet
 // expects a body: the braces it needs, reported fatally. False when `colon`
 // does not end its line.
-parser_report_colon_block: fn(state: &JetParserState, keyword: String, colon: Token) -> Bool {
+parser_report_colon_block: fn(state: ^JetParserState, keyword: String, colon: Token) -> Bool {
     if parser_header_colon_index(state, state.position) != state.position -> return false
     edits := parser_colon_block_edits(state, colon.span)
     first: edits.remove(0, .Slot) ?? return false
@@ -122,7 +122,7 @@ parser_report_colon_block: fn(state: &JetParserState, keyword: String, colon: To
 // A statement line another language starts its own way: `while`, `for` and
 // `elif`. Reported with its rewrite and the word consumed; false when the
 // line at the cursor is no such habit.
-parser_report_habit_line: fn(state: &JetParserState) -> Bool {
+parser_report_habit_line: fn(state: ^JetParserState) -> Bool {
     word_token: parser_current(state)
     is_while: parser_token_text_is_id(word_token, state.words.id_while)
     is_for: !is_while && parser_token_text_is_id(word_token, state.words.id_for)
@@ -148,7 +148,7 @@ parser_report_habit_line: fn(state: &JetParserState) -> Bool {
 
 // Python's `import name` of a Core module, at the top level: Jet's `use`.
 // False when the line at the cursor is no such import.
-parser_report_import_habit: fn(state: &JetParserState) -> Bool {
+parser_report_import_habit: fn(state: ^JetParserState) -> Bool {
     word_token: parser_current(state)
     if !parser_token_text_is_id(word_token, state.words.id_import) || parser_kind_at(state, 1) != TOKEN_IDENT {
         return false
@@ -168,7 +168,7 @@ parser_report_import_habit: fn(state: &JetParserState) -> Bool {
 // Python's `def name(` and JavaScript's `function name(` at the top level:
 // Jet declares the function as `name: fn(`. False when the line at the
 // cursor is no such header, or ends in a Python `:`.
-parser_report_function_word_habit: fn(state: &JetParserState) -> Bool {
+parser_report_function_word_habit: fn(state: ^JetParserState) -> Bool {
     word_token: parser_current(state)
     is_def: parser_token_text_is_id(word_token, state.words.id_def)
     is_function: !is_def && parser_token_text_is_id(word_token, state.words.id_function)
@@ -189,7 +189,7 @@ parser_report_function_word_habit: fn(state: &JetParserState) -> Bool {
 // A statement's first word one slip (a letter changed, added, dropped or
 // two swapped) from a Jet keyword: `retrun` for `return`. False when the
 // word is no such slip.
-parser_report_keyword_slip: fn(state: &JetParserState) -> Bool {
+parser_report_keyword_slip: fn(state: ^JetParserState) -> Bool {
     token: parser_current(state)
     if token.kind != TOKEN_IDENT -> return false
     word: parser_text(state, token)
@@ -240,7 +240,7 @@ parser_one_dropped: fn(short: [U8], long: [U8]) -> Bool Never! {
 // is skipped. False when the `#` at the cursor touches the token after it,
 // as a Jet marker does; touching tokens share a line, so this needs no
 // source text (parse_lexed parses without it).
-parser_report_hash_comment: fn(state: &JetParserState) -> Bool {
+parser_report_hash_comment: fn(state: ^JetParserState) -> Bool {
     token: parser_current(state)
     if token.kind != TOKEN_HASH -> return false
     next: parser_lookahead(state, 1)
@@ -255,7 +255,7 @@ parser_report_hash_comment: fn(state: &JetParserState) -> Bool {
 
 // Python's `f"…"`: every Jet string interpolates `{name}`, so the `f` goes.
 // True when the cursor holds an `f` touching a string.
-parser_text_prefix_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_text_prefix_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if state.words.id_f < 0 -> return false
     token: parser_current(state)
     if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_f) -> return false
@@ -263,13 +263,13 @@ parser_text_prefix_ahead: fn(state: &JetParserState) -> Bool Never! {
     next.kind == TOKEN_STRING && next.span.start == token.span.end
 }
 
-parser_report_text_prefix: fn(state: &JetParserState, token: Token) {
+parser_report_text_prefix: fn(state: ^JetParserState, token: Token) {
     parser_add_habit(state, token.span, "`f\"…\"` is Python's interpolated string", "every Jet string interpolates `{{name}}`, so it needs no prefix", "delete the `f`", TextEdit{span: token.span, new_text: ""}, [TextEdit]{})
 }
 
 // JavaScript's `name => body`. True when the cursor holds a name and a
 // touching `=>`.
-parser_arrow_habit_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_arrow_habit_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_EQ || parser_kind_at(state, 2) != TOKEN_GT {
         return false
     }
@@ -277,7 +277,7 @@ parser_arrow_habit_ahead: fn(state: &JetParserState) -> Bool Never! {
 }
 
 // `name => body` is the lambda `fn(name) { body }` in Jet.
-parser_report_arrow_habit: fn(state: &JetParserState, name: Token, arrow: Span, body: Span) {
+parser_report_arrow_habit: fn(state: ^JetParserState, name: Token, arrow: Span, body: Span) {
     span: Span{start: name.span.start, end: arrow.end}
     written: parser_text(state, name)
     parser_add_habit(state, span, "`=>` is not how Jet writes a lambda", "a Jet lambda is `fn(parameters) {{ body }}`; the call it is passed to gives the parameter types", "write `fn({written}) {{ … }}`", TextEdit{span: span, new_text: "fn({written}) {{"}, [TextEdit]{TextEdit{span: Span{start: body.end, end: body.end}, new_text: " }}"}})
@@ -285,7 +285,7 @@ parser_report_arrow_habit: fn(state: &JetParserState, name: Token, arrow: Span, 
 
 // Python's `pass` alone on its line: an empty block is just `{ }`, so the
 // line goes. False for any other line.
-parser_report_pass_habit: fn(state: &JetParserState) -> Bool {
+parser_report_pass_habit: fn(state: ^JetParserState) -> Bool {
     if state.words.id_pass < 0 -> return false
     token: parser_current(state)
     if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_pass) -> return false
@@ -305,7 +305,7 @@ parser_report_pass_habit: fn(state: &JetParserState) -> Bool {
 
 // `count++` / `count--` after a statement's target: Jet steps a number with
 // `+= 1` and `-= 1`. False when no step operator follows.
-parser_report_step_habit: fn(state: &JetParserState) -> Bool {
+parser_report_step_habit: fn(state: ^JetParserState) -> Bool {
     token: parser_current(state)
     if token.kind != TOKEN_PLUS_PLUS && token.kind != TOKEN_MINUS_MINUS -> return false
     written: if token.kind == TOKEN_PLUS_PLUS -> "++" else -> "--"
@@ -319,7 +319,7 @@ parser_report_step_habit: fn(state: &JetParserState) -> Bool {
 // After a value, another language's spelling of a Jet operator: `and`,
 // `or`, `is`, `is not`, `===` and `!==`. The Jet operator's token kind, or 0
 // when the cursor holds no such habit.
-parser_operator_habit_kind: fn(state: &JetParserState, operator: Int) -> Int Never! {
+parser_operator_habit_kind: fn(state: ^JetParserState, operator: Int) -> Int Never! {
     if operator == TOKEN_IDENT {
         if state.words.id_and < 0 && state.words.id_or < 0 && state.words.id_is < 0 -> return 0
         token: parser_current(state)
@@ -344,7 +344,7 @@ parser_operator_habit_kind: fn(state: &JetParserState, operator: Int) -> Int Nev
 // Reports the operator habit at the cursor (parser_operator_habit_kind
 // found it) with the Jet operator as its edit, and steps over every token of
 // the habit but its last, which the operator loop consumes.
-parser_report_operator_habit: fn(state: &JetParserState, jet_kind: Int) {
+parser_report_operator_habit: fn(state: ^JetParserState, jet_kind: Int) {
     token: parser_current(state)
     jet: if jet_kind == {
         TOKEN_AND_AND -> "&&"
@@ -364,7 +364,7 @@ parser_report_operator_habit: fn(state: &JetParserState, jet_kind: Int) {
 
 // Whether the token `offset` ahead, on the cursor's line, can start the
 // operand of a habit operator.
-parser_habit_operand_ahead: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_habit_operand_ahead: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     token: parser_lookahead(state, offset)
     if token.kind == TOKEN_SEMI || token.kind == TOKEN_EOF -> return false
     parser_starts_expression(token.kind)
@@ -372,14 +372,14 @@ parser_habit_operand_ahead: fn(state: &JetParserState, offset: Int) -> Bool Neve
 
 // Python's `**` after a value: two adjacent `*`. True when the cursor holds
 // it; the caller reads the exponent and reports parser_report_power_habit.
-parser_power_habit_ahead: fn(state: &JetParserState, operator: Int) -> Bool Never! {
+parser_power_habit_ahead: fn(state: ^JetParserState, operator: Int) -> Bool Never! {
     if operator != TOKEN_STAR || parser_kind_at(state, 1) != TOKEN_STAR -> return false
     parser_lookahead(state, 1).span.start == parser_current(state).span.end
 }
 
 // `base ** exponent` is `base.pow(exponent)` in Jet; a base other than a
 // plain name is grouped first.
-parser_report_power_habit: fn(state: &JetParserState, base: Expr, base_span: Span, operator: Span, exponent: Span) {
+parser_report_power_habit: fn(state: ^JetParserState, base: Expr, base_span: Span, operator: Span, exponent: Span) {
     named: base == .Ident(_, _, _)
     open: if named -> ".pow(" else -> ").pow("
     more := [TextEdit]{TextEdit{span: Span{start: exponent.end, end: exponent.end}, new_text: ")"}}
@@ -390,7 +390,7 @@ parser_report_power_habit: fn(state: &JetParserState, base: Expr, base_span: Spa
 }
 
 // Python's `not` before a value is Jet's `!`. True when the cursor holds it.
-parser_not_habit_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_not_habit_ahead: fn(state: ^JetParserState) -> Bool Never! {
     if state.words.id_not < 0 -> return false
     token: parser_current(state)
     if token.kind != TOKEN_IDENT || !parser_token_text_is_id(token, state.words.id_not) -> return false
@@ -399,7 +399,7 @@ parser_not_habit_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_habit_operand_ahead(state, 1)
 }
 
-parser_report_not_habit: fn(state: &JetParserState, token: Token) {
+parser_report_not_habit: fn(state: ^JetParserState, token: Token) {
     next: parser_current(state)
     parser_add_habit(state, token.span, "`not` is spelled `!` in Jet", "Jet negates a Bool with a leading `!`", "write `!`", TextEdit{span: Span{start: token.span.start, end: next.span.start}, new_text: "!"}, [TextEdit]{})
 }

@@ -68,7 +68,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_subcompositor"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -97,13 +97,13 @@ fake_u32: fn(bytes: [U8], at: Int) -> Int {
     Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -122,7 +122,7 @@ fake_version: fn(interface: String) -> Int {
 }
 
 // A configure of the window's size, activated.
-fake_configure: fn(f: &Fake) {
+fake_configure: fn(f: ^Fake) {
     f.serial += 1
     args := fake_words([Int]{WIDTH, HEIGHT, 4})
     fake_put(args, 4)
@@ -142,7 +142,7 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
 // A content commit: the old buffer goes back, the frame callbacks are
 // done at once, and after the measured frames the window is asked to
 // close.
-fake_commit: fn(f: &Fake) {
+fake_commit: fn(f: ^Fake) {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -159,7 +159,7 @@ fake_commit: fn(f: &Fake) {
     }
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -238,7 +238,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
     }
 }
 
-fake_dispatch: fn(f: &Fake) {
+fake_dispatch: fn(f: ^Fake) {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

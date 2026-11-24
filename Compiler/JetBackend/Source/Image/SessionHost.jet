@@ -139,7 +139,7 @@ x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, tracer: Int{0}) -> X6
 // Installs the child's seccomp filter and refusal handler (`stdout` admits
 // stdout); a nonzero `tracer` is the process the child lets trace it
 // (PR_SET_PTRACER), set before the filter.
-x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool, tracer: Int{0}) -> Bool {
+x64_comptime_filter_child: fn(child: ^X64ComptimeChild, stdout: Bool, tracer: Int{0}) -> Bool {
     loop child.cookie == 0 {
         filled := 0
         #Unsafe("getrandom fills the first word of our scratch page") {
@@ -171,7 +171,7 @@ x64_comptime_filter_child: fn(child: &X64ComptimeChild, stdout: Bool, tracer: In
 
 // Opens (`open: true`) or closes the child's admission of the file calls an
 // `#Impure` block makes; the child answers nothing.
-x64_comptime_admit: fn(child: &X64ComptimeChild, open: Bool{false}) -> Bool {
+x64_comptime_admit: fn(child: ^X64ComptimeChild, open: Bool{false}) -> Bool {
     if child.admitted == open -> return true
     child.admitted = open
     x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_ADMIT, [Int]{if open -> 1 else -> 0}), [U8]{})
@@ -258,7 +258,7 @@ x64_comptime_write_all: fn(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int 
 }
 
 // Sends one frame and its payload (or stages payload at child.shm when via_shm).
-x64_comptime_send: fn(child: &X64ComptimeChild, frame: [U8], payload: [U8], via_shm: Bool{false}) -> Bool {
+x64_comptime_send: fn(child: ^X64ComptimeChild, frame: [U8], payload: [U8], via_shm: Bool{false}) -> Bool {
     if child.pid <= 0 -> return false
     error := 0
     #Unsafe("the buffer is the child's scratch mapping past its first page") {
@@ -279,7 +279,7 @@ x64_comptime_send: fn(child: &X64ComptimeChild, frame: [U8], payload: [U8], via_
 }
 
 // Exactly `count` reply bytes, draining the child's output meanwhile.
-x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
+x64_comptime_receive_bytes: fn(child: ^X64ComptimeChild, count: Int) -> [U8]? {
     bytes := [U8]{}
     if child.pid <= 0 -> return None
     poll: child.scratch
@@ -322,7 +322,7 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
 }
 
 // Drains the child's stdout and stderr until neither holds more.
-x64_comptime_settle: fn(child: &X64ComptimeChild) {
+x64_comptime_settle: fn(child: ^X64ComptimeChild) {
     if child.pid <= 0 {
         return
     }
@@ -351,7 +351,7 @@ x64_comptime_settle: fn(child: &X64ComptimeChild) {
 
 // Reads what the child's stdout (or, `errors`, stderr) holds now; false,
 // and the pipe closed, at its end.
-x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
+x64_comptime_drain: fn(child: ^X64ComptimeChild, errors: Bool) -> Bool {
     fd: if errors -> child.errors else -> child.output
     if fd < 0 -> return false
     moved: os_read(fd, child.scratch + 4096, X64_COMPTIME_BUFFER)
@@ -372,7 +372,7 @@ x64_comptime_drain: fn(child: &X64ComptimeChild, errors: Bool) -> Bool {
 // Appends the `count` bytes at `address` (in our mapping) to `bytes` in one
 // move.
 #Unsafe("the caller's `count` bytes at `address` lie in our mapping")
-x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
+x64_comptime_take: fn(address: Int, count: Int, bytes: ^[U8]) {
     if !mem.list_append<U8>(bytes, mem.Ptr<U8>.from_addr(address), count) {
         panic("the comptime child's {count} reply bytes don't fit in memory")
     }
@@ -380,7 +380,7 @@ x64_comptime_take: fn(address: Int, count: Int, bytes: &[U8]) {
 
 // Waits for the child (killing it first when `kill`), collecting what it
 // wrote on its way out; then its descriptors close.
-x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
+x64_comptime_reap: fn(child: ^X64ComptimeChild, kill: Bool) {
     if child.pid <= 0 {
         return
     }
@@ -419,7 +419,7 @@ x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
 }
 
 // Ends a live child and releases its buffers.
-x64_comptime_close: fn(child: &X64ComptimeChild) {
+x64_comptime_close: fn(child: ^X64ComptimeChild) {
     if child.pid > 0 {
         _ := x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_EXIT, [Int]{}), [U8]{})
         x64_comptime_reap(child, false)
@@ -446,13 +446,13 @@ x64_comptime_close: fn(child: &X64ComptimeChild) {
 }
 
 // One reply frame, or None once the child ended or ran out of time.
-x64_comptime_receive: fn(child: &X64ComptimeChild) -> [U8]? {
+x64_comptime_receive: fn(child: ^X64ComptimeChild) -> [U8]? {
     x64_comptime_receive_bytes(child, X64_COMPTIME_FRAME_BYTES)
 }
 
 // Opens and maps the child's shared staging memfd; returns the child-side fd
 // (above X64_COMPTIME_FD_FLOOR) or -1 if unavailable.
-x64_comptime_shm_open: fn(child: &X64ComptimeChild) -> Int {
+x64_comptime_shm_open: fn(child: ^X64ComptimeChild) -> Int {
     raw: loader_memfd(false)
     if os_failed(raw) -> return -1
     sized: os_pwrite64_i64(I64{raw}, I64{child.scratch + 4096}, I64{1}, I64{X64_COMPTIME_SHM_SIZE - 1})
@@ -481,14 +481,14 @@ x64_comptime_spawn_fds: fn(pipes: [Int], shm_fd: Int) -> [Int] Never! {
 }
 
 // Records an asynchronous pipe WRITE so process_vm_readv drains it first.
-x64_comptime_sent: fn(child: &X64ComptimeChild, frame: [U8], via_shm: Bool) -> Bool Never! {
+x64_comptime_sent: fn(child: ^X64ComptimeChild, frame: [U8], via_shm: Bool) -> Bool Never! {
     if !via_shm && x64_comptime_word(frame, 0) == X64_COMPTIME_WRITE -> child.write_pending = true
     true
 }
 
 // Reads `count` bytes from `address` in the child via process_vm_readv (zero
 // pipe round-trips, zero child wakeups), falling back to pipe READ if blocked.
-x64_comptime_read_memory: fn(child: &X64ComptimeChild, address: Int, count: Int) -> [U8]? {
+x64_comptime_read_memory: fn(child: ^X64ComptimeChild, address: Int, count: Int) -> [U8]? {
     if count <= 0 -> return Val([U8]{})
     if !child.write_pending && child.vm_read_ok && child.pid > 0 && child.scratch != 0 {
         trace: X64Trace{pid: child.pid, scratch: child.scratch, failure: "", thread: child.pid}
@@ -507,7 +507,7 @@ x64_comptime_read_memory: fn(child: &X64ComptimeChild, address: Int, count: Int)
 
 // Creates a runtime String from `bytes` via the shared staging window when it
 // fits, avoiding pipe payload writes and child scratch allocation.
-x64_comptime_shm_text: fn(child: &X64ComptimeChild, bytes: [U8]) -> Int? {
+x64_comptime_shm_text: fn(child: ^X64ComptimeChild, bytes: [U8]) -> Int? {
     if !child.shm_ready || bytes.len() > X64_COMPTIME_SHM_SIZE - 8 -> return None
     if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_SHM_TEXT, [Int]{bytes.len()}), bytes, via_shm: true) {
         return None
@@ -523,7 +523,7 @@ x64_comptime_shm_text: fn(child: &X64ComptimeChild, bytes: [U8]) -> Int? {
 
 // Writes `bytes` at `address` in the child through the shared staging window
 // when it fits; returns false if SHM is unavailable or the write failed.
-x64_comptime_shm_write: fn(child: &X64ComptimeChild, address: Int, bytes: [U8]) -> Bool {
+x64_comptime_shm_write: fn(child: ^X64ComptimeChild, address: Int, bytes: [U8]) -> Bool {
     if !child.shm_ready || bytes.len() > X64_COMPTIME_SHM_SIZE - 8 -> return false
     if !x64_comptime_send(child, x64_comptime_frame(X64_COMPTIME_SHM_WRITE, [Int]{address, bytes.len()}), bytes, via_shm: true) {
         return false
@@ -609,13 +609,13 @@ x64_comptime_facts: fn(exe: X64Executable) -> [U8] Never! {
     facts
 }
 
-x64_comptime_facts_put: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
+x64_comptime_facts_put: fn(bytes: ^[U8], at: Int, width: Int, value: Int) {
     loop k in 0..<width -> bytes[at + k] = U8{(value >> (8 * k)) & 255}
 }
 
 // Loads `code` into the child: in one shared-memory round-trip when the batch
 // fits in the staging window, else per-segment MAP/WRITE/PROTECT over pipes.
-x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String {
+x64_comptime_load: fn(child: ^X64ComptimeChild, code: X64ComptimeCode) -> String {
     table_bytes: code.segments.len() * 48
     if child.shm_ready && code.segments.len() > 0 && table_bytes + code.bytes.len() <= X64_COMPTIME_SHM_SIZE - 8 {
         staged := [U8]{}
@@ -679,7 +679,7 @@ x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String
 
 // Sends command `kind` and returns its DONE word; None when the child
 // ended or answered anything else.
-x64_comptime_ask: fn(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> Int? {
+x64_comptime_ask: fn(child: ^X64ComptimeChild, kind: Int, operands: [Int]) -> Int? {
     if !x64_comptime_send(child, x64_comptime_frame(kind, operands), [U8]{}) -> return None
     reply: x64_comptime_receive(child) ?? return None
     if x64_comptime_word(reply, 0) != X64_COMPTIME_DONE {
@@ -768,7 +768,7 @@ X64ComptimeFunction: struct {
 // `symbols` holds, by start address; read as x64_comptime_symbols reads it
 // (`header` the ELF header, `file` the bytes from file offset `file_at` on).
 // With `every`, a function's symbol `symbols` doesn't hold yet is added.
-x64_comptime_functions: fn(header: [U8], file: [U8], file_at: Int, symbols: &NameTable, every: Bool{false}) -> [X64ComptimeFunction] Never! {
+x64_comptime_functions: fn(header: [U8], file: [U8], file_at: Int, symbols: ^NameTable, every: Bool{false}) -> [X64ComptimeFunction] Never! {
     found := [X64ComptimeFunction]{}
     if header.len() < 64 -> return found
     sections: x64_comptime_unsigned(header, 40, 8) - file_at

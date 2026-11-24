@@ -64,8 +64,8 @@ K_FLAG: #run flag(2)
 K_LIGHT: #run light(2)
 
 // Write windows into an inline Option: a write parameter, a field, a variable.
-bump: fn(o: &U8?, by: U8) {
-    if &o == {
+bump: fn(o: ^U8?, by: U8) {
+    if ^o == {
         .Val(n) -> { n += by }
         None -> {}
     }
@@ -73,7 +73,7 @@ bump: fn(o: &U8?, by: U8) {
 
 windows: fn() {
     local := byte(250)
-    if &local == {
+    if ^local == {
         .Val(n) -> { n += U8{4} }
         None -> {}
     }
@@ -81,11 +81,11 @@ windows: fn() {
     bump(local, U8{1})
     print("window param {local}")
     s := Sample{name: "w", code: byte(7), on: flag(1), mark: Val('x'), light: light(0)}
-    if &s.code == {
+    if ^s.code == {
         .Val(n) -> { n *= U8{3} }
         None -> {}
     }
-    if &s.on == {
+    if ^s.on == {
         .Val(v) -> { v = !v }
         None -> {}
     }

@@ -21,7 +21,7 @@ ir_builder_route: fn(m: IRModule, name: String) -> Int Never! {
 
 // Rewrites non-escaping string-builder -> jet_char_len chains in `f`.
 // Returns the number of string builders eliminated.
-ir_opt_builders: fn(m: IRModule, f: &IRFunction) -> Int Never! {
+ir_opt_builders: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
     count: f.op.len()
     if count < 4 -> return 0
     rt_new: ir_builder_route(m, "jet_rt_string_builder_new")

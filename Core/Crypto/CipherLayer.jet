@@ -298,7 +298,7 @@ block_mode: fn(decrypt: Bool) -> block128.BlockMode Never! {
     block128.BlockMode.Encrypt
 }
 
-push_all: fn(out: &[U8], bytes: [U8]) Never! {
+push_all: fn(out: ^[U8], bytes: [U8]) Never! {
     cipher.reserve(out, bytes.len())
     loop b in bytes -> out.push(b)
 }
@@ -366,7 +366,7 @@ keyed_base: fn(info: CipherInfo, key: [U8], decrypt: Bool) -> CipherBase CipherL
 /// Key the context for `operation` (mbedtls_cipher_setkey). The key must
 /// be the cipher's length. CFB, OFB and CTR always use the encryption
 /// schedule, as do GCM and CCM; KW uses the decryption one to unwrap.
-cipher_setkey: fn(ctx: &CipherContext, key: [U8], operation: CipherOperation) CipherLayerError! {
+cipher_setkey: fn(ctx: ^CipherContext, key: [U8], operation: CipherOperation) CipherLayerError! {
     if 8 * key.len() != ctx.info.key_bits -> return Err(.BadInputData)
     mode: ctx.info.mode
     decrypt: operation == .Decrypt && mode != .CFB && mode != .OFB && mode != .CTR
@@ -376,16 +376,16 @@ cipher_setkey: fn(ctx: &CipherContext, key: [U8], operation: CipherOperation) Ci
 
 /// Choose how CBC finish pads and unpads (mbedtls_cipher_set_padding_mode);
 /// BadInputData for any other mode.
-cipher_set_padding_mode: fn(ctx: &CipherContext, mode: cipher.CBCPadding) CipherLayerError! {
+cipher_set_padding_mode: fn(ctx: ^CipherContext, mode: cipher.CBCPadding) CipherLayerError! {
     if ctx.info.mode != .CBC -> return Err(.BadInputData)
     ctx.padding = Val(mode)
 }
 
-gcm_restart: fn<K: ForwardBlock>(g: &GCMContext<K>, decrypt: Bool, iv: [U8]) CipherLayerError! {
+gcm_restart: fn<K: ForwardBlock>(g: ^GCMContext<K>, decrypt: Bool, iv: [U8]) CipherLayerError! {
     g.st = aead.gcm_starts(g.key, decrypt, iv) ?? return Err(.GCMBadInput)
 }
 
-ccm_star_restart: fn<K: ForwardBlock>(c: &CCMContext<K>, decrypt: Bool, iv: [U8]) CipherLayerError! {
+ccm_star_restart: fn<K: ForwardBlock>(c: ^CCMContext<K>, decrypt: Bool, iv: [U8]) CipherLayerError! {
     if !aead.ccm_set_lengths(c.key, c.st, 0, 0, 0) -> return Err(.CCMBadInput)
     mode: if decrypt -> aead.CCMMode.StarDecrypt else -> aead.CCMMode.StarEncrypt
     if !aead.ccm_starts(c.key, c.st, mode, iv) -> return Err(.CCMBadInput)
@@ -395,14 +395,14 @@ ccm_star_restart: fn<K: ForwardBlock>(c: &CCMContext<K>, decrypt: Bool, iv: [U8]
 /// FeatureUnavailable; a fixed-size IV takes its first iv_size bytes and
 /// refuses fewer. GCM and CCM*-no-tag start their operation here and
 /// ChaCha20 its keystream at block 0.
-cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
+cipher_set_iv: fn(ctx: ^CipherContext, iv: [U8]) CipherLayerError! {
     if iv.len() > 16 -> return Err(.FeatureUnavailable)
     actual: if ctx.info.variable_iv -> iv.len() else -> ctx.info.iv_size
     if actual > iv.len() -> return Err(.BadInputData)
     mode: ctx.info.mode
     if mode == .Stream && ctx.info.id == .ChaCha20 {
         if iv.len() != 12 -> return Err(.BadInputData)
-        if &ctx.base == {
+        if ^ctx.base == {
             .ChaCha20(c) -> {
                 if !aead.chacha20_starts(c, iv, 0) -> return Err(.BadInputData)
             }
@@ -413,7 +413,7 @@ cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
     decrypt: decrypting(ctx)
     if {
         mode == .GCM -> {
-            if &ctx.base == {
+            if ^ctx.base == {
                 .GCMAES(g) -> gcm_restart(g, decrypt, iv)
                 .GCMCamellia(g) -> gcm_restart(g, decrypt, iv)
                 .GCMARIA(g) -> gcm_restart(g, decrypt, iv)
@@ -422,7 +422,7 @@ cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
         }
         mode == .CCMStarNoTag -> {
             if ctx.operation == None -> return Err(.BadInputData)
-            if &ctx.base == {
+            if ^ctx.base == {
                 .CCMAES(c) -> ccm_star_restart(c, decrypt, iv)
                 .CCMCamellia(c) -> ccm_star_restart(c, decrypt, iv)
                 .CCMARIA(c) -> ccm_star_restart(c, decrypt, iv)
@@ -443,19 +443,19 @@ cipher_set_iv: fn(ctx: &CipherContext, iv: [U8]) CipherLayerError! {
 }
 
 /// Drop any cached partial block and stream offset (mbedtls_cipher_reset).
-cipher_reset: fn(ctx: &CipherContext) Never! { ctx.unprocessed_len = 0 }
+cipher_reset: fn(ctx: ^CipherContext) Never! { ctx.unprocessed_len = 0 }
 
-gcm_ad: fn<K: ForwardBlock>(g: &GCMContext<K>, ad: [U8]) CipherLayerError! {
+gcm_ad: fn<K: ForwardBlock>(g: ^GCMContext<K>, ad: [U8]) CipherLayerError! {
     if !aead.gcm_update_ad(g.key, g.st, ad) -> return Err(.GCMBadInput)
 }
 
 /// Feed additional data (mbedtls_cipher_update_ad): GCM, and
 /// ChaCha20-Poly1305, which starts its message here under the stored
 /// nonce; FeatureUnavailable for every other mode.
-cipher_update_ad: fn(ctx: &CipherContext, ad: [U8]) CipherLayerError! {
+cipher_update_ad: fn(ctx: ^CipherContext, ad: [U8]) CipherLayerError! {
     if ctx.info.mode == {
         .GCM -> {
-            if &ctx.base == {
+            if ^ctx.base == {
                 .GCMAES(g) -> gcm_ad(g, ad)
                 .GCMCamellia(g) -> gcm_ad(g, ad)
                 .GCMARIA(g) -> gcm_ad(g, ad)
@@ -464,7 +464,7 @@ cipher_update_ad: fn(ctx: &CipherContext, ad: [U8]) CipherLayerError! {
         }
         .ChaChaPoly -> {
             decrypt: decrypting(ctx)
-            if &ctx.base == {
+            if ^ctx.base == {
                 .ChaChaPoly(cp) -> {
                     if !aead.chachapoly_starts(cp, ctx.iv, decrypt) -> return Err(.ChaCha20BadInput)
                     if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
@@ -476,7 +476,7 @@ cipher_update_ad: fn(ctx: &CipherContext, ad: [U8]) CipherLayerError! {
     }
 }
 
-ecb_block: fn(ctx: CipherContext, src: [U8], off: Int, out: &[U8]) CipherLayerError! {
+ecb_block: fn(ctx: CipherContext, src: [U8], off: Int, out: ^[U8]) CipherLayerError! {
     bs: ctx.info.block_size
     if ctx.base == {
         .AES(k) -> cipher.ecb(k, decrypting(ctx), src, off, 1, out)
@@ -488,7 +488,7 @@ ecb_block: fn(ctx: CipherContext, src: [U8], off: Int, out: &[U8]) CipherLayerEr
 }
 
 /// CBC over `len` bytes, whole blocks, chaining through ctx.iv.
-cbc_run: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+cbc_run: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     decrypt: decrypting(ctx)
     if ctx.base == {
         .AES(k) -> {
@@ -506,7 +506,7 @@ cbc_run: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) Ciph
 
 /// mbedtls's CBC caching: a partial block waits in `unprocessed`, and a
 /// padded decryption always keeps the last whole block back for finish.
-update_cbc: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+update_cbc: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     bs: ctx.info.block_size
     keep_block: decrypting(ctx) && adds_padding(ctx)
     room: bs - ctx.unprocessed_len
@@ -539,7 +539,7 @@ update_cbc: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) C
     if n != 0 -> cbc_run(ctx, src, at, n, out)
 }
 
-update_cfb: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+update_cfb: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     decrypt: decrypting(ctx)
     if ctx.base == {
         .AES(k) -> ctx.unprocessed_len = cipher.cfb128(k, decrypt, ctx.unprocessed_len, ctx.iv, src, off, len, out)
@@ -549,7 +549,7 @@ update_cfb: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) C
     }
 }
 
-update_ctr: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+update_ctr: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     if ctx.base == {
         .AES(k) -> ctx.unprocessed_len = cipher.ctr(k, ctx.unprocessed_len, ctx.iv, ctx.unprocessed, src, off, len, out)
         .Camellia(k) -> push_all(out, block128.block_crypt_ctr(k, ctx.unprocessed_len, ctx.iv, ctx.unprocessed, cipher.bytes_of(src, off, len)))
@@ -558,25 +558,25 @@ update_ctr: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) C
     }
 }
 
-gcm_data: fn<K: ForwardBlock>(g: &GCMContext<K>, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+gcm_data: fn<K: ForwardBlock>(g: ^GCMContext<K>, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     if !aead.gcm_update(g.key, g.st, src, off, len, out) -> return Err(.GCMBadInput)
 }
 
-ccm_data: fn<K: ForwardBlock>(c: &CCMContext<K>, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+ccm_data: fn<K: ForwardBlock>(c: ^CCMContext<K>, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     if !aead.ccm_update(c.key, c.st, src, off, len, out) -> return Err(.CCMBadInput)
 }
 
 /// Run `len` bytes of `src` from `off`, appending what is ready to `out`
 /// (mbedtls_cipher_update). ECB takes exactly one block; CBC caches
 /// partial blocks; XTS takes one whole data unit.
-cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]) CipherLayerError! {
+cipher_update: fn(ctx: ^CipherContext, src: [U8], off: Int, len: Int, out: ^[U8]) CipherLayerError! {
     if ctx.info.mode == {
         .ECB -> {
             if len != ctx.info.block_size -> return Err(.FullBlockExpected)
             ecb_block(ctx, src, off, out)
         }
         .GCM -> {
-            if &ctx.base == {
+            if ^ctx.base == {
                 .GCMAES(g) -> gcm_data(g, src, off, len, out)
                 .GCMCamellia(g) -> gcm_data(g, src, off, len, out)
                 .GCMARIA(g) -> gcm_data(g, src, off, len, out)
@@ -584,7 +584,7 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
             }
         }
         .CCMStarNoTag -> {
-            if &ctx.base == {
+            if ^ctx.base == {
                 .CCMAES(c) -> ccm_data(c, src, off, len, out)
                 .CCMCamellia(c) -> ccm_data(c, src, off, len, out)
                 .CCMARIA(c) -> ccm_data(c, src, off, len, out)
@@ -592,7 +592,7 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
             }
         }
         .ChaChaPoly -> {
-            if &ctx.base == {
+            if ^ctx.base == {
                 .ChaChaPoly(cp) -> {
                     if cp.stage != aead.CHACHAPOLY_AAD && cp.stage != aead.CHACHAPOLY_CIPHERTEXT {
                         return Err(.ChaChaPolyBadState)
@@ -629,7 +629,7 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
             if {
                 ctx.info.id == .Null -> push_all(out, cipher.bytes_of(src, off, len))
                 else -> {
-                    if &ctx.base == {
+                    if ^ctx.base == {
                         .ChaCha20(c) -> {
                             if !aead.chacha20_update(c, src, off, len, out) {
                                 return Err(.BadInputData)
@@ -644,7 +644,7 @@ cipher_update: fn(ctx: &CipherContext, src: [U8], off: Int, len: Int, out: &[U8]
     }
 }
 
-finish_cbc: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerError! {
+finish_cbc: fn(ctx: ^CipherContext, out: ^[U8]) -> Bool CipherLayerError! {
     bs: ctx.info.block_size
     pad: ctx.padding ?? cipher.CBCPadding.Unpadded
     decrypt: decrypting(ctx)
@@ -703,7 +703,7 @@ padding_valid: fn(check: cipher.CBCPaddingCheck) -> Bool Never! { check.bad == U
 /// leaves invalid_padding 0). Only CBC and ECB have anything left; CBC
 /// needs a padding mode, and when the padding is malformed nothing is
 /// appended.
-cipher_finish_padded: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerError! {
+cipher_finish_padded: fn(ctx: ^CipherContext, out: ^[U8]) -> Bool CipherLayerError! {
     if ctx.info.mode == {
         .CFB | .OFB | .CTR | .GCM | .CCMStarNoTag | .XTS | .Stream | .ChaChaPoly -> Ok(true)
         .ECB -> {
@@ -720,27 +720,27 @@ cipher_finish_padded: fn(ctx: &CipherContext, out: &[U8]) -> Bool CipherLayerErr
 
 /// cipher_finish_padded with malformed padding refused as InvalidPadding
 /// (mbedtls_cipher_finish).
-cipher_finish: fn(ctx: &CipherContext, out: &[U8]) CipherLayerError! {
+cipher_finish: fn(ctx: ^CipherContext, out: ^[U8]) CipherLayerError! {
     if !cipher_finish_padded(ctx, out) -> return Err(.InvalidPadding)
 }
 
-gcm_tag: fn<K: ForwardBlock>(g: &GCMContext<K>, tag_len: Int) -> [U8] CipherLayerError! {
+gcm_tag: fn<K: ForwardBlock>(g: ^GCMContext<K>, tag_len: Int) -> [U8] CipherLayerError! {
     mac: aead.gcm_finish(g.key, g.st, tag_len) ?? return Err(.GCMBadInput)
     Ok(mac)
 }
 
 /// The tag of the message just encrypted (mbedtls_cipher_write_tag): GCM
 /// with 4 to 16 bytes, ChaCha20-Poly1305 with 16.
-cipher_write_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
+cipher_write_tag: fn(ctx: ^CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
     if ctx.operation != Val(.Encrypt) -> return Err(.BadInputData)
     mac: finish_tag(ctx, tag_len)
     Ok(mac)
 }
 
 /// The first `tag_len` bytes of the running GCM or ChaCha20-Poly1305 tag.
-finish_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
+finish_tag: fn(ctx: ^CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
     if ctx.info.mode == {
-        .GCM -> if &ctx.base == {
+        .GCM -> if ^ctx.base == {
             .GCMAES(g) -> gcm_tag(g, tag_len)
             .GCMCamellia(g) -> gcm_tag(g, tag_len)
             .GCMARIA(g) -> gcm_tag(g, tag_len)
@@ -748,7 +748,7 @@ finish_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
         }
         .ChaChaPoly -> {
             if tag_len != 16 -> return Err(.BadInputData)
-            if &ctx.base == {
+            if ^ctx.base == {
                 .ChaChaPoly(cp) -> {
                     mac: aead.chachapoly_finish(cp) ?? return Err(.ChaChaPolyBadState)
                     Ok(mac)
@@ -762,7 +762,7 @@ finish_tag: fn(ctx: &CipherContext, tag_len: Int) -> [U8] CipherLayerError! {
 
 /// Check the tag of the message just decrypted (mbedtls_cipher_check_tag),
 /// comparing without a branch on its bytes; AuthFailed when it differs.
-cipher_check_tag: fn(ctx: &CipherContext, expected: [U8]) CipherLayerError! {
+cipher_check_tag: fn(ctx: ^CipherContext, expected: [U8]) CipherLayerError! {
     if ctx.operation != Val(.Decrypt) -> return Err(.BadInputData)
     if ctx.info.mode == .GCM && expected.len() > 16 -> return Err(.BadInputData)
     want := finish_tag(ctx, expected.len())
@@ -774,7 +774,7 @@ cipher_check_tag: fn(ctx: &CipherContext, expected: [U8]) CipherLayerError! {
 /// set_iv, reset, update and finish in one call (mbedtls_cipher_crypt):
 /// the whole output, or InvalidPadding, returning nothing: a failure wipes
 /// what was produced.
-cipher_crypt: fn(ctx: &CipherContext, iv: [U8], input: [U8]) -> [U8] CipherLayerError! {
+cipher_crypt: fn(ctx: ^CipherContext, iv: [U8], input: [U8]) -> [U8] CipherLayerError! {
     cipher_set_iv(ctx, iv)
     cipher_reset(ctx)
     out := [U8]{}
@@ -837,7 +837,7 @@ ccm_open: fn<K: ForwardBlock>(c: CCMContext<K>, iv: [U8], ad: [U8], input: [U8],
 }
 
 /// ChaCha20-Poly1305 over the context (mbedtls_chachapoly_encrypt_and_tag).
-chachapoly_seal: fn(cp: &aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8]) -> [U8] CipherLayerError! {
+chachapoly_seal: fn(cp: ^aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8]) -> [U8] CipherLayerError! {
     if !aead.chachapoly_starts(cp, iv, false) -> return Err(.ChaCha20BadInput)
     if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
     out := [U8]{}
@@ -849,7 +849,7 @@ chachapoly_seal: fn(cp: &aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8]) -> [U
 
 /// mbedtls_chachapoly_auth_decrypt over the context: the plaintext of
 /// input[0..<len], or AuthFailed against the tag that follows it.
-chachapoly_open: fn(cp: &aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8], len: Int) -> [U8] CipherLayerError! {
+chachapoly_open: fn(cp: ^aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8], len: Int) -> [U8] CipherLayerError! {
     if !aead.chachapoly_starts(cp, iv, true) -> return Err(.ChaCha20BadInput)
     if !aead.chachapoly_update_ad(cp, ad) -> return Err(.ChaChaPolyBadState)
     out := [U8]{}
@@ -869,7 +869,7 @@ chachapoly_open: fn(cp: &aead.ChaChaPoly, iv: [U8], ad: [U8], input: [U8], len: 
 /// the ciphertext followed by its `tag_len`-byte tag, for GCM, CCM and
 /// ChaCha20-Poly1305 (a 12-byte nonce and a 16-byte tag); or the key
 /// wrap of `input` for KW and KWP, which take no IV, AAD or tag.
-cipher_auth_encrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+cipher_auth_encrypt_ext: fn(ctx: ^CipherContext, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
     mode: ctx.info.mode
     if mode == .KW || mode == .KWP {
         if iv.len() != 0 || tag_len != 0 || ad.len() != 0 -> return Err(.BadInputData)
@@ -898,7 +898,7 @@ cipher_auth_encrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8]
         }
         .ChaChaPoly -> {
             if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
-            if &ctx.base == {
+            if ^ctx.base == {
                 .ChaChaPoly(cp) -> chachapoly_seal(cp, iv, ad, input)
                 .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .KW(_) -> Err(.BadInputData)
             }
@@ -911,7 +911,7 @@ cipher_auth_encrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8]
 /// plaintext of `input`, whose last `tag_len` bytes are the tag, or
 /// AuthFailed with no plaintext; or the key unwrap of `input` for KW and
 /// KWP.
-cipher_auth_decrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
+cipher_auth_decrypt_ext: fn(ctx: ^CipherContext, iv: [U8], ad: [U8], input: [U8], tag_len: Int) -> [U8] CipherLayerError! {
     mode: ctx.info.mode
     if mode == .KW || mode == .KWP {
         if iv.len() != 0 || tag_len != 0 || ad.len() != 0 -> return Err(.BadInputData)
@@ -941,7 +941,7 @@ cipher_auth_decrypt_ext: fn(ctx: &CipherContext, iv: [U8], ad: [U8], input: [U8]
         }
         .ChaChaPoly -> {
             if iv.len() != ctx.info.iv_size || tag_len != 16 -> return Err(.BadInputData)
-            if &ctx.base == {
+            if ^ctx.base == {
                 .ChaChaPoly(cp) -> chachapoly_open(cp, iv, ad, input, input.len() - 16)
                 .Unset | .AES(_) | .XTS(_) | .DES(_) | .Camellia(_) | .ARIA(_) | .GCMAES(_) | .GCMCamellia(_) | .GCMARIA(_) | .CCMAES(_) | .CCMCamellia(_) | .CCMARIA(_) | .ChaCha20(_) | .KW(_) -> Err(.BadInputData)
             }

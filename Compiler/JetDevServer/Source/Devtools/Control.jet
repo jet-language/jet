@@ -21,7 +21,7 @@ JetDevtoolsDatabaseExplainRequest: struct {
     timeout_ms: Int,
     max_rows: Int,
 
-    new: fn(session_id: &&String, request_id: &&String, statement_identity: &&String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
+    new: fn(session_id: ^^String, request_id: ^^String, statement_identity: ^^String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
         request: JetDevtoolsDatabaseExplainRequest{session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), timeout_ms: timeout_ms, max_rows: max_rows}
         request.validate()
         Ok(request)
@@ -52,7 +52,7 @@ JetDevtoolsDBPlanRow: struct {
     parent: String?,
     detail: String,
 
-    new: fn(id: &&String, parent: &&String?, detail: &&String) -> JetDevtoolsDBPlanRow Err! {
+    new: fn(id: ^^String, parent: ^^String?, detail: ^^String) -> JetDevtoolsDBPlanRow Err! {
         row: JetDevtoolsDBPlanRow{id: id.move(), parent: parent.move(), detail: detail.move()}
         row.validate()
         Ok(row)
@@ -84,7 +84,7 @@ JetDevtoolsDatabaseExplainResult: struct {
     error_code: String?,
     error_message: String?,
 
-    new: fn(session_id: &&String, request_id: &&String, statement_identity: &&String, status: &&String, elapsed_ns: Int, truncated: Bool, row_count: Int, plan_rows: &&[JetDevtoolsDBPlanRow], error_code: &&String?, error_message: &&String?) -> JetDevtoolsDatabaseExplainResult Err! {
+    new: fn(session_id: ^^String, request_id: ^^String, statement_identity: ^^String, status: ^^String, elapsed_ns: Int, truncated: Bool, row_count: Int, plan_rows: ^^[JetDevtoolsDBPlanRow], error_code: ^^String?, error_message: ^^String?) -> JetDevtoolsDatabaseExplainResult Err! {
         if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS {
             return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
         }
@@ -192,7 +192,7 @@ JetDevtoolsGameControlRequest: struct {
     frame_id: Int?,
     budget: Int?,
 
-    new: fn(session_id: &&String, request_id: &&String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
+    new: fn(session_id: ^^String, request_id: ^^String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
         request: JetDevtoolsGameControlRequest{
             session_id: session_id.move(),
             request_id: request_id.move(),
@@ -295,7 +295,7 @@ JetDevtoolsProjectRebuildRequest: struct {
     request_id: String,
     expected_revision: String,
 
-    new: fn(session_id: &&String, request_id: &&String, expected_revision: &&String) -> JetDevtoolsProjectRebuildRequest Err! {
+    new: fn(session_id: ^^String, request_id: ^^String, expected_revision: ^^String) -> JetDevtoolsProjectRebuildRequest Err! {
         request: JetDevtoolsProjectRebuildRequest{session_id: session_id.move(), request_id: request_id.move(), expected_revision: expected_revision.move()}
         request.validate()
         Ok(request)
@@ -390,12 +390,12 @@ JetDevtoolsCommandQueue: struct {
     receipt_list: [JetDevtoolsCommandReceipt],
     next_receipt_sequence: Int,
 
-    new: fn(session_id: &&String) -> JetDevtoolsCommandQueue Never! {
+    new: fn(session_id: ^^String) -> JetDevtoolsCommandQueue Never! {
         JetDevtoolsCommandQueue{session_id: session_id.move(), command_list: [JetDevtoolsCommand]{}, receipt_list: [JetDevtoolsCommandReceipt]{}, next_receipt_sequence: 1}
     }
 
     // Admit one checked command and record its `queued` receipt.
-    enqueue: fn(&self, command: &&JetDevtoolsCommand) Err! {
+    enqueue: fn(^self, command: ^^JetDevtoolsCommand) Err! {
         self.admit(command)
         if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
             return Err("jet.devtools.v1 command receipt queue is full")
@@ -411,7 +411,7 @@ JetDevtoolsCommandQueue: struct {
 
     // Put a command back at the head when its runtime destination is not
     // ready yet, keeping FIFO order.
-    requeue_front: fn(&self, command: &&JetDevtoolsCommand) Err! {
+    requeue_front: fn(^self, command: ^^JetDevtoolsCommand) Err! {
         self.admit(command)
         if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
             return Err("jet.devtools.v1 command queue is full")
@@ -420,13 +420,13 @@ JetDevtoolsCommandQueue: struct {
         Ok()
     }
 
-    poll: fn(&self) -> JetDevtoolsCommand? Never! {
+    poll: fn(^self) -> JetDevtoolsCommand? Never! {
         if self.command_list.len() == 0 -> return None
         self.command_list.remove(0, .Slot)
     }
 
     // The oldest database command; every other queued command keeps its place.
-    poll_database_explain: fn(&self) -> JetDevtoolsDatabaseExplainRequest? Never! {
+    poll_database_explain: fn(^self) -> JetDevtoolsDatabaseExplainRequest? Never! {
         found := Int?{None}
         loop (index, command) in self.command_list {
             if command == .DatabaseExplain(_) {
@@ -443,7 +443,7 @@ JetDevtoolsCommandQueue: struct {
     command_count: fn(self) -> Int Never! { self.command_list.len() }
 
     // Append one receipt for `command` to the stream.
-    record_receipt: fn(&self, command: JetDevtoolsCommand, status: &&String, error: &&String?) Err! {
+    record_receipt: fn(^self, command: JetDevtoolsCommand, status: ^^String, error: ^^String?) Err! {
         receipt: self.receipt_for(command, status, error)
         receipt.validate()
         if receipt.session_id != self.session_id {
@@ -457,7 +457,7 @@ JetDevtoolsCommandQueue: struct {
     }
 
     // Update the newest receipt of one request in place; no second row.
-    update_receipt: fn(&self, request_id: String, status: &&String, error: &&String?) Err! {
+    update_receipt: fn(^self, request_id: String, status: ^^String, error: ^^String?) Err! {
         devtools_control_text(request_id, "command receipt request_id")
         devtools_control_text(status, "command receipt status")
         devtools_control_optional_text(error, "command receipt error")
@@ -477,7 +477,7 @@ JetDevtoolsCommandQueue: struct {
     receipts: fn(self) -> [JetDevtoolsCommandReceipt] Never! { self.receipt_list }
 
     // Drop every queued command and receipt at session teardown.
-    clear: fn(&self) Never! {
+    clear: fn(^self) Never! {
         self.command_list = [JetDevtoolsCommand]{}
         self.receipt_list = [JetDevtoolsCommandReceipt]{}
     }
@@ -490,7 +490,7 @@ JetDevtoolsCommandQueue: struct {
         Ok()
     }
 
-    receipt_for: fn(&self, command: JetDevtoolsCommand, status: &&String, error: &&String?) -> JetDevtoolsCommandReceipt Never! {
+    receipt_for: fn(^self, command: JetDevtoolsCommand, status: ^^String, error: ^^String?) -> JetDevtoolsCommandReceipt Never! {
         sequence: self.next_receipt_sequence
         self.next_receipt_sequence = sequence + 1
         JetDevtoolsCommandReceipt{sequence: sequence, session_id: command.session_id(), request_id: command.request_id(), kind: command.kind(), status: status.move(), error: error.move()}
@@ -505,7 +505,7 @@ JetDevtoolsCommandEnvelope: struct {
     started_at_ms: Int,
     command_list: [JetDevtoolsCommand],
 
-    new: fn(session_id: &&String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
+    new: fn(session_id: ^^String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
         JetDevtoolsCommandEnvelope{session_id: session_id.move(), started_at_ms: started_at_ms, command_list: [JetDevtoolsCommand]{}}
     }
 
@@ -523,7 +523,7 @@ JetDevtoolsCommandEnvelope: struct {
         Ok()
     }
 
-    enqueue_command: fn(&self, command: &&JetDevtoolsCommand) Err! {
+    enqueue_command: fn(^self, command: ^^JetDevtoolsCommand) Err! {
         command.validate()
         if command.session_id() != self.session_id {
             return Err("jet.devtools.v1 command session identity mismatch")

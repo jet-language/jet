@@ -81,7 +81,7 @@ ScriptLines: struct {
     impl Iterable {
         Iter: ScriptCursor,
 
-        iter: fn(&&self) -> ScriptCursor { ScriptCursor{rows: self.text.split("\n").to_list(), at: 0} }
+        iter: fn(^^self) -> ScriptCursor { ScriptCursor{rows: self.text.split("\n").to_list(), at: 0} }
     }
 }
 
@@ -92,7 +92,7 @@ ScriptCursor: struct {
     impl Iterator {
         Item: String,
 
-        next: fn(&self) -> String? {
+        next: fn(^self) -> String? {
             if self.at == self.rows.len() -> return None
             row: self.rows[self.at].copy()
             self.at += 1

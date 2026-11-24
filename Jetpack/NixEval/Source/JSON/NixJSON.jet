@@ -122,7 +122,7 @@ NixEvalJSONParser: struct {
     position: Int,
     nodes: [NixEvalJSONNode],
 
-    add: fn(&self, node: NixEvalJSONNode) -> Int Never! {
+    add: fn(^self, node: NixEvalJSONNode) -> Int Never! {
         self.nodes.push(node.copy())
         self.nodes.len() - 1
     }
@@ -130,19 +130,19 @@ NixEvalJSONParser: struct {
     peek: fn(self) -> Int Never! { nixeval_byte(self.bytes, self.position) }
 
     // Consume one whole scalar and return its first byte (-1 at end).
-    bump: fn(&self) -> Int Never! {
+    bump: fn(^self) -> Int Never! {
         value: nixeval_byte(self.bytes, self.position)
         if value >= 0 -> self.position += nixeval_scalar_width(self.bytes, self.position)
         value
     }
 
-    skip_whitespace: fn(&self) Never! {
+    skip_whitespace: fn(^self) Never! {
         loop self.position < self.bytes.len() && nixeval_is_whitespace_scalar(nixeval_scalar(self.bytes, self.position)) {
             self.position += nixeval_scalar_width(self.bytes, self.position)
         }
     }
 
-    value: fn(&self, depth: Int) -> Int NixEvalError! {
+    value: fn(^self, depth: Int) -> Int NixEvalError! {
         if depth > NIXEVAL_EXPRESSION_LIMIT {
             return Err(NixEvalError.JSON("JSON value is too deeply nested"))
         }
@@ -163,7 +163,7 @@ NixEvalJSONParser: struct {
 
     // A number when `next` can start one; otherwise the reference error for
     // the character at the cursor.
-    number_or_unexpected: fn(&self, next: Int) -> Int NixEvalError! {
+    number_or_unexpected: fn(^self, next: Int) -> Int NixEvalError! {
         if next == 45 || nixeval_is_ascii_digit(next) -> return self.number()
         if next < 0 -> return Err(NixEvalError.JSON("unexpected end of input"))
         width: nixeval_scalar_width(self.bytes, self.position)
@@ -171,7 +171,7 @@ NixEvalJSONParser: struct {
         Err(NixEvalError.JSON("unexpected character `{character}`"))
     }
 
-    object: fn(&self, depth: Int) -> Int NixEvalError! {
+    object: fn(^self, depth: Int) -> Int NixEvalError! {
         _: self.bump()
         fields := [String:Int]{}
         self.skip_whitespace()
@@ -198,7 +198,7 @@ NixEvalJSONParser: struct {
         Ok(self.add(NixEvalJSONNode.Object(fields)))
     }
 
-    array: fn(&self, depth: Int) -> Int NixEvalError! {
+    array: fn(^self, depth: Int) -> Int NixEvalError! {
         _: self.bump()
         items := [Int]{}
         self.skip_whitespace()
@@ -216,7 +216,7 @@ NixEvalJSONParser: struct {
         Ok(self.add(NixEvalJSONNode.Array(items)))
     }
 
-    string: fn(&self) -> String NixEvalError! {
+    string: fn(^self) -> String NixEvalError! {
         self.position += 1
         out := [U8]{}
         loop {
@@ -251,7 +251,7 @@ NixEvalJSONParser: struct {
         }
     }
 
-    unicode_escape: fn(&self) -> Int NixEvalError! {
+    unicode_escape: fn(^self) -> Int NixEvalError! {
         codepoint: self.hex4()
         if codepoint >= 55296 && codepoint <= 56319 {
             if self.bump() != 92 || self.bump() != 117 {
@@ -269,7 +269,7 @@ NixEvalJSONParser: struct {
         Ok(codepoint)
     }
 
-    hex4: fn(&self) -> Int NixEvalError! {
+    hex4: fn(^self) -> Int NixEvalError! {
         codepoint := 0
         loop _ in 0..<4 {
             value: self.bump()
@@ -281,7 +281,7 @@ NixEvalJSONParser: struct {
         Ok(codepoint)
     }
 
-    number: fn(&self) -> Int NixEvalError! {
+    number: fn(^self) -> Int NixEvalError! {
         start: self.position.copy()
         loop {
             value: self.peek()
@@ -295,18 +295,18 @@ NixEvalJSONParser: struct {
         Ok(self.add(NixEvalJSONNode.Num(number)))
     }
 
-    boolean: fn(&self) -> Int NixEvalError! {
+    boolean: fn(^self) -> Int NixEvalError! {
         if self.literal("true") -> return Ok(self.add(NixEvalJSONNode.Bool(true)))
         if self.literal("false") -> return Ok(self.add(NixEvalJSONNode.Bool(false)))
         Err(NixEvalError.JSON("invalid literal"))
     }
 
-    null: fn(&self) -> Int NixEvalError! {
+    null: fn(^self) -> Int NixEvalError! {
         if self.literal("null") -> return Ok(self.add(NixEvalJSONNode.Null))
         Err(NixEvalError.JSON("invalid literal"))
     }
 
-    literal: fn(&self, expected: String) -> Bool Never! {
+    literal: fn(^self, expected: String) -> Bool Never! {
         word: expected.bytes()
         if !nixeval_matches_at(self.bytes, word, self.position) -> return false
         self.position += word.len()

@@ -142,14 +142,14 @@ shifted_token_span: fn(span: Span, offset: Int) -> Span Never! {
 }
 
 // Moves a token, its literal's string parts and their tokens by `offset`.
-token_shift_spans: fn(token: &Token, offset: Int, literals: &[TokenLiteral]) Never! {
+token_shift_spans: fn(token: ^Token, offset: Int, literals: ^[TokenLiteral]) Never! {
     token.span = shifted_token_span(token.span, offset)
     if token.literal >= 0 -> literal_shift_spans(token.literal, offset, literals)
 }
 
 // Moves a literal row's string parts, their tokens, its deferred diagnostics
 // and escapes, and its typed-head reading by `offset`.
-literal_shift_spans: fn(row: Int, offset: Int, literals: &[TokenLiteral]) Never! {
+literal_shift_spans: fn(row: Int, offset: Int, literals: ^[TokenLiteral]) Never! {
     loop part_index in 0..<literals[row].string_parts.len() {
         literals[row].string_parts[part_index].span = shifted_token_span(literals[row].string_parts[part_index].span, offset)
         loop nested_index in 0..<literals[row].string_parts[part_index].tokens.len() {
@@ -387,7 +387,7 @@ TOKEN_AMP_TILDE: 111
 
 TOKEN_AMP_TILDE_EQ: 112
 
-// `^^` is the take mark (`^^T`, `^^self`, `task ^^name`), one token as `&&` is;
+// `^^` is the take mark (`^^T`, `^^self`, `task ^^name`), one token as `^^` is;
 // a lone `^` is the write mark. Neither is an operator.
 TOKEN_CARET_CARET: 113
 

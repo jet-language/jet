@@ -135,14 +135,14 @@ build_debug_keep_sources: fn(files: [SourceFile]) Never! {
 
 // Tells the console `event`, without waiting; nothing while the hook is
 // closed.
-build_debug_tell: fn(event: &&BuildDebugEvent) Never! {
+build_debug_tell: fn(event: ^^BuildDebugEvent) Never! {
     _ := build_debug_send(event.move())
 }
 
 // Tells the console `event` and waits for its answer: once it has placed
 // what it places, or once the stop it shows is continued. Returns at once
 // while the hook is closed, or when the console is gone.
-build_debug_ask: fn(event: &&BuildDebugEvent) -[Time.Wait]> Never! {
+build_debug_ask: fn(event: ^^BuildDebugEvent) -[Time.Wait]> Never! {
     { sender: reply, receiver: answer }: channel<Bool>(capacity: 1)
     asked := event.move()
     asked.reply = Val(reply)
@@ -151,7 +151,7 @@ build_debug_ask: fn(event: &&BuildDebugEvent) -[Time.Wait]> Never! {
 
 // Whether the console took `event`; a console that is gone closes the hook,
 // and the build runs on unwatched.
-build_debug_send: fn(event: &&BuildDebugEvent) -> Bool Never! {
+build_debug_send: fn(event: ^^BuildDebugEvent) -> Bool Never! {
     held := BUILD_DEBUG.guard_edit()
     if held.value.events.len() == 0 -> return false
     held.value.events[0].send(event.move()) ?? {

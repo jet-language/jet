@@ -61,7 +61,7 @@ trust_overlay_fingerprint: fn(entries: [OverlayFingerprint], overlay: String, pa
 
 // Drop each invalidated `package-overlay` record and clear the hash of
 // every record the invalidation names by package or action key.
-trust_apply_overlay_invalidations: fn(lock: &SemanticLockFile, invalidations: [OverlayInvalidation]) Never! {
+trust_apply_overlay_invalidations: fn(lock: ^SemanticLockFile, invalidations: [OverlayInvalidation]) Never! {
     loop invalidation in invalidations {
         lock.remove_records(LockRecordKind.PackageOverlay, "{invalidation.overlay}:{invalidation.package}")
         loop index in 0..<lock.records.len() {

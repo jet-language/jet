@@ -20,7 +20,7 @@ BrowserVerb: enum {
     }
 }
 
-cli_cmd_browser: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_browser: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     raw: parsed.positional.get(0) ?? {
         theme.error("`jetpack browser` needs a verb", "verbs are: {BROWSER_VERBS.join(", ")} — lock or provision a project-pinned browser binary.", "try `jetpack browser list` or `jetpack browser lock chromium --binary ./chromium`.")
@@ -87,7 +87,7 @@ cli_browser_lock: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time,
     }
 }
 
-cli_browser_provision: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_browser_provision: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw: parsed.positional.get(1) ?? {
         theme.error("`jetpack browser provision` needs a package ref", "provision realizes one browser package and locks its binary into `.jet/lock`.", "try `jetpack browser provision chromium@jetpack`.")
         return EXIT_USAGE

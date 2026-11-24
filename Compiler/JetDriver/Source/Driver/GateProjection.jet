@@ -6,7 +6,7 @@ use {
     jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, SemaUnitMap, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_gate_source_policy_diagnostics, sema_unsafe_inspect, sema_unsafe_unit_map]
 }
 
-jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
+jet_driver_doc_gate_projection: fn(docs: ^[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
     modules := [SemaGateModule]{}
     loop doc in docs {
         index: doc.name_module_index
@@ -90,7 +90,7 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
 // A module gate row's package identity, display path and `policy.unsafe` /
 // `policy.expert` / `policy.memory` surface, then any host-supplied gate
 // policy for the package.
-jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
+jet_driver_gate_module_policy: fn(row: ^SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
     row.package_identity = package_identity
     loop package in packages {
         if package.identity != package_identity -> next
@@ -119,7 +119,7 @@ jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompil
 // the memory kernel rule reads each operation's own file. Each program's
 // items and script statements move into its row for the read and back after
 // it.
-jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
+jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: ^JetDriverLoadResult) Never! {
     modules := [SemaGateModule]{}
     owners := [Int]{}
     unit_paths := [String:String]{}

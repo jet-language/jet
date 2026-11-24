@@ -38,14 +38,14 @@ envmodel_test_eval_error: fn(src: String) -[FS, Env, Exec, Time.Wait]> Diagnosti
 }
 
 // The diagnostic of a present-but-failing `load`.
-envmodel_test_load_error: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Diagnostic {
+envmodel_test_load_error: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Diagnostic {
     if envmodel_workspace_load(cache, dir) == {
         .Ok(_) -> panic("the workspace source must be surfaced as an error")
         .Err(error) -> error.diagnostic
     }
 }
 
-envmodel_test_load_is_none: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Bool {
+envmodel_test_load_is_none: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Bool {
     if envmodel_workspace_load(cache, dir) == {
         .Ok(loaded) -> loaded == None
         .Err(_) -> panic("load must not fail")

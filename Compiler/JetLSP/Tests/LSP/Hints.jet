@@ -1,5 +1,5 @@
 // Inlay hints from the checked index: parameter names at a call's positional
-// arguments, the `&` and `&&` a callee's signature decides, and, on a type,
+// arguments, the `^` and `^^` a callee's signature decides, and, on a type,
 // the methods an impl declares outside its body. The fixture checker resolves
 // free calls and impl heads but infers no local types, so local type hints and
 // method receivers are covered by the LSP cases.
@@ -34,11 +34,11 @@ LSP_TEST_MARKS_URI: "file:///w/marks.jet"
 
 // Line 10 calls `bump`, which writes its first argument; line 11 calls
 // `keep`, which takes its only one.
-LSP_TEST_MARKS: `bump: fn(count: &Int, by: Int) {
+LSP_TEST_MARKS: `bump: fn(count: ^Int, by: Int) {
     count += by
 }
 
-keep: fn(title: &&String) -> Int {
+keep: fn(title: ^^String) -> Int {
     0
 }
 
@@ -64,7 +64,7 @@ run: fn() -> Int {
 `
 
 // Each hint as `line:character label`.
-lsp_test_hints: fn(server: &LSPServer, uri: String, end_line: Int) -> [String] {
+lsp_test_hints: fn(server: ^LSPServer, uri: String, end_line: Int) -> [String] {
     range: "\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":{end_line},\"character\":0}}}}"
     hints := [String]{}
     loop row in lsp_test_rows(lsp_test_result(server, "textDocument/inlayHint", "{{{lsp_test_text_document(uri)},{range}}}")) {

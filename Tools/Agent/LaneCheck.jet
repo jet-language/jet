@@ -1106,7 +1106,7 @@ RuleSet: struct {
     seen: [String],
 }
 
-add_path: fn(set: &RuleSet, raw: String) Never! {
+add_path: fn(set: ^RuleSet, raw: String) Never! {
     find: trim_slashes(raw)
     if find.len() < 2 || set.seen.contains(find) {
         return
@@ -1115,7 +1115,7 @@ add_path: fn(set: &RuleSet, raw: String) Never! {
     set.rules.push(Rule{kind: "path", find: find.copy(), source: "{escape_pcre(find)}(?![\\w-])"})
 }
 
-add_word: fn(set: &RuleSet, raw: String) Never! {
+add_word: fn(set: ^RuleSet, raw: String) Never! {
     find: raw.trim()
     lower: find.lower()
     if find.len() < 3 || GENERIC_NAMES.contains(lower) || set.seen.contains(lower) {

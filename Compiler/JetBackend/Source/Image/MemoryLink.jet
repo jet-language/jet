@@ -87,7 +87,7 @@ link_image_at: fn(at: Int, gap_at: Int, gap: Int) -> Int Never! {
 // [gap_at, gap_at + gap) (none when gap is 0); errors are reported on `c`.
 // The headers, the program header table and the sections the bind reads
 // lie outside the gap; the view's offsets index `b`.
-link_image_view: fn(c: &LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImageView Never! {
+link_image_view: fn(c: ^LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImageView Never! {
     v := LinkImageView{base: -1, phoff: 0, phnum: 0, load_end: 0, program_base: 0, sites: [Int]{}, symtab_at: 0, symtab_count: 0, first_global: 0, strtab_at: 0, strtab_size: 0, shoff: 0, alloc_headers: 0, names_at: 0, exports_at: 0, exports_slots: 0}
     size: c.bufs[b].len()
     head: if gap == 0 -> size else -> gap_at
@@ -240,7 +240,7 @@ link_bind_startup: fn(frames: Bool) -> LinkSynth Never! {
 // Lay the program out from the image's program base: the combined program
 // header table, the part note of the program's zone sites when its code
 // has any (StaticLink.jet link_zone_write), then its loaded sections.
-link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
+link_bind_layout: fn(c: ^LinkContext, view: LinkImageView) -> LinkLayout Never! {
     order: link_order(c)
     commons := false
     loop g in 0..<c.g_name.len() {
@@ -305,7 +305,7 @@ link_bind_layout: fn(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! 
 // program base); the image part's `main` places bound to `target`. Returns
 // the image's ELF header naming the combined program header table, for
 // link_bind_sections to finish.
-link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
+link_bind_write: fn(c: ^LinkContext, exe: ^X64Executable, view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
     out := [U8]{}
     elf := link_bind_header(c, exe, out, view, l, target)
     link_zone_write(c, out, l, view.program_base)
@@ -319,7 +319,7 @@ link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l
 // layout `l`, which goes to the end of `out` (the program part's start), and
 // the patches of the image part's `main` places bound to `target` in `exe`;
 // a place outside the image's loaded bytes or out of range is reported on `c`.
-link_bind_header: fn(c: &LinkContext, exe: &X64Executable, out: &[U8], view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
+link_bind_header: fn(c: ^LinkContext, exe: ^X64Executable, out: ^[U8], view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
     elf := c.bufs[1][0..<LINK_EHDR_SIZE]
     link_put64(elf, 32, view.program_base - c.base)
     elf[56] = U8{l.phnum & 255}
@@ -370,7 +370,7 @@ link_bind_header: fn(c: &LinkContext, exe: &X64Executable, out: &[U8], view: Lin
 // debug sections, then one `.symtab` holding the program's symbols (locals
 // first), and the section headers, which `elf` names. The image's symbols
 // are left out (link_bind_named_tail).
-link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: &[U8]) Never! {
+link_bind_sections: fn(c: ^LinkContext, out: ^[U8], origin: Int, view: LinkImageView, l: LinkLayout, debug: LinkDebug, elf: ^[U8]) Never! {
     headers := link_bind_image_headers(c, view)
     extents := [[Int]]{}
     loop class in 0..<LINK_CLASSES {
@@ -449,7 +449,7 @@ link_bind_image_headers: fn(c: LinkContext, view: LinkImageView) -> [LinkSection
 // empty, and `.got` after the read-only-after-relocation data when it has
 // `got_slots` slots from `got_start`, appended to `headers`; returns per
 // class its header's index (-1: none). File offsets are addresses less `base`.
-link_bind_class_headers: fn(headers: &[LinkSectionHeader], extents: [[Int]], got_start: Int, got_slots: Int, base: Int) -> [Int] Never! {
+link_bind_class_headers: fn(headers: ^[LinkSectionHeader], extents: [[Int]], got_start: Int, got_slots: Int, base: Int) -> [Int] Never! {
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
     names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
@@ -472,7 +472,7 @@ link_bind_class_headers: fn(headers: &[LinkSectionHeader], extents: [[Int]], got
 // `origin`: `.symtab` (the null symbol, then the program's `locals` and
 // `globals`) and `.strtab` (the empty name, then `symbol_names`), then the
 // section headers, `headers` and theirs, which `elf` names.
-link_bind_symbols: fn(out: &[U8], origin: Int, headers: &[LinkSectionHeader], locals: &&[U8], globals: &&[U8], symbol_names: &&[U8], elf: &[U8]) Never! {
+link_bind_symbols: fn(out: ^[U8], origin: Int, headers: ^[LinkSectionHeader], locals: ^^[U8], globals: ^^[U8], symbol_names: ^^[U8], elf: ^[U8]) Never! {
     // The padding, both tables, then the section names and headers
     // (link_write_section_headers), with room to spare for the names.
     out.try_reserve(8 + 24 + locals.len() + globals.len() + 1 + symbol_names.len() + 64 * (headers.len() + 3) + 512) ?? panic("the bound executable's symbol tables: {err}")
@@ -534,12 +534,12 @@ X64Executable: struct {
 }
 
 // The executable whose file is `bytes`.
-x64_executable_whole: fn(bytes: &&[U8]) -> X64Executable Never! {
+x64_executable_whole: fn(bytes: ^^[U8]) -> X64Executable Never! {
     X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_at: 0, image_end: 0, image_gap_at: 0, image_gap: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: bytes.move(), debug_file: [U8]{}, build_id: [U8]{}}
 }
 
 // The executable a split link wrote (x64_link_executable_split).
-x64_executable_split: fn(linked: &&X64SplitExecutableResult) -> X64Executable Never! {
+x64_executable_split: fn(linked: ^^X64SplitExecutableResult) -> X64Executable Never! {
     exe := x64_executable_whole(linked.bytes.move())
     exe.debug_file = linked.debug_file.move()
     exe.build_id = linked.build_id.move()
@@ -562,7 +562,7 @@ x64_executable_header: fn(exe: X64Executable) -> [U8] Never! {
 }
 
 // The file of `exe`, whose image part is whole (x64_executable_complete).
-x64_executable_bytes: fn(exe: &&X64Executable) -> [U8] Never! {
+x64_executable_bytes: fn(exe: ^^X64Executable) -> [U8] Never! {
     if exe.image_end == 0 -> return exe.tail.move()
     if exe.image_gap > 0 {
         panic("x64_executable_bytes: the image part of {exe.image_path} was read without its loaded segments")
@@ -662,7 +662,7 @@ link_symbol_tables: fn(elf: [U8], bytes: [U8], origin: Int, gap_at: Int, gap: In
 
 // Append the symbols at [from, to) of `tail` to it again, each nonzero name
 // offset `shift` further.
-link_bind_shifted_symbols: fn(tail: &[U8], from: Int, to: Int, shift: Int) Never! {
+link_bind_shifted_symbols: fn(tail: ^[U8], from: Int, to: Int, shift: Int) Never! {
     loop k in 0..<(to - from).div_euclid(24) {
         at: tail.len()
         loop j in 0..<24 {
@@ -691,7 +691,7 @@ X64BindResult: struct {
 // image's base, in parts, whose debug tail holds `.debug_*` sections only
 // under `debug_info` (link_debug_sections) and names the program's symbols
 // only, until its file is written (link_bind_named_tail).
-x64_bind_runtime_image: fn(name: String, program: &&[U8], image: &&[U8], image_path: String, image_stamp: [Int], image_at: Int, gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
+x64_bind_runtime_image: fn(name: String, program: ^^[U8], image: ^^[U8], image_path: String, image_stamp: [Int], image_at: Int, gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
     bound := link_bind_image(name, program, image, gap_at, gap, None, debug_info)
     if bound.errors.len() == 0 {
         bound.executable.image_path = image_path
@@ -703,7 +703,7 @@ x64_bind_runtime_image: fn(name: String, program: &&[U8], image: &&[U8], image_p
 
 // Link the program object `program` (named `name` in reports) against the
 // runtime image `image` into a static executable at the image's base.
-x64_link_with_runtime_image: fn(name: String, program: &&[U8], image: &&[U8]) -> X64ExecutableResult Never! {
+x64_link_with_runtime_image: fn(name: String, program: ^^[U8], image: ^^[U8]) -> X64ExecutableResult Never! {
     link_bind_bytes(link_bind_image(name, program, image, 0, 0, None, true))
 }
 
@@ -719,7 +719,7 @@ x64_link_with_runtime_image: fn(name: String, program: &&[U8], image: &&[U8]) ->
 // load, so the process would never map one. Its `.symtab` holds the
 // program's symbols only: the image's are the image's file's, which the
 // process already runs.
-x64_bind_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+x64_bind_runtime_image_at: fn(name: String, program: ^^[U8], image: ^^[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
     link_bind_image(name, program, image, gap_at, gap, Val(program_base), false)
 }
 
@@ -728,7 +728,7 @@ x64_bind_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], prog
 // the one row of `images`, read without its bytes [gap_at, gap_at + gap);
 // it moves into a context for the reads and back. Nothing is defined when
 // the image is absent or can't be read.
-x64_runtime_image_defines: fn(images: &[[U8]], gap_at: Int, gap: Int, names: [String], rows: [Int]) -> [Bool] Never! {
+x64_runtime_image_defines: fn(images: ^[[U8]], gap_at: Int, gap: Int, names: [String], rows: [Int]) -> [Bool] Never! {
     found := [Bool]{}
     if images.len() == 0 -> return found
     image: images.remove(0, .Slot) ?? return found
@@ -745,7 +745,7 @@ x64_runtime_image_defines: fn(images: &[[U8]], gap_at: Int, gap: Int, names: [St
 // read without its bytes [gap_at, gap_at + gap); it moves into a context
 // for the reads and back. None when the image is absent, can't be read or
 // defines no `name`.
-x64_runtime_image_export: fn(images: &[[U8]], gap_at: Int, gap: Int, name: String) -> Int? Never! {
+x64_runtime_image_export: fn(images: ^[[U8]], gap_at: Int, gap: Int, name: String) -> Int? Never! {
     if images.len() == 0 -> return None
     image: images.remove(0, .Slot) ?? return None
     c := link_context([[U8]]{[U8]{}, image.move()}, LINK_RUN_BASE)
@@ -770,7 +770,7 @@ x64_runtime_image_export: fn(images: &[[U8]], gap_at: Int, gap: Int, name: Strin
     found
 }
 
-link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
+link_bind_bytes: fn(bound: ^^X64BindResult) -> X64ExecutableResult Never! {
     if bound.errors.len() > 0 {
         return X64ExecutableResult{bytes: [U8]{}, errors: bound.errors.move()}
     }
@@ -779,14 +779,14 @@ link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
 
 // A bind that failed: its errors, and the image (input 1) as the
 // executable's image part, as a bound one has it.
-link_bind_failure: fn(c: &LinkContext) -> X64BindResult Never! {
+link_bind_failure: fn(c: ^LinkContext) -> X64BindResult Never! {
     exe := x64_executable_whole([U8]{})
     exe.image = c.bufs.remove(1, .Slot) ?? [U8]{}
     // copy: a few report lines; the context drops its own with it.
     X64BindResult{executable: exe, errors: c.errors.copy()}
 }
 
-link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, gap: Int, program_base: Int?, debug_info: Bool) -> X64BindResult Never! {
+link_bind_image: fn(name: String, program: ^^[U8], image: ^^[U8], gap_at: Int, gap: Int, program_base: Int?, debug_info: Bool) -> X64BindResult Never! {
     c := link_context([[U8]]{program.move(), image.move()}, LINK_RUN_BASE)
     view := link_image_view(c, 1, gap_at, gap)
     if c.errors.len() > 0 -> return link_bind_failure(c)

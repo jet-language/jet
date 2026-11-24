@@ -99,7 +99,7 @@ ReadyProbeKind: enum {
 // Plan the values written in one dev service record: a typed readiness
 // probe's arguments one by one (the probe call itself names the probe), and
 // every other field value whole.
-envmodel_plan_dev_service: fn(plan: &EnvValueProgram, entry: ServiceEntry, globals: [String:CtValue]) EnvModelEvalError! {
+envmodel_plan_dev_service: fn(plan: ^EnvValueProgram, entry: ServiceEntry, globals: [String:CtValue]) EnvModelEvalError! {
     loop field in entry.fields {
         if DevServiceField.parse(field.name) == DevServiceField.Ready {
             if envmodel_ready_probe_call(field.value) == .Val(probe) {
@@ -220,7 +220,7 @@ envmodel_evaluate_dev_service: fn(entry: ServiceEntry, scope: ModuleEvalScope) -
     Ok(plan)
 }
 
-envmodel_push_service_extra: fn(plan: &DevServicePlan, name: String, value: CtValue) Never! {
+envmodel_push_service_extra: fn(plan: ^DevServicePlan, name: String, value: CtValue) Never! {
     plan.extra.push(DevServiceExtra{name: name, value: ast_comptime_value_show(value)})
 }
 

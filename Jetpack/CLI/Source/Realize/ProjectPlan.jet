@@ -57,16 +57,16 @@ RunPlan: struct {
 // Environment and workspace commands run from a project subdirectory keep
 // this one root so planning, trust, dotenv composition, managed state, and
 // explicit refs share the same project identity.
-cli_project_env_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+cli_project_env_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     cli_project_root(cache, start)
 }
 
 // Build a plan from the project `env.jet` (the no-explicit-ref path).
-cli_load_project_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+cli_load_project_plan: fn(cache: ^WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cli_load_project_plan_with_selections(cache, theme, None, None)
 }
 
-cli_load_project_plan_with_selections: fn(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+cli_load_project_plan_with_selections: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cwd: cli_current_dir()
     dir: cli_project_env_root(cache, cwd)
     src: files.read(EnvFile.path_in(dir)) ?? {
@@ -96,7 +96,7 @@ cli_load_project_plan_with_selections: fn(cache: &WorkspaceDeclarationCache, the
 }
 
 // Add `package` to `refs` once, keeping first-seen order.
-cli_push_package_ref: fn(refs: &[String], package: String) Never! {
+cli_push_package_ref: fn(refs: ^[String], package: String) Never! {
     if !refs.contains(package) -> refs.push(package.copy())
 }
 

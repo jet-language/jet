@@ -252,7 +252,7 @@ X509SigAlg: struct {
 
 /// A CertificateSerialNumber: an INTEGER, or the [2] form some CRLs carry
 /// (mbedtls_x509_get_serial).
-x509_get_serial: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
+x509_get_serial: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf X509Error! {
     if end - p < 1 -> return Err(.InvalidSerial(Val(.OutOfData)))
     tag_id: Int{data[p]}
     if tag_id != asn1.ASN1_CONTEXT_SPECIFIC | 2 && tag_id != asn1.ASN1_INTEGER {
@@ -267,13 +267,13 @@ x509_get_serial: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
 
 /// An AlgorithmIdentifier whose parameters are absent or NULL
 /// (mbedtls_x509_get_alg_null).
-x509_get_alg_null: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
+x509_get_alg_null: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf X509Error! {
     alg: asn1.get_alg_null(data, p, end) ?? return Err(.InvalidAlg(Val(err)))
     Ok(alg)
 }
 
 /// An AlgorithmIdentifier and its parameters (mbedtls_x509_get_alg).
-x509_get_alg: fn(data: [U8], p: &Int, end: Int) -> {alg: asn1.ASN1Buf, params: asn1.ASN1Buf} X509Error! {
+x509_get_alg: fn(data: [U8], p: ^Int, end: Int) -> {alg: asn1.ASN1Buf, params: asn1.ASN1Buf} X509Error! {
     got: asn1.get_alg(data, p, end) ?? return Err(.InvalidAlg(Val(err)))
     Ok(got)
 }
@@ -366,7 +366,7 @@ x509_get_rsassa_pss_params: fn(data: [U8], params: asn1.ASN1Buf) -> X509PssParam
 
 // x509_get_attr_type_value: one AttributeTypeAndValue, its value a string
 // type or a BIT STRING.
-x509_get_attr_type_value: fn(data: [U8], p: &Int, end: Int) -> asn1.NamedData X509Error! {
+x509_get_attr_type_value: fn(data: [U8], p: ^Int, end: Int) -> asn1.NamedData X509Error! {
     len: asn1.get_tag(data, p, end, X509_SEQUENCE) ?? return Err(.InvalidName(Val(err)))
     item_end: p + len
     if item_end - p < 1 -> return Err(.InvalidName(Val(.OutOfData)))
@@ -389,7 +389,7 @@ x509_get_attr_type_value: fn(data: [U8], p: &Int, end: Int) -> asn1.NamedData X5
 /// A Name: its RDNSequence flattened, each attribute of a multi-valued RDN
 /// but the last marked next_merged (mbedtls_x509_get_name). The name must
 /// end at `end`.
-x509_get_name: fn(data: [U8], p: &Int, end: Int) -> [asn1.NamedData] X509Error! {
+x509_get_name: fn(data: [U8], p: ^Int, end: Int) -> [asn1.NamedData] X509Error! {
     names := [asn1.NamedData]{}
     loop {
         set_len: asn1.get_tag(data, p, end, X509_SET) ?? return Err(.InvalidName(Val(err)))
@@ -459,7 +459,7 @@ X509_ZULU: U8{90}
 
 /// A Time: UTCTime or GeneralizedTime, to the second, with an optional
 /// trailing Z (mbedtls_x509_get_time).
-x509_get_time: fn(data: [U8], p: &Int, end: Int) -> X509Time X509Error! {
+x509_get_time: fn(data: [U8], p: ^Int, end: Int) -> X509Time X509Error! {
     if end - p < 1 -> return Err(.InvalidDate(Val(.OutOfData)))
     tag_id: Int{data[p]}
     year_len: if {
@@ -480,7 +480,7 @@ x509_get_time: fn(data: [U8], p: &Int, end: Int) -> X509Time X509Error! {
 
 /// The signature BIT STRING's content after its unused-bits byte, which
 /// must be zero (mbedtls_x509_get_sig).
-x509_get_sig: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
+x509_get_sig: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf X509Error! {
     if end - p < 1 -> return Err(.InvalidSignature(Val(.OutOfData)))
     tag_id: Int{data[p]}
     len: asn1.get_bitstring_null(data, p, end) ?? return Err(.InvalidSignature(Val(err)))
@@ -507,7 +507,7 @@ x509_get_sig_alg: fn(data: [U8], sig_oid: asn1.ASN1Buf, sig_params: asn1.ASN1Buf
 
 /// The explicit [tag] wrapper of an Extensions SEQUENCE, which must fill it;
 /// the cursor stops at the first Extension (mbedtls_x509_get_ext).
-x509_get_ext: fn(data: [U8], p: &Int, end: Int, tag_num: Int) -> asn1.ASN1Buf X509Error! {
+x509_get_ext: fn(data: [U8], p: ^Int, end: Int, tag_num: Int) -> asn1.ASN1Buf X509Error! {
     ext_tag: x509_explicit(tag_num)
     len: asn1.get_tag(data, p, end, ext_tag) ?? return Err(.InvalidExtensions(Val(err)))
     ext: asn1.ASN1Buf{tag_id: ext_tag, p: p, len: len}
@@ -524,7 +524,7 @@ x509_hex_digit: fn(n: Int) -> U8 Never! {
     U8{55 + n}
 }
 
-x509_push_hex2: fn(out: &[U8], b: Int) {
+x509_push_hex2: fn(out: ^[U8], b: Int) {
     out.push(x509_hex_digit(b >> 4))
     out.push(x509_hex_digit(b & 15))
 }
@@ -790,7 +790,7 @@ x509_parse_subject_alt_name: fn(data: [U8], san: asn1.ASN1Buf) -> SubjectAltName
 
 /// The GeneralNames from the cursor to `end`, each context-specific and
 /// readable or of a type mbedtls skips (mbedtls_x509_get_subject_alt_name_ext).
-x509_get_subject_alt_name_ext: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
+x509_get_subject_alt_name_ext: fn(data: [U8], p: ^Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
     names := [asn1.ASN1Buf]{}
     loop p < end {
         tag_id: Int{data[p]}
@@ -815,7 +815,7 @@ x509_get_subject_alt_name_ext: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Bu
 
 /// A SubjectAltName extension's GeneralNames, a SEQUENCE that must fill
 /// the extension (mbedtls_x509_get_subject_alt_name).
-x509_get_subject_alt_name: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
+x509_get_subject_alt_name: fn(data: [U8], p: ^Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
     len: asn1.get_tag(data, p, end, X509_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
     if p + len != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
     x509_get_subject_alt_name_ext(data, p, end)
@@ -823,7 +823,7 @@ x509_get_subject_alt_name: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] X
 
 /// A Netscape certificate type, one byte of flags, zero when the BIT
 /// STRING is empty (mbedtls_x509_get_ns_cert_type).
-x509_get_ns_cert_type: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
+x509_get_ns_cert_type: fn(data: [U8], p: ^Int, end: Int) -> Int X509Error! {
     bs: asn1.get_bitstring(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
     if bs.len == 0 -> return Ok(0)
     if bs.len != 1 -> return Err(.InvalidExtensions(Val(.InvalidLength)))
@@ -832,7 +832,7 @@ x509_get_ns_cert_type: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
 
 /// The keyUsage flags, the first content byte lowest and at most four bytes
 /// read (mbedtls_x509_get_key_usage).
-x509_get_key_usage: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
+x509_get_key_usage: fn(data: [U8], p: ^Int, end: Int) -> Int X509Error! {
     bs: asn1.get_bitstring(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
     usage := 0
     loop i in 0..<bs.len {
@@ -844,7 +844,7 @@ x509_get_key_usage: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
 
 /// The subject alternative names as mbedtls's certificate information
 /// lists them, each on a line after `prefix` (mbedtls_x509_info_subject_alt_name).
-x509_info_subject_alt_name: fn(out: &[U8], data: [U8], names: [asn1.ASN1Buf], prefix: String) X509Error! {
+x509_info_subject_alt_name: fn(out: ^[U8], data: [U8], names: [asn1.ASN1Buf], prefix: String) X509Error! {
     loop item in names {
         if x509_parse_subject_alt_name(data, item) == {
             .Err(e) -> {
@@ -856,7 +856,7 @@ x509_info_subject_alt_name: fn(out: &[U8], data: [U8], names: [asn1.ASN1Buf], pr
 }
 
 // One readable subject alternative name.
-x509_info_one_san: fn(out: &[U8], data: [U8], san: SubjectAltName, prefix: String) X509Error! {
+x509_info_one_san: fn(out: ^[U8], data: [U8], san: SubjectAltName, prefix: String) X509Error! {
     if san == {
         .OtherName(other) -> {
             out.extend("\n{prefix}    otherName :".bytes())
@@ -903,7 +903,7 @@ x509_info_one_san: fn(out: &[U8], data: [U8], san: SubjectAltName, prefix: Strin
 }
 
 // The comma-separated names of the flags set in `bits`.
-x509_info_flags: fn(out: &[U8], bits: Int, flags: [Int], names: [String]) {
+x509_info_flags: fn(out: ^[U8], bits: Int, flags: [Int], names: [String]) {
     sep := ""
     loop i in 0..<flags.len() {
         if bits & flags[i] != 0 {
@@ -914,7 +914,7 @@ x509_info_flags: fn(out: &[U8], bits: Int, flags: [Int], names: [String]) {
 }
 
 /// The Netscape certificate types set (mbedtls_x509_info_cert_type).
-x509_info_cert_type: fn(out: &[U8], ns_cert_type: Int) {
+x509_info_cert_type: fn(out: ^[U8], ns_cert_type: Int) {
     flags: [Int]{
         X509_NS_CERT_TYPE_SSL_CLIENT,
         X509_NS_CERT_TYPE_SSL_SERVER,
@@ -930,7 +930,7 @@ x509_info_cert_type: fn(out: &[U8], ns_cert_type: Int) {
 }
 
 /// The key usages set (mbedtls_x509_info_key_usage).
-x509_info_key_usage: fn(out: &[U8], key_usage: Int) {
+x509_info_key_usage: fn(out: ^[U8], key_usage: Int) {
     flags: [Int]{
         X509_KU_DIGITAL_SIGNATURE,
         X509_KU_NON_REPUDIATION,

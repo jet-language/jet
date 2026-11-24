@@ -11,7 +11,7 @@ image_build_tar: fn(layer_files: [LayerFile]) -> [U8] Never! {
     out
 }
 
-image_write_tar_entry: fn(out: &[U8], file: LayerFile) Never! {
+image_write_tar_entry: fn(out: ^[U8], file: LayerFile) Never! {
     header := [U8]{}
     loop _ in 0..<512 -> header.push(U8{0})
     image_tar_set(header, 0, 100, file.path.bytes())
@@ -39,7 +39,7 @@ image_write_tar_entry: fn(out: &[U8], file: LayerFile) Never! {
 
 // Copy `bytes` into `header[offset..<offset + length]`, truncated to `length`;
 // the rest of the field stays NUL.
-image_tar_set: fn(header: &[U8], offset: Int, length: Int, bytes: [U8]) Never! {
+image_tar_set: fn(header: ^[U8], offset: Int, length: Int, bytes: [U8]) Never! {
     count: if bytes.len() < length -> bytes.len() else -> length
     loop i in 0..<count -> header[offset + i] = bytes[i]
 }

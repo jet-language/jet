@@ -143,7 +143,7 @@ sema_data_filter_migrated: fn(program: SemaProgramTables, type_name: String) -> 
 
 // `predicate` as a condition over `fields` of the row `parameter` names,
 // with the values it binds pushed on `values`; None when it is not one.
-sema_data_filter_condition: fn(predicate: Expr, parameter: String, fields: [SemaDataFilterField], values: &[Expr]) -> String? Never! {
+sema_data_filter_condition: fn(predicate: Expr, parameter: String, fields: [SemaDataFilterField], values: ^[Expr]) -> String? Never! {
     if predicate == .Paren(inner, _, _) {
         return sema_data_filter_condition(inner, parameter, fields, values)
     }
@@ -153,7 +153,7 @@ sema_data_filter_condition: fn(predicate: Expr, parameter: String, fields: [Sema
     None
 }
 
-sema_data_filter_binary: fn(op: BinOp, left: Expr, right: Expr, parameter: String, fields: [SemaDataFilterField], values: &[Expr]) -> String? Never! {
+sema_data_filter_binary: fn(op: BinOp, left: Expr, right: Expr, parameter: String, fields: [SemaDataFilterField], values: ^[Expr]) -> String? Never! {
     if op == BinOp.And || op == BinOp.Or {
         first: sema_data_filter_condition(left, parameter, fields, values) ?? return None
         second: sema_data_filter_condition(right, parameter, fields, values) ?? return None
@@ -177,7 +177,7 @@ sema_data_filter_binary: fn(op: BinOp, left: Expr, right: Expr, parameter: Strin
 }
 
 // `field` compared by `op` with `value`, whose text binds the `?`.
-sema_data_filter_compare: fn(field: SemaDataFilterField, op: BinOp, value: Expr, values: &[Expr]) -> String? Never! {
+sema_data_filter_compare: fn(field: SemaDataFilterField, op: BinOp, value: Expr, values: ^[Expr]) -> String? Never! {
     word: if op == {
         .Eq -> "="
         .Ne -> "<>"
@@ -246,7 +246,7 @@ sema_data_filter_texts: fn(sql: SemaDataFilterSQL, span: Span) -> Expr Never! {
 // `row`: the predicate as SQL and the list of its values' text, read here.
 // Values that do not check give the empty condition, and the predicate
 // reports what is wrong with them.
-sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, source_args: &[CallArg], argument_types: &[Type], typed: &[TExpr]) {
+sema_data_filter_push: fn(callback: Expr, row: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, source_args: ^[CallArg], argument_types: ^[Type], typed: ^[TExpr]) {
     sql := sema_data_filter_sql(callback, row, environment, program)
     texts := sema_data_filter_texts(sql, span)
     text_list: Type.List{element: Type.String}

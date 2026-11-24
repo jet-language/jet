@@ -145,7 +145,7 @@ layout_byte: fn(data: [U8], at: Int) -> U8 Never! { data[at] }
 
 /// A definite length of at most four bytes, which must fit before `end`
 /// (mbedtls_asn1_get_len).
-get_len: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
+get_len: fn(data: [U8], p: ^Int, end: Int) -> Int ASN1Error! {
     if end - p < 1 -> return Err(.OutOfData)
     first: Int{layout_byte(data, p)}
     len := 0
@@ -167,7 +167,7 @@ get_len: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
 }
 
 /// The length of an item that must carry `tag_id` (mbedtls_asn1_get_tag).
-get_tag: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error! {
+get_tag: fn(data: [U8], p: ^Int, end: Int, tag_id: Int) -> Int ASN1Error! {
     if end - p < 1 -> return Err(.OutOfData)
     if (Int{layout_byte(data, p)}) != tag_id -> return Err(.UnexpectedTag)
     p += 1
@@ -176,7 +176,7 @@ get_tag: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error! {
 }
 
 /// A BOOLEAN; any non-zero byte is true (mbedtls_asn1_get_bool).
-get_bool: fn(data: [U8], p: &Int, end: Int) -> Bool ASN1Error! {
+get_bool: fn(data: [U8], p: ^Int, end: Int) -> Bool ASN1Error! {
     len: get_tag(data, p, end, ASN1_BOOLEAN)
     if len != 1 -> return Err(.InvalidLength)
     val: data[p] != (U8{0})
@@ -186,7 +186,7 @@ get_bool: fn(data: [U8], p: &Int, end: Int) -> Bool ASN1Error! {
 
 /// A non-negative INTEGER or ENUMERATED that fits a 32-bit int; leading
 /// zero bytes are skipped, negative values refused.
-get_tagged_int: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error! {
+get_tagged_int: fn(data: [U8], p: ^Int, end: Int, tag_id: Int) -> Int ASN1Error! {
     len := get_tag(data, p, end, tag_id)
     // An empty content is malformed: zero is 020100.
     if len == 0 -> return Err(.InvalidLength)
@@ -206,13 +206,13 @@ get_tagged_int: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> Int ASN1Error!
 }
 
 /// A non-negative INTEGER that fits a 32-bit int (mbedtls_asn1_get_int).
-get_int: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
+get_int: fn(data: [U8], p: ^Int, end: Int) -> Int ASN1Error! {
     val: get_tagged_int(data, p, end, ASN1_INTEGER)
     Ok(val)
 }
 
 /// A non-negative ENUMERATED that fits a 32-bit int (mbedtls_asn1_get_enum).
-get_enum: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
+get_enum: fn(data: [U8], p: ^Int, end: Int) -> Int ASN1Error! {
     val: get_tagged_int(data, p, end, ASN1_ENUMERATED)
     Ok(val)
 }
@@ -220,7 +220,7 @@ get_enum: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
 /// An INTEGER as a big number. The content is read as unsigned, so a
 /// negative INTEGER gives its two's-complement bytes, and an empty content
 /// gives zero (mbedtls_asn1_get_mpi).
-get_mpi: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi ASN1Error! {
+get_mpi: fn(data: [U8], p: ^Int, end: Int) -> bn.Mpi ASN1Error! {
     len: get_tag(data, p, end, ASN1_INTEGER)
     bytes: cipher.bytes_of(data, p, len)
     p += len
@@ -229,7 +229,7 @@ get_mpi: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi ASN1Error! {
 }
 
 /// A BIT STRING that must end at `end` (mbedtls_asn1_get_bitstring).
-get_bitstring: fn(data: [U8], p: &Int, end: Int) -> ASN1Bitstring ASN1Error! {
+get_bitstring: fn(data: [U8], p: ^Int, end: Int) -> ASN1Bitstring ASN1Error! {
     len := get_tag(data, p, end, ASN1_BIT_STRING)
     if len < 1 -> return Err(.OutOfData)
     len -= 1
@@ -244,7 +244,7 @@ get_bitstring: fn(data: [U8], p: &Int, end: Int) -> ASN1Bitstring ASN1Error! {
 
 /// A BIT STRING with no unused bits, the cursor left on its content; the
 /// content length (mbedtls_asn1_get_bitstring_null).
-get_bitstring_null: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
+get_bitstring_null: fn(data: [U8], p: ^Int, end: Int) -> Int ASN1Error! {
     len := get_tag(data, p, end, ASN1_BIT_STRING)
     if len == 0 -> return Err(.InvalidData)
     len -= 1
@@ -257,13 +257,13 @@ get_bitstring_null: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
 /// the entry's tag and the offset and length of its content. A result other
 /// than 0 ends the walk with ASN1Error.Stopped of that code.
 SequenceVisitor: trait {
-    visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never!,
+    visit: fn(^self, tag_id: Int, start: Int, len: Int) -> Int Never!,
 }
 
 /// Walk a SEQUENCE that must end at `end`. Every entry's tag must satisfy
 /// tag & must_mask == must_val; `visitor` sees the entries whose tag
 /// satisfies tag & may_mask == may_val (mbedtls_asn1_traverse_sequence_of).
-traverse_sequence_of: fn<V: SequenceVisitor>(data: [U8], p: &Int, end: Int, must_mask: Int, must_val: Int, may_mask: Int, may_val: Int, visitor: &V) ASN1Error! {
+traverse_sequence_of: fn<V: SequenceVisitor>(data: [U8], p: ^Int, end: Int, must_mask: Int, must_val: Int, may_mask: Int, may_val: Int, visitor: ^V) ASN1Error! {
     len := get_tag(data, p, end, ASN1_CONSTRUCTED | ASN1_SEQUENCE)
     if p + len != end -> return Err(.LengthMismatch)
     loop p < end {
@@ -284,7 +284,7 @@ SequenceItems: struct {
     items: [ASN1Buf],
 
     impl SequenceVisitor {
-        visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never! {
+        visit: fn(^self, tag_id: Int, start: Int, len: Int) -> Int Never! {
             self.items.push(ASN1Buf{tag_id: tag_id, p: start, len: len})
             0
         }
@@ -293,7 +293,7 @@ SequenceItems: struct {
 
 /// The entries of a SEQUENCE OF items that all carry `tag_id`, in order;
 /// empty for an empty sequence (mbedtls_asn1_get_sequence_of).
-get_sequence_of: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> [ASN1Buf] ASN1Error! {
+get_sequence_of: fn(data: [U8], p: ^Int, end: Int, tag_id: Int) -> [ASN1Buf] ASN1Error! {
     seq := SequenceItems{items: [ASN1Buf]{}}
     traverse_sequence_of(data, p, end, 0xFF, tag_id, 0, 0, seq)
     Ok(seq.items.move())
@@ -301,7 +301,7 @@ get_sequence_of: fn(data: [U8], p: &Int, end: Int, tag_id: Int) -> [ASN1Buf] ASN
 
 /// An AlgorithmIdentifier: the OID, and the parameters, asn1_none() when there
 /// are none (mbedtls_asn1_get_alg).
-get_alg: fn(data: [U8], p: &Int, end: Int) -> {alg: ASN1Buf, params: ASN1Buf} ASN1Error! {
+get_alg: fn(data: [U8], p: ^Int, end: Int) -> {alg: ASN1Buf, params: ASN1Buf} ASN1Error! {
     len: get_tag(data, p, end, ASN1_CONSTRUCTED | ASN1_SEQUENCE)
     if end - p < 1 -> return Err(.OutOfData)
     alg_tag: Int{layout_byte(data, p)}
@@ -321,7 +321,7 @@ get_alg: fn(data: [U8], p: &Int, end: Int) -> {alg: ASN1Buf, params: ASN1Buf} AS
 
 /// An AlgorithmIdentifier whose parameters are NULL or absent
 /// (mbedtls_asn1_get_alg_null).
-get_alg_null: fn(data: [U8], p: &Int, end: Int) -> ASN1Buf ASN1Error! {
+get_alg_null: fn(data: [U8], p: ^Int, end: Int) -> ASN1Buf ASN1Error! {
     got: get_alg(data, p, end)
     if (got.params.tag_id != ASN1_NULL && got.params.tag_id != 0) || got.params.len != 0 {
         return Err(.InvalidData)
@@ -342,7 +342,7 @@ find_named_data: fn(list: [NamedData], oid: [U8]) -> Int? {
 // Writing: each call writes before the cursor and moves it back.
 
 /// A definite length, short form below 0x80 (mbedtls_asn1_write_len).
-write_len: fn(buf: &[U8], p: &Int, start: Int, len: Int) -> Int ASN1Error! {
+write_len: fn(buf: ^[U8], p: ^Int, start: Int, len: Int) -> Int ASN1Error! {
     if len < 0 || len > 0xFFFFFFFF -> return Err(.InvalidLength)
     required := 1
     if len >= 0x80 {
@@ -370,7 +370,7 @@ write_len: fn(buf: &[U8], p: &Int, start: Int, len: Int) -> Int ASN1Error! {
 }
 
 /// One tag byte (mbedtls_asn1_write_tag).
-write_tag: fn(buf: &[U8], p: &Int, start: Int, tag_id: Int) -> Int ASN1Error! {
+write_tag: fn(buf: ^[U8], p: ^Int, start: Int, tag_id: Int) -> Int ASN1Error! {
     if p - start < 1 -> return Err(.BufTooSmall)
     p -= 1
     buf[p] = U8{tag_id & 0xFF}
@@ -378,14 +378,14 @@ write_tag: fn(buf: &[U8], p: &Int, start: Int, tag_id: Int) -> Int ASN1Error! {
 }
 
 /// The length and tag before `len` content bytes already written; the total.
-write_len_and_tag: fn(buf: &[U8], p: &Int, start: Int, len: Int, tag_id: Int) -> Int ASN1Error! {
+write_len_and_tag: fn(buf: ^[U8], p: ^Int, start: Int, len: Int, tag_id: Int) -> Int ASN1Error! {
     n: write_len(buf, p, start, len)
     t: write_tag(buf, p, start, tag_id)
     Ok(len + n + t)
 }
 
 /// `bytes` verbatim (mbedtls_asn1_write_raw_buffer).
-write_raw_buffer: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8]) -> Int ASN1Error! {
+write_raw_buffer: fn(buf: ^[U8], p: ^Int, start: Int, bytes: [U8]) -> Int ASN1Error! {
     if p < start || p - start < bytes.len() -> return Err(.BufTooSmall)
     p -= bytes.len()
     loop i in 0..<bytes.len() -> buf[p + i] = bytes[i]
@@ -394,7 +394,7 @@ write_raw_buffer: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8]) -> Int ASN1Er
 
 /// An INTEGER holding |x|, with a leading zero byte when a non-negative
 /// value's top bit is set; zero is 020100 (mbedtls_asn1_write_mpi).
-write_mpi: fn(buf: &[U8], p: &Int, start: Int, x: bn.Mpi) -> Int ASN1Error! {
+write_mpi: fn(buf: ^[U8], p: ^Int, start: Int, x: bn.Mpi) -> Int ASN1Error! {
     len := bn.size(x)
     if len == 0 -> len = 1
     if p < start || p - start < len -> return Err(.BufTooSmall)
@@ -412,13 +412,13 @@ write_mpi: fn(buf: &[U8], p: &Int, start: Int, x: bn.Mpi) -> Int ASN1Error! {
 }
 
 /// NULL (mbedtls_asn1_write_null).
-write_null: fn(buf: &[U8], p: &Int, start: Int) -> Int ASN1Error! {
+write_null: fn(buf: ^[U8], p: ^Int, start: Int) -> Int ASN1Error! {
     total: write_len_and_tag(buf, p, start, 0, ASN1_NULL)
     Ok(total)
 }
 
 /// An OBJECT IDENTIFIER from its encoded content (mbedtls_asn1_write_oid).
-write_oid: fn(buf: &[U8], p: &Int, start: Int, oid: [U8]) -> Int ASN1Error! {
+write_oid: fn(buf: ^[U8], p: ^Int, start: Int, oid: [U8]) -> Int ASN1Error! {
     len: write_raw_buffer(buf, p, start, oid)
     total: write_len_and_tag(buf, p, start, len, ASN1_OID)
     Ok(total)
@@ -427,7 +427,7 @@ write_oid: fn(buf: &[U8], p: &Int, start: Int, oid: [U8]) -> Int ASN1Error! {
 /// An AlgorithmIdentifier around parameters of `par_len` bytes already
 /// written; with `has_par` and no parameters, a NULL is written for them
 /// (mbedtls_asn1_write_algorithm_identifier_ext).
-write_algorithm_identifier_ext: fn(buf: &[U8], p: &Int, start: Int, oid: [U8], par_len: Int, has_par: Bool{true}) -> Int ASN1Error! {
+write_algorithm_identifier_ext: fn(buf: ^[U8], p: ^Int, start: Int, oid: [U8], par_len: Int, has_par: Bool{true}) -> Int ASN1Error! {
     len := 0
     if has_par {
         if par_len == 0 -> len += write_null(buf, p, start) else -> len += par_len
@@ -438,13 +438,13 @@ write_algorithm_identifier_ext: fn(buf: &[U8], p: &Int, start: Int, oid: [U8], p
 }
 
 /// An AlgorithmIdentifier with parameters (mbedtls_asn1_write_algorithm_identifier).
-write_algorithm_identifier: fn(buf: &[U8], p: &Int, start: Int, oid: [U8], par_len: Int) -> Int ASN1Error! {
+write_algorithm_identifier: fn(buf: ^[U8], p: ^Int, start: Int, oid: [U8], par_len: Int) -> Int ASN1Error! {
     total: write_algorithm_identifier_ext(buf, p, start, oid, par_len)
     Ok(total)
 }
 
 /// A BOOLEAN, true as 0xFF (mbedtls_asn1_write_bool).
-write_bool: fn(buf: &[U8], p: &Int, start: Int, value: Bool) -> Int ASN1Error! {
+write_bool: fn(buf: ^[U8], p: ^Int, start: Int, value: Bool) -> Int ASN1Error! {
     if p - start < 1 -> return Err(.BufTooSmall)
     p -= 1
     buf[p] = if value -> U8{0xFF} else -> U8{0}
@@ -454,7 +454,7 @@ write_bool: fn(buf: &[U8], p: &Int, start: Int, value: Bool) -> Int ASN1Error! {
 
 /// An INTEGER or ENUMERATED of a 32-bit int. A negative value writes only
 /// its low byte, as mbedtls does.
-write_tagged_int: fn(buf: &[U8], p: &Int, start: Int, value: Int, tag_id: Int) -> Int ASN1Error! {
+write_tagged_int: fn(buf: ^[U8], p: ^Int, start: Int, value: Int, tag_id: Int) -> Int ASN1Error! {
     len := 0
     v := value
     if p - start < 1 -> return Err(.BufTooSmall)
@@ -480,45 +480,45 @@ write_tagged_int: fn(buf: &[U8], p: &Int, start: Int, value: Int, tag_id: Int) -
 }
 
 /// An INTEGER (mbedtls_asn1_write_int).
-write_int: fn(buf: &[U8], p: &Int, start: Int, value: Int) -> Int ASN1Error! {
+write_int: fn(buf: ^[U8], p: ^Int, start: Int, value: Int) -> Int ASN1Error! {
     total: write_tagged_int(buf, p, start, value, ASN1_INTEGER)
     Ok(total)
 }
 
 /// An ENUMERATED (mbedtls_asn1_write_enum).
-write_enum: fn(buf: &[U8], p: &Int, start: Int, value: Int) -> Int ASN1Error! {
+write_enum: fn(buf: ^[U8], p: ^Int, start: Int, value: Int) -> Int ASN1Error! {
     total: write_tagged_int(buf, p, start, value, ASN1_ENUMERATED)
     Ok(total)
 }
 
 /// `text` under `tag_id` (mbedtls_asn1_write_tagged_string).
-write_tagged_string: fn(buf: &[U8], p: &Int, start: Int, tag_id: Int, text: [U8]) -> Int ASN1Error! {
+write_tagged_string: fn(buf: ^[U8], p: ^Int, start: Int, tag_id: Int, text: [U8]) -> Int ASN1Error! {
     len: write_raw_buffer(buf, p, start, text)
     total: write_len_and_tag(buf, p, start, len, tag_id)
     Ok(total)
 }
 
 /// A UTF8String (mbedtls_asn1_write_utf8_string).
-write_utf8_string: fn(buf: &[U8], p: &Int, start: Int, text: [U8]) -> Int ASN1Error! {
+write_utf8_string: fn(buf: ^[U8], p: ^Int, start: Int, text: [U8]) -> Int ASN1Error! {
     total: write_tagged_string(buf, p, start, ASN1_UTF8_STRING, text)
     Ok(total)
 }
 
 /// A PrintableString (mbedtls_asn1_write_printable_string).
-write_printable_string: fn(buf: &[U8], p: &Int, start: Int, text: [U8]) -> Int ASN1Error! {
+write_printable_string: fn(buf: ^[U8], p: ^Int, start: Int, text: [U8]) -> Int ASN1Error! {
     total: write_tagged_string(buf, p, start, ASN1_PRINTABLE_STRING, text)
     Ok(total)
 }
 
 /// An IA5String (mbedtls_asn1_write_ia5_string).
-write_ia5_string: fn(buf: &[U8], p: &Int, start: Int, text: [U8]) -> Int ASN1Error! {
+write_ia5_string: fn(buf: ^[U8], p: ^Int, start: Int, text: [U8]) -> Int ASN1Error! {
     total: write_tagged_string(buf, p, start, ASN1_IA5_STRING, text)
     Ok(total)
 }
 
 /// A named BIT STRING of the first `bits` bits of `bytes`: trailing zero bits
 /// are dropped, as DER requires (mbedtls_asn1_write_named_bitstring).
-write_named_bitstring: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8], bits: Int) -> Int ASN1Error! {
+write_named_bitstring: fn(buf: ^[U8], p: ^Int, start: Int, bytes: [U8], bits: Int) -> Int ASN1Error! {
     byte_len: (bits + 7) /% 8
     unused_bits: byte_len * 8 - bits
     n := bits
@@ -543,7 +543,7 @@ write_named_bitstring: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8], bits: In
 
 /// A BIT STRING of the first `bits` bits of `bytes`, the unused bits of its
 /// last byte cleared (mbedtls_asn1_write_bitstring).
-write_bitstring: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8], bits: Int) -> Int ASN1Error! {
+write_bitstring: fn(buf: ^[U8], p: ^Int, start: Int, bytes: [U8], bits: Int) -> Int ASN1Error! {
     byte_len := (bits + 7) /% 8
     unused_bits: byte_len * 8 - bits
     if p < start || p - start < byte_len + 1 -> return Err(.BufTooSmall)
@@ -562,7 +562,7 @@ write_bitstring: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8], bits: Int) -> 
 }
 
 /// An OCTET STRING (mbedtls_asn1_write_octet_string).
-write_octet_string: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8]) -> Int ASN1Error! {
+write_octet_string: fn(buf: ^[U8], p: ^Int, start: Int, bytes: [U8]) -> Int ASN1Error! {
     len: write_raw_buffer(buf, p, start, bytes)
     total: write_len_and_tag(buf, p, start, len, ASN1_OCTET_STRING)
     Ok(total)
@@ -571,7 +571,7 @@ write_octet_string: fn(buf: &[U8], p: &Int, start: Int, bytes: [U8]) -> Int ASN1
 /// Set the value of the entry with OID `oid` to a copy of `val`, adding the
 /// entry at the head of `list` when there is none; the entry's index
 /// (mbedtls_asn1_store_named_data).
-store_named_data: fn(list: &[NamedData], oid: [U8], val: [U8]) -> Int Never! {
+store_named_data: fn(list: ^[NamedData], oid: [U8], val: [U8]) -> Int Never! {
     if find_named_data(list, oid) == .Val(at) {
         list[at].val = val.copy()
         return at

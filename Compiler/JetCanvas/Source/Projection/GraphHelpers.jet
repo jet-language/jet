@@ -235,7 +235,7 @@ pure_leaf: fn(tables: ASTTables, expr: ExprNode) -> Bool Never! {
     }
 }
 
-wire_ident_refs: fn(g: &GraphBuilder, expr: ExprNode, input_pin: String) {
+wire_ident_refs: fn(g: ^GraphBuilder, expr: ExprNode, input_pin: String) {
     if ast_expr(g.tables, expr) == .Ident(name, span, _) {
         if g.local_pins.get(name) == .Val(pin) {
             add_wire_with_span(g, pin, input_pin, "data", Val(span))

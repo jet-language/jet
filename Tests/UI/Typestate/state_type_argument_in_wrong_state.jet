@@ -12,11 +12,11 @@ Order: struct {
 
     start: fn(id: Int) -> Order.Draft { Order{id: id} }
 
-    confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+    confirm: fn(self: ^^Order.Draft) -> Order.Confirmed { self }
 
-    ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+    ship: fn(self: ^^Order.Confirmed) -> Order.Shipped { self }
 
-    cancel: fn(self: &&Order.Open) -> Order.Canceled { self }
+    cancel: fn(self: ^^Order.Open) -> Order.Canceled { self }
 }
 
 receipt: fn(order: Order.Shipped) -> String { "shipped {order.id}" }

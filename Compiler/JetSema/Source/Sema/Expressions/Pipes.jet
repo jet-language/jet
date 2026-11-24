@@ -44,7 +44,7 @@ sema_expr_pipe_unread_step: fn(steps: [PipeStep]) -> Int? Never! {
 
 // E0438 for `step`, whose hidden name `scopes` binds to the value it
 // receives.
-sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Diagnostic {
+sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> Diagnostic {
     what: "This pipe step doesn't use `<>`"
     why: "Each `|>` step receives the value of the line above as `<>`; a step that never reads it drops that value"
     // The method form is a placement only when no function placement fits.
@@ -76,7 +76,7 @@ sema_expr_pipe_step_without_value: fn(step: PipeStep, environment: SemaScopeEnvi
 }
 
 // Whether `value` checks without an error; the probe leaves nothing behind.
-sema_expr_pipe_fits: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+sema_expr_pipe_fits: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> Bool {
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
     probed != None && !sema_has_error_since(probe_diagnostics, 0)
@@ -86,7 +86,7 @@ sema_expr_pipe_fits: fn(value: Expr, environment: SemaScopeEnvironment, program:
 // function call's argument slots first to last, then the method form of a
 // name with no dot. A call that already checks takes no value: its step
 // drops it, and only a person can say where the value goes.
-sema_expr_pipe_placements: fn(step: PipeStep, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> [SemaPipePlacement] {
+sema_expr_pipe_placements: fn(step: PipeStep, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> [SemaPipePlacement] {
     placements := [SemaPipePlacement]{}
     if step.value == .Ident(name, span, id) {
         // copy: each placement owns its rewritten step.

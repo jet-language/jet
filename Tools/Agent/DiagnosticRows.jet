@@ -744,14 +744,14 @@ source_code: fn(code: String) -> Bool Never! {
     words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { code_byte(Int{byte}) && Int{byte} != 45 }) })
 }
 
-add_code: fn(codes: &[String], code: String) {
+add_code: fn(codes: ^[String], code: String) {
     if !codes.contains(code) -> codes.push(code.copy())
 }
 
 // The codes `text` names: in double quotes or square brackets, or by the
 // name a message or report heading in it opens with
 // (`"Jet.EnvDecodeFailed: …"`, `"Stop: Jet.ZipLengthMismatch: …"`).
-source_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
+source_codes: fn(facts: [RowFacts], text: String, codes: ^[String]) {
     bytes: text.bytes()
     loop (index, raw) in bytes {
         byte: Int{raw}
@@ -771,7 +771,7 @@ source_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
 // The codes the `.jet` sources under `directory` name, outside test, fixture
 // and hidden directories (a build's `.jet` holds generated copies of the
 // registry) and the registry's own two files.
-emitted_codes: fn(facts: [RowFacts], directory: String, codes: &[String]) -[FS]> DiagnosticRowsError! {
+emitted_codes: fn(facts: [RowFacts], directory: String, codes: ^[String]) -[FS]> DiagnosticRowsError! {
     if !files.exists(directory) -> return Ok()
     loop child in
         (files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))) {
@@ -794,7 +794,7 @@ emitted_codes: fn(facts: [RowFacts], directory: String, codes: &[String]) -[FS]>
 // as an `Err` whose message opens with a code, since every row's heading
 // prints its name; any other code is a build rule's own (`Error: ORG01: …`),
 // which a compiler report never prints.
-report_codes: fn(facts: [RowFacts], text: String, codes: &[String]) {
+report_codes: fn(facts: [RowFacts], text: String, codes: ^[String]) {
     loop line in text.split("\n") {
         token: line_name(line) ?? next
         if token.starts_with(NAME_PATH) {

@@ -244,7 +244,7 @@ jet_cli_struct_conflict: fn(kind: String, base: JetCLIStructUnit, ours: JetCLISt
     JetCLIStructConflict{kind: kind, stable_id: base.fact.stable_id, identity: base.fact.human_identity, ours: ours.fact.content_id, theirs: theirs.fact.content_id}
 }
 
-jet_cli_struct_merge_text: fn(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: &[JetCLIStructConflict]) -> String Never! {
+jet_cli_struct_merge_text: fn(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: ^[JetCLIStructConflict]) -> String Never! {
     // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if ours == theirs -> return ours.copy()

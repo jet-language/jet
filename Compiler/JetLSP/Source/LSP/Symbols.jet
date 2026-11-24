@@ -79,7 +79,7 @@ lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> S
 
 // The rows of one folder: each open document below it, then each saved file
 // below it that is not open. False once the answer is full.
-lsp_root_symbol_rows: fn(server: LSPServer, root: String, query: String, seen: &[String:Bool], rows: &[String]) -> Bool {
+lsp_root_symbol_rows: fn(server: LSPServer, root: String, query: String, seen: ^[String:Bool], rows: ^[String]) -> Bool {
     loop (uri, doc) in server.diagnostic_state.docs {
         if !lsp_path_below(doc.path, root) -> next
         checked: server.published.get(uri) ?? server.check(doc)
@@ -104,7 +104,7 @@ lsp_path_open: fn(server: LSPServer, path: String) -> Bool Never! {
 // The folders `initialize` names: its `workspaceFolders`, else its
 // `rootUri`. A client that names neither leaves workspace symbols on the
 // open documents' checks.
-lsp_initial_workspace_folders: fn(server: &LSPServer, params: Dyn?) Never! {
+lsp_initial_workspace_folders: fn(server: ^LSPServer, params: Dyn?) Never! {
     if lsp_param(params, "workspaceFolders") == .Val(folders) {
         if folders == .Array(rows) {
             server.workspace_named = true
@@ -122,7 +122,7 @@ lsp_initial_workspace_folders: fn(server: &LSPServer, params: Dyn?) Never! {
 
 // `workspace/didChangeWorkspaceFolders`: the removed folders leave, then the
 // added ones join.
-lsp_change_workspace_folders: fn(server: &LSPServer, params: Dyn?) Never! {
+lsp_change_workspace_folders: fn(server: ^LSPServer, params: Dyn?) Never! {
     event: lsp_param(params, "event") ?? return
     removed: lsp_folder_paths(lsp_member_rows(event, "removed"))
     // Popping the folders reverses them; popping again restores the order.
@@ -170,7 +170,7 @@ lsp_path_below: fn(path: String, root: String) -> Bool Never! {
 
 // A saved file's declarations, from its text parsed and outlined alone
 // (semindex_build_outline): the module is named by the file's stem.
-lsp_saved_outline: fn(source: &&JetDriverSourceDocument) -> LSPChecked Never! {
+lsp_saved_outline: fn(source: ^^JetDriverSourceDocument) -> LSPChecked Never! {
     parsed: parse_source(source.source.bytes())
     physical: source.path.move()
     stem: lsp_file_stem(physical)
@@ -203,7 +203,7 @@ lsp_file_stem: fn(path: String) -> String Never! {
 // Adds the rows of `checked`'s declarations that match `query`, only those of
 // the module at `slot` when it is not -1. Each declaration is one row. False
 // once the answer is full.
-lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: &[String:Bool], rows: &[String]) -> Bool Never! {
+lsp_symbol_rows: fn(checked: LSPChecked, slot: Int, query: String, seen: ^[String:Bool], rows: ^[String]) -> Bool Never! {
     index: checked.index ?? return true
     loop definition in index.definitions {
         def: definition.def

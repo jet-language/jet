@@ -23,7 +23,7 @@ user_scope: fn(authority: Authority) { _: scope(authority) }
 #Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
 
 // `queue.enqueue` forwards to `core.jobs.__enqueue`, declared `-[DB, Time]>`.
-core_enqueue: fn(queue: &jobs.JobQueue) { _: queue.enqueue(process, "now") ?? return }
+core_enqueue: fn(queue: ^jobs.JobQueue) { _: queue.enqueue(process, "now") ?? return }
 
 main: fn() {
     core_today()

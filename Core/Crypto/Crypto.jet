@@ -97,7 +97,7 @@ Hasher: struct {
 
     new: fn() -> Hasher Never! { {ctx: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)} }
 
-    update: fn(&self, bytes: [U8]) Never! {
+    update: fn(^self, bytes: [U8]) Never! {
         hashes.hash_update_with(hashes.SHA256Hash{}, self.ctx, bytes)
     }
 
@@ -112,9 +112,9 @@ Hasher: struct {
 /// Hashlib-style module constructors for the default SHA-256 hasher.
 new: fn() -> Hasher Never! { Hasher.new() }
 
-update: fn(hasher: &Hasher, bytes: [U8]) Never! { hasher.update(bytes) }
+update: fn(hasher: ^Hasher, bytes: [U8]) Never! { hasher.update(bytes) }
 
-digest: fn(hasher: &&Hasher) -> String Never! { hasher.digest() }
+digest: fn(hasher: ^^Hasher) -> String Never! { hasher.digest() }
 
 #!Codable
 Secret: struct {
@@ -145,7 +145,7 @@ Secret: struct {
     // same allocation before it is released. Rebinding `self.move()` instead would make a
     // second owner whose scope-end Close re-enters this one.
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             bytes := self.bytes.move()
             core.crypto.wipe(bytes)
         }
@@ -171,7 +171,7 @@ SigningKey: struct {
     public_key: fn(self) -> VerifyKey Never! { VerifyKey{bytes: ed25519_public_raw(self.bytes)} }
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             bytes := self.bytes.move()
             core.crypto.wipe(bytes)
         }
@@ -210,7 +210,7 @@ X25519SecretKey: struct {
     }
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             bytes := self.bytes.move()
             core.crypto.wipe(bytes)
         }
@@ -241,7 +241,7 @@ SharedSecret: struct {
     bytes: [U8],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             bytes := self.bytes.move()
             core.crypto.wipe(bytes)
         }
@@ -269,7 +269,7 @@ WrappedKey: struct {
 }
 
 // Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
-priv __vault_wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
+priv __vault_wrapped_from_bytes: fn(bytes: ^^[U8]) -> WrappedVaultKey KeyWrapError! {
     #Unsafe("vault key import: validate a serialized wrapped carrier at the typed crypto boundary") {
         wrapped: core.crypto.vault.__wrapped_from_bytes(bytes) ?? return Err(KeyWrapError{reason: err.reason})
         return Ok(wrapped)
@@ -373,7 +373,7 @@ pbkdf2_hmac: fn(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U
 
 // Zeroes the buffer in place through the raw wipe leaf; this public entry owns
 // the user-facing signature.
-wipe: fn(bytes: &[U8]) Never! { core.crypto.__wipe(bytes) }
+wipe: fn(bytes: ^[U8]) Never! { core.crypto.__wipe(bytes) }
 
 /// Whether a and b hold the same bytes, in time that depends only on their
 /// lengths: the bytes fold into one U8 difference, with no branch on them.
@@ -560,7 +560,7 @@ key_order: fn(a: [U8], b: [U8]) -> Int Never! {
     0
 }
 
-append_be32: fn(out: &[U8], n: Int) -> Bool CryptoError! {
+append_be32: fn(out: ^[U8], n: Int) -> Bool CryptoError! {
     out.push(wrapping(U8{n >> 24}))
     out.push(wrapping(U8{n >> 16}))
     out.push(wrapping(U8{n >> 8}))
@@ -959,7 +959,7 @@ priv byte_words: module {
         U32{bytes[off]} | U32{bytes[off + 1]} << 8 | U32{bytes[off + 2]} << 16 | U32{bytes[off + 3]} << 24
     }
 
-    push_le32: fn(out: &[U8], value: U32) Never! {
+    push_le32: fn(out: ^[U8], value: U32) Never! {
         loop k in 0..<4 -> out.push(wrapping(U8{value >> (8 * k)}))
     }
 }
@@ -1079,7 +1079,7 @@ priv chacha20_core: module {
     }
 
     /// The twenty ChaCha rounds of `state` into `w`, before the final addition.
-    chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+    chacha20_rounds: fn(state: [U32], w: ^[U32]) Never! {
         loop i in 0..<16 -> w[i] = state[i]
         loop _ in 0..<10 {
             qr(w, 0, 4, 8, 12)
@@ -1103,7 +1103,7 @@ priv chacha20_core: module {
     out
 }
 
-#Overflow(.Wrapping) qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+#Overflow(.Wrapping) qr: fn(s: ^[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
     a := s[ia]
     b := s[ib]
     c := s[ic]
@@ -1511,7 +1511,7 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
 }
 
 /// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
-#Overflow(.Wrapping) priv blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
+#Overflow(.Wrapping) priv blake3_g: fn(s: ^[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
     s[a] = s[a] + s[b] + mx
     s[d] = (s[d] ~ s[a]).rotate_right(16)
     s[c] = s[c] + s[d]

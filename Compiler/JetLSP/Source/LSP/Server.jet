@@ -83,7 +83,7 @@ LSPServer: struct {
     lex: fn(self, doc: LSPDocument) -> Lexed Never! { lsp_lex_source(doc.text) }
 }
 
-lsp_server: fn(checker: &&LSPChecker) -> LSPServer Never! {
+lsp_server: fn(checker: ^^LSPChecker) -> LSPServer Never! {
     LSPServer{diagnostic_state: lsp_diagnostic_state(), checker: checker, published: [String:LSPChecked]{}, initialized: false, shutdown: false, exited: false, document_changes: false, semantic_results: [String:LSPSemanticResult]{}, semantic_serial: 0}
 }
 
@@ -96,7 +96,7 @@ lsp_lex_source: fn(text: String) -> Lexed Never! {
     lex(text.bytes())
 }
 
-lsp_apply_content_change: fn(doc: &LSPDocument, change: Dyn) -> Bool Never! {
+lsp_apply_content_change: fn(doc: ^LSPDocument, change: Dyn) -> Bool Never! {
     replacement: lsp_text_member(change, "text") ?? return false
     length := Int?{None}
     if lsp_member(change, "rangeLength") == .Val(value) {
@@ -116,7 +116,7 @@ lsp_apply_content_change: fn(doc: &LSPDocument, change: Dyn) -> Bool Never! {
 // accepted change list, even an empty one, advances the version and marks the
 // document dirty. A document opened in another language is not Jet and is not
 // kept, so it is never checked. Returns the document's URI.
-lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool{false}) -> String? Never! {
+lsp_update_document: fn(state: ^LSPDiagnosticState, params: Dyn?, is_open: Bool{false}) -> String? Never! {
     document: lsp_param(params, "textDocument") ?? return None
     uri: lsp_text_member(document, "uri") ?? return None
     version: foundation_json_integer(lsp_member(document, "version") ?? return None) ?? return None

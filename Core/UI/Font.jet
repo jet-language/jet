@@ -442,7 +442,7 @@ GlyphCache: struct {
 
     /// `face.raster(id, size_px, x_frac)` with `x_frac` rounded to a quarter
     /// pixel, drawn the first time and kept.
-    glyph: fn(&self, face: Face, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
+    glyph: fn(^self, face: Face, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
         quarter: if x_frac > 0.0 && x_frac < 1.0 -> Int{math.round(x_frac * 4.0)} else -> 0
         cached_mask(self, face, id, size_64(size_px), quarter)
     }
@@ -483,7 +483,7 @@ Cells: struct {
 /// byte d becomes s + d * (255 - sa) / 255, with s = C * sa / 255 (alpha
 /// alike, its source 255) and every product rounded, (p + 127) / 255.
 /// Integers only, so every target paints the same bytes.
-blend: fn(pixels: &[U8], width: Int, height: Int, stride_bytes: Int, mask: GlyphMask, x: Int, y: Int, argb: Int, clip: UIRect) {
+blend: fn(pixels: ^[U8], width: Int, height: Int, stride_bytes: Int, mask: GlyphMask, x: Int, y: Int, argb: Int, clip: UIRect) {
     if width <= 0 || height <= 0 || stride_bytes < width * 4 || pixels.len() < width * 4 || mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height {
         return
     }
@@ -527,7 +527,7 @@ blend: fn(pixels: &[U8], width: Int, height: Int, stride_bytes: Int, mask: Glyph
 /// each glyph at its quarter-pixel position with masks from `cache`.
 /// Positions are integer 1/64 pixels. Returns the line's advance in whole
 /// pixels.
-draw_text: fn(pixels: &[U8], width: Int, height: Int, stride_bytes: Int, cache: &GlyphCache, face: Face, text: String, size_px: Float, x: Int, baseline_y: Int, argb: Int, clip: UIRect) -> Int {
+draw_text: fn(pixels: ^[U8], width: Int, height: Int, stride_bytes: Int, cache: ^GlyphCache, face: Face, text: String, size_px: Float, x: Int, baseline_y: Int, argb: Int, clip: UIRect) -> Int {
     size: size_64(size_px)
     if size == 0 -> return 0
     shaped: shape(face, text)
@@ -632,7 +632,7 @@ priv internal: module {
     }
 
     // Ranges must ascend without overlap, so a binary search finds each glyph.
-    push_range: fn(ranges: &Ranges, start: Int, end: Int, value: Int, what: String) FontError! {
+    push_range: fn(ranges: ^Ranges, start: Int, end: Int, value: Int, what: String) FontError! {
         if end < start -> return Err(font_error("{what}: range {start}..{end} runs backwards"))
         last: ranges.ends.len() - 1
         if last >= 0 && start <= ranges.ends[last] {
@@ -831,7 +831,7 @@ priv internal: module {
     // `points`) to `ends`. `scale` is a 16.16 factor from font units (UNSCALED
     // for none), applied as FreeType applies it: to each point and to each
     // component offset, so a composite rounds as FreeType's does.
-    glyph_points: fn(face: Face, id: Int, depth: Int, scale: Int, points: &[OutlinePoint], ends: &[Int]) FontError! {
+    glyph_points: fn(face: Face, id: Int, depth: Int, scale: Int, points: ^[OutlinePoint], ends: ^[Int]) FontError! {
         span: glyph_span(face, id)
         if span.length == 0 -> return Ok()
         if span.length < 10 {
@@ -842,7 +842,7 @@ priv internal: module {
         composite_points(face, id, span, depth, scale, points, ends)
     }
 
-    simple_points: fn(face: Face, id: Int, span: TableSpan, contours: Int, scale: Int, points: &[OutlinePoint], ends: &[Int]) FontError! {
+    simple_points: fn(face: Face, id: Int, span: TableSpan, contours: Int, scale: Int, points: ^[OutlinePoint], ends: ^[Int]) FontError! {
         b: face.bytes
         limit: span.offset + span.length
         at := span.offset + 10
@@ -925,7 +925,7 @@ priv internal: module {
 
     // A composite glyph: each component's points, transformed and moved, in
     // order. Offsets are not scaled by the transform (the Microsoft reading).
-    composite_points: fn(face: Face, id: Int, span: TableSpan, depth: Int, scale: Int, points: &[OutlinePoint], ends: &[Int]) FontError! {
+    composite_points: fn(face: Face, id: Int, span: TableSpan, depth: Int, scale: Int, points: ^[OutlinePoint], ends: ^[Int]) FontError! {
         if depth >= COMPONENT_DEPTH_MAX {
             return Err(font_error("glyf: glyph {id} nests components deeper than {COMPONENT_DEPTH_MAX}"))
         }
@@ -1340,7 +1340,7 @@ priv internal: module {
     }
 
     // Greedy filling of one paragraph, bytes `start..<stop` without its "\n".
-    wrap_paragraph: fn(face: Face, bytes: [U8], start: Int, stop: Int, size_px: Float, max_width: Float, lines: &[TextLine]) {
+    wrap_paragraph: fn(face: Face, bytes: [U8], start: Int, stop: Int, size_px: Float, max_width: Float, lines: ^[TextLine]) {
         line := start
         loop line < stop && is_space(Int{bytes[line]}) -> line += 1
         if line >= stop {
@@ -1393,7 +1393,7 @@ priv internal: module {
     // Glyph `id` at `size` 1/64 pixels per em, `quarter` quarter pixels right,
     // from `cache` or drawn into it. Four quarters is the unmoved mask one pixel
     // right.
-    cached_mask: fn(cache: &GlyphCache, face: Face, id: Int, size: Int, quarter: Int) -> GlyphMask {
+    cached_mask: fn(cache: ^GlyphCache, face: Face, id: Int, size: Int, quarter: Int) -> GlyphMask {
         if quarter == 4 {
             moved := cached_mask(cache, face, id, size, 0)
             moved.left += 1
@@ -1519,7 +1519,7 @@ priv internal: module {
     // (`ox`, `oy`). It starts at its first on-curve point, or between its last
     // and first points when all are control points; between two control points
     // lies an on-curve point at their midpoint, rounded down.
-    contour: fn(cells: &Cells, points: [OutlinePoint], first: Int, last: Int, ox: Int, oy: Int) {
+    contour: fn(cells: ^Cells, points: [OutlinePoint], first: Int, last: Int, ox: Int, oy: Int) {
         n: last - first + 1
         if n < 2 {
             return
@@ -1575,7 +1575,7 @@ priv internal: module {
 
     // A quadratic curve as 2^k lines: k grows until each piece's bend is under a
     // quarter pixel, the points stepped by forward differences in 32.32.
-    conic: fn(cells: &Cells, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
+    conic: fn(cells: ^Cells, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
         ax: x0 + x2 - 2 * x1
         ay: y0 + y2 - 2 * y1
         bend := max_int(abs_int(ax), abs_int(ay))
@@ -1614,7 +1614,7 @@ priv internal: module {
     }
 
     // A line in 1/SUBPIXEL pixels, split at each row it crosses.
-    line: fn(cells: &Cells, x0: Int, y0: Int, x1: Int, y1: Int) {
+    line: fn(cells: ^Cells, x0: Int, y0: Int, x1: Int, y1: Int) {
         if y0 == y1 {
             return
         }
@@ -1654,7 +1654,7 @@ priv internal: module {
     }
 
     // A piece of a line inside pixel row `row`, split at each column it crosses.
-    row_piece: fn(cells: &Cells, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+    row_piece: fn(cells: ^Cells, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
         if y0 == y1 {
             return
         }
@@ -1699,7 +1699,7 @@ priv internal: module {
     }
 
     // A piece of a line inside one pixel.
-    cell: fn(cells: &Cells, col: Int, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+    cell: fn(cells: ^Cells, col: Int, row: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
         if y0 == y1 || row < 0 || row >= cells.height || col > cells.width {
             return
         }
@@ -1782,7 +1782,7 @@ priv internal: module {
         out
     }
 
-    put: fn(out: &[U8], value: Int, width: Int) {
+    put: fn(out: ^[U8], value: Int, width: Int) {
         loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)) & 255})
     }
 

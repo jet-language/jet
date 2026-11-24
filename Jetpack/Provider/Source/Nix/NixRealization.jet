@@ -95,7 +95,7 @@ provider_primary_nix_output_digest: fn(digests: [String:String]) -> String? Neve
 // The authenticated admission digest of an output this provider just
 // substituted, when its path is exactly the sealed Hangar object. Admission
 // already enforced the object-shape law (directory, file, or symlink root).
-provider_admitted_output_digest: fn(verification: &StoreVerification, ctx: ProviderCtx, realized: Realized, name: String, path: String) -[FS, Env]> String? Never! {
+provider_admitted_output_digest: fn(verification: ^StoreVerification, ctx: ProviderCtx, realized: Realized, name: String, path: String) -[FS, Env]> String? Never! {
     if realized.producer.provider != "nix" || realized.source_state != SourceState.Substituted {
         return None
     }
@@ -114,7 +114,7 @@ provider_admitted_output_digest: fn(verification: &StoreVerification, ctx: Provi
 
 // Hash realized output bytes. Hangar objects use the sealed stat manifest and
 // the Nix shape law; everything else keeps the strict native law.
-provider_hash_output_bytes: fn(verification: &StoreVerification, ctx: ProviderCtx, path: String) -[FS, Env]> String ProviderReason! {
+provider_hash_output_bytes: fn(verification: ^StoreVerification, ctx: ProviderCtx, path: String) -[FS, Env]> String ProviderReason! {
     if ctx.nix_roots == {
         .Val(roots) -> {
             hangar: roots.hangar_dir()
@@ -133,7 +133,7 @@ provider_hash_output_bytes: fn(verification: &StoreVerification, ctx: ProviderCt
 // Prepare the Nix identity from the authenticated admission digest when this
 // provider just substituted the object; other paths hash current bytes. An
 // existing project lock pins the primary digest.
-provider_prepare_nix_identity: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[FS, Env]> PreparedNixIdentity ProviderError! {
+provider_prepare_nix_identity: fn(verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[FS, Env]> PreparedNixIdentity ProviderError! {
     digests := [String:String]{}
     loop name in provider_sorted_keys(realized.named_outputs) {
         path: realized.named_outputs[name]
@@ -345,7 +345,7 @@ provider_nix_closure_record: fn(entry: StoreEntry, producer: ProducerRecord, pro
 
 // Publish Nix lock state only after Store returned a registered entry. A
 // missing or non-directory project root intentionally does nothing.
-provider_record_nix_lock_after_store: fn(verification: &StoreVerification, ctx: ProviderCtx, roots: HangarRoots, entry: StoreEntry) -[IO, FS, Env, Exec, Time, Time.Wait]> StoreEntry ProviderError! {
+provider_record_nix_lock_after_store: fn(verification: ^StoreVerification, ctx: ProviderCtx, roots: HangarRoots, entry: StoreEntry) -[IO, FS, Env, Exec, Time, Time.Wait]> StoreEntry ProviderError! {
     project: ctx.project_dir ?? return Ok(entry)
     if !files.is_dir(project) -> return Ok(entry)
     if entry.reference == "" || entry.envelope.output_hash == "" -> return Ok(entry)
@@ -530,7 +530,7 @@ provider_is_lower_hex: fn(value: String, count: Int) -> Bool Never! {
 
 // Realize a true local catalog miss through the one-shot interactive Nix
 // compatibility fallback; the result remains Jetpack-owned.
-provider_realize_from_local_nix: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, key: NixIndexKey) -[IO, FS, Env, Exec, Time, Time.Wait]> Realized ProviderError! {
+provider_realize_from_local_nix: fn(verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, key: NixIndexKey) -[IO, FS, Env, Exec, Time, Time.Wait]> Realized ProviderError! {
     project: ctx.project_dir ?? return Err(ProviderError.Unsupported("local Nix fallback requires a project with an exact source lock"))
     source_name: if spec.source == {
         .Named(name) -> name
@@ -555,7 +555,7 @@ provider_realize_from_local_nix: fn(verification: &StoreVerification, spec: RefS
 
 // A native cache admission failure as E1350, naming the missing Nix
 // reference when a registered Nix entry no longer hashes to its record.
-provider_nix_cache_error: fn(verification: &StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env, Time]> ProviderError Never! {
+provider_nix_cache_error: fn(verification: ^StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env, Time]> ProviderError Never! {
     detail := "{diagnostic_headline(error.code(), error.what())}; why: {error.why()}; fix: {error.fix()}"
     if provider_missing_nix_store_path(verification, roots) == {
         .Val(store_path) -> { detail = "{detail}; missing Nix reference `{store_path}`" }
@@ -564,7 +564,7 @@ provider_nix_cache_error: fn(verification: &StoreVerification, roots: HangarRoot
     ProviderError.NixCache(detail)
 }
 
-provider_missing_nix_store_path: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> String? Never! {
+provider_missing_nix_store_path: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env, Time]> String? Never! {
     entries: store_list_checked(verification, roots) ?? return None
     loop entry in entries {
         producer: ProducerRecord.decode(entry.producer_record) ?? next
@@ -580,7 +580,7 @@ provider_missing_nix_store_path: fn(verification: &StoreVerification, roots: Han
 
 // Bind a Nix realization to its prepared identity: cache identity, prepared
 // facts in both the producer facts and the replay plan, and the policy facts.
-provider_finalize_nix_realization: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[IO, FS, Env, Time.Wait]> Realized ProviderError! {
+provider_finalize_nix_realization: fn(verification: ^StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx, realized: Realized) -[IO, FS, Env, Time.Wait]> Realized ProviderError! {
     if ctx.progress == {
         .Val(progress) -> { progress.phase("Registering") }
         .None -> {}

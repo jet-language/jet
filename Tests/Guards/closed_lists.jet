@@ -75,7 +75,7 @@ closed_list_ident_prefix: fn(text: String) -> String {
 }
 
 // The string literals on `line`, lower-cased.
-closed_list_string_members: fn(line: String, out: &[String]) {
+closed_list_string_members: fn(line: String, out: ^[String]) {
     bytes: line.bytes()
     index := 0
     loop {
@@ -393,7 +393,7 @@ CLOSED_LIST_IN_DISCRIMINANT: 5
 // pushed to `out` lower-cased: `A, B, C`, `Custom(String)`, `Report{ code:
 // Int }`, `#Marker A` and `A = 1` each name one; a group `G { A, B }` names
 // `G`. Returns the index just past the body's closing `}`.
-closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: &[String]) -> Int {
+closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: ^[String]) -> Int {
     cursor := from
     depth := 1
     state := CLOSED_LIST_AT_START
@@ -458,7 +458,7 @@ closed_list_enum_members: fn(text: String, bytes: [U8], from: Int, out: &[String
 // The string literals of the `[String]` body that starts just past its `{`
 // at `from`, pushed to `out` lower-cased. Returns the index just past the
 // body's closing `}`.
-closed_list_string_body: fn(text: String, bytes: [U8], from: Int, out: &[String]) -> Int {
+closed_list_string_body: fn(text: String, bytes: [U8], from: Int, out: ^[String]) -> Int {
     cursor := from
     depth := 1
     loop {
@@ -479,7 +479,7 @@ closed_list_string_body: fn(text: String, bytes: [U8], from: Int, out: &[String]
     }
 }
 
-closed_list_record: fn(path: String, name: String, members: [String], out: &[ClosedListFinding]) {
+closed_list_record: fn(path: String, name: String, members: [String], out: ^[ClosedListFinding]) {
     unique: closed_list_unique(members)
     if unique.len() >= 3 -> out.push(ClosedListFinding{path: path, name: name, members: unique})
 }
@@ -489,7 +489,7 @@ closed_list_record: fn(path: String, name: String, members: [String], out: &[Clo
 // when it holds three or more members. A list a method call follows
 // (`[String]{…}.join("")`) is a String, not a list. Returns the index just
 // past the body, or -1 when `name` opens none of them.
-closed_list_declaration: fn(path: String, text: String, bytes: [U8], name: ClosedListToken, out: &[ClosedListFinding]) -> Int {
+closed_list_declaration: fn(path: String, text: String, bytes: [U8], name: ClosedListToken, out: ^[ClosedListFinding]) -> Int {
     colon: closed_list_code_token(bytes, name.end)
     if !closed_list_is_punct(bytes, colon, 58) -> return -1
     head: closed_list_code_token(bytes, colon.end)
@@ -526,7 +526,7 @@ closed_list_declaration: fn(path: String, text: String, bytes: [U8], name: Close
 // Every closed list `text` declares at top level, outside the generated
 // blocks registered generators own, for the file `path`. A declaration
 // after `priv` or `pub` is not one.
-closed_list_findings_in: fn(path: String, text: String, out: &[ClosedListFinding]) {
+closed_list_findings_in: fn(path: String, text: String, out: ^[ClosedListFinding]) {
     if !text.contains("enum") && !text.contains("[String]") {
         return
     }
@@ -574,7 +574,7 @@ closed_list_skipped_dir: fn(name: String) -> Bool {
     name.starts_with(".") || name == "node_modules" || name == "target" || name == "build" || name == "Tests" || name == "tests" || name == "Fixtures" || name == "fixtures" || name == "Vendor"
 }
 
-closed_list_scan: fn(path: String, out: &[ClosedListFinding]) {
+closed_list_scan: fn(path: String, out: ^[ClosedListFinding]) {
     kind: closed_list_files.stat(path) ?? return
     if kind.is_symlink {
         return
@@ -685,7 +685,7 @@ closed_list_dispatch_key: fn(text: String, bytes: [U8], token: ClosedListToken) 
 // pushed to `out` lower-cased: only its dispatch keys when `keys_only`.
 // Returns the index just past its body, or the start of the next top-level
 // line when it has none.
-closed_list_function_members: fn(text: String, bytes: [U8], from: Int, keys_only: Bool, out: &[String]) -> Int {
+closed_list_function_members: fn(text: String, bytes: [U8], from: Int, keys_only: Bool, out: ^[String]) -> Int {
     cursor := from
     depth := 0
     opened := false
@@ -717,7 +717,7 @@ closed_list_function_members: fn(text: String, bytes: [U8], from: Int, keys_only
 // Every top-level function of the route or dispatch file `path` (source
 // `text`) that holds three or more Core names, as a finding named by the
 // function.
-closed_list_dispatch_in: fn(path: String, text: String, keys_only: Bool, out: &[ClosedListFinding]) {
+closed_list_dispatch_in: fn(path: String, text: String, keys_only: Bool, out: ^[ClosedListFinding]) {
     bytes: text.bytes()
     depth := 0
     cursor := 0
@@ -781,7 +781,7 @@ closed_list_duplicate_problem: fn(pair: String) -> String {
 // copy file, copy name, home file, home name. The copy must hold the home's
 // members in the home's order, so editing the copy alone fails; edit the home
 // and copy it, or generate the copy. Returns the copies' keys.
-closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]], problems: &[String]) -> [String] {
+closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]], problems: ^[String]) -> [String] {
     at := [String:Int]{}
     loop (index, finding) in findings -> at[closed_list_key(finding.path, finding.name)] = index
     copies := [String]{}
@@ -810,7 +810,7 @@ closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 // constant that check reads. The view is derived, not a second home: its
 // duplicate pairs are the vocabulary's, and it leaves the baseline. `texts`
 // holds each view file's source. Returns the views' keys.
-closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]], texts: [String:String], problems: &[String]) -> [String] {
+closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]], texts: [String:String], problems: ^[String]) -> [String] {
     known := [String:Bool]{}
     loop finding in findings -> known[closed_list_key(finding.path, finding.name)] = true
     views := [String]{}
@@ -836,7 +836,7 @@ closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 // Every finding the kernel ledger, the mirror or subset ledger (`copies`, the
 // keys of both) or the baseline does not hold, every stale or malformed ledger
 // row, and a baseline that grew or shrank past its ceiling.
-closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], problems: &[String]) {
+closed_list_home_problems: fn(findings: [ClosedListFinding], copies: [String], problems: ^[String]) {
     kernel := [String:Bool]{}
     kernel_keys := [String]{}
     loop row in closed_list_rows(CLOSED_LIST_KERNEL_PATH) {
@@ -1001,7 +1001,7 @@ closed_list_mirror_pair: fn(pair: String, copies: [String]) -> Bool {
 // new shared member does, even when unique ones arrive with it. A mirror copy
 // matches its home and a subset view is checked against its vocabulary, so
 // their pairs are their homes' pairs.
-closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [String], problems: &[String]) {
+closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [String], problems: ^[String]) {
     pairs := [String:ClosedListPair]{}
     pair_keys := [String]{}
     loop pair in closed_list_shared_pairs(findings) {
@@ -1291,7 +1291,7 @@ closed_list_literal_at: fn(text: String, start: Int) -> String? {
 }
 
 // The top-level `NAME: "text"` constants in `text`, the source of `path`.
-closed_list_spellings_in: fn(path: String, text: String, out: &[ClosedListSpelling]) {
+closed_list_spellings_in: fn(path: String, text: String, out: ^[ClosedListSpelling]) {
     loop line in text.lines() {
         ident: closed_list_ident_prefix(line)
         if ident == "" || !closed_list_upper_byte(ident.bytes()[0]) -> next

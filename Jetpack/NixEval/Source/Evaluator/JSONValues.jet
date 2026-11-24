@@ -7,7 +7,7 @@
 NIXEVAL_JSON_INTEGER_BOUND: 9223372036854775808
 
 impl NixEvaluator {
-    encode_json: fn(&self, value: NixEvalValue, depth: Int) -> String NixEvalError! {
+    encode_json: fn(^self, value: NixEvalValue, depth: Int) -> String NixEvalError! {
         if depth > NIXEVAL_EXPRESSION_LIMIT {
             return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
         }
@@ -40,7 +40,7 @@ impl NixEvaluator {
         Err(NixEvalError.Unsupported("value of type {value.type_name()} cannot be encoded as JSON"))
     }
 
-    json_to_value: fn(&self, document: NixEvalJSON, index: Int, depth: Int) -> NixEvalValue NixEvalError! {
+    json_to_value: fn(^self, document: NixEvalJSON, index: Int, depth: Int) -> NixEvalValue NixEvalError! {
         if depth > NIXEVAL_EXPRESSION_LIMIT {
             return Err(NixEvalError.ResourceLimit("JSON value is too deeply nested"))
         }

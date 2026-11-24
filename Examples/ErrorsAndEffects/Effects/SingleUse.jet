@@ -8,7 +8,7 @@
 //
 //   - dropping it without using it      → E0140
 //   - using it on only one `if` branch  → E0141
-//   - lending it (`&`/read) instead of  → E0142
+//   - lending it (`^`/read) instead of  → E0142
 //     moving it
 //   - using it twice                    → E0121 (reuses the move tracker)
 //
@@ -27,7 +27,7 @@ acquire: fn(resource: String) -> Lock {
 
 // `release` takes the lock by move (`^`) — this is the terminal consumption.
 // After this call the lock is gone, and the duty is discharged.
-release: fn(lock: &&Lock) { print("unlocked {lock.resource}") }
+release: fn(lock: ^^Lock) { print("unlocked {lock.resource}") }
 
 run: fn() {
     db: acquire("db")
@@ -43,7 +43,7 @@ run: fn() {
 
 // A pass-through: takes the lock and returns it, leaving the consume duty with
 // the caller.
-hold: fn(lock: &&Lock) -> Lock {
+hold: fn(lock: ^^Lock) -> Lock {
     print("using {lock.resource}")
     return lock
 }
@@ -72,7 +72,7 @@ hold: fn(lock: &&Lock) -> Lock {
 
 issue: fn(id: String) -> Ticket { return Ticket{id: id.copy()} }
 
-redeem: fn(ticket: &&Ticket) { print("redeemed {ticket.id}") }
+redeem: fn(ticket: ^^Ticket) { print("redeemed {ticket.id}") }
 
 single_use_discard_lesson: fn() {
     // The ordinary path: the ticket is consumed by being redeemed.

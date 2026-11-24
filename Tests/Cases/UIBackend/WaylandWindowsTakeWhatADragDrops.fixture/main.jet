@@ -67,7 +67,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat", "wl_data_device_manager"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -102,13 +102,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -120,13 +120,13 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
 // Writes all of `bytes` into `fd`; dropping `fd` closes the pipe and ends
 // the data.
-fake_write_all: fn(f: &Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
+fake_write_all: fn(f: ^Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
     at := 0
     loop at < bytes.len() {
         wrote: fd.write(bytes[at..<bytes.len()].copy(), WAIT_NS) ?? {
@@ -139,7 +139,7 @@ fake_write_all: fn(f: &Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
 
 // A drag of `offer`, which comes as `types`, entering the window's surface
 // at (`x`, `y`) in logical units.
-fake_enter: fn(f: &Fake, offer: Int, types: [String], x: Int, y: Int) {
+fake_enter: fn(f: ^Fake, offer: Int, types: [String], x: Int, y: Int) {
     device: f.device
     surface: f.surface
     fake_event(f, device, 0, fake_words([Int]{offer}))
@@ -149,7 +149,7 @@ fake_enter: fn(f: &Fake, offer: Int, types: [String], x: Int, y: Int) {
     fake_event(f, device, 1, fake_words([Int]{f.serial, surface, x * 256, y * 256, offer}))
 }
 
-fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
+fake_commit: fn(f: ^Fake) -[Env, Net, Time]> {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -195,7 +195,7 @@ fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
 // What the window asks of an offer: accept(serial, mime_type or none),
 // receive(mime_type, fd), destroy, finish and set_actions(dnd_actions,
 // preferred_action).
-fake_offer: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
+fake_offer: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     which: if object == FIRST_OFFER -> "first" else if object == SECOND_OFFER -> "second" else -> "third"
     if opcode == 0 {
         entered: f.enter_serials[object - FIRST_OFFER]
@@ -221,7 +221,7 @@ fake_offer: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     }
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -311,7 +311,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Tim
     }
 }
 
-fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+fake_dispatch: fn(f: ^Fake) -[Env, Net, Time]> {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

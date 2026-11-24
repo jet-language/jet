@@ -13,18 +13,18 @@ held: fn() -[FS]> Int {
 
 lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
-consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
+consume_lock: fn(l: ^^FileLock) -[FS]> Int { held() }
 
-// The test after `&&` runs only where the pattern matched: where `n` is
+// The test after `^^` runs only where the pattern matched: where `n` is
 // absent the parameter still owns the lock, which closes as this returns.
-pattern_and: fn(l: &&FileLock, n: Int?) -[FS]> Int {
+pattern_and: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
     result := 0
     if n == .Val(v) && consume_lock(l.move()) > v -> result = 1
     result
 }
 
 // The same with a body that leaves.
-pattern_and_return: fn(l: &&FileLock, n: Int?) -[FS]> Int {
+pattern_and_return: fn(l: ^^FileLock, n: Int?) -[FS]> Int {
     if n == .Val(v) && consume_lock(l.move()) > v -> return 1
     0
 }

@@ -429,7 +429,7 @@ bvarint: fn(buf: [U8], at: Int) -> util.Varint Never! {
 }
 
 // memmove within one buffer.
-mem_move: fn(buf: &[U8], to: Int, from: Int, n: Int) Never! {
+mem_move: fn(buf: ^[U8], to: Int, from: Int, n: Int) Never! {
     if n <= 0 || to == from {
         return
     }
@@ -458,19 +458,19 @@ pg2: fn(bt: Btree, s: Int, at: Int) -> Int Never! { bget2(bt.pager.pcache.pages[
 
 pg4: fn(bt: Btree, s: Int, at: Int) -> Int Never! { bget4(bt.pager.pcache.pages[s].data, at) }
 
-ps1: fn(bt: &Btree, s: Int, at: Int, v: Int) Never! {
+ps1: fn(bt: ^Btree, s: Int, at: Int, v: Int) Never! {
     bt.pager.pcache.pages[s].data[at] = U8{v & 255}
 }
 
-ps2: fn(bt: &Btree, s: Int, at: Int, v: Int) Never! {
+ps2: fn(bt: ^Btree, s: Int, at: Int, v: Int) Never! {
     util.put2(bt.pager.pcache.pages[s].data, at, v & 65535)
 }
 
-ps4: fn(bt: &Btree, s: Int, at: Int, v: Int) Never! {
+ps4: fn(bt: ^Btree, s: Int, at: Int, v: Int) Never! {
     util.put4(bt.pager.pcache.pages[s].data, at, v & os.U32_MASK)
 }
 
-pzero: fn(bt: &Btree, s: Int, at: Int, n: Int) Never! {
+pzero: fn(bt: ^Btree, s: Int, at: Int, n: Int) Never! {
     loop i in 0..<n -> bt.pager.pcache.pages[s].data[at + i] = U8{0}
 }
 
@@ -494,13 +494,13 @@ writable_schema: fn(db: BtDB) -> Bool Never! {
 // The MemPage of a pager slot.
 
 // The slot's MemPage exists.
-ensure_mem: fn(bt: &Btree, s: Int) Never! {
+ensure_mem: fn(bt: ^Btree, s: Int) Never! {
     loop bt.mem.len() <= s -> bt.mem.push(mem_page_zero())
 }
 
 // sqlite3PagerGetExtra: the slot's MemPage, its first eight bytes zeroed
 // when the cache reset them.
-sync_extra: fn(bt: &Btree, s: Int) Never! {
+sync_extra: fn(bt: ^Btree, s: Int) Never! {
     ensure_mem(bt, s)
     if bt.pager.pcache.pages[s].extra_reset {
         bt.pager.pcache.pages[s].extra_reset = false
@@ -512,7 +512,7 @@ sync_extra: fn(bt: &Btree, s: Int) Never! {
 }
 
 // pageReinit for every slot a playback changed while the btree held it.
-drain_reinit: fn(bt: &Btree) Never! {
+drain_reinit: fn(bt: ^Btree) Never! {
     if bt.pager.reinit.len() == 0 {
         return
     }
@@ -529,17 +529,17 @@ drain_reinit: fn(bt: &Btree) Never! {
 }
 
 // invalidateOverflowCache.
-invalidate_overflow_cache: fn(bt: &Btree, c: Int) Never! {
+invalidate_overflow_cache: fn(bt: ^Btree, c: Int) Never! {
     bt.cursors[c].cur_flags = util.clear_bits(bt.cursors[c].cur_flags, BTCF_VALID_OVFL)
 }
 
 // invalidateAllOverflowCache.
-invalidate_all_overflow_cache: fn(bt: &Btree) Never! {
+invalidate_all_overflow_cache: fn(bt: ^Btree) Never! {
     loop c in bt.cursor_list.copy() -> invalidate_overflow_cache(bt, c)
 }
 
 // invalidateIncrblobCursors.
-invalidate_incrblob_cursors: fn(bt: &Btree, pgno_root: Int, i_row: Int, is_clear_table: Bool) Never! {
+invalidate_incrblob_cursors: fn(bt: ^Btree, pgno_root: Int, i_row: Int, is_clear_table: Bool) Never! {
     bt.has_incrblob_cur = false
     loop c in bt.cursor_list.copy() {
         if bt.cursors[c].cur_flags & BTCF_INCRBLOB != 0 {
@@ -552,7 +552,7 @@ invalidate_incrblob_cursors: fn(bt: &Btree, pgno_root: Int, i_row: Int, is_clear
 }
 
 // btreeSetHasContent.
-btree_set_has_content: fn(bt: &Btree, pgno: Int) -> Int Never! {
+btree_set_has_content: fn(bt: ^Btree, pgno: Int) -> Int Never! {
     if !bt.has_content.live -> bt.has_content = cache.bitvec_create(bt.n_page)
     if pgno <= cache.bitvec_size(bt.has_content) -> cache.bitvec_set(bt.has_content, pgno)
     base.OK
@@ -565,10 +565,10 @@ btree_get_has_content: fn(bt: Btree, pgno: Int) -> Bool Never! {
 }
 
 // btreeClearHasContent.
-btree_clear_has_content: fn(bt: &Btree) Never! { bt.has_content = cache.bitvec_none() }
+btree_clear_has_content: fn(bt: ^Btree) Never! { bt.has_content = cache.bitvec_none() }
 
 // btreeReleaseAllCursorPages.
-btree_release_all_cursor_pages: fn(bt: &Btree, c: Int) Never! {
+btree_release_all_cursor_pages: fn(bt: ^Btree, c: Int) Never! {
     if bt.cursors[c].i_page >= 0 {
         n: bt.cursors[c].i_page
         loop i in 0..<n {
@@ -582,7 +582,7 @@ btree_release_all_cursor_pages: fn(bt: &Btree, c: Int) Never! {
 }
 
 // saveCursorKey.
-save_cursor_key: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+save_cursor_key: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     rc := base.OK
     if bt.cursors[c].cur_int_key {
         k: btree_integer_key(bt, c)
@@ -598,7 +598,7 @@ save_cursor_key: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // saveCursorPosition.
-save_cursor_position: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+save_cursor_position: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     if bt.cursors[c].cur_flags & BTCF_PINNED != 0 -> return base.CONSTRAINT_PINNED
     if bt.cursors[c].state == CURSOR_SKIPNEXT -> bt.cursors[c].state = CURSOR_VALID else {
         bt.cursors[c].skip_next = 0
@@ -614,7 +614,7 @@ save_cursor_position: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 
 // saveAllCursors: save every cursor on root i_root (every cursor when 0)
 // but `except` (-1 for none).
-save_all_cursors: fn(bt: &Btree, i_root: Int, except: Int) -[DB]> Int Never! {
+save_all_cursors: fn(bt: ^Btree, i_root: Int, except: Int) -[DB]> Int Never! {
     list: bt.cursor_list.copy()
     first := -1
     loop k in 0..<list.len() {
@@ -632,7 +632,7 @@ save_all_cursors: fn(bt: &Btree, i_root: Int, except: Int) -[DB]> Int Never! {
 }
 
 // saveCursorsOnList from list[first] on.
-save_cursors_on_list: fn(bt: &Btree, list: [Int], first: Int, i_root: Int, except: Int) -[DB]> Int Never! {
+save_cursors_on_list: fn(bt: ^Btree, list: [Int], first: Int, i_root: Int, except: Int) -[DB]> Int Never! {
     loop k in first..<list.len() {
         c: list[k]
         if c != except && (i_root == 0 || bt.cursors[c].pgno_root == i_root) {
@@ -647,14 +647,14 @@ save_cursors_on_list: fn(bt: &Btree, list: [Int], first: Int, i_root: Int, excep
 }
 
 // sqlite3BtreeClearCursor.
-btree_clear_cursor: fn(bt: &Btree, c: Int) Never! {
+btree_clear_cursor: fn(bt: ^Btree, c: Int) Never! {
     bt.cursors[c].key = None
     bt.cursors[c].state = CURSOR_INVALID
 }
 
 // btreeMoveto: seek the saved key; key is the packed key of an index
 // cursor, None for a table.
-btree_moveto: fn(bt: &Btree, c: Int, key: [U8]?, n_key: Int, bias: Bool, res: &Int) -[DB]> Int Never! {
+btree_moveto: fn(bt: ^Btree, c: Int, key: [U8]?, n_key: Int, bias: Bool, res: ^Int) -[DB]> Int Never! {
     if key == .Val(k) {
         info: bt.cursors[c].key_info ?? return base.CORRUPT
         idx := record.unpacked_record_alloc(info)
@@ -666,7 +666,7 @@ btree_moveto: fn(bt: &Btree, c: Int, key: [U8]?, n_key: Int, bias: Bool, res: &I
 }
 
 // btreeRestoreCursorPosition.
-btree_restore_cursor_position: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+btree_restore_cursor_position: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     if bt.cursors[c].state == CURSOR_FAULT -> return bt.cursors[c].skip_next
     bt.cursors[c].state = CURSOR_INVALID
     skip_next := 0
@@ -684,7 +684,7 @@ btree_restore_cursor_position: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // restoreCursorPosition.
-restore_cursor_position: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+restore_cursor_position: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     if bt.cursors[c].state >= CURSOR_REQUIRESEEK -> return btree_restore_cursor_position(bt, c)
     base.OK
 }
@@ -694,7 +694,7 @@ btree_cursor_has_moved: fn(bt: Btree, c: Int) -> Bool Never! { bt.cursors[c].sta
 
 // sqlite3BtreeCursorRestore: different_row is set when the cursor no
 // longer points at the row it did.
-btree_cursor_restore: fn(bt: &Btree, c: Int, different_row: &Bool) -[DB]> Int Never! {
+btree_cursor_restore: fn(bt: ^Btree, c: Int, different_row: ^Bool) -[DB]> Int Never! {
     rc: restore_cursor_position(bt, c)
     if rc != base.OK {
         different_row = true
@@ -705,7 +705,7 @@ btree_cursor_restore: fn(bt: &Btree, c: Int, different_row: &Bool) -[DB]> Int Ne
 }
 
 // sqlite3BtreeCursorHintFlags.
-btree_cursor_hint_flags: fn(bt: &Btree, c: Int, x: Int) Never! { bt.cursors[c].hints = x }
+btree_cursor_hint_flags: fn(bt: ^Btree, c: Int, x: Int) Never! { bt.cursors[c].hints = x }
 
 // ---------------------------------------------------------------------------
 // The pointer map.
@@ -725,7 +725,7 @@ ptrmap_is_page: fn(bt: Btree, pgno: Int) -> Bool Never! { ptrmap_pageno(bt, pgno
 
 // ptrmapPut: the parent of page `key` is `parent`, as e_type. Nothing when
 // rc already holds an error.
-ptrmap_put: fn(bt: &Btree, key: Int, e_type: Int, parent: Int, rc: &Int) -[DB]> Never! {
+ptrmap_put: fn(bt: ^Btree, key: Int, e_type: Int, parent: Int, rc: ^Int) -[DB]> Never! {
     if rc != base.OK {
         return
     }
@@ -754,7 +754,7 @@ ptrmap_put: fn(bt: &Btree, key: Int, e_type: Int, parent: Int, rc: &Int) -[DB]> 
 }
 
 // ptrmapGet.
-ptrmap_get: fn(bt: &Btree, key: Int, e_type: &Int, pgno: &Int) -[DB]> Int Never! {
+ptrmap_get: fn(bt: ^Btree, key: Int, e_type: ^Int, pgno: ^Int) -[DB]> Int Never! {
     i_ptrmap: ptrmap_pageno(bt, key)
     s := cache.NO_PAGE
     rc: pager.pager_get(bt.pager, i_ptrmap, s, 0)
@@ -786,7 +786,7 @@ find_cell_past_ptr: fn(bt: Btree, s: Int, i: Int) -> Int Never! {
 
 // The payload size varint of btreeParseCellPtr and its kin: at most nine
 // bytes, seven bits each, in 32 bits.
-payload_varint: fn(buf: [U8], at: Int, value: &Int) -> Int Never! {
+payload_varint: fn(buf: [U8], at: Int, value: ^Int) -> Int Never! {
     iter := at
     n := bb(buf, iter)
     if n >= 128 {
@@ -803,7 +803,7 @@ payload_varint: fn(buf: [U8], at: Int, value: &Int) -> Int Never! {
 }
 
 // btreeParseCellAdjustSizeForOverflow.
-parse_cell_adjust_size_for_overflow: fn(m: MemPage, usable: Int, cell: Int, info: &CellInfo) Never! {
+parse_cell_adjust_size_for_overflow: fn(m: MemPage, usable: Int, cell: Int, info: ^CellInfo) Never! {
     min_local: m.min_local
     max_local: m.max_local
     surplus: min_local + (info.n_payload - min_local) % (usable - 4)
@@ -821,7 +821,7 @@ btree_payload_to_local: fn(bt: Btree, m: MemPage, n_payload: Int) -> Int Never! 
 }
 
 // xParseCell: parse the cell at buf[cell] of a page like m.
-parse_cell: fn(m: MemPage, usable: Int, buf: [U8], cell: Int, info: &CellInfo) Never! {
+parse_cell: fn(m: MemPage, usable: Int, buf: [U8], cell: Int, info: ^CellInfo) Never! {
     if m.parse_kind == PARSE_NO_PAYLOAD {
         // btreeParseCellPtrNoPayload.
         v: bvarint(buf, cell + 4)
@@ -856,7 +856,7 @@ parse_cell: fn(m: MemPage, usable: Int, buf: [U8], cell: Int, info: &CellInfo) N
 }
 
 // btreeParseCell: parse cell i of slot s.
-btree_parse_cell: fn(bt: Btree, s: Int, i: Int, info: &CellInfo) Never! {
+btree_parse_cell: fn(bt: Btree, s: Int, i: Int, info: ^CellInfo) Never! {
     parse_cell(bt.mem[s], bt.usable_size, bt.pager.pcache.pages[s].data, find_cell(bt, s, i), info)
 }
 
@@ -911,7 +911,7 @@ cell_size_of: fn(bt: Btree, s: Int, i: Int) -> Int Never! {
 // ptrmapPutOvflPtr: the pointer-map entry of the overflow chain of the cell
 // at buf[cell], which page s holds. limit is the end of the source page
 // image when buf is one (the SQLITE_OVERFLOW check), else -1.
-ptrmap_put_ovfl_ptr: fn(bt: &Btree, s: Int, buf: [U8], cell: Int, limit: Int, rc: &Int) -[DB]> Never! {
+ptrmap_put_ovfl_ptr: fn(bt: ^Btree, s: Int, buf: [U8], cell: Int, limit: Int, rc: ^Int) -[DB]> Never! {
     if rc != base.OK {
         return
     }
@@ -932,7 +932,7 @@ ptrmap_put_ovfl_ptr: fn(bt: &Btree, s: Int, buf: [U8], cell: Int, limit: Int, rc
 // Space on a page.
 
 // defragmentPage.
-defragment_page: fn(bt: &Btree, s: Int, n_max_frag: Int) -> Int Never! {
+defragment_page: fn(bt: ^Btree, s: Int, n_max_frag: Int) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     cell_offset: bt.mem[s].cell_offset
     n_cell: bt.mem[s].n_cell
@@ -1002,7 +1002,7 @@ defragment_page: fn(bt: &Btree, s: Int, n_max_frag: Int) -> Int Never! {
 
 // pageFindSlot: the offset of a free slot of n_byte bytes, or 0 (rc gets
 // SQLITE_CORRUPT when the freelist is corrupt).
-page_find_slot: fn(bt: &Btree, s: Int, n_byte: Int, rc: &Int) -> Int Never! {
+page_find_slot: fn(bt: ^Btree, s: Int, n_byte: Int, rc: ^Int) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     i_addr := hdr + 1
     pc := pg2(bt, s, i_addr)
@@ -1038,7 +1038,7 @@ page_find_slot: fn(bt: &Btree, s: Int, n_byte: Int, rc: &Int) -> Int Never! {
 }
 
 // allocateSpace: idx gets the offset of n_byte new bytes of cell content.
-allocate_space: fn(bt: &Btree, s: Int, n_byte: Int, idx: &Int) -> Int Never! {
+allocate_space: fn(bt: ^Btree, s: Int, n_byte: Int, idx: ^Int) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     gap: bt.mem[s].cell_offset + 2 * bt.mem[s].n_cell
     top := pg2(bt, s, hdr + 5)
@@ -1068,7 +1068,7 @@ allocate_space: fn(bt: &Btree, s: Int, n_byte: Int, idx: &Int) -> Int Never! {
 }
 
 // freeSpace: return i_size bytes at i_start to the freelist.
-free_space: fn(bt: &Btree, s: Int, i_start_in: Int, i_size_in: Int) -> Int Never! {
+free_space: fn(bt: ^Btree, s: Int, i_start_in: Int, i_size_in: Int) -> Int Never! {
     i_start := i_start_in & 65535
     i_size := i_size_in & 65535
     i_orig_size: i_size
@@ -1127,7 +1127,7 @@ free_space: fn(bt: &Btree, s: Int, i_start_in: Int, i_size_in: Int) -> Int Never
 }
 
 // decodeFlags.
-decode_flags: fn(bt: &Btree, s: Int, flag_byte: Int) -> Int Never! {
+decode_flags: fn(bt: ^Btree, s: Int, flag_byte: Int) -> Int Never! {
     bt.mem[s].max1byte_payload = bt.max1byte_payload
     if flag_byte >= PTF_ZERODATA | PTF_LEAF {
         bt.mem[s].child_ptr_size = 0
@@ -1182,7 +1182,7 @@ decode_flags: fn(bt: &Btree, s: Int, flag_byte: Int) -> Int Never! {
 }
 
 // btreeComputeFreeSpace.
-btree_compute_free_space: fn(bt: &Btree, s: Int) -> Int Never! {
+btree_compute_free_space: fn(bt: ^Btree, s: Int) -> Int Never! {
     usable: bt.usable_size
     hdr: bt.mem[s].hdr_offset
     top: get2_not_zero(pg2(bt, s, hdr + 5))
@@ -1211,7 +1211,7 @@ btree_compute_free_space: fn(bt: &Btree, s: Int) -> Int Never! {
 }
 
 // btreeCellSizeCheck.
-btree_cell_size_check: fn(bt: &Btree, s: Int) -> Int Never! {
+btree_cell_size_check: fn(bt: ^Btree, s: Int) -> Int Never! {
     i_cell_first: bt.mem[s].cell_offset + 2 * bt.mem[s].n_cell
     usable: bt.usable_size
     i_cell_last := usable - 4
@@ -1227,7 +1227,7 @@ btree_cell_size_check: fn(bt: &Btree, s: Int) -> Int Never! {
 }
 
 // btreeInitPage.
-btree_init_page: fn(bt: &Btree, s: Int) -> Int Never! {
+btree_init_page: fn(bt: ^Btree, s: Int) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     flag: pb(bt, s, hdr)
     if decode_flags(bt, s, flag) != base.OK -> return base.CORRUPT
@@ -1244,7 +1244,7 @@ btree_init_page: fn(bt: &Btree, s: Int) -> Int Never! {
 }
 
 // zeroPage.
-zero_page: fn(bt: &Btree, s: Int, flags: Int) Never! {
+zero_page: fn(bt: ^Btree, s: Int, flags: Int) Never! {
     hdr: bt.mem[s].hdr_offset
     usable: bt.usable_size
     if bt.bts_flags & BTS_FAST_SECURE != 0 -> pzero(bt, s, hdr, usable - hdr)
@@ -1266,7 +1266,7 @@ zero_page: fn(bt: &Btree, s: Int, flags: Int) Never! {
 // Getting and releasing pages.
 
 // btreePageFromDbPage.
-btree_page_from_db_page: fn(bt: &Btree, s: Int, pgno: Int) Never! {
+btree_page_from_db_page: fn(bt: ^Btree, s: Int, pgno: Int) Never! {
     sync_extra(bt, s)
     if pgno != bt.mem[s].pgno {
         bt.mem[s].pgno = pgno
@@ -1275,7 +1275,7 @@ btree_page_from_db_page: fn(bt: &Btree, s: Int, pgno: Int) Never! {
 }
 
 // btreeGetPage: page gets the slot of page pgno.
-btree_get_page: fn(bt: &Btree, pgno: Int, page: &Int, flags: Int) -[DB]> Int Never! {
+btree_get_page: fn(bt: ^Btree, pgno: Int, page: ^Int, flags: Int) -[DB]> Int Never! {
     s := cache.NO_PAGE
     rc: pager.pager_get(bt.pager, pgno, s, flags)
     if rc != base.OK -> return rc
@@ -1285,7 +1285,7 @@ btree_get_page: fn(bt: &Btree, pgno: Int, page: &Int, flags: Int) -[DB]> Int Nev
 }
 
 // btreePageLookup: the cached page pgno with a new reference, or NO_PAGE.
-btree_page_lookup: fn(bt: &Btree, pgno: Int) -> Int Never! {
+btree_page_lookup: fn(bt: ^Btree, pgno: Int) -> Int Never! {
     s: pager.pager_lookup(bt.pager, pgno)
     if s != cache.NO_PAGE -> btree_page_from_db_page(bt, s, pgno)
     s
@@ -1297,7 +1297,7 @@ btree_pagecount: fn(bt: Btree) -> Int Never! { bt.n_page }
 btree_last_page: fn(bt: Btree) -> Int Never! { bt.n_page }
 
 // getAndInitPage.
-get_and_init_page: fn(bt: &Btree, pgno: Int, page: &Int, read_only: Int) -[DB]> Int Never! {
+get_and_init_page: fn(bt: ^Btree, pgno: Int, page: ^Int, read_only: Int) -[DB]> Int Never! {
     if pgno > btree_pagecount(bt) {
         page = cache.NO_PAGE
         return base.CORRUPT
@@ -1323,21 +1323,21 @@ get_and_init_page: fn(bt: &Btree, pgno: Int, page: &Int, read_only: Int) -[DB]> 
 }
 
 // releasePageNotNull.
-release_page_not_null: fn(bt: &Btree, s: Int) Never! { pager.pager_unref_not_null(bt.pager, s) }
+release_page_not_null: fn(bt: ^Btree, s: Int) Never! { pager.pager_unref_not_null(bt.pager, s) }
 
 // releasePage.
-release_page: fn(bt: &Btree, s: Int) Never! {
+release_page: fn(bt: ^Btree, s: Int) Never! {
     if s != cache.NO_PAGE -> release_page_not_null(bt, s)
 }
 
 // releasePageOne.
-release_page_one: fn(bt: &Btree, s: Int) -[DB]> Never! {
+release_page_one: fn(bt: ^Btree, s: Int) -[DB]> Never! {
     pager.pager_unref_page_one(bt.pager, s)
     drain_reinit(bt)
 }
 
 // btreeGetUnusedPage.
-btree_get_unused_page: fn(bt: &Btree, pgno: Int, page: &Int, flags: Int) -[DB]> Int Never! {
+btree_get_unused_page: fn(bt: ^Btree, pgno: Int, page: ^Int, flags: Int) -[DB]> Int Never! {
     s := cache.NO_PAGE
     rc: btree_get_page(bt, pgno, s, flags)
     if rc == base.OK {
@@ -1353,14 +1353,14 @@ btree_get_unused_page: fn(bt: &Btree, pgno: Int, page: &Int, flags: Int) -[DB]> 
 }
 
 // btreeInvokeBusyHandler.
-btree_invoke_busy_handler: fn(bt: &Btree) -[DB]> Bool Never! { wal.busy_invoke(bt.pager.busy) }
+btree_invoke_busy_handler: fn(bt: ^Btree) -[DB]> Bool Never! { wal.busy_invoke(bt.pager.busy) }
 
 // ---------------------------------------------------------------------------
 // Opening and closing.
 
 // sqlite3BtreeOpen. path None or "" opens a temporary database; psow,
 // nolock, immutable and readonly_shm are the pager's URI options.
-btree_open: fn(bt: &Btree, path: String?, db: BtDB, flags_in: Int, vfs_flags_in: Int, psow: Bool, nolock: Bool, immutable: Bool, readonly_shm: Bool) -[DB]> Int Never! {
+btree_open: fn(bt: ^Btree, path: String?, db: BtDB, flags_in: Int, vfs_flags_in: Int, psow: Bool, nolock: Bool, immutable: Bool, readonly_shm: Bool) -[DB]> Int Never! {
     bt = btree_closed()
     name: path ?? ""
     is_temp_db: name == ""
@@ -1416,15 +1416,15 @@ btree_open: fn(bt: &Btree, path: String?, db: BtDB, flags_in: Int, vfs_flags_in:
 pager_opened: fn(bt: Btree) -> Bool Never! { bt.pager.page_size > 0 }
 
 // freeTempSpace.
-free_temp_space: fn(bt: &Btree) Never! { bt.tmp_space = [U8]{} }
+free_temp_space: fn(bt: ^Btree) Never! { bt.tmp_space = [U8]{} }
 
 // allocateTempSpace.
-allocate_temp_space: fn(bt: &Btree) Never! {
+allocate_temp_space: fn(bt: ^Btree) Never! {
     if bt.tmp_space.len() == 0 -> bt.tmp_space = pager.zeros(bt.page_size)
 }
 
 // sqlite3BtreeClose.
-btree_close: fn(bt: &Btree) -[DB]> Int Never! {
+btree_close: fn(bt: ^Btree) -[DB]> Int Never! {
     _: btree_rollback(bt, base.OK, false)
     ckpt: bt.db.flags & SQLITE_NO_CKPT_ON_CLOSE == 0
     pager.pager_close(bt.pager, ckpt)
@@ -1434,22 +1434,22 @@ btree_close: fn(bt: &Btree) -[DB]> Int Never! {
 }
 
 // sqlite3BtreeSetCacheSize.
-btree_set_cache_size: fn(bt: &Btree, mx_page: Int) Never! {
+btree_set_cache_size: fn(bt: ^Btree, mx_page: Int) Never! {
     pager.pager_set_cachesize(bt.pager, mx_page)
 }
 
 // sqlite3BtreeSetSpillSize.
-btree_set_spill_size: fn(bt: &Btree, mx_page: Int) -> Int Never! {
+btree_set_spill_size: fn(bt: ^Btree, mx_page: Int) -> Int Never! {
     pager.pager_set_spillsize(bt.pager, mx_page)
 }
 
 // sqlite3BtreeSetPagerFlags.
-btree_set_pager_flags: fn(bt: &Btree, pg_flags: Int) Never! {
+btree_set_pager_flags: fn(bt: ^Btree, pg_flags: Int) Never! {
     pager.pager_set_flags(bt.pager, pg_flags)
 }
 
 // sqlite3BtreeSetPageSize.
-btree_set_page_size: fn(bt: &Btree, page_size_in: Int, n_reserve_in: Int, fix: Bool) -[DB]> Int Never! {
+btree_set_page_size: fn(bt: ^Btree, page_size_in: Int, n_reserve_in: Int, fix: Bool) -[DB]> Int Never! {
     bt.n_reserve_wanted = n_reserve_in
     x: bt.page_size - bt.usable_size
     n_reserve := n_reserve_in
@@ -1483,13 +1483,13 @@ btree_get_requested_reserve: fn(bt: Btree) -> Int Never! {
 }
 
 // sqlite3BtreeMaxPageCount.
-btree_max_page_count: fn(bt: &Btree, mx_page: Int) -> Int Never! {
+btree_max_page_count: fn(bt: ^Btree, mx_page: Int) -> Int Never! {
     pager.pager_max_page_count(bt.pager, mx_page)
 }
 
 // sqlite3BtreeSecureDelete: set it (0, 1 or 2 for fast) when new_flag >= 0;
 // the setting in effect.
-btree_secure_delete: fn(bt: &Btree, new_flag: Int) -> Int Never! {
+btree_secure_delete: fn(bt: ^Btree, new_flag: Int) -> Int Never! {
     if new_flag >= 0 {
         bt.bts_flags = util.clear_bits(bt.bts_flags, BTS_FAST_SECURE)
         bt.bts_flags |= BTS_SECURE_DELETE * new_flag
@@ -1498,7 +1498,7 @@ btree_secure_delete: fn(bt: &Btree, new_flag: Int) -> Int Never! {
 }
 
 // sqlite3BtreeSetAutoVacuum.
-btree_set_auto_vacuum: fn(bt: &Btree, auto_vacuum: Int) -> Int Never! {
+btree_set_auto_vacuum: fn(bt: ^Btree, auto_vacuum: Int) -> Int Never! {
     av: auto_vacuum & 255
     if bt.bts_flags & BTS_PAGESIZE_FIXED != 0 && (av != 0) != bt.auto_vacuum -> return base.READONLY
     bt.auto_vacuum = av != 0
@@ -1522,14 +1522,14 @@ page_bytes_eq: fn(bt: Btree, s: Int, at: Int, want: [U8]) -> Bool Never! {
 }
 
 // lockBtree's page1_init_failed.
-page1_init_failed: fn(bt: &Btree, s: Int, rc: Int) -[DB]> Int Never! {
+page1_init_failed: fn(bt: ^Btree, s: Int, rc: Int) -[DB]> Int Never! {
     release_page_one(bt, s)
     bt.page1 = cache.NO_PAGE
     rc
 }
 
 // lockBtree: read page 1 and take a shared lock on the file.
-lock_btree: fn(bt: &Btree) -[DB]> Int Never! {
+lock_btree: fn(bt: ^Btree) -[DB]> Int Never! {
     rc := pager.pager_shared_lock(bt.pager)
     drain_reinit(bt)
     if rc != base.OK -> return rc
@@ -1597,7 +1597,7 @@ lock_btree: fn(bt: &Btree) -[DB]> Int Never! {
 }
 
 // unlockBtreeIfUnused.
-unlock_btree_if_unused: fn(bt: &Btree) -[DB]> Never! {
+unlock_btree_if_unused: fn(bt: ^Btree) -[DB]> Never! {
     if bt.in_transaction == TRANS_NONE && bt.page1 != cache.NO_PAGE {
         s1: bt.page1
         bt.page1 = cache.NO_PAGE
@@ -1606,7 +1606,7 @@ unlock_btree_if_unused: fn(bt: &Btree) -[DB]> Never! {
 }
 
 // newDatabase: make page 1 of an empty file.
-new_database: fn(bt: &Btree) -[DB]> Int Never! {
+new_database: fn(bt: ^Btree) -[DB]> Int Never! {
     if bt.n_page > 0 -> return base.OK
     s1: bt.page1
     rc: pager.pager_write(bt.pager, s1)
@@ -1633,14 +1633,14 @@ new_database: fn(bt: &Btree) -[DB]> Int Never! {
 }
 
 // sqlite3BtreeNewDb.
-btree_new_db: fn(bt: &Btree) -[DB]> Int Never! {
+btree_new_db: fn(bt: ^Btree) -[DB]> Int Never! {
     bt.n_page = 0
     new_database(bt)
 }
 
 // btreeBeginTrans. wrflag is 0 (read), 1 (write) or 2 (exclusive);
 // schema_version gets the schema cookie.
-btree_begin_trans_inner: fn(bt: &Btree, wrflag: Int, schema_version: &Int) -[DB]> Int Never! {
+btree_begin_trans_inner: fn(bt: ^Btree, wrflag: Int, schema_version: ^Int) -[DB]> Int Never! {
     rc := base.OK
     skip := false
     if bt.in_trans == TRANS_WRITE || (bt.in_trans == TRANS_READ && wrflag == 0) -> skip = true
@@ -1701,7 +1701,7 @@ btree_begin_trans_inner: fn(bt: &Btree, wrflag: Int, schema_version: &Int) -[DB]
 }
 
 // sqlite3BtreeBeginTrans.
-btree_begin_trans: fn(bt: &Btree, wrflag: Int, schema_version: &Int) -[DB]> Int Never! {
+btree_begin_trans: fn(bt: ^Btree, wrflag: Int, schema_version: ^Int) -[DB]> Int Never! {
     if bt.in_trans == TRANS_NONE || (bt.in_trans == TRANS_READ && wrflag != 0) {
         return btree_begin_trans_inner(bt, wrflag, schema_version)
     }
@@ -1717,7 +1717,7 @@ btree_begin_trans: fn(bt: &Btree, wrflag: Int, schema_version: &Int) -[DB]> Int 
 // Auto-vacuum.
 
 // setChildPtrmaps.
-set_child_ptrmaps: fn(bt: &Btree, s: Int) -[DB]> Int Never! {
+set_child_ptrmaps: fn(bt: ^Btree, s: Int) -[DB]> Int Never! {
     pgno: bt.mem[s].pgno
     rc := if bt.mem[s].is_init -> base.OK else -> btree_init_page(bt, s)
     if rc != base.OK -> return rc
@@ -1740,7 +1740,7 @@ set_child_ptrmaps: fn(bt: &Btree, s: Int) -[DB]> Int Never! {
 }
 
 // modifyPagePointer.
-modify_page_pointer: fn(bt: &Btree, s: Int, i_from: Int, i_to: Int, e_type: Int) -> Int Never! {
+modify_page_pointer: fn(bt: ^Btree, s: Int, i_from: Int, i_to: Int, e_type: Int) -> Int Never! {
     if e_type == PTRMAP_OVERFLOW2 {
         if pg4(bt, s, 0) != i_from -> return base.CORRUPT
         ps4(bt, s, 0, i_to)
@@ -1782,7 +1782,7 @@ modify_page_pointer: fn(bt: &Btree, s: Int, i_from: Int, i_to: Int, e_type: Int)
 
 // relocatePage: move page s (of type e_type, its pointer on page
 // i_ptr_page) to page i_free_page.
-relocate_page: fn(bt: &Btree, s: Int, e_type: Int, i_ptr_page: Int, i_free_page: Int, is_commit: Bool) -[DB]> Int Never! {
+relocate_page: fn(bt: ^Btree, s: Int, e_type: Int, i_ptr_page: Int, i_free_page: Int, is_commit: Bool) -[DB]> Int Never! {
     i_db_page: bt.mem[s].pgno
     if i_db_page < 3 -> return base.CORRUPT
     rc := pager.pager_movepage(bt.pager, s, i_free_page, is_commit)
@@ -1815,7 +1815,7 @@ relocate_page: fn(bt: &Btree, s: Int, e_type: Int, i_ptr_page: Int, i_free_page:
 }
 
 // incrVacuumStep.
-incr_vacuum_step: fn(bt: &Btree, n_fin: Int, i_last_pg_in: Int, commit: Bool) -[DB]> Int Never! {
+incr_vacuum_step: fn(bt: ^Btree, n_fin: Int, i_last_pg_in: Int, commit: Bool) -[DB]> Int Never! {
     i_last_pg := i_last_pg_in
     if !ptrmap_is_page(bt, i_last_pg) && i_last_pg != pending_byte_page(bt) {
         n_free_list: pg4(bt, bt.page1, 36)
@@ -1887,7 +1887,7 @@ final_db_size: fn(bt: Btree, n_orig: Int, n_free: Int) -> Int Never! {
 }
 
 // sqlite3BtreeIncrVacuum.
-btree_incr_vacuum: fn(bt: &Btree) -[DB]> Int Never! {
+btree_incr_vacuum: fn(bt: ^Btree) -[DB]> Int Never! {
     if !bt.auto_vacuum -> return base.DONE
     n_orig: btree_pagecount(bt)
     n_free: pg4(bt, bt.page1, 36)
@@ -1909,7 +1909,7 @@ btree_incr_vacuum: fn(bt: &Btree) -[DB]> Int Never! {
 }
 
 // autoVacuumCommit.
-auto_vacuum_commit: fn(bt: &Btree) -[DB]> Int Never! {
+auto_vacuum_commit: fn(bt: ^Btree) -[DB]> Int Never! {
     rc := base.OK
     invalidate_all_overflow_cache(bt)
     if bt.incr_vacuum -> return rc
@@ -1948,7 +1948,7 @@ auto_vacuum_commit: fn(bt: &Btree) -[DB]> Int Never! {
 // Committing and rolling back.
 
 // sqlite3BtreeCommitPhaseOne.
-btree_commit_phase_one: fn(bt: &Btree, super: String?) -[DB]> Int Never! {
+btree_commit_phase_one: fn(bt: ^Btree, super: String?) -[DB]> Int Never! {
     if bt.in_trans != TRANS_WRITE -> return base.OK
     if bt.auto_vacuum {
         rc: auto_vacuum_commit(bt)
@@ -1962,7 +1962,7 @@ btree_commit_phase_one: fn(bt: &Btree, super: String?) -[DB]> Int Never! {
 }
 
 // btreeEndTransaction.
-btree_end_transaction: fn(bt: &Btree) -[DB]> Never! {
+btree_end_transaction: fn(bt: ^Btree) -[DB]> Never! {
     bt.do_truncate = false
     if bt.in_trans > TRANS_NONE && bt.db.n_vdbe_read > 1 -> bt.in_trans = TRANS_READ else {
         if bt.in_trans != TRANS_NONE {
@@ -1975,7 +1975,7 @@ btree_end_transaction: fn(bt: &Btree) -[DB]> Never! {
 }
 
 // sqlite3BtreeCommitPhaseTwo.
-btree_commit_phase_two: fn(bt: &Btree, cleanup: Bool) -[DB]> Int Never! {
+btree_commit_phase_two: fn(bt: ^Btree, cleanup: Bool) -[DB]> Int Never! {
     if bt.in_trans == TRANS_NONE -> return base.OK
     if bt.in_trans == TRANS_WRITE {
         rc: pager.pager_commit_phase_two(bt.pager)
@@ -1989,14 +1989,14 @@ btree_commit_phase_two: fn(bt: &Btree, cleanup: Bool) -[DB]> Int Never! {
 }
 
 // sqlite3BtreeCommit.
-btree_commit: fn(bt: &Btree) -[DB]> Int Never! {
+btree_commit: fn(bt: ^Btree) -[DB]> Int Never! {
     rc := btree_commit_phase_one(bt, None)
     if rc == base.OK -> rc = btree_commit_phase_two(bt, false)
     rc
 }
 
 // sqlite3BtreeTripAllCursors.
-btree_trip_all_cursors: fn(bt: &Btree, err_code: Int, write_only: Bool) -[DB]> Int Never! {
+btree_trip_all_cursors: fn(bt: ^Btree, err_code: Int, write_only: Bool) -[DB]> Int Never! {
     rc := base.OK
     loop c in bt.cursor_list.copy() {
         if write_only && bt.cursors[c].cur_flags & BTCF_WRITE_FLAG == 0 {
@@ -2019,14 +2019,14 @@ btree_trip_all_cursors: fn(bt: &Btree, err_code: Int, write_only: Bool) -[DB]> I
 }
 
 // btreeSetNPage.
-btree_set_npage: fn(bt: &Btree, s1: Int) Never! {
+btree_set_npage: fn(bt: ^Btree, s1: Int) Never! {
     n_page := pg4(bt, s1, 28)
     if n_page == 0 -> n_page = pager.pager_page_count(bt.pager)
     bt.n_page = n_page
 }
 
 // sqlite3BtreeRollback.
-btree_rollback: fn(bt: &Btree, trip_code_in: Int, write_only_in: Bool) -[DB]> Int Never! {
+btree_rollback: fn(bt: ^Btree, trip_code_in: Int, write_only_in: Bool) -[DB]> Int Never! {
     rc := base.OK
     trip_code := trip_code_in
     write_only := write_only_in
@@ -2056,14 +2056,14 @@ btree_rollback: fn(bt: &Btree, trip_code_in: Int, write_only_in: Bool) -[DB]> In
 }
 
 // sqlite3BtreeBeginStmt.
-btree_begin_stmt: fn(bt: &Btree, i_statement: Int) -> Int Never! {
+btree_begin_stmt: fn(bt: ^Btree, i_statement: Int) -> Int Never! {
     pager.pager_open_savepoint(bt.pager, i_statement)
     base.OK
 }
 
 // sqlite3BtreeSavepoint: release (SAVEPOINT_RELEASE) or roll back to
 // savepoint i_savepoint (-1 for the whole transaction).
-btree_savepoint: fn(bt: &Btree, op: Int, i_savepoint: Int) -[DB]> Int Never! {
+btree_savepoint: fn(bt: ^Btree, op: Int, i_savepoint: Int) -[DB]> Int Never! {
     if bt.in_trans != TRANS_WRITE -> return base.OK
     rc := base.OK
     if op == base.SAVEPOINT_ROLLBACK -> rc = save_all_cursors(bt, 0, -1)
@@ -2086,7 +2086,7 @@ btree_savepoint: fn(bt: &Btree, op: Int, i_savepoint: Int) -[DB]> Int Never! {
 // btreeCursor: cur gets the new cursor on root page i_table. wr_flag is 0,
 // BTREE_WRCSR or BTREE_WRCSR|BTREE_FORDELETE; key_info is set for an
 // index.
-btree_cursor: fn(bt: &Btree, i_table_in: Int, wr_flag: Int, key_info: record.KeyInfo?, cur: &Int) -> Int Never! {
+btree_cursor: fn(bt: ^Btree, i_table_in: Int, wr_flag: Int, key_info: record.KeyInfo?, cur: ^Int) -> Int Never! {
     cur = -1
     i_table := i_table_in
     if i_table <= 1 {
@@ -2130,7 +2130,7 @@ btree_cursor: fn(bt: &Btree, i_table_in: Int, wr_flag: Int, key_info: record.Key
 }
 
 // sqlite3BtreeCloseCursor.
-btree_close_cursor: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+btree_close_cursor: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     if c < 0 || c >= bt.cursors.len() || !bt.cursors[c].live -> return base.OK
     list := [Int]{}
     loop x in bt.cursor_list.copy() {
@@ -2145,7 +2145,7 @@ btree_close_cursor: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // getCellInfo.
-get_cell_info: fn(bt: &Btree, c: Int) Never! {
+get_cell_info: fn(bt: ^Btree, c: Int) Never! {
     if bt.cursors[c].info.n_size == 0 {
         bt.cursors[c].cur_flags = bt.cursors[c].cur_flags | BTCF_VALID_NKEY
         info := cell_info_zero()
@@ -2160,29 +2160,29 @@ btree_cursor_is_valid_nn: fn(bt: Btree, c: Int) -> Bool Never! {
 }
 
 // sqlite3BtreeIntegerKey.
-btree_integer_key: fn(bt: &Btree, c: Int) -> Int Never! {
+btree_integer_key: fn(bt: ^Btree, c: Int) -> Int Never! {
     get_cell_info(bt, c)
     bt.cursors[c].info.n_key
 }
 
 // sqlite3BtreeCursorPin and sqlite3BtreeCursorUnpin.
-btree_cursor_pin: fn(bt: &Btree, c: Int) Never! {
+btree_cursor_pin: fn(bt: ^Btree, c: Int) Never! {
     bt.cursors[c].cur_flags = bt.cursors[c].cur_flags | BTCF_PINNED
 }
 
-btree_cursor_unpin: fn(bt: &Btree, c: Int) Never! {
+btree_cursor_unpin: fn(bt: ^Btree, c: Int) Never! {
     bt.cursors[c].cur_flags = util.clear_bits(bt.cursors[c].cur_flags, BTCF_PINNED)
 }
 
 // sqlite3BtreeOffset.
-btree_offset: fn(bt: &Btree, c: Int) -> Int Never! {
+btree_offset: fn(bt: ^Btree, c: Int) -> Int Never! {
     get_cell_info(bt, c)
     s: bt.cursors[c].page
     bt.page_size * (bt.mem[s].pgno - 1) + bt.cursors[c].info.payload
 }
 
 // sqlite3BtreePayloadSize.
-btree_payload_size: fn(bt: &Btree, c: Int) -> Int Never! {
+btree_payload_size: fn(bt: ^Btree, c: Int) -> Int Never! {
     get_cell_info(bt, c)
     bt.cursors[c].info.n_payload
 }
@@ -2192,7 +2192,7 @@ btree_max_record_size: fn(bt: Btree) -> Int Never! { bt.page_size * bt.n_page }
 
 // getOverflowPage: next gets the page after overflow page ovfl; page gets
 // ovfl's slot when want_page (else it is released).
-get_overflow_page: fn(bt: &Btree, ovfl: Int, want_page: Bool, page: &Int, next: &Int) -[DB]> Int Never! {
+get_overflow_page: fn(bt: ^Btree, ovfl: Int, want_page: Bool, page: ^Int, next: ^Int) -[DB]> Int Never! {
     nxt := 0
     s := cache.NO_PAGE
     rc := base.OK
@@ -2220,7 +2220,7 @@ get_overflow_page: fn(bt: &Btree, ovfl: Int, want_page: Bool, page: &Int, next: 
 }
 
 // copyPayload between page s at `at` and buf at pos.
-copy_payload: fn(bt: &Btree, s: Int, at: Int, buf: &[U8], pos: Int, n: Int, write: Bool) -[DB]> Int Never! {
+copy_payload: fn(bt: ^Btree, s: Int, at: Int, buf: ^[U8], pos: Int, n: Int, write: Bool) -[DB]> Int Never! {
     if write {
         rc: pager.pager_write(bt.pager, s)
         if rc != base.OK -> return rc
@@ -2239,7 +2239,7 @@ ovfl_at: fn(bt: Btree, c: Int, i: Int) -> Int Never! {
 
 // accessPayload: read (or write, for write) amt bytes of the cursor's
 // payload from offset into (from) buf.
-access_payload: fn(bt: &Btree, c: Int, offset_in: Int, amt_in: Int, buf: &[U8], write: Bool) -[DB]> Int Never! {
+access_payload: fn(bt: ^Btree, c: Int, offset_in: Int, amt_in: Int, buf: ^[U8], write: Bool) -[DB]> Int Never! {
     s: bt.cursors[c].page
     if bt.cursors[c].ix >= bt.mem[s].n_cell -> return base.CORRUPT
     get_cell_info(bt, c)
@@ -2324,12 +2324,12 @@ access_payload: fn(bt: &Btree, c: Int, offset_in: Int, amt_in: Int, buf: &[U8], 
 }
 
 // sqlite3BtreePayload: amt bytes of the payload from offset into buf.
-btree_payload: fn(bt: &Btree, c: Int, offset: Int, amt: Int, buf: &[U8]) -[DB]> Int Never! {
+btree_payload: fn(bt: ^Btree, c: Int, offset: Int, amt: Int, buf: ^[U8]) -[DB]> Int Never! {
     access_payload(bt, c, offset, amt, buf, false)
 }
 
 // sqlite3BtreePayloadChecked (accessPayloadChecked).
-btree_payload_checked: fn(bt: &Btree, c: Int, offset: Int, amt: Int, buf: &[U8]) -[DB]> Int Never! {
+btree_payload_checked: fn(bt: ^Btree, c: Int, offset: Int, amt: Int, buf: ^[U8]) -[DB]> Int Never! {
     if bt.cursors[c].state == CURSOR_VALID -> return access_payload(bt, c, offset, amt, buf, false)
     if bt.cursors[c].state == CURSOR_INVALID -> return base.ABORT
     rc: btree_restore_cursor_position(bt, c)
@@ -2340,7 +2340,7 @@ btree_payload_checked: fn(bt: &Btree, c: Int, offset: Int, amt: Int, buf: &[U8])
 // sqlite3BtreePayloadFetch (fetchPayload): the offset of the local payload
 // in the image of the cursor's page (bt.cursors[c].page); amt gets its
 // size.
-btree_payload_fetch: fn(bt: Btree, c: Int, amt: &Int) -> Int Never! {
+btree_payload_fetch: fn(bt: Btree, c: Int, amt: ^Int) -> Int Never! {
     payload: bt.cursors[c].info.payload
     a := bt.cursors[c].info.n_local
     room: bt.page_size - payload
@@ -2350,7 +2350,7 @@ btree_payload_fetch: fn(bt: Btree, c: Int, amt: &Int) -> Int Never! {
 }
 
 // moveToChild.
-move_to_child: fn(bt: &Btree, c: Int, new_pgno: Int) -[DB]> Int Never! {
+move_to_child: fn(bt: ^Btree, c: Int, new_pgno: Int) -[DB]> Int Never! {
     ip: bt.cursors[c].i_page
     if ip >= BTCURSOR_MAX_DEPTH - 1 -> return base.CORRUPT
     bt.cursors[c].info.n_size = 0
@@ -2376,7 +2376,7 @@ move_to_child: fn(bt: &Btree, c: Int, new_pgno: Int) -[DB]> Int Never! {
 }
 
 // moveToParent.
-move_to_parent: fn(bt: &Btree, c: Int) Never! {
+move_to_parent: fn(bt: ^Btree, c: Int) Never! {
     ip: bt.cursors[c].i_page - 1
     bt.cursors[c].info.n_size = 0
     bt.cursors[c].cur_flags = util.clear_bits(bt.cursors[c].cur_flags, BTCF_VALID_NKEY | BTCF_VALID_OVFL)
@@ -2394,7 +2394,7 @@ cursor_is_table: fn(bt: Btree, c: Int) -> Bool Never! {
 }
 
 // moveToRoot.
-move_to_root: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+move_to_root: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     rc := base.OK
     skip_init := false
     if bt.cursors[c].i_page >= 0 {
@@ -2454,7 +2454,7 @@ move_to_root: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // moveToLeftmost.
-move_to_leftmost: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+move_to_leftmost: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     rc := base.OK
     loop rc == base.OK && !bt.mem[bt.cursors[c].page].leaf {
         s: bt.cursors[c].page
@@ -2465,7 +2465,7 @@ move_to_leftmost: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // moveToRightmost.
-move_to_rightmost: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+move_to_rightmost: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     loop !bt.mem[bt.cursors[c].page].leaf {
         s: bt.cursors[c].page
         pgno: pg4(bt, s, bt.mem[s].hdr_offset + 8)
@@ -2479,7 +2479,7 @@ move_to_rightmost: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // sqlite3BtreeFirst: res gets 1 for an empty table, else 0.
-btree_first: fn(bt: &Btree, c: Int, res: &Int) -[DB]> Int Never! {
+btree_first: fn(bt: ^Btree, c: Int, res: ^Int) -[DB]> Int Never! {
     rc := move_to_root(bt, c)
     if rc == base.OK {
         res = 0
@@ -2492,7 +2492,7 @@ btree_first: fn(bt: &Btree, c: Int, res: &Int) -[DB]> Int Never! {
 }
 
 // btreeLast.
-btree_last_inner: fn(bt: &Btree, c: Int, res: &Int) -[DB]> Int Never! {
+btree_last_inner: fn(bt: ^Btree, c: Int, res: ^Int) -[DB]> Int Never! {
     rc := move_to_root(bt, c)
     if rc == base.OK {
         res = 0
@@ -2508,7 +2508,7 @@ btree_last_inner: fn(bt: &Btree, c: Int, res: &Int) -[DB]> Int Never! {
 }
 
 // sqlite3BtreeLast.
-btree_last: fn(bt: &Btree, c: Int, res: &Int) -[DB]> Int Never! {
+btree_last: fn(bt: ^Btree, c: Int, res: ^Int) -[DB]> Int Never! {
     if bt.cursors[c].state == CURSOR_VALID && bt.cursors[c].cur_flags & BTCF_AT_LAST != 0 {
         res = 0
         return base.OK
@@ -2519,7 +2519,7 @@ btree_last: fn(bt: &Btree, c: Int, res: &Int) -[DB]> Int Never! {
 // sqlite3BtreeTableMoveto: move to the row int_key, or next to where it
 // would be; res gets <0, 0 or >0 as the row the cursor is on is smaller,
 // equal or larger.
-btree_table_moveto: fn(bt: &Btree, c: Int, int_key: Int, bias_right: Bool, res: &Int) -[DB]> Int Never! {
+btree_table_moveto: fn(bt: ^Btree, c: Int, int_key: Int, bias_right: Bool, res: ^Int) -[DB]> Int Never! {
     if bt.cursors[c].state == CURSOR_VALID && bt.cursors[c].cur_flags & BTCF_VALID_NKEY != 0 {
         if bt.cursors[c].info.n_key == int_key {
             res = 0
@@ -2611,7 +2611,7 @@ btree_table_moveto: fn(bt: &Btree, c: Int, int_key: Int, bias_right: Bool, res: 
 
 // indexCellCompare's and sqlite3BtreeIndexMoveto's compare of a cell whose
 // key is all on the page: 99 when it is not.
-index_cell_compare_local: fn(bt: Btree, s: Int, cell: Int, kind: Int, idx: &record.UnpackedRecord) -> Int Never! {
+index_cell_compare_local: fn(bt: Btree, s: Int, cell: Int, kind: Int, idx: ^record.UnpackedRecord) -> Int Never! {
     data: bt.pager.pcache.pages[s].data
     n_cell := bb(data, cell)
     if n_cell <= bt.mem[s].max1byte_payload {
@@ -2628,7 +2628,7 @@ index_cell_compare_local: fn(bt: Btree, s: Int, cell: Int, kind: Int, idx: &reco
 }
 
 // indexCellCompare.
-index_cell_compare: fn(bt: Btree, c: Int, i: Int, kind: Int, idx: &record.UnpackedRecord) -> Int Never! {
+index_cell_compare: fn(bt: Btree, c: Int, i: Int, kind: Int, idx: ^record.UnpackedRecord) -> Int Never! {
     s: bt.cursors[c].page
     index_cell_compare_local(bt, s, find_cell_past_ptr(bt, s, i), kind, idx)
 }
@@ -2644,7 +2644,7 @@ cursor_on_last_page: fn(bt: Btree, c: Int) -> Bool Never! {
 
 // sqlite3BtreeIndexMoveto: move to the index entry idx, or next to where
 // it would be; res as for btree_table_moveto.
-btree_index_moveto: fn(bt: &Btree, c: Int, idx: &record.UnpackedRecord, res: &Int) -[DB]> Int Never! {
+btree_index_moveto: fn(bt: ^Btree, c: Int, idx: ^record.UnpackedRecord, res: ^Int) -[DB]> Int Never! {
     kind: record.find_compare(idx)
     idx.err_code = 0
     bypass := false
@@ -2768,7 +2768,7 @@ btree_row_count_est: fn(bt: Btree, c: Int) -> Int Never! {
 }
 
 // btreeNext.
-btree_next_slow: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+btree_next_slow: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     if bt.cursors[c].state != CURSOR_VALID {
         rc: restore_cursor_position(bt, c)
         if rc != base.OK -> return rc
@@ -2806,7 +2806,7 @@ btree_next_slow: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // sqlite3BtreeNext: SQLITE_DONE past the last entry.
-btree_next: fn(bt: &Btree, c: Int, flags: Int) -[DB]> Int Never! {
+btree_next: fn(bt: ^Btree, c: Int, flags: Int) -[DB]> Int Never! {
     bt.cursors[c].info.n_size = 0
     bt.cursors[c].cur_flags = util.clear_bits(bt.cursors[c].cur_flags, BTCF_VALID_NKEY | BTCF_VALID_OVFL)
     if bt.cursors[c].state != CURSOR_VALID -> return btree_next_slow(bt, c)
@@ -2821,7 +2821,7 @@ btree_next: fn(bt: &Btree, c: Int, flags: Int) -[DB]> Int Never! {
 }
 
 // btreePrevious.
-btree_previous_slow: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+btree_previous_slow: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     if bt.cursors[c].state != CURSOR_VALID {
         rc: restore_cursor_position(bt, c)
         if rc != base.OK -> return rc
@@ -2853,7 +2853,7 @@ btree_previous_slow: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 }
 
 // sqlite3BtreePrevious: SQLITE_DONE before the first entry.
-btree_previous: fn(bt: &Btree, c: Int, flags: Int) -[DB]> Int Never! {
+btree_previous: fn(bt: ^Btree, c: Int, flags: Int) -[DB]> Int Never! {
     bt.cursors[c].cur_flags = util.clear_bits(bt.cursors[c].cur_flags, BTCF_AT_LAST | BTCF_VALID_OVFL | BTCF_VALID_NKEY)
     bt.cursors[c].info.n_size = 0
     if bt.cursors[c].state != CURSOR_VALID || bt.cursors[c].ix == 0 {
@@ -2879,7 +2879,7 @@ abs_diff32: fn(a: Int, b: Int) -> Int Never! {
 
 // allocateBtreePage's search of the freelist: the do-while loop. A return
 // is its goto end_allocate_page; the caller releases trunk and prev_trunk.
-allocate_from_freelist: fn(bt: &Btree, page: &Int, pgno: &Int, nearby: Int, e_mode: Int, n: Int, mx_page: Int, search_list_in: Bool, trunk: &Int, prev_trunk: &Int) -[DB]> Int Never! {
+allocate_from_freelist: fn(bt: ^Btree, page: ^Int, pgno: ^Int, nearby: Int, e_mode: Int, n: Int, mx_page: Int, search_list_in: Bool, trunk: ^Int, prev_trunk: ^Int) -[DB]> Int Never! {
     s1: bt.page1
     search_list := search_list_in
     n_search := 0
@@ -2996,7 +2996,7 @@ allocate_from_freelist: fn(bt: &Btree, page: &Int, pgno: &Int, nearby: Int, e_mo
 // allocateBtreePage: a new page, from the freelist or the end of the file.
 // page gets its slot (written and with a reference) and pgno its number;
 // e_mode is BTALLOC_ANY, BTALLOC_EXACT (only page nearby) or BTALLOC_LE.
-allocate_btree_page: fn(bt: &Btree, page: &Int, pgno: &Int, nearby: Int, e_mode: Int) -[DB]> Int Never! {
+allocate_btree_page: fn(bt: ^Btree, page: ^Int, pgno: ^Int, nearby: Int, e_mode: Int) -[DB]> Int Never! {
     s1: bt.page1
     mx_page: btree_pagecount(bt)
     n: pg4(bt, s1, 36)
@@ -3056,7 +3056,7 @@ allocate_btree_page: fn(bt: &Btree, page: &Int, pgno: &Int, nearby: Int, e_mode:
 }
 
 // freePage2 up to freepage_out; the caller releases page and trunk.
-free_page2_body: fn(bt: &Btree, page: &Int, trunk: &Int, i_page: Int) -[DB]> Int Never! {
+free_page2_body: fn(bt: ^Btree, page: ^Int, trunk: ^Int, i_page: Int) -[DB]> Int Never! {
     s1: bt.page1
     rc := pager.pager_write(bt.pager, s1)
     if rc != base.OK -> return rc
@@ -3115,7 +3115,7 @@ free_page2_body: fn(bt: &Btree, page: &Int, trunk: &Int, i_page: Int) -[DB]> Int
 
 // freePage2: put page i_page on the freelist. mem_page is its slot when
 // the caller holds it, else NO_PAGE.
-free_page2: fn(bt: &Btree, mem_page: Int, i_page: Int) -[DB]> Int Never! {
+free_page2: fn(bt: ^Btree, mem_page: Int, i_page: Int) -[DB]> Int Never! {
     if i_page < 2 || i_page > bt.n_page -> return base.CORRUPT
     page := cache.NO_PAGE
     if mem_page != cache.NO_PAGE {
@@ -3132,7 +3132,7 @@ free_page2: fn(bt: &Btree, mem_page: Int, i_page: Int) -[DB]> Int Never! {
 }
 
 // freePage.
-free_page: fn(bt: &Btree, s: Int, rc: &Int) -[DB]> Never! {
+free_page: fn(bt: ^Btree, s: Int, rc: ^Int) -[DB]> Never! {
     if rc == base.OK {
         pgno: bt.mem[s].pgno
         rc = free_page2(bt, s, pgno)
@@ -3140,7 +3140,7 @@ free_page: fn(bt: &Btree, s: Int, rc: &Int) -[DB]> Never! {
 }
 
 // clearCellOverflow: free the overflow chain of the cell at `cell` of s.
-clear_cell_overflow: fn(bt: &Btree, s: Int, cell: Int, info: CellInfo) -[DB]> Int Never! {
+clear_cell_overflow: fn(bt: ^Btree, s: Int, cell: Int, info: CellInfo) -[DB]> Int Never! {
     if cell + info.n_size > bt.page_size -> return base.CORRUPT
     ovfl_pgno := pg4(bt, s, cell + info.n_size - 4)
     ovfl_page_size: bt.usable_size - 4
@@ -3168,7 +3168,7 @@ clear_cell_overflow: fn(bt: &Btree, s: Int, cell: Int, info: CellInfo) -[DB]> In
 
 // BTREE_CLEAR_CELL: parse the cell at `cell` of s into info and free its
 // overflow chain.
-clear_cell: fn(bt: &Btree, s: Int, cell: Int, info: &CellInfo) -[DB]> Int Never! {
+clear_cell: fn(bt: ^Btree, s: Int, cell: Int, info: ^CellInfo) -[DB]> Int Never! {
     parse_cell(bt.mem[s], bt.usable_size, bt.pager.pcache.pages[s].data, cell, info)
     if info.n_local != info.n_payload -> return clear_cell_overflow(bt, s, cell, info.copy())
     base.OK
@@ -3190,12 +3190,12 @@ BtreePayload: struct {
 }
 
 // memcpy(page s + at, src, n); bytes past the end of src read as zero.
-put_bytes: fn(bt: &Btree, s: Int, at: Int, src: [U8], n: Int) Never! {
+put_bytes: fn(bt: ^Btree, s: Int, at: Int, src: [U8], n: Int) Never! {
     loop i in 0..<n -> bt.pager.pcache.pages[s].data[at + i] = U8{bb(src, i)}
 }
 
 // memcpy from page `from` at src_at to page `to` at `at`.
-copy_page_bytes: fn(bt: &Btree, to: Int, at: Int, from: Int, src_at: Int, n: Int) Never! {
+copy_page_bytes: fn(bt: ^Btree, to: Int, at: Int, from: Int, src_at: Int, n: Int) Never! {
     loop i in 0..<n {
         v: pb(bt, from, src_at + i)
         ps1(bt, to, at + i, v)
@@ -3204,7 +3204,7 @@ copy_page_bytes: fn(bt: &Btree, to: Int, at: Int, from: Int, src_at: Int, n: Int
 
 // fillInCell's writes: into bt.tmp_space (slot -1, the new cell) or into
 // an overflow page.
-fill_bytes: fn(bt: &Btree, slot: Int, at: Int, src: [U8], from: Int, n: Int) Never! {
+fill_bytes: fn(bt: ^Btree, slot: Int, at: Int, src: [U8], from: Int, n: Int) Never! {
     if slot < 0 {
         loop i in 0..<n -> bt.tmp_space[at + i] = U8{bb(src, from + i)}
     } else {
@@ -3212,7 +3212,7 @@ fill_bytes: fn(bt: &Btree, slot: Int, at: Int, src: [U8], from: Int, n: Int) Nev
     }
 }
 
-fill_zero: fn(bt: &Btree, slot: Int, at: Int, n: Int) Never! {
+fill_zero: fn(bt: ^Btree, slot: Int, at: Int, n: Int) Never! {
     if slot < 0 {
         loop i in 0..<n -> bt.tmp_space[at + i] = U8{0}
     } else { pzero(bt, slot, at, n) }
@@ -3220,7 +3220,7 @@ fill_zero: fn(bt: &Btree, slot: Int, at: Int, n: Int) Never! {
 
 // fillInCell: build the cell of x for page s in bt.tmp_space (the caller's
 // newCell), spilling to new overflow pages; n_size gets its size.
-fill_in_cell: fn(bt: &Btree, s: Int, x: BtreePayload, n_size: &Int) -[DB]> Int Never! {
+fill_in_cell: fn(bt: ^Btree, s: Int, x: BtreePayload, n_size: ^Int) -[DB]> Int Never! {
     n_header := bt.mem[s].child_ptr_size
     head := [U8]{}
     n_payload := 0
@@ -3313,7 +3313,7 @@ fill_in_cell: fn(bt: &Btree, s: Int, x: BtreePayload, n_size: &Int) -[DB]> Int N
 }
 
 // dropCell: remove cell idx, sz bytes, from page s.
-drop_cell: fn(bt: &Btree, s: Int, idx: Int, sz: Int, rc: &Int) Never! {
+drop_cell: fn(bt: ^Btree, s: Int, idx: Int, sz: Int, rc: ^Int) Never! {
     if rc != base.OK {
         return
     }
@@ -3345,7 +3345,7 @@ drop_cell: fn(bt: &Btree, s: Int, idx: Int, sz: Int, rc: &Int) Never! {
 }
 
 // Record overflow cell j of page s: the cell `cell` that would be cell i.
-set_ovfl: fn(bt: &Btree, s: Int, j: Int, cell: [U8], i: Int) Never! {
+set_ovfl: fn(bt: ^Btree, s: Int, j: Int, cell: [U8], i: Int) Never! {
     loop bt.mem[s].ap_ovfl.len() <= j {
         bt.mem[s].ap_ovfl.push([U8]{})
         bt.mem[s].ai_ovfl.push(0)
@@ -3356,7 +3356,7 @@ set_ovfl: fn(bt: &Btree, s: Int, j: Int, cell: [U8], i: Int) Never! {
 
 // The bookkeeping insertCell and insertCellFast share once the cell's sz
 // bytes are at idx: its pointer becomes cell i.
-insert_cell_pointer: fn(bt: &Btree, s: Int, i: Int, idx: Int) Never! {
+insert_cell_pointer: fn(bt: ^Btree, s: Int, i: Int, idx: Int) Never! {
     ins: bt.mem[s].cell_offset + i * 2
     n: bt.mem[s].n_cell
     mem_move(bt.pager.pcache.pages[s].data, ins + 2, ins, 2 * (n - i))
@@ -3373,7 +3373,7 @@ insert_cell_pointer: fn(bt: &Btree, s: Int, i: Int, idx: Int) Never! {
 
 // insertCell: make `cell` (sz bytes, whose first four become i_child) cell
 // i of page s, or an overflow cell of s when it does not fit.
-insert_cell: fn(bt: &Btree, s: Int, i: Int, cell: [U8], sz: Int, i_child: Int) -[DB]> Int Never! {
+insert_cell: fn(bt: ^Btree, s: Int, i: Int, cell: [U8], sz: Int, i_child: Int) -[DB]> Int Never! {
     if bt.mem[s].n_overflow != 0 || sz + 2 > bt.mem[s].n_free {
         c := slice_of(cell, 0, if sz < 4 -> 4 else -> sz)
         util.put4(c, 0, i_child & os.U32_MASK)
@@ -3400,7 +3400,7 @@ insert_cell: fn(bt: &Btree, s: Int, i: Int, cell: [U8], sz: Int, i_child: Int) -
 }
 
 // insertCellFast: insertCell for a cell without a child pointer to set.
-insert_cell_fast: fn(bt: &Btree, s: Int, i: Int, cell: [U8], sz: Int) -[DB]> Int Never! {
+insert_cell_fast: fn(bt: ^Btree, s: Int, i: Int, cell: [U8], sz: Int) -[DB]> Int Never! {
     if sz + 2 > bt.mem[s].n_free {
         j: bt.mem[s].n_overflow
         bt.mem[s].n_overflow = j + 1
@@ -3457,7 +3457,7 @@ cell_array_new: fn(ref: MemPage) -> CellArray Never! {
     CellArray{n_cell: 0, ref: ref, cells: [[U8]]{}, src: [Int]{}, off: [Int]{}, sz: [Int]{}, ap_end: no_pages(NB * 2), ix_nx: zero_ints(NB * 2)}
 }
 
-cell_array_push: fn(b: &CellArray, cell: &&[U8], src: Int, off: Int, sz: Int) Never! {
+cell_array_push: fn(b: ^CellArray, cell: ^^[U8], src: Int, off: Int, sz: Int) Never! {
     b.cells.push(cell)
     b.src.push(src)
     b.off.push(off)
@@ -3466,7 +3466,7 @@ cell_array_push: fn(b: &CellArray, cell: &&[U8], src: Int, off: Int, sz: Int) Ne
 }
 
 // populateCellCache.
-populate_cell_cache: fn(b: &CellArray, idx: Int, n: Int, usable: Int) Never! {
+populate_cell_cache: fn(b: ^CellArray, idx: Int, n: Int, usable: Int) Never! {
     loop i in idx..<idx + n {
         if b.sz[i] == 0 {
             v: cell_size(b.ref, usable, b.cells[i], 0)
@@ -3476,7 +3476,7 @@ populate_cell_cache: fn(b: &CellArray, idx: Int, n: Int, usable: Int) Never! {
 }
 
 // cachedCellSize.
-cached_cell_size: fn(b: &CellArray, n: Int, usable: Int) -> Int Never! {
+cached_cell_size: fn(b: ^CellArray, n: Int, usable: Int) -> Int Never! {
     if b.sz[n] != 0 -> return b.sz[n]
     v: cell_size(b.ref, usable, b.cells[n], 0)
     b.sz[n] = v
@@ -3499,7 +3499,7 @@ straddles: fn(src: Int, off: Int, sz: Int, end_slot: Int, page_size: Int) -> Boo
 }
 
 // rebuildPage: page s holds exactly cells i_first..<i_first + n_cell.
-rebuild_page: fn(bt: &Btree, b: &CellArray, i_first: Int, n_cell: Int, s: Int) -> Int Never! {
+rebuild_page: fn(bt: ^Btree, b: ^CellArray, i_first: Int, n_cell: Int, s: Int) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     usable: bt.usable_size
     j := pg2(bt, s, hdr + 5)
@@ -3539,7 +3539,7 @@ rebuild_page: fn(bt: &Btree, b: &CellArray, i_first: Int, n_cell: Int, s: Int) -
 // pageInsertArray: add cells i_first..<i_first + n_cell to page s, their
 // pointers from cellptr on and their content below data (or in free
 // slots); 1 when they do not fit.
-page_insert_array: fn(bt: &Btree, s: Int, p_begin: Int, data: &Int, cellptr_in: Int, i_first: Int, n_cell: Int, b: CellArray) -> Int Never! {
+page_insert_array: fn(bt: ^Btree, s: Int, p_begin: Int, data: ^Int, cellptr_in: Int, i_first: Int, n_cell: Int, b: CellArray) -> Int Never! {
     i := i_first
     i_end: i_first + n_cell
     if i_end <= i_first -> return 0
@@ -3576,7 +3576,7 @@ page_insert_array: fn(bt: &Btree, s: Int, p_begin: Int, data: &Int, cellptr_in: 
 
 // pageFreeArray: free the cells i_first..<i_first + n_cell that lie on
 // page s; the count freed.
-page_free_array: fn(bt: &Btree, s: Int, i_first: Int, n_cell: Int, b: CellArray) -> Int Never! {
+page_free_array: fn(bt: ^Btree, s: Int, i_first: Int, n_cell: Int, b: CellArray) -> Int Never! {
     usable: bt.usable_size
     start: bt.mem[s].hdr_offset + 8 + bt.mem[s].child_ptr_size
     n_ret := 0
@@ -3617,7 +3617,7 @@ page_free_array: fn(bt: &Btree, s: Int, i_first: Int, n_cell: Int, b: CellArray)
 }
 
 // editPage up to editpage_fail, which EDIT_FAIL stands for.
-edit_page_try: fn(bt: &Btree, s: Int, i_old: Int, i_new: Int, n_new: Int, b: &CellArray) -> Int Never! {
+edit_page_try: fn(bt: ^Btree, s: Int, i_old: Int, i_new: Int, n_new: Int, b: ^CellArray) -> Int Never! {
     hdr: bt.mem[s].hdr_offset
     cell_idx: bt.mem[s].cell_offset
     p_begin: cell_idx + n_new * 2
@@ -3672,7 +3672,7 @@ edit_page_try: fn(bt: &Btree, s: Int, i_old: Int, i_new: Int, n_new: Int, b: &Ce
 
 // editPage: page s, which holds cells i_old.., is to hold the n_new cells
 // from i_new on.
-edit_page: fn(bt: &Btree, s: Int, i_old: Int, i_new: Int, n_new: Int, b: &CellArray) -> Int Never! {
+edit_page: fn(bt: ^Btree, s: Int, i_old: Int, i_new: Int, n_new: Int, b: ^CellArray) -> Int Never! {
     rc: edit_page_try(bt, s, i_old, i_new, n_new, b)
     if rc != EDIT_FAIL -> return rc
     // editpage_fail.
@@ -3683,7 +3683,7 @@ edit_page: fn(bt: &Btree, s: Int, i_old: Int, i_new: Int, n_new: Int, b: &CellAr
 
 // balance_quick: the page s, the rightmost child of parent, overflows by
 // one cell at its end; that cell goes alone on a new right sibling.
-balance_quick: fn(bt: &Btree, parent: Int, s: Int) -[DB]> Int Never! {
+balance_quick: fn(bt: ^Btree, parent: Int, s: Int) -[DB]> Int Never! {
     if bt.mem[s].n_cell == 0 -> return base.CORRUPT
     new := cache.NO_PAGE
     pgno_new := 0
@@ -3735,7 +3735,7 @@ balance_quick: fn(bt: &Btree, parent: Int, s: Int) -[DB]> Int Never! {
 }
 
 // copyNodeContent: page `to` gets the content of page `from`.
-copy_node_content: fn(bt: &Btree, from: Int, to: Int, rc: &Int) -[DB]> Never! {
+copy_node_content: fn(bt: ^Btree, from: Int, to: Int, rc: ^Int) -[DB]> Never! {
     if rc != base.OK {
         return
     }
@@ -3762,7 +3762,7 @@ page_slice: fn(bt: Btree, s: Int, at: Int, n: Int) -> [U8] Never! {
 
 // balance_nonroot up to balance_cleanup, which a return stands for; the
 // caller releases ap_old[..<n_old] and ap_new[..<n_new].
-balance_nonroot_body: fn(bt: &Btree, parent: Int, i_parent_idx: Int, is_root: Bool, b_bulk: Int, ap_old: &[Int], ap_new: &[Int], n_old_out: &Int, n_new_out: &Int) -[DB]> Int Never! {
+balance_nonroot_body: fn(bt: ^Btree, parent: Int, i_parent_idx: Int, is_root: Bool, b_bulk: Int, ap_old: ^[Int], ap_new: ^[Int], n_old_out: ^Int, n_new_out: ^Int) -[DB]> Int Never! {
     rc := base.OK
     usable: bt.usable_size
     page_size: bt.page_size
@@ -4124,7 +4124,7 @@ balance_nonroot_body: fn(bt: &Btree, parent: Int, i_parent_idx: Int, is_root: Bo
 
 // balance_nonroot: redistribute the cells of the child i_parent_idx of
 // parent and its siblings (up to NB pages) over as many pages as they need.
-balance_nonroot: fn(bt: &Btree, parent: Int, i_parent_idx: Int, is_root: Bool, b_bulk: Int) -[DB]> Int Never! {
+balance_nonroot: fn(bt: ^Btree, parent: Int, i_parent_idx: Int, is_root: Bool, b_bulk: Int) -[DB]> Int Never! {
     ap_old := no_pages(NB)
     ap_new := no_pages(NB + 2)
     n_old := 0
@@ -4138,7 +4138,7 @@ balance_nonroot: fn(bt: &Btree, parent: Int, i_parent_idx: Int, is_root: Bool, b
 
 // balance_deeper: move the content of the overfull root into a new child,
 // which child gets, leaving the root an interior page over it.
-balance_deeper: fn(bt: &Btree, root: Int, child: &Int) -[DB]> Int Never! {
+balance_deeper: fn(bt: ^Btree, root: Int, child: ^Int) -[DB]> Int Never! {
     ch := cache.NO_PAGE
     pgno_child := 0
     rc := pager.pager_write(bt.pager, root)
@@ -4180,7 +4180,7 @@ another_valid_cursor: fn(bt: Btree, c: Int) -> Int Never! {
 
 // balance: rebalance the pages on the cursor's path after an insert or a
 // delete left its page overfull or underfull.
-balance: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+balance: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     rc := base.OK
     loop {
         s: bt.cursors[c].page
@@ -4232,7 +4232,7 @@ balance: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 // btreeOverwriteContent: write i_amt bytes of x's data from i_offset (zero
 // past its end) at dest_at of page s, making the page writable only when a
 // byte changes.
-btree_overwrite_content: fn(bt: &Btree, s: Int, dest_at: Int, x: BtreePayload, i_offset: Int, i_amt_in: Int) -[DB]> Int Never! {
+btree_overwrite_content: fn(bt: ^Btree, s: Int, dest_at: Int, x: BtreePayload, i_offset: Int, i_amt_in: Int) -[DB]> Int Never! {
     i_amt := i_amt_in
     n_data: x.n_data - i_offset
     if n_data <= 0 {
@@ -4267,7 +4267,7 @@ btree_overwrite_content: fn(bt: &Btree, s: Int, dest_at: Int, x: BtreePayload, i
 
 // btreeOverwriteOverflowCell: overwrite the cursor's cell, whose payload
 // spills to overflow pages, with x.
-btree_overwrite_overflow_cell: fn(bt: &Btree, c: Int, x: BtreePayload) -[DB]> Int Never! {
+btree_overwrite_overflow_cell: fn(bt: ^Btree, c: Int, x: BtreePayload) -[DB]> Int Never! {
     n_total: x.n_data + x.n_zero
     s: bt.cursors[c].page
     payload: bt.cursors[c].info.payload
@@ -4297,7 +4297,7 @@ btree_overwrite_overflow_cell: fn(bt: &Btree, c: Int, x: BtreePayload) -[DB]> In
 
 // btreeOverwriteCell: overwrite the cursor's cell in place with x, which
 // has the same size.
-btree_overwrite_cell: fn(bt: &Btree, c: Int, x: BtreePayload) -[DB]> Int Never! {
+btree_overwrite_cell: fn(bt: ^Btree, c: Int, x: BtreePayload) -[DB]> Int Never! {
     n_total: x.n_data + x.n_zero
     s: bt.cursors[c].page
     payload: bt.cursors[c].info.payload
@@ -4312,7 +4312,7 @@ btree_overwrite_cell: fn(bt: &Btree, c: Int, x: BtreePayload) -[DB]> Int Never! 
 // seek to x's key (0 when the cursor is not known to be there); flags are
 // BTREE_SAVEPOSITION, BTREE_APPEND and BTREE_PREFORMAT (the cell is already
 // in bt.tmp_space, n_preformat_size bytes, from btree_transfer_row).
-btree_insert: fn(bt: &Btree, c: Int, x: BtreePayload, flags: Int, seek_result: Int) -[DB]> Int Never! {
+btree_insert: fn(bt: ^Btree, c: Int, x: BtreePayload, flags: Int, seek_result: Int) -[DB]> Int Never! {
     loc := seek_result
     sz_new := 0
     root: bt.cursors[c].pgno_root
@@ -4439,7 +4439,7 @@ btree_insert: fn(bt: &Btree, c: Int, x: BtreePayload, flags: Int, seek_result: I
 // may be another Btree, or this one), with the same checks in the same
 // order, and btree_transfer_row builds the cell from the copy. The pages
 // written are the same.
-btree_transfer_source: fn(bt: &Btree, c: Int, out: &[U8]) -[DB]> Int Never! {
+btree_transfer_source: fn(bt: ^Btree, c: Int, out: ^[U8]) -[DB]> Int Never! {
     get_cell_info(bt, c)
     s: bt.cursors[c].page
     n_in: bt.cursors[c].info.n_local
@@ -4472,7 +4472,7 @@ btree_transfer_source: fn(bt: &Btree, c: Int, out: &[U8]) -[DB]> Int Never! {
 // src (from btree_transfer_source) under rowid i_key (a table's), spilling
 // to new overflow pages, ready for btree_insert with BTREE_PREFORMAT.
 // C's shortcut for a payload that fits locally builds the same cell.
-btree_transfer_row: fn(bt: &Btree, dest: Int, src: [U8], i_key: Int) -[DB]> Int Never! {
+btree_transfer_row: fn(bt: ^Btree, dest: Int, src: [U8], i_key: Int) -[DB]> Int Never! {
     n_payload: src.len()
     head := [U8]{}
     util.put_varint(head, n_payload)
@@ -4532,7 +4532,7 @@ btree_transfer_row: fn(bt: &Btree, dest: Int, src: [U8], i_key: Int) -[DB]> Int 
 // sqlite3BtreeDelete: delete the cursor's entry. With BTREE_SAVEPOSITION
 // the cursor is left where a following btree_next or btree_previous finds
 // the neighboring entry; BTREE_AUXDELETE needs nothing here.
-btree_delete: fn(bt: &Btree, c: Int, flags: Int) -[DB]> Int Never! {
+btree_delete: fn(bt: ^Btree, c: Int, flags: Int) -[DB]> Int Never! {
     if bt.cursors[c].state != CURSOR_VALID {
         if bt.cursors[c].state < CURSOR_REQUIRESEEK -> return base.CORRUPT
         rc: btree_restore_cursor_position(bt, c)
@@ -4637,7 +4637,7 @@ btree_delete: fn(bt: &Btree, c: Int, flags: Int) -[DB]> Int Never! {
 // sqlite3BtreeCreateTable: a new empty table (BTREE_INTKEY) or index
 // (BTREE_BLOBKEY) whose root page number pi_table gets. With auto-vacuum
 // the root goes right after the largest root page, moving what was there.
-btree_create_table: fn(bt: &Btree, pi_table: &Int, flags: Int) -[DB]> Int Never! {
+btree_create_table: fn(bt: ^Btree, pi_table: ^Int, flags: Int) -[DB]> Int Never! {
     root := cache.NO_PAGE
     pgno_root := 0
     rc := base.OK
@@ -4702,7 +4702,7 @@ btree_create_table: fn(bt: &Btree, pi_table: &Int, flags: Int) -[DB]> Int Never!
 // clearDatabasePage: free every cell of page pgno and its subtree (the
 // page too when free_page_flag), adding the cells freed to n_change when
 // count (C's pnChange; the rows of a table, the entries of an index).
-clear_database_page: fn(bt: &Btree, pgno: Int, free_page_flag: Bool, n_change: &Int, count: Bool) -[DB]> Int Never! {
+clear_database_page: fn(bt: ^Btree, pgno: Int, free_page_flag: Bool, n_change: ^Int, count: Bool) -[DB]> Int Never! {
     if pgno > btree_pagecount(bt) -> return base.CORRUPT
     s := cache.NO_PAGE
     rc := get_and_init_page(bt, pgno, s, 0)
@@ -4713,7 +4713,7 @@ clear_database_page: fn(bt: &Btree, pgno: Int, free_page_flag: Bool, n_change: &
     rc
 }
 
-clear_database_page_body: fn(bt: &Btree, s: Int, pgno: Int, free_page_flag: Bool, n_change: &Int, count_in: Bool) -[DB]> Int Never! {
+clear_database_page_body: fn(bt: ^Btree, s: Int, pgno: Int, free_page_flag: Bool, n_change: ^Int, count_in: Bool) -[DB]> Int Never! {
     want_refs: if pgno == 1 -> 2 else -> 1
     if bt.open_flags & BTREE_SINGLE == 0 && pager.pager_page_refcount(bt.pager, s) != want_refs {
         return base.CORRUPT
@@ -4751,7 +4751,7 @@ clear_database_page_body: fn(bt: &Btree, s: Int, pgno: Int, free_page_flag: Bool
 
 // sqlite3BtreeClearTable: delete every entry of table or index i_table,
 // keeping its root page; n_change gets the entries deleted added to it.
-btree_clear_table: fn(bt: &Btree, i_table: Int, n_change: &Int) -[DB]> Int Never! {
+btree_clear_table: fn(bt: ^Btree, i_table: Int, n_change: ^Int) -[DB]> Int Never! {
     rc := save_all_cursors(bt, i_table, -1)
     if rc == base.OK {
         if bt.has_incrblob_cur -> invalidate_incrblob_cursors(bt, i_table, 0, true)
@@ -4761,7 +4761,7 @@ btree_clear_table: fn(bt: &Btree, i_table: Int, n_change: &Int) -[DB]> Int Never
 }
 
 // sqlite3BtreeClearTableOfCursor.
-btree_clear_table_of_cursor: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
+btree_clear_table_of_cursor: fn(bt: ^Btree, c: Int) -[DB]> Int Never! {
     root: bt.cursors[c].pgno_root
     unused := 0
     btree_clear_table(bt, root, unused)
@@ -4770,7 +4770,7 @@ btree_clear_table_of_cursor: fn(bt: &Btree, c: Int) -[DB]> Int Never! {
 // sqlite3BtreeDropTable: free table i_table and its root page. With
 // auto-vacuum the largest root page moves into the freed root's place and
 // pi_moved gets its old number (else 0).
-btree_drop_table: fn(bt: &Btree, i_table: Int, pi_moved: &Int) -[DB]> Int Never! {
+btree_drop_table: fn(bt: ^Btree, i_table: Int, pi_moved: ^Int) -[DB]> Int Never! {
     if i_table > btree_pagecount(bt) -> return base.CORRUPT
     unused := 0
     rc := btree_clear_table(bt, i_table, unused)
@@ -4826,7 +4826,7 @@ btree_get_meta: fn(bt: Btree, idx: Int) -> Int Never! {
 
 // sqlite3BtreeUpdateMeta: set meta value idx (1 to 15) in a write
 // transaction.
-btree_update_meta: fn(bt: &Btree, idx: Int, i_meta: Int) -[DB]> Int Never! {
+btree_update_meta: fn(bt: ^Btree, idx: Int, i_meta: Int) -[DB]> Int Never! {
     p1: bt.page1
     rc: pager.pager_write(bt.pager, p1)
     if rc == base.OK {
@@ -4840,7 +4840,7 @@ btree_update_meta: fn(bt: &Btree, idx: Int, i_meta: Int) -[DB]> Int Never! {
 // table or index, counted from the cells of every leaf (and of every
 // interior page of an index). It stops without setting n_entry when the
 // connection is interrupted.
-btree_count: fn(bt: &Btree, c: Int, n_entry: &Int) -[DB]> Int Never! {
+btree_count: fn(bt: ^Btree, c: Int, n_entry: ^Int) -[DB]> Int Never! {
     n := 0
     rc := move_to_root(bt, c)
     if rc == base.EMPTY {
@@ -4915,7 +4915,7 @@ IntegrityCk: struct {
 
 // checkProgress: stop the check once the connection is interrupted. (No
 // progress callback can be set in this build; xProgress is NULL.)
-check_progress: fn(db: BtDB, ck: &IntegrityCk) Never! {
+check_progress: fn(db: BtDB, ck: ^IntegrityCk) Never! {
     if db.is_interrupted {
         ck.rc = base.INTERRUPT
         ck.n_err += 1
@@ -4933,7 +4933,7 @@ check_prefix: fn(ck: IntegrityCk) -> String Never! {
 }
 
 // checkAppendMsg: add one error, under the current prefix.
-check_append_msg: fn(db: BtDB, ck: &IntegrityCk, text: String) Never! {
+check_append_msg: fn(db: BtDB, ck: ^IntegrityCk, text: String) Never! {
     check_progress(db, ck)
     if ck.mx_err == 0 {
         return
@@ -4946,7 +4946,7 @@ check_append_msg: fn(db: BtDB, ck: &IntegrityCk, text: String) Never! {
 
 // checkRef: mark page i_page referenced; true (after reporting it) when it
 // is out of range or was already referenced.
-check_ref: fn(db: BtDB, ck: &IntegrityCk, i_page: Int) -> Bool Never! {
+check_ref: fn(db: BtDB, ck: ^IntegrityCk, i_page: Int) -> Bool Never! {
     if i_page > ck.n_ck_page || i_page == 0 {
         check_append_msg(db, ck, "invalid page number {i_page}")
         return true
@@ -4961,7 +4961,7 @@ check_ref: fn(db: BtDB, ck: &IntegrityCk, i_page: Int) -> Bool Never! {
 
 // checkPtrmap: report the pointer-map entry of i_child unless it is
 // (e_type, i_parent).
-check_ptrmap: fn(bt: &Btree, ck: &IntegrityCk, i_child: Int, e_type: Int, i_parent: Int) -[DB]> Never! {
+check_ptrmap: fn(bt: ^Btree, ck: ^IntegrityCk, i_child: Int, e_type: Int, i_parent: Int) -[DB]> Never! {
     got_type := 0
     got_parent := 0
     rc: ptrmap_get(bt, i_child, got_type, got_parent)
@@ -4976,7 +4976,7 @@ check_ptrmap: fn(bt: &Btree, ck: &IntegrityCk, i_child: Int, e_type: Int, i_pare
 
 // checkList: check the freelist (is_free_list) or an overflow chain that
 // starts at i_page and should hold n_expected pages. The count is a u32.
-check_list: fn(bt: &Btree, ck: &IntegrityCk, is_free_list: Bool, i_page_in: Int, n_expected: Int) -[DB]> Never! {
+check_list: fn(bt: ^Btree, ck: ^IntegrityCk, is_free_list: Bool, i_page_in: Int, n_expected: Int) -[DB]> Never! {
     i_page := i_page_in
     n := n_expected
     n_err_at_start: ck.n_err
@@ -5017,7 +5017,7 @@ check_list: fn(bt: &Btree, ck: &IntegrityCk, is_free_list: Bool, i_page_in: Int,
 }
 
 // btreeHeapInsert: add x to the min-heap (heap[0] is its size).
-heap_insert: fn(heap: &[Int], x: Int) Never! {
+heap_insert: fn(heap: ^[Int], x: Int) Never! {
     i := heap[0] + 1
     heap[0] = i
     heap[i] = x
@@ -5033,7 +5033,7 @@ heap_insert: fn(heap: &[Int], x: Int) Never! {
 }
 
 // btreeHeapPull: take the least entry into out; false when empty.
-heap_pull: fn(heap: &[Int], out: &Int) -> Bool Never! {
+heap_pull: fn(heap: ^[Int], out: ^Int) -> Bool Never! {
     x: heap[0]
     if x == 0 -> return false
     out = heap[1]
@@ -5059,7 +5059,7 @@ heap_pull: fn(heap: &[Int], out: &Int) -> Bool Never! {
 // checkTreePage: check page i_page and the tree below it, whose rowids
 // must not pass max_key; pi_min_key gets the least rowid. The depth of
 // the tree, 0 for a leaf (and for a page that cannot be checked).
-check_tree_page: fn(bt: &Btree, ck: &IntegrityCk, i_page: Int, pi_min_key: &Int, max_key: Int) -[DB]> Int Never! {
+check_tree_page: fn(bt: ^Btree, ck: ^IntegrityCk, i_page: Int, pi_min_key: ^Int, max_key: Int) -[DB]> Int Never! {
     check_progress(bt.db, ck)
     if ck.mx_err == 0 -> return 0
     if i_page == 0 -> return 0
@@ -5088,7 +5088,7 @@ check_tree_page: fn(bt: &Btree, ck: &IntegrityCk, i_page: Int, pi_min_key: &Int,
     depth + 1
 }
 
-check_tree_page_body: fn(bt: &Btree, ck: &IntegrityCk, s: Int, i_page: Int, pi_min_key: &Int, max_key_in: Int, depth: &Int, do_coverage: &Bool) -[DB]> Never! {
+check_tree_page_body: fn(bt: ^Btree, ck: ^IntegrityCk, s: Int, i_page: Int, pi_min_key: ^Int, max_key_in: Int, depth: ^Int, do_coverage: ^Bool) -[DB]> Never! {
     rc := btree_init_page(bt, s)
     if rc != base.OK {
         check_append_msg(bt.db, ck, "btreeInitPage() returns error code {rc}")
@@ -5206,7 +5206,7 @@ check_tree_page_body: fn(bt: &Btree, ck: &IntegrityCk, s: Int, i_page: Int, pi_m
 // reporting at most mx_err errors. n_err gets the errors seen and out their
 // messages (None when there are none); the result is SQLITE_INTERRUPT when
 // the check was interrupted, else OK.
-btree_integrity_check: fn(bt: &Btree, roots: [Int], mx_err: Int, n_err: &Int, out: &String?) -[DB]> Int Never! {
+btree_integrity_check: fn(bt: ^Btree, roots: [Int], mx_err: Int, n_err: ^Int, out: ^String?) -[DB]> Int Never! {
     b_partial := false
     b_ck_freelist := true
     if roots[0] == 0 {
@@ -5221,7 +5221,7 @@ btree_integrity_check: fn(bt: &Btree, roots: [Int], mx_err: Int, n_err: &Int, ou
     ck.rc
 }
 
-integrity_check_body: fn(bt: &Btree, ck: &IntegrityCk, roots: [Int], b_partial: Bool, b_ck_freelist: Bool) -[DB]> Never! {
+integrity_check_body: fn(bt: ^Btree, ck: ^IntegrityCk, roots: [Int], b_partial: Bool, b_ck_freelist: Bool) -[DB]> Never! {
     n_ck: ck.n_ck_page
     loop _ in 0..<n_ck + 1 -> ck.pg_ref.push(false)
     ck.heap = zero_ints(bt.page_size /% 4)
@@ -5286,7 +5286,7 @@ btree_txn_state: fn(bt: Btree) -> Int Never! { bt.in_trans }
 
 // sqlite3BtreeCheckpoint: checkpoint the WAL (an eMode of
 // SQLITE_CHECKPOINT_*), or SQLITE_LOCKED while a transaction is open.
-btree_checkpoint: fn(bt: &Btree, e_mode: Int, n_log: &Int, n_ckpt: &Int) -[DB]> Int Never! {
+btree_checkpoint: fn(bt: ^Btree, e_mode: Int, n_log: ^Int, n_ckpt: ^Int) -[DB]> Int Never! {
     if bt.in_transaction != TRANS_NONE -> return base.LOCKED
     pager.pager_checkpoint(bt.pager, e_mode, n_log, n_ckpt)
 }
@@ -5296,7 +5296,7 @@ btree_is_in_backup: fn(bt: Btree) -> Bool Never! { bt.n_backup != 0 }
 
 // sqlite3BtreePutData: write amt bytes of z at offset of the payload of an
 // incremental-blob write cursor.
-btree_put_data: fn(bt: &Btree, c: Int, offset: Int, amt: Int, z: &[U8]) -[DB]> Int Never! {
+btree_put_data: fn(bt: ^Btree, c: Int, offset: Int, amt: Int, z: ^[U8]) -[DB]> Int Never! {
     rc := restore_cursor_position(bt, c)
     if rc != base.OK -> return rc
     if bt.cursors[c].state != CURSOR_VALID -> return base.ABORT
@@ -5307,14 +5307,14 @@ btree_put_data: fn(bt: &Btree, c: Int, offset: Int, amt: Int, z: &[U8]) -[DB]> I
 }
 
 // sqlite3BtreeIncrblobCursor.
-btree_incrblob_cursor: fn(bt: &Btree, c: Int) Never! {
+btree_incrblob_cursor: fn(bt: ^Btree, c: Int) Never! {
     bt.cursors[c].cur_flags = bt.cursors[c].cur_flags | BTCF_INCRBLOB
     bt.has_incrblob_cur = true
 }
 
 // sqlite3BtreeSetVersion: set the file format read and write versions
 // (bytes 18 and 19), 1 for a rollback journal and 2 for WAL.
-btree_set_version: fn(bt: &Btree, i_version: Int) -[DB]> Int Never! {
+btree_set_version: fn(bt: ^Btree, i_version: Int) -[DB]> Int Never! {
     bt.bts_flags = util.clear_bits(bt.bts_flags, BTS_NO_WAL)
     if i_version == 1 -> bt.bts_flags |= BTS_NO_WAL
     unused := 0
@@ -5346,7 +5346,7 @@ btree_cursor_has_hint: fn(bt: Btree, c: Int, mask: Int) -> Bool Never! {
 btree_is_readonly: fn(bt: Btree) -> Bool Never! { bt.bts_flags & BTS_READ_ONLY != 0 }
 
 // sqlite3BtreeClearCache: drop the cached pages outside a transaction.
-btree_clear_cache: fn(bt: &Btree) Never! {
+btree_clear_cache: fn(bt: ^Btree) Never! {
     if bt.in_transaction == TRANS_NONE -> pager.pager_clear_cache(bt.pager)
 }
 
@@ -5379,14 +5379,14 @@ test_key_info: fn() -> record.KeyInfo Never! {
 
 // A database in memory with 512-byte pages, so a thousand rows make a tree
 // of several levels.
-test_open: fn(bt: &Btree, auto_vacuum: Int) -[DB]> Never! {
+test_open: fn(bt: ^Btree, auto_vacuum: Int) -[DB]> Never! {
     flags: os.OPEN_READWRITE | os.OPEN_CREATE | os.OPEN_MAIN_DB
     assert_eq(btree_open(bt, Val(":memory:"), bt_db_default(), 0, flags, true, false, false, false), base.OK)
     assert_eq(btree_set_page_size(bt, 512, -1, false), base.OK)
     assert_eq(btree_set_auto_vacuum(bt, auto_vacuum), base.OK)
 }
 
-test_payload: fn(bt: &Btree, c: Int) -[DB]> [U8] Never! {
+test_payload: fn(bt: ^Btree, c: Int) -[DB]> [U8] Never! {
     n: btree_payload_size(bt, c)
     buf := pager.zeros(n)
     assert_eq(btree_payload(bt, c, 0, n, buf), base.OK)
@@ -5394,7 +5394,7 @@ test_payload: fn(bt: &Btree, c: Int) -[DB]> [U8] Never! {
 }
 
 // The integrity check of the trees at roots; the number of errors.
-test_errors: fn(bt: &Btree, roots: [Int]) -[DB]> Int Never! {
+test_errors: fn(bt: ^Btree, roots: [Int]) -[DB]> Int Never! {
     n_err := 0
     msg := String?{None}
     assert_eq(btree_integrity_check(bt, roots, 100, n_err, msg), base.OK)
@@ -5403,7 +5403,7 @@ test_errors: fn(bt: &Btree, roots: [Int]) -[DB]> Int Never! {
 }
 
 // Insert rows 1..n of t and their index entries in a scattered order.
-test_fill: fn(bt: &Btree, ct: Int, ci: Int, n: Int) -[DB]> Never! {
+test_fill: fn(bt: ^Btree, ct: Int, ci: Int, n: Int) -[DB]> Never! {
     loop i in 0..<n {
         // 7919 is prime to n, so i visits every key once.
         k: (i * 7919) % n + 1
@@ -5420,7 +5420,7 @@ test_fill: fn(bt: &Btree, ct: Int, ci: Int, n: Int) -[DB]> Never! {
 
 // Delete the rows whose key is a multiple of m but not of gone (those are
 // deleted already), and their index entries.
-test_delete: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int, gone: Int) -[DB]> Never! {
+test_delete: fn(bt: ^Btree, ct: Int, ci: Int, n: Int, m: Int, gone: Int) -[DB]> Never! {
     info: test_key_info()
     res := 0
     loop k in 1..n {
@@ -5439,7 +5439,7 @@ test_delete: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int, gone: Int) -[DB]> 
 
 // The table holds exactly the rows 1..n that are not multiples of m, in
 // rowid order, and the index one entry for each, in key order.
-test_verify: fn(bt: &Btree, ct: Int, ci: Int, n: Int, m: Int) -[DB]> Never! {
+test_verify: fn(bt: ^Btree, ct: Int, ci: Int, n: Int, m: Int) -[DB]> Never! {
     res := 0
     assert_eq(btree_first(bt, ct, res), base.OK)
     want := 1

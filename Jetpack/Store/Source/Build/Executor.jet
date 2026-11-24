@@ -465,7 +465,7 @@ build_wait_action: fn(run: BuildActionRun, child: ProcessChild, watch: BuildActi
 // its path and each found program it is passed named by the path it runs at
 // there; with `traces` (build_execute_actions) it also gets its trace folder
 // and `JET_TRACE_FILE`, and with `threads` `JET_BUILD_THREADS`.
-build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable, traces: String?, threads: Int?) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: ^StampTable, traces: String?, threads: Int?) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in declared.caps {
         if !grants.contains(cap) {
             return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})

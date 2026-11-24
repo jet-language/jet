@@ -706,7 +706,7 @@ new_ast: fn() -> AST Never! {
 }
 
 // Begin a statement over `sql`: a fresh Parse.
-begin_statement: fn(a: &AST, sql: [U8]) Never! { a.ctx = new_ctx(sql) }
+begin_statement: fn(a: ^AST, sql: [U8]) Never! { a.ctx = new_ctx(sql) }
 
 // IN_RENAME_OBJECT (sqliteInt.h).
 in_rename: fn(a: AST) -> Bool Never! { a.ctx.parse_mode >= PARSE_MODE_RENAME }
@@ -762,7 +762,7 @@ span_dup: fn(a: AST, start: Int, end: Int) -> [U8] Never! {
 
 // sqlite3ErrorMsg: record an error against the statement. `offset` is the
 // byte offset the message's %T or %#T argument records, else -1.
-error_at: fn(a: &AST, msg: String, offset: Int) Never! {
+error_at: fn(a: ^AST, msg: String, offset: Int) Never! {
     a.err_offset = offset
     if a.suppress_err {
         return
@@ -773,7 +773,7 @@ error_at: fn(a: &AST, msg: String, offset: Int) Never! {
     a.ctx.cur_with = -1
 }
 
-error: fn(a: &AST, msg: String) Never! { error_at(a, msg, -1) }
+error: fn(a: ^AST, msg: String) Never! { error_at(a, msg, -1) }
 
 // The offset sqlite3RecordErrorOffsetOfExpr (printf.c) records for an
 // expression, -1 when none: the first of it and its left descendants that
@@ -794,7 +794,7 @@ expr_text: fn(a: AST, e: Int) -> String Never! {
 }
 
 // sqlite3ExprSetErrorOffset (expr.c).
-expr_set_error_offset: fn(a: &AST, e: Int, offset: Int) Never! {
+expr_set_error_offset: fn(a: ^AST, e: Int, offset: Int) Never! {
     if e < 0 {
         return
     }
@@ -809,9 +809,9 @@ expr_set_error_offset: fn(a: &AST, e: Int, offset: Int) Never! {
 
 has: fn(a: AST, e: Int, f: Int) -> Bool Never! { a.exprs[e].flags & f != 0 }
 
-set_flags: fn(a: &AST, e: Int, f: Int) Never! { a.exprs[e].flags = a.exprs[e].flags | f }
+set_flags: fn(a: ^AST, e: Int, f: Int) Never! { a.exprs[e].flags = a.exprs[e].flags | f }
 
-clear_flags: fn(a: &AST, e: Int, f: Int) Never! {
+clear_flags: fn(a: ^AST, e: Int, f: Int) Never! {
     a.exprs[e].flags = clear_bits(a.exprs[e].flags, f)
 }
 
@@ -819,7 +819,7 @@ zero_expr: fn(op: Int) -> SQLExpr Never! {
     SQLExpr{op: op, aff: 0, op2: 0, flags: 0, token: None, ivalue: 0, left: -1, right: -1, x: -1, height: 0, itable: 0, icolumn: 0, iagg: -1, w: 0, agg_info: -1, y: -1, y_reg: 0}
 }
 
-push_expr: fn(a: &AST, e: SQLExpr) -> Int Never! {
+push_expr: fn(a: ^AST, e: SQLExpr) -> Int Never! {
     a.exprs.push(e.copy())
     a.exprs.len() - 1
 }
@@ -835,7 +835,7 @@ list_expr: fn(a: AST, l: Int, i: Int) -> Int Never! { a.lists[l].items[i].expr }
 // Token); a TK_INTEGER token that sqlite3GetInt32 reads becomes an
 // EP_INT_VALUE node, any other token is copied and, when `dequote`, a quoted
 // one is dequoted (sqlite3DequoteExpr).
-expr_alloc: fn(a: &AST, op: Int, tok: [U8]?, dequote_it: Bool) -> Int Never! {
+expr_alloc: fn(a: ^AST, op: Int, tok: [U8]?, dequote_it: Bool) -> Int Never! {
     e := zero_expr(op)
     if tok == .Val(t) {
         iv: if op == tk.TK_INTEGER -> get_int32(t) else -> None
@@ -852,10 +852,10 @@ expr_alloc: fn(a: &AST, op: Int, tok: [U8]?, dequote_it: Bool) -> Int Never! {
 }
 
 // sqlite3Expr: a leaf node with the token text `z`.
-expr: fn(a: &AST, op: Int, z: [U8]) -> Int Never! { expr_alloc(a, op, Val(z), false) }
+expr: fn(a: ^AST, op: Int, z: [U8]) -> Int Never! { expr_alloc(a, op, Val(z), false) }
 
 // sqlite3ExprAttachSubtrees.
-attach_subtrees: fn(a: &AST, root: Int, left: Int, right: Int) Never! {
+attach_subtrees: fn(a: ^AST, root: Int, left: Int, right: Int) Never! {
     if root < 0 {
         expr_delete(a, left)
         expr_delete(a, right)
@@ -878,7 +878,7 @@ attach_subtrees: fn(a: &AST, root: Int, left: Int, right: Int) Never! {
 }
 
 // sqlite3ExprCheckHeight.
-check_height: fn(a: &AST, height: Int) -> Int Never! {
+check_height: fn(a: ^AST, height: Int) -> Int Never! {
     mx: a.limits[LIMIT_EXPR_DEPTH]
     if height > mx {
         error(a, "Expression tree is too large (maximum depth {mx})")
@@ -914,7 +914,7 @@ height_of_select: fn(a: AST, s0: Int, h0: Int) -> Int Never! {
 }
 
 // exprSetHeight.
-expr_set_height: fn(a: &AST, e: Int) Never! {
+expr_set_height: fn(a: ^AST, e: Int) Never! {
     h := if a.exprs[e].left >= 0 -> a.exprs[a.exprs[e].left].height else -> 0
     r: a.exprs[e].right
     if r >= 0 && a.exprs[r].height > h -> h = a.exprs[r].height
@@ -927,7 +927,7 @@ expr_set_height: fn(a: &AST, e: Int) Never! {
 }
 
 // sqlite3ExprSetHeightAndFlags.
-set_height_and_flags: fn(a: &AST, e: Int) Never! {
+set_height_and_flags: fn(a: ^AST, e: Int) Never! {
     if a.ctx.nerr > 0 {
         return
     }
@@ -936,7 +936,7 @@ set_height_and_flags: fn(a: &AST, e: Int) Never! {
 }
 
 // sqlite3PExpr: an interior node over two subtrees.
-pexpr: fn(a: &AST, op: Int, left: Int, right: Int) -> Int Never! {
+pexpr: fn(a: ^AST, op: Int, left: Int, right: Int) -> Int Never! {
     e: push_expr(a, zero_expr(op & 255))
     attach_subtrees(a, e, left, right)
     _ := check_height(a, a.exprs[e].height)
@@ -944,7 +944,7 @@ pexpr: fn(a: &AST, op: Int, left: Int, right: Int) -> Int Never! {
 }
 
 // sqlite3PExprAddSelect.
-pexpr_add_select: fn(a: &AST, e: Int, sel: Int) Never! {
+pexpr_add_select: fn(a: ^AST, e: Int, sel: Int) Never! {
     if e < 0 {
         select_delete(a, sel)
         return
@@ -956,7 +956,7 @@ pexpr_add_select: fn(a: &AST, e: Int, sel: Int) Never! {
 
 // sqlite3ExprListToValues: the VALUES compound a list of vectors stands for
 // on the right of IN.
-expr_list_to_values: fn(a: &AST, nelem: Int, list: Int) -> Int Never! {
+expr_list_to_values: fn(a: ^AST, nelem: Int, list: Int) -> Int Never! {
     ret := -1
     loop ii in 0..<list_len(a, list) {
         e: list_expr(a, list, ii)
@@ -983,7 +983,7 @@ expr_list_to_values: fn(a: &AST, nelem: Int, list: Int) -> Int Never! {
 
 // sqlite3ExprAnd: AND two expressions; a side known false (outside an ON
 // clause) makes the whole the constant 0.
-expr_and: fn(a: &AST, left: Int, right: Int) -> Int Never! {
+expr_and: fn(a: ^AST, left: Int, right: Int) -> Int Never! {
     if left < 0 -> return right
     if right < 0 -> return left
     f: a.exprs[left].flags | a.exprs[right].flags
@@ -995,7 +995,7 @@ expr_and: fn(a: &AST, left: Int, right: Int) -> Int Never! {
 }
 
 // sqlite3ExprFunction: a function call node named by `name`.
-expr_function: fn(a: &AST, list: Int, name: SQLTok, distinct: Int) -> Int Never! {
+expr_function: fn(a: ^AST, list: Int, name: SQLTok, distinct: Int) -> Int Never! {
     name_bytes: tok_bytes(a, name)
     e: expr_alloc(a, tk.TK_FUNCTION, Val(name_bytes), true)
     a.exprs[e].w = name.z
@@ -1017,7 +1017,7 @@ is_window_func: fn(a: AST, e: Int) -> Bool Never! {
 }
 
 // sqlite3ExprOrderByAggregateError.
-order_by_aggregate_error: fn(a: &AST, e: Int) Never! {
+order_by_aggregate_error: fn(a: ^AST, e: Int) Never! {
     t: expr_text(a, e)
     off: expr_offset(a, e)
     error_at(a, "ORDER BY may not be used with non-aggregate {t}()", off)
@@ -1025,7 +1025,7 @@ order_by_aggregate_error: fn(a: &AST, e: Int) Never! {
 
 // sqlite3ExprAddFunctionOrderBy: attach an aggregate's ORDER BY clause as a
 // TK_ORDER node on the function's left.
-expr_add_function_order_by: fn(a: &AST, e: Int, order_by: Int) Never! {
+expr_add_function_order_by: fn(a: ^AST, e: Int, order_by: Int) Never! {
     if order_by < 0 {
         return
     }
@@ -1067,7 +1067,7 @@ vlist_name_to_num: fn(a: AST, name: [U8]) -> Int Never! {
 
 // sqlite3ExprAssignVarNumber: number a bound parameter "?", "?NNN",
 // ":AAA", "@AAA" or "$AAA".
-expr_assign_var_number: fn(a: &AST, e: Int, n: Int) Never! {
+expr_assign_var_number: fn(a: ^AST, e: Int, n: Int) Never! {
     if e < 0 {
         return
     }
@@ -1110,7 +1110,7 @@ expr_assign_var_number: fn(a: &AST, e: Int, n: Int) Never! {
 }
 
 // sqlite3ExprDelete: the side effects of deleting a tree.
-expr_delete: fn(a: &AST, e: Int) Never! {
+expr_delete: fn(a: ^AST, e: Int) Never! {
     if e < 0 {
         return
     }
@@ -1129,10 +1129,10 @@ expr_delete: fn(a: &AST, e: Int) Never! {
 }
 
 // sqlite3ExprUnmapAndDelete.
-expr_unmap_and_delete: fn(a: &AST, e: Int) Never! { expr_delete(a, e) }
+expr_unmap_and_delete: fn(a: ^AST, e: Int) Never! { expr_delete(a, e) }
 
 // sqlite3ClearOnOrUsing.
-clear_on_or_using: fn(a: &AST, on: Int, using: Int) Never! {
+clear_on_or_using: fn(a: ^AST, on: Int, using: Int) Never! {
     if on >= 0 -> expr_delete(a, on)
 }
 
@@ -1144,7 +1144,7 @@ zero_item: fn(e: Int) -> SQLExprItem Never! {
 }
 
 // sqlite3ExprListAppend.
-expr_list_append: fn(a: &AST, list: Int, e: Int) -> Int Never! {
+expr_list_append: fn(a: ^AST, list: Int, e: Int) -> Int Never! {
     if list < 0 {
         a.lists.push(SQLExprList{items: [SQLExprItem]{zero_item(e)}})
         return a.lists.len() - 1
@@ -1177,7 +1177,7 @@ vector_field_subexpr: fn(a: AST, v: Int, i: Int) -> Int Never! {
 }
 
 // sqlite3ExprForVectorField: a new expression for field `i` of a vector.
-expr_for_vector_field: fn(a: &AST, v: Int, i: Int, n: Int) -> Int Never! {
+expr_for_vector_field: fn(a: ^AST, v: Int, i: Int, n: Int) -> Int Never! {
     if a.exprs[v].op == tk.TK_SELECT {
         r: pexpr(a, tk.TK_SELECT_COLUMN, -1, -1)
         set_flags(a, r, EP_FULL_SIZE)
@@ -1200,7 +1200,7 @@ expr_for_vector_field: fn(a: &AST, v: Int, i: Int, n: Int) -> Int Never! {
 
 // sqlite3ExprListAppendVector: the terms of "(a,b,c) = vector" in an UPDATE
 // SET clause.
-expr_list_append_vector: fn(a: &AST, list0: Int, cols: Int, e0: Int) -> Int Never! {
+expr_list_append_vector: fn(a: ^AST, list0: Int, cols: Int, e0: Int) -> Int Never! {
     list := list0
     e := e0
     first: if list >= 0 -> list_len(a, list) else -> 0
@@ -1236,7 +1236,7 @@ expr_list_append_vector: fn(a: &AST, list0: Int, cols: Int, e0: Int) -> Int Neve
 
 // sqlite3ExprListSetSortOrder: the ASC/DESC and NULLS FIRST/LAST of the
 // last item.
-expr_list_set_sort_order: fn(a: &AST, list: Int, order0: Int, nulls: Int) Never! {
+expr_list_set_sort_order: fn(a: ^AST, list: Int, order0: Int, nulls: Int) Never! {
     if list < 0 {
         return
     }
@@ -1251,7 +1251,7 @@ expr_list_set_sort_order: fn(a: &AST, list: Int, order0: Int, nulls: Int) Never!
 
 // sqlite3ExprListSetName: name the last item `name`, dequoted when
 // `dequote_it`.
-expr_list_set_name: fn(a: &AST, list: Int, name: [U8], dequote_it: Bool) Never! {
+expr_list_set_name: fn(a: ^AST, list: Int, name: [U8], dequote_it: Bool) Never! {
     if list < 0 {
         return
     }
@@ -1261,7 +1261,7 @@ expr_list_set_name: fn(a: &AST, list: Int, name: [U8], dequote_it: Bool) Never! 
 
 // sqlite3ExprListSetSpan: give the last item, unless named, the text from
 // `start` to `end` as its span.
-expr_list_set_span: fn(a: &AST, list: Int, start: Int, end: Int) Never! {
+expr_list_set_span: fn(a: ^AST, list: Int, start: Int, end: Int) Never! {
     if list < 0 {
         return
     }
@@ -1273,14 +1273,14 @@ expr_list_set_span: fn(a: &AST, list: Int, start: Int, end: Int) Never! {
 }
 
 // sqlite3ExprListCheckLength.
-expr_list_check_length: fn(a: &AST, list: Int, what: String) Never! {
+expr_list_check_length: fn(a: ^AST, list: Int, what: String) Never! {
     if list >= 0 && list_len(a, list) > a.limits[LIMIT_COLUMN] {
         error(a, "too many columns in {what}")
     }
 }
 
 // sqlite3ExprListDelete.
-expr_list_delete: fn(a: &AST, list: Int) Never! {
+expr_list_delete: fn(a: ^AST, list: Int) Never! {
     loop i in 0..<list_len(a, list) {
         e: list_expr(a, list, i)
         expr_delete(a, e)
@@ -1296,7 +1296,7 @@ expr_list_flags: fn(a: AST, list: Int) -> Int Never! {
 
 // sqlite3ExprAddCollateToken: wrap an expression in COLLATE `name` unless
 // the name is empty.
-expr_add_collate_token: fn(a: &AST, e: Int, name: [U8], dequote_it: Bool) -> Int Never! {
+expr_add_collate_token: fn(a: ^AST, e: Int, name: [U8], dequote_it: Bool) -> Int Never! {
     if name.len() == 0 -> return e
     c: expr_alloc(a, tk.TK_COLLATE, Val(name), dequote_it)
     a.exprs[c].left = e
@@ -1305,7 +1305,7 @@ expr_add_collate_token: fn(a: &AST, e: Int, name: [U8], dequote_it: Bool) -> Int
 }
 
 // sqlite3ExprAddCollateString.
-expr_add_collate_string: fn(a: &AST, e: Int, name: [U8]) -> Int Never! {
+expr_add_collate_string: fn(a: ^AST, e: Int, name: [U8]) -> Int Never! {
     expr_add_collate_token(a, e, name, false)
 }
 
@@ -1334,7 +1334,7 @@ is_true_or_false: fn(z: [U8]) -> Int Never! {
 
 // sqlite3ExprIdToTrueFalse: turn an unquoted TRUE or FALSE identifier into
 // a TK_TRUEFALSE node.
-expr_id_to_true_false: fn(a: &AST, e: Int) -> Bool Never! {
+expr_id_to_true_false: fn(a: ^AST, e: Int) -> Bool Never! {
     if has(a, e, EP_QUOTED | EP_INT_VALUE) -> return false
     v: is_true_or_false(a.exprs[e].token ?? [U8]{})
     if v == 0 -> return false
@@ -1401,7 +1401,7 @@ duped_struct_size: fn(a: AST, e: Int, flags: Int) -> Int Never! {
 }
 
 // The fields a node of `size` lacks hold their zero values.
-cut_to_size: fn(n: &SQLExpr, size: Int) Never! {
+cut_to_size: fn(n: ^SQLExpr, size: Int) Never! {
     if size == SIZE_TOKEN_ONLY {
         n.left = -1
         n.right = -1
@@ -1422,7 +1422,7 @@ cut_to_size: fn(n: &SQLExpr, size: Int) Never! {
 // exprDup: copy node `p` and its subtrees. `in_buf` is true for the
 // descendants of a reduced copy, which C places in their root's allocation
 // (EP_Static).
-expr_dup_node: fn(a: &AST, p: Int, flags: Int, in_buf: Bool) -> Int Never! {
+expr_dup_node: fn(a: ^AST, p: Int, flags: Int, in_buf: Bool) -> Int Never! {
     src: a.exprs[p].copy()
     size: duped_struct_size(a, p, flags)
     n := src.copy()
@@ -1454,13 +1454,13 @@ expr_dup_node: fn(a: &AST, p: Int, flags: Int, in_buf: Bool) -> Int Never! {
 
 // sqlite3ExprDup: a deep copy; EXPRDUP_REDUCE gives the reduced copy the
 // schema keeps.
-expr_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
+expr_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
     if p < 0 -> return -1
     expr_dup_node(a, p, flags, false)
 }
 
 // sqlite3WithDup.
-with_dup: fn(a: &AST, w: Int) -> Int Never! {
+with_dup: fn(a: ^AST, w: Int) -> Int Never! {
     if w < 0 -> return -1
     ids := [Int]{}
     loop c in a.withs[w].ctes.copy() {
@@ -1479,35 +1479,35 @@ SQLWindowGatherer: struct {
     sel: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^AST, e: Int) -> Int Never! {
             if a.exprs[e].op == tk.TK_FUNCTION && has(a, e, EP_WIN_FUNC) {
                 window_link(a, self.sel, a.exprs[e].y)
             }
             WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
-        walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never! {
+        walk_select_cb: fn(^self, a: ^AST, s: Int) -> Int Never! {
             if s == self.sel -> WRC_CONTINUE else -> WRC_PRUNE
         }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^AST) -> Bool Never! { false }
     }
 }
 
-gather_select_windows: fn(a: &AST, s: Int) Never! {
+gather_select_windows: fn(a: ^AST, s: Int) Never! {
     g := SQLWindowGatherer{sel: s}
     _ := walk_select<SQLWindowGatherer>(g, a, s)
 }
 
 // sqlite3ExprListDup. A run of TK_SELECT_COLUMN items over one vector keeps
 // sharing one copy of it.
-expr_list_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
+expr_list_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
     if p < 0 -> return -1
     old: a.lists[p].items.copy()
     items := [SQLExprItem]{}
@@ -1540,7 +1540,7 @@ expr_list_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
 }
 
 // sqlite3SrcListDup.
-src_list_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
+src_list_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
     if p < 0 -> return -1
     ids := [Int]{}
     loop old in a.srclists[p].items.copy() {
@@ -1564,14 +1564,14 @@ src_list_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
 }
 
 // sqlite3IdListDup.
-id_list_dup: fn(a: &AST, p: Int) -> Int Never! {
+id_list_dup: fn(a: ^AST, p: Int) -> Int Never! {
     if p < 0 -> return -1
     a.idlists.push(a.idlists[p].copy())
     a.idlists.len() - 1
 }
 
 // sqlite3SelectDup: a copy of a SELECT and the compound chain before it.
-select_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
+select_dup: fn(a: ^AST, p: Int, flags: Int) -> Int Never! {
     ret := -1
     last := -1
     cur := p
@@ -1603,7 +1603,7 @@ select_dup: fn(a: &AST, p: Int, flags: Int) -> Int Never! {
 }
 
 // sqlite3WindowDup.
-window_dup: fn(a: &AST, owner: Int, p: Int) -> Int Never! {
+window_dup: fn(a: ^AST, owner: Int, p: Int) -> Int Never! {
     if p < 0 -> return -1
     w: a.windows[p].copy()
     n := new_window()
@@ -1632,7 +1632,7 @@ window_dup: fn(a: &AST, owner: Int, p: Int) -> Int Never! {
 }
 
 // sqlite3WindowListDup.
-window_list_dup: fn(a: &AST, p: Int) -> Int Never! {
+window_list_dup: fn(a: ^AST, p: Int) -> Int Never! {
     ret := -1
     last := -1
     w := p
@@ -1646,7 +1646,7 @@ window_list_dup: fn(a: &AST, p: Int) -> Int Never! {
 }
 
 // sqlite3UpsertDup.
-upsert_dup: fn(a: &AST, p: Int) -> Int Never! {
+upsert_dup: fn(a: ^AST, p: Int) -> Int Never! {
     if p < 0 -> return -1
     u: a.upserts[p].copy()
     target: expr_list_dup(a, u.target, 0)
@@ -1658,10 +1658,10 @@ upsert_dup: fn(a: &AST, p: Int) -> Int Never! {
 }
 
 // A FROM item takes a reference on its table (Table.nTabRef++).
-tab_ref: fn(a: &AST, tab: Int) Never! { a.tab_refs[tab] = (a.tab_refs.get(tab) ?? 0) + 1 }
+tab_ref: fn(a: ^AST, tab: Int) Never! { a.tab_refs[tab] = (a.tab_refs.get(tab) ?? 0) + 1 }
 
 // sqlite3DeleteTable drops a FROM item's table reference.
-tab_unref: fn(a: &AST, tab: Int) Never! { a.tab_refs[tab] = (a.tab_refs.get(tab) ?? 0) - 1 }
+tab_unref: fn(a: ^AST, tab: Int) Never! { a.tab_refs[tab] = (a.tab_refs.get(tab) ?? 0) - 1 }
 
 // ---------------------------------------------------------------------------
 // Comparison (expr.c sqlite3ExprCompare, window.c sqlite3WindowCompare).
@@ -1670,19 +1670,19 @@ tab_unref: fn(a: &AST, tab: Int) Never! { a.tab_refs[tab] = (a.tab_refs.get(tab)
 // parameter `var` matches literal `e` under the bindings of the statement
 // being reprepared (expr.c exprCompareVariable).
 SQLVarMatch: trait {
-    var_match: fn(&self, a: &AST, var: Int, e: Int) -> Bool Never!,
+    var_match: fn(^self, a: ^AST, var: Int, e: Int) -> Bool Never!,
 }
 
 // A NULL Parse: no parameter matches a literal.
 SQLNoParse: struct {
     impl SQLVarMatch {
-        var_match: fn(&self, a: &AST, var: Int, e: Int) -> Bool Never! { false }
+        var_match: fn(^self, a: ^AST, var: Int, e: Int) -> Bool Never! { false }
     }
 }
 
 // sqlite3ExprCompare: 0 when two trees are the same, 1 when they differ only
 // by a top-level COLLATE, 2 otherwise (or when it cannot tell).
-expr_compare_with: fn<M: SQLVarMatch>(m: &M, a: &AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
+expr_compare_with: fn<M: SQLVarMatch>(m: ^M, a: ^AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
     if pa < 0 || pb < 0 -> return if pa == pb -> 0 else -> 2
     if a.exprs[pa].op == tk.TK_VARIABLE && m.var_match(a, pa, pb) -> return 0
     fa: a.exprs[pa].flags
@@ -1740,13 +1740,13 @@ expr_compare_with: fn<M: SQLVarMatch>(m: &M, a: &AST, pa: Int, pb: Int, itab: In
 }
 
 // sqlite3ExprCompare with a NULL Parse.
-expr_compare: fn(a: &AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
+expr_compare: fn(a: ^AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
     np := SQLNoParse{}
     expr_compare_with<SQLNoParse>(np, a, pa, pb, itab)
 }
 
 // sqlite3ExprListCompare: 0 identical, 1 different, 2 undetermined.
-expr_list_compare: fn(a: &AST, la: Int, lb: Int, itab: Int) -> Int Never! {
+expr_list_compare: fn(a: ^AST, la: Int, lb: Int, itab: Int) -> Int Never! {
     if la < 0 && lb < 0 -> return 0
     if la < 0 || lb < 0 -> return 1
     n: list_len(a, la)
@@ -1762,14 +1762,14 @@ expr_list_compare: fn(a: &AST, la: Int, lb: Int, itab: Int) -> Int Never! {
 }
 
 // sqlite3ExprCompareSkip.
-expr_compare_skip: fn(a: &AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
+expr_compare_skip: fn(a: ^AST, pa: Int, pb: Int, itab: Int) -> Int Never! {
     sa: skip_collate(a, pa)
     sb: skip_collate(a, pb)
     expr_compare(a, sa, sb, itab)
 }
 
 // sqlite3WindowCompare: 0 when two windows can share one scan.
-window_compare_with: fn<M: SQLVarMatch>(m: &M, a: &AST, w1: Int, w2: Int, filter: Bool) -> Int Never! {
+window_compare_with: fn<M: SQLVarMatch>(m: ^M, a: ^AST, w1: Int, w2: Int, filter: Bool) -> Int Never! {
     if w1 < 0 || w2 < 0 -> return 1
     if a.windows[w1].frm_type != a.windows[w2].frm_type -> return 1
     if a.windows[w1].start_type != a.windows[w2].start_type -> return 1
@@ -1792,7 +1792,7 @@ window_compare_with: fn<M: SQLVarMatch>(m: &M, a: &AST, w1: Int, w2: Int, filter
     0
 }
 
-window_compare: fn(a: &AST, w1: Int, w2: Int, filter: Bool) -> Int Never! {
+window_compare: fn(a: ^AST, w1: Int, w2: Int, filter: Bool) -> Int Never! {
     np := SQLNoParse{}
     window_compare_with<SQLNoParse>(np, a, w1, w2, filter)
 }
@@ -1805,16 +1805,16 @@ window_compare: fn(a: &AST, w1: Int, w2: Int, filter: Bool) -> Int Never! {
 // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback or
 // sqlite3SelectPopWith, or the walker's Parse is renaming).
 SQLWalker: trait {
-    walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never!,
-    walk_has_select_cb: fn(&self) -> Bool Never!,
-    walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never!,
-    walk_has_select_cb2: fn(&self) -> Bool Never!,
-    walk_select_cb2: fn(&self, a: &AST, s: Int) Never!,
-    walk_win_defn: fn(&self, a: &AST) -> Bool Never!,
+    walk_expr_cb: fn(^self, a: ^AST, e: Int) -> Int Never!,
+    walk_has_select_cb: fn(^self) -> Bool Never!,
+    walk_select_cb: fn(^self, a: ^AST, s: Int) -> Int Never!,
+    walk_has_select_cb2: fn(^self) -> Bool Never!,
+    walk_select_cb2: fn(^self, a: ^AST, s: Int) Never!,
+    walk_win_defn: fn(^self, a: ^AST) -> Bool Never!,
 }
 
 // walkWindowList.
-walk_window_list: fn<W: SQLWalker>(w: &W, a: &AST, list: Int, one_only: Bool) -> Int Never! {
+walk_window_list: fn<W: SQLWalker>(w: ^W, a: ^AST, list: Int, one_only: Bool) -> Int Never! {
     win := list
     loop win >= 0 {
         if walk_expr_list<W>(w, a, a.windows[win].order_by) != 0 -> return WRC_ABORT
@@ -1830,7 +1830,7 @@ walk_window_list: fn<W: SQLWalker>(w: &W, a: &AST, list: Int, one_only: Bool) ->
 
 // sqlite3WalkExpr: call the expression callback on each node, parents
 // before children.
-walk_expr: fn<W: SQLWalker>(w: &W, a: &AST, e0: Int) -> Int Never! {
+walk_expr: fn<W: SQLWalker>(w: ^W, a: ^AST, e0: Int) -> Int Never! {
     if e0 < 0 -> return WRC_CONTINUE
     e := e0
     loop {
@@ -1858,7 +1858,7 @@ walk_expr: fn<W: SQLWalker>(w: &W, a: &AST, e0: Int) -> Int Never! {
 }
 
 // sqlite3WalkExprList.
-walk_expr_list: fn<W: SQLWalker>(w: &W, a: &AST, list: Int) -> Int Never! {
+walk_expr_list: fn<W: SQLWalker>(w: ^W, a: ^AST, list: Int) -> Int Never! {
     loop i in 0..<list_len(a, list) {
         e: list_expr(a, list, i)
         if walk_expr<W>(w, a, e) != 0 -> return WRC_ABORT
@@ -1867,7 +1867,7 @@ walk_expr_list: fn<W: SQLWalker>(w: &W, a: &AST, list: Int) -> Int Never! {
 }
 
 // sqlite3WalkSelectExpr: the expressions of one SELECT.
-walk_select_expr: fn<W: SQLWalker>(w: &W, a: &AST, s: Int) -> Int Never! {
+walk_select_expr: fn<W: SQLWalker>(w: ^W, a: ^AST, s: Int) -> Int Never! {
     if walk_expr_list<W>(w, a, a.selects[s].elist) != 0 -> return WRC_ABORT
     if walk_expr<W>(w, a, a.selects[s].where_expr) != 0 -> return WRC_ABORT
     if walk_expr_list<W>(w, a, a.selects[s].group_by) != 0 -> return WRC_ABORT
@@ -1882,7 +1882,7 @@ walk_select_expr: fn<W: SQLWalker>(w: &W, a: &AST, s: Int) -> Int Never! {
 
 // sqlite3WalkSelectFrom: the subqueries and table-function arguments of a
 // FROM clause.
-walk_select_from: fn<W: SQLWalker>(w: &W, a: &AST, s: Int) -> Int Never! {
+walk_select_from: fn<W: SQLWalker>(w: ^W, a: ^AST, s: Int) -> Int Never! {
     src: a.selects[s].src
     if src < 0 -> return WRC_CONTINUE
     loop i in 0..<a.srclists[src].items.len() {
@@ -1899,7 +1899,7 @@ walk_select_from: fn<W: SQLWalker>(w: &W, a: &AST, s: Int) -> Int Never! {
 
 // sqlite3WalkSelect: a SELECT and the compound chain before it; a no-op
 // for a walker without a SELECT callback.
-walk_select: fn<W: SQLWalker>(w: &W, a: &AST, s0: Int) -> Int Never! {
+walk_select: fn<W: SQLWalker>(w: ^W, a: ^AST, s0: Int) -> Int Never! {
     if s0 < 0 -> return WRC_CONTINUE
     if !w.walk_has_select_cb() -> return WRC_CONTINUE
     s := s0
@@ -1925,7 +1925,7 @@ SQLConstWalker: struct {
     cur: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^AST, e: Int) -> Int Never! {
             if self.code == 2 && has(a, e, EP_OUTER_ON) {
                 self.code = 0
                 return WRC_ABORT
@@ -1960,54 +1960,54 @@ SQLConstWalker: struct {
         }
 
         // sqlite3SelectWalkFail.
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
-        walk_select_cb: fn(&self, a: &AST, s: Int) -> Int Never! {
+        walk_select_cb: fn(^self, a: ^AST, s: Int) -> Int Never! {
             self.code = 0
             WRC_ABORT
         }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^AST) -> Bool Never! { false }
     }
 }
 
-expr_is_const: fn(a: &AST, e: Int, init: Int, cur: Int) -> Int Never! {
+expr_is_const: fn(a: ^AST, e: Int, init: Int, cur: Int) -> Int Never! {
     w := SQLConstWalker{code: init, cur: cur}
     _ := walk_expr<SQLConstWalker>(w, a, e)
     w.code
 }
 
 // sqlite3ExprIsConstant.
-expr_is_constant: fn(a: &AST, e: Int) -> Bool Never! { expr_is_const(a, e, 1, 0) != 0 }
+expr_is_constant: fn(a: ^AST, e: Int) -> Bool Never! { expr_is_const(a, e, 1, 0) != 0 }
 
 // sqlite3ExprIsConstantNotJoin.
-expr_is_constant_not_join: fn(a: &AST, e: Int) -> Bool Never! { expr_is_const(a, e, 2, 0) != 0 }
+expr_is_constant_not_join: fn(a: ^AST, e: Int) -> Bool Never! { expr_is_const(a, e, 2, 0) != 0 }
 
 // sqlite3ExprIsTableConstant.
-expr_is_table_constant: fn(a: &AST, e: Int, cur: Int) -> Bool Never! {
+expr_is_table_constant: fn(a: ^AST, e: Int, cur: Int) -> Bool Never! {
     expr_is_const(a, e, 3, cur) != 0
 }
 
 // sqlite3ExprIsConstantOrFunction.
-expr_is_constant_or_function: fn(a: &AST, e: Int, is_init: Bool) -> Bool Never! {
+expr_is_constant_or_function: fn(a: ^AST, e: Int, is_init: Bool) -> Bool Never! {
     expr_is_const(a, e, if is_init -> 5 else -> 4, 0) != 0
 }
 
 // ---------------------------------------------------------------------------
 // SELECT (select.c).
 
-new_select: fn(a: &AST) -> Int Never! {
+new_select: fn(a: ^AST) -> Int Never! {
     a.selects.push(SQLSelect{op: tk.TK_SELECT, nselect_row: 0, sel_flags: 0, ilimit: 0, ioffset: 0, sel_id: 0, addr_open_ephm0: -1, addr_open_ephm1: -1, elist: -1, src: -1, where_expr: -1, group_by: -1, having: -1, order_by: -1, prior: -1, next_sel: -1, limit: -1, with_clause: -1, win: -1, win_defn: -1})
     a.selects.len() - 1
 }
 
 // sqlite3SelectNew: a SELECT; no result list means "*", no FROM clause an
 // empty one.
-select_new: fn(a: &AST, elist0: Int, src0: Int, where_expr: Int, group_by: Int, having: Int, order_by: Int, flags: Int, limit: Int) -> Int Never! {
+select_new: fn(a: ^AST, elist0: Int, src0: Int, where_expr: Int, group_by: Int, having: Int, order_by: Int, flags: Int, limit: Int) -> Int Never! {
     elist := elist0
     if elist < 0 {
         star: expr(a, tk.TK_ASTERISK, [U8]{})
@@ -2030,7 +2030,7 @@ select_new: fn(a: &AST, elist0: Int, src0: Int, where_expr: Int, group_by: Int, 
 }
 
 // clearSelect: the side effects of deleting a SELECT and its compound chain.
-select_delete: fn(a: &AST, s0: Int) Never! {
+select_delete: fn(a: ^AST, s0: Int) Never! {
     s := s0
     loop s >= 0 {
         expr_list_delete(a, a.selects[s].elist)
@@ -2066,7 +2066,7 @@ tok_is: fn(a: AST, t: SQLTok, kw: [U8]) -> Bool Never! {
 
 // sqlite3JoinType: the JT_* mask of the one to three words before JOIN;
 // `pb` and `pc` have z -1 when absent.
-join_type: fn(a: &AST, pa: SQLTok, pb: SQLTok, pc: SQLTok) -> Int Never! {
+join_type: fn(a: ^AST, pa: SQLTok, pb: SQLTok, pc: SQLTok) -> Int Never! {
     words: [String]{"natural", "left", "outer", "right", "full", "inner", "cross"}
     codes: [Int]{JT_NATURAL, JT_LEFT | JT_OUTER, JT_OUTER, JT_RIGHT | JT_OUTER, JT_LEFT | JT_RIGHT | JT_OUTER, JT_INNER, JT_INNER | JT_CROSS}
     all: [SQLTok]{pa, pb, pc}
@@ -2108,7 +2108,7 @@ new_src_item: fn() -> SQLSrcItem Never! {
     SQLSrcItem{schema: -1, database: None, name: None, alias: None, tab: -1, select: -1, addr_fill_sub: 0, reg_return: 0, reg_result: 0, jointype: 0, not_indexed: false, is_indexed_by: false, is_tab_func: false, is_correlated: false, is_materialized: false, via_coroutine: false, is_recursive: false, from_ddl: false, is_cte: false, not_cte: false, is_using: false, is_on: false, is_synth_using: false, is_nested_from: false, cursor: -1, u3: -1, col_used: 0, indexed_by: None, func_arg: -1, u2: -1}
 }
 
-new_src_list: fn(a: &AST) -> Int Never! {
+new_src_list: fn(a: ^AST) -> Int Never! {
     a.srclists.push(SQLSrcList{items: [Int]{}, nalloc: 0})
     a.srclists.len() - 1
 }
@@ -2122,7 +2122,7 @@ src_item: fn(a: AST, s: Int, i: Int) -> Int Never! { a.srclists[s].items[i] }
 
 // sqlite3SrcListEnlarge: insert `nextra` empty items at `istart`; false,
 // with the error, once the list would reach SQLITE_MAX_SRCLIST.
-src_list_enlarge: fn(a: &AST, s: Int, nextra: Int, istart: Int) -> Bool Never! {
+src_list_enlarge: fn(a: ^AST, s: Int, nextra: Int, istart: Int) -> Bool Never! {
     n: a.srclists[s].items.len()
     if n + nextra > a.srclists[s].nalloc {
         if n + nextra >= MAX_SRCLIST {
@@ -2148,7 +2148,7 @@ src_list_enlarge: fn(a: &AST, s: Int, nextra: Int, istart: Int) -> Bool Never! {
 // sqlite3SrcListAppend: append a table named by the tokens `table` and
 // `database` (C token pointers; a database with a NULL z counts as none).
 // -1 when the list cannot grow.
-src_list_append: fn(a: &AST, list: Int, table: [U8]?, database: [U8]?) -> Int Never! {
+src_list_append: fn(a: ^AST, list: Int, table: [U8]?, database: [U8]?) -> Int Never! {
     s := list
     if s < 0 {
         s = new_src_list(a)
@@ -2172,7 +2172,7 @@ src_list_append: fn(a: &AST, list: Int, table: [U8]?, database: [U8]?) -> Int Ne
 
 // sqlite3SrcListAssignCursors: number the cursors of a FROM clause and of
 // its subqueries' (`ntab` is Parse.nTab; returns the new value).
-src_list_assign_cursors: fn(a: &AST, s: Int, ntab0: Int) -> Int Never! {
+src_list_assign_cursors: fn(a: ^AST, s: Int, ntab0: Int) -> Int Never! {
     ntab := ntab0
     loop i in 0..<src_len(a, s) {
         si: src_item(a, s, i)
@@ -2187,7 +2187,7 @@ src_list_assign_cursors: fn(a: &AST, s: Int, ntab0: Int) -> Int Never! {
 }
 
 // sqlite3SrcListDelete.
-src_list_delete: fn(a: &AST, s: Int) Never! {
+src_list_delete: fn(a: ^AST, s: Int) Never! {
     loop i in 0..<src_len(a, s) {
         si: src_item(a, s, i)
         if a.items[si].is_tab_func -> expr_list_delete(a, a.items[si].func_arg)
@@ -2200,7 +2200,7 @@ src_list_delete: fn(a: &AST, s: Int) Never! {
 // sqlite3SrcListAppendFromTerm: append a FROM term. `alias` is the AS
 // token's bytes (empty for none); `on` and `using` are its ON expression or
 // USING list, -1 when absent.
-src_list_append_from_term: fn(a: &AST, p: Int, table: [U8]?, database: [U8]?, alias: [U8], sub: Int, on: Int, using: Int) -> Int Never! {
+src_list_append_from_term: fn(a: ^AST, p: Int, table: [U8]?, database: [U8]?, alias: [U8], sub: Int, on: Int, using: Int) -> Int Never! {
     if p < 0 && (on >= 0 || using >= 0) {
         what: if on >= 0 -> "ON" else -> "USING"
         error(a, "a JOIN clause is required before {what}")
@@ -2229,7 +2229,7 @@ src_list_append_from_term: fn(a: &AST, p: Int, table: [U8]?, database: [U8]?, al
 
 // sqlite3SrcListIndexedBy: the INDEXED BY name or NOT INDEXED of the last
 // item.
-src_list_indexed_by: fn(a: &AST, s: Int, t: SQLTok) Never! {
+src_list_indexed_by: fn(a: ^AST, s: Int, t: SQLTok) Never! {
     if s < 0 || t.n <= 0 {
         return
     }
@@ -2242,7 +2242,7 @@ src_list_indexed_by: fn(a: &AST, s: Int, t: SQLTok) Never! {
 
 // sqlite3SrcListAppendList: append FROM list `p2` after the single item of
 // `p1`.
-src_list_append_list: fn(a: &AST, p1: Int, p2: Int) -> Int Never! {
+src_list_append_list: fn(a: ^AST, p1: Int, p2: Int) -> Int Never! {
     if p2 < 0 -> return p1
     n2: a.srclists[p2].items.len()
     if !src_list_enlarge(a, p1, n2, 1) {
@@ -2257,7 +2257,7 @@ src_list_append_list: fn(a: &AST, p1: Int, p2: Int) -> Int Never! {
 }
 
 // sqlite3SrcListFuncArgs: the arguments of a table-valued function.
-src_list_func_args: fn(a: &AST, s: Int, list: Int) Never! {
+src_list_func_args: fn(a: ^AST, s: Int, list: Int) Never! {
     if s < 0 {
         expr_list_delete(a, list)
         return
@@ -2270,7 +2270,7 @@ src_list_func_args: fn(a: &AST, s: Int, list: Int) Never! {
 // sqlite3SrcListShiftJoinType: move each join operator from its left
 // operand to its right one, and tag every table left of the last RIGHT JOIN
 // with JT_LTORJ.
-src_list_shift_join_type: fn(a: &AST, s: Int) Never! {
+src_list_shift_join_type: fn(a: ^AST, s: Int) Never! {
     n: src_len(a, s)
     if n <= 1 {
         return
@@ -2296,13 +2296,13 @@ src_list_shift_join_type: fn(a: &AST, s: Int) Never! {
     }
 }
 
-new_id_list: fn(a: &AST) -> Int Never! {
+new_id_list: fn(a: ^AST) -> Int Never! {
     a.idlists.push(SQLIDList{items: [SQLIDItem]{}, eu4: EU4_NONE})
     a.idlists.len() - 1
 }
 
 // sqlite3IdListAppend: append the name a token (a C token pointer) spells.
-id_list_append: fn(a: &AST, list: Int, name: [U8]?) -> Int Never! {
+id_list_append: fn(a: ^AST, list: Int, name: [U8]?) -> Int Never! {
     l := list
     if l < 0 -> l = new_id_list(a)
     a.idlists[l].items.push(SQLIDItem{name: name_from(name), u4: 0})
@@ -2319,7 +2319,7 @@ id_list_index: fn(a: AST, list: Int, name: [U8]) -> Int Never! {
 
 // sqlite3HasExplicitNulls: an error, and true, when a list item has NULLS
 // FIRST or LAST.
-has_explicit_nulls: fn(a: &AST, list: Int) -> Bool Never! {
+has_explicit_nulls: fn(a: ^AST, list: Int) -> Bool Never! {
     loop i in 0..<list_len(a, list) {
         if a.lists[list].items[i].nulls {
             sf: a.lists[list].items[i].sort_flags
@@ -2335,14 +2335,14 @@ has_explicit_nulls: fn(a: &AST, list: Int) -> Bool Never! {
 // Common table expressions (build.c).
 
 // sqlite3CteNew.
-cte_new: fn(a: &AST, name: [U8]?, cols: Int, sel: Int, m10d: Int) -> Int Never! {
+cte_new: fn(a: ^AST, name: [U8]?, cols: Int, sel: Int, m10d: Int) -> Int Never! {
     a.ctes.push(SQLCte{name: name_from(name), cols: cols, select: sel, cte_err: None, cte_use: -1, m10d: m10d})
     a.ctes.len() - 1
 }
 
 // sqlite3WithAdd: add a CTE to a WITH clause, which is created if `w` is -1;
 // a name already in the clause is an error.
-with_add: fn(a: &AST, w: Int, cte: Int) -> Int Never! {
+with_add: fn(a: ^AST, w: Int, cte: Int) -> Int Never! {
     if cte < 0 -> return w
     if a.ctes[cte].name == .Val(name) && w >= 0 {
         loop c in a.withs[w].ctes.copy() {
@@ -2361,7 +2361,7 @@ with_add: fn(a: &AST, w: Int, cte: Int) -> Int Never! {
 }
 
 // sqlite3WithDelete.
-with_delete: fn(a: &AST, w: Int) Never! {
+with_delete: fn(a: ^AST, w: Int) Never! {
     if w < 0 {
         return
     }
@@ -2374,7 +2374,7 @@ with_delete: fn(a: &AST, w: Int) Never! {
 // sqlite3WithPush (select.c): make WITH clause `w` the innermost in scope,
 // unless the statement already has an error. (bFree's cleanup registration
 // has nothing to do here: the arena owns every object.)
-with_push: fn(a: &AST, w: Int) Never! {
+with_push: fn(a: ^AST, w: Int) Never! {
     if w < 0 || a.ctx.nerr > 0 {
         return
     }
@@ -2390,7 +2390,7 @@ new_window: fn() -> SQLWindow Never! {
 }
 
 // sqlite3WindowUnlinkFromSelect.
-window_unlink_from_select: fn(a: &AST, w: Int) Never! {
+window_unlink_from_select: fn(a: ^AST, w: Int) Never! {
     kind: a.windows[w].this_kind
     if kind == THIS_NONE {
         return
@@ -2408,7 +2408,7 @@ window_unlink_from_select: fn(a: &AST, w: Int) Never! {
 }
 
 // sqlite3WindowDelete.
-window_delete: fn(a: &AST, w: Int) Never! {
+window_delete: fn(a: ^AST, w: Int) Never! {
     if w < 0 {
         return
     }
@@ -2421,7 +2421,7 @@ window_delete: fn(a: &AST, w: Int) Never! {
 }
 
 // sqlite3WindowListDelete.
-window_list_delete: fn(a: &AST, w0: Int) Never! {
+window_list_delete: fn(a: ^AST, w0: Int) Never! {
     w := w0
     loop w >= 0 {
         nxt: a.windows[w].next_win
@@ -2432,7 +2432,7 @@ window_list_delete: fn(a: &AST, w0: Int) Never! {
 
 // sqlite3WindowOffsetExpr: a PRECEDING or FOLLOWING offset that is not
 // constant becomes NULL.
-window_offset_expr: fn(a: &AST, e: Int) -> Int Never! {
+window_offset_expr: fn(a: ^AST, e: Int) -> Int Never! {
     if expr_is_constant(a, e) -> return e
     expr_delete(a, e)
     expr_alloc(a, tk.TK_NULL, None, false)
@@ -2440,7 +2440,7 @@ window_offset_expr: fn(a: &AST, e: Int) -> Int Never! {
 
 // sqlite3WindowAlloc: a window frame. `frm_type` 0 is the implicit RANGE
 // frame; -1 on an unsupported frame.
-window_alloc: fn(a: &AST, frm_type: Int, start_type: Int, start_expr: Int, end_type: Int, end_expr: Int, exclude0: Int) -> Int Never! {
+window_alloc: fn(a: ^AST, frm_type: Int, start_type: Int, start_expr: Int, end_type: Int, end_expr: Int, exclude0: Int) -> Int Never! {
     implicit: frm_type == 0
     ft: if implicit -> tk.TK_RANGE else -> frm_type
     if (start_type == tk.TK_CURRENT && end_type == tk.TK_PRECEDING) || (start_type == tk.TK_FOLLOWING && (end_type == tk.TK_PRECEDING || end_type == tk.TK_CURRENT)) {
@@ -2466,7 +2466,7 @@ window_alloc: fn(a: &AST, frm_type: Int, start_type: Int, start_expr: Int, end_t
 
 // sqlite3WindowAssemble: attach PARTITION BY and ORDER BY, and the name of
 // the base window (copied as written).
-window_assemble: fn(a: &AST, w: Int, partition: Int, order_by: Int, base_name: [U8]?) -> Int Never! {
+window_assemble: fn(a: ^AST, w: Int, partition: Int, order_by: Int, base_name: [U8]?) -> Int Never! {
     if w < 0 {
         expr_list_delete(a, partition)
         expr_list_delete(a, order_by)
@@ -2479,7 +2479,7 @@ window_assemble: fn(a: &AST, w: Int, partition: Int, order_by: Int, base_name: [
 }
 
 // windowFind: the window named `name` in a WINDOW list, else an error and -1.
-window_find: fn(a: &AST, list: Int, name: [U8]) -> Int Never! {
+window_find: fn(a: ^AST, list: Int, name: [U8]) -> Int Never! {
     w := list
     loop w >= 0 {
         if str_icmp(a.windows[w].name ?? [U8]{}, name) == 0 -> return w
@@ -2492,7 +2492,7 @@ window_find: fn(a: &AST, list: Int, name: [U8]) -> Int Never! {
 
 // sqlite3WindowChain: complete a WINDOW-clause window from the earlier one
 // it names as its base.
-window_chain: fn(a: &AST, w: Int, list: Int) Never! {
+window_chain: fn(a: ^AST, w: Int, list: Int) Never! {
     base_name: a.windows[w].base ?? return
     ex: window_find(a, list, base_name)
     if ex < 0 {
@@ -2515,7 +2515,7 @@ window_chain: fn(a: &AST, w: Int, list: Int) Never! {
 }
 
 // sqlite3WindowAttach: make window `w` the OVER clause of function `e`.
-window_attach: fn(a: &AST, e: Int, w: Int) Never! {
+window_attach: fn(a: ^AST, e: Int, w: Int) Never! {
     if e < 0 {
         window_delete(a, w)
         return
@@ -2531,7 +2531,7 @@ window_attach: fn(a: &AST, e: Int, w: Int) Never! {
 // sqlite3WindowLink: add a window to the SELECT's list when the list is
 // empty or its windows share this one's frame; otherwise note that the
 // SELECT partitions more than one way.
-window_link: fn(a: &AST, sel: Int, w: Int) Never! {
+window_link: fn(a: ^AST, sel: Int, w: Int) Never! {
     if sel < 0 {
         return
     }
@@ -2554,13 +2554,13 @@ window_link: fn(a: &AST, sel: Int, w: Int) Never! {
 // Upserts (upsert.c) and trigger steps (trigger.c).
 
 // sqlite3UpsertNew.
-upsert_new: fn(a: &AST, target: Int, target_where: Int, set: Int, where_expr: Int, next_upsert: Int) -> Int Never! {
+upsert_new: fn(a: ^AST, target: Int, target_where: Int, set: Int, where_expr: Int, next_upsert: Int) -> Int Never! {
     a.upserts.push(SQLUpsert{target: target, target_where: target_where, set: set, where_expr: where_expr, next_upsert: next_upsert, do_update: set >= 0, is_dup: false, idx: -1, src: -1, reg_data: 0, data_cur: 0, idx_cur: 0})
     a.upserts.len() - 1
 }
 
 // sqlite3UpsertDelete.
-upsert_delete: fn(a: &AST, u0: Int) Never! {
+upsert_delete: fn(a: ^AST, u0: Int) Never! {
     u := u0
     loop u >= 0 {
         expr_list_delete(a, a.upserts[u].target)
@@ -2585,7 +2585,7 @@ new_step: fn(op: Int) -> SQLTriggerStep Never! {
 }
 
 // sqlite3TriggerSelectStep.
-trigger_select_step: fn(a: &AST, sel: Int, start: Int, end: Int) -> Int Never! {
+trigger_select_step: fn(a: ^AST, sel: Int, start: Int, end: Int) -> Int Never! {
     s := new_step(tk.TK_SELECT)
     s.select = sel
     s.orconf = OE_DEFAULT
@@ -2595,7 +2595,7 @@ trigger_select_step: fn(a: &AST, sel: Int, start: Int, end: Int) -> Int Never! {
 }
 
 // triggerStepAllocate: -1 once the statement has an error.
-trigger_step_allocate: fn(a: &AST, op: Int, name: [U8], start: Int, end: Int) -> Int Never! {
+trigger_step_allocate: fn(a: ^AST, op: Int, name: [U8], start: Int, end: Int) -> Int Never! {
     if a.ctx.nerr > 0 -> return -1
     s := new_step(op)
     s.target = Val(dequote(name))
@@ -2605,7 +2605,7 @@ trigger_step_allocate: fn(a: &AST, op: Int, name: [U8], start: Int, end: Int) ->
 }
 
 // sqlite3TriggerInsertStep.
-trigger_insert_step: fn(a: &AST, name: [U8], cols: Int, sel0: Int, orconf: Int, upsert: Int, start: Int, end: Int) -> Int Never! {
+trigger_insert_step: fn(a: ^AST, name: [U8], cols: Int, sel0: Int, orconf: Int, upsert: Int, start: Int, end: Int) -> Int Never! {
     sel := sel0
     s: trigger_step_allocate(a, tk.TK_INSERT, name, start, end)
     if s >= 0 {
@@ -2623,7 +2623,7 @@ trigger_insert_step: fn(a: &AST, name: [U8], cols: Int, sel0: Int, orconf: Int, 
 }
 
 // sqlite3TriggerUpdateStep.
-trigger_update_step: fn(a: &AST, name: [U8], from0: Int, elist0: Int, where0: Int, orconf: Int, start: Int, end: Int) -> Int Never! {
+trigger_update_step: fn(a: ^AST, name: [U8], from0: Int, elist0: Int, where0: Int, orconf: Int, start: Int, end: Int) -> Int Never! {
     from := from0
     elist := elist0
     where_expr := where0
@@ -2650,7 +2650,7 @@ trigger_update_step: fn(a: &AST, name: [U8], from0: Int, elist0: Int, where0: In
 }
 
 // sqlite3TriggerDeleteStep.
-trigger_delete_step: fn(a: &AST, name: [U8], where0: Int, start: Int, end: Int) -> Int Never! {
+trigger_delete_step: fn(a: ^AST, name: [U8], where0: Int, start: Int, end: Int) -> Int Never! {
     where_expr := where0
     s: trigger_step_allocate(a, tk.TK_DELETE, name, start, end)
     if s >= 0 {

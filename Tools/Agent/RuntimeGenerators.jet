@@ -1916,7 +1916,7 @@ code_at: fn(code: [U8], at: Int) -> Int Never! {
 }
 
 // Spaces over bytes `start..<end` of `code`, keeping line breaks.
-blank_range: fn(source: [U8], code: &[U8], start: Int, end: Int) {
+blank_range: fn(source: [U8], code: ^[U8], start: Int, end: Int) {
     loop at in start..<end {
         byte: Int{source[at]}
         if byte != 10 && byte != 13 -> code[at] = U8{32}
@@ -1928,7 +1928,7 @@ blank_range: fn(source: [U8], code: &[U8], start: Int, end: Int) {
 // code is read in the lexer's raw-token mode, so its line breaks become
 // spaces. Inside an interpolation the scan stops after its closing brace and
 // returns that offset.
-mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int GeneratorError! {
+mask_scan: fn(source: [U8], code: ^[U8], start: Int, interpolation: Bool) -> Int GeneratorError! {
     at := start
     braces := 0
     length: source.len()
@@ -2232,7 +2232,7 @@ leading_name: fn(text: String) -> String Never! {
     byte_slice(text, 0, end)
 }
 
-errno_word_rows: fn(text: String, indent: String, rows: &[String]) {
+errno_word_rows: fn(text: String, indent: String, rows: ^[String]) {
     loop word in text_words(text) {
         rows.push("{indent}rt_text_push_word(text, I64{{{word.value}}}, I64{{{word.count}}})")
     }
@@ -3113,7 +3113,7 @@ exit_literal_problems: fn(path: String, source: String) -> [String] GeneratorErr
     Ok(problems)
 }
 
-exit_guard_files: fn(directory: String, found: &[String]) -[FS]> GeneratorError! {
+exit_guard_files: fn(directory: String, found: ^[String]) -[FS]> GeneratorError! {
     entries: files.list_dir(directory) ?? return Err(generator_fail("cannot list {directory}: {err}"))
     loop entry in entries {
         path: "{directory}/{entry.name}"

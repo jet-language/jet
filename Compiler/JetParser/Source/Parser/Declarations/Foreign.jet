@@ -34,11 +34,11 @@ use {
     ]
 }
 
-parser_extern_ahead: fn(state: &JetParserState) -> Bool Never! {
+parser_extern_ahead: fn(state: ^JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_KW_EXTERN
 }
 
-parser_foreign_plain_string: fn(state: &JetParserState, context: String) -> NamedSpan {
+parser_foreign_plain_string: fn(state: ^JetParserState, context: String) -> NamedSpan {
     token: parser_current(state)
     if token.kind != TOKEN_STRING && token.kind != TOKEN_RAW_STRING {
         parser_add_error(state, token.span, "expected a plain string {context}", "foreign crate and path names are fixed source text", "write one non-interpolated string literal")
@@ -52,7 +52,7 @@ parser_foreign_plain_string: fn(state: &JetParserState, context: String) -> Name
     NamedSpan{name: parser_value(state, token), span: token.span}
 }
 
-parser_parse_extern_rust: fn(state: &JetParserState) -> Item {
+parser_parse_extern_rust: fn(state: ^JetParserState) -> Item {
     start: parser_bump(state)
     rust: parser_expect_name(state, "after `extern`")
     if parser_value(state, rust) != "rust" {
@@ -70,7 +70,7 @@ parser_parse_extern_rust: fn(state: &JetParserState) -> Item {
     Item.ExternRust{value: ExternRustBlock{crate_spec: crate_value.name, crate_span: crate_value.span, functions: functions, span: parser_cover(start.span, close.span)}}
 }
 
-parser_parse_c_module: fn(state: &JetParserState) -> Item {
+parser_parse_c_module: fn(state: ^JetParserState) -> Item {
     marker: parser_parse_marker(state)
     kind: if marker.name == "Import" -> CModuleKind.Extern else -> CModuleKind.Bindgen
     parser_expect(state, TOKEN_KW_MODULE, "after `#{marker.name}` in a C module declaration")
@@ -125,7 +125,7 @@ parser_parse_c_module: fn(state: &JetParserState) -> Item {
     Item.CModule{value: CModule{kind: kind, lib: parser_value(state, lib), path_span: path_span, functions: functions, span: parser_cover(marker.span, close.span)}}
 }
 
-parser_c_module_callback_metadata: fn(function: &&ExternFn, lib: String) -> ExternFn Never! {
+parser_c_module_callback_metadata: fn(function: ^^ExternFn, lib: String) -> ExternFn Never! {
     updated := function
     has_function_parameter := false
     loop parameter in updated.params {
@@ -166,7 +166,7 @@ parser_foreign_marker_name: fn(marker: Marker, index: Int) -> NamedSpan? {
     }
 }
 
-parser_parse_extern_fn: fn(state: &JetParserState, allow_missing_semicolon: Bool) -> ExternFn {
+parser_parse_extern_fn: fn(state: ^JetParserState, allow_missing_semicolon: Bool) -> ExternFn {
     abi := NamedSpan?{None}
     undo := NamedSpan?{None}
     close_name := NamedSpan?{None}
@@ -250,6 +250,6 @@ parser_parse_extern_fn: fn(state: &JetParserState, allow_missing_semicolon: Bool
     ExternFn{abi: abi, name: parser_value(state, name), name_span: name.span, params: params, return_type: return_type, return_type_span: return_span, rust_path: path.name, rust_path_span: path.span, generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: undo, close: close_name, span: parser_cover(start, end)}
 }
 
-parser_foreign_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+parser_foreign_error: fn(state: ^JetParserState, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(state, "E3212", span, what, why, fix)
 }

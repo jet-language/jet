@@ -453,7 +453,7 @@ jet_cli_build_missing_sources: fn(root: String, selected: BuildPlanSelection, ge
     missing
 }
 
-jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutable, generated: [BuildSessionGeneratedModule], produced: [String], missing: &[String]) -[FS]> Never! {
+jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutable, generated: [BuildSessionGeneratedModule], produced: [String], missing: ^[String]) -[FS]> Never! {
     loop source in target.sources {
         if produced.contains(source) || build_files.exists(jet_cli_entry_join(root, source)) -> next
         made: loop made_module in generated {
@@ -854,7 +854,7 @@ JetCLIContributedRequest: struct {
     refusal: JetDriverVerbOutput?,
 }
 
-jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_generated: Bool, color: Bool) -> JetCLIContributedRequest {
+jet_cli_contributed_request: fn(owned_request: ^^JetDriverCompileRequest, load_generated: Bool, color: Bool) -> JetCLIContributedRequest {
     request := owned_request.move()
     probe: jet_driver_entry_build_probe(request)
     if !probe.has_build && !probe.profiled -> return {request: request.move(), refusal: None}
@@ -919,7 +919,7 @@ JetCLIGeneratedRequest: struct {
     reports: [Diagnostic],
 }
 
-jet_cli_generated_request: fn(owned_request: &&JetDriverCompileRequest) -> JetCLIGeneratedRequest {
+jet_cli_generated_request: fn(owned_request: ^^JetDriverCompileRequest) -> JetCLIGeneratedRequest {
     request := owned_request.move()
     if request.generated_modules.len() > 0 || !jet_driver_sources_may_generate(request) {
         return {request: request.move(), reports: [Diagnostic]{}}
@@ -1116,7 +1116,7 @@ jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [Buil
     choices
 }
 
-jet_cli_build_host: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+jet_cli_build_host: fn(owned_request: ^^JetDriverCompileRequest, scope: ^JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(owned_request, scope)
     request := response.request.move()
     query := response.query.move()
@@ -1284,7 +1284,7 @@ jet_cli_build_nodes_report: fn(program: String, record: BuildRecord?, planned: [
 // authenticated last record, if any. With no record the command still answers
 // with the planned nodes; a record for another program means the store is
 // damaged and is refused with E2104.
-jet_cli_build_nodes_host: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+jet_cli_build_nodes_host: fn(owned_request: ^^JetDriverCompileRequest, scope: ^JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(owned_request, scope)
     request := response.request.move()
     query := response.query.move()

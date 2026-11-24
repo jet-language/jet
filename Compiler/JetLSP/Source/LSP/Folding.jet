@@ -40,7 +40,7 @@ lsp_compute_folding_ranges: fn(src: String, lexed: Lexed) -> [LSPFoldingRange] N
     folds
 }
 
-lsp_push_fold: fn(bytes: [U8], table: LineTable, start: Int, end: Int, kind: String, folds: &[LSPFoldingRange]) Never! {
+lsp_push_fold: fn(bytes: [U8], table: LineTable, start: Int, end: Int, kind: String, folds: ^[LSPFoldingRange]) Never! {
     first: lsp_byte_offset_in_table(bytes, table, start)
     last: lsp_byte_offset_in_table(bytes, table, end)
     if last.line > first.line {
@@ -63,7 +63,7 @@ lsp_line_starts_with: fn(src: String, line: Span, prefix: String) -> Bool Never!
 
 // A run of two or more lines starting with `prefix` folds from the first
 // line's text to the end of the last.
-lsp_line_group_folds: fn(src: String, lines: [Span], prefix: String, kind: String, folds: &[LSPFoldingRange]) Never! {
+lsp_line_group_folds: fn(src: String, lines: [Span], prefix: String, kind: String, folds: ^[LSPFoldingRange]) Never! {
     bytes: src.bytes()
     run_start := -1
     loop index in 0..<(lines.len() + 1) {

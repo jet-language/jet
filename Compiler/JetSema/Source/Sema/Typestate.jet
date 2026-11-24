@@ -59,7 +59,7 @@ sema_state_table_new: fn() -> SemaStateTable Never! {
 }
 
 // The id of `key` in `table`, with its columns grown to cover it.
-sema_state_table_id: fn(table: &SemaStateTable, key: String) -> Int Never! {
+sema_state_table_id: fn(table: ^SemaStateTable, key: String) -> Int Never! {
     id: name_index(name_intern(table.keys, key))
     if id == table.results.len() {
         table.needs.push([SemaStateNeed]{})
@@ -121,7 +121,7 @@ SemaStateWalk: struct {
 // in different states (`many`, in order, empty for none).
 SemaStatePlane: struct {
     impl SemaFlowPlane {
-        flow_join: fn(self, binding: Int, one: &&SemaFlowFact, other: &&SemaFlowFact, splits: &[SemaFlowSplit]) -> SemaFlowFact Never! { sema_state_join(binding, one, other, splits) }
+        flow_join: fn(self, binding: Int, one: ^^SemaFlowFact, other: ^^SemaFlowFact, splits: ^[SemaFlowSplit]) -> SemaFlowFact Never! { sema_state_join(binding, one, other, splits) }
     }
 }
 
@@ -131,7 +131,7 @@ sema_state_flow_start: fn() -> SemaFlowWalk<SemaStatePlane> Never! {
 }
 
 // The id of local `name`, interned.
-sema_state_local_id: fn(walk: &SemaStateWalk, name: String) -> Int Never! {
+sema_state_local_id: fn(walk: ^SemaStateWalk, name: String) -> Int Never! {
     name_index(name_intern(walk.locals, name))
 }
 
@@ -152,7 +152,7 @@ sema_state_met: fn(facts: SemaFlowFacts, id: Int) -> [String] Never! {
 }
 
 // Local `id`'s fact with `known` and `met`; unheld when both are empty.
-sema_state_put: fn(facts: &SemaFlowFacts, id: Int, known: String, met: [String]) Never! {
+sema_state_put: fn(facts: ^SemaFlowFacts, id: Int, known: String, met: [String]) Never! {
     if known == "" && met.len() == 0 {
         sema_flow_drop(facts, id)
         return
@@ -160,22 +160,22 @@ sema_state_put: fn(facts: &SemaFlowFacts, id: Int, known: String, met: [String])
     sema_flow_put(facts, id, SemaFlowFact{held: true, one: known, many: met})
 }
 
-sema_state_put_known: fn(facts: &SemaFlowFacts, id: Int, state: String) Never! {
+sema_state_put_known: fn(facts: ^SemaFlowFacts, id: Int, state: String) Never! {
     met: sema_state_met(facts, id)
     sema_state_put(facts, id, state, met)
 }
 
-sema_state_put_met: fn(facts: &SemaFlowFacts, id: Int, states: [String]) Never! {
+sema_state_put_met: fn(facts: ^SemaFlowFacts, id: Int, states: [String]) Never! {
     known: sema_state_known(facts, id)
     sema_state_put(facts, id, known, states)
 }
 
-sema_state_drop_known: fn(facts: &SemaFlowFacts, id: Int) Never! {
+sema_state_drop_known: fn(facts: ^SemaFlowFacts, id: Int) Never! {
     met: sema_state_met(facts, id)
     sema_state_put(facts, id, "", met)
 }
 
-sema_state_drop_met: fn(facts: &SemaFlowFacts, id: Int) Never! {
+sema_state_drop_met: fn(facts: ^SemaFlowFacts, id: Int) Never! {
     known: sema_state_known(facts, id)
     sema_state_put(facts, id, known, [String]{})
 }
@@ -264,13 +264,13 @@ sema_state_body_index: fn(bodies: [FnBody], body_by_start: [Int:Int], span: Span
 }
 
 // A body starts with no facts, on a path that has not left it.
-sema_state_start: fn(walk: &SemaStateWalk) Never! {
+sema_state_start: fn(walk: ^SemaStateWalk) Never! {
     walk.flow = sema_state_flow_start()
 }
 
 // `self` and every other parameter typed by states start in them, so a chain
 // of moves on `self` checks.
-sema_state_check_function: fn(walk: &SemaStateWalk, interner: Interner, function: Func, bodies: [FnBody], body_by_start: [Int:Int], empty_tree: BodyTree) Never! {
+sema_state_check_function: fn(walk: ^SemaStateWalk, interner: Interner, function: Func, bodies: [FnBody], body_by_start: [Int:Int], empty_tree: BodyTree) Never! {
     sema_state_start(walk)
     body_idx: sema_state_body_index(bodies, body_by_start, function.span)
     walk.typed = body_idx >= 0
@@ -308,7 +308,7 @@ sema_state_set_within: fn(current: String, required: String) -> Bool Never! {
 // The rows a function's state types add: one need per typed parameter, by
 // its argument position in a call (the receiver is -1), and the result's
 // states.
-sema_state_table_add_typed: fn(table: &SemaStateTable, key: String, function: Func) Never! {
+sema_state_table_add_typed: fn(table: ^SemaStateTable, key: String, function: Func) Never! {
     if function.state_types.len() == 0 {
         return
     }
@@ -329,7 +329,7 @@ sema_state_table_add_typed: fn(table: &SemaStateTable, key: String, function: Fu
     }
 }
 
-sema_state_table_add_items: fn(table: &SemaStateTable, items: [Item]) Never! {
+sema_state_table_add_items: fn(table: ^SemaStateTable, items: [Item]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { sema_state_table_add_typed(table, function.name, function) }
@@ -363,7 +363,7 @@ sema_state_table_add_items: fn(table: &SemaStateTable, items: [Item]) Never! {
     }
 }
 
-sema_state_table_add_method: fn(table: &SemaStateTable, type_name: String, method: Func) Never! {
+sema_state_table_add_method: fn(table: ^SemaStateTable, type_name: String, method: Func) Never! {
     if method.state_types.len() == 0 {
         return
     }
@@ -414,7 +414,7 @@ sema_state_static_type: fn(receiver: Expr) -> String? Never! {
     }
 }
 
-sema_state_block: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, statements: [Stmt]) Never! {
+sema_state_block: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, statements: [Stmt]) Never! {
     loop statement in statements {
         if walk.flow.ended -> break
         sema_state_statement(walk, interner, tree, statement)
@@ -428,19 +428,19 @@ sema_state_possible: fn(fact: SemaFlowFact) -> [String] Never! {
     fact.many
 }
 
-sema_state_set: fn(walk: &SemaStateWalk, name: String, state: String) Never! {
+sema_state_set: fn(walk: ^SemaStateWalk, name: String, state: String) Never! {
     id: sema_state_local_id(walk, name)
     sema_state_put(walk.flow.current, id, state, [String]{})
 }
 
-sema_state_forget: fn(walk: &SemaStateWalk, name: String) Never! {
+sema_state_forget: fn(walk: ^SemaStateWalk, name: String) Never! {
     id: sema_state_local_find(walk, name)
     sema_flow_drop(walk.flow.current, id)
 }
 
 // Walk one path from `before`; when it falls through to the end of `body`,
 // its facts join `paths`.
-sema_state_path: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, before: SemaFlowFacts, body: [Stmt], paths: &[SemaFlowFacts]) Never! {
+sema_state_path: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, before: SemaFlowFacts, body: [Stmt], paths: ^[SemaFlowFacts]) Never! {
     sema_flow_restore(walk.flow, before)
     sema_state_block(walk, interner, tree, body)
     sema_flow_reach(walk.flow, paths)
@@ -449,7 +449,7 @@ sema_state_path: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, be
 // The typestate plane's join (SemaFlowPlane): a state survives only when
 // both paths carry it and agree. Where both track a local and disagree, it
 // may be in any of their states; a split of two known states is L0152.
-sema_state_join: fn(binding: Int, left: SemaFlowFact, right: SemaFlowFact, splits: &[SemaFlowSplit]) -> SemaFlowFact Never! {
+sema_state_join: fn(binding: Int, left: SemaFlowFact, right: SemaFlowFact, splits: ^[SemaFlowSplit]) -> SemaFlowFact Never! {
     one: sema_state_possible(left)
     if one.len() == 0 -> return SemaFlowFact{}
     other: sema_state_possible(right)
@@ -468,20 +468,20 @@ sema_state_join: fn(binding: Int, left: SemaFlowFact, right: SemaFlowFact, split
 
 // The paths that fall through meet (sema_flow_meet), and every split is
 // L0152.
-sema_state_merge: fn(walk: &SemaStateWalk, paths: &&[SemaFlowFacts], span: Span) Never! {
+sema_state_merge: fn(walk: ^SemaStateWalk, paths: ^^[SemaFlowFacts], span: Span) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_meet(walk.flow, paths, splits)
     sema_state_report(walk, splits, span)
 }
 
 // A loop's body, met by the one loop rule (sema_flow_loop_leave).
-sema_state_loop: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, body: [Stmt], span: Span) Never! {
+sema_state_loop: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, body: [Stmt], span: Span) Never! {
     entered: sema_flow_loop_enter(walk.flow)
     sema_state_block(walk, interner, tree, body)
     sema_state_after_loop(walk, entered, span)
 }
 
-sema_state_after_loop: fn(walk: &SemaStateWalk, entered: &&SemaFlowLoop, span: Span) Never! {
+sema_state_after_loop: fn(walk: ^SemaStateWalk, entered: ^^SemaFlowLoop, span: Span) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_loop_leave(walk.flow, entered, splits)
     sema_state_report(walk, splits, span)
@@ -489,7 +489,7 @@ sema_state_after_loop: fn(walk: &SemaStateWalk, entered: &&SemaFlowLoop, span: S
 
 // One L0152 per diverging local, in name order; the first split by state
 // order names the two states.
-sema_state_report: fn(walk: &SemaStateWalk, splits: [SemaFlowSplit], span: Span) Never! {
+sema_state_report: fn(walk: ^SemaStateWalk, splits: [SemaFlowSplit], span: Span) Never! {
     if splits.len() == 0 {
         return
     }
@@ -510,7 +510,7 @@ sema_state_report: fn(walk: &SemaStateWalk, splits: [SemaFlowSplit], span: Span)
     }
 }
 
-sema_state_switch: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) Never! {
+sema_state_switch: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) Never! {
     sema_state_expr(walk, interner, tree, subject)
     before: walk.flow.current.copy()
     // A local of an enum with a state list is in the arm's case inside that
@@ -538,7 +538,7 @@ sema_state_switch: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, 
 
 // The arm paths meet by the one arm-table rule (sema_flow_arms_meet), and
 // every split is L0152.
-sema_state_arms_merge: fn(walk: &SemaStateWalk, before: &&SemaFlowFacts, paths: &&[SemaFlowFacts], has_else: Bool, exhaustive: Bool, span: Span) Never! {
+sema_state_arms_merge: fn(walk: ^SemaStateWalk, before: ^^SemaFlowFacts, paths: ^^[SemaFlowFacts], has_else: Bool, exhaustive: Bool, span: Span) Never! {
     splits := [SemaFlowSplit]{}
     sema_flow_arms_meet(walk.flow, before, paths, has_else, exhaustive, splits)
     sema_state_report(walk, splits, span)
@@ -553,7 +553,7 @@ sema_state_subject_cases: fn(walk: SemaStateWalk, interner: Interner, tree: Body
 }
 
 // A narrowed local leaves its branch in the states it had before it.
-sema_state_end_narrowing: fn(walk: &SemaStateWalk, before: SemaFlowFacts, local: String) Never! {
+sema_state_end_narrowing: fn(walk: ^SemaStateWalk, before: SemaFlowFacts, local: String) Never! {
     id: sema_state_local_find(walk, local)
     state: sema_state_known(before, id)
     if state == "" {
@@ -614,7 +614,7 @@ sema_state_case: fn(walk: SemaStateWalk, interner: Interner, tree: BodyTree, val
 // A binding or plain assignment takes the states its value's type names, a
 // spawn's `Running`, or (a binding only) the states of the local it aliases;
 // otherwise it is untracked.
-sema_state_rebind: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, name: String, value: Expr, aliases: Bool) Never! {
+sema_state_rebind: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, name: String, value: Expr, aliases: Bool) Never! {
     if sema_state_result(walk, interner, tree, value) == .Val(to) {
         sema_state_set(walk, name, to)
         return
@@ -643,7 +643,7 @@ sema_state_rebind: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, 
     sema_state_forget(walk, name)
 }
 
-sema_state_statement: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, statement: Stmt) Never! {
+sema_state_statement: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, statement: Stmt) Never! {
     if statement == {
         .Expr(value) -> { sema_state_expr(walk, interner, tree, value) }
         .Yield(value, _) -> { sema_state_expr(walk, interner, tree, value) }
@@ -814,7 +814,7 @@ sema_state_arg_state: fn(walk: SemaStateWalk, interner: Interner, tree: BodyTree
 
 // E0150 for each argument whose state is known and is not among the states
 // its parameter's type names. `receiver` is a method call's receiver.
-sema_state_check_needs: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, key: String, operation: String, receiver: Expr?, args: [Expr], method_span: Span) Never! {
+sema_state_check_needs: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, key: String, operation: String, receiver: Expr?, args: [Expr], method_span: Span) Never! {
     id: sema_state_table_find(walk.table, key)
     if walk.table.needs[id].len() == 0 {
         return
@@ -857,7 +857,7 @@ sema_state_moves_from: fn(walk: SemaStateWalk, owner: String, state: String) -> 
     moves
 }
 
-sema_state_method: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, receiver: Expr, method: String, method_span: Span, args: [Expr]) Never! {
+sema_state_method: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, receiver: Expr, method: String, method_span: Span, args: [Expr]) Never! {
     // State types: the receiver and each argument against the states its
     // parameter names. The receiver is a value, so it keeps its state; the
     // result carries the new one.
@@ -882,12 +882,12 @@ sema_state_method: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, 
     sema_state_set(walk, local, to)
 }
 
-sema_state_call: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, name: String, args: [Expr]) Never! {
+sema_state_call: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, name: String, args: [Expr]) Never! {
     sema_state_check_needs(walk, interner, tree, name, name, None, args, expr_span(args[0]))
 }
 
 // The local a receiver or first argument names, if it is a bare local or a
-// marked one (`order.move()`, `&order`).
+// marked one (`order.move()`, `^order`).
 sema_state_local: fn(value: Expr) -> String? Never! {
     if value == {
         .Ident(name, _, _) -> Val(name)
@@ -896,13 +896,13 @@ sema_state_local: fn(value: Expr) -> String? Never! {
     }
 }
 
-sema_state_exprs: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, values: [Expr]) Never! {
+sema_state_exprs: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, values: [Expr]) Never! {
     loop value in values -> sema_state_expr(walk, interner, tree, value)
 }
 
 // Walk an expression for typestate violations; a task method moves its
 // receiver in place.
-sema_state_expr: fn(walk: &SemaStateWalk, interner: Interner, tree: BodyTree, value: Expr) Never! {
+sema_state_expr: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTree, value: Expr) Never! {
     if value == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             sema_state_expr(walk, interner, tree, receiver)

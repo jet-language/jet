@@ -193,7 +193,7 @@ jet_target_layout_active: fn(query: JetTargetLayoutQuery, identity: String) -> B
     (name_column_get(query.active_keys, query.active, identity) ?? 0) == 1
 }
 
-jet_target_layout_set_active: fn(query: &JetTargetLayoutQuery, identity: String, active: Bool) Never! {
+jet_target_layout_set_active: fn(query: ^JetTargetLayoutQuery, identity: String, active: Bool) Never! {
     name_column_set(query.active_keys, query.active, identity, if active -> 1 else -> 0)
 }
 
@@ -310,27 +310,27 @@ jet_target_layout_u64_bytes: fn(value: Int) -> [U8] Never! {
     bytes
 }
 
-jet_target_layout_frame: fn(bytes: &[U8], value: [U8]) Never! {
+jet_target_layout_frame: fn(bytes: ^[U8], value: [U8]) Never! {
     loop byte in jet_target_layout_u64_bytes(value.len()) -> bytes.push(byte)
     loop byte in value -> bytes.push(byte)
 }
 
-jet_target_layout_frame_string: fn(bytes: &[U8], value: String) Never! {
+jet_target_layout_frame_string: fn(bytes: ^[U8], value: String) Never! {
     jet_target_layout_frame(bytes, value.bytes())
 }
 
-jet_target_layout_frame_bool: fn(bytes: &[U8], value: Bool) Never! {
+jet_target_layout_frame_bool: fn(bytes: ^[U8], value: Bool) Never! {
     if value -> jet_target_layout_frame(bytes, [U8]{1}) else {
         jet_target_layout_frame(bytes, [U8]{0})
     }
 }
 
-jet_target_layout_frame_optional_int: fn(bytes: &[U8], value: Int?) Never! {
+jet_target_layout_frame_optional_int: fn(bytes: ^[U8], value: Int?) Never! {
     actual: value ?? 0
     jet_target_layout_frame(bytes, jet_target_layout_u64_bytes(actual))
 }
 
-jet_target_layout_frame_support: fn(bytes: &[U8], support: LayoutSupportFacts) Never! {
+jet_target_layout_frame_support: fn(bytes: ^[U8], support: LayoutSupportFacts) Never! {
     jet_target_layout_frame_bool(bytes, support.proven)
     loop alignment in support.alignments {
         jet_target_layout_frame(bytes, jet_target_layout_u64_bytes(alignment))
@@ -540,7 +540,7 @@ jet_target_layout_type_facts: fn(engine: TargetLayoutEngine, ty: Type) -> ByteLa
     jet_target_layout_type_inner(engine, ty, "", query)
 }
 
-jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, definition: StructDef, identity: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+jet_target_layout_struct_facts_inner_named: fn(engine: TargetLayoutEngine, definition: StructDef, identity: String, owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     field_names: loop field in definition.fields if field.computed == None -> field.name
     layout: definition.layout ?? return jet_target_layout_native_struct_facts(engine, definition, identity, query)
     if !jet_target_layout_struct_layout_is_physical(layout) {
@@ -620,7 +620,7 @@ jet_target_layout_aggregate_size: fn(end: Int) -> Int? {
 // The bytes the native code generator gives struct `definition`: its members
 // placed by jet_target_layout_place, reordered unless it has a `#Layout`.
 // Unknown when any member's bytes are.
-jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef, identity: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition: StructDef, identity: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     names := [String]{}
     types := [Type]{}
     loop field in definition.fields {
@@ -657,7 +657,7 @@ jet_target_layout_native_aggregate_facts: fn(names: [String], layouts: [ByteLayo
 // header; a record is its members inline (jet_target_layout_native_record).
 // Core declarations are carried by the runtime, not by their declared fields,
 // and stay unknown.
-jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> ByteLayout? {
     if ty == {
         .Int | .Float | .Char | .String | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Shared(_) -> Val(jet_target_layout_scalar(8))
         .Bool -> Val(jet_target_layout_scalar(1))
@@ -678,7 +678,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
 // The bytes the native code generator gives a record (`{x: U8, y: Int}`): its
 // members in their written order, never reordered (JetIR BuildTypes.jet
 // ir_tuple_members_in), placed as a struct's are.
-jet_target_layout_native_record: fn(engine: TargetLayoutEngine, fields: [TypeTupleField], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+jet_target_layout_native_record: fn(engine: TargetLayoutEngine, fields: [TypeTupleField], owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     names: loop field in fields -> field.name
     layouts := [ByteLayout]{}
     loop field in fields {
@@ -687,7 +687,7 @@ jet_target_layout_native_record: fn(engine: TargetLayoutEngine, fields: [TypeTup
     jet_target_layout_native_aggregate_facts(names, layouts, false)
 }
 
-jet_target_layout_native_named: fn(engine: TargetLayoutEngine, name: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+jet_target_layout_native_named: fn(engine: TargetLayoutEngine, name: String, owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> ByteLayout? {
     if jet_target_layout_numeric_type(name) == .Val(numeric) {
         return jet_target_layout_native_type(engine, numeric, owner_qualified_name, query)
     }
@@ -706,7 +706,7 @@ jet_target_layout_native_named: fn(engine: TargetLayoutEngine, name: String, own
     jet_target_layout_native_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, query)
 }
 
-jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identity: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identity: String, query: ^JetTargetLayoutQuery) -> ByteLayout? {
     if item == {
         .Struct(definition) -> {
             if definition.type_params.len() > 0 -> return None
@@ -731,7 +731,7 @@ jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identi
     }
 }
 
-jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     variant_names: loop variant in definition.variants -> variant.name
     enum_tag: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_native_enum_facts(engine, definition, identity, query)
     if !jet_target_layout_enter(query, identity) -> return jet_target_layout_unknown(variant_names)
@@ -813,7 +813,7 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
 // its own. A case's facts are its payload's offset and bytes in the box; a
 // case without a payload reports its tag word. A generic enum lays out per
 // instance and stays unknown.
-jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     variant_names: loop variant in definition.variants -> variant.name
     if definition.type_params.len() > 0 || !jet_target_layout_enter(query, identity) {
         return jet_target_layout_unknown(variant_names)
@@ -858,7 +858,7 @@ jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: 
 // box to `sizes` and `aligns`: its own bytes, or one 8-byte pointer when it is
 // wider than JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES. False when its bytes are
 // unknown.
-priv jet_target_layout_variant_member: fn(engine: TargetLayoutEngine, ty: Type, identity: String, query: &JetTargetLayoutQuery, sizes: &[Int], aligns: &[Int]) -> Bool Never! {
+priv jet_target_layout_variant_member: fn(engine: TargetLayoutEngine, ty: Type, identity: String, query: ^JetTargetLayoutQuery, sizes: ^[Int], aligns: ^[Int]) -> Bool Never! {
     member: jet_target_layout_native_type(engine, ty, identity, query) ?? return false
     boxed: member.size > JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES
     sizes.push(if boxed -> 8 else -> member.size)
@@ -866,7 +866,7 @@ priv jet_target_layout_variant_member: fn(engine: TargetLayoutEngine, ty: Type, 
     true
 }
 
-jet_target_layout_aggregate: fn(engine: TargetLayoutEngine, names: [String], types: [Type], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+jet_target_layout_aggregate: fn(engine: TargetLayoutEngine, names: [String], types: [Type], owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> LayoutFacts Never! {
     cursor := Val(0)
     aggregate_alignment := Val(1)
     facts := [FieldLayoutFacts]{}
@@ -916,7 +916,7 @@ jet_target_layout_aggregate_bytes: fn(cursor: Int?, aggregate_alignment: Int?) -
     Val(ByteLayout{size: size, alignment: alignment, stride: size})
 }
 
-jet_target_layout_type_inner: fn(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+jet_target_layout_type_inner: fn(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> ByteLayout? {
     if ty == {
         .Int | .Float -> Val(jet_target_layout_scalar(8))
         .Bool -> Val(jet_target_layout_scalar(1))
@@ -1014,7 +1014,7 @@ jet_target_layout_resolved_name: fn(engine: TargetLayoutEngine, owner_qualified_
     engine.name_resolutions[position].qualified_name
 }
 
-jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identity: String, registry_key: String, args: [Type], query: &JetTargetLayoutQuery) -> ByteLayout? {
+jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identity: String, registry_key: String, args: [Type], query: ^JetTargetLayoutQuery) -> ByteLayout? {
     key: type_identity_key(Type.Apply{name: registry_key, args: args})
     if !jet_target_layout_active(query, identity) {
         if name_column_get(query.completed_keys, query.completed_positions, key) == .Val(position) -> return query.completed[position]
@@ -1044,7 +1044,7 @@ jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identit
     result
 }
 
-jet_target_layout_named_type: fn(engine: TargetLayoutEngine, name: String, args: [Type], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+jet_target_layout_named_type: fn(engine: TargetLayoutEngine, name: String, args: [Type], owner_qualified_name: String, query: ^JetTargetLayoutQuery) -> ByteLayout? {
     if jet_target_layout_numeric_type(name) == .Val(numeric) {
         return jet_target_layout_type_inner(engine, numeric, owner_qualified_name, query)
     }
@@ -1173,7 +1173,7 @@ jet_target_layout_supports_atomic_word: fn(target: JetTargetLayout) -> Bool Neve
     target.triple.starts_with("x86_64-") || target.triple.starts_with("aarch64-") || target.triple.starts_with("wasm32-")
 }
 
-jet_target_layout_enter: fn(query: &JetTargetLayoutQuery, identity: String) -> Bool Never! {
+jet_target_layout_enter: fn(query: ^JetTargetLayoutQuery, identity: String) -> Bool Never! {
     if jet_target_layout_active(query, identity) {
         query.cycle_hits += 1
         return false

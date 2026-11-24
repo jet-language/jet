@@ -1,7 +1,7 @@
 use core.encoding.[Dyn]
 
 // A move ends only the current path; a reset restores the next iteration.
-consume: fn(value: &&[Int]) -[]> Int { value.len() }
+consume: fn(value: ^^[Int]) -[]> Int { value.len() }
 
 move_then_return: fn() -[]> Int {
     out := [1, 2]
@@ -37,7 +37,7 @@ Tree: enum {
     Text(String),
 }
 
-owned_payload: fn(tree: &&Tree) -[]> Int {
+owned_payload: fn(tree: ^^Tree) -[]> Int {
     owned := tree.move()
     if owned.move() == {
         .Object(entries) -> return consume(entries)
@@ -45,7 +45,7 @@ owned_payload: fn(tree: &&Tree) -[]> Int {
     }
 }
 
-owned_dyn_payload: fn(tree: &&Dyn) -[]> Int {
+owned_dyn_payload: fn(tree: ^^Dyn) -[]> Int {
     owned := tree.move()
     if owned.move() == {
         .Text(text) -> {

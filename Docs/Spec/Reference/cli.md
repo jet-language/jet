@@ -1409,8 +1409,8 @@ until it is ported.
 lists every call of the entry's checked package that changes or takes a named
 value, chosen and checked as `audit copies` chooses and checks it, without
 writing anything. The sites are the Safe E0228 edits sema gives every module of
-the entry's source root under `#Policy(writes: .Explicit)`: `&` before a value a
-call changes (a `&` parameter or `&self` method), `&&` before one it takes. The
+the entry's source root under `#Policy(writes: .Explicit)`: `^` before a value a
+call changes (a `^` parameter or `^self` method), `^^` before one it takes. The
 text form is `Calls that change or take a named value: N` and then one
 `  <path>:<line>:<col>  span=<start>..<end>  mark=<&|&&>  access=<write|take>`
 row per site, sorted by path and then by offset. `--json` emits the

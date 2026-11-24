@@ -52,7 +52,7 @@ sema_reactive_function_value: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_reactive_value_ok: fn(ty: Type, kind: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_reactive_value_ok: fn(ty: Type, kind: String, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if sema_reactive_function_value(ty) {
         diagnostics.push(sema_error("E2913", span, "a reactive {kind} can't hold a function", "signals and derived values hold ordinary data so they can be copied to dependents", "use a data value (number, text, list, struct, …); wrap behavior in `reactive.autorun` instead"))
         return false
@@ -68,7 +68,7 @@ sema_reactive_source_lambda_arity: fn(expr: Expr) -> Int? {
     }
 }
 
-sema_reactive_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr] Never! {
+sema_reactive_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [TExpr] Never! {
     values := [TExpr]{}
     loop arg in args {
         if sema_check_expression(arg.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) == .Val(value) {
@@ -78,7 +78,7 @@ sema_reactive_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment,
     values
 }
 
-sema_reactive_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, type_args: [Type], effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_reactive_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, api: String, span: Span, result_type: Type, type_args: [Type], effect_name: String, diagnostics: ^[Diagnostic]) -> Bool Never! {
     effect_entries := [EffectRowEntry]{}
     if effect_name != "" -> effect_entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -91,7 +91,7 @@ sema_reactive_call_fact: fn(environment: SemaScopeEnvironment, program: SemaProg
     sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
 }
 
-sema_reactive_core_call_value: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_reactive_core_call_value: fn(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     value: sema_call_core_tree(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
         return None
@@ -99,11 +99,11 @@ sema_reactive_core_call_value: fn(record: CoreCallRecord, args: [TExpr], span: S
     Val(value)
 }
 
-sema_reactive_core_record: fn(module_name: String, member: String, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
+sema_reactive_core_record: fn(module_name: String, member: String, args: [CallArg], span: Span, diagnostics: ^[Diagnostic]) -> CoreCallRecord? {
     sema_call_core_record(module_name, member, args.len(), span, diagnostics)
 }
 
-sema_reactive_typed_single_argument: fn(member: String, argument: CallArg, required: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_reactive_typed_single_argument: fn(member: String, argument: CallArg, required: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     sema_check_expression(argument.expr, required, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
@@ -111,7 +111,7 @@ sema_reactive_callback_type: fn(return_type: Type?) -> Type Never! {
     Type.Fn{params: [Type]{}, ret: return_type, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-sema_reactive_check_retained_lambda: fn(kind: String, argument: CallArg, expected_return: Type?, expected_element: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
+sema_reactive_check_retained_lambda: fn(kind: String, argument: CallArg, expected_return: Type?, expected_element: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TLambda? {
     source_arity: sema_reactive_source_lambda_arity(argument.expr) ?? {
         checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         actual: if checked == .Val(value) -> sema_type_show(value.ty) else -> "an invalid value"
@@ -136,7 +136,7 @@ sema_reactive_check_retained_lambda: fn(kind: String, argument: CallArg, expecte
     }
 }
 
-sema_reactive_direct_closure: fn(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, type_args: [Type], diagnostics: &[Diagnostic]) -> TExpr? {
+sema_reactive_direct_closure: fn(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, type_args: [Type], diagnostics: ^[Diagnostic]) -> TExpr? {
     closure_kind: if kind == "autorun" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
     value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
     checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return None
@@ -146,7 +146,7 @@ sema_reactive_direct_closure: fn(kind: String, lambda: TLambda, result_type: Typ
     Val(checked)
 }
 
-sema_reactive_autorun_value: fn(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_reactive_autorun_value: fn(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, args: [CallArg], diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 1 {
         _ := sema_reactive_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         diagnostics.push(sema_call_arity_diagnostic("core.reactive.autorun", 1, args.len(), false, span))
@@ -162,7 +162,7 @@ sema_reactive_autorun_value: fn(type_args: [Type], span: Span, expected: Type?, 
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
-sema_reactive_derived_value: fn(member: String, type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_reactive_derived_value: fn(member: String, type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, args: [CallArg], diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 1 {
         _ := sema_reactive_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         diagnostics.push(sema_call_arity_diagnostic("core.reactive.{member}", 1, args.len(), false, span))
@@ -193,7 +193,7 @@ sema_reactive_derived_value: fn(member: String, type_args: [Type], span: Span, e
 
 // `reactive.signal(value)` has no Core registry row: sema types the element
 // and rewrites the call into the Core source function `signal<T>`.
-sema_reactive_signal_value: fn(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_reactive_signal_value: fn(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, args: [CallArg], diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 1 {
         _ := sema_reactive_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         diagnostics.push(sema_call_arity_diagnostic("core.reactive.signal", 1, args.len(), false, span))
@@ -218,7 +218,7 @@ sema_reactive_signal_value: fn(type_args: [Type], span: Span, expected: Type?, e
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
 }
 
-sema_reactive_loadable_value: fn(member: String, type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+sema_reactive_loadable_value: fn(member: String, type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, args: [CallArg], diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     record: sema_reactive_core_record("core.reactive.loadable", member, args, span, diagnostics) ?? {
         _ := sema_reactive_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -234,7 +234,7 @@ sema_reactive_loadable_value: fn(member: String, type_args: [Type], span: Span, 
     SemaDirectSpecialCheck{handled: true, value: value_out}
 }
 
-sema_call_try_reactive_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_reactive_core_call: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name == "core.reactive" {
         if member == "signal" {
             return sema_reactive_signal_value(type_args, span, expected, environment, program, scopes, state, tail_store, context, args, diagnostics)
@@ -278,7 +278,7 @@ sema_reactive_method_parameter: fn(name: String, ty: Type, convention: AccessCon
     SemaCallParam{label: "", name: name, zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false}
 }
 
-sema_reactive_checked_handle_args: fn(owner: String, method: String, args: [CallArg], receiver: Expr, receiver_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+sema_reactive_checked_handle_args: fn(owner: String, method: String, args: [CallArg], receiver: Expr, receiver_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> [TExpr]? {
     params := [SemaCallParam]{}
     if method == "set" {
         params.push(sema_reactive_method_parameter("value", sema_reactive_element_type(receiver_type, owner, Type.Int), AccessConvention.Move))
@@ -297,7 +297,7 @@ sema_reactive_checked_handle_args: fn(owner: String, method: String, args: [Call
     Val(typed.values)
 }
 
-sema_call_try_reactive_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_reactive_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     owner: sema_reactive_type_name(receiver_value.ty)
     if !sema_reactive_handle_member(owner, method) {
         return SemaMethodSpecialCheck{handled: false, value: None}

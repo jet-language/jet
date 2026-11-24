@@ -174,28 +174,28 @@ XML uses the exact tagged `Dyn` schema in the XML section. Every reader
 has the current-signature form
 
 ```jet
-next: fn(&self) -> Item? encoding.EncodingError!
+next: fn(^self) -> Item? encoding.EncodingError!
 ```
 
 Every writer has
 
 ```jet
-write: fn(&self, item: Item) encoding.EncodingError!
-flush: fn(&self) encoding.EncodingError!
-finish: fn(&self) encoding.EncodingError!
+write: fn(^self, item: Item) encoding.EncodingError!
+flush: fn(^self) encoding.EncodingError!
+finish: fn(^self) encoding.EncodingError!
 ```
 
-`&self` is the edit access because each call advances state; callers keep a
+`^self` is the edit access because each call advances state; callers keep a
 handle in a changeable binding. Constructors consume their byte source or
-file handle with `&&`. A reader takes any Prelude `Reader` (a `FileReader`, a
+file handle with `^^`. A reader takes any Prelude `Reader` (a `FileReader`, a
 socket, or a program's own type); a writer takes any Prelude `Writer` (a
 `FileWriter`, a socket, or a program's own type):
 
 ```jet
-reader<R: Reader>(input: &&R,
+reader<R: Reader>(input: ^^R,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Reader<R> encoding.EncodingError!
-writer<W: Writer>(output: &&W,
+writer<W: Writer>(output: ^^W,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Writer<W> encoding.EncodingError!
 ```
@@ -311,7 +311,7 @@ Validate and decode predefined and numeric references. Declared general
 references default to `Preserve`; `Reject` refuses them; `Resolve(values:
 [String:String])` expands only names in the explicit in-memory map as
 character data. Never reparse replacement strings as XML markup: `<`, `>`,
-`&`, quotes, and entity-looking text stay characters and render escaped.
+`^`, quotes, and entity-looking text stay characters and render escaped.
 Internal declaration replacement text remains inert preservation data.
 Parameter entities, external parsed entities, and replacement-text markup
 expansion are `Unsupported`; cycles and limits still reject. External
@@ -427,8 +427,8 @@ representation exists.
 The reader and writer use current Jet signatures:
 
 ```jet
-xml.XMLReader.next(&self) -> encoding.Dyn? encoding.EncodingError!
-xml.XMLWriter.write(&self, item: encoding.Dyn) encoding.EncodingError!
+xml.XMLReader.next(^self) -> encoding.Dyn? encoding.EncodingError!
+xml.XMLWriter.write(^self, item: encoding.Dyn) encoding.EncodingError!
 ```
 
 The reader returns events in source order. The writer validates one complete
@@ -600,11 +600,11 @@ retaining the item, allocating, or truncating. (D-ENCXML1=A)
 Use these reader and writer constructors:
 
 ```jet
-xml.reader<R: Reader>(input: &&R,
+xml.reader<R: Reader>(input: ^^R,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
     -> xml.XMLReader<R> encoding.EncodingError!
-xml.writer<W: Writer>(output: &&W,
+xml.writer<W: Writer>(output: ^^W,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
     -> xml.XMLWriter<W> encoding.EncodingError!

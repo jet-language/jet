@@ -291,7 +291,7 @@ jet_driver_recursion_at: fn(calls: [JetDriverRecursionCall], target: Int) -> Spa
 
 // The calls both `left` and `right` make, None standing for no path: the
 // calls every path of either kind makes, each at the earlier of its calls.
-jet_driver_recursion_meet: fn(left: &&[JetDriverRecursionCall]?, right: &&[JetDriverRecursionCall]?) -> [JetDriverRecursionCall]? Never! {
+jet_driver_recursion_meet: fn(left: ^^[JetDriverRecursionCall]?, right: ^^[JetDriverRecursionCall]?) -> [JetDriverRecursionCall]? Never! {
     first: left ?? return right
     second: right ?? return Val(first)
     kept := [JetDriverRecursionCall]{}
@@ -303,7 +303,7 @@ jet_driver_recursion_meet: fn(left: &&[JetDriverRecursionCall]?, right: &&[JetDr
 }
 
 // The calls of `calls` with those of `prefix`, which the path made first.
-jet_driver_recursion_after: fn(calls: &&[JetDriverRecursionCall]?, prefix: [JetDriverRecursionCall]) -> [JetDriverRecursionCall]? Never! {
+jet_driver_recursion_after: fn(calls: ^^[JetDriverRecursionCall]?, prefix: [JetDriverRecursionCall]) -> [JetDriverRecursionCall]? Never! {
     later: calls ?? return None
     if prefix.len() == 0 -> return Val(later)
     joined := [JetDriverRecursionCall]{}
@@ -315,7 +315,7 @@ jet_driver_recursion_after: fn(calls: &&[JetDriverRecursionCall]?, prefix: [JetD
 }
 
 // The flow of either `left` or `right`.
-jet_driver_recursion_either: fn(left: &&JetDriverRecursionFlow, right: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+jet_driver_recursion_either: fn(left: ^^JetDriverRecursionFlow, right: ^^JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
     JetDriverRecursionFlow{
         fall: jet_driver_recursion_meet(left.fall.move(), right.fall.move()),
         exit: jet_driver_recursion_meet(left.exit.move(), right.exit.move()),
@@ -325,12 +325,12 @@ jet_driver_recursion_either: fn(left: &&JetDriverRecursionFlow, right: &&JetDriv
 }
 
 // The flow of code that may not run at all.
-jet_driver_recursion_maybe: fn(flow: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+jet_driver_recursion_maybe: fn(flow: ^^JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
     jet_driver_recursion_either(flow, jet_driver_recursion_fall())
 }
 
 // The flow of `first` and then, where it falls through, `second`.
-jet_driver_recursion_then: fn(first: &&JetDriverRecursionFlow, second: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+jet_driver_recursion_then: fn(first: ^^JetDriverRecursionFlow, second: ^^JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
     if first.fall == None -> return first
     prefix: first.fall.move() ?? [JetDriverRecursionCall]{}
     JetDriverRecursionFlow{
@@ -344,7 +344,7 @@ jet_driver_recursion_then: fn(first: &&JetDriverRecursionFlow, second: &&JetDriv
 // The flow of a loop whose `header` runs first and whose `body` runs any
 // number of times: it falls through as the header does, and a `break` or
 // `continue` of the body stays in it.
-jet_driver_recursion_repeat: fn(header: &&JetDriverRecursionFlow, body: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+jet_driver_recursion_repeat: fn(header: ^^JetDriverRecursionFlow, body: ^^JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
     if header.fall == None -> return header
     prefix: header.fall.move() ?? [JetDriverRecursionCall]{}
     exit: jet_driver_recursion_meet(header.exit.move(), jet_driver_recursion_after(body.exit.move(), prefix))
@@ -354,13 +354,13 @@ jet_driver_recursion_repeat: fn(header: &&JetDriverRecursionFlow, body: &&JetDri
 // The flow of a `loop` with no condition whose body flows as `body`: only
 // a `break` falls out of it, and a body that falls through or continues
 // runs again.
-jet_driver_recursion_forever: fn(body: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+jet_driver_recursion_forever: fn(body: ^^JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
     JetDriverRecursionFlow{fall: body.brk.move(), exit: body.exit.move()}
 }
 
 // The calls every path out of a function body that flows as `flow` makes,
 // by falling off its end or by leaving it; none when no path leaves it.
-jet_driver_recursion_leaving: fn(flow: &&JetDriverRecursionFlow) -> [JetDriverRecursionCall] Never! {
+jet_driver_recursion_leaving: fn(flow: ^^JetDriverRecursionFlow) -> [JetDriverRecursionCall] Never! {
     jet_driver_recursion_meet(flow.fall.move(), flow.exit.move()) ?? [JetDriverRecursionCall]{}
 }
 
@@ -394,7 +394,7 @@ jet_driver_recursion_optional: fn(tree: BodyTree, hits: [Int:Int], value: Int?) 
 // The flow of a jump: a plain one reaches the nearest loop as `jump`, a
 // labeled one may leave more than one loop and counts as leaving the
 // function.
-jet_driver_recursion_jump: fn(label: String?, jump: &&JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
+jet_driver_recursion_jump: fn(label: String?, jump: ^^JetDriverRecursionFlow) -> JetDriverRecursionFlow Never! {
     if label != None -> return jet_driver_recursion_exit()
     jump
 }
@@ -497,7 +497,7 @@ jet_driver_recursion_statement: fn(tree: BodyTree, hits: [Int:Int], statement: I
 }
 
 // The flow of the condition `condition` of `tree`: the right side of an
-// `&&` runs only when its left side holds.
+// `^^` runs only when its left side holds.
 jet_driver_recursion_condition: fn(tree: BodyTree, hits: [Int:Int], condition: BodyIfCond) -> JetDriverRecursionFlow Never! {
     if condition == {
         .Plain(value) -> jet_driver_recursion_expression(tree, hits, value)

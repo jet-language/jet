@@ -393,7 +393,7 @@ store_cache_atomic_replace: fn(path: String, bytes: [U8]) StoreError! {
     }
 }
 
-store_cache_finish_replace: fn(out: &FileWriter, partial: String, path: String, bytes: [U8]) StoreError! {
+store_cache_finish_replace: fn(out: ^FileWriter, partial: String, path: String, bytes: [U8]) StoreError! {
     out.write_bytes(bytes)
     out.fsync()
     if sys.is_windows() -> files.remove(path)
@@ -416,7 +416,7 @@ store_cache_remove_tree: fn(path: String) StoreError! {
 }
 
 // Append one `name=value` line after checking both halves are one line.
-store_cache_line: fn(output: &String, name: String, value: String) StoreError! {
+store_cache_line: fn(output: ^String, name: String, value: String) StoreError! {
     store_cache_validate_text(name, "cache binding field")
     store_cache_validate_text(value, "cache binding value")
     output = "{output}{name}={value}\n"

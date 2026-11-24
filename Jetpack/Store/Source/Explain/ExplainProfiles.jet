@@ -10,7 +10,7 @@ use {
 
 // The nearest `<project>/.jet/profiles` directory above the working
 // directory. A linked or unreadable profile state is a loss.
-store_explain_nearest_profile_generations: fn(reports: &[ExplainReport]) -> String? Never! {
+store_explain_nearest_profile_generations: fn(reports: ^[ExplainReport]) -> String? Never! {
     current := sys.current_dir() ?? return None
     loop {
         profiles: files.join(pkg_managed_dir(current), "profiles")
@@ -35,7 +35,7 @@ store_explain_nearest_profile_generations: fn(reports: &[ExplainReport]) -> Stri
     }
 }
 
-store_explain_profile_provider_facts: fn(entry: StoreEntry, reports: &[ExplainReport]) -> [ExplainProfile] Never! {
+store_explain_profile_provider_facts: fn(entry: StoreEntry, reports: ^[ExplainReport]) -> [ExplainProfile] Never! {
     generations_root: store_explain_nearest_profile_generations(reports) ?? return [ExplainProfile]{}
     profiles := [ExplainProfile]{}
     profile_dirs: files.list_dir(generations_root) ?? {
@@ -57,7 +57,7 @@ store_explain_profile_provider_facts: fn(entry: StoreEntry, reports: &[ExplainRe
     store_explain_sorted_profiles(profiles)
 }
 
-store_explain_profile_generations: fn(entry: StoreEntry, profile_name: String, profile_path: String, profiles: &[ExplainProfile], reports: &[ExplainReport]) Never! {
+store_explain_profile_generations: fn(entry: StoreEntry, profile_name: String, profile_path: String, profiles: ^[ExplainProfile], reports: ^[ExplainReport]) Never! {
     generation_dir: files.join(profile_path, "generations")
     generations: files.list_dir(generation_dir) ?? {
         if !store_io_is_not_found(err) {
@@ -80,7 +80,7 @@ store_explain_profile_generations: fn(entry: StoreEntry, profile_name: String, p
     }
 }
 
-store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, number: Int, metadata_path: String, profiles: &[ExplainProfile], reports: &[ExplainReport]) Never! {
+store_explain_generation_packages: fn(entry: StoreEntry, profile_name: String, number: Int, metadata_path: String, profiles: ^[ExplainProfile], reports: ^[ExplainReport]) Never! {
     label: "profile {profile_name} generation {number}"
     raw: files.read(metadata_path) ?? {
         reports.push(ExplainReport.loss("{label} metadata is unavailable: {err}"))

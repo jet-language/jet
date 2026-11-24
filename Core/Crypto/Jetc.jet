@@ -42,7 +42,7 @@ Recipient: struct {
     public: crypto.X25519PublicKey,
 }
 
-append: fn(out: &[U8], bytes: [U8]) Never! {
+append: fn(out: ^[U8], bytes: [U8]) Never! {
     loop byte in bytes -> out.push(byte)
 }
 
@@ -300,8 +300,8 @@ writer: fn(
     sorted: [Recipient],
     plain_length: Int,
     file_id: [U8],
-    file_key: &&crypto.Secret,
-    ephemeral_secret: &&crypto.Secret,
+    file_key: ^^crypto.Secret,
+    ephemeral_secret: ^^crypto.Secret,
     nonce_prefix: [U8],
 ) -> Writer crypto.FileCryptoError! {
     body: body_length(plain_length) ?? return Err(.SourceIO)
@@ -375,7 +375,7 @@ Record: struct {
     cipher: [U8],
 }
 
-seal_chunk: fn(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
+seal_chunk: fn(state: ^Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
     if state.final || state.index > MAX_RECORDS -> return Err(.SourceIO)
     expected: if state.remaining >= CHUNK -> CHUNK else -> state.remaining
     if plain.len() != expected -> return Err(.SourceIO)
@@ -474,7 +474,7 @@ reader: fn(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: I
 }
 
 // The record's plaintext; the caller owns wiping it.
-open_chunk: fn(state: &ChunkReader, framing: [U8], encrypted: [U8]) -> [U8] crypto.FileCryptoError! {
+open_chunk: fn(state: ^ChunkReader, framing: [U8], encrypted: [U8]) -> [U8] crypto.FileCryptoError! {
     if state.final || state.index > MAX_RECORDS || framing.len() != 5 -> return Err(.OpenFailed)
     length: integer(framing, 0, 4)
     flags: framing[4]

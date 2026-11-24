@@ -665,7 +665,7 @@ provider_graph_shape_is: fn(value: Dyn?, text: Bool, array: Bool, object: Bool) 
 
 // Rust `provider_dependency_field`: the dependency names of an array field,
 // each item recorded by index and by name.
-provider_graph_dependency_field: fn(facts: &MetadataFacts, object: [String:Dyn], field: String, kind: String, namespace: String, losses: &[String]) -> [String] Never! {
+provider_graph_dependency_field: fn(facts: ^MetadataFacts, object: [String:Dyn], field: String, kind: String, namespace: String, losses: ^[String]) -> [String] Never! {
     value: object.get(field) ?? return [String]{}
     items: pkg_json_array(value) ?? {
         losses.push("{namespace} `{field}` must be an array")
@@ -702,7 +702,7 @@ provider_graph_dependency_field: fn(facts: &MetadataFacts, object: [String:Dyn],
 
 // vcpkg `dependencies`: names or dependency objects with version, feature,
 // platform, and host facts.
-provider_vcpkg_dependencies: fn(object: [String:Dyn], facts: &MetadataFacts, losses: &[String]) -> [String] Never! {
+provider_vcpkg_dependencies: fn(object: [String:Dyn], facts: ^MetadataFacts, losses: ^[String]) -> [String] Never! {
     value: object.get("dependencies") ?? return [String]{}
     items: pkg_json_array(value) ?? {
         losses.push("vcpkg `dependencies` must be an array")
@@ -752,7 +752,7 @@ provider_vcpkg_dependencies: fn(object: [String:Dyn], facts: &MetadataFacts, los
 }
 
 // Homebrew source, variant, hook, and advisory fields as typed facts.
-provider_homebrew_named_facts: fn(facts: &MetadataFacts, object: [String:Dyn]) Never! {
+provider_homebrew_named_facts: fn(facts: ^MetadataFacts, object: [String:Dyn]) Never! {
     fields: [{field: String, category: String}]{
         {field: "homepage", category: "source"},
         {field: "tap", category: "source"},
@@ -784,7 +784,7 @@ provider_homebrew_named_facts: fn(facts: &MetadataFacts, object: [String:Dyn]) N
 }
 
 // Each stable bottle's artifact and exact sha256.
-provider_homebrew_bottle_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
+provider_homebrew_bottle_facts: fn(facts: ^MetadataFacts, value: Dyn, losses: ^[String]) Never! {
     bottle: pkg_json_object(value) ?? {
         losses.push("Homebrew `bottle` must be an object")
         return
@@ -819,7 +819,7 @@ provider_homebrew_bottle_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[
 
 // The formula's source hash from `sha256`, `source.sha256`, or
 // `urls.stable.sha256`; differing hashes are a loss.
-provider_homebrew_source_hash: fn(object: [String:Dyn], losses: &[String]) -> String? Never! {
+provider_homebrew_source_hash: fn(object: [String:Dyn], losses: ^[String]) -> String? Never! {
     hashes := [String]{}
     if object.get("sha256") == {
         .Val(value) -> {
@@ -906,7 +906,7 @@ provider_homebrew_source_hash: fn(object: [String:Dyn], losses: &[String]) -> St
 }
 
 // Each named release asset's projection, platform, and exact digest.
-provider_github_asset_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
+provider_github_asset_facts: fn(facts: ^MetadataFacts, value: Dyn, losses: ^[String]) Never! {
     assets: pkg_json_array(value) ?? {
         losses.push("GitHub `assets` must be an array")
         return
@@ -940,7 +940,7 @@ provider_github_asset_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[Str
 }
 
 // Each platform artifact's projection and exact digest.
-provider_binary_artifact_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
+provider_binary_artifact_facts: fn(facts: ^MetadataFacts, value: Dyn, losses: ^[String]) Never! {
     artifacts: pkg_json_object(value) ?? {
         losses.push("binary metadata `artifacts` must be an object")
         return

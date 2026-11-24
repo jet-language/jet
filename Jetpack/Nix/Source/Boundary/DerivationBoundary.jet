@@ -74,11 +74,11 @@ NixNativeBoundary: struct {
         self.evaluate_devshell_output_with_import_authority(source, system, output, None)
     }
 
-    evaluate_devshell_with_import_authority: fn(self, source: String, system: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+    evaluate_devshell_with_import_authority: fn(self, source: String, system: String, authority: ^^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
         self.evaluate_devshell_output_with_import_authority(source, system, "default", authority)
     }
 
-    evaluate_devshell_output_with_import_authority: fn(self, source: String, system: String, output: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+    evaluate_devshell_output_with_import_authority: fn(self, source: String, system: String, output: String, authority: ^^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
         if nixeval_evaluate_devshell_output_with_import_authority(source, system, output, authority) == {
             .Ok(shell) -> return Ok(shell)
             .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
@@ -89,7 +89,7 @@ NixNativeBoundary: struct {
         self.evaluate_derivation_with_import_authority(source, system, None)
     }
 
-    evaluate_derivation_with_import_authority: fn(self, source: String, system: String, authority: &&NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
+    evaluate_derivation_with_import_authority: fn(self, source: String, system: String, authority: ^^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
         if nixeval_evaluate_derivation_with_import_authority(source, system, authority) == {
             .Ok(evaluation) -> return nix_materialize_evaluated(evaluation)
             .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
@@ -100,7 +100,7 @@ NixNativeBoundary: struct {
         self.evaluate_derivation_output_with_import_authority(source, system, attribute, None)
     }
 
-    evaluate_derivation_output_with_import_authority: fn(self, source: String, system: String, attribute: String, authority: &&NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
+    evaluate_derivation_output_with_import_authority: fn(self, source: String, system: String, attribute: String, authority: ^^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
         if nixeval_evaluate_derivation_output_with_import_authority(source, system, attribute, authority) == {
             .Ok(evaluation) -> return nix_materialize_evaluated(evaluation)
             .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))

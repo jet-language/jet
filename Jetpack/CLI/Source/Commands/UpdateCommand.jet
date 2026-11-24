@@ -16,7 +16,7 @@ UpdateConfirmation: struct {
 
     new: fn() -> UpdateConfirmation Never! { UpdateConfirmation{decision: None} }
 
-    confirm: fn(&self, theme: Theme, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
+    confirm: fn(^self, theme: Theme, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
         if self.decision == .Val(decided) -> return decided
         decided: theme.confirm_apply(assume_yes)
         self.decision = Val(decided)
@@ -77,13 +77,13 @@ cli_update_scopes: fn(parsed: CLIParsed) -> UpdateScopes Never! {
 }
 
 // The project root when it has an env file to update.
-cli_project_scope_root: fn(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
+cli_project_scope_root: fn(cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
     root: cli_project_root(cache, cli_current_dir())
     if files.is_file(EnvFile.path_in(root)) -> return Val(root)
     None
 }
 
-cli_cmd_update: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_update: fn(verification: ^StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     confirmation := UpdateConfirmation.new()
     scopes: cli_update_scopes(parsed)
@@ -124,7 +124,7 @@ cli_update_exit_code: fn(error: CLIError) -> Int Never! {
 
 // `jetpack update --deps` / `jetpack update <source>`: resolve project
 // channel refs and move only their lock entries; nothing is realized.
-cli_cmd_update_project: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_update_project: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, confirmation: ^UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     plan: if cli_plan_project_update(cache, theme, parsed) == {
         .Val(found) -> found
         .None -> {
@@ -141,7 +141,7 @@ cli_cmd_update_project: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pars
     cli_apply_project_update(theme, plan)
 }
 
-cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CLIError! {
+cli_plan_project_update: fn(cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CLIError! {
     if parsed.flags.offline && parsed.flags.local_nix_catalog == None {
         return Err(CLIError.Reported(cli_offline_refusal(theme, "update")))
     }

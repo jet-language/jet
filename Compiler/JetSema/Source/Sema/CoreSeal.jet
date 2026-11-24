@@ -149,7 +149,7 @@ sema_core_seal_failure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModu
 // sema_failure_fixpoint over callable rows: each candidate of `rows` starts
 // inferred in `inferred`; one with an edge to a row that is not, or is no
 // longer, falls, and its fall reaches every candidate with an edge to it.
-sema_core_seal_fixpoint: fn(inferred: &[Int:Bool], rows: [Int], edges: [[Int]]) Never! {
+sema_core_seal_fixpoint: fn(inferred: ^[Int:Bool], rows: [Int], edges: [[Int]]) Never! {
     slots := [Int:Int]{}
     dependents := [[Int]]{}
     fallen := [Int]{}
@@ -188,7 +188,7 @@ sema_core_seal_fixpoint: fn(inferred: &[Int:Bool], rows: [Int], edges: [[Int]]) 
 // is unclean when it, or a row it reaches, holds a member or mints a case,
 // and general when it is, or an edge leaves the rows or reaches a general
 // one.
-sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], seal: &SemaCoreSealFailure) Never! {
+sema_core_seal_unions: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], seal: ^SemaCoreSealFailure) Never! {
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     rows := [Int]{}
     edges := [[Int]]{}
@@ -289,7 +289,7 @@ SEMA_CORE_SEAL_TAB: U8{9}
 // library's code, and a line left with no flag is left out. The Core
 // library writes its seal so (JetCLI CoreLibrary.jet), and a program reads
 // it as written.
-sema_core_seal_bound: fn(lines: &&[String], sealed: [String]) -> [String] Never! {
+sema_core_seal_bound: fn(lines: ^^[String], sealed: [String]) -> [String] Never! {
     bound := [String]{}
     at := 0
     loop line in lines.move() {

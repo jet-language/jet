@@ -581,7 +581,7 @@ workspace_members: fn(setup: SuiteSetup) -> [String] Err! {
 // Adds every package directory at or below `relative` (from `checkout`) to
 // `found`, except the workspace root, the `members`, ASSEMBLED_PACKAGES,
 // build output, hidden directories and fixtures.
-package_dirs: fn(checkout: String, relative: String, members: [String], found: &[String]) Err! {
+package_dirs: fn(checkout: String, relative: String, members: [String], found: ^[String]) Err! {
     directory: files.join(checkout, relative)
     if relative != "Compiler" && !members.contains(relative) && !ASSEMBLED_PACKAGES.contains(relative) && files.is_file(files.join(directory, "package.jet")) {
         found.push(relative.copy())
@@ -675,7 +675,7 @@ test_sources: fn(setup: SuiteSetup) -> [TestSource] Err! {
 
 // Adds every .jet file at or below `relative` (from `checkout`) to `found`,
 // outside the directories test_data_dir skips and TEST_INPUT_TREES.
-jet_sources: fn(checkout: String, relative: String, found: &[String]) Err! {
+jet_sources: fn(checkout: String, relative: String, found: ^[String]) Err! {
     listed: files.list_dir(files.join(checkout, relative)) ?? return Err("couldn't list `{relative}`: {err}")
     loop entry in listed {
         path: "{relative}/{entry.name}"
@@ -1126,7 +1126,7 @@ fuzz_rows: fn(rows: TestRows) {
 
 // The programs of the corpus directory `dir` whose check or run rows are
 // selected, pushed to `programs`.
-fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String, programs: &[FuzzProgram]) {
+fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String, programs: ^[FuzzProgram]) {
     relative: "{FUZZ_CORPUS}/{dir}"
     directory: files.join(checkout, relative)
     listed: files.list_dir(directory) ?? {

@@ -61,7 +61,7 @@ PlanSandbox: struct {
 
     // Read one exact declared input and verify its locked digest before the
     // callback sees its bytes.
-    read_input: fn(&self, path: String) -[FS, Env]> [U8] StagedPlanActionError! {
+    read_input: fn(^self, path: String) -[FS, Env]> [U8] StagedPlanActionError! {
         declared_digest: self.declared_inputs.get(path) ?? return Err(StagedPlanActionError.UndeclaredAccess("input `{path}`"))
         source: if recipe_confined_source(self.source_dir, path, false) == {
             .Ok(resolved) -> resolved
@@ -101,7 +101,7 @@ PlanSandbox: struct {
 
     // Every declared input is read and digest-checked, even ones the
     // callback did not open.
-    verify_declared_inputs: fn(&self) -[FS, Env]> StagedPlanActionError! {
+    verify_declared_inputs: fn(^self) -[FS, Env]> StagedPlanActionError! {
         paths := self.declared_inputs.keys().to_list()
         paths.sort()
         loop path in paths -> self.read_input(path)

@@ -89,7 +89,7 @@ WorkspaceSourceError: struct {
 // than an absent workspace, so callers never fall through to an outer
 // authority or a stale lock. A missing directory is no workspace.
 // The caller shares `cache` with every other discovery scan in its session.
-pkg_resolve_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> WorkspaceSource? WorkspaceSourceError! {
+pkg_resolve_workspace_source: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env]> WorkspaceSource? WorkspaceSourceError! {
     resolver: AuthorityResolver.open(dir) ?? {
         if err.is_missing() -> return Ok(None)
         return Err(WorkspaceSourceError{diagnostic: err.workspace_diagnostic()})
@@ -145,7 +145,7 @@ WorkspaceDeclarationCache: struct {
 
     // Whether the directory `root` directly holds Jet source, listed once
     // per session. A failure is never remembered.
-    has_candidate: fn(&self, root: String) -[FS, Env]> Bool AuthorityError! {
+    has_candidate: fn(^self, root: String) -[FS, Env]> Bool AuthorityError! {
         if self.candidates.get(root) == .Val(held) -> return Ok(held)
         held: pkg_authority_has_candidate(root)
         self.listings += 1
@@ -159,7 +159,7 @@ WorkspaceDeclarationCache: struct {
         Val(PkgPackageRoots{manifest: found.manifest.copy(), inline: found.inline.copy()})
     }
 
-    keep_package_roots: fn(&self, key: String, roots: PkgPackageRoots) Never! {
+    keep_package_roots: fn(^self, key: String, roots: PkgPackageRoots) Never! {
         self.package_roots[key] = roots
     }
 }
@@ -167,7 +167,7 @@ WorkspaceDeclarationCache: struct {
 // Whether `resolver`'s root resolves a workspace source (only the verdict;
 // a caller that uses the source resolves it itself). A failure is never
 // remembered, so every walk that reaches it reports it.
-pkg_workspace_present: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> Bool AuthorityError! {
+pkg_workspace_present: fn(cache: ^WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> Bool AuthorityError! {
     if cache.presence.get(resolver.root) == .Val(present) -> return Ok(present)
     source: resolver.resolve_workspace_source(cache)
     present: if source == .Val(_) -> true else -> false
@@ -179,7 +179,7 @@ pkg_workspace_present: fn(cache: &WorkspaceDeclarationCache, resolver: Authority
 // spaces or comments between. Discovery reads every `.jet` file of every
 // directory it climbs through, and a file where no `workspace` is followed by
 // `:` or by a comment declares nothing, so it is never lexed.
-pkg_workspace_declaration_probe: fn(cache: &WorkspaceDeclarationCache, src: String) -> WorkspaceDeclarationProbe Never! {
+pkg_workspace_declaration_probe: fn(cache: ^WorkspaceDeclarationCache, src: String) -> WorkspaceDeclarationProbe Never! {
     if !pkg_workspace_head_possible(src) {
         return WorkspaceDeclarationProbe{declares_module: false, declares_members: false}
     }
@@ -248,14 +248,14 @@ pkg_workspace_tokens_name_members: fn(tokens: [Token], tables: TokenTables) -> B
 
 // Cheap token probe for a top-level `workspace: module` declaration. Full
 // parsing stays in the EnvModel workspace evaluator.
-pkg_declares_workspace_module: fn(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
+pkg_declares_workspace_module: fn(cache: ^WorkspaceDeclarationCache, src: String) -> Bool Never! {
     pkg_workspace_declaration_probe(cache, src).declares_module
 }
 
 // True when a workspace declaration also supplies a `members:` index field.
 // A top-level `.jet` file that lists members is an index, not
 // authority-only metadata.
-pkg_declares_workspace_members: fn(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
+pkg_declares_workspace_members: fn(cache: ^WorkspaceDeclarationCache, src: String) -> Bool Never! {
     pkg_workspace_declaration_probe(cache, src).declares_members
 }
 

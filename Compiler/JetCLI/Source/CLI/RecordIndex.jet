@@ -63,7 +63,7 @@ jet_cli_record_links_to: fn(entry: JetCLIRecordIndexEntry, target: JetCLIRecordI
 // Connected disposable groups cannot leave a protected record with a dangling
 // link. This is eviction_groups/apply_eviction, not a separate recency policy:
 // FIFO sequence, then artifact id, never timestamps.
-jet_cli_record_index_evict: fn(entries: &[JetCLIRecordIndexEntry], budget: U64) JetCLIReadError! {
+jet_cli_record_index_evict: fn(entries: ^[JetCLIRecordIndexEntry], budget: U64) JetCLIReadError! {
     loop {
         total := U64{0}
         loop entry in entries {
@@ -137,7 +137,7 @@ jet_cli_record_index_evict: fn(entries: &[JetCLIRecordIndexEntry], budget: U64) 
     }
 }
 
-jet_cli_record_index_update: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
+jet_cli_record_index_update: fn(index: ^JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
     row: jet_cli_record_entry_normalize(entry)
     loop existing in index.entries {
         if existing.kind != row.kind || existing.artifact_id != row.artifact_id -> next
@@ -160,7 +160,7 @@ jet_cli_record_index_update: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIn
     index.entries = candidate.move()
 }
 
-jet_cli_record_index_replace: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
+jet_cli_record_index_replace: fn(index: ^JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
     row: jet_cli_record_entry_normalize(entry)
     candidate := index.entries
     found := false
@@ -203,7 +203,7 @@ jet_cli_record_index_to_bytes: fn(index: JetCLIRecordIndex) -> [U8] JetCLIReadEr
     Ok(bytes)
 }
 
-jet_cli_record_index_save_replay: fn(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -> JetCLIRecordIndexEntry JetCLIReadError! {
+jet_cli_record_index_save_replay: fn(index: ^JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -> JetCLIRecordIndexEntry JetCLIReadError! {
     saved := jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err(jet_cli_read_error("replay `{artifact_id}` is not indexed"))
     if saved.identity != identity {
         return Err(jet_cli_read_error("replay `{artifact_id}` conflicts with the current target identity"))
@@ -278,7 +278,7 @@ jet_cli_record_index_store_held: fn(index: JetCLIRecordIndex, held: JetCLIRooted
     }
 }
 
-jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: &&JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry JetCLIReadError! {
+jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: ^^JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry JetCLIReadError! {
     updated := entry.move()
     maximum := U64{0}
     loop existing in index.entries {
@@ -293,7 +293,7 @@ jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: &&JetCL
     Ok(updated)
 }
 
-jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: &&JetCLIRecordIndexEntry, supersede: Bool{false}) -[FS, Env, Time]> JetCLIReadError! {
+jet_cli_record_index_publish_and_store: fn(index: ^JetCLIRecordIndex, project_root: String, entry: ^^JetCLIRecordIndexEntry, supersede: Bool{false}) -[FS, Env, Time]> JetCLIReadError! {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
@@ -313,7 +313,7 @@ jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_ro
     index = candidate.move()
 }
 
-jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entries: &&[JetCLIRecordIndexEntry]) -[FS, Env, Time]> JetCLIReadError! {
+jet_cli_record_index_upsert_many_and_store: fn(index: ^JetCLIRecordIndex, project_root: String, entries: ^^[JetCLIRecordIndexEntry]) -[FS, Env, Time]> JetCLIReadError! {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)

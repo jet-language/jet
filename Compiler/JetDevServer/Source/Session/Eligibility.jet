@@ -87,7 +87,7 @@ CaptureStartFact: struct {
 
     capture_kind: fn(self) -> CaptureKind? Never! { self.eligibility.kind() }
 
-    fault: fn(self, fault_code: &&String, location: &&CaptureLocation?) -> CaptureFaultFact Never! {
+    fault: fn(self, fault_code: ^^String, location: ^^CaptureLocation?) -> CaptureFaultFact Never! {
         CaptureFaultFact.new(self, fault_code, location)
     }
 }
@@ -99,7 +99,7 @@ CaptureFaultFact: struct {
     location: CaptureLocation?,
     eligibility: CaptureEligibility,
 
-    new: fn(start: CaptureStartFact, fault_code: &&String, location: &&CaptureLocation?) -> CaptureFaultFact Never! {
+    new: fn(start: CaptureStartFact, fault_code: ^^String, location: ^^CaptureLocation?) -> CaptureFaultFact Never! {
         CaptureFaultFact{identity: start.identity.copy(), mode: start.mode, fault_code: fault_code.move(), location: location.move(), eligibility: start.eligibility.copy()}
     }
 
@@ -112,6 +112,6 @@ CaptureFaultFact: struct {
 // owner and read receipt facts. No filesystem implementation or fake adapter.
 RecordIndexCaptureSink: trait {
     Error: type,
-    record_capture_start: fn(&self, fact: &&CaptureStartFact) Error!,
-    record_capture_fault: fn(&self, fact: &&CaptureFaultFact) Error!,
+    record_capture_start: fn(^self, fact: ^^CaptureStartFact) Error!,
+    record_capture_fault: fn(^self, fact: ^^CaptureFaultFact) Error!,
 }

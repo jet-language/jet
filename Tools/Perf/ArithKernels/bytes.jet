@@ -15,7 +15,7 @@ FRAMES: 1000000
 
 ROUNDS: 5
 
-push_le: fn(out: &[U8], value: Int, width: Int) {
+push_le: fn(out: ^[U8], value: Int, width: Int) {
     rest := value
     loop _ in 0..<width {
         out.push(U8{rest % 256})
@@ -41,7 +41,7 @@ payload: fn(frames: Int) -> [U8] {
     out
 }
 
-take_pattern_kernel: fn(data: &&[U8]) -> U64 {
+take_pattern_kernel: fn(data: ^^[U8]) -> U64 {
     reader: Reader.over(data)
     reader.take_pattern([U8]{"EDB1"}) ?? return U64{0}
     count: Int{reader.read_u32_le() ?? return U64{0}}

@@ -23,10 +23,10 @@ use {
 SEMA_PATCHABLE_BASE_METHODS: "__JetPatchableMethods"
 
 // The generated `T.Patch` items join the module after its declarations.
-sema_patchable_expand: fn(items: &[Item]) {
+sema_patchable_expand: fn(items: ^[Item]) {
     generated := [Item]{}
     loop index in 0..<items.len() {
-        if &items[index] == .Struct(definition) {
+        if ^items[index] == .Struct(definition) {
             if !sema_patchable_eligible(definition) -> next
             fields := [Field]{}
             loop field in definition.fields {
@@ -88,7 +88,7 @@ sema_patchable_field: fn(parsed: Field, field: Field) -> Field Never! {
 }
 
 // Generated methods report at the struct and share its visibility.
-sema_patchable_mark: fn(methods: &[Func], definition: StructDef) Never! {
+sema_patchable_mark: fn(methods: ^[Func], definition: StructDef) Never! {
     loop index in 0..<methods.len() {
         methods[index].span = definition.span
         methods[index].name_span = definition.name_span

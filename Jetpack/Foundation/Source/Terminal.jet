@@ -151,7 +151,7 @@ DiagnosticCollector: struct {
 
     // A repeat (same code and either the same root-cause key or the same
     // three texts) only raises the first card's count.
-    record: fn(&self, color: Bool, code: String, root_cause_key: String, what: String, why: String, fix: String) Never! {
+    record: fn(^self, color: Bool, code: String, root_cause_key: String, what: String, why: String, fix: String) Never! {
         loop index in 0..<self.groups.len() {
             group: self.groups[index]
             same_text: group.what == what && group.why == why && group.fix == fix
@@ -184,7 +184,7 @@ DiagnosticInvocation: struct {
     collector: Shared<DiagnosticCollector>,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             collector: self.collector
             permit: collector.guard_read()
             rendered: permit.value.render()
@@ -809,7 +809,7 @@ Spinner: struct {
     priv running: Task<()>?,
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             if self.stop == .Val(flag) {
                 permit: flag.guard_edit()
                 permit.value.stop = true

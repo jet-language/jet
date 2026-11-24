@@ -391,7 +391,7 @@ jet_cli_fix_name: fn(stem: String) -> String Never! {
 
 // `others`: the other files the fix changes, committed with `file` in the
 // one transaction.
-jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?, skipped: [JetCLIFixSkip], others: &&[JetCLISourceChange]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
+jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?, skipped: [JetCLIFixSkip], others: ^^[JetCLISourceChange]) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
     path: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
     parent: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
     cache := WorkspaceDeclarationCache.new()

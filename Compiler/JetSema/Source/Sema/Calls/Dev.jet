@@ -10,7 +10,7 @@ sema_dev_context_method_known: fn(method: String) -> Bool Never! {
     method == "watch" || method == "serve" || method == "reload"
 }
 
-sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_dev_context_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Dev"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }

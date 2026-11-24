@@ -18,7 +18,7 @@ wasm_section_rank: fn(id: Int) -> Int Never! {
     return -1
 }
 
-wasm_decode_module: fn(bytes: &&[U8]) -> WasmModule WasmError! {
+wasm_decode_module: fn(bytes: ^^[U8]) -> WasmModule WasmError! {
     end: bytes.len()
     reader := WasmReader.new(bytes)
     magic: reader.fixed(4) ?? return Err(WasmError.new("unexpected end: not a WebAssembly binary", 0))
@@ -37,7 +37,7 @@ wasm_decode_module: fn(bytes: &&[U8]) -> WasmModule WasmError! {
 
 // The sections of one core module whose header ends at `start`, up to `end`
 // (a whole file, or a module nested in a component).
-wasm_decode_module_body: fn(bytes: &&[U8], start: Int, end: Int) -> WasmModule WasmError! {
+wasm_decode_module_body: fn(bytes: ^^[U8], start: Int, end: Int) -> WasmModule WasmError! {
     reader := WasmReader{bytes: bytes, at: start, end: end}
     ops: WasmOpTable.new()
     wm := WasmModule.empty()
@@ -89,7 +89,7 @@ wasm_decode_module_body: fn(bytes: &&[U8], start: Int, end: Int) -> WasmModule W
     Ok(wm)
 }
 
-wasm_count: fn(section: &WasmReader, limit: Int, what: String) -> Int WasmError! {
+wasm_count: fn(section: ^WasmReader, limit: Int, what: String) -> Int WasmError! {
     at: section.at
     count: section.u32()
     // Every entry takes at least one byte, so a count beyond the bytes left is malformed.
@@ -99,7 +99,7 @@ wasm_count: fn(section: &WasmReader, limit: Int, what: String) -> Int WasmError!
     Ok(count)
 }
 
-wasm_read_valtype: fn(section: &WasmReader) -> Int WasmError! {
+wasm_read_valtype: fn(section: ^WasmReader) -> Int WasmError! {
     at: section.at
     code: section.byte()
     if code == WASM_V128 {
@@ -111,7 +111,7 @@ wasm_read_valtype: fn(section: &WasmReader) -> Int WasmError! {
     Ok(code)
 }
 
-wasm_read_reftype: fn(section: &WasmReader) -> Int WasmError! {
+wasm_read_reftype: fn(section: ^WasmReader) -> Int WasmError! {
     at: section.at
     code: section.byte()
     if !wasm_is_ref(code) {
@@ -120,7 +120,7 @@ wasm_read_reftype: fn(section: &WasmReader) -> Int WasmError! {
     Ok(code)
 }
 
-wasm_read_limits: fn(section: &WasmReader, ceiling: Int) -> WasmLimits WasmError! {
+wasm_read_limits: fn(section: ^WasmReader, ceiling: Int) -> WasmLimits WasmError! {
     at: section.at
     flags: section.byte()
     if flags == 0x02 || flags == 0x03 {
@@ -137,13 +137,13 @@ wasm_read_limits: fn(section: &WasmReader, ceiling: Int) -> WasmLimits WasmError
     Ok(WasmLimits{min: min, max: Val(top)})
 }
 
-wasm_read_table_type: fn(section: &WasmReader) -> WasmTableType WasmError! {
+wasm_read_table_type: fn(section: ^WasmReader) -> WasmTableType WasmError! {
     elem: wasm_read_reftype(section)
     limits: wasm_read_limits(section, TWO_32 - 1)
     Ok(WasmTableType{elem: elem, limits: limits})
 }
 
-wasm_read_global_type: fn(section: &WasmReader) -> WasmGlobalType WasmError! {
+wasm_read_global_type: fn(section: ^WasmReader) -> WasmGlobalType WasmError! {
     value: wasm_read_valtype(section)
     at: section.at
     flag: section.byte()
@@ -151,7 +151,7 @@ wasm_read_global_type: fn(section: &WasmReader) -> WasmGlobalType WasmError! {
     Ok(WasmGlobalType{value: value, mutable: flag == 1})
 }
 
-wasm_read_valtypes: fn(section: &WasmReader, what: String) -> [Int] WasmError! {
+wasm_read_valtypes: fn(section: ^WasmReader, what: String) -> [Int] WasmError! {
     count: wasm_count(section, 1000, what)
     out := [Int]{}
     loop _ in 0..<count {
@@ -161,7 +161,7 @@ wasm_read_valtypes: fn(section: &WasmReader, what: String) -> [Int] WasmError! {
     Ok(out)
 }
 
-wasm_decode_types: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_types: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, WASM_MAX_FUNCTIONS, "types")
     loop _ in 0..<count {
         at: section.at
@@ -175,7 +175,7 @@ wasm_decode_types: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_imports: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_imports: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, WASM_MAX_FUNCTIONS, "imports")
     loop _ in 0..<count {
         module_name: section.name()
@@ -202,7 +202,7 @@ wasm_decode_imports: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_functions: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_functions: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, WASM_MAX_FUNCTIONS, "functions")
     loop _ in 0..<count {
         index: section.u32()
@@ -210,7 +210,7 @@ wasm_decode_functions: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_tables: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_tables: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, 100000, "tables")
     loop _ in 0..<count {
         table: wasm_read_table_type(section)
@@ -218,7 +218,7 @@ wasm_decode_tables: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_memories: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_memories: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, 100000, "memories")
     loop _ in 0..<count {
         limits: wasm_read_limits(section, WASM_MAX_PAGES)
@@ -226,7 +226,7 @@ wasm_decode_memories: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_globals: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_globals: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, 1000000, "globals")
     loop _ in 0..<count {
         ty: wasm_read_global_type(section)
@@ -235,7 +235,7 @@ wasm_decode_globals: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_exports: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_exports: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, WASM_MAX_FUNCTIONS, "exports")
     loop _ in 0..<count {
         name: section.name()
@@ -250,7 +250,7 @@ wasm_decode_exports: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
 }
 
 // A constant expression: one instruction followed by `end`.
-wasm_read_const_expr: fn(section: &WasmReader) -> WasmConstExpr WasmError! {
+wasm_read_const_expr: fn(section: ^WasmReader) -> WasmConstExpr WasmError! {
     at: section.at
     op: section.byte()
     value := 0
@@ -274,7 +274,7 @@ wasm_read_const_expr: fn(section: &WasmReader) -> WasmConstExpr WasmError! {
 
 wasm_zero_offset: fn() -> WasmConstExpr Never! { WasmConstExpr{op: WASM_OP_I32_CONST, value: 0} }
 
-wasm_decode_elems: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_elems: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, WASM_MAX_TABLE, "element segments")
     loop _ in 0..<count {
         at: section.at
@@ -318,7 +318,7 @@ wasm_decode_elems: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_datas: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_datas: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     count: wasm_count(section, 100000, "data segments")
     loop _ in 0..<count {
         at: section.at
@@ -335,7 +335,7 @@ wasm_decode_datas: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
     }
 }
 
-wasm_decode_custom: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
+wasm_decode_custom: fn(wm: ^WasmModule, section: ^WasmReader) WasmError! {
     name: section.name()
     if name == "name" -> wasm_decode_names(wm, section)
     // Custom section contents are not semantics; skip the remainder.
@@ -344,7 +344,7 @@ wasm_decode_custom: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
 
 // The name section's module and function names. A malformed name section is
 // ignored, as the specification requires of custom sections.
-wasm_decode_names: fn(wm: &WasmModule, section: &WasmReader) Never! {
+wasm_decode_names: fn(wm: ^WasmModule, section: ^WasmReader) Never! {
     loop !section.done() {
         id: section.byte() ?? return
         size: section.u32() ?? return
@@ -367,7 +367,7 @@ wasm_decode_names: fn(wm: &WasmModule, section: &WasmReader) Never! {
     }
 }
 
-wasm_decode_codes: fn(wm: &WasmModule, section: &WasmReader, ops: WasmOpTable) WasmError! {
+wasm_decode_codes: fn(wm: ^WasmModule, section: ^WasmReader, ops: WasmOpTable) WasmError! {
     at: section.at
     count: wasm_count(section, WASM_MAX_FUNCTIONS, "function bodies")
     if count != wm.funcs.len() {
@@ -387,7 +387,7 @@ wasm_decode_codes: fn(wm: &WasmModule, section: &WasmReader, ops: WasmOpTable) W
     }
 }
 
-wasm_decode_body: fn(body: &WasmReader, ops: WasmOpTable, has_data_count: Bool) -> WasmCode WasmError! {
+wasm_decode_body: fn(body: ^WasmReader, ops: WasmOpTable, has_data_count: Bool) -> WasmCode WasmError! {
     groups: wasm_count(body, WASM_MAX_LOCALS, "local declarations")
     locals := [Int]{}
     loop _ in 0..<groups {
@@ -473,7 +473,7 @@ wasm_decode_body: fn(body: &WasmReader, ops: WasmOpTable, has_data_count: Bool) 
     Ok(code)
 }
 
-wasm_read_zero_memory: fn(body: &WasmReader) WasmError! {
+wasm_read_zero_memory: fn(body: ^WasmReader) WasmError! {
     at: body.at
     index: body.byte()
     if index != 0 {
@@ -481,7 +481,7 @@ wasm_read_zero_memory: fn(body: &WasmReader) WasmError! {
     }
 }
 
-wasm_read_block_type: fn(body: &WasmReader) -> Int WasmError! {
+wasm_read_block_type: fn(body: ^WasmReader) -> Int WasmError! {
     at: body.at
     value: body.signed(33)
     if value >= 0 -> return Ok(value)

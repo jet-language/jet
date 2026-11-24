@@ -33,7 +33,7 @@ BuildStep: enum {
     }
 
     // Frame the step's tag and fields into a recipe identity.
-    write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
+    write_canonical: fn(self, writer: ^RecipeCanonicalWriter) Never! {
         if self == {
             .Fetch(url, sha256) -> {
                 writer.push_text("fetch")
@@ -132,7 +132,7 @@ RecipeCanonicalWriter: struct {
     }
 
     // A count or index as eight big-endian bytes.
-    push_count: fn(&self, value: Int) Never! {
+    push_count: fn(^self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
             byte: ((value >> shift)) & 255
@@ -142,14 +142,14 @@ RecipeCanonicalWriter: struct {
     }
 
     // A UTF-8 string framed by its byte length.
-    push_text: fn(&self, value: String) Never! {
+    push_text: fn(^self, value: String) Never! {
         raw: value.bytes()
         self.push_count(raw.len())
         loop byte in raw -> self.bytes.push(byte)
     }
 
     // A counted list of framed strings.
-    push_texts: fn(&self, values: [String]) Never! {
+    push_texts: fn(^self, values: [String]) Never! {
         self.push_count(values.len())
         loop value in values -> self.push_text(value)
     }

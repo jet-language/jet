@@ -13,7 +13,7 @@ BuildKeyWriter: struct {
 
     new: fn() -> BuildKeyWriter Never! { BuildKeyWriter{bytes: [U8]{}} }
 
-    number: fn(&self, value: Int) Never! {
+    number: fn(^self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
             self.bytes.push(U8{(value >> shift) & 255})
@@ -21,21 +21,21 @@ BuildKeyWriter: struct {
         }
     }
 
-    text: fn(&self, value: String) Never! {
+    text: fn(^self, value: String) Never! {
         raw: value.bytes()
         self.number(raw.len())
         loop byte in raw -> self.bytes.push(byte)
     }
 
-    flag: fn(&self, value: Bool) Never! { self.bytes.push(if value -> U8{1} else -> U8{0}) }
+    flag: fn(^self, value: Bool) Never! { self.bytes.push(if value -> U8{1} else -> U8{0}) }
 
-    texts: fn(&self, values: [String]) Never! {
+    texts: fn(^self, values: [String]) Never! {
         self.number(values.len())
         loop value in values -> self.text(value)
     }
 
     // Rust `BTreeMap<String, String>`: entries in key order.
-    map: fn(&self, values: [String:String]) Never! {
+    map: fn(^self, values: [String:String]) Never! {
         keys := values.keys().to_list()
         keys.sort()
         self.number(keys.len())
@@ -264,7 +264,7 @@ build_effect_set: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
     out
 }
 
-hermetic_build_key_toolchain: fn(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
+hermetic_build_key_toolchain: fn(w: ^BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
     w.text(toolchain.name)
     w.text(if toolchain.role == ToolchainRole.Host -> "host" else -> "target")
     w.text(toolchain.host_triple)
@@ -313,7 +313,7 @@ hermetic_build_key_toolchain: fn(w: &BuildKeyWriter, toolchain: HermeticBuildToo
     build_key_provenance(w, toolchain.provenance)
 }
 
-hermetic_build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
+hermetic_build_key_probe: fn(w: ^BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
     w.text(probe.name)
     if probe.kind == {
         .FindProgram(program) -> {
@@ -351,7 +351,7 @@ hermetic_build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe:
     hermetic_build_key_toolchain(w, plan.toolchains[probe.toolchain.id])
 }
 
-build_key_provenance: fn(w: &BuildKeyWriter, provenance: BuildProvenance) Never! {
+build_key_provenance: fn(w: ^BuildKeyWriter, provenance: BuildProvenance) Never! {
     if provenance.source == {
         .InferredHost -> { w.text("inferred-host") }
         .JetpackDependency(dep) -> {

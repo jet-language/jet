@@ -53,7 +53,7 @@ IR_DROP_EARLY_NS_PER_INSTRUCTION: 30
 // rows, which none writes, and owns its part; the parts come back in order,
 // so every body is the same for any thread count. A module whose bodies
 // already dropped early (IRModule.dropped_early) stays as it is.
-ir_drop_early: fn(m: &IRModule, threads: CompilerThreads) Never! {
+ir_drop_early: fn(m: ^IRModule, threads: CompilerThreads) Never! {
     if m.dropped_early {
         return
     }
@@ -315,7 +315,7 @@ ir_drop_target: fn(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, a
 
 // Rewrites `f` by `plan`: each moved Drop goes before its new instruction,
 // and every instruction the plan kills goes.
-ir_drop_apply: fn(f: &IRFunction, plan: IRDropPlan) Never! {
+ir_drop_apply: fn(f: ^IRFunction, plan: IRDropPlan) Never! {
     code := ir_drop_build_code(f, plan)
     f.op = code.op.move()
     f.dst = code.dst.move()
@@ -425,7 +425,7 @@ ir_drop_scratch_new: fn() -> IRDropScratch Never! {
 // Produces bit-for-bit identical move lists (`slots`, `to`, `lines`, `kill`)
 // to `ir_drop_plan`, and also accumulates `s.frame_bytes` during its
 // initial O(N) scan so O0 codegen needs no separate pre-pass for stack checks.
-ir_drop_plan_into: fn(s: &IRDropScratch, m: IRModule, fast: IRX64FastModule, f: IRFunction, poll: Int, trap: Int, turn: Int) Never! {
+ir_drop_plan_into: fn(s: ^IRDropScratch, m: IRModule, fast: IRX64FastModule, f: IRFunction, poll: Int, trap: Int, turn: Int) Never! {
     n: f.op.len()
     count: f.slot_type.len()
     s.has_moves = false

@@ -40,7 +40,7 @@ pkg_build_entry_source: fn(text: String) -> String? Never! {
     Val(source)
 }
 
-pkg_mask_manifest_blocks: fn(bytes: [U8], masked: &[U8]) Never! {
+pkg_mask_manifest_blocks: fn(bytes: [U8], masked: ^[U8]) Never! {
     i := 0
     brace_depth := 0
     bracket_depth := 0
@@ -241,7 +241,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
 }
 
 // Blank `[start, end)` with spaces, keeping CR and LF.
-pkg_blank_range: fn(masked: &[U8], start: Int, end: Int) Never! {
+pkg_blank_range: fn(masked: ^[U8], start: Int, end: Int) Never! {
     limit: if end < masked.len() -> end else -> masked.len()
     loop index in start..<limit {
         code: Int{masked[index]}

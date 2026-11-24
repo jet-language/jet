@@ -795,7 +795,7 @@ jfmt_control_at: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // Appends `\u{H}` for `code`: lowercase hexadecimal without leading zeros,
 // the one spelling formatted code gives a scalar escape.
-jfmt_push_scalar_escape: fn(out: &[U8], code: Int) Never! {
+jfmt_push_scalar_escape: fn(out: ^[U8], code: Int) Never! {
     loop byte in "\\u{{{code.to_radix(16)}}}".bytes() -> out.push(byte)
 }
 
@@ -878,7 +878,7 @@ jfmt_escape_str_lit: fn(text: String) -> String Never! {
 
 // ---- writer ----
 
-jfmt_write: fn(f: &JetFmt, text: String) Never! {
+jfmt_write: fn(f: ^JetFmt, text: String) Never! {
     if f.at_line_start && text.len() > 0 -> jfmt_write_indent(f)
     f.col += jfmt_char_count(text)
     f.at_line_start = false
@@ -895,13 +895,13 @@ jfmt_write_at: fn(f: JetFmt) -> Int Never! {
 // Marks the start of the expression statement about to be written
 // (stmt_head_at) and returns the enclosing mark, which the caller restores
 // once the statement is written.
-jfmt_expr_stmt_begin: fn(f: &JetFmt) -> Int Never! {
+jfmt_expr_stmt_begin: fn(f: ^JetFmt) -> Int Never! {
     saved: f.stmt_head_at
     f.stmt_head_at = jfmt_write_at(f)
     saved
 }
 
-jfmt_write_indent: fn(f: &JetFmt) Never! {
+jfmt_write_indent: fn(f: ^JetFmt) Never! {
     loop _ in 0..<f.indent {
         loop _ in 0..<JFMT_INDENT -> f.out.push(U8{32})
     }
@@ -909,13 +909,13 @@ jfmt_write_indent: fn(f: &JetFmt) Never! {
     f.at_line_start = false
 }
 
-jfmt_newline: fn(f: &JetFmt) Never! {
+jfmt_newline: fn(f: ^JetFmt) Never! {
     f.out.push(U8{10})
     f.col = 0
     f.at_line_start = true
 }
 
-jfmt_end_block: fn(f: &JetFmt) Never! {
+jfmt_end_block: fn(f: ^JetFmt) Never! {
     jfmt_newline(f)
     jfmt_write(f, "}}")
 }
@@ -924,11 +924,11 @@ jfmt_mark: fn(f: JetFmt) -> JetFmtMark Never! {
     JetFmtMark{out_len: f.out.len(), col: f.col, at_line_start: f.at_line_start, pending_blank: f.pending_blank, comment_i: f.comment_i}
 }
 
-jfmt_truncate: fn(f: &JetFmt, length: Int) Never! {
+jfmt_truncate: fn(f: ^JetFmt, length: Int) Never! {
     loop f.out.len() > length -> _ := f.out.pop()
 }
 
-jfmt_rollback: fn(f: &JetFmt, mark: JetFmtMark) Never! {
+jfmt_rollback: fn(f: ^JetFmt, mark: JetFmtMark) Never! {
     jfmt_truncate(f, mark.out_len)
     f.col = mark.col
     f.at_line_start = mark.at_line_start
@@ -951,23 +951,23 @@ jfmt_out_text: fn(f: JetFmt) -> String Never! { String.from_bytes(f.out) ?? "" }
 
 // ---- comments and separators ----
 
-jfmt_write_loop_continuation_indent: fn(f: &JetFmt) Never! {
+jfmt_write_loop_continuation_indent: fn(f: ^JetFmt) Never! {
     f.indent += 1
     jfmt_write_indent(f)
     f.indent -= 1
 }
 
-jfmt_loop_clause_separator: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
+jfmt_loop_clause_separator: fn(f: ^JetFmt, next_start: Int, wrap: Bool) Never! {
     jfmt_write(f, ",")
     jfmt_loop_separator_tail(f, next_start, wrap)
 }
 
-jfmt_loop_source_separator: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
+jfmt_loop_source_separator: fn(f: ^JetFmt, next_start: Int, wrap: Bool) Never! {
     jfmt_write(f, " in")
     jfmt_loop_separator_tail(f, next_start, wrap)
 }
 
-jfmt_loop_separator_tail: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
+jfmt_loop_separator_tail: fn(f: ^JetFmt, next_start: Int, wrap: Bool) Never! {
     broke := false
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < next_start {
         text: f.comments[f.comment_i].text.copy()
@@ -988,14 +988,14 @@ jfmt_loop_separator_tail: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
 
 // The bindingless loop subject has no comma before it; only the line break
 // survives from `loop_clause_separator`.
-jfmt_maybe_wrap_loop_clause: fn(f: &JetFmt, wrap: Bool) Never! {
+jfmt_maybe_wrap_loop_clause: fn(f: ^JetFmt, wrap: Bool) Never! {
     if wrap {
         jfmt_newline(f)
         jfmt_write_loop_continuation_indent(f)
     }
 }
 
-jfmt_blank_line_between_items: fn(f: &JetFmt) Never! {
+jfmt_blank_line_between_items: fn(f: ^JetFmt) Never! {
     if !f.pending_blank {
         jfmt_newline(f)
         f.pending_blank = true
@@ -1003,7 +1003,7 @@ jfmt_blank_line_between_items: fn(f: &JetFmt) Never! {
 }
 
 // Top-level definitions are separated by exactly one blank line.
-jfmt_blank_separator_before_item: fn(f: &JetFmt) Never! {
+jfmt_blank_separator_before_item: fn(f: ^JetFmt) Never! {
     if f.out.len() == 0 {
         return
     }
@@ -1012,7 +1012,7 @@ jfmt_blank_separator_before_item: fn(f: &JetFmt) Never! {
     f.pending_blank = true
 }
 
-jfmt_emit_remaining_comments: fn(f: &JetFmt) Never! {
+jfmt_emit_remaining_comments: fn(f: ^JetFmt) Never! {
     loop f.comment_i < f.comments.len() {
         text: f.comments[f.comment_i].text.copy()
         jfmt_emit_comment_line(f, text)
@@ -1020,9 +1020,9 @@ jfmt_emit_remaining_comments: fn(f: &JetFmt) Never! {
     }
 }
 
-jfmt_emit_leading: fn(f: &JetFmt, pos: Int) Never! {
+jfmt_emit_leading: fn(f: ^JetFmt, pos: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        // copy: the pending comment (owner: f.comments) is emitted through `&f`; a view into
+        // copy: the pending comment (owner: f.comments) is emitted through `^f`; a view into
         // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
         // refcounted text.
         comment: f.comments[f.comment_i].copy()
@@ -1046,9 +1046,9 @@ jfmt_emit_leading: fn(f: &JetFmt, pos: Int) Never! {
 // A declaration's leading comments. A blank line written between a standalone
 // comment and what follows it stays, so a banner comment above a declaration
 // never becomes that declaration's doc comment.
-jfmt_emit_leading_declaration: fn(f: &JetFmt, pos: Int) Never! {
+jfmt_emit_leading_declaration: fn(f: ^JetFmt, pos: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        // copy: the pending comment (owner: f.comments) is emitted through `&f`, as in jfmt_emit_leading.
+        // copy: the pending comment (owner: f.comments) is emitted through `^f`, as in jfmt_emit_leading.
         comment: f.comments[f.comment_i].copy()
         if comment.span.start >= pos -> break
         if jfmt_is_trailing_comment_at(f, comment.span) -> break
@@ -1067,7 +1067,7 @@ jfmt_emit_leading_declaration: fn(f: &JetFmt, pos: Int) Never! {
 // comment inside an earlier item, or between two items before an import,
 // leaves the queue while the imports print (jfmt_return_item_comments puts it
 // back for that item).
-jfmt_hold_item_comments: fn(f: &JetFmt, items: [Item], imports: [ImportDecl]) -> [JetFmtComment] Never! {
+jfmt_hold_item_comments: fn(f: ^JetFmt, items: [Item], imports: [ImportDecl]) -> [JetFmtComment] Never! {
     limit := 0
     loop import in imports {
         if import.span.end > limit -> limit = import.span.end
@@ -1106,7 +1106,7 @@ jfmt_comment_belongs_to_item: fn(f: JetFmt, span: Span, items: [Item], imports: 
 
 // The held item comments rejoin the queue ahead of every comment the imports
 // left: they sit before the last import in source.
-jfmt_return_item_comments: fn(f: &JetFmt, held: [JetFmtComment]) Never! {
+jfmt_return_item_comments: fn(f: ^JetFmt, held: [JetFmtComment]) Never! {
     if held.len() == 0 {
         return
     }
@@ -1117,9 +1117,9 @@ jfmt_return_item_comments: fn(f: &JetFmt, held: [JetFmtComment]) Never! {
     loop comment in rest -> f.comments.push(comment.copy())
 }
 
-jfmt_emit_trailing: fn(f: &JetFmt, end: Int) Never! {
+jfmt_emit_trailing: fn(f: ^JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        // copy: the pending comment (owner: f.comments) is written through `&f`; a view into
+        // copy: the pending comment (owner: f.comments) is written through `^f`; a view into
         // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
         // refcounted text.
         comment: f.comments[f.comment_i].copy()
@@ -1134,7 +1134,7 @@ jfmt_emit_trailing: fn(f: &JetFmt, end: Int) Never! {
 
 // Verbatim items copy their source slice; skip the comments inside it so the
 // next `emit_leading` does not print them twice.
-jfmt_skip_verbatim_comments: fn(f: &JetFmt, end: Int) Never! {
+jfmt_skip_verbatim_comments: fn(f: ^JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < end {
         f.comment_i += 1
     }
@@ -1155,7 +1155,7 @@ jfmt_is_trailing_comment_at: fn(f: JetFmt, span: Span) -> Bool Never! {
     jfmt_line_of(f, span.start) == jfmt_line_of(f, bounded) && !f.at_line_start
 }
 
-jfmt_emit_comment_line: fn(f: &JetFmt, text: String) Never! {
+jfmt_emit_comment_line: fn(f: ^JetFmt, text: String) Never! {
     if f.out.len() > 0 && !f.at_line_start -> jfmt_newline(f)
     jfmt_write_indent(f)
     jfmt_write(f, text)
@@ -1163,7 +1163,7 @@ jfmt_emit_comment_line: fn(f: &JetFmt, text: String) Never! {
     f.pending_blank = false
 }
 
-jfmt_emit_comment_inline: fn(f: &JetFmt, text: String) Never! {
+jfmt_emit_comment_inline: fn(f: ^JetFmt, text: String) Never! {
     jfmt_write(f, text)
     f.pending_blank = false
 }
@@ -1278,7 +1278,7 @@ jfmt_table_else_arm: fn(f: JetFmt, start: Int) -> JetFmtTableArms Never! {
 
 // The next source arm: its tokens up to the line break, `,` or closing
 // token that ends it. Moves `arms` past it.
-jfmt_table_arm_source: fn(f: JetFmt, arms: &JetFmtTableArms) -> Span? Never! {
+jfmt_table_arm_source: fn(f: JetFmt, arms: ^JetFmtTableArms) -> Span? Never! {
     if arms.close < 0 -> return None
     start := -1
     end := -1
@@ -1313,7 +1313,7 @@ jfmt_table_arm_source: fn(f: JetFmt, arms: &JetFmtTableArms) -> Span? Never! {
 // it, with a blank line written between an earlier arm and a comment kept.
 // Returns where the arm ends in the source, for its trailing comment
 // (jfmt_table_arm_end), or -1 when the source has no arm left.
-jfmt_table_arm_lead: fn(f: &JetFmt, arms: &JetFmtTableArms) -> Int {
+jfmt_table_arm_lead: fn(f: ^JetFmt, arms: ^JetFmtTableArms) -> Int {
     span: jfmt_table_arm_source(f, arms) ?? return -1
     if arms.previous_end >= 0 -> jfmt_emit_leading_statement_gap(f, arms.previous_end, span.start) else {
         jfmt_emit_leading(f, span.start)
@@ -1323,13 +1323,13 @@ jfmt_table_arm_lead: fn(f: &JetFmt, arms: &JetFmtTableArms) -> Int {
 }
 
 // After an arm: the comment written on its last line.
-jfmt_table_arm_end: fn(f: &JetFmt, end: Int) {
+jfmt_table_arm_end: fn(f: ^JetFmt, end: Int) {
     if end >= 0 -> jfmt_emit_trailing(f, end)
 }
 
 // Before a table's closing `}`: the comments on their own lines after its
 // last arm.
-jfmt_table_arms_close: fn(f: &JetFmt, arms: JetFmtTableArms) {
+jfmt_table_arms_close: fn(f: ^JetFmt, arms: JetFmtTableArms) {
     if arms.close >= 0 && arms.close < f.source_toks.len() {
         jfmt_emit_leading(f, f.source_toks[arms.close].span.start)
     }
@@ -1454,7 +1454,7 @@ jfmt_source_span_multiline: fn(f: JetFmt, span: Span) -> Bool Never! {
 // Rust `fmt_comma_items`, split at its closure boundaries: begin, then per
 // item before/render/after, then end. A multiline list puts each item on its
 // own line one level in, and its closer back at the list's own indent.
-jfmt_comma_begin: fn(f: &JetFmt, count: Int, source: JetFmtSourceList?) -> Bool Never! {
+jfmt_comma_begin: fn(f: ^JetFmt, count: Int, source: JetFmtSourceList?) -> Bool Never! {
     multiline := false
     if source == .Val(list) -> multiline = jfmt_source_span_multiline(f, list.span)
     if !multiline -> return false
@@ -1463,21 +1463,21 @@ jfmt_comma_begin: fn(f: &JetFmt, count: Int, source: JetFmtSourceList?) -> Bool 
     true
 }
 
-jfmt_comma_before: fn(f: &JetFmt, index: Int, multiline: Bool, item_start: Int) Never! {
+jfmt_comma_before: fn(f: ^JetFmt, index: Int, multiline: Bool, item_start: Int) Never! {
     if index > 0 {
         if multiline -> jfmt_newline(f) else -> jfmt_write(f, ", ")
     }
     if multiline -> jfmt_emit_leading(f, item_start)
 }
 
-jfmt_comma_after: fn(f: &JetFmt, multiline: Bool, item_end: Int) Never! {
+jfmt_comma_after: fn(f: ^JetFmt, multiline: Bool, item_end: Int) Never! {
     if multiline {
         jfmt_write(f, ",")
         jfmt_emit_trailing(f, item_end)
     }
 }
 
-jfmt_comma_end: fn(f: &JetFmt, multiline: Bool, source: JetFmtSourceList?) Never! {
+jfmt_comma_end: fn(f: ^JetFmt, multiline: Bool, source: JetFmtSourceList?) Never! {
     if !multiline {
         return
     }
@@ -1548,7 +1548,7 @@ jfmt_list_item_spans: fn(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never!
 
 // ---- brace bodies ----
 
-jfmt_fmt_body: fn(f: &JetFmt, body: [Stmt]) { jfmt_fmt_control_body(f, body) }
+jfmt_fmt_body: fn(f: ^JetFmt, body: [Stmt]) { jfmt_fmt_control_body(f, body) }
 
 // The parser reads the last line of a callable body with a value as the
 // body's value when it is an `if` in a value form
@@ -1556,14 +1556,14 @@ jfmt_fmt_body: fn(f: &JetFmt, body: [Stmt]) { jfmt_fmt_control_body(f, body) }
 // braces (jfmt_fmt_classic_switch). `body` is that body, or no lines for a
 // body without a value. Returns the enclosing body's mark, which the caller
 // restores once the body is written.
-jfmt_value_tail_begin: fn(f: &JetFmt, body: [Stmt]) -> Int {
+jfmt_value_tail_begin: fn(f: ^JetFmt, body: [Stmt]) -> Int {
     saved: f.value_tail_at
     f.value_tail_at = if body.len() > 0 -> jfmt_stmt_start(body[body.len() - 1]) else -> -1
     saved
 }
 
 // The expanded brace-body shape; the caller has already emitted ` {`.
-jfmt_fmt_body_expanded: fn(f: &JetFmt, body: [Stmt]) {
+jfmt_fmt_body_expanded: fn(f: ^JetFmt, body: [Stmt]) {
     jfmt_newline(f)
     f.indent += 1
     jfmt_fmt_block_stmts(f, body)
@@ -1626,7 +1626,7 @@ jfmt_value_block_braces: fn(f: JetFmt, value: Expr) -> JetFmtBraces? Never! {
 
 // Attempt the inline branch `{ value }`; rolls back on overflow. The
 // caller has already emitted the opening `{`.
-jfmt_try_inline_value_block: fn(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool {
+jfmt_try_inline_value_block: fn(f: ^JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if !jfmt_value_block_inlineable(f, stmts, value) -> return false
     saved_out: f.out.len()
     saved_col: f.col
@@ -1643,7 +1643,7 @@ jfmt_try_inline_value_block: fn(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool 
     false
 }
 
-jfmt_fmt_control_body: fn(f: &JetFmt, body: [Stmt]) {
+jfmt_fmt_control_body: fn(f: ^JetFmt, body: [Stmt]) {
     if body.len() == 1 {
         statement: body[0]
         comment_free := true
@@ -1694,7 +1694,7 @@ jfmt_empty_block_before: fn(f: JetFmt, end: Int) -> JetFmtBraces? Never! {
 // the comments it holds one per line inside the braces, so no comment leaves
 // the block. One written over several lines without a comment keeps the
 // expanded form.
-jfmt_fmt_empty_block: fn(f: &JetFmt, braces: JetFmtBraces) {
+jfmt_fmt_empty_block: fn(f: ^JetFmt, braces: JetFmtBraces) {
     one_line: jfmt_written_on_one_line(f, Span{start: braces.open, end: braces.close})
     if one_line {
         jfmt_write(f, "}}")
@@ -1894,7 +1894,7 @@ jfmt_comment_between: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
 // the right operand (`n = (n + 1)` reads as `n += (1)`, the same program). A
 // layout tried and rolled back prints the same assignment again, so each is
 // recorded once.
-jfmt_note_compound_rewrite: fn(f: &JetFmt, op_start: Int, right_start: Int, grouping: Int, spelled: String) Never! {
+jfmt_note_compound_rewrite: fn(f: ^JetFmt, op_start: Int, right_start: Int, grouping: Int, spelled: String) Never! {
     loop edit in f.compound_rewrites {
         if edit.span.start == op_start {
             return
@@ -1920,7 +1920,7 @@ JfmtBodyRewrite: enum {
 
 // The `rewrite` edits of every callable body in `items`: free functions,
 // type and impl methods, and functions nested in code modules.
-jfmt_body_rewrites: fn(f: JetFmt, items: [Item], rewrite: JfmtBodyRewrite, edits: &[TextEdit]) -[]> {
+jfmt_body_rewrites: fn(f: JetFmt, items: [Item], rewrite: JfmtBodyRewrite, edits: ^[TextEdit]) -[]> {
     loop item in items {
         if item == {
             .Func(function) -> { jfmt_func_rewrites(f, function, rewrite, edits) }
@@ -1958,7 +1958,7 @@ jfmt_body_rewrites: fn(f: JetFmt, items: [Item], rewrite: JfmtBodyRewrite, edits
     }
 }
 
-jfmt_func_rewrites: fn(f: JetFmt, function: Func, rewrite: JfmtBodyRewrite, edits: &[TextEdit]) -[]> {
+jfmt_func_rewrites: fn(f: JetFmt, function: Func, rewrite: JfmtBodyRewrite, edits: ^[TextEdit]) -[]> {
     if rewrite == {
         .ValueTails -> { jfmt_value_tail_func_rewrites(f, function, edits) }
         .GuardClauses -> {
@@ -1975,7 +1975,7 @@ jfmt_func_rewrites: fn(f: JetFmt, function: Func, rewrite: JfmtBodyRewrite, edit
 // last-line table that ends in `return value` ends in the value. A block's
 // own last-line `return` stays as written, as do the branches of a classic
 // `if cond { … } else { … }`, which cannot end in a value.
-jfmt_value_tail_func_rewrites: fn(f: JetFmt, function: Func, edits: &[TextEdit]) -[]> {
+jfmt_value_tail_func_rewrites: fn(f: JetFmt, function: Func, edits: ^[TextEdit]) -[]> {
     if !parser_return_type_has_value(function.return_type) {
         return
     }
@@ -2183,7 +2183,7 @@ JfmtInlineSlot: struct {
 // that is the next line of one already inlined waits for the next pass, as
 // both would edit that line. A layout tried and rolled back prints the same
 // block again, so each binding is recorded once.
-jfmt_note_inline_temporaries: fn(f: &JetFmt, body: [Stmt]) -[]> Never! {
+jfmt_note_inline_temporaries: fn(f: ^JetFmt, body: [Stmt]) -[]> Never! {
     if body.len() < 2 {
         return
     }
@@ -2497,7 +2497,7 @@ jfmt_brace_closes: fn(tokens: [Token]) -> [Int] Never! {
 // (jfmt_one_line_trial_lost). Without that, each level of a deep
 // `else -> if { … }` chain rendered its whole tail twice, once per form:
 // exponential in the chain's depth.
-jfmt_one_line_trial_begin: fn(f: &JetFmt) -> JetFmtMark Never! {
+jfmt_one_line_trial_begin: fn(f: ^JetFmt) -> JetFmtMark Never! {
     mark: jfmt_mark(f)
     if f.one_line_trials == 0 -> f.one_line_trial_start = mark.out_len
     f.one_line_trials += 1
@@ -2506,7 +2506,7 @@ jfmt_one_line_trial_begin: fn(f: &JetFmt) -> JetFmtMark Never! {
 
 // Ends the trial begun at `mark`: true when its one-line form stays, false
 // when it was rolled back.
-jfmt_one_line_trial_end: fn(f: &JetFmt, mark: JetFmtMark) -> Bool Never! {
+jfmt_one_line_trial_end: fn(f: ^JetFmt, mark: JetFmtMark) -> Bool Never! {
     f.one_line_trials -= 1
     if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return true
     jfmt_rollback(f, mark)
@@ -2534,7 +2534,7 @@ jfmt_inline_rules: fn(applications: [AppliedRuleApplication]) -> [AppliedRuleApp
 // starting at `start`. A statement or declaration row targets the construct;
 // a parameter or trait-member row targets its own marker, which the
 // construct follows.
-jfmt_fmt_rules_before: fn(f: &JetFmt, site: RuleSite, start: Int) {
+jfmt_fmt_rules_before: fn(f: ^JetFmt, site: RuleSite, start: Int) {
     loop application in f.inline_rules {
         if !jfmt_rule_anchored(f, application, site, start) -> next
         jfmt_write(f, "#")
@@ -2567,7 +2567,7 @@ jfmt_rule_at: fn(application: AppliedRuleApplication, site: RuleSite) -> Bool Ne
 
 // The unregistered marker a value position held (the parser keeps a `()` in
 // its place); false when `span` is an ordinary `()`.
-jfmt_fmt_expression_rule: fn(f: &JetFmt, span: Span) -> Bool {
+jfmt_fmt_expression_rule: fn(f: ^JetFmt, span: Span) -> Bool {
     loop application in f.inline_rules {
         if application.target == .Val(target) {
             if target.start == span.start && target.end == span.end && jfmt_rule_at(application, RuleSite.Expression) {
@@ -2582,7 +2582,7 @@ jfmt_fmt_expression_rule: fn(f: &JetFmt, span: Span) -> Bool {
 
 // The `#!/…` launch line at byte 0 is no token (the lexer reads it there
 // only); it prints byte for byte, and a blank line written after it stays.
-jfmt_fmt_launch_line: fn(f: &JetFmt) Never! {
+jfmt_fmt_launch_line: fn(f: ^JetFmt) Never! {
     bytes: f.src_bytes
     if bytes.len() < 3 || bytes[0] != (U8{35}) || bytes[1] != (U8{33}) || bytes[2] != (U8{47}) {
         return
@@ -2601,7 +2601,7 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
     jfmt_format_program_with(f, prog)
 }
 
-jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
+jfmt_format_program_with: fn(f: ^JetFmt, prog: Program) -> String {
     jfmt_fmt_launch_line(f)
     first := true
     ordered_file_rules := [Marker]{}
@@ -2736,7 +2736,7 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
 
 // A marker after the last declaration attaches to nothing; the parser keeps it
 // as a File-site fact for sema to reject, and it stays where it was written.
-jfmt_fmt_trailing_file_markers: fn(f: &JetFmt, prog: Program, ordered_file_rules: [Marker], first: Bool) {
+jfmt_fmt_trailing_file_markers: fn(f: ^JetFmt, prog: Program, ordered_file_rules: [Marker], first: Bool) {
     written := !first
     loop application in prog.rule_facts {
         if application.target != None || !jfmt_rule_at(application, RuleSite.File) -> next
@@ -2942,7 +2942,7 @@ jfmt_diff_hunk_start: fn(start: Int, count: Int) -> Int Never! {
 // Marks the lines of one longest common subsequence of `a[a_start..<a_end]`
 // and `b[b_start..<b_end]`: the common ends, then each side of a middle
 // point on a shortest edit path.
-jfmt_diff_mark: fn(a: [Int], b: [Int], a_start: Int, a_end: Int, b_start: Int, b_end: Int, old_kept: &[Bool], new_kept: &[Bool]) Never! {
+jfmt_diff_mark: fn(a: [Int], b: [Int], a_start: Int, a_end: Int, b_start: Int, b_end: Int, old_kept: ^[Bool], new_kept: ^[Bool]) Never! {
     a0 := a_start
     b0 := b_start
     a1 := a_end

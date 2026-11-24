@@ -337,7 +337,7 @@ JetCLISolverSteps: struct {
     limit: Int,
 }
 
-jet_cli_solver_charge: fn(steps: &JetCLISolverSteps) -> Bool JetCLISolverUnknown! {
+jet_cli_solver_charge: fn(steps: ^JetCLISolverSteps) -> Bool JetCLISolverUnknown! {
     if steps.used >= steps.limit -> return Err(jet_cli_solver_unknown("step_limit"))
     steps.used += 1
     Ok(true)
@@ -345,7 +345,7 @@ jet_cli_solver_charge: fn(steps: &JetCLISolverSteps) -> Bool JetCLISolverUnknown
 
 // The branches of `node` (its disjunctive normal form): each branch is the
 // list of `affine <= 0` inequalities, in the node's order.
-jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: &JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
+jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: ^JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
     if node == {
         .Constant(value) -> Ok(if value -> [[JetCLISolverAffine]]{[JetCLISolverAffine]{}} else -> [[JetCLISolverAffine]]{})
         .Atom(atom) -> {
@@ -389,7 +389,7 @@ jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: &JetCLISolverSteps) -
 }
 
 // The branches the search refutes: `assumptions && !claim`.
-jet_cli_solver_formula_branches: fn(formula: JetCLISolverFormula, steps: &JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
+jet_cli_solver_formula_branches: fn(formula: JetCLISolverFormula, steps: ^JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
     negated: jet_cli_solver_negate(formula.claim)
     jet_cli_solver_branches(JetCLISolverBool.And([JetCLISolverBool]{formula.assumptions, negated}), steps)
 }
@@ -452,7 +452,7 @@ jet_cli_solver_variables: fn(ineqs: [JetCLISolverAffine]) -> [String] Never! {
 // row's multipliers. A row `0 < c <= 0` refutes the branch. Otherwise the
 // branch holds over the rationals, and back-substitution picks integers or
 // names the variable to split.
-jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps) -> JetCLISolverSearch JetCLISolverUnknown! {
+jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: ^JetCLISolverSteps) -> JetCLISolverSearch JetCLISolverUnknown! {
     count: ineqs.len()
     rows := [JetCLISolverDerived]{}
     loop (index, ineq) in ineqs {
@@ -599,7 +599,7 @@ jet_cli_solver_prove: fn(formula: JetCLISolverFormula) -> JetCLISolverOutcome Ne
 // branch or a split child; every task refuted proves the claim. A split at
 // `pivot` adds `x - pivot <= 0` on the left and `pivot + 1 - x <= 0` on the
 // right, each as the branch's next inequality.
-jet_cli_solver_search: fn(formula: JetCLISolverFormula, steps: &JetCLISolverSteps) -> JetCLISolverOutcome JetCLISolverUnknown! {
+jet_cli_solver_search: fn(formula: JetCLISolverFormula, steps: ^JetCLISolverSteps) -> JetCLISolverOutcome JetCLISolverUnknown! {
     branches: jet_cli_solver_formula_branches(formula, steps)
     proofs := [JetCLISolverProof]{}
     queue := [JetCLISolverTask]{}
@@ -678,7 +678,7 @@ jet_cli_solver_complete: fn(formula: JetCLISolverFormula, values: [JetCLISolverV
     out
 }
 
-jet_cli_solver_collect_affines: fn(node: JetCLISolverBool, out: &[JetCLISolverAffine]) Never! {
+jet_cli_solver_collect_affines: fn(node: JetCLISolverBool, out: ^[JetCLISolverAffine]) Never! {
     if node == {
         .Atom(atom) -> { out.push(atom.affine) }
         .And(children) -> {

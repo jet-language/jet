@@ -288,7 +288,7 @@ pkg_java_render_jet: fn(lib: String, surface: JavaSurface) -> String Never! {
     }
     out.push("}}\nuse abi: c.{abi}\n\nHandle: struct {{ value: Int }}\n#Error\nJavaError: enum {{ Exception }}\n\n")
     out.push("new: fn({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
-    out.push("close: fn(&&handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\n")
+    out.push("close: fn(^^handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    close: fn(^^self) {{ abi.close(self.value) }}\n}}\n\n")
     loop method in surface.methods {
         receiver: pkg_java_receiver(method, "handle: Handle")
         call_receiver: pkg_java_receiver(method, "handle.value")

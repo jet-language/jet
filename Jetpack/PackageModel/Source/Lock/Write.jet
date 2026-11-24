@@ -106,7 +106,7 @@ pkg_lock_write: fn(input: LockFile) -> String Never! {
     out.join("")
 }
 
-pkg_lock_write_package: fn(out: &[String], package: LockedPackage) Never! {
+pkg_lock_write_package: fn(out: ^[String], package: LockedPackage) Never! {
     out.push("\n[[package]]\n")
     out.push(pkg_lock_string_field("name", package.name))
     out.push(pkg_lock_string_field("version", package.version))
@@ -196,7 +196,7 @@ pkg_lock_source_value: fn(source: LockSource) -> String Never! {
     }
 }
 
-pkg_lock_write_nix_closure: fn(out: &[String], closure: NixClosureRecord) Never! {
+pkg_lock_write_nix_closure: fn(out: ^[String], closure: NixClosureRecord) Never! {
     out.push(pkg_lock_string_field("nix-channel", closure.channel))
     out.push(pkg_lock_string_field("nix-revision", closure.revision))
     out.push(pkg_lock_string_field("nix-system", closure.system))
@@ -215,7 +215,7 @@ pkg_lock_write_nix_closure: fn(out: &[String], closure: NixClosureRecord) Never!
 // (A4): the envelope field set shared by `[[package]]`,
 // `[[toolchain]]`, and `[[browser]]` blocks. `output-hash`, `platform`, and
 // `provenance` are always emitted; the other slots only when filled.
-pkg_lock_write_envelope: fn(out: &[String], envelope: LockEnvelope) Never! {
+pkg_lock_write_envelope: fn(out: ^[String], envelope: LockEnvelope) Never! {
     out.push(pkg_lock_string_field("output-hash", envelope.output_hash))
     out.push(pkg_lock_string_field("platform", envelope.platform))
     if envelope.signature != "" -> out.push(pkg_lock_string_field("signature", envelope.signature))
@@ -228,7 +228,7 @@ pkg_lock_write_envelope: fn(out: &[String], envelope: LockEnvelope) Never! {
     out.push(pkg_lock_string_field("provenance", envelope.provenance))
 }
 
-pkg_lock_write_workspace_overlay_policy: fn(out: &[String], policy: OverlayPolicy) Never! {
+pkg_lock_write_workspace_overlay_policy: fn(out: ^[String], policy: OverlayPolicy) Never! {
     if policy.allow_unfree.len() > 0 {
         out.push("workspace_policy_allow_unfree = {pkg_lock_string_array(policy.allow_unfree)}\n")
     }
@@ -373,7 +373,7 @@ pkg_lock_trust_decision: fn(decision: TrustDecision) -> String Never! {
 // Normalize the model before every serialization. Lock updates are read,
 // changed, and rewritten; a canonical boundary makes a replayed record
 // replace its prior identity.
-pkg_lock_canonicalize: fn(lock: &LockFile) Never! {
+pkg_lock_canonicalize: fn(lock: ^LockFile) Never! {
     lock.root_dependencies = pkg_overlay_sorted_unique(lock.root_dependencies)
     loop index in 0..<lock.packages.len() {
         package := lock.packages[index]

@@ -472,7 +472,7 @@ TerminalStyleSnapshot: struct {
         self.roles.get(role.as_str())
     }
 
-    paint: fn(self, role: TerminalStyleRole, text: &&String) -> String {
+    paint: fn(self, role: TerminalStyleRole, text: ^^String) -> String {
         value: self.roles.get(role.as_str()) ?? return text.move()
         if !self.facts.capabilities.color_enabled() -> return text.move()
         value.paint(text)
@@ -597,13 +597,13 @@ TerminalStyleReload: struct {
         TerminalStyleReload{current: None, pending: None, last_error: None, next_subscriber: 1, subscribers: [Int:[TerminalStyleReloadNotification]]{}}
     }
 
-    reload: fn(&self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
+    reload: fn(^self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
         self.apply(edit.bound_source())
     }
 
-    enqueue: fn(&self, edit: TerminalStyleEdit) { self.pending = Val(edit.bound_source()) }
+    enqueue: fn(^self, edit: TerminalStyleEdit) { self.pending = Val(edit.bound_source()) }
 
-    flush: fn(&self) -> TerminalStyleReloadReceipt? {
+    flush: fn(^self) -> TerminalStyleReloadReceipt? {
         edit: self.pending ?? return None
         self.pending = None
         Val(self.apply(edit))
@@ -614,7 +614,7 @@ TerminalStyleReload: struct {
         snapshot.revision
     }
 
-    subscribe: fn(&self) -> TerminalStyleSubscriberID TerminalStyleSubscribeError! {
+    subscribe: fn(^self) -> TerminalStyleSubscriberID TerminalStyleSubscribeError! {
         if self.subscribers.len() >= MAX_TERMINAL_STYLE_SUBSCRIBERS {
             return Err(TerminalStyleSubscribeError.LimitReached)
         }
@@ -624,7 +624,7 @@ TerminalStyleReload: struct {
         id
     }
 
-    unsubscribe: fn(&self, id: TerminalStyleSubscriberID) -> Bool {
+    unsubscribe: fn(^self, id: TerminalStyleSubscriberID) -> Bool {
         if self.subscribers.get(id.value) == None -> return false
         remaining := [Int:[TerminalStyleReloadNotification]]{}
         loop (key, mailbox) in self.subscribers {
@@ -634,19 +634,19 @@ TerminalStyleReload: struct {
         true
     }
 
-    drain_notifications: fn(&self, id: TerminalStyleSubscriberID) -> [TerminalStyleReloadNotification] {
+    drain_notifications: fn(^self, id: TerminalStyleSubscriberID) -> [TerminalStyleReloadNotification] {
         mailbox: self.subscribers.get(id.value) ?? return [TerminalStyleReloadNotification]{}
         self.subscribers[id.value] = [TerminalStyleReloadNotification]{}
         mailbox
     }
 
-    reset: fn(&self) {
+    reset: fn(^self) {
         self.current = None
         self.pending = None
         self.last_error = None
     }
 
-    notify: fn(&self, notification: TerminalStyleReloadNotification) {
+    notify: fn(^self, notification: TerminalStyleReloadNotification) {
         ids := self.subscribers.keys().to_list()
         loop id in ids {
             mailbox := self.subscribers[id]
@@ -659,7 +659,7 @@ TerminalStyleReload: struct {
         }
     }
 
-    reject: fn(&self, fact: TerminalStyleErrorFact, candidate_fingerprint: String?) -> TerminalStyleReloadReceipt {
+    reject: fn(^self, fact: TerminalStyleErrorFact, candidate_fingerprint: String?) -> TerminalStyleReloadReceipt {
         revision: self.revision()
         self.last_error = Val(fact)
         self.notify(TerminalStyleReloadNotification{revision: revision, change: .Invalid, prior_fingerprint: self.current_fingerprint(), candidate_fingerprint: candidate_fingerprint, error: Val(fact)})
@@ -672,7 +672,7 @@ TerminalStyleReload: struct {
     }
 
     // A failed candidate never replaces the last valid snapshot.
-    apply: fn(&self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
+    apply: fn(^self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
         revision: self.revision()
         attempted_fingerprint := String?{None}
         if edit.source.bytes().len() <= MAX_TERMINAL_STYLE_SOURCE_BYTES {
@@ -783,7 +783,7 @@ terminal_style_digest: fn(bytes: [U8]) -> String {
 }
 
 // `<byte length>:<value>;`, so adjacent fields cannot run together.
-terminal_style_frame: fn(output: &[U8], value: String) {
+terminal_style_frame: fn(output: ^[U8], value: String) {
     output.extend("{value.bytes().len()}:{value};".bytes())
 }
 
@@ -861,7 +861,7 @@ TerminalStyleHostAdapter: struct {
     }
 
     // A different source identity discards the previous style transaction.
-    inject: fn(&self, source: TerminalStyleHostSource) {
+    inject: fn(^self, source: TerminalStyleHostSource) {
         identity_changed := false
         if self.source == .Val(previous) {
             identity_changed = previous.source_id != source.source_id
@@ -870,7 +870,7 @@ TerminalStyleHostAdapter: struct {
         if identity_changed -> self.reload.reset()
     }
 
-    apply_json: fn(&self, body: String) -> TerminalStyleHostResponse {
+    apply_json: fn(^self, body: String) -> TerminalStyleHostResponse {
         source: self.source ?? return terminal_style_response(.Unavailable{reason: .SourceNotInjected}, None)
         edit: terminal_style_parse_request(body, source, self.reload.revision()) ?? return terminal_style_response(err, None)
         receipt: self.reload.reload(edit)

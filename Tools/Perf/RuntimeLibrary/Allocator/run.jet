@@ -258,7 +258,7 @@ hash: fn(path: String) -[FS]> String Err! { crypto.sha256(files.read_bytes(path)
 
 // One build step in the checkout: its output and errors go to OUT/NAME.log,
 // its ending to `steps`. True when it exited 0.
-step: fn(steps: &[Step], out: String, tree: String, name: String, argv: [String]) -[Exec, FS, IO, Time.Wait]> Bool Err! {
+step: fn(steps: ^[Step], out: String, tree: String, name: String, argv: [String]) -[Exec, FS, IO, Time.Wait]> Bool Err! {
     ended: spawn(process.cmd(argv).cwd(tree).output_limit(STEP_OUTPUT), argv[0])
     files.write(files.join(out, "{name}.log"), "{ended.output}{ended.errors}")
     steps.push(Step{name: name, rc: ended.rc.encode(), signal: ended.signal.encode(), error: ended.error})

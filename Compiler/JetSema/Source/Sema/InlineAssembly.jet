@@ -12,7 +12,7 @@ use jet_foundation.[
 ]
 
 // `source` is the bytes of the module's text, which holds the body at its span.
-sema_inline_assembly_contract: fn(function: Func, target: String, source: [U8], diagnostics: &[Diagnostic]) -> InlineAsmContract? {
+sema_inline_assembly_contract: fn(function: Func, target: String, source: [U8], diagnostics: ^[Diagnostic]) -> InlineAsmContract? {
     inline: function.inline_foreign ?? return None
     contract := InlineAsmContract?{None}
     if inline_assembly_contract(function, target) == {
@@ -32,7 +32,7 @@ sema_inline_assembly_contract: fn(function: Func, target: String, source: [U8], 
 // which the backend assembles; at the body string where that text is not at
 // hand.
 // Only x86-64 has the template assembler.
-sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, bytes: [U8], diagnostics: &[Diagnostic]) -> Bool {
+sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, bytes: [U8], diagnostics: ^[Diagnostic]) -> Bool {
     if target != "x86_64" && !target.starts_with("x86_64-") -> return true
     body := inline.source
     offset := -1

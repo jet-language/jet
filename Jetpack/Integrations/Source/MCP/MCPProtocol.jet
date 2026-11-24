@@ -434,7 +434,7 @@ MCPPeer: struct {
 
     // Negotiate once against the other peer's wire offers. A stateless
     // revision is ready at once; a session revision waits for initialize.
-    negotiate: fn(&self, peer_versions: [String]) -> MCPNegotiatedProtocol MCPNegotiationError! {
+    negotiate: fn(^self, peer_versions: [String]) -> MCPNegotiatedProtocol MCPNegotiationError! {
         if self.lifecycle != MCPLifecycleState.New {
             return Err(MCPNegotiationError.AlreadyNegotiated)
         }
@@ -445,7 +445,7 @@ MCPPeer: struct {
     }
 
     // Process the stable-session `initialize` and produce the typed result.
-    initialize: fn(&self, params: MCPInitializeParams, server_info: MCPImplementation, server_capabilities: MCPCapabilities) -> MCPInitializeResult MCPLifecycleError! {
+    initialize: fn(^self, params: MCPInitializeParams, server_info: MCPImplementation, server_capabilities: MCPCapabilities) -> MCPInitializeResult MCPLifecycleError! {
         protocol: self.negotiated ?? return Err(MCPLifecycleError.NotNegotiated)
         if protocol.lifecycle != MCPLifecycleProfile.Session {
             return Err(MCPLifecycleError.StatelessRevision)
@@ -470,7 +470,7 @@ MCPPeer: struct {
     }
 
     // The stable `initialized` notification.
-    initialized: fn(&self) MCPLifecycleError! {
+    initialized: fn(^self) MCPLifecycleError! {
         if self.negotiated == None -> return Err(MCPLifecycleError.NotNegotiated)
         if self.lifecycle != MCPLifecycleState.Initializing {
             return Err(MCPLifecycleError.InvalidState{operation: "initialized", lifecycle: self.lifecycle})
@@ -479,7 +479,7 @@ MCPPeer: struct {
     }
 
     // The stable `shutdown` request.
-    shutdown: fn(&self) MCPLifecycleError! {
+    shutdown: fn(^self) MCPLifecycleError! {
         if self.lifecycle_profile() == {
             .None -> return Err(MCPLifecycleError.NotNegotiated)
             .Val(profile) -> {
@@ -495,7 +495,7 @@ MCPPeer: struct {
     }
 
     // The stable `exit` notification, or closing a stateless peer.
-    exit: fn(&self) MCPLifecycleError! {
+    exit: fn(^self) MCPLifecycleError! {
         if self.lifecycle_profile() == {
             .None -> return Err(MCPLifecycleError.NotNegotiated)
             .Val(profile) -> {

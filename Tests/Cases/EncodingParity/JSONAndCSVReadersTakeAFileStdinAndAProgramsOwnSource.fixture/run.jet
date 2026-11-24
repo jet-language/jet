@@ -22,13 +22,13 @@ MySource: struct {
     at: Int,
 
     impl Reader {
-        read_bytes: fn(&self, limit: Int) -> [U8] IOError! {
+        read_bytes: fn(^self, limit: Int) -> [U8] IOError! {
             out := [U8]{}
             _: self.read_into(out, limit) ?? return Err(err)
             Ok(out)
         }
 
-        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+        read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError! {
             count := 0
             loop count < limit && count < 2 && self.at < self.data.len() {
                 buffer.push(self.data[self.at])
@@ -58,7 +58,7 @@ event_name: fn(event: encoding.DataEvent) -> String {
 }
 
 // Every event json.reader reads from `source`, on one line.
-json_line: fn<R: Reader>(label: String, source: &&R) -> String EncodingError! {
+json_line: fn<R: Reader>(label: String, source: ^^R) -> String EncodingError! {
     reader: json.reader(source) ?? return Err(err)
     names := [String]{}
     loop event in reader -> names.push(event_name(event))
@@ -67,7 +67,7 @@ json_line: fn<R: Reader>(label: String, source: &&R) -> String EncodingError! {
 
 // Every record csv.reader reads from `source`, on one line: each record's
 // line number and its fields, a line break inside a field shown as `/`.
-csv_line: fn<R: Reader>(label: String, source: &&R) -> String EncodingError! {
+csv_line: fn<R: Reader>(label: String, source: ^^R) -> String EncodingError! {
     records: csv.reader(source) ?? return Err(err)
     rows := [String]{}
     loop row in records {

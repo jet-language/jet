@@ -59,14 +59,14 @@ name_byte: fn(z: [U8], i: Int) -> Int Never! { if i < z.len() -> (Int{z[i]}) els
 
 // The connection-wide half of C's db->suppressErr++: the previous flags,
 // for unsuppress_err.
-suppress_err: fn(p: &cg.Parse, a: &ast.AST) -> {ast_flag: Bool, db_flag: Int} Never! {
+suppress_err: fn(p: ^cg.Parse, a: ^ast.AST) -> {ast_flag: Bool, db_flag: Int} Never! {
     saved: {ast_flag: a.suppress_err, db_flag: p.db.suppress_err}
     a.suppress_err = true
     p.db.suppress_err += 1
     saved
 }
 
-unsuppress_err: fn(p: &cg.Parse, a: &ast.AST, saved: {ast_flag: Bool, db_flag: Int}) Never! {
+unsuppress_err: fn(p: ^cg.Parse, a: ^ast.AST, saved: {ast_flag: Bool, db_flag: Int}) Never! {
     a.suppress_err = saved.ast_flag
     p.db.suppress_err = saved.db_flag
 }
@@ -91,7 +91,7 @@ DBFixer: struct {
 
     impl SQLWalker {
         // fixExprCb.
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if !self.b_temp -> ast.set_flags(a, e, ast.EP_FROM_DDL)
             if a.exprs[e].op == tk.TK_VARIABLE {
                 if self.busy -> a.exprs[e].op = tk.TK_NULL else {
@@ -102,10 +102,10 @@ DBFixer: struct {
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
         // fixSelectCb.
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! {
             list: a.selects[s].src
             if list < 0 -> return ast.WRC_CONTINUE
             loop i in 0..<a.srclists[list].items.len() {
@@ -139,11 +139,11 @@ DBFixer: struct {
         }
 
         // xSelectCallback2 is sqlite3WalkWinDefnDummyCallback.
-        walk_has_select_cb2: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { true }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { true }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { true }
     }
 }
 
@@ -160,14 +160,14 @@ fixer_find_db: fn(f: DBFixer, name: [U8]) -> Int Never! {
 
 // sqlite3FixInit: a fixer for database i_db; `name` is the object's name
 // and name_off where its token lies in the statement, -1 if it does not.
-fix_init: fn(p: &cg.Parse, i_db: Int, z_type: String, name: String, name_off: Int) -> DBFixer Never! {
+fix_init: fn(p: ^cg.Parse, i_db: Int, z_type: String, name: String, name_off: Int) -> DBFixer Never! {
     names := [[U8]]{}
     loop d in p.db.dbs -> names.push(d.name.copy())
     DBFixer{b_temp: i_db == 1, i_db: i_db, busy: p.db.init.busy, db_names: names, schema: p.db.dbs[i_db].schema, z_type: z_type, name: name, name_off: name_off}
 }
 
 // sqlite3FixSrcList: through a zeroed Select over the list, as C does.
-fix_src_list: fn(f: &DBFixer, a: &ast.AST, list: Int) -> Int Never! {
+fix_src_list: fn(f: ^DBFixer, a: ^ast.AST, list: Int) -> Int Never! {
     if list < 0 -> return 0
     s: ast.new_select(a)
     a.selects[s].src = list
@@ -177,10 +177,10 @@ fix_src_list: fn(f: &DBFixer, a: &ast.AST, list: Int) -> Int Never! {
 }
 
 // sqlite3FixSelect.
-fix_select: fn(f: &DBFixer, a: &ast.AST, s: Int) -> Int Never! { ast.walk_select<DBFixer>(f, a, s) }
+fix_select: fn(f: ^DBFixer, a: ^ast.AST, s: Int) -> Int Never! { ast.walk_select<DBFixer>(f, a, s) }
 
 // sqlite3FixExpr.
-fix_expr: fn(f: &DBFixer, a: &ast.AST, e: Int) -> Int Never! { ast.walk_expr<DBFixer>(f, a, e) }
+fix_expr: fn(f: ^DBFixer, a: ^ast.AST, e: Int) -> Int Never! { ast.walk_expr<DBFixer>(f, a, e) }
 
 // ---------------------------------------------------------------------------
 // Names and nested statements.
@@ -201,7 +201,7 @@ dequote_token: fn(a: ast.AST, t: ast.SQLTok) -> ast.SQLTok Never! {
 
 // sqlite3NestedParse: run the statement fmt renders over args inside this
 // one (the Host's Gen.nested_parse saves and restores the Parse around it).
-nested_parse: fn(p: &cg.Parse, a: &ast.AST, fmt: String, args: [base.Mem]) -[DB]> Never! {
+nested_parse: fn(p: ^cg.Parse, a: ^ast.AST, fmt: String, args: [base.Mem]) -[DB]> Never! {
     if a.ctx.nerr > 0 {
         return
     }
@@ -225,7 +225,7 @@ find_db: fn(db: conn.Conn, a: ast.AST, t: ast.SQLTok) -> Int Never! {
 
 // sqlite3TwoPartName: the database of "name1.name2" (or of "name1") and
 // the unqualified name; i_db -1 after an error.
-two_part_name: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -> {i_db: Int, name: ast.SQLTok} Never! {
+two_part_name: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -> {i_db: Int, name: ast.SQLTok} Never! {
     if name2.n > 0 {
         if p.db.init.busy {
             ast.error(a, "corrupt database")
@@ -245,7 +245,7 @@ two_part_name: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTo
 
 // sqlite3CheckObjectName: 0 when `name` may name a new `typ` object on
 // table `tbl`, else nonzero with the error left in the Parse.
-check_object_name: fn(p: &cg.Parse, a: &ast.AST, name: [U8], typ: String, tbl: [U8]) -[DB]> Int Never! {
+check_object_name: fn(p: ^cg.Parse, a: ^ast.AST, name: [U8], typ: String, tbl: [U8]) -[DB]> Int Never! {
     db: p.db
     if cat.conn_writable_schema(db) || db.init.imposter_table != 0 -> return base.OK
     if db.init.busy {
@@ -269,7 +269,7 @@ check_object_name: fn(p: &cg.Parse, a: &ast.AST, name: [U8], typ: String, tbl: [
 // sqlite3ForceNotReadOnly: an OP_JournalMode query, so that
 // sqlite3_stmt_readonly() is false for a CREATE ... IF NOT EXISTS of an
 // object that exists.
-force_not_read_only: fn(p: &cg.Parse) Never! {
+force_not_read_only: fn(p: ^cg.Parse) Never! {
     p.f.n_mem += 1
     i_reg: p.f.n_mem
     cg.get_vdbe(p)
@@ -278,13 +278,13 @@ force_not_read_only: fn(p: &cg.Parse) Never! {
 }
 
 // sqlite3OpenSchemaTable: cursor 0 writing the schema table of i_db.
-open_schema_table: fn(p: &cg.Parse, i_db: Int) Never! {
+open_schema_table: fn(p: ^cg.Parse, i_db: Int) Never! {
     _: cg.op4_int(p, opc.OP_OPEN_WRITE, 0, 1, i_db, 5)
     if p.f.n_tab == 0 -> p.f.n_tab = 1
 }
 
 // sqlite3ChangeCookie: code the schema-version bump of database i_db.
-change_cookie: fn(p: &cg.Parse, i_db: Int) Never! {
+change_cookie: fn(p: ^cg.Parse, i_db: Int) Never! {
     s: p.db.dbs[i_db].schema
     x := (p.db.schemas[s].schema_cookie + 1) & 4294967295
     if x >= 2147483648 -> x -= 4294967296
@@ -293,7 +293,7 @@ change_cookie: fn(p: &cg.Parse, i_db: Int) Never! {
 
 // sqlite3VdbeAddParseSchemaOp (vdbeaux.c): reload the schema rows `where`
 // selects, with P5 p5.
-add_parse_schema_op: fn(p: &cg.Parse, i_db: Int, where: [U8], p5: Int) Never! {
+add_parse_schema_op: fn(p: ^cg.Parse, i_db: Int, where: [U8], p5: Int) Never! {
     _: cg.op4_text(p, opc.OP_PARSE_SCHEMA, i_db, 0, 0, where)
     cg.v_change_p5(p, p5)
     loop j in 0..<p.db.dbs.len() -> cg.v_uses_btree(p, j)
@@ -305,7 +305,7 @@ add_parse_schema_op: fn(p: &cg.Parse, i_db: Int, where: [U8], p5: Int) Never! {
 
 // sqlite3StartTable: begin a table (or a view, or a virtual table) named
 // name1.name2, its schema row reserved; the table is p.f.new_table.
-start_table: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp0: Bool, is_view: Bool, is_virtual: Bool, no_err: Bool) -[DB]> Never! {
+start_table: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp0: Bool, is_view: Bool, is_virtual: Bool, no_err: Bool) -[DB]> Never! {
     is_temp := is_temp0
     i_db := 0
     z_name := [U8]{}
@@ -418,7 +418,7 @@ STD_TYPE_AFF: [Int]{67, 65, 68, 68, 69, 66}
 
 // sqlite3AddColumn: a column named `name` of declared type `typ` for the
 // table being built.
-add_column: fn(p: &cg.Parse, a: &ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) Never! {
+add_column: fn(p: ^cg.Parse, a: ^ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) Never! {
     t: p.f.new_table
     if t < 0 {
         return
@@ -485,7 +485,7 @@ add_column: fn(p: &cg.Parse, a: &ast.AST, name0: ast.SQLTok, typ0: ast.SQLTok) N
 }
 
 // sqlite3AddNotNull: NOT NULL on the last column.
-add_not_null: fn(p: &cg.Parse, a: &ast.AST, on_error: Int) Never! {
+add_not_null: fn(p: ^cg.Parse, a: ^ast.AST, on_error: Int) Never! {
     t: p.f.new_table
     if t < 0 || p.db.tables[t].cols.len() < 1 {
         return
@@ -504,7 +504,7 @@ add_not_null: fn(p: &cg.Parse, a: &ast.AST, on_error: Int) Never! {
 
 // sqlite3AddDefaultValue: the DEFAULT `e` of the last column, written
 // sql[start, end).
-add_default_value: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int) -[DB]> Never! {
+add_default_value: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, start: Int, end: Int) -[DB]> Never! {
     t: p.f.new_table
     if t >= 0 && p.db.tables[t].cols.len() > 0 {
         is_init: p.db.init.busy && p.db.init.i_db != 1
@@ -528,14 +528,14 @@ add_default_value: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int) -
 
 // sqlite3StringToId: a string literal used where an identifier belongs
 // becomes one.
-string_to_id: fn(a: &ast.AST, e: Int) Never! {
+string_to_id: fn(a: ^ast.AST, e: Int) Never! {
     if a.exprs[e].op == tk.TK_STRING -> a.exprs[e].op = tk.TK_ID else if a.exprs[e].op == tk.TK_COLLATE && a.exprs[e].left >= 0 && a.exprs[a.exprs[e].left].op == tk.TK_STRING {
         a.exprs[a.exprs[e].left].op = tk.TK_ID
     }
 }
 
 // makeColumnPartOfPrimaryKey.
-make_column_part_of_primary_key: fn(p: &cg.Parse, a: &ast.AST, t: Int, i: Int) Never! {
+make_column_part_of_primary_key: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i: Int) Never! {
     p.db.tables[t].cols[i].col_flags = p.db.tables[t].cols[i].col_flags | conn.COLFLAG_PRIMKEY
     if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED != 0 {
         ast.error(a, "generated columns cannot be part of the PRIMARY KEY")
@@ -544,7 +544,7 @@ make_column_part_of_primary_key: fn(p: &cg.Parse, a: &ast.AST, t: Int, i: Int) N
 
 // sqlite3AddPrimaryKey: PRIMARY KEY on the last column, or on the columns
 // of `list`.
-add_primary_key: fn(p: &cg.Parse, a: &ast.AST, list: Int, on_error: Int, auto_inc: Bool, sort_order: Int) -[DB]> Never! {
+add_primary_key: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, on_error: Int, auto_inc: Bool, sort_order: Int) -[DB]> Never! {
     t: p.f.new_table
     ilist := list
     i_col := -1
@@ -595,7 +595,7 @@ add_primary_key: fn(p: &cg.Parse, a: &ast.AST, list: Int, on_error: Int, auto_in
 
 // sqlite3AddCheckConstraint: CHECK `e` on the table being built, written
 // sql[start, end) with its parentheses.
-add_check_constraint: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
+add_check_constraint: fn(p: ^cg.Parse, a: ^ast.AST, e: Int, start: Int, end: Int) Never! {
     t: p.f.new_table
     bt: p.db.dbs[p.db.init.i_db].bt
     read_only: bt >= 0 && btree.btree_is_readonly(p.db.btrees[bt])
@@ -615,7 +615,7 @@ add_check_constraint: fn(p: &cg.Parse, a: &ast.AST, e: Int, start: Int, end: Int
 }
 
 // sqlite3AddCollateType: COLLATE `name` on the last column.
-add_collate_type: fn(p: &cg.Parse, a: &ast.AST, name: ast.SQLTok) Never! {
+add_collate_type: fn(p: ^cg.Parse, a: ^ast.AST, name: ast.SQLTok) Never! {
     t: p.f.new_table
     if t < 0 {
         return
@@ -636,7 +636,7 @@ add_collate_type: fn(p: &cg.Parse, a: &ast.AST, name: ast.SQLTok) Never! {
 
 // sqlite3AddGenerated: GENERATED ALWAYS AS (e) VIRTUAL or STORED (`typ`,
 // z -1 when absent) on the last column.
-add_generated: fn(p: &cg.Parse, a: &ast.AST, e0: Int, typ: ast.SQLTok) Never! {
+add_generated: fn(p: ^cg.Parse, a: ^ast.AST, e0: Int, typ: ast.SQLTok) Never! {
     e := e0
     t: p.f.new_table
     if t < 0 {
@@ -681,7 +681,7 @@ add_generated: fn(p: &cg.Parse, a: &ast.AST, e0: Int, typ: ast.SQLTok) Never! {
 // The end of CREATE TABLE.
 
 // estimateTableWidth.
-estimate_table_width: fn(db: &conn.Conn, t: Int) Never! {
+estimate_table_width: fn(db: ^conn.Conn, t: Int) Never! {
     w := 0
     loop c in db.tables[t].cols -> w += c.sz_est
     if db.tables[t].ipkey < 0 -> w += 1
@@ -689,7 +689,7 @@ estimate_table_width: fn(db: &conn.Conn, t: Int) Never! {
 }
 
 // estimateIndexWidth.
-estimate_index_width: fn(db: &conn.Conn, ix: Int) Never! {
+estimate_index_width: fn(db: ^conn.Conn, ix: Int) Never! {
     w := 0
     t: db.indexes[ix].table
     loop i in 0..<db.indexes[ix].n_column {
@@ -704,7 +704,7 @@ estimate_index_width: fn(db: &conn.Conn, ix: Int) Never! {
 // the schema load this codes the sqlite_master row's update; during it the
 // table joins the schema. A WITHOUT ROWID table or CREATE TABLE ... AS
 // SELECT fails, as this build does not support them.
-end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) -[DB]> Never! {
+end_table: fn(p: ^cg.Parse, a: ^ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) -[DB]> Never! {
     if end.z < 0 && select < 0 {
         return
     }
@@ -837,7 +837,7 @@ end_table: fn(p: &cg.Parse, a: &ast.AST, cons0: ast.SQLTok, end: ast.SQLTok, tab
 // Indexes.
 
 // sqlite3DefaultRowEst: the aiRowLogEst[] guesses used without ANALYZE.
-default_row_est: fn(db: &conn.Conn, ix: Int) Never! {
+default_row_est: fn(db: ^conn.Conn, ix: Int) Never! {
     vals: [Int]{33, 32, 30, 28, 26}
     t: db.indexes[ix].table
     n_key: db.indexes[ix].n_key_col
@@ -856,7 +856,7 @@ default_row_est: fn(db: &conn.Conn, ix: Int) Never! {
 
 // recomputeColumnsNotIndexed: colNotIdxed, a 0 bit for each column (of the
 // first 63) the index holds, virtual columns excepted.
-recompute_columns_not_indexed: fn(db: &conn.Conn, ix: Int) Never! {
+recompute_columns_not_indexed: fn(db: ^conn.Conn, ix: Int) Never! {
     m := 0
     t: db.indexes[ix].table
     j := db.indexes[ix].n_column - 1
@@ -892,7 +892,7 @@ CreateIndexState: struct {
 // SrcList; -1 for the PRIMARY KEY or UNIQUE index of the table being
 // created, `list` -1 for its last column). `start` is the CREATE token of a
 // CREATE INDEX statement (none for an implied index).
-create_index: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Never! {
+create_index: fn(p: ^cg.Parse, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Never! {
     s := CreateIndexState{t: -1, list: list, where_expr: where_expr}
     ix: create_index_object(p, a, s, name1, name2, tbl, on_error, start, sort_order, if_not_exist, idx_type)
     if ix >= 0 -> conn.free_index(p.db, ix)
@@ -904,7 +904,7 @@ create_index: fn(p: &cg.Parse, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok
 
 // The exit_create_index loop of sqlite3CreateIndex: the one REPLACE index
 // out of place moves to the end of table t's index list.
-replace_indexes_last: fn(db: &conn.Conn, t: Int) Never! {
+replace_indexes_last: fn(db: ^conn.Conn, t: Int) Never! {
     from := -1
     this := db.tables[t].index
     loop this >= 0 {
@@ -926,7 +926,7 @@ replace_indexes_last: fn(db: &conn.Conn, t: Int) Never! {
 
 // The body of sqlite3CreateIndex up to exit_create_index: the index slot
 // left for the caller to free, or -1 when none is (none made, or linked).
-create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, on_error: Int, start: ast.SQLTok, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Int Never! {
+create_index_object: fn(p: ^cg.Parse, a: ^ast.AST, s: ^CreateIndexState, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, on_error: Int, start: ast.SQLTok, sort_order: Int, if_not_exist: Bool, idx_type: Int) -[DB]> Int Never! {
     if cg.n_err(a) > 0 -> return -1
     if a.ctx.parse_mode == ast.PARSE_MODE_DECLARE_VTAB && idx_type != ast.IDXTYPE_PRIMARYKEY {
         return -1
@@ -1165,7 +1165,7 @@ create_index_object: fn(p: &cg.Parse, a: &ast.AST, s: &CreateIndexState, name1: 
 // sqlite3RefillIndex for a new index: every row of its table keyed into a
 // sorter, then written in key order to the index btree whose root page is
 // in register mem_root_page. A UNIQUE index stops at a duplicate key.
-refill_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int, mem_root_page: Int) -[DB]> Never! {
+refill_index: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int, mem_root_page: Int) -[DB]> Never! {
     t: p.db.indexes[ix].table
     i_db: conn.schema_to_index(p.db, p.db.indexes[ix].schema)
     if cg.auth_check(p, a, conn.AUTH_REINDEX, Val(p.db.indexes[ix].name.copy()), None, Val(p.db.dbs[i_db].name.copy())) != base.OK {
@@ -1220,7 +1220,7 @@ refill_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int, mem_root_page: Int) -[DB]> 
 
 // destroyRootPage: code the OP_Destroy of root page i_table of i_db, and
 // the sqlite_master update for the root page auto-vacuum moves into it.
-destroy_root_page: fn(p: &cg.Parse, a: &ast.AST, i_table: Int, i_db: Int) -[DB]> Never! {
+destroy_root_page: fn(p: ^cg.Parse, a: ^ast.AST, i_table: Int, i_db: Int) -[DB]> Never! {
     cg.get_vdbe(p)
     r1: cg.get_temp_reg(p)
     if i_table < 2 -> ast.error(a, "corrupt schema")
@@ -1231,7 +1231,7 @@ destroy_root_page: fn(p: &cg.Parse, a: &ast.AST, i_table: Int, i_db: Int) -[DB]>
 }
 
 // destroyTable: the root pages of table t and its indexes, largest first.
-destroy_table: fn(p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Never! {
+destroy_table: fn(p: ^cg.Parse, a: ^ast.AST, t: Int) -[DB]> Never! {
     i_tab: p.db.tables[t].tnum
     i_destroyed := 0
     loop {
@@ -1254,7 +1254,7 @@ destroy_table: fn(p: &cg.Parse, a: &ast.AST, t: Int) -[DB]> Never! {
 
 // sqlite3ClearStatTables: the sqlite_statN rows of a dropped table or
 // index (`typ` "tbl" or "idx").
-clear_stat_tables: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, typ: String, name: [U8]) -[DB]> Never! {
+clear_stat_tables: fn(p: ^cg.Parse, a: ^ast.AST, i_db: Int, typ: String, name: [U8]) -[DB]> Never! {
     z_db: p.db.dbs[i_db].name.copy()
     loop i in 1..<5 {
         z_tab: "sqlite_stat{i}"
@@ -1267,7 +1267,7 @@ clear_stat_tables: fn(p: &cg.Parse, a: &ast.AST, i_db: Int, typ: String, name: [
 // sqlite3CodeDropTable. This build has no triggers, virtual tables or
 // views with computed columns, so there are no triggers to drop and
 // sqliteViewResetAll has nothing to reset.
-code_drop_table: fn(p: &cg.Parse, a: &ast.AST, t: Int, i_db: Int, is_view: Bool) -[DB]> Never! {
+code_drop_table: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, i_db: Int, is_view: Bool) -[DB]> Never! {
     cg.get_vdbe(p)
     cg.begin_write_operation(p, a, true, i_db)
     z_db: p.db.dbs[i_db].name.copy()
@@ -1296,13 +1296,13 @@ table_may_not_be_dropped: fn(db: conn.Conn, t: Int) -> Bool Never! {
 // sqlite3DropTable: DROP TABLE or DROP VIEW of the one-item SrcList
 // `name`. Foreign keys are never enforced in this build, so
 // sqlite3FkDropTable codes nothing.
-drop_table: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err: Bool) -[DB]> Never! {
+drop_table: fn(p: ^cg.Parse, a: ^ast.AST, name: Int, is_view: Bool, no_err: Bool) -[DB]> Never! {
     drop_table_code(p, a, name, is_view, no_err)
     ast.src_list_delete(a, name)
 }
 
 // The body of sqlite3DropTable up to exit_drop_table.
-drop_table_code: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err: Bool) -[DB]> Never! {
+drop_table_code: fn(p: ^cg.Parse, a: ^ast.AST, name: Int, is_view: Bool, no_err: Bool) -[DB]> Never! {
     g := p.up
     if g.read_schema(p, a) != base.OK {
         return
@@ -1362,7 +1362,7 @@ drop_table_code: fn(p: &cg.Parse, a: &ast.AST, name: Int, is_view: Bool, no_err:
 
 // sqlite3BeginTransaction: BEGIN of kind TK_DEFERRED, TK_IMMEDIATE or
 // TK_EXCLUSIVE.
-begin_transaction: fn(p: &cg.Parse, a: &ast.AST, kind: Int) -[DB]> Never! {
+begin_transaction: fn(p: ^cg.Parse, a: ^ast.AST, kind: Int) -[DB]> Never! {
     if cg.auth_check(p, a, conn.AUTH_TRANSACTION, Val("BEGIN".bytes()), None, None) != base.OK {
         return
     }
@@ -1383,7 +1383,7 @@ begin_transaction: fn(p: &cg.Parse, a: &ast.AST, kind: Int) -[DB]> Never! {
 
 // sqlite3EndTransaction: COMMIT or END (op TK_COMMIT or TK_END), or
 // ROLLBACK (TK_ROLLBACK).
-end_transaction: fn(p: &cg.Parse, a: &ast.AST, op: Int) -[DB]> Never! {
+end_transaction: fn(p: ^cg.Parse, a: ^ast.AST, op: Int) -[DB]> Never! {
     is_rollback: op == tk.TK_ROLLBACK
     what: if is_rollback -> "ROLLBACK" else -> "COMMIT"
     if cg.auth_check(p, a, conn.AUTH_TRANSACTION, Val(what.bytes()), None, None) != base.OK {

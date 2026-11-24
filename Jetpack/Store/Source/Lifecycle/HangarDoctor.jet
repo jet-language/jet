@@ -46,13 +46,13 @@ HangarDoctorReport: struct {
     remaining_count: fn(self) -> Int Never! { self.findings.len() - self.fixed_count() }
 
     // Tally one object's seal verification outcome.
-    record_status: fn(&self, status: VerificationStatus) Never! {
+    record_status: fn(^self, status: VerificationStatus) Never! {
         if status.reused -> self.seal_reused += 1
         if status.resealed -> self.seal_resealed += 1
         if status.reseal_needed -> self.seal_reseal_needed += 1
     }
 
-    push: fn(&self, kind: String, subject: String, detail: String, repair: DoctorRepair) Never! {
+    push: fn(^self, kind: String, subject: String, detail: String, repair: DoctorRepair) Never! {
         self.findings.push(HangarDoctorFinding{kind: kind, subject: subject, detail: detail, fixed: false, repair: repair})
     }
 }
@@ -64,7 +64,7 @@ DoctorScan: struct {
 }
 
 // Rust `hangar_doctor`.
-store_hangar_doctor: fn(verification: &StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
+store_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
     if !repair {
         scan: store_scan_hangar_doctor(verification, roots, false)
         return Ok(scan.report)
@@ -146,7 +146,7 @@ store_hangar_doctor: fn(verification: &StoreVerification, roots: HangarRoots, re
 }
 
 // Rust `scan_hangar_doctor`.
-store_scan_hangar_doctor: fn(verification: &StoreVerification, roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
+store_scan_hangar_doctor: fn(verification: ^StoreVerification, roots: HangarRoots, write_seals: Bool) -[FS, Env]> DoctorScan StoreError! {
     hangar: roots.hangar_dir()
     scan := DoctorScan{report: HangarDoctorReport.empty(), repair_paths: [String:String]{}}
     found: store_node_stat(hangar)
@@ -189,7 +189,7 @@ store_doctor_sorted_entries: fn(path: String) -[FS]> [DirEntry] StoreError! {
 
 // Rust `scan_doctor_objects`: verify every canonical object's content digest
 // against its name; the CAS keys the object files would use.
-store_scan_doctor_objects: fn(verification: &StoreVerification, hangar: String, report: &HangarDoctorReport, write_seals: Bool) -[FS, Env]> [String] StoreError! {
+store_scan_doctor_objects: fn(verification: ^StoreVerification, hangar: String, report: ^HangarDoctorReport, write_seals: Bool) -[FS, Env]> [String] StoreError! {
     objects: files.join(hangar, STORE_OBJECTS_DIR)
     found: store_node_stat(objects)
     pool: found ?? return Ok([String]{})
@@ -232,7 +232,7 @@ store_scan_doctor_objects: fn(verification: &StoreVerification, hangar: String, 
 
 // Rust `collect_doctor_cas_keys`: `<sha256>-<permission bits, 8 hex digits>`
 // of every non-empty regular file in an object; unreadable files are skipped.
-store_collect_doctor_cas_keys: fn(object: String, keys: &[String]) -[FS, Env]> Never! {
+store_collect_doctor_cas_keys: fn(object: String, keys: ^[String]) -[FS, Env]> Never! {
     members: store_files_under(object)
     loop file in members {
         metadata: files.stat(file) ?? next
@@ -254,7 +254,7 @@ store_doctor_hex8: fn(value: Int) -> String Never! {
 
 // Rust `scan_doctor_staging`: abandoned ingest and admission stages, and
 // partial objects under `objects/`.
-store_scan_doctor_staging: fn(hangar: String, report: &HangarDoctorReport) -[FS, Env]> StoreError! {
+store_scan_doctor_staging: fn(hangar: String, report: ^HangarDoctorReport) -[FS, Env]> StoreError! {
     store_scan_doctor_stage_dir(hangar, STORE_STAGE_DIR, false, report)
     store_scan_doctor_stage_dir(hangar, "stage", true, report)
     objects: files.join(hangar, STORE_OBJECTS_DIR)
@@ -271,7 +271,7 @@ store_scan_doctor_staging: fn(hangar: String, report: &HangarDoctorReport) -[FS,
 
 // Rust `scan_doctor_stage_dir`. In the admission stage directory a native
 // `nix-cache-` stage of a live process is not stale (Unix only).
-store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only: Bool, report: &HangarDoctorReport) -[FS, Env]> StoreError! {
+store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only: Bool, report: ^HangarDoctorReport) -[FS, Env]> StoreError! {
     stage: files.join(hangar, relative)
     found: store_node_stat(stage)
     metadata: found ?? return
@@ -293,7 +293,7 @@ store_scan_doctor_stage_dir: fn(hangar: String, relative: String, admission_only
 // `.locks` namespace and the `.jetpack.lock` owner file belong to
 // RuntimePolicy and are never removed: removing either can split active
 // shared-CAS lock holders across lock-file inodes.
-store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: &HangarDoctorReport) -[FS]> StoreError! {
+store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: ^HangarDoctorReport) -[FS]> StoreError! {
     cas: files.join(hangar, STORE_CAS_DIR)
     found: store_node_stat(cas)
     pool: found ?? return
@@ -333,7 +333,7 @@ store_scan_doctor_cas: fn(hangar: String, referenced: [String], report: &HangarD
 
 // Rust `doctor_repair_paths`: the first native `/nix/store` path recorded
 // for each primary and named-output digest of Nix-produced records.
-store_doctor_repair_paths: fn(entries: [StoreEntry], paths: &[String:String]) Never! {
+store_doctor_repair_paths: fn(entries: [StoreEntry], paths: ^[String:String]) Never! {
     loop entry in entries {
         producer: ProducerRecord.decode(entry.producer_record) ?? next
         if producer.provider != "nix" -> next
@@ -360,7 +360,7 @@ store_doctor_repair_paths: fn(entries: [StoreEntry], paths: &[String:String]) Ne
 }
 
 // Rust `doctor_object_digest`.
-store_doctor_object_digest: fn(verification: &StoreVerification, path: String, hangar: String, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
+store_doctor_object_digest: fn(verification: ^StoreVerification, path: String, hangar: String, write_seal: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
     store_verified_output_hash_with_options(verification, path, Val(hangar), false, false, write_seal)
 }
 

@@ -90,7 +90,7 @@ debug_place: fn(text: String) -> DebugPlace DebugEvaluationError! {
 
 // The fields `node` goes through, outermost first, into `fields`, and the
 // local it starts at; None when it is not a local or a field path under one.
-debug_place_fields: fn(tables: ASTTables, node: ExprNode, fields: &[String]) -> String? Never! {
+debug_place_fields: fn(tables: ASTTables, node: ExprNode, fields: ^[String]) -> String? Never! {
     if ast_expr(tables, node) == .Ident(name, _, _) -> return Val(name)
     if ast_expr(tables, node) == .Field(base, member, _, _) {
         root: debug_place_fields(tables, base, fields) ?? return None

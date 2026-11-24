@@ -90,7 +90,7 @@ PolicyWalkNode: enum {
     Fallback(value: OrFallback),
 }
 
-policy_push_body: fn(stack: &[PolicyWalkNode], body: [Stmt]) {
+policy_push_body: fn(stack: ^[PolicyWalkNode], body: [Stmt]) {
     index := body.len()
     loop index > 0 {
         index -= 1
@@ -98,7 +98,7 @@ policy_push_body: fn(stack: &[PolicyWalkNode], body: [Stmt]) {
     }
 }
 
-policy_push_args: fn(stack: &[PolicyWalkNode], args: [CallArg]) {
+policy_push_args: fn(stack: ^[PolicyWalkNode], args: [CallArg]) {
     index := args.len()
     loop index > 0 {
         index -= 1
@@ -109,7 +109,7 @@ policy_push_args: fn(stack: &[PolicyWalkNode], args: [CallArg]) {
 // `visited` receives every expression in walk preorder. Callers loop over the
 // list instead of passing a visitor: a lambda that captures a list it pushes to
 // consumes that list (E0121), so accumulating callers could not use it after.
-policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
+policy_walk: fn(stack: ^[PolicyWalkNode], visited: ^[Expr]) Never! {
     loop stack.len() > 0 {
         node: stack.pop() ?? panic("corpus walk node")
         if node == {
@@ -1228,7 +1228,7 @@ policy_body_walk_filter: fn(body: [Stmt], aliases: [String:String]) -> Span? {
     None
 }
 
-policy_collect_statement: fn(statement: Stmt, aliases: [String:String], facts: &PolicyStatementFacts, pending: &[PolicyPendingBody]) {
+policy_collect_statement: fn(statement: Stmt, aliases: [String:String], facts: ^PolicyStatementFacts, pending: ^[PolicyPendingBody]) {
     if statement == {
         .TaskGroup(_, _, _, nested, span) -> {
             combinators := 0
@@ -1264,7 +1264,7 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String:String], facts: &
     }
 }
 
-policy_collect_body_facts: fn(root: [Stmt], aliases: [String:String], facts: &PolicyStatementFacts) {
+policy_collect_body_facts: fn(root: [Stmt], aliases: [String:String], facts: ^PolicyStatementFacts) {
     pending := [PolicyPendingBody]{PolicyPendingBody.Body{body: root}}
     loop pending.len() > 0 {
         selected: pending.pop() ?? panic("pending statement body")
@@ -2629,7 +2629,7 @@ policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
 // functions documents the surface without observing it. The names are the
 // module's top-level functions and methods, read from its Core source AST
 // through the generated source-owned rows.
-policy_core_api_names: fn(module_name: String, known: &[String:[String]]) -> [String] PolicyError! {
+policy_core_api_names: fn(module_name: String, known: ^[String:[String]]) -> [String] PolicyError! {
     if known.get(module_name) == .Val(cached) -> return Ok(cached.copy())
     names := [String]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
@@ -2681,7 +2681,7 @@ policy_plain_literal: fn(expression: Expr) -> String? {
     None
 }
 
-policy_api_name_only_sites: fn(path: String, source: String, known: &[String:[String]]) -> [String] PolicyError! {
+policy_api_name_only_sites: fn(path: String, source: String, known: ^[String:[String]]) -> [String] PolicyError! {
     program: policy_parse_program(path, source) ?? return Ok([String]{})
     modules := [String]{}
     loop (_, imported) in policy_module_aliases(program) {

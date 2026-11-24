@@ -1,5 +1,5 @@
 // Inlay hints: from the checked index, the type of each local, the parameter
-// each positional argument binds, the `&` or `&&` of each argument or
+// each positional argument binds, the `^` or `^^` of each argument or
 // receiver a call writes or takes, and on a type each method an impl declares
 // outside its body; the `?` after each call that passes a failure up by
 // itself; then the `lsp.inlay_hints` hooks of a marked block's package label
@@ -78,7 +78,7 @@ lsp_checked_inlay_hints: fn(view: LSPView) -> [LSPInlayHint] Never! {
 // On a type's name, each method an impl written outside the type's
 // declaration adds, with its checked signature, so a reader of the type sees
 // what was scattered. Methods a derive generated have no written name.
-lsp_breadcrumb_hints: fn(checked: LSPChecked, index: SemIndex, def: SemDef, hints: &[LSPInlayHint]) Never! {
+lsp_breadcrumb_hints: fn(checked: LSPChecked, index: SemIndex, def: SemDef, hints: ^[LSPInlayHint]) Never! {
     declaration := Span?{None}
     loop node in index.nodes {
         if node.class != "item" || node.module_path != def.module_path -> next
@@ -140,10 +140,10 @@ LSPCallMark: struct {
 }
 
 // Each call's positional arguments named by the parameter they bind, and
-// marked `&` or `&&` when the callee writes or takes them, as is a method's
+// marked `^` or `^^` when the callee writes or takes them, as is a method's
 // receiver. A labeled argument, a rest argument, and an argument that
 // already spells its parameter's name get no name.
-lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: &[LSPInlayHint]) Never! {
+lsp_parameter_hints: fn(view: LSPView, index: SemIndex, hints: ^[LSPInlayHint]) Never! {
     loop mark in lsp_call_marks(view, index) {
         name: if mark.name == "" -> "" else -> "{mark.name}: "
         hints.push(LSPInlayHint{at: mark.at, label: "{name}{access_sigil(mark.access)}", kind: Val(LSP_INLAY_HINT_PARAMETER)})
@@ -200,7 +200,7 @@ lsp_checked_type: fn(def: SemDef) -> Type? Never! {
     }
 }
 
-lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, marks: &[LSPCallMark]) Never! {
+lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, marks: ^[LSPCallMark]) Never! {
     tokens: lexed.tokens
     params: callable.params
     loop (argument, first) in lsp_call_arguments(lexed, first_token) {
@@ -230,7 +230,7 @@ lsp_argument_marks: fn(lexed: Lexed, callable: SemCallable, first_token: Int, ma
     }
 }
 
-lsp_push_call_mark: fn(marks: &[LSPCallMark], tokens: [Token], first: Int, name: String, access: AccessConvention) Never! {
+lsp_push_call_mark: fn(marks: ^[LSPCallMark], tokens: [Token], first: Int, name: String, access: AccessConvention) Never! {
     if name == "" && access == AccessConvention.Read -> return
     place: if tokens[first].kind == TOKEN_IDENT && lsp_lone_token(tokens, first) -> Span?{Val(tokens[first].span)} else -> Span?{None}
     marks.push(LSPCallMark{at: tokens[first].span.start, name: name, access: access, place: place})

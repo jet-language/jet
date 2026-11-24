@@ -228,7 +228,7 @@ ProviderFacts: struct {
 
     // Record a fact. A different value for a known key is a conflict; the
     // same value from a new source extends its provenance.
-    add_fact: fn(&self, key: String, value: ProviderFactValue, source: String) Never! {
+    add_fact: fn(^self, key: String, value: ProviderFactValue, source: String) Never! {
         if self.facts.get(key) == {
             .Val(existing) -> {
                 if existing != value {
@@ -247,29 +247,29 @@ ProviderFacts: struct {
         self.provenance[key] = source
     }
 
-    add_loss: fn(&self, key: String, reason: String, source: String) Never! {
+    add_loss: fn(^self, key: String, reason: String, source: String) Never! {
         self.losses.push(ProviderLoss{key: key, reason: reason, source: source})
     }
 
-    add_conflict: fn(&self, key: String, left: String, right: String, source: String) Never! {
+    add_conflict: fn(^self, key: String, left: String, right: String, source: String) Never! {
         self.conflicts.push(ProviderConflict{key: key, left: left, right: right, source: source})
     }
 
-    set_profile: fn(&self, profile: String, provenance: String) Never! {
+    set_profile: fn(^self, profile: String, provenance: String) Never! {
         self.profile = profile
         self.profile_provenance = provenance
         self.add_fact("profile.name", ProviderFactValue.Text(profile), "profile.source")
         self.add_fact("profile.provenance", ProviderFactValue.Text(provenance), "profile.source")
     }
 
-    set_resolved_source: fn(&self, source: String) Never! {
+    set_resolved_source: fn(^self, source: String) Never! {
         self.resolved_source = source
         self.add_fact("provider.resolved_source", ProviderFactValue.Text(source), "resolver")
     }
 
     // Retain the exact selector a named source authority resolved while the
     // user's intentionally unpinned reference stays unchanged.
-    set_resolved_selector: fn(&self, selector: String, source: String) Never! {
+    set_resolved_selector: fn(^self, selector: String, source: String) Never! {
         details: ProviderSelectorDetails.parse(selector)
         loop unknown in details.unknown {
             self.add_loss("provider.resolved_selector", "unsupported resolved selector fact `{unknown}` cannot be normalized losslessly", source)
@@ -302,7 +302,7 @@ ProviderFacts: struct {
 
     // Retain the provider's native document once; a different second
     // document is a conflict named by both digests.
-    set_native_document: fn(&self, format: String, document: String) Never! {
+    set_native_document: fn(^self, format: String, document: String) Never! {
         if self.native_format != "" || self.native_document != "" {
             if self.native_format != format || self.native_document != document {
                 left: "{self.native_format}:sha256-{pkg_sha256_hex(self.native_document.bytes())}"

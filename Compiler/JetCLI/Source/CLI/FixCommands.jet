@@ -281,7 +281,7 @@ jet_cli_fix_touched: fn(files: [JetCLIFixFile]) -> Bool Never! {
 // and the fixes that edit it are refused, jet_cli_fix_apply_non_overlapping),
 // and gives each edit its row; an edit of `canonical`, the fixed file, is
 // row -1.
-jet_cli_fix_resolve: fn(files: &[JetCLIFixFile], canonical: String, fixes: &&[JetCLIFix]) -> [JetCLIFix] {
+jet_cli_fix_resolve: fn(files: ^[JetCLIFixFile], canonical: String, fixes: ^^[JetCLIFix]) -> [JetCLIFix] {
     resolved := [JetCLIFix]{}
     loop fix in fixes.move() {
         first := jet_cli_fix_place(files, canonical, fix.edit.move())
@@ -303,7 +303,7 @@ JetCLIFixPlaced: struct {
     row: Int,
 }
 
-jet_cli_fix_place: fn(files: &[JetCLIFixFile], canonical: String, edit: &&TextEdit) -> JetCLIFixPlaced {
+jet_cli_fix_place: fn(files: ^[JetCLIFixFile], canonical: String, edit: ^^TextEdit) -> JetCLIFixPlaced {
     stripped := TextEdit{span: edit.span, new_text: edit.new_text.move()}
     named := edit.path.move() ?? return JetCLIFixPlaced{edit: stripped.move(), row: -1}
     if named == canonical -> return JetCLIFixPlaced{edit: stripped.move(), row: -1}
@@ -322,7 +322,7 @@ jet_cli_fix_read: fn(path: String) -> String? {
 
 // Sets each file of the table `files` that `texts` (by row) gives a text to
 // that text.
-jet_cli_fix_settle: fn(files: &[JetCLIFixFile], texts: &&[String?]) Never! {
+jet_cli_fix_settle: fn(files: ^[JetCLIFixFile], texts: ^^[String?]) Never! {
     row := 0
     loop text in texts.move() {
         if text != None -> files[row].source = text
@@ -337,7 +337,7 @@ jet_cli_fix_settle: fn(files: &[JetCLIFixFile], texts: &&[String?]) Never! {
 // is tried on top of the ones kept so far, and one that adds an error is
 // rolled back into `rejected` with the first error it adds. A fix none of
 // whose edits can apply goes to `refused`.
-jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], rejected: &[JetCLIFixSkip], refused: &[JetCLIFixSkip]) -> JetCLIFixApply {
+jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fixes: [JetCLIFix], baseline: [String], rejected: ^[JetCLIFixSkip], refused: ^[JetCLIFixSkip]) -> JetCLIFixApply {
     whole: jet_cli_fix_apply_non_overlapping(source, files, fixes, jet_cli_fix_all(fixes))
     loop refusal in whole.refused -> jet_cli_fix_skip(refused, fixes[refusal.fix], refusal.reason)
     if !jet_cli_fix_changes(whole, source, files) || jet_cli_fix_errors(file, whole.source, files, whole.texts).len() <= baseline.len() {
@@ -370,7 +370,7 @@ jet_cli_fix_checked: fn(file: String, source: String, files: [JetCLIFixFile], fi
 }
 
 // Records `fix` as skipped, once per edit.
-jet_cli_fix_skip: fn(skips: &[JetCLIFixSkip], fix: JetCLIFix, reason: String) Never! {
+jet_cli_fix_skip: fn(skips: ^[JetCLIFixSkip], fix: JetCLIFix, reason: String) Never! {
     loop skip in skips {
         if skip.edit.span.start == fix.edit.span.start && skip.edit.span.end == fix.edit.span.end && skip.edit.new_text == fix.edit.new_text {
             return
@@ -564,7 +564,7 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mod
 
 // `path`, another file a fix changes, as the diff names it: beside `file`
 // when it sits in `file`'s folder or under it, else whole.
-jet_cli_fix_display: fn(file: String, path: &&String) -[FS, Env]> String Never! {
+jet_cli_fix_display: fn(file: String, path: ^^String) -[FS, Env]> String Never! {
     folder: jet_cli_parent(jet_cli_overlay_path(file)) ?? return path
     if !path.starts_with("{folder}/") -> return path
     rest: path.slice(folder.len() + 1, path.len())

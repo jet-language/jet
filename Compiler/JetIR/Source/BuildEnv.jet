@@ -4,7 +4,7 @@
 use jet_foundation.[Span, Type]
 
 // Whether `row` is a compact byte List (`[U8]`, stride 1).
-ir_environment_bytes: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+ir_environment_bytes: fn(m: ^IRModule, p: IRProgram, row: Int) -> Bool Never! {
     ty: ir_row_ty(m, p, row)
     if ir_untag(ty) == .List(element) {
         element_row: ir_value_type(m, p, element) ?? return false
@@ -14,7 +14,7 @@ ir_environment_bytes: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     false
 }
 
-ir_environment_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_environment_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != route.arity {
         return ir_fail_slot(b, span, "environment route has incorrect arity")
     }
@@ -37,7 +37,7 @@ ir_environment_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvi
     value
 }
 
-ir_environment_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_environment_value: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if route.op == .Seed {
         if !ir_unit_type(result) -> return ir_fail_slot(b, span, "environment seed requires Unit")
         _: ir_runtime(m, b, route.export, inputs, -1)
@@ -108,7 +108,7 @@ ir_environment_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnv
 // get_os owns an align-1 raw buffer (data at 0, length at 8 of `out`); a
 // [U8] owns align-8 storage. The compact bytes are copied into a buffer
 // of their own, then the raw allocation is released once.
-ir_environment_byte_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, out: Int) Never! {
+ir_environment_byte_payload: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, boxed: Int, out: Int) Never! {
     data: ir_load_word(m, b, out, 0)
     length: ir_load_word(m, b, out, 8)
     zero: ir_word_const(m, b, 0)
@@ -131,7 +131,7 @@ ir_environment_byte_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed
 // A mutation's status word: >= 0 is Ok (for unset, whether a key was
 // removed), -1 is EnvError.InvalidName, any other negative status
 // EnvError.InvalidValue.
-ir_environment_status: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+ir_environment_status: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
     ok_ty := Type.Int
     err_ty := Type.Int
     if ir_untag(result) == .Result(success, failure) {

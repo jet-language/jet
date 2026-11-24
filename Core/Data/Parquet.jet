@@ -33,7 +33,7 @@ ParquetFailure: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.display_text() }
+        debug: fn(^^self) -> String { self.display_text() }
     }
 
     display_text: fn(self) -> String Never! {
@@ -120,7 +120,7 @@ Cursor: struct {
     pos: Int,
     end: Int,
 
-    byte: fn(&self, input: [U8]) -> Int ParquetFailure! {
+    byte: fn(^self, input: [U8]) -> Int ParquetFailure! {
         if self.pos >= self.end {
             return Err(decode_failure("Parquet metadata ends early at byte {self.pos}"))
         }
@@ -130,7 +130,7 @@ Cursor: struct {
     }
 
     // An unsigned LEB128 varint of at most 64 bits.
-    varint: fn(&self, input: [U8]) -> Int ParquetFailure! {
+    varint: fn(^self, input: [U8]) -> Int ParquetFailure! {
         value := 0
         shift := 0
         loop shift < 64 {
@@ -145,14 +145,14 @@ Cursor: struct {
         Err(decode_failure("varint at byte {self.pos} is longer than 10 bytes"))
     }
 
-    zigzag: fn(&self, input: [U8]) -> Int ParquetFailure! {
+    zigzag: fn(^self, input: [U8]) -> Int ParquetFailure! {
         raw: self.varint(input) ?? return Err(err)
         half: (raw >> 1) & 9223372036854775807
         if raw & 1 == 0 -> return Ok(half)
         Ok(-half - 1)
     }
 
-    little: fn(&self, input: [U8], width: Int) -> Int ParquetFailure! {
+    little: fn(^self, input: [U8], width: Int) -> Int ParquetFailure! {
         if width > self.end - self.pos {
             return Err(decode_failure("value at byte {self.pos} needs {width} bytes past the end of its page"))
         }
@@ -163,13 +163,13 @@ Cursor: struct {
     }
 
     // Eight little-endian bytes as a two's-complement 64-bit value.
-    signed64: fn(&self, input: [U8]) -> Int ParquetFailure! {
+    signed64: fn(^self, input: [U8]) -> Int ParquetFailure! {
         raw: self.little(input, 8) ?? return Err(err)
         if raw <= 9223372036854775807 -> return Ok(raw)
         Ok((raw - 9223372036854775807 - 1) + (-9223372036854775807 - 1))
     }
 
-    bytes: fn(&self, input: [U8], length: Int) -> [U8] ParquetFailure! {
+    bytes: fn(^self, input: [U8], length: Int) -> [U8] ParquetFailure! {
         if length < 0 || length > self.end - self.pos {
             return Err(decode_failure("{length} bytes at byte {self.pos} run past the end of their region"))
         }
@@ -180,7 +180,7 @@ Cursor: struct {
     }
 
     // The next Thrift field header as (id, kind); kind 0 ends the struct.
-    field: fn(&self, input: [U8], last: Int) -> {id: Int, kind: Int} ParquetFailure! {
+    field: fn(^self, input: [U8], last: Int) -> {id: Int, kind: Int} ParquetFailure! {
         head: self.byte(input) ?? return Err(err)
         kind: head & 15
         if kind == 0 -> return Ok({id: 0, kind: 0})
@@ -190,7 +190,7 @@ Cursor: struct {
         Ok({id: id, kind: kind})
     }
 
-    int: fn(&self, input: [U8], kind: Int) -> Int ParquetFailure! {
+    int: fn(^self, input: [U8], kind: Int) -> Int ParquetFailure! {
         if kind == THRIFT_BYTE {
             value: self.byte(input) ?? return Err(err)
             return Ok(if value >= 128 -> value - 256 else -> value)
@@ -201,7 +201,7 @@ Cursor: struct {
         self.zigzag(input)
     }
 
-    binary: fn(&self, input: [U8], kind: Int) -> [U8] ParquetFailure! {
+    binary: fn(^self, input: [U8], kind: Int) -> [U8] ParquetFailure! {
         if kind != THRIFT_BINARY {
             return Err(decode_failure("Thrift field of type {kind} where a binary belongs"))
         }
@@ -209,7 +209,7 @@ Cursor: struct {
         self.bytes(input, length)
     }
 
-    text: fn(&self, input: [U8], kind: Int) -> String ParquetFailure! {
+    text: fn(^self, input: [U8], kind: Int) -> String ParquetFailure! {
         bytes: self.binary(input, kind) ?? return Err(err)
         text: String.from_bytes(bytes) ?? return Err(decode_failure("Thrift string is not UTF-8"))
         Ok(text)
@@ -217,7 +217,7 @@ Cursor: struct {
 
     // A list header as (size, element kind); every element takes at least
     // one byte, so a size past the region is refused before any loop.
-    list: fn(&self, input: [U8], kind: Int) -> {size: Int, kind: Int} ParquetFailure! {
+    list: fn(^self, input: [U8], kind: Int) -> {size: Int, kind: Int} ParquetFailure! {
         if kind != THRIFT_LIST && kind != 10 {
             return Err(decode_failure("Thrift field of type {kind} where a list belongs"))
         }
@@ -231,7 +231,7 @@ Cursor: struct {
     }
 
     // Skips one value of `kind`; a Bool element of a list or map is one byte.
-    skip: fn(&self, input: [U8], kind: Int, depth: Int, element: Bool) ParquetFailure! {
+    skip: fn(^self, input: [U8], kind: Int, depth: Int, element: Bool) ParquetFailure! {
         if depth > THRIFT_MAX_DEPTH {
             return Err(decode_failure("Thrift metadata nests deeper than {THRIFT_MAX_DEPTH}"))
         }
@@ -353,7 +353,7 @@ Leaf: struct {
     unsigned: Bool,
 }
 
-parse_logical: fn(cursor: &Cursor, input: [U8], element: &SchemaElement) ParquetFailure! {
+parse_logical: fn(cursor: ^Cursor, input: [U8], element: ^SchemaElement) ParquetFailure! {
     last := 0
     loop {
         field: cursor.field(input, last) ?? return Err(err)
@@ -378,7 +378,7 @@ parse_logical: fn(cursor: &Cursor, input: [U8], element: &SchemaElement) Parquet
     }
 }
 
-parse_schema_element: fn(cursor: &Cursor, input: [U8]) -> SchemaElement ParquetFailure! {
+parse_schema_element: fn(cursor: ^Cursor, input: [U8]) -> SchemaElement ParquetFailure! {
     element := SchemaElement{physical: -1, type_length: 0, repetition: -1, name: "", children: 0, converted: -1, logical: -1, logical_width: 0, logical_signed: true}
     has_name := false
     last := 0
@@ -406,7 +406,7 @@ parse_schema_element: fn(cursor: &Cursor, input: [U8]) -> SchemaElement ParquetF
     Ok(element)
 }
 
-parse_column_meta: fn(cursor: &Cursor, input: [U8], column: &ColumnMeta) ParquetFailure! {
+parse_column_meta: fn(cursor: ^Cursor, input: [U8], column: ^ColumnMeta) ParquetFailure! {
     seen := [Bool]{false, false, false, false, false, false}
     last := 0
     loop {
@@ -444,7 +444,7 @@ parse_column_meta: fn(cursor: &Cursor, input: [U8], column: &ColumnMeta) Parquet
     }
 }
 
-parse_column_chunk: fn(cursor: &Cursor, input: [U8]) -> ColumnMeta ParquetFailure! {
+parse_column_chunk: fn(cursor: ^Cursor, input: [U8]) -> ColumnMeta ParquetFailure! {
     column := ColumnMeta{physical: -1, path: [String]{}, codec: 0, values: 0, compressed_size: 0, data_offset: 0, dictionary_offset: -1, external: false}
     has_meta := false
     last := 0
@@ -466,7 +466,7 @@ parse_column_chunk: fn(cursor: &Cursor, input: [U8]) -> ColumnMeta ParquetFailur
     Ok(column)
 }
 
-parse_row_group: fn(cursor: &Cursor, input: [U8]) -> RowGroup ParquetFailure! {
+parse_row_group: fn(cursor: ^Cursor, input: [U8]) -> RowGroup ParquetFailure! {
     group := RowGroup{columns: [ColumnMeta]{}, rows: -1}
     last := 0
     loop {
@@ -490,7 +490,7 @@ parse_row_group: fn(cursor: &Cursor, input: [U8]) -> RowGroup ParquetFailure! {
     Ok(group)
 }
 
-parse_file_meta: fn(cursor: &Cursor, input: [U8]) -> FileMeta ParquetFailure! {
+parse_file_meta: fn(cursor: ^Cursor, input: [U8]) -> FileMeta ParquetFailure! {
     meta := FileMeta{schema: [SchemaElement]{}, rows: -1, groups: [RowGroup]{}}
     has_groups := false
     last := 0
@@ -525,7 +525,7 @@ parse_file_meta: fn(cursor: &Cursor, input: [U8]) -> FileMeta ParquetFailure! {
     Ok(meta)
 }
 
-parse_page_header: fn(cursor: &Cursor, input: [U8]) -> PageHeader ParquetFailure! {
+parse_page_header: fn(cursor: ^Cursor, input: [U8]) -> PageHeader ParquetFailure! {
     header := PageHeader{kind: -1, uncompressed: -1, compressed: -1, values: 0, encoding: 0, level_encoding: 3, has_data: false, has_dictionary: false}
     last := 0
     loop {
@@ -627,7 +627,7 @@ int96_instant: fn(julian: Int, nanos: Int) -> Dyn Never! {
 }
 
 // `count` PLAIN values of `leaf` from `page[cursor.pos..<cursor.end]`.
-plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] ParquetFailure! {
+plain_values: fn(page: [U8], cursor: ^Cursor, leaf: Leaf, count: Int) -> [Dyn] ParquetFailure! {
     values := [Dyn]{}
     if leaf.physical == PARQUET_BOOLEAN {
         bytes: (count + 7) >> 3
@@ -680,7 +680,7 @@ plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] P
 
 // `count` values of `width` bits from the RLE/bit-packed hybrid run list
 // in `data[cursor.pos..<cursor.end]`.
-hybrid: fn(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] ParquetFailure! {
+hybrid: fn(data: [U8], cursor: ^Cursor, width: Int, count: Int) -> [Int] ParquetFailure! {
     out := [Int]{}
     value_bytes: (width + 7) >> 3
     loop out.len() < count {
@@ -775,7 +775,7 @@ snappy: fn(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFail
 }
 
 // One data page's values appended to `values`; nulls are Dyn.Null.
-data_page: fn(page: [U8], header: PageHeader, leaf: Leaf, dictionary: &[Dyn], has_dictionary: Bool, values: &[Dyn]) ParquetFailure! {
+data_page: fn(page: [U8], header: PageHeader, leaf: Leaf, dictionary: ^[Dyn], has_dictionary: Bool, values: ^[Dyn]) ParquetFailure! {
     count: header.values
     cursor := Cursor{pos: 0, end: page.len()}
     present := [Bool]{}
@@ -963,7 +963,7 @@ read_rows: fn(input: [U8], max_rows: Int, max_page_bytes: Int) -> Dyn ParquetFai
     Ok(Dyn.Array(rows))
 }
 
-test_varint: fn(out: &[U8], value: Int) {
+test_varint: fn(out: ^[U8], value: Int) {
     rest := value
     loop rest >= 128 {
         out.push(U8{(rest & 127) + 128})
@@ -973,17 +973,17 @@ test_varint: fn(out: &[U8], value: Int) {
 }
 
 // A Thrift field header in long form: the type nibble, then the zigzag id.
-test_field: fn(out: &[U8], id: Int, kind: Int) {
+test_field: fn(out: ^[U8], id: Int, kind: Int) {
     out.push(U8{kind})
     test_varint(out, id * 2)
 }
 
-test_int: fn(out: &[U8], id: Int, kind: Int, value: Int) {
+test_int: fn(out: ^[U8], id: Int, kind: Int, value: Int) {
     test_field(out, id, kind)
     test_varint(out, if value >= 0 -> value * 2 else -> -value * 2 - 1)
 }
 
-test_text: fn(out: &[U8], id: Int, text: String) {
+test_text: fn(out: ^[U8], id: Int, text: String) {
     test_field(out, id, THRIFT_BINARY)
     bytes: text.bytes()
     test_varint(out, bytes.len())

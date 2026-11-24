@@ -26,11 +26,11 @@ cli_metadata_zeros: fn(length: Int) -> [U8] Never! {
     loop _ in 0..<length -> U8{0}
 }
 
-cli_metadata_copy: fn(out: &[U8], at: Int, bytes: [U8]) Never! {
+cli_metadata_copy: fn(out: ^[U8], at: Int, bytes: [U8]) Never! {
     loop index in 0..<bytes.len() -> out[at + index] = bytes[index]
 }
 
-cli_metadata_number: fn(out: &[U8], at: Int, width: Int, value: U64, little: Bool) Never! {
+cli_metadata_number: fn(out: ^[U8], at: Int, width: Int, value: U64, little: Bool) Never! {
     loop index in 0..<width {
         shift: if little -> index * 8 else -> (width - index - 1) * 8
         out[at + index] = U8{(value >> shift) & U64{255}}
@@ -124,7 +124,7 @@ cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8
     out
 }
 
-cli_metadata_leb: fn(out: &[U8], value: Int) Never! {
+cli_metadata_leb: fn(out: ^[U8], value: Int) Never! {
     rest := value
     loop {
         byte := U8{rest & 127}

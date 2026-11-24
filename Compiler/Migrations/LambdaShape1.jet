@@ -124,7 +124,7 @@ LambdaShapeQuoted: struct {
 // A Jet program quoted in a string literal without interpolation holes or
 // unread escapes, rewritten in place when the result parses cleanly and
 // declares an item, so prose that happens to hold an arrow stays as written.
-lambda_shape1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[String]) -> LambdaShapeQuoted? {
+lambda_shape1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: ^[String]) -> LambdaShapeQuoted? {
     raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
     if !raw.contains("->") && !raw.contains("-[") -> return None
     quote: if token.kind == TOKEN_RAW_STRING -> lambda_shape1_fence(raw, 96) else -> lambda_shape1_fence(raw, 34)
@@ -148,7 +148,7 @@ lambda_shape1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[Str
 
 // Finds and rewrites the lambdas among one token run: a file's code tokens or
 // one interpolation hole's, whose enclosing bracket is `outer`.
-lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], outer: Int, edits: &[LambdaShapeEdit], skipped: &[String]) -> Int {
+lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], outer: Int, edits: ^[LambdaShapeEdit], skipped: ^[String]) -> Int {
     tokens: lexer_without_comments(raw)
     rewritten := 0
     stack := [Int]{}
@@ -217,7 +217,7 @@ LAMBDA_SHAPE_SPAN: -1
 
 // Text read whole (a string literal or an expected output's line without code
 // spans) reads as a code span, except that nothing leads at its start: a text
-// such as `(item) -> T` or `(&self) -> Bool` is a signature.
+// such as `(item) -> T` or `(^self) -> Bool` is a signature.
 LAMBDA_SHAPE_TEXT: -2
 
 // Whether the token at `index` stands where a value starts, so a `(…)` group or
@@ -298,7 +298,7 @@ lambda_shape1_capital: fn(bytes: [U8], token: Token) -> Bool {
 // line's pairs of `mark` enclose: backticks around code spans, or single
 // quotes around a command line's Jet argument. Inside a string literal
 // (`doubled`) the inserted braces are doubled. Returns how many it rewrote.
-lambda_shape1_spans: fn(bytes: [U8], start: Int, end: Int, mark: Int, doubled: Bool, edits: &[LambdaShapeEdit]) -> Int {
+lambda_shape1_spans: fn(bytes: [U8], start: Int, end: Int, mark: Int, doubled: Bool, edits: ^[LambdaShapeEdit]) -> Int {
     rewritten := 0
     index := start
     loop index < end {
@@ -327,7 +327,7 @@ lambda_shape1_spans: fn(bytes: [U8], start: Int, end: Int, mark: Int, doubled: B
 // A string literal without code spans read whole as one, for a quoted
 // fragment such as `parse("xs.map((x) -> x + 1)")`. A literal with escapes is
 // read through them and written back quoted.
-lambda_shape1_snippet: fn(bytes: [U8], token: Token, edits: &[LambdaShapeEdit]) -> Int {
+lambda_shape1_snippet: fn(bytes: [U8], token: Token, edits: ^[LambdaShapeEdit]) -> Int {
     raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
     if !raw.contains("->") && !raw.contains("-[") -> return 0
     raw_string: token.kind == TOKEN_RAW_STRING
@@ -352,7 +352,7 @@ lambda_shape1_snippet: fn(bytes: [U8], token: Token, edits: &[LambdaShapeEdit]) 
 
 // A text without code spans: a command line's single-quoted arguments
 // (`jet -e '…'`) when it has any, otherwise the whole text as one span.
-lambda_shape1_plain: fn(bytes: [U8], from: Int, to: Int, doubled: Bool, edits: &[LambdaShapeEdit]) -> Int {
+lambda_shape1_plain: fn(bytes: [U8], from: Int, to: Int, doubled: Bool, edits: ^[LambdaShapeEdit]) -> Int {
     loop at in from..<to {
         if bytes[at] == 39 -> return lambda_shape1_spans(bytes, from, to, 39, doubled, edits)
     }
@@ -362,7 +362,7 @@ lambda_shape1_plain: fn(bytes: [U8], from: Int, to: Int, doubled: Bool, edits: &
 // Rewrites the arrow lambdas of one code span or text, the bytes from `from`
 // to `to`, all or none; `mode` is `LAMBDA_SHAPE_SPAN` or `LAMBDA_SHAPE_TEXT`.
 // Returns how many it rewrote.
-lambda_shape1_span: fn(bytes: [U8], from: Int, to: Int, mode: Int, doubled: Bool, edits: &[LambdaShapeEdit]) -> Int {
+lambda_shape1_span: fn(bytes: [U8], from: Int, to: Int, mode: Int, doubled: Bool, edits: ^[LambdaShapeEdit]) -> Int {
     // A `…` placeholder reads as a name of its three bytes.
     written: String.from_bytes(bytes[from..<to]) ?? ""
     placeholder: written.contains("…") && !written.contains("___")
@@ -444,7 +444,7 @@ lambda_shape1_continues: fn(tokens: [Token], index: Int) -> Bool {
 // The edits for the lambda whose head starts at token `first`, whose
 // parameters end at token `params_end` and whose body runs from token `body`
 // to byte `end`; or the reason it was left alone.
-lambda_shape1_site_edits: fn(bytes: [U8], tokens: [Token], first: Int, params_end: Int, body: Int, end: Int, edits: &[LambdaShapeEdit]) -> String {
+lambda_shape1_site_edits: fn(bytes: [U8], tokens: [Token], first: Int, params_end: Int, body: Int, end: Int, edits: ^[LambdaShapeEdit]) -> String {
     start: tokens[first].span.start
     bare: tokens[first].kind == TOKEN_IDENT
     head_end: tokens[params_end].span.end
@@ -478,7 +478,7 @@ lambda_shape1_site_edits: fn(bytes: [U8], tokens: [Token], first: Int, params_en
 // Applies `edits`; None when two overlap. At one offset, insertions precede
 // replacements, and the closers of nested lambdas that end together close the
 // innermost (latest-starting) first.
-lambda_shape1_apply: fn(bytes: [U8], edits: &[LambdaShapeEdit]) -> String? {
+lambda_shape1_apply: fn(bytes: [U8], edits: ^[LambdaShapeEdit]) -> String? {
     edits.sort_by(fn(left, right) {
         if {
             left.start != right.start -> left.start <=> right.start

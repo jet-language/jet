@@ -112,19 +112,19 @@ framed: fn(kind: Int, serial: Int, fields: [U8], body: [U8]) -> [U8] {
 }
 
 // A header field holding a string (type `kind` 115) or an object path (111).
-text_field: fn(out: &[U8], code: Int, kind: Int, text: String) {
+text_field: fn(out: ^[U8], code: Int, kind: Int, text: String) {
     pad(out, 8)
     append(out, [U8]{U8{code}, U8{1}, U8{kind}, U8{0}})
     put_text(out, text)
 }
 
-number_field: fn(out: &[U8], code: Int, n: Int) {
+number_field: fn(out: ^[U8], code: Int, n: Int) {
     pad(out, 8)
     append(out, [U8]{U8{code}, U8{1}, U8{117}, U8{0}})
     put_word(out, n)
 }
 
-signature_field: fn(out: &[U8], signature: String) {
+signature_field: fn(out: ^[U8], signature: String) {
     pad(out, 8)
     append(out, [U8]{U8{8}, U8{1}, U8{103}, U8{0}})
     out.push(U8{signature.bytes().len()})
@@ -140,7 +140,7 @@ text_value: fn(text: String) -> [U8] {
 }
 
 // A string at a 4-byte boundary: its length, its bytes and a NUL.
-put_text: fn(out: &[U8], text: String) {
+put_text: fn(out: ^[U8], text: String) {
     pad(out, 4)
     put_word(out, text.bytes().len())
     append(out, text.bytes())
@@ -148,16 +148,16 @@ put_text: fn(out: &[U8], text: String) {
 }
 
 // A little-endian 32-bit word at a 4-byte boundary.
-put_word: fn(out: &[U8], n: Int) {
+put_word: fn(out: ^[U8], n: Int) {
     pad(out, 4)
     loop shift in ([Int]{0, 8, 16, 24}) -> out.push(U8{(n >> shift) & 255})
 }
 
-pad: fn(out: &[U8], to: Int) {
+pad: fn(out: ^[U8], to: Int) {
     loop out.len() % to != 0 -> out.push(U8{0})
 }
 
-append: fn(out: &[U8], bytes: [U8]) {
+append: fn(out: ^[U8], bytes: [U8]) {
     loop b in bytes -> out.push(b)
 }
 

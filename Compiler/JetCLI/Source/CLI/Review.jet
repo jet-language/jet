@@ -413,7 +413,7 @@ jet_cli_review_key: fn(kind: String, value: String, module_path: String?) -> Str
 
 // `pair_by_key`: pair the facts not yet matched whose stage key is unique on
 // both sides and whose names agree.
-jet_cli_review_pair: fn(before: [SemDefinitionFact], after: [SemDefinitionFact], matched_before: &[Int:Bool], matched_after: &[Int:Bool], stage: Int, pairs: &[JetCLIReviewPair]) Never! {
+jet_cli_review_pair: fn(before: [SemDefinitionFact], after: [SemDefinitionFact], matched_before: ^[Int:Bool], matched_after: ^[Int:Bool], stage: Int, pairs: ^[JetCLIReviewPair]) Never! {
     old_first := [String:Int]{}
     old_count := [String:Int]{}
     new_first := [String:Int]{}
@@ -537,7 +537,7 @@ jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIRevi
 }
 
 // `append_effect_operations`: the last row of a repeated function wins.
-jet_cli_review_effect_ops: fn(operations: &[JetCLIReviewOp], before: [SemEffect], after: [SemEffect]) Never! {
+jet_cli_review_effect_ops: fn(operations: ^[JetCLIReviewOp], before: [SemEffect], after: [SemEffect]) Never! {
     old_by_function := [String:Int]{}
     new_by_function := [String:Int]{}
     functions := [String]{}
@@ -622,7 +622,7 @@ jet_cli_review_optional_order: fn(left: String?, right: String?) -> Ordering Nev
 }
 
 // `sort_review_operations` (and the plain sort without alignment).
-jet_cli_review_sort: fn(operations: &[JetCLIReviewOp], include_alignment: Bool) Never! {
+jet_cli_review_sort: fn(operations: ^[JetCLIReviewOp], include_alignment: Bool) Never! {
     operations.sort_by(fn(left: JetCLIReviewOp, right: JetCLIReviewOp) { (left.stable_id <=> right.stable_id).then(left.identity <=> right.identity).then(jet_cli_review_kind_rank(left.kind) <=> jet_cli_review_kind_rank(right.kind)).then(jet_cli_review_optional_order(left.before, right.before)).then(jet_cli_review_optional_order(left.after, right.after)).then(if include_alignment -> jet_cli_review_alignment_rank(left.alignment) <=> jet_cli_review_alignment_rank(right.alignment) else -> 0 <=> 0) })
 }
 
@@ -744,7 +744,7 @@ jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLIS
 
 // ---- authority (authority_facts / authority_diff) ----
 
-jet_cli_review_slot: fn(facts: &[JetCLIReviewFact], slots: &[String:Int], key: String) -> Int Never! {
+jet_cli_review_slot: fn(facts: ^[JetCLIReviewFact], slots: ^[String:Int], key: String) -> Int Never! {
     if slots.get(key) == .Val(slot) -> return slot
     slot: facts.len()
     slots[key.copy()] = slot
@@ -1465,7 +1465,7 @@ jet_cli_failure_name: fn(alias: String, local: String) -> String Never! {
 // The propagation sites of `function`'s own body: a lambda's sites pass
 // failures out of the lambda, and a call of a function the failure solve
 // proved infallible passes nothing up.
-jet_cli_failure_points: fn(interner: Interner, doc_module: JetDriverDocModule, function: FnBody, aliases: [String:String], infallible: [String:Bool], points: &[JetCLIFailurePoint]) Never! {
+jet_cli_failure_points: fn(interner: Interner, doc_module: JetDriverDocModule, function: FnBody, aliases: [String:String], infallible: [String:Bool], points: ^[JetCLIFailurePoint]) Never! {
     tree: function.tree
     lambdas := [Span]{}
     loop node in tree.nodes {

@@ -11,7 +11,7 @@ TDigest: struct {
     new: fn() -> TDigest Never! { TDigest{centroids: [Centroid]{}} }
 
     /// Record one sample with the shipped unit weight.
-    add: fn(&self, value: Float) Never! { add_sample(self.centroids, value) }
+    add: fn(^self, value: Float) Never! { add_sample(self.centroids, value) }
 
     /// Return the first centroid whose cumulative weight reaches q * total.
     quantile: fn(self, q: Float) -> Float Never! { step_quantile(self.centroids, q) }
@@ -37,7 +37,7 @@ insertion_index: fn(values: [Centroid], value: Float) -> Int Never! {
     if values[base].mean < value -> base + 1 else -> base
 }
 
-add_sample: fn(values: &[Centroid], value: Float) Never! {
+add_sample: fn(values: ^[Centroid], value: Float) Never! {
     index: insertion_index(values, value)
     values.push(Centroid{mean: value, weight: Float{1.0}})
     at := values.len() - 1

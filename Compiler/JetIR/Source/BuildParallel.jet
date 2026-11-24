@@ -25,7 +25,7 @@ ir_para_signature: fn(ty: Type) -> IRParaSignature? Never! {
 
 // The id of parallel helper `role` for `ty`, built on first use; -1 with `b`
 // failed when its body cannot be built.
-ir_para_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
+ir_para_helper: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
     key: "para.{role}<{type_carrier_identity(ty)}>"
     if ir_keyed_function(m, key) == .Val(known) {
         if known < 0 -> return ir_fail_slot(b, span, "para.{role} of {ir_type_name(ty)}")
@@ -55,7 +55,7 @@ PARA_EVERY_WORKER: 1073741824
 
 // Opens a loop over the native words begin..<end; ir_walk_close advances
 // and closes it.
-ir_para_range_open: fn(m: &IRModule, a: &IRBuilder, begin: Int, end: Int) -> Int Never! {
+ir_para_range_open: fn(m: ^IRModule, a: ^IRBuilder, begin: Int, end: Int) -> Int Never! {
     word_row: ir_word_row(m)
     index: ir_temp(m, a, word_row)
     ir_emit(a.f, IROp.Copy, index, begin, -1, -1, a.line)
@@ -69,7 +69,7 @@ ir_para_range_open: fn(m: &IRModule, a: &IRBuilder, begin: Int, end: Int) -> Int
 // para.map(env, begin, end): env lends the closure at 0, the input buffer at
 // 8 and the output buffer at 16. Each item in the range is lent to the
 // closure and its result moves into the item's own output slot.
-ir_para_map_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_para_map_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     signature: ir_para_signature(ty) ?? return ir_fail(a, span, "parallel callback through {ir_type_name(ty)}")
     if signature.params.len() != 1 {
         return ir_fail(a, span, "parallel callback through {ir_type_name(ty)}")
@@ -108,7 +108,7 @@ ir_para_map_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: 
 // closure at 8, the input buffer at 16 and the accumulator buffer at 24. The
 // range is one 64-item chunk: its accumulator starts from a fresh seed and
 // steps over the chunk's items in source order into slot begin / 64.
-ir_para_fold_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+ir_para_fold_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, ty: Type, span: Span) Never! {
     fields: if ir_untag(ty) == .Tuple(rows) -> rows else -> {
         return ir_fail(a, span, "parallel fold through {ir_type_name(ty)}")
     }
@@ -155,7 +155,7 @@ ir_para_fold_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span:
 // The Result box of the fold's checked type `ty` (row `box_row`) that
 // calling `callback` (type `callback_ty`) with `args` makes: a fallible
 // callback's own box, or a total callback's value (row `acc_row`) as Ok.
-ir_para_fold_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callback: Int, callback_ty: Type, args: [Int], ty: Type, box_row: Int, acc_row: Int, span: Span) -> Int Never! {
+ir_para_fold_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, callback: Int, callback_ty: Type, args: [Int], ty: Type, box_row: Int, acc_row: Int, span: Span) -> Int Never! {
     ret: ir_closure_result(callback_ty) ?? return ir_fail_slot(b, span, "parallel fold callback {ir_type_name(callback_ty)}")
     if ir_untag(ret) == .Result(_, err) {
         if !ir_never_type(err) -> return ir_call_closure(m, p, b, callback, args, box_row)
@@ -168,7 +168,7 @@ ir_para_fold_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callback: Int, 
 // checked Result type): as para.fold, but chunk slot begin / 64 holds the
 // chunk's Result box. The chunk stops stepping at its first failure, whose
 // box stays in the slot.
-ir_para_fold_try_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, fields: [TypeTupleField], span: Span) Never! {
+ir_para_fold_try_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, fields: [TypeTupleField], span: Span) Never! {
     ty: fields[2].ty
     acc_ty: if ir_untag(ty) == .Result(ok, _) -> ok else -> {
         return ir_fail(a, span, "parallel fold to {ir_type_name(ty)}")
@@ -218,7 +218,7 @@ ir_para_fold_try_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, fields: [Ty
 }
 
 // Moves `value` of type row `row` into `result`'s own storage.
-ir_para_move_into: fn(m: &IRModule, b: &IRBuilder, result: Int, value: Int, row: Int) Never! {
+ir_para_move_into: fn(m: ^IRModule, b: ^IRBuilder, result: Int, value: Int, row: Int) Never! {
     if m.types[row].kind == .Aggregate {
         ir_emit(b.f, IROp.CopyBytes, -1, result, value, m.types[row].size, b.line)
     } else {
@@ -229,7 +229,7 @@ ir_para_move_into: fn(m: &IRModule, b: &IRBuilder, result: Int, value: Int, row:
 }
 
 // Zeroes the List header at `list`.
-ir_para_list_clear: fn(m: &IRModule, b: &IRBuilder, list: Int) Never! {
+ir_para_list_clear: fn(m: ^IRModule, b: ^IRBuilder, list: Int) Never! {
     zero: ir_word_const(m, b, 0)
     loop offset in ([Int]{0, 8, 16}) -> ir_emit(b.f, IROp.Store, -1, list, offset, zero, b.line)
 }
@@ -238,7 +238,7 @@ ir_para_list_clear: fn(m: &IRModule, b: &IRBuilder, list: Int) Never! {
 // `xs.para_fold(seed, step, merge)` over the List at `list`. `operands` are
 // the built arguments in order; `args` the checked ones, whose callback type
 // (I3, as the sequential methods read it) gives the helper's signature.
-ir_closure_parallel: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], args: [Int], span: Span) -> Int Never! {
+ir_closure_parallel: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], args: [Int], span: Span) -> Int Never! {
     if m.types[element].kind == .Unit {
         return ir_fail_slot(b, span, "closure method {ir_closure_op_name(operation)} over Unit items")
     }
@@ -367,7 +367,7 @@ IRParaSelection: struct {
 // `dropped`; the lowest-index Err becomes the call's Err and the selection
 // is dropped, so no partial result escapes. Every box and the slot buffer
 // are freed.
-ir_para_select_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, item_ty: Type, selection: IRParaSelection, list: Int, element: Int, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
+ir_para_select_settle: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, item_ty: Type, selection: IRParaSelection, list: Int, element: Int, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
     err_ty := Type.Int
     if ir_untag(item_ty) == .Result(ok, err) {
         if ir_untag(ok) != Type.Bool {
@@ -438,7 +438,7 @@ ir_para_select_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, i
 // mapped List; the lowest-index Err becomes the call's Err and drops the List
 // built so far, and every later payload ends, so no partial result escapes.
 // Every box and the slot buffer are freed.
-ir_para_map_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list_ty: Type, item_ty: Type, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
+ir_para_map_settle: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, list_ty: Type, item_ty: Type, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
     ok_ty := Type.Int
     err_ty := Type.Int
     if ir_untag(item_ty) == .Result(ok, err) {
@@ -511,7 +511,7 @@ ir_para_map_settle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
 // boxes then merge up the same fixed tree, where a failed left box wins over
 // its right one and a failed right box over a successful left, so the
 // lowest-index failure becomes the call's Err and no accumulator escapes.
-ir_para_fold_try: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, acc_ty: Type, length: Int, data: Int, operands: [Int], span: Span) -> Int Never! {
+ir_para_fold_try: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, acc_ty: Type, length: Int, data: Int, operands: [Int], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     pointer_row: ir_pointer_row(m)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -612,7 +612,7 @@ ir_para_fold_try: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, acc_ty
 // seed in source order (para.fold), then adjacent chunk results merge up a
 // fixed tree, [[c0|c1]|[c2|c3]]; the grouping is part of the contract. An
 // empty List folds to one seed.
-ir_para_fold: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: Int, data: Int, operands: [Int], span: Span) -> Int Never! {
+ir_para_fold: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, length: Int, data: Int, operands: [Int], span: Span) -> Int Never! {
     if operands.len() != 3 {
         return ir_fail_slot(b, span, "para_fold without seed, step and merge callbacks")
     }

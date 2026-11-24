@@ -336,7 +336,7 @@ sema_shared_access_desugar_field_read: fn(handle: Expr, field: String, span: Spa
 }
 
 // Probe stored place types without checking (and therefore copying) the place.
-sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
+sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Type? {
     if value == {
         .Paren(inner, _, _) -> {
             return sema_shared_access_place_type(inner, environment, program, scopes)
@@ -371,7 +371,7 @@ sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment
 
 // The declared type of field `member` of a stored `owner_ty` struct, with the
 // struct's type arguments substituted.
-sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
+sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Type? {
     owner_name: if owner_ty == {
         .Named(name) | .Apply(name, _) -> name
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
@@ -399,7 +399,7 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
 
 // Split at the cell, retaining every field/index below it in the edit callback
 // whose payload parameter is `name`.
-sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> {handle: Expr, place: Expr, name: String}? {
+sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> {handle: Expr, place: Expr, name: String}? {
     ty := sema_shared_access_place_type(value, environment, program, scopes)
     if ty == .Val(known) && sema_shared_access_is_shared_type(known) {
         name: sema_shared_access_payload_name(scopes)
@@ -433,7 +433,7 @@ sema_shared_access_is_payload: fn(place: Expr, name: String) -> Bool Never! {
 // The locked-edit callback spans the whole written place, from its first
 // byte: the payload name the projection reads (spanned at the cell handle)
 // resolves against the callback parameter, which must not start after it.
-sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> {handle: Expr, target: LValue, span: Span, name: String}? {
+sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> {handle: Expr, target: LValue, span: Span, name: String}? {
     if target == {
         .Field(base, field, span) -> {
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
@@ -474,7 +474,7 @@ sema_shared_access_desugar_place_call: fn(handle: Expr, place: Expr, place_span:
 // the place below it, the call's span from the place's first byte, and the
 // edit callback's payload name. None when the receiver is not a written place
 // inside a cell.
-sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> {handle: Expr, place: Expr, place_span: Span, span: Span, name: String}? {
+sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> {handle: Expr, place: Expr, place_span: Span, span: Span, name: String}? {
     if receiver == .Place(value, access, place_span, _) {
         if access != PlaceAccess.Write -> return None
         projected: sema_shared_access_project_place(value, environment, program, scopes) ?? return None
@@ -487,7 +487,7 @@ sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment
 // A statement `cell.place.method(args)` whose arguments read shared state
 // binds those arguments first, inside one implicit transaction with the edit,
 // as a shared place assignment's right side does.
-sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Stmt? {
+sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Stmt? {
     if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
         if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, scopes) {
             return None
@@ -516,7 +516,7 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScope
 // that polls a field of a `Shared` handle, with no wait point, sleep, channel
 // receive, or write to the polled field in its body, spins a core. Runs on the
 // parsed condition and body before they are checked.
-sema_shared_access_lint_busy_wait: fn(tables: ASTTables, condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+sema_shared_access_lint_busy_wait: fn(tables: ASTTables, condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
     handles := [String]{}
     members := [String]{}
     ast_visit_expr(tables, condition, fn(expression: ExprNode) { sema_shared_access_note_field_read(handles, members, ast_expr(tables, expression)) })
@@ -554,7 +554,7 @@ sema_shared_access_name_is_shared: fn(name: String, scopes: SemaScopeTable) -> B
 }
 
 // A `handle.field` read whose base is a plain name: a poll candidate.
-sema_shared_access_note_field_read: fn(handles: &[String], members: &[String], expression: Expr) Never! {
+sema_shared_access_note_field_read: fn(handles: ^[String], members: ^[String], expression: Expr) Never! {
     if expression == .Field(base, member, _, _) {
         if sema_shared_access_without_parens_name(base) == .Val(name) {
             handles.push(name)
@@ -575,7 +575,7 @@ sema_shared_access_without_parens_name: fn(value: Expr) -> String? Never! {
 
 // Rust body_has_blocking_call: a call that can park the loop. A module or
 // receiver call (`time.sleep`, `rx.receive`) counts by its last segment.
-sema_shared_access_note_blocking_call: fn(found: &Bool, expression: Expr) Never! {
+sema_shared_access_note_blocking_call: fn(found: ^Bool, expression: Expr) Never! {
     if expression == {
         .Call(call, _) -> {
             parts: call.name.split(".").to_list()

@@ -992,7 +992,7 @@ phase_cpu: fn(run: Run, kind: String) -> Int {
 }
 
 // The phase kinds of `run`'s trace not yet in `kinds`, in order.
-add_kinds: fn(kinds: &[String], run: Run) {
+add_kinds: fn(kinds: ^[String], run: Run) {
     trace: run.trace ?? return
     loop phase in trace.phases {
         if !kinds.contains(phase.kind) -> kinds.push(phase.kind.copy())
@@ -2087,7 +2087,7 @@ digest_count: fn(program: Program) -> Int {
 }
 
 // The full lane's gates of one complete program; failures go to `failures`.
-cell_gate: fn(cell: AxisCell, budgets: BudgetFile, program: Program, failures: &[String]) -> Gate {
+cell_gate: fn(cell: AxisCell, budgets: BudgetFile, program: Program, failures: ^[String]) -> Gate {
     gate := Gate{program: program.id.copy(), determinism: "pass", memory: "-", threshold: "-", lines_per_second_median: 0, lines_per_second_min: 0, phase_budgets: None}
     distinct: digest_count(program)
     if distinct != 1 {
@@ -2134,7 +2134,7 @@ rate: fn(lines: Int, ns: Int) -> Int {
 nearest: fn(value: Float) -> Int { Int{math.floor(value + 0.5)} }
 
 // One quick-lane comparison; a regression or a missing value fails.
-compare: fn(out: &[Comparison], failures: &[String], program: String, arm: String, metric: String, previous: Int, current: Int, pct: Int, floor: Int) {
+compare: fn(out: ^[Comparison], failures: ^[String], program: String, arm: String, metric: String, previous: Int, current: Int, pct: Int, floor: Int) {
     limit: previous + previous * pct /% 100
     status: if {
         previous < floor -> "below-floor"
@@ -2444,7 +2444,7 @@ read_baseline: fn(path: String) -> Baseline? {
 
 // The quick lane's checks: determinism, then the baseline comparison
 // (skipped when --write-baseline records one).
-quick_checks: fn(options: Options, pin_dir: String, complete: [Program], receipt: &Receipt) {
+quick_checks: fn(options: Options, pin_dir: String, complete: [Program], receipt: ^Receipt) {
     loop program in complete {
         distinct: digest_count(program)
         if distinct != 1 {

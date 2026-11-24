@@ -10,13 +10,13 @@ Order: struct {
 
     start: fn(id: Int) -[]> Order.Draft { return Order{id: id} }
 
-    confirm: fn(self: &&Order.Draft) -[]> Order.Confirmed { return self }
+    confirm: fn(self: ^^Order.Draft) -[]> Order.Confirmed { return self }
 
-    cancel: fn(self: &&Order.Draft) -[]> Order.Canceled { return self }
+    cancel: fn(self: ^^Order.Draft) -[]> Order.Canceled { return self }
 
-    close: fn(self: &&Order.Confirmed) -[]> Order.Closed { return self }
+    close: fn(self: ^^Order.Confirmed) -[]> Order.Closed { return self }
 
-    archive: fn(self: &&Order.Canceled) -[]> Order.Closed { return self }
+    archive: fn(self: ^^Order.Canceled) -[]> Order.Closed { return self }
 
     ship: fn(self: Order.Confirmed) -[]> Int { return self.id }
 }

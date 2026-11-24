@@ -130,7 +130,7 @@ sema_core_role_case: fn(graph: SemaRegistrationGraph, kind: SemaCoreRoleKind, ro
 // `#Builtin.Role(.X)` of Compiler/Prelude/Traits.jet), already fills is
 // E1014, at its name. Gives the roles the owned traits and the loaded Core
 // functions fill, for sema_core_roles_check_filled.
-sema_core_roles_check: fn(graph: &SemaRegistrationGraph) -> SemaCoreRoleFill {
+sema_core_roles_check: fn(graph: ^SemaRegistrationGraph) -> SemaCoreRoleFill {
     kind: sema_core_role_kind(graph) ?? return SemaCoreRoleFill{kind: None, fillers: [String]{}}
     fillers := [String]{}
     loop variant in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {
@@ -167,7 +167,7 @@ sema_core_role_owned_filler: fn(role: String) -> String Never! {
 // With every Core module loaded (`jet check Core` and the Core library's
 // check), each case of jet_builtins' RoleKind that no owned trait and no
 // function fills is E1015, at the case.
-sema_core_roles_check_filled: fn(graph: &SemaRegistrationGraph, fill: SemaCoreRoleFill) {
+sema_core_roles_check_filled: fn(graph: ^SemaRegistrationGraph, fill: SemaCoreRoleFill) {
     kind: fill.kind ?? return
     problems := [Diagnostic]{}
     loop (index, variant) in graph.modules[kind.module_index].nominals[kind.nominal_index].variants {

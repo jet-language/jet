@@ -72,7 +72,7 @@ WebProgram: struct {
 // against the runtime partition's receipt `receipt`, and the manifest rows
 // of the two (Host.jet web_manifest). The module's last section is
 // `sourceMappingURL`, naming WEB_SOURCE_MAP_FILE.
-web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
+web_program: fn(program: ^^IRModule, receipt: String) -> WebProgram Never! {
     runtime_end := -1
     runtime_slots := -1
     armed := -1
@@ -175,7 +175,7 @@ WEB_VLQ_DIGITS: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+
 
 // `value` as a source map base64 VLQ: the sign in the low bit, five bits a
 // digit, low digits first, bit 5 set on every digit but the last.
-web_vlq: fn(out: &[U8], value: Int) Never! {
+web_vlq: fn(out: ^[U8], value: Int) Never! {
     digits: WEB_VLQ_DIGITS.bytes()
     rest := if value < 0 -> ((0 - value) << 1) + 1 else -> value << 1
     loop {

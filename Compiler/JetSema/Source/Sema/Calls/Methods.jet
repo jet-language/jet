@@ -81,7 +81,7 @@ sema_call_shared_access_forbidden_diagnostic: fn(method: String, span: Span) -> 
     sema_error("E1116", span, "a shared value has no `.{method}(…)` method", "a shared value reads and writes like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step", "read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact {{ … }}`, or take an expert guard with `.guard_edit()`")
 }
 
-sema_call_distinct_raw_finish: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_distinct_raw_finish: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     base: sema_expr_distinct_facts(receiver_value.ty, environment, program, scopes)?.base ?? sema_expr_quantity_raw_base(receiver_value.ty, environment, program, scopes) ?? {
         diagnostics.push(sema_error("E0311", span, "`.raw()` is only valid on a distinct type value", "`.raw()` unwraps a distinct type to its base representation", "only call `.raw()` on a value whose type was declared as `Name: distinct BaseType`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -94,7 +94,7 @@ sema_call_distinct_raw_finish: fn(receiver_value: TExpr, args: [CallArg], span: 
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
-sema_call_try_distinct_raw_value: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_distinct_raw_value: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     gate_scope: sema_call_enter_gate(scopes, SemaKnowledgeGate.RawProjection)
     allowed: sema_scope_require_knowledge_gate(scopes, SemaKnowledgePlane.Range, SemaKnowledgeGate.RawProjection, span, diagnostics)
     finished: if allowed -> sema_call_distinct_raw_finish(receiver_value, args, span, expected, environment, program, scopes, diagnostics) else -> SemaMethodSpecialCheck{handled: true, value: None}
@@ -102,7 +102,7 @@ sema_call_try_distinct_raw_value: fn(receiver_value: TExpr, args: [CallArg], spa
     finished
 }
 
-sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Transaction"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -177,7 +177,7 @@ sema_call_builtin_host_lambda_diagnostic: fn(method: String, ty: Type, span: Spa
     sema_error("E0112", span, "`{method}` needs a lambda, not {type_name(ty)}", "`.{method}` runs a short function against the locked value", "write `.{method}(fn(value) {{ … }})`")
 }
 
-sema_call_try_builtin_host_route: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_builtin_host_route: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_shared_access_host_method(receiver_value.ty, method) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -241,7 +241,7 @@ sema_call_try_builtin_host_route: fn(receiver: Expr, receiver_value: TExpr, meth
 // handle: the narrowing family, each a new handle from the runtime route. A
 // `with` that sema can answer, and whose answer is no, is refused here
 // (sema_call_authority_narrowing).
-sema_call_try_authority_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_authority_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "with" && method != "without" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -278,7 +278,7 @@ sema_call_try_authority_method: fn(receiver: Expr, receiver_value: TExpr, method
 // refused here (E0712) and nothing runs. Any other `with` is the runtime's to
 // answer, which stops at the asking line under the same code. False when it
 // reports.
-sema_call_authority_narrowing: fn(receiver: Expr, receiver_value: TExpr, right: TExpr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_authority_narrowing: fn(receiver: Expr, receiver_value: TExpr, right: TExpr, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     requested: sema_call_authority_text(right) ?? return true
     if sema_call_authority_binding(receiver_value, scopes) == .Val(index) {
         if scopes.bindings[index].authority_rights == .Val(held) {
@@ -292,7 +292,7 @@ sema_call_authority_narrowing: fn(receiver: Expr, receiver_value: TExpr, right: 
 
 // Reports E0712 when none of `held`'s rights covers `requested`, the right
 // `with` asks `receiver` for. False when it reports.
-sema_call_authority_refuse: fn(receiver: Expr, held: SemaAuthorityRights, requested: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_authority_refuse: fn(receiver: Expr, held: SemaAuthorityRights, requested: String, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if authority_covers_any(held.rights, requested) -> return true
     subject := "the authority"
     if receiver == .Ident(written, _, _) -> subject = "`{written}`"
@@ -384,7 +384,7 @@ sema_call_authority_rights: fn(value: TExpr, environment: SemaScopeEnvironment, 
 // What `method`, `with` or `without`, asking `base` for `requested` holds:
 // for `with`, the requested right alone, or None when no held right covers
 // it; for `without`, the held rights the requested one doesn't cover.
-sema_call_authority_narrowed: fn(base: SemaAuthorityRights, method: String, requested: &&String, origin: &&String) -> SemaAuthorityRights? Never! {
+sema_call_authority_narrowed: fn(base: SemaAuthorityRights, method: String, requested: ^^String, origin: ^^String) -> SemaAuthorityRights? Never! {
     if method == "with" {
         if !authority_covers_any(base.rights, requested) -> return None
         return Val(SemaAuthorityRights{rights: [String]{requested}, origin: origin})
@@ -443,7 +443,7 @@ sema_call_authority_rights_words: fn(rights: [String]) -> String Never! {
 // Keeps the rights of the `Authority` that `statement`, the `:` binding
 // `name` just declared, binds, when sema can see them (see
 // SemaScopeBinding.authority_rights).
-sema_call_authority_note_binding: fn(scopes: &SemaScopeTable, name: String, statement: TStmt, environment: SemaScopeEnvironment) {
+sema_call_authority_note_binding: fn(scopes: ^SemaScopeTable, name: String, statement: TStmt, environment: SemaScopeEnvironment) {
     if statement == .Let(_, _, init, _, _, _) {
         rights: sema_call_authority_rights(init, environment, scopes) ?? return
         sema_scope_mark_authority_rights(scopes, name, rights)
@@ -454,7 +454,7 @@ sema_call_authority_note_binding: fn(scopes: &SemaScopeTable, name: String, stat
 // lists, in their canonical spelling (see SemaScopeBinding.authority_rights).
 // A cap that is not a vocabulary right (a package's own effect) leaves the
 // handle's rights to the runtime.
-sema_call_authority_note_scope_head: fn(scopes: &SemaScopeTable, name: String, caps: [NamedSpan], span: Span, environment: SemaScopeEnvironment) {
+sema_call_authority_note_scope_head: fn(scopes: ^SemaScopeTable, name: String, caps: [NamedSpan], span: Span, environment: SemaScopeEnvironment) {
     rights := [String]{}
     loop cap in caps -> rights.push(authority_parse_right(cap.name) ?? return)
     sema_scope_mark_authority_rights(scopes, name, SemaAuthorityRights{rights: authority_holds(rights), origin: sema_call_authority_origin("its `#FX(…)` head", span, environment)})
@@ -462,7 +462,7 @@ sema_call_authority_note_scope_head: fn(scopes: &SemaScopeTable, name: String, c
 
 // Only the canonical primitive selects this route. Nominal types named Int
 // and the Complex magnitude method retain their own method namespaces.
-sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != Type.Int || method != "abs" {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -489,7 +489,7 @@ sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: 
 // `core.time.__duration_in(d, .Seconds)`, the receiver its first argument and
 // the call's own (labeled) arguments after it. Another name or argument count
 // is no Duration method.
-sema_call_try_duration_source: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_duration_source: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if sema_expr_unwrap_tag(receiver_value.ty) != (Type.Named{name: "Duration"}) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -517,7 +517,7 @@ sema_call_try_duration_source: fn(receiver: Expr, receiver_value: TExpr, method:
 // One pre-candidate seam for compiler-owned method routes. Callers must pass
 // the already checked receiver so builtin identity comes from its Type rather
 // than from a user spelling or a basename.
-sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     hook: sema_call_try_type_param_hook_method(receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if hook.handled -> return hook
     compiler: sema_call_try_compiler_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -555,7 +555,7 @@ sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: 
 // bound that declares the method decides, so a registered trait bound keeps its
 // candidate path. When no bound declares it, the trait with the least name that
 // does is the missing bound (E0901).
-sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
     receiver_name: if receiver_value.ty == {
@@ -711,7 +711,7 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
     }
 }
 
-sema_call_append_local_methods: fn(output: &[SemaCallMethodCandidate], methods: [Func], module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], program: SemaProgramTables) Never! {
+sema_call_append_local_methods: fn(output: ^[SemaCallMethodCandidate], methods: [Func], module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], program: SemaProgramTables) Never! {
     loop method in methods {
         if sema_call_method_candidate_from_func(method, module_name, owner_name, owner_type, trait_name, type_args, fallback_source_file, fallback_origin, source_segments, program) == .Val(candidate_value) {
             output.push(candidate_value)
@@ -807,7 +807,7 @@ sema_call_local_method_defaults: fn(candidate: SemaCallMethodCandidate, binding:
     Val(defaults)
 }
 
-sema_call_method_candidate_ready: fn(candidate: SemaCallMethodCandidate, diagnostics: &[Diagnostic], span: Span) -> Bool {
+sema_call_method_candidate_ready: fn(candidate: SemaCallMethodCandidate, diagnostics: ^[Diagnostic], span: Span) -> Bool {
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
         diagnostics.push(sema_error("E0904", span, "cannot infer type arguments for `{candidate.method.name}`", "method inference requires argument and receiver types", "provide the method's type arguments explicitly"))
         return false
@@ -831,7 +831,7 @@ sema_call_method_candidate_with_inference: fn(candidate: SemaCallMethodCandidate
     Val(specialized)
 }
 
-sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandidate, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandidate, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
     if candidate.generic_params.len() == 0 -> return Val(candidate)
     return_type: sema_call_signature_return(candidate.signature) ?? return None
     caller_module: scopes.module_identity
@@ -844,7 +844,7 @@ sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandida
     sema_call_method_candidate_with_inference(candidate, result)
 }
 
-sema_call_collect_method_inference_facts: fn(candidate: SemaCallMethodCandidate, receiver_value: TExpr, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
+sema_call_collect_method_inference_facts: fn(candidate: SemaCallMethodCandidate, receiver_value: TExpr, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> SemaCallInferenceFacts Never! {
     // A lambda filling a method's failure parameter `E` binds it as it does
     // for a direct call.
     facts := sema_call_collect_inference_facts(params, binding, args, environment, program, scopes, state, tail_store, context)
@@ -886,7 +886,7 @@ sema_call_method_candidate_types_compatible: fn(candidate: SemaCallMethodCandida
     true
 }
 
-sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String, args: [CallArg], argument_types: [Type?], expected: Type?, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String, args: [CallArg], argument_types: [Type?], expected: Type?, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallMethodCandidate? {
     shape_matches := [SemaCallMethodCandidate]{}
     receiver_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
@@ -978,7 +978,7 @@ sema_call_host_callback_assignable: fn(required: Type, offered: Type, environmen
     sema_call_type_assignable(required, offered, environment, program)
 }
 
-sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], host_write: Bool, host_stored: Bool) -> SemaCallTypedArguments? {
+sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: ^[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic], host_write: Bool, host_stored: Bool) -> SemaCallTypedArguments? {
     if !sema_call_validate_binding(callee, params, binding, args, span, diagnostics) -> return None
     values := [TExpr]{}
     slots := [Int]{}
@@ -1017,7 +1017,7 @@ sema_call_builtin_trait: fn(graph: SemaRegistrationGraph, owner: SymbolID) -> Bo
     builtin.id == owner
 }
 
-sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_method_checked_from_value: fn(state: ^SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     // Declaration existence selects the method namespace. Check the chosen
     // registered identity's visibility here, never while filtering candidates.
     if program.registration_graph == .Val(graph) {
@@ -1063,7 +1063,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
 }
 
 // sema_call_method_checked_from_value past its visibility check and rules.
-sema_call_method_checked_visible: fn(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_method_checked_visible: fn(state: ^SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     resolved_candidate := candidate
     params := sema_call_params_from_type_after(resolved_candidate.signature, resolved_candidate.receiver_offset) ?? return None
     source_args := args
@@ -1240,7 +1240,7 @@ sema_call_method_checked_visible: fn(state: &SemaOwnershipState, receiver: Expr,
 // trait's route and never takes one implementation's infallibility. Nothing
 // is recorded when the call's type is the carrier itself or the trait's
 // route cannot fail.
-sema_call_trait_dispatch_failure: fn(method: TMethodRef, result: Type, program: SemaProgramTables, context: &SemaCheckContext) Never! {
+sema_call_trait_dispatch_failure: fn(method: TMethodRef, result: Type, program: SemaProgramTables, context: ^SemaCheckContext) Never! {
     owner: method.trait_owner ?? return
     if sema_expr_unwrap_tag(result) == .Result(_, _) {
         return
@@ -1282,16 +1282,16 @@ sema_call_method_summary_signature: fn(candidate: SemaCallMethodCandidate, scope
     None
 }
 
-sema_call_check_method_candidate_from_value_owned: fn(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_check_method_candidate_from_value_owned: fn(state: ^SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     sema_call_method_checked_from_value(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
 }
 
-sema_call_check_method_candidate_owned: fn(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+sema_call_check_method_candidate_owned: fn(state: ^SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaCallChecked? {
     receiver_value: sema_check_expression(receiver, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     sema_call_method_checked_from_value(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
 }
 
-sema_call_check_method: fn(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_check_method: fn(state: ^SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     receiver_value: sema_check_expression(receiver, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     routed_method: core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     candidates := sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
@@ -1373,7 +1373,7 @@ SEMA_APP_ADAPTER_PARAM: "__jet_app_call"
 
 // The adapter over the named handler `name`. `None` after an E2810 when the
 // handler's inputs cannot come from an App call.
-sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistrationFunction, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Expr? {
+sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistrationFunction, graph: SemaRegistrationGraph, span: Span, diagnostics: ^[Diagnostic]) -> Expr? {
     call: SEMA_APP_ADAPTER_PARAM
     params: function.declaration.params
     boundary: method == "pending" || method == "not_found" || method == "error"
@@ -1441,7 +1441,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
 
 // The named function an App registration argument passes, after an E2810
 // when it is not one.
-sema_app_named_handler: fn(method: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> {name: String, function: SemaRegistrationFunction}? {
+sema_app_named_handler: fn(method: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> {name: String, function: SemaRegistrationFunction}? {
     name: sema_http_mux_callee(argument.expr) ?? {
         diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
         return None
@@ -1533,7 +1533,7 @@ SemaAppRoutePart: struct {
 // chain and its own earlier files, so each pair is checked once, at the later
 // call. A pair reports as the graph orders it: builder entries before
 // convention files, and otherwise in chain order. Whether it reported.
-sema_app_check_route_registrations: fn(receiver: Expr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+sema_app_check_route_registrations: fn(receiver: Expr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph, diagnostics: ^[Diagnostic]) -> Bool {
     roots: sema_app_route_roots(environment, graph)
     current := [SemaAppRouteRegistration]{}
     if method == "routes" {
@@ -1573,7 +1573,7 @@ sema_app_builder_registration: fn(method: String, args: [CallArg], span: Span) -
     Val(SemaAppRouteRegistration{verb: verb, path: sema_app_canonical_route_path(text), provenance: "builder", span: span, convention: false})
 }
 
-sema_app_route_conflict: fn(pool: [SemaAppRouteRegistration], registration: SemaAppRouteRegistration, diagnostics: &[Diagnostic]) -> Bool {
+sema_app_route_conflict: fn(pool: [SemaAppRouteRegistration], registration: SemaAppRouteRegistration, diagnostics: ^[Diagnostic]) -> Bool {
     loop previous in pool {
         if previous.verb != registration.verb || previous.path != registration.path -> next
         swap: previous.convention && !registration.convention
@@ -1607,7 +1607,7 @@ sema_app_route_duplicate: fn(first: SemaAppRouteRegistration, second: SemaAppRou
 // The rows the builder chain ending at `expression` registers, in chain
 // order. Convention files a root cannot route are left out; their own call
 // reports them.
-sema_app_chain_registrations: fn(expression: Expr, roots: [AppRouteRoot], registrations: &[SemaAppRouteRegistration]) {
+sema_app_chain_registrations: fn(expression: Expr, roots: [AppRouteRoot], registrations: ^[SemaAppRouteRegistration]) {
     if expression == .MethodCall(receiver, method, method_span, _, _, args, _) {
         sema_app_chain_registrations(receiver, roots, registrations)
         if method == "routes" && args.len() == 1 {
@@ -1629,7 +1629,7 @@ sema_app_chain_registrations: fn(expression: Expr, roots: [AppRouteRoot], regist
 
 // The routes the convention files under one `.routes(from:)` root register,
 // reporting each file the root cannot route (E2806).
-sema_app_expand_route_root: fn(roots: [AppRouteRoot], name: String, span: Span, diagnostics: &[Diagnostic]) -> [SemaAppRouteRegistration] {
+sema_app_expand_route_root: fn(roots: [AppRouteRoot], name: String, span: Span, diagnostics: ^[Diagnostic]) -> [SemaAppRouteRegistration] {
     registrations := [SemaAppRouteRegistration]{}
     found := AppRouteRoot?{None}
     loop root in roots {
@@ -1716,7 +1716,7 @@ sema_app_routes_overlap: fn(left_path: String, right_path: String) -> Bool {
 // beside the method's own check: `.routes(from:)` is Core's declared method,
 // so the check site calls it before declared-method resolution. Whether it
 // reported.
-sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     if !sema_app_is_route_table(receiver_value.ty, environment, program) -> return false
     graph: program.registration_graph ?? return false
     sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
@@ -1751,7 +1751,7 @@ sema_web_type_marked: fn(ty: Type, name: String, environment: SemaScopeEnvironme
 // The App capability check for a browser feature: `.csr`, `.island` and the
 // hydration modes need target JS (a `Web` or `JS` build); a function with no
 // resolved web target is not checked.
-sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
+sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: ^[Diagnostic]) {
     if !sema_app_is_route_table(receiver_value.ty, environment, program) {
         return
     }
@@ -1771,7 +1771,7 @@ sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: S
 // nothing for a page that is closed, so `.background` on an app graph whose
 // resolved target is the web output is refused, never dropped, and the fix
 // names the server jobs that replace it.
-sema_call_app_native_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
+sema_call_app_native_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: ^[Diagnostic]) {
     if !sema_app_is_graph(receiver_value.ty, environment, program) {
         return
     }
@@ -1816,7 +1816,7 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 // needs its purpose (sema_call_app_permission_purpose): `ask` those its
 // argument names, the photo the camera's, the location's calls its, a
 // notification its own.
-sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
+sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: ^[Diagnostic]) {
     if module_name != SEMA_APP_MARKER_MODULE {
         return
     }
@@ -1868,7 +1868,7 @@ sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, pr
 // A browser shows a page's notification only while the page is open. So a
 // notification on this device in an app whose resolved target is the web
 // output is refused, never dropped.
-sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
+sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: ^[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
         target: sema_app_feature_target(environment, graph, function_name)
@@ -1889,7 +1889,7 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
 // purpose when it asks for it, so each one the call needs that the
 // package's `purposes:` doesn't name fails the build at `span`, naming the
 // call and the missing keys.
-sema_call_app_permission_purpose: fn(member: String, alias: String, named: String?, span: Span, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_call_app_permission_purpose: fn(member: String, alias: String, named: String?, span: Span, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
         variants: core_enum_cases("Permission") ?? return
@@ -1934,7 +1934,7 @@ sema_app_permission_case: fn(arg: Expr) -> String? {
 // `app.images` takes each setting as literal data: the image variants are
 // facts of the application graph, which is read from the source. A setting
 // the method doesn't declare is the declared method check's to refuse.
-sema_call_app_image_settings: fn(receiver_value: TExpr, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_call_app_image_settings: fn(receiver_value: TExpr, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     if !sema_app_is_route_table(receiver_value.ty, environment, program) {
         return
     }
@@ -1981,7 +1981,7 @@ sema_app_route_shape: fn(path: String) -> String {
     "/{parts.join("/")}"
 }
 
-sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_app_is_route_table(receiver_value.ty, environment, program) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -2081,7 +2081,7 @@ sema_call_method_leaf: fn(name: String) -> String Never! {
     parts[parts.len() - 1]
 }
 
-sema_call_push_arity: fn(arities: &[Int], arity: Int) Never! {
+sema_call_push_arity: fn(arities: ^[Int], arity: Int) Never! {
     if !arities.contains(arity) -> arities.push(arity)
 }
 
@@ -2265,7 +2265,7 @@ sema_call_local_method_names: fn(environment: SemaScopeEnvironment, owner: Strin
     names
 }
 
-sema_call_push_instance_method_names: fn(names: &[String], methods: [Func]) Never! {
+sema_call_push_instance_method_names: fn(names: ^[String], methods: [Func]) Never! {
     loop method in methods {
         if method.params.len() > 0 && method.params[0].name == "self" && !names.contains(method.name) {
             names.push(method.name.copy())
@@ -2293,7 +2293,7 @@ sema_call_method_owners: fn(environment: SemaScopeEnvironment, program: SemaProg
     owners
 }
 
-sema_call_item_method_owner: fn(item: Item, name: String, owners: &[String]) Never! {
+sema_call_item_method_owner: fn(item: Item, name: String, owners: ^[String]) Never! {
     if item == {
         .Struct(value) -> {
             if sema_call_methods_have_instance(value.methods, name) {
@@ -2320,7 +2320,7 @@ sema_call_item_method_owner: fn(item: Item, name: String, owners: &[String]) Nev
 }
 
 // Adds `owner` to `owners` once, quoted.
-sema_call_push_method_owner: fn(owners: &[String], owner: String) Never! {
+sema_call_push_method_owner: fn(owners: ^[String], owner: String) Never! {
     quoted: "`{owner}`"
     if !owners.contains(quoted) -> owners.push(quoted)
 }
@@ -2524,7 +2524,7 @@ sema_call_free_idiom_error: fn(index: Int, call: Call, environment: SemaScopeEnv
 // A dotted call another language makes on a name nothing declares
 // (`console.log(x)`): the E0107 its receiver just reported gets the row's
 // Fix, and its edit writes the row's rename for the dotted name.
-sema_call_dotted_idiom_edit: fn(receiver: Expr, method: String, method_span: Span, diagnostics: &[Diagnostic]) {
+sema_call_dotted_idiom_edit: fn(receiver: Expr, method: String, method_span: Span, diagnostics: ^[Diagnostic]) {
     if diagnostics.len() == 0 {
         return
     }

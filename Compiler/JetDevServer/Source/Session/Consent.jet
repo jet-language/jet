@@ -17,7 +17,7 @@ CaptureIdentity: struct {
     build_id: String,
     revision: String,
 
-    exact: fn(target_inputs_sha256: &&String, tool_version: &&String, engine: &&String, session_id: &&String, source_id: &&String, build_id: &&String, revision: &&String) -> CaptureIdentity Never! {
+    exact: fn(target_inputs_sha256: ^^String, tool_version: ^^String, engine: ^^String, session_id: ^^String, source_id: ^^String, build_id: ^^String, revision: ^^String) -> CaptureIdentity Never! {
         CaptureIdentity{target_inputs_sha256: target_inputs_sha256.move(), tool_version: tool_version.move(), engine: engine.move(), session_id: session_id.move(), source_id: source_id.move(), build_id: build_id.move(), revision: revision.move()}
     }
 
@@ -48,7 +48,7 @@ CaptureConsentScope: struct {
         CaptureConsentScope{authorities: [String]{}, hosts: [String]{}, streams: [String]{}, disclosures: [String]{}, destination: "", byte_limit: DEFAULT_CAPTURE_BUDGET_BYTES, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
     }
 
-    new: fn(authorities: &&[String], hosts: &&[String], streams: &&[String], disclosures: &&[String], destination: &&String, byte_limit: U64) -> CaptureConsentScope Never! {
+    new: fn(authorities: ^^[String], hosts: ^^[String], streams: ^^[String], disclosures: ^^[String], destination: ^^String, byte_limit: U64) -> CaptureConsentScope Never! {
         scope := CaptureConsentScope{authorities: authorities.move(), hosts: hosts.move(), streams: streams.move(), disclosures: disclosures.move(), destination: destination.move(), byte_limit, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
         scope.canonicalize()
         scope
@@ -61,7 +61,7 @@ CaptureConsentScope: struct {
     }
 
     // Same-package C3 calls this after applying policy mode and budget.
-    canonicalize: fn(&self) Never! {
+    canonicalize: fn(^self) Never! {
         capture_consent_sort_unique(self.authorities)
         capture_consent_sort_unique(self.hosts)
         capture_consent_sort_unique(self.streams)
@@ -104,7 +104,7 @@ CaptureConsentScope: struct {
     }
 }
 
-capture_consent_sort_unique: fn(values: &[String]) Never! {
+capture_consent_sort_unique: fn(values: ^[String]) Never! {
     values.sort()
     count := 0
     loop index in 0..<values.len() {
@@ -125,14 +125,14 @@ capture_consent_source_rank: fn(source: CaptureSource) -> Int Never! {
     }
 }
 
-capture_consent_frame: fn(output: &[U8], key: String, value: String) Never! {
+capture_consent_frame: fn(output: ^[U8], key: String, value: String) Never! {
     bytes: value.bytes()
     loop byte in "{key}:{bytes.len()}:".bytes() -> output.push(byte)
     loop byte in bytes -> output.push(byte)
     output.push(U8{59})
 }
 
-capture_consent_frame_vec: fn(output: &[U8], key: String, values: [String]) Never! {
+capture_consent_frame_vec: fn(output: ^[U8], key: String, values: [String]) Never! {
     capture_consent_frame(output, "{key}.count", "{values.len()}")
     loop (index, value) in values -> capture_consent_frame(output, "{key}.{index}", value)
 }
@@ -145,7 +145,7 @@ SensitiveCaptureConsent: struct {
     _identity: CaptureIdentity,
     _scope: CaptureConsentScope,
 
-    new: fn(identity: &&CaptureIdentity, scope: &&CaptureConsentScope) -> SensitiveCaptureConsent Never! {
+    new: fn(identity: ^^CaptureIdentity, scope: ^^CaptureConsentScope) -> SensitiveCaptureConsent Never! {
         canonical := scope.move()
         canonical.canonicalize()
         SensitiveCaptureConsent{_identity: identity.move(), _scope: canonical.move()}
@@ -193,22 +193,22 @@ CaptureAttempt: struct {
     consent: SensitiveCaptureConsent?,
     terminal_available: Bool,
 
-    new: fn(identity: &&CaptureIdentity) -> CaptureAttempt Never! {
+    new: fn(identity: ^^CaptureIdentity) -> CaptureAttempt Never! {
         CaptureAttempt{identity: identity.move(), sources: [CaptureSourceFact]{}, scope: CaptureConsentScope.default(), consent: None, terminal_available: true}
     }
 
-    safe_clock: fn(identity: &&CaptureIdentity) -> CaptureAttempt Never! {
+    safe_clock: fn(identity: ^^CaptureIdentity) -> CaptureAttempt Never! {
         CaptureAttempt.new(identity).with_source(CaptureSourceFact{source: CaptureSource.Clock, location: None})
     }
 
     // Rust builders consume `mut self`: move every retained field once.
-    with_sources: fn(&&self, sources: &&[CaptureSourceFact]) -> CaptureAttempt Never! {
+    with_sources: fn(^^self, sources: ^^[CaptureSourceFact]) -> CaptureAttempt Never! {
         updated := self.move()
         updated.sources = sources.move()
         updated.move()
     }
 
-    with_source: fn(&&self, source: &&CaptureSourceFact) -> CaptureAttempt Never! {
+    with_source: fn(^^self, source: ^^CaptureSourceFact) -> CaptureAttempt Never! {
         updated := self.move()
         updated.sources.push(source)
         updated.move()

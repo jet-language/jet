@@ -339,7 +339,7 @@ fault: fn(status: Int) -> String Never! {
 }
 
 /// RFC 1951 inflate of `data` into the empty `out`; a status.
-inflate_into: fn(data: [U8], out: &[U8]) -> Int Never! {
+inflate_into: fn(data: [U8], out: ^[U8]) -> Int Never! {
     r := BitReader{data: data, i: 0, bit: 0, bad: false}
     finished := false
     loop {
@@ -393,7 +393,7 @@ inflate_into: fn(data: [U8], out: &[U8]) -> Int Never! {
 }
 
 /// Python `zlib.decompress` of `data` into the empty `out`; a status.
-decompress_into: fn(data: [U8], out: &[U8]) -> Int Never! {
+decompress_into: fn(data: [U8], out: ^[U8]) -> Int Never! {
     if data.len() < 6 -> return C_INFLATE_MALFORMED
     cmf: u8_int(data[0])
     flg: u8_int(data[1])
@@ -429,9 +429,9 @@ BitReader: struct {
     bit: Int,
     bad: Bool,
 
-    // Bit-reader state is advanced through `&self` methods so every nested read
+    // Bit-reader state is advanced through `^self` methods so every nested read
     // writes the caller's reader, never a copy.
-    read_bit: fn(&self) -> Int Never! {
+    read_bit: fn(^self) -> Int Never! {
         if self.i >= self.data.len() {
             self.bad = true
             return 0
@@ -445,7 +445,7 @@ BitReader: struct {
         out
     }
 
-    get_bits_lsb: fn(&self, n: Int) -> Int Never! {
+    get_bits_lsb: fn(^self, n: Int) -> Int Never! {
         v := 0
         k := 0
         loop k < n {
@@ -455,14 +455,14 @@ BitReader: struct {
         v
     }
 
-    align_byte: fn(&self) Never! {
+    align_byte: fn(^self) Never! {
         if self.bit != 0 {
             self.bit = 0
             self.i += 1
         }
     }
 
-    take_u8: fn(&self) -> U8 Never! {
+    take_u8: fn(^self) -> U8 Never! {
         if self.i >= self.data.len() {
             self.bad = true
             return (U8{0})
@@ -473,7 +473,7 @@ BitReader: struct {
     }
 }
 
-inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
+inflate_fixed: fn(r: ^BitReader, out: ^[U8]) -> Int Never! {
     loop {
         code := 0
         n := 0
@@ -610,7 +610,7 @@ huff_sym: fn(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int Never! {
     -1
 }
 
-inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
+inflate_dynamic: fn(r: ^BitReader, out: ^[U8]) -> Int Never! {
     tmp := BitReader{data: r.data, i: r.i, bit: r.bit, bad: false}
     hlit: (tmp.get_bits_lsb(5) + 257)
     hdist: (tmp.get_bits_lsb(5) + 1)

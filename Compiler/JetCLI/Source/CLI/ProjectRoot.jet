@@ -11,7 +11,7 @@ use {
     jet_pkg_model.[AuthorityResolver, ManifestError, WorkspaceDeclarationCache, pkg_find_package_roots_checked, pkg_workspace_present]
 }
 
-jet_cli_selected_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String ManifestError! {
+jet_cli_selected_project_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String ManifestError! {
     if jet_cli_find_workspace_root_checked(cache, start) == {
         .Ok(found) -> {
             if found == .Val(root) -> return Ok(root)
@@ -34,7 +34,7 @@ jet_cli_selected_project_root: fn(cache: &WorkspaceDeclarationCache, start: Stri
 // `receipt_project_root`: the selected root, else the canonical start, else the
 // start as given. History is optional, so a discovery diagnostic never stops
 // the command that records it.
-jet_cli_receipt_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String Never! {
+jet_cli_receipt_project_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String Never! {
     if jet_cli_selected_project_root(cache, start) == {
         .Ok(root) -> root
         .Err(_) -> cli_files.realpath(start) ?? start
@@ -44,7 +44,7 @@ jet_cli_receipt_project_root: fn(cache: &WorkspaceDeclarationCache, start: Strin
 // `find_workspace_root_checked`: the nearest directory whose checked authority
 // resolves a workspace declaration. Every failure is the workspace diagnostic,
 // as `find_workspace_root_with_error` maps it.
-jet_cli_find_workspace_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+jet_cli_find_workspace_root_checked: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
     loop {
         if AuthorityResolver.open_for_authority_walk(cache, dir) == {
@@ -80,7 +80,7 @@ jet_cli_find_repository_root: fn(start: String) -[FS, Env]> String? Never! {
 // `find_package_root_checked`: the extracted manifest root or the inline
 // Package carrier's root, found in one climb; the inline root wins so a later
 // facts read reports the explicit conflict instead of silently choosing one.
-jet_cli_find_package_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+jet_cli_find_package_root_checked: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     roots: if pkg_find_package_roots_checked(cache, start, true) == {
         .Ok(found) -> found
         .Err(error) -> {

@@ -29,7 +29,7 @@ store_nix_test_parse_fails: fn(text: String) -> Bool Never! {
 }
 
 // One NAR string field: little-endian length, bytes, zero padding to 8.
-store_nix_test_put: fn(output: &[U8], value: [U8]) Never! {
+store_nix_test_put: fn(output: ^[U8], value: [U8]) Never! {
     length: value.len()
     loop index in 0..<8 -> output.push(U8{((length >> (index * 8))) & 255})
     output.extend(value.copy())
@@ -37,12 +37,12 @@ store_nix_test_put: fn(output: &[U8], value: [U8]) Never! {
     loop _ in 0..<padding -> output.push(U8{0})
 }
 
-store_nix_test_put_text: fn(output: &[U8], value: String) Never! {
+store_nix_test_put_text: fn(output: ^[U8], value: String) Never! {
     store_nix_test_put(output, value.bytes())
 }
 
 // A regular-file node (`(type regular [executable] contents …)`).
-store_nix_test_put_regular: fn(output: &[U8], contents: [U8], executable: Bool) Never! {
+store_nix_test_put_regular: fn(output: ^[U8], contents: [U8], executable: Bool) Never! {
     store_nix_test_put_text(output, "(")
     store_nix_test_put_text(output, "type")
     store_nix_test_put_text(output, "regular")
@@ -56,7 +56,7 @@ store_nix_test_put_regular: fn(output: &[U8], contents: [U8], executable: Bool) 
 }
 
 // A symlink node (`(type symlink target …)`).
-store_nix_test_put_symlink: fn(output: &[U8], target: [U8]) Never! {
+store_nix_test_put_symlink: fn(output: ^[U8], target: [U8]) Never! {
     store_nix_test_put_text(output, "(")
     store_nix_test_put_text(output, "type")
     store_nix_test_put_text(output, "symlink")
@@ -66,7 +66,7 @@ store_nix_test_put_symlink: fn(output: &[U8], target: [U8]) Never! {
 }
 
 // Open one directory entry; the caller writes the node, then closes it.
-store_nix_test_open_entry: fn(output: &[U8], name: [U8]) Never! {
+store_nix_test_open_entry: fn(output: ^[U8], name: [U8]) Never! {
     store_nix_test_put_text(output, "entry")
     store_nix_test_put_text(output, "(")
     store_nix_test_put_text(output, "name")
@@ -74,7 +74,7 @@ store_nix_test_open_entry: fn(output: &[U8], name: [U8]) Never! {
     store_nix_test_put_text(output, "node")
 }
 
-store_nix_test_open_directory: fn(output: &[U8]) Never! {
+store_nix_test_open_directory: fn(output: ^[U8]) Never! {
     store_nix_test_put_text(output, "(")
     store_nix_test_put_text(output, "type")
     store_nix_test_put_text(output, "directory")
@@ -182,12 +182,12 @@ store_nix_test_only_cache_info: fn() -> [String:[U8]] Never! {
     [String:[U8]]{"/nix-cache-info": store_nix_test_cache_info()}
 }
 
-store_nix_test_admit: fn(verification: &StoreVerification, roots: HangarRoots, name: String, store_path: String) -> AdmittedNixClosure Never! {
+store_nix_test_admit: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, store_path: String) -> AdmittedNixClosure Never! {
     store_admit_nix_closure(verification, roots, store_nix_test_request(name, store_path), false) ?? panic("admit {store_path}: {err.message()}")
 }
 
 // Register one entry while holding the Hangar lock for this call only.
-store_nix_test_register_locked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
+store_nix_test_register_locked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     _: store_register_entry_unlocked(verification, roots, entry) ?? panic("register entry")
 }
@@ -198,7 +198,7 @@ store_nix_test_object: fn(admitted: AdmittedNixClosure, store_path: String) -> A
 
 // Admission must fail with `expected` and leave no entry, object, or receipt
 // behind (Rust `assert_single_nix_cache_failure`).
-store_nix_test_single_failure: fn(verification: &StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
+store_nix_test_single_failure: fn(verification: ^StoreVerification, label: String, store_path: String, narinfo: [U8], object: [U8], trusted_seed: [U8], expected: NixCacheErrorKind) -> NixCacheError Never! {
     root: store_nix_test_unique_dir(label)
     narinfo_text: String.from_bytes(narinfo) ?? panic("narinfo text")
     routes := [String:[U8]]{

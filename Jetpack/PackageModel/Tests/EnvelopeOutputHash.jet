@@ -60,7 +60,7 @@ pkg_test_envelope_hangar_error: fn(out: String, hangar: String) -[FS, Env]> Stri
 }
 
 // The error of a hook-observed native hash.
-pkg_test_envelope_hook_error: fn(out: String, hook: &EnvelopeWalkHook) -[FS, Env]> String Never! {
+pkg_test_envelope_hook_error: fn(out: String, hook: ^EnvelopeWalkHook) -[FS, Env]> String Never! {
     if pkg_try_output_hash_of_with_policy(out, false, hook) == {
         .Ok(_) -> panic("the concurrent change must be refused")
         .Err(error) -> error.message()
@@ -87,18 +87,18 @@ pkg_test_reference_archive: fn(root: String, allow_semantic_xattrs: Bool) -[FS, 
     archive_bytes
 }
 
-pkg_test_reference_push_bytes: fn(out: &[U8], bytes: [U8]) Never! {
+pkg_test_reference_push_bytes: fn(out: ^[U8], bytes: [U8]) Never! {
     loop byte in pkg_u64_be_bytes(bytes.len()) -> out.push(byte)
     loop byte in bytes -> out.push(byte)
 }
 
-pkg_test_reference_header: fn(out: &[U8], kind: U8, path: [U8], mode: Int) Never! {
+pkg_test_reference_header: fn(out: ^[U8], kind: U8, path: [U8], mode: Int) Never! {
     out.push(kind)
     pkg_test_reference_push_bytes(out, path)
     loop byte in pkg_u32_be_bytes(mode) -> out.push(byte)
 }
 
-pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) -[FS]> Never! {
+pkg_test_reference_xattrs: fn(path: String, out: ^[U8], allow: Bool) -[FS]> Never! {
     names := [String]{}
     listed: pkg_list_xattr_names(path) ?? panic("xattr names")
     loop name in listed {
@@ -117,7 +117,7 @@ pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) -[FS]> Neve
     }
 }
 
-pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links: &[EnvelopeTestLink], allow: Bool) -[FS, Env]> Never! {
+pkg_test_reference_encode_node: fn(path: String, rel: String, out: ^[U8], links: ^[EnvelopeTestLink], allow: Bool) -[FS, Env]> Never! {
     info: files.stat(path) ?? panic("stat fixture node")
     mode: pkg_envelope_mode(info)
     if info.is_dir {

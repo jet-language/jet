@@ -80,7 +80,7 @@ recipe_run: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTr
 
 // Run with per-step logging into `attempt` (`jet logs`, `jet explain`, and
 // preserved failed scratch).
-recipe_run_logged: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?, attempt: &BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+recipe_run_logged: fn(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?, attempt: ^BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     admission: recipe_admit(recipe, ctx)
     staged: PrivateStage.new(ctx.output_root)
     staged_ctx: staged.context(ctx)
@@ -135,7 +135,7 @@ recipe_run_steps: fn(recipe: BuildRecipe, order: [Int], ctx: RecipeBuildContext,
 
 // Perform one admitted step. `logged` selects the step-log wording of an
 // exec failure.
-recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport, logged: Bool) -[FS, Env, Exec, Net, Rand, Time.Wait]> RecipeDiagnostic! {
+recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeTransport?, report: ^RunReport, logged: Bool) -[FS, Env, Exec, Net, Rand, Time.Wait]> RecipeDiagnostic! {
     if step == {
         .Fetch(url, sha256) -> { recipe_do_fetch(url, sha256, ctx, transport, report) }
         .Exec(tool, args) -> { recipe_do_exec(tool, args, ctx, report, logged) }
@@ -144,7 +144,7 @@ recipe_run_step: fn(step: BuildStep, ctx: RecipeBuildContext, transport: RecipeT
     }
 }
 
-recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) -[FS, Env]> RecipeDiagnostic! {
+recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, report: ^RunReport) -[FS, Env]> RecipeDiagnostic! {
     target: recipe_confined_dest(ctx.output_root, dest)
     from: recipe_confined_source(ctx.source_dir, src, false)
     parent: files.dirname(target)
@@ -166,7 +166,7 @@ recipe_install_file: fn(src: String, dest: String, ctx: RecipeBuildContext, repo
     report.add_effect("write")
 }
 
-recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, report: &RunReport) -[FS, Env]> RecipeDiagnostic! {
+recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, report: ^RunReport) -[FS, Env]> RecipeDiagnostic! {
     target: recipe_confined_dest(ctx.output_root, dest)
     from: recipe_confined_source(ctx.source_dir, src, true)
     if recipe_copy_tree(from, target) == {
@@ -180,7 +180,7 @@ recipe_install_tree: fn(src: String, dest: String, ctx: RecipeBuildContext, repo
 
 // Run a realized tool in the native sandbox. Declared arguments and tool
 // output never reach the diagnostic.
-recipe_do_exec: fn(tool: String, args: [String], ctx: RecipeBuildContext, report: &RunReport, logged: Bool) -[FS, Env, Exec, Rand, Time.Wait]> RecipeDiagnostic! {
+recipe_do_exec: fn(tool: String, args: [String], ctx: RecipeBuildContext, report: ^RunReport, logged: Bool) -[FS, Env, Exec, Rand, Time.Wait]> RecipeDiagnostic! {
     exe: recipe_realized_tool(ctx.tools, tool)
     result: recipe_run_tool(exe, args, ctx)
     if !result.receipt.success {

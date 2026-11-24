@@ -32,7 +32,7 @@ sema_call_reflection_leaf_name: fn(name: String) -> String Never! { symbol_key_l
 // capture can't copy: a capture holds the whole value or refuses it. A field
 // the capture can't hold is named first, since it says more than the whole
 // value's copy gate (a secret-bearing field also makes its value one owner's).
-sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [TExpr]? {
+sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) -> [TExpr]? {
     args := [TExpr]{}
     sema_call_reflection_names(ty, span, environment, program, args)
     if !sema_call_reflection_level_args(ty, span, value_span, environment, program, scopes, [String]{}, args, diagnostics) {
@@ -58,7 +58,7 @@ sema_call_reflection_name_args: fn(ty: Type, span: Span, value_span: Span, envir
 // one's payload identity, type name and path, so the IR names a trait value
 // by the type whose payload key its box holds (ir_trait_reflect_text). Any
 // other type holds none.
-sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, args: &[TExpr]) {
+sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, args: ^[TExpr]) {
     names: sema_call_reflection_type_names(ty, environment, program)
     args.push(sema_call_reflection_text(names.type_name, span))
     args.push(sema_call_reflection_text(names.path, span))
@@ -76,7 +76,7 @@ sema_call_reflection_names: fn(ty: Type, span: Span, environment: SemaScopeEnvir
 // A declared type's identity is its checked key. A builtin scalar's
 // (`impl Int.Shown`) is its carrier identity, and it reflects under its own
 // spelling (`Int`) for both names, as any value of it does.
-sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: SemaProgramTables, args: &[TExpr]) -> Int {
+sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: SemaProgramTables, args: ^[TExpr]) -> Int {
     graph: program.registration_graph ?? return 0
     holders: sema_call_reflection_trait_holders(graph, bounds) ?? return 0
     rows := [SemaRegistrationRowRef]{}
@@ -108,7 +108,7 @@ sema_call_reflection_declared_impls: fn(bounds: [String], span: Span, program: S
 // then its cases (sema_call_reflection_case_args). A type already open on the
 // way down lists no fields or cases again: its level is two zero counts.
 // False after reporting the first part that can't be captured.
-sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, open: [String], args: &[TExpr], diagnostics: &[Diagnostic]) -> Bool {
+sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, open: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
     path: sema_call_reflection_type_names(ty, environment, program).path
     if sema_call_reflection_has_name(open, path) {
         args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
@@ -129,7 +129,7 @@ sema_call_reflection_level_args: fn(ty: Type, span: Span, value_span: Span, envi
 // types open above it. False after reporting the first stored field whose
 // type is unknown or can't be reflected the way the value itself is
 // (sema_call_reflection_validate_value).
-sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, inner: [String], args: &[TExpr], diagnostics: &[Diagnostic]) -> Bool {
+sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, inner: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return true
@@ -168,7 +168,7 @@ sema_call_reflection_field_args: fn(ty: Type, span: Span, value_span: Span, envi
 // listed, not just the one a value holds, so a payload no case could capture
 // refuses the value whichever case it holds. False after reporting the first
 // payload member that can't be reflected.
-sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, inner: [String], args: &[TExpr], diagnostics: &[Diagnostic]) -> Bool {
+sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, inner: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
     count_at: args.len()
     args.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span))
     if sema_call_reflection_outcome_cases(ty) == .Val(cases) {
@@ -216,7 +216,7 @@ sema_call_reflection_case_args: fn(ty: Type, path: String, span: Span, value_spa
 // One payload member `label` of case `leaf` of `ty`: its name, its names and
 // its own level pushed onto `args`. False after reporting a member that holds
 // a secret or doesn't show the way `"{x}"` interpolation does.
-sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, member_ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, inner: [String], args: &[TExpr], diagnostics: &[Diagnostic]) -> Bool {
+sema_call_reflection_case_member: fn(ty: Type, leaf: String, label: String, member_ty: Type, span: Span, value_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, inner: [String], args: ^[TExpr], diagnostics: ^[Diagnostic]) -> Bool {
     if sema_call_reflection_secret_bearing(member_ty) {
         diagnostics.push(sema_error("E0112", value_span, "case `{leaf}` of {sema_type_show(ty)} holds secret-bearing {sema_type_show(member_ty)} in `{label}`, which can't be reflected", "`reflect.of` captures every case payload the value could hold or refuses the value, and this payload would expose a cryptographic secret", "reflect a value whose cases hold no secret instead"))
         return false
@@ -568,7 +568,7 @@ sema_call_reflection_cases_refusal: fn(owner: Symbol, written: String, args: [Ty
 // One type within a case catalog's reach, named from module row `caller`;
 // `params` are the type parameters of the declaration it is written in,
 // which name no declaration of their own.
-sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, params: [TypeParam], written: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, visited: &[SemaRegistrationRowRef]) -> Diagnostic? {
+sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, params: [TypeParam], written: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, visited: ^[SemaRegistrationRowRef]) -> Diagnostic? {
     if ty == {
         .Named(name) -> {
             loop param in params {
@@ -623,7 +623,7 @@ sema_call_reflection_cases_reach: fn(graph: SemaRegistrationGraph, ty: Type, cal
 // checking module, with each stored field of a struct readable and its type
 // reached, or each case payload of an enum reached. A row already reached
 // closes its edge.
-sema_call_reflection_cases_row: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, written: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, visited: &[SemaRegistrationRowRef]) -> Diagnostic? {
+sema_call_reflection_cases_row: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, written: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, visited: ^[SemaRegistrationRowRef]) -> Diagnostic? {
     loop seen in visited {
         if seen.module_index == row.module_index && seen.row == row.row -> return None
     }
@@ -669,7 +669,7 @@ sema_call_reflection_cases_private: fn(written: String, detail: String, span: Sp
 // inferred the value. This keeps argument evaluation and ownership in the
 // ordinary call path while centralizing secret/display diagnostics. A value
 // reflects exactly where bare `"{x}"` interpolation shows it.
-sema_call_reflection_validate_value: fn(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_reflection_validate_value: fn(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool {
     if sema_expression_displayable(value.ty, environment, program) -> return true
     if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
     if {
@@ -764,11 +764,11 @@ sema_call_reflection_marker_lookup: fn(
     expected: Type?,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
-    scopes: &SemaScopeTable,
-    state: &SemaOwnershipState,
-    tail_store: &SemaStatementTailStore,
-    context: &SemaCheckContext,
-    diagnostics: &[Diagnostic],
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -828,11 +828,11 @@ sema_call_try_reflection_metadata_method: fn(
     expected: Type?,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
-    scopes: &SemaScopeTable,
-    state: &SemaOwnershipState,
-    tail_store: &SemaStatementTailStore,
-    context: &SemaCheckContext,
-    diagnostics: &[Diagnostic],
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
     owner: sema_call_reflection_metadata_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_call_reflection_metadata_method(owner, method) {
@@ -901,11 +901,11 @@ sema_call_try_reflection_handle_method: fn(
     expected: Type?,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
-    scopes: &SemaScopeTable,
-    state: &SemaOwnershipState,
-    tail_store: &SemaStatementTailStore,
-    context: &SemaCheckContext,
-    diagnostics: &[Diagnostic],
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
 ) -> SemaMethodSpecialCheck {
     metadata := sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if metadata.handled -> return metadata

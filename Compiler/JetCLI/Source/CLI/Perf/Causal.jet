@@ -200,13 +200,13 @@ jet_cli_perf_causal_gain: fn(base: JetCLIPerfCausalRate, line: JetCLIPerfCausalR
 // The next of the resampling's random numbers below `bound`: a fixed seed,
 // so the same trace gives the same intervals. The step is a 64-bit linear
 // congruential one, kept to its low 63 bits.
-jet_cli_perf_causal_draw: fn(state: &U64, bound: Int) -> Int Never! {
+jet_cli_perf_causal_draw: fn(state: ^U64, bound: Int) -> Int Never! {
     state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1442695040888963407}) & U64{9223372036854775807}
     Int{state >> 17} %% bound
 }
 
 // `chosen` drawn again with replacement.
-jet_cli_perf_causal_resample: fn(chosen: [Int], state: &U64) -> [Int] Never! {
+jet_cli_perf_causal_resample: fn(chosen: [Int], state: ^U64) -> [Int] Never! {
     loop _ in 0..<chosen.len() -> chosen[jet_cli_perf_causal_draw(state, chosen.len())]
 }
 
@@ -443,7 +443,7 @@ jet_cli_perf_causal_warm: fn(fit: JetCLIPerfCausalFit, gain: Int) -> Int Never! 
 // JET_CLI_PERF_CAUSAL_CLOCK_MOST while the lens could not fit how that
 // slows its tasks keeps its gains, flagged with the drop and why the fit
 // failed: they may read low.
-jet_cli_perf_causal_section: fn(source: &&String, experiments: &&[JetCLIPerfExperiment], points: &&[Int:String], idle: &&[Int]) -> TraceReceiptSection Never! {
+jet_cli_perf_causal_section: fn(source: ^^String, experiments: ^^[JetCLIPerfExperiment], points: ^^[Int:String], idle: ^^[Int]) -> TraceReceiptSection Never! {
     fit: jet_cli_perf_causal_fit(idle)
     base := [Int]{}
     groups := [JetCLIPerfCausalGroup]{}
@@ -614,7 +614,7 @@ jet_cli_perf_causal_cell_json: fn(cell: JetCLIPerfCausalCell) -> CanonicalJSON N
     )
 }
 
-jet_cli_perf_causal_json: fn(line: &&JetCLIPerfCausalLine) -> CanonicalJSON Never! {
+jet_cli_perf_causal_json: fn(line: ^^JetCLIPerfCausalLine) -> CanonicalJSON Never! {
     CanonicalJSON.Object(
         [CanonicalJSONField]{
             {key: "experiments", value: CanonicalJSON.Integer("{line.experiments}")},
@@ -662,7 +662,7 @@ JetCLIPerfCausalTasks: struct {
 // at its start and its end, the CPU it began on, and the idle gap before it
 // (-1 for none), each time in nanoseconds. None when the run wrote no
 // timings.
-jet_cli_perf_causal_tasks_section: fn(source: String, experiments: &&[JetCLIPerfExperiment], tasks: &&JetCLIPerfCausalTasks) -> TraceReceiptSection? Never! {
+jet_cli_perf_causal_tasks_section: fn(source: String, experiments: ^^[JetCLIPerfExperiment], tasks: ^^JetCLIPerfCausalTasks) -> TraceReceiptSection? Never! {
     if tasks.seen < 0 -> return None
     first := 0
     loop row in 0..<tasks.rows.len() /% (JET_CLI_PERF_CAUSAL_ROW_WORDS - 1) {

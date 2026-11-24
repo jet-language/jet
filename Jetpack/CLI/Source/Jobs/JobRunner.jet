@@ -10,11 +10,11 @@ use {
 }
 
 // `jet run <entry> -- <name> <job-args>`.
-cli_run_project_job: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_run_project_job: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cli_run_project_job_with_mode(verification, cache, theme, parsed, roots, project_dir, entry, job, false, false)
 }
 
-cli_run_project_job_with_mode: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_run_project_job_with_mode: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     registry: cli_checked_project_job_registry(entry) ?? {
         loop diagnostic in err.diagnostics {
             theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
@@ -61,7 +61,7 @@ cli_exit_for: fn(theme: Theme, error: CLIError) -[IO, Time.Wait]> Int Never! {
     }
 }
 
-cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool, metadata: JobMetadata) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_run_project_job_leaf: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool, metadata: JobMetadata) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if cli_job_skip_reason(metadata.skip) == .Val(reason) {
         theme.status("skipping job {theme.bold(job)}: {reason}")
         return EXIT_OK
@@ -217,7 +217,7 @@ JobCompiler: struct {
     build: String,
 }
 
-cli_resolve_job_compiler: fn(env: &ShellEnv) -[FS, Env, Rand]> JobCompiler CLIError! {
+cli_resolve_job_compiler: fn(env: ^ShellEnv) -[FS, Env, Rand]> JobCompiler CLIError! {
     requested: envmodel_find_jet_binary()
     loop index in 0..<env.cache_leases.len() {
         if env.cache_leases[index].executable_digest_for_command(requested) == {

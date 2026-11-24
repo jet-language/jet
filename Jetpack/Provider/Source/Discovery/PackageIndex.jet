@@ -47,7 +47,7 @@ PackageIndexEntry: struct {
     }
 
     // Fill what this record lacks from a later record of the same package.
-    merge_from: fn(&self, other: PackageIndexEntry) Never! {
+    merge_from: fn(^self, other: PackageIndexEntry) Never! {
         if self.version == "" && other.version != "" -> self.version = other.version
         if self.provenance == "declared" && other.provenance != "declared" {
             self.provenance = other.provenance
@@ -79,7 +79,7 @@ PackageIndex: struct {
     is_empty: fn(self) -> Bool Never! { self.packages.len() == 0 }
 
     // Merge into an existing record of the same source and name, else add.
-    add_package: fn(&self, record: PackageIndexEntry) Never! {
+    add_package: fn(^self, record: PackageIndexEntry) Never! {
         found := false
         loop index in 0..<self.packages.len() {
             if !found && self.packages[index].source == record.source && self.packages[index].name == record.name {
@@ -214,7 +214,7 @@ env_discovery_write: fn(project_dir: String, index: PackageIndex) -[FS, Env, Tim
 
 // Declared refs, versioned from an offline fixture or a hangar record when
 // one exists.
-env_discovery_merge_refs: fn(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) -[FS]> Never! {
+env_discovery_merge_refs: fn(index: ^PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) -[FS]> Never! {
     loop spec in refs {
         found: if env_discovery_fixture_version(fixtures, spec) == {
             .Val(pair) -> Val(pair)
@@ -233,7 +233,7 @@ env_discovery_merge_refs: fn(index: &PackageIndex, refs: [RefSpec], fixtures: St
 }
 
 // Realized hangar records, published under their canonical source spelling.
-env_discovery_merge_store_entries: fn(index: &PackageIndex, store_entries: [StoreEntry]) Never! {
+env_discovery_merge_store_entries: fn(index: ^PackageIndex, store_entries: [StoreEntry]) Never! {
     loop entry in store_entries {
         canonical: pkg_canonical_locked_ref(entry.reference)
         source := ""
@@ -274,7 +274,7 @@ env_discovery_merge_store_entries: fn(index: &PackageIndex, store_entries: [Stor
 }
 
 // `Pkg.adapt(...)` adapter packages.
-env_discovery_merge_adapters: fn(index: &PackageIndex, adapters: [AdapterPlan]) Never! {
+env_discovery_merge_adapters: fn(index: ^PackageIndex, adapters: [AdapterPlan]) Never! {
     loop adapter in adapters {
         index.add_package(
             PackageIndexEntry{
@@ -296,7 +296,7 @@ env_discovery_merge_adapters: fn(index: &PackageIndex, adapters: [AdapterPlan]) 
 // Registry packages from the project lock, the resolver's source of truth,
 // so `inspect info` never infers a tier from a provider label or a stale
 // discovery record.
-env_discovery_merge_lock: fn(index: &PackageIndex, lock: LockFile) Never! {
+env_discovery_merge_lock: fn(index: ^PackageIndex, lock: LockFile) Never! {
     loop package in lock.packages {
         if package.source == {
             .Registry(registry, reference, _, _, _, authority, tier, gate_status) -> {

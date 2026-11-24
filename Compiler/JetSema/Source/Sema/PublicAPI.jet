@@ -59,7 +59,7 @@ sema_public_api_order: fn(left: PublicAPIItem, right: PublicAPIItem) -> Ordering
 
 // One module's rows, its names under `prefix` (`""` for the package's entry
 // module, `"geometry."` for its `geometry` module).
-sema_public_api_items: fn(items: [Item], functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
+sema_public_api_items: fn(items: [Item], functions: [FnBody], prefix: String, rows: ^[PublicAPIItem]) Never! {
     modules := [String:Bool]{}
     sema_public_api_modules(items, "", true, modules)
     sema_public_api_scope(items, functions, prefix, modules, sema_public_api_spellings_none(), rows)
@@ -67,7 +67,7 @@ sema_public_api_items: fn(items: [Item], functions: [FnBody], prefix: String, ro
 
 // Every inline module path under `items` (dotted from the file), and whether
 // dependents can reach it: every module on the path is public and named.
-sema_public_api_modules: fn(items: [Item], parent: String, reachable: Bool, modules: &[String:Bool]) Never! {
+sema_public_api_modules: fn(items: [Item], parent: String, reachable: Bool, modules: ^[String:Bool]) Never! {
     loop item in items {
         if item == .CodeModule(module_value) {
             path: if parent == "" -> module_value.name.copy() else -> "{parent}.{module_value.name}"
@@ -83,7 +83,7 @@ sema_public_api_modules: fn(items: [Item], parent: String, reachable: Bool, modu
 // The rows of `items` where `inherited` spells the types an enclosing scope
 // can name (sema_public_api_spellings) and `modules` holds the file's inline
 // module paths (sema_public_api_modules).
-sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, modules: [String:Bool], inherited: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
+sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, modules: [String:Bool], inherited: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     spellings: sema_public_api_spellings(items, modules, inherited)
     loop item in items {
         if item == {
@@ -232,7 +232,7 @@ sema_public_api_spellings_none: fn() -> SemaPublicAPISpellings Never! {
 }
 
 // Respells type `name` as `spelled` in `spellings`.
-sema_public_api_respell: fn(spellings: &SemaPublicAPISpellings, name: String, spelled: String) Never! {
+sema_public_api_respell: fn(spellings: ^SemaPublicAPISpellings, name: String, spelled: String) Never! {
     id: name_index(name_intern(spellings.names, name))
     loop spellings.spelled.len() <= id -> spellings.spelled.push(name_empty())
     spellings.spelled[id] = name_intern(spellings.texts, spelled)
@@ -410,7 +410,7 @@ sema_public_api_fn: fn(name: String, function: Func, functions: [FnBody], units:
     PublicAPIItem{kind: "fn", name: name.copy(), signature: "fn {name}{sema_public_api_type_params(function.type_params, units)}({sema_public_api_params(function.params, units)}){sema_public_api_solved_effects(function, functions)}{ret}"}
 }
 
-sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody], units: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
+sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody], units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     loop method in methods {
         if method.is_pub && sema_public_api_named(method.name) && !method.compiler_generated {
             item := sema_public_api_fn("{owner}.{method.name}", method, functions, units)
@@ -423,7 +423,7 @@ sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody],
 
 // Every trait a type implements, written or derived, is a promise its
 // dependents can lean on.
-sema_public_api_impls: fn(owner: String, blocks: [TraitImplBlock], rows: &[PublicAPIItem]) Never! {
+sema_public_api_impls: fn(owner: String, blocks: [TraitImplBlock], rows: ^[PublicAPIItem]) Never! {
     loop block in blocks {
         rows.push(PublicAPIItem{kind: "impl", name: "{owner}.{block.trait_name}", signature: "impl {owner}.{block.trait_name}"})
     }
@@ -432,7 +432,7 @@ sema_public_api_impls: fn(owner: String, blocks: [TraitImplBlock], rows: &[Publi
 // A written `#FX(…)` cap is the ceiling dependents rely on, so it is a row of
 // the type, trait or module `name` it bounds: `cap Receipt #FX(IO, !FS)`.
 // Allowed effects sort first, then denials.
-sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: &[PublicAPIItem]) Never! {
+sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: ^[PublicAPIItem]) Never! {
     if cap == .Val(written) {
         allowed := [String]{}
         denied := [String]{}
@@ -454,7 +454,7 @@ sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: &[PublicAPIItem]) N
 // ends in `= _`. A `#CLI` field that fills a bare positional ends in
 // `[positional N]`: declaration order is part of the command interface
 // (spec.md "Field mapping"), the binding the checked CLISchema records.
-sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
+sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     positions := [String:String]{}
     cli := false
     loop derive_item in definition.derives {
@@ -485,7 +485,7 @@ sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], name: Str
 // An enum is its row plus one `variant` row per variant. An `#Open` enum's row
 // ends in ` #Open`, so adding a variant is non-breaking while adding or
 // removing `#Open` changes the row signature.
-sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
+sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], name: String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     loop variant in definition.variants {
         payload: if variant.payload == {
             .Unit -> ""
@@ -521,7 +521,7 @@ sema_public_api_trait_method: fn(name: String, method: TraitMethodSig, units: Se
 // without a default and methods without a body. A defaulted constant or
 // method is a `const` or `fn` row ending in `= _`, so adding one breaks no
 // implementor.
-sema_public_api_trait: fn(definition: TraitDef, name: String, units: SemaPublicAPISpellings, rows: &[PublicAPIItem]) Never! {
+sema_public_api_trait: fn(definition: TraitDef, name: String, units: SemaPublicAPISpellings, rows: ^[PublicAPIItem]) Never! {
     loop assoc in definition.assoc_types {
         rows.push(PublicAPIItem{kind: "require", name: "{name}.{assoc.name}", signature: "require {name}.{assoc.name}: type"})
     }
@@ -616,7 +616,7 @@ sema_public_api_reexport_target: fn(declaration: ImportDecl, original: String) -
 // The re-exports of each inline module among `items` (nested under the
 // inline module `parent`, reachable by dependents when `reachable`), depth
 // first: each public `name: path` row of its body that its surface bound.
-priv sema_public_api_inline_reexports: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, items: [Item], parent: String, reachable: Bool, reexports: &[SemaPublicAPIReexport]) -[]> {
+priv sema_public_api_inline_reexports: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, items: [Item], parent: String, reachable: Bool, reexports: ^[SemaPublicAPIReexport]) -[]> {
     module_row: graph.modules[module_index]
     loop item in items {
         if item == .CodeModule(definition) {
@@ -653,7 +653,7 @@ priv sema_public_api_inline_reexports: fn(graph: SemaRegistrationGraph, result: 
 // The re-export row of `local`, the name the inline module row at `surface`
 // binds to the member `original` of `declaration`, under the module `path`;
 // none when the binding names no function or value of a module row.
-priv sema_public_api_inline_reexport: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, surface: Int, declaration: ImportDecl, local: &&String, original: String, path: String, public: Bool, reexports: &[SemaPublicAPIReexport]) -[]> {
+priv sema_public_api_inline_reexport: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int, surface: Int, declaration: ImportDecl, local: ^^String, original: String, path: String, public: Bool, reexports: ^[SemaPublicAPIReexport]) -[]> {
     bound: sema_inline_target_of(graph.modules[module_index].inline_bindings.modules[surface].reexports, local) ?? return
     found: sema_public_api_inline_target(graph, module_index, bound) ?? return
     owner: sema_registration_module_index(graph, found.source_module_identity) ?? return
@@ -705,7 +705,7 @@ sema_public_api_reexport_signature: fn(graph: SemaRegistrationGraph, result: Sem
 // `reexport clamp = fn core.math.clamp(…) -[]> Int`,
 // `reexport geo.clamp = …`. A changed target, or a target whose signature
 // changed, changes the row.
-sema_public_api_reexport_rows: fn(reexports: [SemaPublicAPIReexport], prefix: String, rows: &[PublicAPIItem]) -[]> {
+sema_public_api_reexport_rows: fn(reexports: [SemaPublicAPIReexport], prefix: String, rows: ^[PublicAPIItem]) -[]> {
     loop reexport in reexports {
         if !reexport.public || !sema_public_api_named(reexport.name) -> next
         name: if reexport.parent == "" -> "{prefix}{reexport.name}" else -> "{prefix}{reexport.parent}.{reexport.name}"

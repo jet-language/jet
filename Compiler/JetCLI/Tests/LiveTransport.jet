@@ -10,11 +10,11 @@ use {
 
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length and its bytes.
-live_transport_u64: fn(out: &[U8], value: U64) Never! {
+live_transport_u64: fn(out: ^[U8], value: U64) Never! {
     loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)) & U64{255}}})
 }
 
-live_transport_text: fn(out: &[U8], text: String) Never! {
+live_transport_text: fn(out: ^[U8], text: String) Never! {
     live_transport_u64(out, U64{text.bytes().len()})
     loop byte in text.bytes() -> out.push(byte)
 }

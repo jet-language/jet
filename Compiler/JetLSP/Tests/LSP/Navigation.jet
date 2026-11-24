@@ -53,7 +53,7 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
 // Publishes the check of `uri` with each unresolved read of a local or a
 // parameter pointed at the one declaration of its name there. The fixture
 // checks without sema, which is what resolves the names a body reads.
-lsp_test_publish_resolved_locals: fn(server: &LSPServer, uri: String) Never! {
+lsp_test_publish_resolved_locals: fn(server: ^LSPServer, uri: String) Never! {
     doc: server.diagnostic_state.docs.get(uri) ?? panic("{uri} is open")
     checked := server.check(doc)
     index := checked.index ?? panic("the fixture builds an index")
@@ -76,7 +76,7 @@ lsp_test_publish_resolved_locals: fn(server: &LSPServer, uri: String) Never! {
 }
 
 // The sorted linked ranges at a position, or "null".
-lsp_test_linked: fn(server: &LSPServer, uri: String, line: Int, character: Int) -> [String] {
+lsp_test_linked: fn(server: ^LSPServer, uri: String, line: Int, character: Int) -> [String] {
     result: lsp_test_result(server, "textDocument/linkedEditingRange", lsp_test_at(uri, line, character))
     if result == .Null -> return [String]{"null"}
     ranges := [String]{}
@@ -290,7 +290,7 @@ frame: fn(panel: Panel, items: [Button]) -> Panel? {
 `
 
 // The ranges a location request answers at `line`:`character`, sorted.
-lsp_test_located: fn(server: &LSPServer, method: String, line: Int, character: Int) -> [String] {
+lsp_test_located: fn(server: ^LSPServer, method: String, line: Int, character: Int) -> [String] {
     rows: lsp_test_rows(lsp_test_result(server, method, lsp_test_at(LSP_TEST_IMPLS_URI, line, character)))
     loop row in rows -> assert_eq(lsp_test_text(row, "uri"), LSP_TEST_IMPLS_URI)
     lsp_test_ranges(rows)

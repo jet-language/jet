@@ -32,9 +32,9 @@ Reader: struct {
     fd: Int,
 
     impl Reader {
-        read_bytes: fn(&self, limit: Int) -> [U8] IOError! { cursor_read(self, limit) }
+        read_bytes: fn(^self, limit: Int) -> [U8] IOError! { cursor_read(self, limit) }
 
-        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+        read_into: fn(^self, buffer: ^[U8], limit: Int) -> Int IOError! {
             bytes: cursor_read(self, limit) ?? return Err(err)
             count: bytes.len()
             buffer.extend(bytes)
@@ -53,7 +53,7 @@ StdinHandle: struct {
     // The declaration's fd is informational; every token reads shared stdin.
     // The Rust original owns no independent unread buffer or close operation.
     // The raw leaf already drops the line's trailing LF and CR bytes.
-    read_line: fn(&self) -[IO, Time.Wait]> String? IOError! {
+    read_line: fn(^self) -[IO, Time.Wait]> String? IOError! {
         stdio_checkpoint(.Read, "stdin", "IO.Read")
         rt.stdin_line()
     }
@@ -66,12 +66,12 @@ StdinHandle: struct {
     // As the Prelude `Reader`, standard input hands out up to `limit` bytes,
     // waiting until it has them or the input ends; an empty list is the end.
     impl Reader {
-        read_bytes: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
+        read_bytes: fn(^self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
             if limit <= 0 -> return Err(terminal_invalid("the read limit must be positive"))
             __take_bytes(limit)
         }
 
-        read_into: fn(&self, buffer: &[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {
+        read_into: fn(^self, buffer: ^[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {
             bytes: self.read_bytes(limit) ?? return Err(err)
             count: bytes.len()
             buffer.extend(bytes)
@@ -90,7 +90,7 @@ priv __InputLines: struct {
     priv at: Int,
     priv open: [FileReader],
 
-    read_line: fn(&self) -[IO, FS.Read, Time.Wait]> String? IOError! {
+    read_line: fn(^self) -[IO, FS.Read, Time.Wait]> String? IOError! {
         if self.paths.is_empty() {
             handle := stdin()
             return handle.read_line()
@@ -116,13 +116,13 @@ Stdout: struct {
     fd: Int,
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) -[IO]> IOError! { stdio_bytes(bytes, false) }
+        write_bytes: fn(^self, bytes: [U8]) -[IO]> IOError! { stdio_bytes(bytes, false) }
 
-        flush: fn(&self) -[IO]> IOError! { stdio_flush(false) }
+        flush: fn(^self) -[IO]> IOError! { stdio_flush(false) }
 
-        write: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, false, false) }
+        write: fn(^self, text: String) -[IO]> IOError! { stdio_write(text, false, false) }
 
-        write_line: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, true, false) }
+        write_line: fn(^self, text: String) -[IO]> IOError! { stdio_write(text, true, false) }
     }
 
     // A pure query: the read receiver lets a temporary ask (`stdout().is_tty()`).
@@ -134,13 +134,13 @@ Stderr: struct {
     fd: Int,
 
     impl Writer {
-        write_bytes: fn(&self, bytes: [U8]) -[IO]> IOError! { stdio_bytes(bytes, true) }
+        write_bytes: fn(^self, bytes: [U8]) -[IO]> IOError! { stdio_bytes(bytes, true) }
 
-        flush: fn(&self) -[IO]> IOError! { stdio_flush(true) }
+        flush: fn(^self) -[IO]> IOError! { stdio_flush(true) }
 
-        write: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, false, true) }
+        write: fn(^self, text: String) -[IO]> IOError! { stdio_write(text, false, true) }
 
-        write_line: fn(&self, text: String) -[IO]> IOError! { stdio_write(text, true, true) }
+        write_line: fn(^self, text: String) -[IO]> IOError! { stdio_write(text, true, true) }
     }
 
     is_tty: fn(self) -[IO]> Bool Never! { rt.stderr_terminal() }
@@ -296,7 +296,7 @@ take_within: fn(n: Int, wait: Duration) -[IO, Time.Wait]> [U8]? IOError! {
 
 // Up to `limit` of the bytes the cursor has not read; a cursor at its end
 // gives none.
-priv cursor_read: fn(cursor: &Reader, limit: Int) -> [U8] IOError! {
+priv cursor_read: fn(cursor: ^Reader, limit: Int) -> [U8] IOError! {
     if limit <= 0 {
         return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("the read limit must be positive")}))
     }
@@ -350,7 +350,7 @@ priv __input_lines: fn() -[Exec.Args]> __InputLines Never! {
 // named, the lines of `lines` (standard input) are printed changed. A file
 // that cannot be read or replaced stops the edit with its IOError; the files
 // before it stay edited.
-priv __input_edit: fn(lines: &&Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
+priv __input_edit: fn(lines: ^^Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
     paths: core.process.args()
     if paths.len() == 0 {
         loop line in lines -> print(change(line))

@@ -75,7 +75,7 @@ sema_output_runnable: fn(kind: OutputKind) -> Bool {
 }
 
 // Store positions, not copies of the argument expressions or their payloads.
-sema_output_fields: fn(args: [EnumLitArg], span: Span, diagnostics: &[Diagnostic]) -> [String:Int]? Never! {
+sema_output_fields: fn(args: [EnumLitArg], span: Span, diagnostics: ^[Diagnostic]) -> [String:Int]? Never! {
     fields := [String:Int]{}
     loop (index, arg) in args {
         if arg == .Named(label, value) {
@@ -129,7 +129,7 @@ sema_output_import_reference: fn(graph: SemaRegistrationGraph, owner: SemaRegist
     sema_name_reference(span, symbol, Val(SymbolKind.Import))
 }
 
-sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: Int, entry: Expr, diagnostics: &[Diagnostic]) -> SemaOutputTarget? Never! {
+sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: Int, entry: Expr, diagnostics: ^[Diagnostic]) -> SemaOutputTarget? Never! {
     owner: graph.modules[declaring_index]
     references := [SemaNameReferenceFact]{}
     source_name := String?{None}
@@ -360,7 +360,7 @@ sema_output_cli_parameter: fn(graph: SemaRegistrationGraph, module_identity: Mod
     false
 }
 
-sema_output_entry_contract: fn(graph: SemaRegistrationGraph, module_index: Int, function: SemaRegistrationFunction, source_name: String, kind: OutputKind, span: Span, fix: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_output_entry_contract: fn(graph: SemaRegistrationGraph, module_index: Int, function: SemaRegistrationFunction, source_name: String, kind: OutputKind, span: Span, fix: String, diagnostics: ^[Diagnostic]) -> Bool Never! {
     params_ok := false
     if kind == OutputKind.Executable {
         if function.parameters.len() == 0 -> params_ok = true
@@ -403,7 +403,7 @@ sema_output_entry_contract: fn(graph: SemaRegistrationGraph, module_index: Int, 
     false
 }
 
-sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address: String, kind: OutputKind, output_name: String, entry: Expr, diagnostics: &[Diagnostic]) -> {fact: ResolvedOutput, references: [SemaNameReferenceFact]}? Never! {
+sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address: String, kind: OutputKind, output_name: String, entry: Expr, diagnostics: ^[Diagnostic]) -> {fact: ResolvedOutput, references: [SemaNameReferenceFact]}? Never! {
     target := sema_output_callable_target(graph, declaring_index, entry, diagnostics) ?? return None
     module_row: graph.modules[target.module_index]
     function: module_row.functions[target.function_index]
@@ -430,7 +430,7 @@ sema_output_fact: fn(graph: SemaRegistrationGraph, declaring_index: Int, address
     Val({fact: fact.move(), references: target.references.move()})
 }
 
-sema_output_default: fn(graph: SemaRegistrationGraph, entry_index: Int, diagnostics: &[Diagnostic]) -> String? Never! {
+sema_output_default: fn(graph: SemaRegistrationGraph, entry_index: Int, diagnostics: ^[Diagnostic]) -> String? Never! {
     loop item_index in 0..<graph.modules[entry_index].program.items.len() {
         if graph.modules[entry_index].program.items[item_index] == .Const(definition) {
             if definition.ty != (Val(Type.Named{name: "__OutputDefaults"})) -> next
@@ -467,7 +467,7 @@ sema_output_entry_span: fn(graph: SemaRegistrationGraph, entry_index: Int) -> Sp
 // projection of these same checked facts, never another load/check/resolver.
 // `manifest_entry`: the entry package's manifest binds an `outputs.*.entry`
 // function, which the driver starts at when no source Output is selected.
-sema_output_resolve: fn(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit_address: String?, manifest_entry: Bool) -> [Diagnostic] Never! {
+sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent, explicit_address: String?, manifest_entry: Bool) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     rows := [SemaOutputRow]{}
     loop (module_index, module_row) in graph.modules {
@@ -696,7 +696,7 @@ sema_output_run_contract_fix: fn(function: SemaRegistrationFunction) -> String N
 // The Rust original publishes the same solved callable row into every checked
 // Output. Index only modules actually referenced by an Output; keep functions
 // and their bodies borrowed while publishing the settled callable contract.
-sema_output_fact_with_solved_effects: fn(output: &&ResolvedOutput, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rows: &[[String:Int]], indexed: &[Bool]) -> ResolvedOutput {
+sema_output_fact_with_solved_effects: fn(output: ^^ResolvedOutput, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rows: ^[[String:Int]], indexed: ^[Bool]) -> ResolvedOutput {
     fact := output.move()
     fact.effects = [String]{}
     if fact.module_id < 0 || fact.module_id >= modules.len() -> return fact
@@ -733,7 +733,7 @@ sema_output_fact_with_solved_effects: fn(output: &&ResolvedOutput, graph: SemaRe
     fact
 }
 
-sema_output_publish_solved_effects: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult]) -> [ResolvedOutput] {
+sema_output_publish_solved_effects: fn(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult]) -> [ResolvedOutput] {
     // Every published Output contributes its authenticated callable reference.
     // No Output means no function index or additional whole-AST projection.
     if graph.output_name_references.len() == 0 -> return [ResolvedOutput]{}

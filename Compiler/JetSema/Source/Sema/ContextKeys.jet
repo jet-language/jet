@@ -126,7 +126,7 @@ sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaCont
 }
 
 // The field's value where no `#Context` block set it, typed `ty`.
-sema_context_field_default: fn(field: SemaContextFieldKey, ty: Type, span: Span, context: &SemaCheckContext) -> TExpr Never! {
+sema_context_field_default: fn(field: SemaContextFieldKey, ty: Type, span: Span, context: ^SemaCheckContext) -> TExpr Never! {
     if field.default == {
         .Constant(symbol) -> sema_node(context, ty, NodeKind.ConstRef{symbol: symbol}, span)
         .Function(function) -> sema_tree_node(ty, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
@@ -156,7 +156,7 @@ sema_context_key_declared: fn(declaration: ConstDef) -> Bool Never! {
 // except the field's own key in the Core module that owns the field
 // (sema_context_field_module), and holds one fixed default, so it is
 // neither mutable nor `#Persist` (E0761).
-sema_context_key_check_declaration: fn(declaration: ConstDef, module_name: String, diagnostics: &[Diagnostic]) Never! {
+sema_context_key_check_declaration: fn(declaration: ConstDef, module_name: String, diagnostics: ^[Diagnostic]) Never! {
     if !sema_context_key_declared(declaration) {
         return
     }
@@ -217,7 +217,7 @@ sema_context_marker_fields: fn(marker: Marker) -> Marker Never! {
 // while no local hides the import, and the bare `context` names it while no
 // local or type of that name is in scope. Only an import binding pays for
 // the import lookup, and a use through an import is recorded on its alias.
-sema_context_root: fn(root: String, root_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext) -> Bool Never! {
+sema_context_root: fn(root: String, root_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext) -> Bool Never! {
     if sema_scope_resolve_index(scopes, root) == .Val(found) {
         if scopes.bindings[found].symbol.kind != SymbolKind.Import -> return false
         imported: sema_call_core_import_target(environment, program, root) ?? return false
@@ -234,7 +234,7 @@ sema_context_root: fn(root: String, root_span: Span, environment: SemaScopeEnvir
 // and a `#Memo` key holds the value (Effects/Checks.jet
 // sema_effect_context_reach), compared by the type's equality.
 // Unhandled unless the receiver names the task context (sema_context_root).
-sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     root := ""
     root_span := Span{start: 0, end: 0}

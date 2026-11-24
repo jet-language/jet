@@ -26,7 +26,7 @@ state: fn<T>(value: T?) -> String {
 run: fn() {
     task.group g {
         {sender, receiver}: channel<Order>(1)
-        producer: task &&sender {
+        producer: task ^^sender {
             sender.send(Order{id: 4, item: "soup", tags: [String]{"warm"}})
             sender.close()
         }

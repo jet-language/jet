@@ -127,7 +127,7 @@ x509_crt_new: fn() -> X509Crt Never! {
 }
 
 // x509_get_version: the explicit [0] version, v1 (0) when absent.
-x509_crt_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
+x509_crt_get_version: fn(data: [U8], p: ^Int, end: Int) -> Int x509.X509Error! {
     if asn1.get_tag(data, p, end, x509.x509_explicit(0)) == {
         .Ok(len) -> {
             v_end: p + len
@@ -143,7 +143,7 @@ x509_crt_get_version: fn(data: [U8], p: &Int, end: Int) -> Int x509.X509Error! {
 }
 
 // x509_get_dates: Validity, notBefore then notAfter.
-x509_crt_get_dates: fn(data: [U8], p: &Int, end: Int) -> {from: x509.X509Time, to: x509.X509Time} x509.X509Error! {
+x509_crt_get_dates: fn(data: [U8], p: ^Int, end: Int) -> {from: x509.X509Time, to: x509.X509Time} x509.X509Error! {
     len: asn1.get_tag(data, p, end, X509CRT_SEQUENCE) ?? return Err(.InvalidDate(Val(err)))
     d_end: p + len
     from: x509.x509_get_time(data, p, d_end)
@@ -154,7 +154,7 @@ x509_crt_get_dates: fn(data: [U8], p: &Int, end: Int) -> {from: x509.X509Time, t
 
 // x509_get_uid: an implicit [n] unique identifier, kept unparsed; none
 // when absent.
-x509_crt_get_uid: fn(data: [U8], p: &Int, end: Int, n: Int) -> asn1.ASN1Buf x509.X509Error! {
+x509_crt_get_uid: fn(data: [U8], p: ^Int, end: Int, n: Int) -> asn1.ASN1Buf x509.X509Error! {
     if p == end -> return Ok(asn1.asn1_none())
     tag_id: Int{data[p]}
     if asn1.get_tag(data, p, end, x509.x509_explicit(n)) == {
@@ -172,7 +172,7 @@ x509_crt_get_uid: fn(data: [U8], p: &Int, end: Int, n: Int) -> asn1.ASN1Buf x509
 
 // x509_get_basic_constraints: cA, which must be a BOOLEAN when the
 // SEQUENCE is not empty, and the pathLenConstraint plus one.
-x509_crt_get_basic_constraints: fn(data: [U8], p: &Int, end: Int) -> {ca: Bool, max_pathlen: Int} x509.X509Error! {
+x509_crt_get_basic_constraints: fn(data: [U8], p: ^Int, end: Int) -> {ca: Bool, max_pathlen: Int} x509.X509Error! {
     len: asn1.get_tag(data, p, end, X509CRT_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
     if p == end -> return Ok({ca: false, max_pathlen: 0})
     if end - p != len -> return Err(.InvalidExtensions(None))
@@ -185,7 +185,7 @@ x509_crt_get_basic_constraints: fn(data: [U8], p: &Int, end: Int) -> {ca: Bool, 
 }
 
 // x509_get_ext_key_usage: one or more KeyPurposeId OIDs.
-x509_crt_get_ext_key_usage: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] x509.X509Error! {
+x509_crt_get_ext_key_usage: fn(data: [U8], p: ^Int, end: Int) -> [asn1.ASN1Buf] x509.X509Error! {
     usages: asn1.get_sequence_of(data, p, end, asn1.ASN1_OID) ?? return Err(.InvalidExtensions(Val(err)))
     if usages.len() == 0 -> return Err(.InvalidExtensions(Val(.InvalidLength)))
     Ok(usages)
@@ -193,7 +193,7 @@ x509_crt_get_ext_key_usage: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] 
 
 // x509_get_subject_key_id: the KeyIdentifier OCTET STRING, which must fill
 // the extension.
-x509_crt_get_subject_key_id: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
+x509_crt_get_subject_key_id: fn(data: [U8], p: ^Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
     len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.InvalidExtensions(Val(err)))
     id: asn1.ASN1Buf{tag_id: asn1.ASN1_OCTET_STRING, p: p, len: len}
     p += len
@@ -203,7 +203,7 @@ x509_crt_get_subject_key_id: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x
 
 // x509_get_authority_key_id: the optional [0] keyIdentifier, then the [1]
 // authorityCertIssuer and [2] authorityCertSerialNumber together.
-x509_crt_get_authority_key_id: fn(data: [U8], p: &Int, end: Int) -> X509Authority x509.X509Error! {
+x509_crt_get_authority_key_id: fn(data: [U8], p: ^Int, end: Int) -> X509Authority x509.X509Error! {
     out := X509Authority{key_identifier: asn1.asn1_none(), authority_cert_issuer: [asn1.ASN1Buf]{}, authority_cert_serial_number: asn1.asn1_none()}
     len := asn1.get_tag(data, p, end, X509CRT_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
     if p + len != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
@@ -232,7 +232,7 @@ x509_crt_get_authority_key_id: fn(data: [U8], p: &Int, end: Int) -> X509Authorit
 // qualifiers skipped. Any policy other than anyPolicy makes the result
 // FeatureUnavailable once the whole extension has been read; `policies`
 // holds them either way.
-x509_crt_get_certificate_policies: fn(data: [U8], p: &Int, end: Int, policies: &[asn1.ASN1Buf]) x509.X509Error! {
+x509_crt_get_certificate_policies: fn(data: [U8], p: ^Int, end: Int, policies: ^[asn1.ASN1Buf]) x509.X509Error! {
     len := asn1.get_tag(data, p, end, X509CRT_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
     if p + len != end -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
     if len == 0 -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
@@ -258,7 +258,7 @@ x509_crt_get_certificate_policies: fn(data: [U8], p: &Int, end: Int, policies: &
 // x509_get_crt_ext: the explicit [3] Extensions. An extension the OID
 // table lacks goes to the callback, or is skipped unless critical; a known
 // one may appear once.
-x509_crt_get_ext: fn(crt: &X509Crt, data: [U8], p: &Int, end: Int, cb: X509ExtCallback?) x509.X509Error! {
+x509_crt_get_ext: fn(crt: ^X509Crt, data: [U8], p: ^Int, end: Int, cb: X509ExtCallback?) x509.X509Error! {
     if p == end {
         return
     }
@@ -420,14 +420,14 @@ x509_crt_parse_der_core: fn(buf: [U8], cb: X509ExtCallback?) -> X509Crt x509.X50
 
 /// Parse one DER certificate from the start of buf and append it to chain
 /// (mbedtls_x509_crt_parse_der); on failure the chain is unchanged.
-x509_crt_parse_der: fn(chain: &[X509Crt], buf: [U8]) x509.X509Error! {
+x509_crt_parse_der: fn(chain: ^[X509Crt], buf: [U8]) x509.X509Error! {
     crt: x509_crt_parse_der_core(buf, None)
     chain.push(crt)
 }
 
 /// x509_crt_parse_der with a handler for unknown extensions
 /// (mbedtls_x509_crt_parse_der_with_ext_cb).
-x509_crt_parse_der_with_ext_cb: fn(chain: &[X509Crt], buf: [U8], cb: X509ExtCallback) x509.X509Error! {
+x509_crt_parse_der_with_ext_cb: fn(chain: ^[X509Crt], buf: [U8], cb: X509ExtCallback) x509.X509Error! {
     crt: x509_crt_parse_der_core(buf, Val(cb))
     chain.push(crt)
 }
@@ -443,7 +443,7 @@ X509CRT_PEM_END: "-----END CERTIFICATE-----"
 /// reads is appended, and the result is the number of blocks that did not;
 /// when none reads, the first block's failure, or CertUnknownFormat when
 /// there is no block.
-x509_crt_parse: fn(chain: &[X509Crt], buf: [U8]) -> Int x509.X509Error! {
+x509_crt_parse: fn(chain: ^[X509Crt], buf: [U8]) -> Int x509.X509Error! {
     if pem.pem_block_len(X509CRT_PEM_BEGIN, X509CRT_PEM_END, buf) == None {
         x509_crt_parse_der(chain, buf)
         return Ok(0)
@@ -482,7 +482,7 @@ x509_crt_has_ext_type: fn(crt: X509Crt, ext_type: Int) -> Int Never! { crt.ext_t
 
 // The descriptions of a list of OIDs, "???" for one the table lacks
 // (x509_info_ext_key_usage and x509_info_cert_policies).
-x509_crt_info_oids: fn(out: &[U8], data: [U8], items: [asn1.ASN1Buf], policies: Bool) {
+x509_crt_info_oids: fn(out: ^[U8], data: [U8], items: [asn1.ASN1Buf], policies: Bool) {
     sep := ""
     loop item in items {
         desc := "???"
@@ -1034,7 +1034,7 @@ x509_crt_signed: fn(crt: X509Crt) -> X509Signed Never! {
 
 // x509_crt_check_signature: the signer's key can make and verifies the
 // signature.
-x509_crt_check_signature: fn(signed: X509Signed, signer: &X509Crt) -> Bool Never! {
+x509_crt_check_signature: fn(signed: X509Signed, signer: ^X509Crt) -> Bool Never! {
     hash: signed.hash ?? return false
     kind: signed.kind ?? return false
     if !pk.pk_can_do(signer.pk, kind) -> return false
@@ -1047,7 +1047,7 @@ x509_crt_check_signature: fn(signed: X509Signed, signer: &X509Crt) -> Bool Never
 // x509_crt_verifycrl: the CRL flags for the certificate with serial
 // `serial` that `ca` issued, from the first of `crls` that `ca` issued and
 // whose signature holds.
-x509_crt_verifycrl: fn(serial: [U8], ca: &X509Crt, crls: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
+x509_crt_verifycrl: fn(serial: [U8], ca: ^X509Crt, crls: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
     flags := 0
     loop i in 0..<crls.len() {
         if crls[i].version == 0 || !x509_name_cmp(crls[i].issuer, ca.subject) -> next
@@ -1110,7 +1110,7 @@ X509Parent: struct {
 // root (`top`) must verify the signature; an intermediate's path length
 // limit must allow the path_cnt certificates below it, self_cnt of them
 // self-issued.
-x509_crt_find_parent_in: fn(issuer: [asn1.NamedData], signed: X509Signed, cands: &[X509Crt], from: Int, top: Bool, path_cnt: Int, self_cnt: Int, now: x509.X509Time) -> X509Parent? Never! {
+x509_crt_find_parent_in: fn(issuer: [asn1.NamedData], signed: X509Signed, cands: ^[X509Crt], from: Int, top: Bool, path_cnt: Int, self_cnt: Int, now: x509.X509Time) -> X509Parent? Never! {
     fallback := -1
     fallback_good := false
     loop j in from..<cands.len() {
@@ -1131,7 +1131,7 @@ x509_crt_find_parent_in: fn(issuer: [asn1.NamedData], signed: X509Signed, cands:
 
 // x509_crt_find_parent: the parent of chain[child], first among the
 // trusted roots, then among the certificates after it in the chain.
-x509_crt_find_parent: fn(chain: &[X509Crt], trust_ca: &[X509Crt], child: Int, path_cnt: Int, self_cnt: Int, now: x509.X509Time) -> X509Parent? Never! {
+x509_crt_find_parent: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], child: Int, path_cnt: Int, self_cnt: Int, now: x509.X509Time) -> X509Parent? Never! {
     issuer: chain[child].issuer.copy()
     signed: x509_crt_signed(chain[child])
     if x509_crt_find_parent_in(issuer, signed, trust_ca, 0, true, path_cnt, self_cnt, now) == {
@@ -1171,7 +1171,7 @@ X509ChainItem: struct {
 // x509_crt_verify_chain: the chain from chain[0] up to a trusted root, or
 // as far as parents are found, each certificate with its flags. More than
 // X509_MAX_INTERMEDIATE_CA certificates below the root are FatalError.
-x509_crt_verify_chain: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> [X509ChainItem] x509.X509Error! {
+x509_crt_verify_chain: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> [X509ChainItem] x509.X509Error! {
     items := [X509ChainItem]{}
     child := 0
     child_trusted := false
@@ -1214,7 +1214,7 @@ x509_crt_verify_chain: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
 
 // The flags a certificate takes from its parent: BAD_KEY for a key the
 // profile refuses, and those of the parent's CRLs.
-x509_crt_parent_flags: fn(chain: &[X509Crt], trust_ca: &[X509Crt], parent: X509Parent, serial: [U8], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
+x509_crt_parent_flags: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], parent: X509Parent, serial: [U8], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
     if parent.trusted {
         return x509_crt_signer_flags(trust_ca, parent.index, serial, ca_crl, profile, now)
     }
@@ -1222,7 +1222,7 @@ x509_crt_parent_flags: fn(chain: &[X509Crt], trust_ca: &[X509Crt], parent: X509P
 }
 
 // The parent-side flags for the signer list[at].
-x509_crt_signer_flags: fn(list: &[X509Crt], at: Int, serial: [U8], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
+x509_crt_signer_flags: fn(list: ^[X509Crt], at: Int, serial: [U8], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, now: x509.X509Time) -> Int Never! {
     flags := 0
     if !x509_profile_check_key(profile, list[at].pk) -> flags = x509.X509_BADCERT_BAD_KEY
     flags | x509_crt_verifycrl(serial, list[at], ca_crl, profile, now)
@@ -1251,7 +1251,7 @@ x509_crt_verify_call: fn(callback: X509VerifyCallback, chain: [X509Crt], trust_c
 /// against `cn` when given and the profile's check of its key (the
 /// chain-building half of mbedtls_x509_crt_verify_with_profile). BadInput
 /// for an empty chain; FatalError for a chain too long.
-x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, now: x509.X509Time) -> [X509ChainItem] x509.X509Error! {
+x509_crt_verify_items: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, now: x509.X509Time) -> [X509ChainItem] x509.X509Error! {
     if chain.len() == 0 -> return Err(.BadInput)
     ee_flags := 0
     if cn == {
@@ -1274,13 +1274,13 @@ x509_crt_verify_items: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509
 /// `vrfy` when given, which may change its flags. CertVerifyFailed carries
 /// the flags of the whole chain when any is set; any other error means the
 /// chain could not be examined.
-x509_crt_verify_with_profile: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, vrfy: X509VerifyCallback?) x509.X509Error! {
+x509_crt_verify_with_profile: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, vrfy: X509VerifyCallback?) x509.X509Error! {
     x509_crt_verify_with_profile_at(chain, trust_ca, ca_crl, profile, cn, vrfy, x509.x509_now())
 }
 
 /// x509_crt_verify_with_profile at the UTC date `now` instead of the
 /// current one; core.net.tls passes its handshake clock's date.
-x509_crt_verify_with_profile_at: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, vrfy: X509VerifyCallback?, now: x509.X509Time) x509.X509Error! {
+x509_crt_verify_with_profile_at: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], ca_crl: [x509crl.X509Crl], profile: X509CrtProfile, cn: [U8]?, vrfy: X509VerifyCallback?, now: x509.X509Time) x509.X509Error! {
     items: x509_crt_verify_items(chain, trust_ca, ca_crl, profile, cn, now)
     flags := 0
     loop k in 0..<items.len() {
@@ -1311,6 +1311,6 @@ x509_crt_callback_error: fn(e: x509.X509Error) -> x509.X509Error Never! {
 
 /// x509_crt_verify_with_profile under the default profile
 /// (mbedtls_x509_crt_verify).
-x509_crt_verify: fn(chain: &[X509Crt], trust_ca: &[X509Crt], ca_crl: [x509crl.X509Crl], cn: [U8]?, vrfy: X509VerifyCallback?) x509.X509Error! {
+x509_crt_verify: fn(chain: ^[X509Crt], trust_ca: ^[X509Crt], ca_crl: [x509crl.X509Crl], cn: [U8]?, vrfy: X509VerifyCallback?) x509.X509Error! {
     x509_crt_verify_with_profile(chain, trust_ca, ca_crl, x509_crt_profile_default(), cn, vrfy)
 }

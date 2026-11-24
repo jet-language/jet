@@ -88,12 +88,12 @@ jet_driver_compiler_queries_new: fn() -> JetDriverCompilerQueries Never! {
     JetDriverCompilerQueries{documents: [String:String]{}}
 }
 
-jet_driver_compiler_queries_set_document: fn(queries: &JetDriverCompilerQueries, path: String, source: String) Never! {
+jet_driver_compiler_queries_set_document: fn(queries: ^JetDriverCompilerQueries, path: String, source: String) Never! {
     queries.documents[path] = source
 }
 
 // Each document the session was given, ordered by path.
-jet_driver_compiler_queries_documents: fn(queries: &JetDriverCompilerQueries) -> [JetDriverSourceDocument] Never! {
+jet_driver_compiler_queries_documents: fn(queries: ^JetDriverCompilerQueries) -> [JetDriverSourceDocument] Never! {
     documents := [JetDriverSourceDocument]{}
     loop (path, source) in queries.documents {
         documents.push(JetDriverSourceDocument{path: path, source: source})
@@ -102,12 +102,12 @@ jet_driver_compiler_queries_documents: fn(queries: &JetDriverCompilerQueries) ->
     documents
 }
 
-jet_driver_compiler_queries_check_disk: fn(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: &&JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+jet_driver_compiler_queries_check_disk: fn(queries: ^JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     // Disk and text ingress differ only at the existing authorized CLI adapter.
     jet_driver_compiler_queries_check_text(queries, parsed, request)
 }
 
-jet_driver_compiler_queries_check_text: fn(queries: &JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: &&JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
+jet_driver_compiler_queries_check_text: fn(queries: ^JetDriverCompilerQueries, parsed: JetCompilerServicesParseFacts, request: ^^JetDriverCompileRequest) -> JetDriverCompilerCheckResult {
     root: request.authorized_sources.entry_path
     jet_driver_compiler_queries_set_document(queries, root, parsed.source)
     jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: request.move(), retain_projection: true, entry_path: None})
@@ -206,7 +206,7 @@ jet_driver_compiler_check_module_sources: fn(load: JetDriverLoadResult, canonica
     Val(rows)
 }
 
-jet_driver_compiler_check_result: fn(input: JetDriverCompilerCheckInput, registration: &&SemaRegistrationGraph, graph: &&SemaGraphResult, module_sources: [SemaCompilerModuleSource], diagnostics: [Diagnostic]) -> JetDriverCompilerCheckResult {
+jet_driver_compiler_check_result: fn(input: JetDriverCompilerCheckInput, registration: ^^SemaRegistrationGraph, graph: ^^SemaGraphResult, module_sources: [SemaCompilerModuleSource], diagnostics: [Diagnostic]) -> JetDriverCompilerCheckResult {
     graph_complete: graph.complete
     checked := jet_eval_compiler_services_checked(
         JetCompilerServicesCheckedInput{
@@ -224,8 +224,8 @@ jet_driver_compiler_check_result: fn(input: JetDriverCompilerCheckInput, registr
 
 jet_driver_compiler_check_diagnostic_packet: fn(
     input: JetDriverCompilerCheckInput,
-    registration: &&SemaRegistrationGraph,
-    graph: &&SemaGraphResult,
+    registration: ^^SemaRegistrationGraph,
+    graph: ^^SemaGraphResult,
     module_sources: [SemaCompilerModuleSource],
     diagnostics: [Diagnostic],
 ) -> JetDriverCompilerCheckResult? {

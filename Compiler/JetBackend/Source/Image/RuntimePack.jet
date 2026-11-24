@@ -105,7 +105,7 @@ link_pack_out: fn(c: LinkContext, p: LinkPack, s: Int) -> Int Never! {
     return -1
 }
 
-link_pack_local: fn(p: &LinkPack, key: Int, name: String, info: Int, shndx: Int, value: Int, size: Int) -> Int Never! {
+link_pack_local: fn(p: ^LinkPack, key: Int, name: String, info: Int, shndx: Int, value: Int, size: Int) -> Int Never! {
     if p.local_index.get(key) == .Val(found) -> return 1 + p.ord_row.len() + found
     j: p.l_name.len()
     p.local_index.add(key, j).drop("checked absent above")
@@ -117,7 +117,7 @@ link_pack_local: fn(p: &LinkPack, key: Int, name: String, info: Int, shndx: Int,
     1 + p.ord_row.len() + j
 }
 
-link_pack_global: fn(p: &LinkPack, f: Int) -> Int Never! {
+link_pack_global: fn(p: ^LinkPack, f: Int) -> Int Never! {
     if p.global_index.get(f) == .Val(found) -> return -1 - found
     j: p.gl_id.len()
     p.global_index.add(f, j).drop("checked absent above")
@@ -126,7 +126,7 @@ link_pack_global: fn(p: &LinkPack, f: Int) -> Int Never! {
 }
 
 // The pack symbol reference for symbol `k` of object `obj`.
-link_pack_symbol: fn(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Never! {
+link_pack_symbol: fn(c: ^LinkContext, p: ^LinkPack, obj: Int, k: Int) -> Int Never! {
     if k == 0 -> return 0
     g: link_global_of(c, obj, k)
     if g >= 0 {
@@ -176,7 +176,7 @@ link_pack_symbol: fn(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Nev
 
 // Append the rewritten relocation rows `first..<end` of the RELA table at
 // `table` (object `obj`), offsets shifted by `shift`.
-link_pack_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first: Int, end: Int, shift: Int) Never! {
+link_pack_relocs: fn(c: ^LinkContext, p: ^LinkPack, obj: Int, table: Int, first: Int, end: Int, shift: Int) Never! {
     b: c.obj_buffer[obj].copy()
     loop k in first..<end {
         at: table + 24 * k
@@ -208,7 +208,7 @@ link_pack_left_out: fn(c: LinkContext, p: LinkPack, obj: Int, k: Int) -> Bool Ne
 // against an absolute zero instead: its start falls below `.text`, where a
 // link that relocates the table drops it (DebugPrune.jet
 // link_jetline_link), as it drops the record of a function it collects.
-link_pack_line_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, s: Int) Never! {
+link_pack_line_relocs: fn(c: ^LinkContext, p: ^LinkPack, obj: Int, s: Int) Never! {
     table: link_rel_table(c, obj, s)
     loop k in 0..<link_rel_count(c, obj, s) {
         at: table + 24 * k
@@ -229,7 +229,7 @@ link_pack_line_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, s: Int) Never
 // through its section symbol, so those would otherwise be left unnamed and
 // their samples would fall to the preceding named symbol. Names that
 // relocations already added keep their index.
-link_pack_name_kept: fn(c: &LinkContext, p: &LinkPack) Never! {
+link_pack_name_kept: fn(c: ^LinkContext, p: ^LinkPack) Never! {
     loop obj in 0..<c.obj_name.len() {
         b: c.obj_buffer[obj].copy()
         loop k in 1..<c.obj_first_global[obj] {
@@ -275,7 +275,7 @@ link_pack_section_name: fn(c: LinkContext, class: Int, s: Int) -> String Never! 
 
 // Symbol table entry; every real reserved-range section index crosses through
 // SHN_XINDEX. Absolute/common are negative linker sentinels, never indexes.
-link_pack_sym: fn(symtab: &[U8], xindex: &[U8], name: Int, info: Int, shndx: Int, value: Int, size: Int) Never! {
+link_pack_sym: fn(symtab: ^[U8], xindex: ^[U8], name: Int, info: Int, shndx: Int, value: Int, size: Int) Never! {
     elf64_u32(symtab, name)
     symtab.push(U8{info})
     symtab.push(U8{0})
@@ -291,7 +291,7 @@ link_pack_sym: fn(symtab: &[U8], xindex: &[U8], name: Int, info: Int, shndx: Int
     elf64_u64(symtab, size)
 }
 
-link_pack_rela: fn(bytes: &[U8], p: LinkPack, first: Int, end: Int, first_global: Int) Never! {
+link_pack_rela: fn(bytes: ^[U8], p: LinkPack, first: Int, end: Int, first_global: Int) Never! {
     loop k in first..<end {
         ref: p.r_sym[k]
         symbol: if ref >= 0 -> ref else -> first_global + (-1 - ref)
@@ -313,7 +313,7 @@ LinkPackHeaders: struct {
     entry_size: [Int],
 }
 
-link_pack_header: fn(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
+link_pack_header: fn(h: ^LinkPackHeaders, name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
     h.name.push(name)
     h.kind.push(kind)
     h.flags.push(flags)
@@ -327,7 +327,7 @@ link_pack_header: fn(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offs
 
 // The offset of `name` in the section name table `table`, written once:
 // `offsets` holds each name's offset by its id in `seen` (-1: not written).
-link_pack_shstr: fn(table: &[U8], seen: &NameTable, offsets: &[Int], name: String) -> Int Never! {
+link_pack_shstr: fn(table: ^[U8], seen: ^NameTable, offsets: ^[Int], name: String) -> Int Never! {
     id: name_index(name_intern(seen, name))
     loop offsets.len() <= id -> offsets.push(-1)
     if offsets[id] < 0 -> offsets[id] = elf64_string(table, name)
@@ -336,7 +336,7 @@ link_pack_shstr: fn(table: &[U8], seen: &NameTable, offsets: &[Int], name: Strin
 
 // Write the pack for the collected context `c` whose roots are `exports`
 // (final global ids).
-link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
+link_pack_write: fn(c: ^LinkContext, exports: [Int]) -> [U8] Never! {
     ord_row: link_rows_in_order(c)
     row_ord := [Int]{}
     loop _ in ord_row -> row_ord.push(0)
@@ -611,7 +611,7 @@ link_pack_write: fn(c: &LinkContext, exports: [Int]) -> [U8] Never! {
 // Link the Jet runtime objects into a pack. Audited Jet exports are defined
 // public globals in standalone objects; private functions and imports are
 // not exports. Archives only satisfy roots.
-x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
+x64_link_runtime_pack: fn(names: [String], bufs: ^^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(bufs, LINK_BASE)
     c.fault_report = LinkFaultReport.Import
     link_load_inputs(c, names)
@@ -726,7 +726,7 @@ link_image_failure: fn(c: LinkContext) -> X64ExecutableResult Never! {
     X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
 }
 
-link_runtime_image_finish: fn(c_in: &&LinkContext, name: String, entry_g: Int, threads: CompilerThreads) -> X64ExecutableResult Never! {
+link_runtime_image_finish: fn(c_in: ^^LinkContext, name: String, entry_g: Int, threads: CompilerThreads) -> X64ExecutableResult Never! {
     c := c_in.move()
     // No zone-site part note: a program bound to the image writes its own
     // (MemoryLink.jet link_bind_write), and a library in the pack registers
@@ -818,7 +818,7 @@ link_runtime_image_finish: fn(c_in: &&LinkContext, name: String, entry_g: Int, t
 // every program bound to the image. A `--checked-alloc` program imports
 // jet_rt_alloc_check_link, which the image then lacks, so it links the pack
 // in full (JetCLI Host.jet jet_cli_native_executable).
-x64_link_runtime_image: fn(name: String, pack: &&[U8], threads: CompilerThreads) -> X64ExecutableResult Never! {
+x64_link_runtime_image: fn(name: String, pack: ^^[U8], threads: CompilerThreads) -> X64ExecutableResult Never! {
     c := link_context([[U8]]{pack.move()}, LINK_RUN_BASE)
     link_load_inputs(c, [String]{name})
     if c.errors.len() > 0 -> return link_image_failure(c)
@@ -841,7 +841,7 @@ x64_link_runtime_image: fn(name: String, pack: &&[U8], threads: CompilerThreads)
 
 // Link standalone runtime and Core objects directly into the prelinked
 // runtime image without first building an intermediate combined pack object.
-x64_link_runtime_image_objects: fn(names: [String], bufs: &&[[U8]], threads: CompilerThreads) -> X64ExecutableResult Never! {
+x64_link_runtime_image_objects: fn(names: [String], bufs: ^^[[U8]], threads: CompilerThreads) -> X64ExecutableResult Never! {
     c := link_context(bufs, LINK_RUN_BASE)
     link_load_inputs(c, names)
     if c.errors.len() > 0 -> return link_image_failure(c)
@@ -902,7 +902,7 @@ x64_link_runtime_image_objects: fn(names: [String], bufs: &&[[U8]], threads: Com
 
 // Add section `name` holding `payload` to the whole executable `image`
 // (link_image_add_section_at).
-link_image_add_section: fn(image: &[U8], name: String, payload: [U8]) Never! {
+link_image_add_section: fn(image: ^[U8], name: String, payload: [U8]) Never! {
     elf := [U8]{}
     elf.extend(image[0..<LINK_EHDR_SIZE])
     link_image_add_section_at(elf, image, 0, name, payload)
@@ -916,7 +916,7 @@ link_image_add_section: fn(image: &[U8], name: String, payload: [U8]) Never! {
 // and then the headers already end it (link_write_section_headers), they
 // are rewritten in place, else the old copies stay as unreferenced bytes,
 // since a loaded segment may follow them (link_write_sections).
-link_image_add_section_at: fn(elf: &[U8], tail: &[U8], origin: Int, name: String, payload: [U8]) Never! {
+link_image_add_section_at: fn(elf: ^[U8], tail: ^[U8], origin: Int, name: String, payload: [U8]) Never! {
     shoff: link_image_i64(elf, 40) - origin
     shnum: link_image_u16(elf, 60)
     names_header: shoff + 64 * link_image_u16(elf, 62)
@@ -949,7 +949,7 @@ link_image_add_section_at: fn(elf: &[U8], tail: &[U8], origin: Int, name: String
 // Add section `name` holding `payload` to the linked executable `exe`: a
 // whole one is all `tail`; a bound one's ELF header is its patch at file
 // offset 0 and its section headers end its `tail` (link_bind_sections).
-x64_executable_add_section: fn(exe: &X64Executable, name: String, payload: [U8]) Never! {
+x64_executable_add_section: fn(exe: ^X64Executable, name: String, payload: [U8]) Never! {
     if exe.image_end == 0 -> return link_image_add_section(exe.tail, name, payload)
     loop k in 0..<exe.patch_at.len() {
         if exe.patch_at[k] != 0 -> next

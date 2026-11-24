@@ -252,27 +252,27 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.sys __atexit_os fn(;Unit) Unit
     core.sys __interrupt_os fn(;Unit) Unit
     core.sys __dotenv_read String Result<String,(not_found:Bool,cause:String)>
-    core.files __reader_line_bytes &FileReader Result<[u8],IOError>
+    core.files __reader_line_bytes ^FileReader Result<[u8],IOError>
     core.process __stdout_line_bytes ProcessStdoutStream Result<[u8],IOError>
     core.process __stderr_line_bytes ProcessStderrStream Result<[u8],IOError>
     core.net __unix_connect_deadline_host String,Duration Result<UnixStream,NetError>
     core.net.ws __live_watch WsConn,String Unit
     core.files __list_dir_raw String Result<[DirEntry],IOError>
-    core.files __mkdtemp_raw &&String Result<String,IOError>
-    core.files __temp_dir_raw &&String Result<TempDir,IOError>
-    core.files __temp_file_raw &&String Result<TempFile,IOError>
+    core.files __mkdtemp_raw ^^String Result<String,IOError>
+    core.files __temp_dir_raw ^^String Result<TempDir,IOError>
+    core.files __temp_file_raw ^^String Result<TempFile,IOError>
     jet_builtins lock_open String LockCall
     jet_builtins lock_try Int LockCall
     jet_builtins lock_wait Int,Int,Bool,Int LockWait
     jet_builtins lock_close Int Int
     jet_builtins lock_fd_identity Int LockIdentity
     jet_builtins lock_path_identity String LockIdentity
-    jet_builtins lock_owner &&String,Int FileLock
+    jet_builtins lock_owner ^^String,Int FileLock
     core.files __walk_parallel_raw String,^^String? Result<[WalkEntry],IOError>
     core.browser __ws_set_timeout WsConn,Int Result<(),WsError>
 
 
-    core.devtools __publish_payload &&String,^^String,^^String,^^String,^^T - T
+    core.devtools __publish_payload ^^String,^^String,^^String,^^String,^^T - T
     core.crypto sha256 Union<[u8],String> Digest256
     core.crypto sha1|sha224|sha384|sha3_224|sha3_256|sha3_384|sha3_512 [u8] String
     core.crypto hmac_sha256 [u8],[u8] [u8]
@@ -310,8 +310,8 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.crypto.expert shared_secret_bytes SharedSecret [u8]
     core.crypto.vault prepare_import_signing String,^^[u8] Result<MutationPlan<SigningKey>,VaultError>
     core.crypto.vault prepare_import_x25519 String,^^[u8] Result<MutationPlan<X25519SecretKey>,VaultError>
-    core.crypto.vault commit_import_signing &&VaultWrite<SigningKey>,^^MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
-    core.crypto.vault commit_import_x25519 &&VaultWrite<X25519SecretKey>,^^MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
+    core.crypto.vault commit_import_signing ^^VaultWrite<SigningKey>,^^MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
+    core.crypto.vault commit_import_x25519 ^^VaultWrite<X25519SecretKey>,^^MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
     core.net gethostname - String
     core.net tcp_listen String Result<TCPListener,NetError>
     core.net ip_addr String Result<IPAddr,NetError>
@@ -325,16 +325,16 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net tcp_connect String Result<TCPStream,NetError>
     core.net tcp_connect_addr SocketAddr Result<TCPStream,NetError>
     core.net tcp_connect_happy String,Int Result<TCPStream,NetError>
-    core.net tcp_read &TCPStream Result<String,NetError>
-    core.net tcp_write &TCPStream,String Result<Unit,NetError>
-    core.net tcp_read_bytes &TCPStream,Int Result<[u8],NetError>
-    core.net tcp_read_text &TCPStream,Int Result<String,NetError>
-    core.net tcp_write_bytes &TCPStream,[u8] Result<Unit,NetError>
-    core.net tcp_write_all_bytes &TCPStream,[u8] Result<Unit,NetError>
-    core.net tcp_write_text &TCPStream,String Result<Unit,NetError>
-    core.net tcp_shutdown &TCPStream,NetShutdown Result<Unit,NetError>
-    core.net tcp_close &TCPStream Result<Unit,NetError>
-    core.net tcp_ready &TCPStream,NetReadyInterest,Int Result<NetReady,NetError>
+    core.net tcp_read ^TCPStream Result<String,NetError>
+    core.net tcp_write ^TCPStream,String Result<Unit,NetError>
+    core.net tcp_read_bytes ^TCPStream,Int Result<[u8],NetError>
+    core.net tcp_read_text ^TCPStream,Int Result<String,NetError>
+    core.net tcp_write_bytes ^TCPStream,[u8] Result<Unit,NetError>
+    core.net tcp_write_all_bytes ^TCPStream,[u8] Result<Unit,NetError>
+    core.net tcp_write_text ^TCPStream,String Result<Unit,NetError>
+    core.net tcp_shutdown ^TCPStream,NetShutdown Result<Unit,NetError>
+    core.net tcp_close ^TCPStream Result<Unit,NetError>
+    core.net tcp_ready ^TCPStream,NetReadyInterest,Int Result<NetReady,NetError>
     core.net ready_readable|ready_writable NetReady Bool
     core.net error_operation|error_message NetError String
     core.net error_address|error_name NetError String?
@@ -343,12 +343,12 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net tcp_local_socket_addr|tcp_peer_socket_addr TCPStream Result<SocketAddr,NetError>
     core.net listener_local_socket_addr TCPListener Result<SocketAddr,NetError>
     core.net nodelay TCPStream Result<Bool,NetError>
-    core.net set_nodelay &TCPStream,Bool Result<Unit,NetError>
+    core.net set_nodelay ^TCPStream,Bool Result<Unit,NetError>
     core.net ttl TCPStream Result<Int,NetError>
-    core.net set_ttl &TCPStream,Int Result<Unit,NetError>
+    core.net set_ttl ^TCPStream,Int Result<Unit,NetError>
     core.net socket_type TCPStream String
-    core.net sendfile &TCPStream,String Result<Int,NetError>
-    core.net tcp_reply &&TCPStream,String,String Result<Unit,NetError>
+    core.net sendfile ^TCPStream,String Result<Int,NetError>
+    core.net tcp_reply ^^TCPStream,String,String Result<Unit,NetError>
     core.net udp_bind String Result<UDPSocket,NetError>
     core.net udp_bind_addr SocketAddr Result<UDPSocket,NetError>
     core.net udp_local_addr UDPSocket Result<SocketAddr,NetError>
@@ -364,13 +364,13 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net unix_listen String Result<UnixListener,NetError>
     core.net unix_accept UnixListener Result<UnixStream,NetError>
     core.net unix_connect String Result<UnixStream,NetError>
-    core.net unix_read &UnixStream Result<String,NetError>
-    core.net unix_write &UnixStream,String Result<Unit,NetError>
-    core.net unix_read_bytes &UnixStream,Int Result<[u8],NetError>
-    core.net unix_write_all_bytes &UnixStream,[u8] Result<Unit,NetError>
-    core.net __unix_wait_wake_raw &UnixStream,Int,Int Result<Int,NetError>
-    core.net unix_shutdown &UnixStream,NetShutdown Result<Unit,NetError>
-    core.net unix_close &UnixStream Result<Unit,NetError>
+    core.net unix_read ^UnixStream Result<String,NetError>
+    core.net unix_write ^UnixStream,String Result<Unit,NetError>
+    core.net unix_read_bytes ^UnixStream,Int Result<[u8],NetError>
+    core.net unix_write_all_bytes ^UnixStream,[u8] Result<Unit,NetError>
+    core.net __unix_wait_wake_raw ^UnixStream,Int,Int Result<Int,NetError>
+    core.net unix_shutdown ^UnixStream,NetShutdown Result<Unit,NetError>
+    core.net unix_close ^UnixStream Result<Unit,NetError>
     core.net dns_a|dns_aaaa String Result<[IPAddr],NetError>
     core.net dns_a_at|dns_aaaa_at String,String Result<[IPAddr],NetError>
     core.net dns_txt String Result<[String],NetError>
@@ -382,18 +382,18 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.net dns_srv_at String,String Result<[DNSSRV],NetError>
     core.net dns_srv_target DNSSRV String
     core.net dns_srv_port|dns_srv_priority|dns_srv_weight DNSSRV Int
-    core.net tls_connect &&TCPStream,String Result<TLSStream,NetError>
-    core.net tls_read &TLSStream Result<String,IOError>
-    core.net tls_write &TLSStream,String Result<Unit,IOError>
-    core.net tls_close &&TLSStream Result<Unit,IOError>
+    core.net tls_connect ^^TCPStream,String Result<TLSStream,NetError>
+    core.net tls_read ^TLSStream Result<String,IOError>
+    core.net tls_write ^TLSStream,String Result<Unit,IOError>
+    core.net tls_close ^^TLSStream Result<Unit,IOError>
     core.net.tls unwrap TLSStream Result<TCPStream,IOError>
     core.net.tls client String,Int Result<TLSStream,IOError>
-    core.net.tls read &TLSStream,Int Result<String,IOError>
-    core.net.tls read_bytes &TLSStream,Int Result<[u8],IOError>
-    core.net.tls write &TLSStream,String Result<Unit,IOError>
-    core.net.tls write_some &TLSStream,[u8] Result<Int,IOError>
-    core.net.tls write_bytes &TLSStream,[u8] Result<Unit,IOError>
-    core.net.tls close &&TLSStream Result<Unit,IOError>
+    core.net.tls read ^TLSStream,Int Result<String,IOError>
+    core.net.tls read_bytes ^TLSStream,Int Result<[u8],IOError>
+    core.net.tls write ^TLSStream,String Result<Unit,IOError>
+    core.net.tls write_some ^TLSStream,[u8] Result<Int,IOError>
+    core.net.tls write_bytes ^TLSStream,[u8] Result<Unit,IOError>
+    core.net.tls close ^^TLSStream Result<Unit,IOError>
     core.net.tls peer_port TLSStream Result<Int,IOError>
     core.net.tls __host_list_directory Int Result<[[u8]],IOError>
     core.http reason_phrase Int String
@@ -507,7 +507,7 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.ui node_accessibility UINode,UIAccessibility UINode
     core.ui node_shortcut UINode,UIShortcut UINode
     core.ui text_input String,UIIMEMode UINode
-    core.tui list &&[String] UINode
+    core.tui list ^^[String] UINode
     core.tui key_event String TUIEvent
     core.tui resize_event Float,Float TUIEvent
     core.tui capabilities - TUICapabilities
@@ -518,17 +518,17 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.tui color_ansi16|color_ansi256 Int TUIColor
     core.tui color_rgb Color TUIColor
     core.tui style - TUIStyle
-    core.tui style_foreground|style_background &&TUIStyle,TUIColor TUIStyle
-    core.tui style_bold|style_dim|style_underline &&TUIStyle,Bool TUIStyle
+    core.tui style_foreground|style_background ^^TUIStyle,TUIColor TUIStyle
+    core.tui style_bold|style_dim|style_underline ^^TUIStyle,Bool TUIStyle
     core.tui style_text String,TUIStyle,TUICapabilities String
     core.tui ascii String String
     core.tui display_width String Int
     core.tui length|min|max|percent|fill Float TUIConstraint
     core.tui horizontal|vertical - TUIDirection
     core.tui layout Rect,TUIDirection,^^[TUIConstraint] [Rect]
-    core.tui table &&[String],^^[[String]] UINode
+    core.tui table ^^[String],^^[[String]] UINode
     core.tui list_state - TUIListState
-    core.tui list_state_select|list_state_offset &&TUIListState,Int TUIListState
+    core.tui list_state_select|list_state_offset ^^TUIListState,Int TUIListState
     core.tui list_state_selected TUIListState Int
     core.ui.host capabilities - UICapabilityFacts
     core.ui.host file_filter String,[String],[String] Result<UIFileFilter,UIHostError>

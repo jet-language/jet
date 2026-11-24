@@ -67,7 +67,7 @@ EnvironmentEntryIndex: struct {
         index
     }
 
-    offer: fn(&self, key: String, entry: StoreEntry) Never! {
+    offer: fn(^self, key: String, entry: StoreEntry) Never! {
         if self.by_selection.get(key) == {
             .Val(current) -> {
                 newer: entry.last_used_at > current.last_used_at || (entry.last_used_at == current.last_used_at && entry.id > current.id)
@@ -82,7 +82,7 @@ EnvironmentEntryIndex: struct {
     }
 }
 
-store_append_environment_stamp_field: fn(stamp: &[U8], field: [U8]) Never! {
+store_append_environment_stamp_field: fn(stamp: ^[U8], field: [U8]) Never! {
     store_push_u64_le(stamp, field.len())
     store_push_bytes(stamp, field)
 }
@@ -115,7 +115,7 @@ store_external_output_paths: fn(roots: HangarRoots, entries: [StoreEntry]) -> [S
     store_sorted_unique(paths)
 }
 
-store_append_external_metadata_stamp: fn(stamp: &[U8], metadata: Stat) Never! {
+store_append_external_metadata_stamp: fn(stamp: ^[U8], metadata: Stat) Never! {
     kind: if {
         metadata.is_symlink -> "symlink"
         metadata.is_dir -> "directory"
@@ -143,7 +143,7 @@ store_io_kind_name: fn(error: IOError) -> String Never! {
     }
 }
 
-store_append_external_output_stamp: fn(stamp: &[U8], path: String) Never! {
+store_append_external_output_stamp: fn(stamp: ^[U8], path: String) Never! {
     store_append_environment_stamp_field(stamp, path.bytes())
     if files.stat(path) == {
         .Ok(metadata) -> {
@@ -177,7 +177,7 @@ store_append_external_output_stamp: fn(stamp: &[U8], path: String) Never! {
 
 // A missing node records `missing`; any other failure records `failed` and
 // the Rust error-kind name.
-store_append_stat_failure: fn(stamp: &[U8], error: IOError, missing: String, failed: String) Never! {
+store_append_stat_failure: fn(stamp: ^[U8], error: IOError, missing: String, failed: String) Never! {
     if StoreError.IO(error).is_not_found() {
         store_append_environment_stamp_field(stamp, missing.bytes())
         return

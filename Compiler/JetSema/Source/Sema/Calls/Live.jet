@@ -95,7 +95,7 @@ sema_live_member: fn(module_name: String, member: String) -> Bool Never! {
 }
 
 // A live-binding call through a Core module alias (`use app`).
-sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_live_member(module_name, member) -> return sema_live_unhandled()
     // A nested module path (`alias.leaf.member`) names another module.
     imported_module: sema_call_core_import_module(environment, program, alias) ?? return sema_live_unhandled()
@@ -109,7 +109,7 @@ sema_call_try_live: fn(module_name: String, member: String, alias: String, alias
 
 // `alias.member(source, args...)`, where `alias` names `app`
 // and the import is already recorded.
-sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if member == {
         "enqueue" -> return sema_call_enqueue(alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         "endpoints" -> return sema_call_app_endpoints(alias, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -259,7 +259,7 @@ sema_live_shape: fn(member: String) -> String Never! {
 
 // The named source function: its wire name (module path and name), parameter
 // types, and result and error types, each Encode and Decode.
-sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaLiveSource? {
+sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
     source_span: expr_span(expression)
     name: if expression == {
         .Ident(written, _, _) -> written
@@ -318,7 +318,7 @@ sema_live_is_closure: fn(expression: Expr) -> Bool Never! {
 
 // An `app.live` closure that is not one remote call: E2816, naming what it
 // is instead.
-sema_live_not_remote: fn(found: String, at: Span, diagnostics: &[Diagnostic]) -> SemaLiveSource? {
+sema_live_not_remote: fn(found: String, at: Span, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
     entry: diagnostic_registry_row("E2816") ?? panic("E2816 must have a registry row")
     diagnostics.push(sema_error("E2816", at, entry.what.replace("{{found}}", found), entry.why, entry.fix))
     None
@@ -327,7 +327,7 @@ sema_live_not_remote: fn(found: String, at: Span, diagnostics: &[Diagnostic]) ->
 // The closure `expression` given to `live`, which must take no parameters
 // and be one call, `remote.method(args)` (sema_live_remote_call). `extra`
 // counts the arguments written after it; its call gives them instead.
-sema_live_remote_source: fn(expression: Expr, extra: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaLiveSource? {
+sema_live_remote_source: fn(expression: Expr, extra: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
     span: expr_span(expression)
     if extra != 0 {
         return sema_live_not_remote("arguments follow it, but its one call gives them", span, diagnostics)
@@ -353,7 +353,7 @@ sema_live_remote_source: fn(expression: Expr, extra: Int, environment: SemaScope
 
 // The closure's one call, which must be a method call without type
 // arguments on a name that holds an `app.Remote<S>`.
-sema_live_remote_call: fn(call: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaLiveSource? {
+sema_live_remote_call: fn(call: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
     if call == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, call_id) {
         if owner_type_args.len() != 0 || type_args.len() != 0 {
             return sema_live_not_remote("its call has type arguments", method_span, diagnostics)
@@ -388,7 +388,7 @@ sema_live_remote_call: fn(call: Expr, span: Span, environment: SemaScopeEnvironm
 // in its place, and each parameter type must be Encode and Decode. Its wire
 // name is the service's module path, name and method; its result and error
 // are the method's.
-sema_live_remote_endpoint: fn(service: Type, holder: String, holder_span: Span, holder_id: Int, method: String, method_span: Span, args: [CallArg], call_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaLiveSource? {
+sema_live_remote_endpoint: fn(service: Type, holder: String, holder_span: Span, holder_id: Int, method: String, method_span: Span, args: [CallArg], call_id: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaLiveSource? {
     graph: program.registration_graph ?? return None
     row: sema_type_resolve_nominal_row(graph, service, environment.module_identity) ?? return None
     service_module: graph.modules[row.module_index].module_identity
@@ -452,7 +452,7 @@ sema_live_remote_endpoint: fn(service: Type, holder: String, holder_span: Span, 
 
 // A `live` query may only read the database: its declared effects are
 // `DB.Read` at most.
-sema_live_reads_only: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_live_reads_only: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     rows: effect_bound ?? {
         diagnostics.push(sema_error("E0740", span, "`{name}` declares no effects, so a live query can't prove it only reads", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "declare it `{name}: fn(...) -[DB.Read]> ...`, or use `subscribe` for a source that also fetches over `Net` or waits on `Time`"))
         return false
@@ -471,7 +471,7 @@ sema_live_reads_only: fn(name: String, effect_bound: [EffectRowEntry]?, span: Sp
 // browser, and every such target provides those (`app.Live` bounds its run to
 // them). A source that declares none is held to that bound by its body's
 // inferred effects where the binding is made.
-sema_live_subscribable: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_live_subscribable: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     rows: effect_bound ?? return true
     loop row in rows {
         if sema_effect_covers("DB.Read", row.name) || sema_effect_covers("Net", row.name) || sema_effect_covers("Time", row.name) {
@@ -483,7 +483,7 @@ sema_live_subscribable: fn(name: String, effect_bound: [EffectRowEntry]?, span: 
     true
 }
 
-sema_live_codable: fn(graph: SemaRegistrationGraph, name: String, role: String, ty: Type, environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_live_codable: fn(graph: SemaRegistrationGraph, name: String, role: String, ty: Type, environment: SemaScopeEnvironment, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     missing: loop codec in owned_trait_codec_names() {
         if sema_type_bound_satisfied(graph, ty, codec, environment.module_identity) != (Val(true)) {
             break codec.copy()

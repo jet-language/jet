@@ -118,19 +118,19 @@ build_graph_rules_failure: fn(reply: BuildSessionReply) -> BuildSessionDiagnosti
 
 // `b.found(b.probe("tool", "find_program", "tool"))`: the program the
 // session's steps run.
-build_graph_rules_tool: fn(session: &BuildSession) -> BuildSessionValue Never! {
+build_graph_rules_tool: fn(session: ^BuildSession) -> BuildSessionValue Never! {
     probe: build_graph_rules_value(build_session_call(session, build_session_probe, [BuildSessionValue]{.Text{value: "tool"}, .Text{value: "find_program"}, .Text{value: "tool"}}, None, true, 1, 2))
     build_graph_rules_value(build_session_call(session, build_session_found, [BuildSessionValue]{probe}, None, true, 3, 4))
 }
 
-build_graph_rules_step: fn(session: &BuildSession, operation: fn(&BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, step: BuildSessionValue, values: [BuildSessionValue]) -> BuildSessionReply Never! {
+build_graph_rules_step: fn(session: ^BuildSession, operation: fn(^BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, step: BuildSessionValue, values: [BuildSessionValue]) -> BuildSessionReply Never! {
     args := [BuildSessionValue]{step.copy()}
     loop value in values -> args.push(value.copy())
     build_session_call(session, operation, args, None, true, 9, 10)
 }
 
 // `step := b.run(name, tool, caps)`, then `step.output(path)` for each output.
-build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name: String, outputs: [String]) -> BuildSessionReply Never! {
+build_graph_rules_made: fn(session: ^BuildSession, tool: BuildSessionValue, name: String, outputs: [String]) -> BuildSessionReply Never! {
     step: build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: name}, tool, build_graph_rules_list([String]{})}, None, true, 5, 6)
     handle: if step == {
         .Value(value) -> value
@@ -679,7 +679,7 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
 // `step := b.run(name, tool, caps)` at bytes `start..end`, then
 // `step.reads(path)` for each of `reads` and `step.writes(path)` for each of
 // `writes`.
-build_graph_rules_schedule_step: fn(session: &BuildSession, tool: BuildSessionValue, name: String, reads: [String], writes: [String], start: Int) -> BuildSessionValue Never! {
+build_graph_rules_schedule_step: fn(session: ^BuildSession, tool: BuildSessionValue, name: String, reads: [String], writes: [String], start: Int) -> BuildSessionValue Never! {
     step: build_graph_rules_value(build_session_call(session, build_session_run, [BuildSessionValue]{.Text{value: name}, tool, build_graph_rules_list([String]{})}, None, true, start, start + 1))
     loop path in reads {
         assert(build_graph_rules_ok(build_graph_rules_step(session, build_session_step_reads, step, [BuildSessionValue]{.Text{value: path}})))
@@ -691,7 +691,7 @@ build_graph_rules_schedule_step: fn(session: &BuildSession, tool: BuildSessionVa
 }
 
 // `b.generate(name) { source }`, made at `.jet/generated/graph/<name>.jet`.
-build_graph_rules_generate: fn(session: &BuildSession, name: String, source: String) Never! {
+build_graph_rules_generate: fn(session: ^BuildSession, name: String, source: String) Never! {
     assert(build_graph_rules_ok(build_session_call(session, build_session_generate, [BuildSessionValue]{.Text{value: name}}, Val(source), false, 1, 2)))
 }
 
@@ -715,7 +715,7 @@ build_graph_rules_schedule_made: fn(plan: BuildSessionPlan) -> [String] Never! {
 }
 
 // The refusal `build: fn` returning leaves, once the session is set up.
-build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiagnostic Never! {
+build_graph_rules_finish_refusal: fn(session: ^BuildSession) -> BuildSessionDiagnostic Never! {
     finished: build_session_finish(session, .Unit)
     assert(finished.plan == None, "the schedule refuses the plan")
     assert_eq(finished.diagnostics.len(), 1)
@@ -827,7 +827,7 @@ build_graph_rules_finish_refusal: fn(session: &BuildSession) -> BuildSessionDiag
 }
 
 // A chain of `count` steps, each reading the Jet source the one before made.
-build_graph_rules_round_chain: fn(session: &BuildSession, count: Int) Never! {
+build_graph_rules_round_chain: fn(session: ^BuildSession, count: Int) Never! {
     tool: build_graph_rules_tool(session)
     loop index in 0..<count {
         reads: if index == 0 -> [String]{} else -> [String]{".jet/generated/graph/gen{index - 1}.jet"}

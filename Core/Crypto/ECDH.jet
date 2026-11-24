@@ -47,7 +47,7 @@ ecdh_new: fn() -> ECDHContext Never! {
 }
 
 /// A private key d and public key d G (mbedtls_ecdh_gen_public).
-ecdh_gen_public: fn<R: RNG>(grp: ecp.EcpGroup, rng: &R) -> {d: bn.Mpi, q: ecp.Point} ecp.EcpError! {
+ecdh_gen_public: fn<R: RNG>(grp: ecp.EcpGroup, rng: ^R) -> {d: bn.Mpi, q: ecp.Point} ecp.EcpError! {
     d: ecp.gen_privkey(grp, rng)
     q: ecp.ecp_mul(grp, d, grp.g, rng)
     Ok({d: d, q: q})
@@ -56,7 +56,7 @@ ecdh_gen_public: fn<R: RNG>(grp: ecp.EcpGroup, rng: &R) -> {d: bn.Mpi, q: ecp.Po
 /// The shared secret x(d Q), with the multiplication blinded from rng
 /// (mbedtls_ecdh_compute_shared). BadInput when d Q is the point at
 /// infinity.
-ecdh_compute_shared: fn<R: RNG>(grp: ecp.EcpGroup, q: ecp.Point, d: bn.Mpi, rng: &R) -> bn.Mpi ecp.EcpError! {
+ecdh_compute_shared: fn<R: RNG>(grp: ecp.EcpGroup, q: ecp.Point, d: bn.Mpi, rng: ^R) -> bn.Mpi ecp.EcpError! {
     pt: ecp.ecp_mul(grp, d, q, rng)
     if ecp.is_zero(pt) -> return Err(.BadInput)
     Ok(bn.copy_mpi_ct(pt.x))
@@ -67,7 +67,7 @@ ecdh_grp_id: fn(ctx: ECDHContext) -> ecp.GroupID Never! { ctx.grp_id }
 
 /// Reset ctx for curve `id` (mbedtls_ecdh_setup): FeatureUnavailable for a
 /// curve it cannot load.
-ecdh_setup: fn(ctx: &ECDHContext, id: ecp.GroupID) ecp.EcpError! {
+ecdh_setup: fn(ctx: ^ECDHContext, id: ecp.GroupID) ecp.EcpError! {
     ctx.point_format = .Uncompressed
     ctx.grp_id = id
     ctx.d = bn.mpi()
@@ -82,7 +82,7 @@ ecdh_setup: fn(ctx: &ECDHContext, id: ecp.GroupID) ecp.EcpError! {
 
 /// A fresh key pair and the ServerECDHParams { ECParameters, ECPoint }
 /// holding its public point, at most blen bytes (mbedtls_ecdh_make_params).
-ecdh_make_params: fn<R: RNG>(ctx: &ECDHContext, blen: Int, rng: &R) -> [U8] ecp.EcpError! {
+ecdh_make_params: fn<R: RNG>(ctx: ^ECDHContext, blen: Int, rng: ^R) -> [U8] ecp.EcpError! {
     if ctx.grp.pbits == 0 -> return Err(.BadInput)
     pair: ecdh_gen_public(ctx.grp, rng)
     ctx.d = pair.d.move()
@@ -95,7 +95,7 @@ ecdh_make_params: fn<R: RNG>(ctx: &ECDHContext, blen: Int, rng: &R) -> [U8] ecp.
 
 /// Set ctx up from the ServerECDHParams at the start of buf and take its
 /// point as the peer's (mbedtls_ecdh_read_params); the bytes read.
-ecdh_read_params: fn(ctx: &ECDHContext, buf: [U8]) -> Int ecp.EcpError! {
+ecdh_read_params: fn(ctx: ^ECDHContext, buf: [U8]) -> Int ecp.EcpError! {
     group: ecp.tls_read_group_id(buf)
     ecdh_setup(ctx, group.id)
     rest: cipher.bytes_of(buf, group.used, buf.len() - group.used)
@@ -107,7 +107,7 @@ ecdh_read_params: fn(ctx: &ECDHContext, buf: [U8]) -> Int ecp.EcpError! {
 /// Import key into ctx: the whole pair as ours or the public point as the
 /// peer's (mbedtls_ecdh_get_params). The first call sets up the context
 /// for key's curve; later keys must be on the same curve, else BadInput.
-ecdh_get_params: fn(ctx: &ECDHContext, key: ecp.Keypair, side: ECDHSide) ecp.EcpError! {
+ecdh_get_params: fn(ctx: ^ECDHContext, key: ecp.Keypair, side: ECDHSide) ecp.EcpError! {
     if {
         ctx.grp_id == .Unknown -> ecdh_setup(ctx, key.grp.id)
         ctx.grp_id != key.grp.id -> return Err(.BadInput)
@@ -123,7 +123,7 @@ ecdh_get_params: fn(ctx: &ECDHContext, key: ecp.Keypair, side: ECDHSide) ecp.Ecp
 
 /// A fresh key pair and the client's ECPoint of its public point, at most
 /// blen bytes (mbedtls_ecdh_make_public).
-ecdh_make_public: fn<R: RNG>(ctx: &ECDHContext, blen: Int, rng: &R) -> [U8] ecp.EcpError! {
+ecdh_make_public: fn<R: RNG>(ctx: ^ECDHContext, blen: Int, rng: ^R) -> [U8] ecp.EcpError! {
     if ctx.grp.pbits == 0 -> return Err(.BadInput)
     pair: ecdh_gen_public(ctx.grp, rng)
     ctx.d = pair.d.move()
@@ -134,7 +134,7 @@ ecdh_make_public: fn<R: RNG>(ctx: &ECDHContext, blen: Int, rng: &R) -> [U8] ecp.
 
 /// Take the client's ECPoint, exactly all of buf, as the peer's point
 /// (mbedtls_ecdh_read_public).
-ecdh_read_public: fn(ctx: &ECDHContext, buf: [U8]) ecp.EcpError! {
+ecdh_read_public: fn(ctx: ^ECDHContext, buf: [U8]) ecp.EcpError! {
     point: ecp.tls_read_point(ctx.grp, buf)
     ctx.qp = point.pt.move()
     if point.used != buf.len() -> return Err(.BadInput)
@@ -143,7 +143,7 @@ ecdh_read_public: fn(ctx: &ECDHContext, buf: [U8]) ecp.EcpError! {
 /// The shared secret as the field size in bytes, little-endian on the
 /// Montgomery curves (RFC 7748), at most blen bytes
 /// (mbedtls_ecdh_calc_secret).
-ecdh_calc_secret: fn<R: RNG>(ctx: &ECDHContext, blen: Int, rng: &R) -> [U8] ecp.EcpError! {
+ecdh_calc_secret: fn<R: RNG>(ctx: ^ECDHContext, blen: Int, rng: ^R) -> [U8] ecp.EcpError! {
     if ctx.grp.pbits == 0 -> return Err(.BadInput)
     ctx.z = ecdh_compute_shared(ctx.grp, ctx.qp, ctx.d, rng)
     p_bytes: (ctx.grp.pbits + 7) /% 8

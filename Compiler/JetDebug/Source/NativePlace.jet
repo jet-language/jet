@@ -314,17 +314,17 @@ native_place_refusal: fn(bytes: [U8], address: Int, at: Int, length: Int) -> Str
 // Whether `value` fits a signed 32-bit field.
 native_place_near: fn(value: Int) -> Bool Never! { value >= -2147483648 && value <= 2147483647 }
 
-native_place_emit: fn(out: &[U8], bytes: [Int]) Never! {
+native_place_emit: fn(out: ^[U8], bytes: [Int]) Never! {
     loop byte in bytes -> out.push(U8{byte & 255})
 }
 
-native_place_word: fn(out: &[U8], value: Int, size: Int) Never! {
+native_place_word: fn(out: ^[U8], value: Int, size: Int) Never! {
     loop k in 0..<size -> out.push(U8{(value >> (8 * k)) & 255})
 }
 
 // A rel32 field at `field` of `out` (which runs at `base`) to `target`;
 // false when it can't reach.
-native_place_rel: fn(out: &[U8], field: Int, base: Int, target: Int) -> Bool Never! {
+native_place_rel: fn(out: ^[U8], field: Int, base: Int, target: Int) -> Bool Never! {
     rel: target - (base + field + 4)
     if !native_place_near(rel) -> return false
     native_fix_put(out, field, rel, 4)
@@ -336,7 +336,7 @@ native_place_rel: fn(out: &[U8], field: Int, base: Int, target: Int) -> Bool Nev
 // instruction after them: a rip-relative operand keeps its target, a branch
 // takes its rel32 form and a call pushes the return address it would have
 // pushed and jumps. False when a target can't be reached from there.
-native_moved: fn(out: &[U8], base: Int, bytes: [U8], at: Int, address: Int, insns: [NativeInsn]) -> Bool Never! {
+native_moved: fn(out: ^[U8], base: Int, bytes: [U8], at: Int, address: Int, insns: [NativeInsn]) -> Bool Never! {
     offset := at
     loop insn in insns {
         here: address + (offset - at)
@@ -380,7 +380,7 @@ native_moved: fn(out: &[U8], base: Int, bytes: [U8], at: Int, address: Int, insn
 
 // Puts every register and the flags back from the trampoline's frame (rbp),
 // leaving rsp as the program had it.
-native_place_restore: fn(out: &[U8]) Never! {
+native_place_restore: fn(out: ^[U8]) Never! {
     loop k in 0..<16 {
         // movups xmmk,[rbp+NATIVE_PLACE_XMM+16k]
         if k >= 8 -> out.push(0x44)
@@ -651,7 +651,7 @@ native_place_code: fn(base: Int, address: Int, calls: [NativePlaceCall], ring: N
 
 // Gives up the arena at `arena` (native_place_code): movabs r11,arena;
 // mov qword [r11+busy],0.
-native_place_free_arena: fn(out: &[U8], arena: Int) Never! {
+native_place_free_arena: fn(out: ^[U8], arena: Int) Never! {
     native_eval_r11(out, arena)
     native_place_emit(out, [Int]{0x49, 0xc7, 0x43, NATIVE_PLACE_ARENA_BUSY, 0, 0, 0, 0})
 }
@@ -659,7 +659,7 @@ native_place_free_arena: fn(out: &[U8], arena: Int) Never! {
 // The address of a capture's bytes into x86 register `reg`: a register's
 // saved slot (lea R,[rbp+saved]), or memory at one (mov R,[rbp+saved];
 // lea R,[R+offset]), read once more (mov R,[R]) when it says so.
-native_place_capture: fn(out: &[U8], argument: NativePlaceArg, reg: Int) Never! {
+native_place_capture: fn(out: ^[U8], argument: NativePlaceArg, reg: Int) Never! {
     high: if reg >= 8 -> 4 else -> 0
     low: reg & 7
     saved: NATIVE_PLACE_GPR + 8 * argument.register

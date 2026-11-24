@@ -94,7 +94,7 @@ jet_cli_doctest_declared: fn(line: String) -> String Never! {
 // The doctest files of `snapshot`'s entry root (every source of a package, or
 // the entry alone when `package` is false), each file's claims laid over its
 // bytes in `snapshot`.
-jet_cli_doctest_overlay: fn(snapshot: &JetDriverAuthorizedSourceSnapshot, package: Bool) -> [JetCLIDoctestFile] Never! {
+jet_cli_doctest_overlay: fn(snapshot: ^JetDriverAuthorizedSourceSnapshot, package: Bool) -> [JetCLIDoctestFile] Never! {
     found := [JetCLIDoctestFile]{}
     if snapshot.roots.len() == 0 -> return found
     loop file in snapshot.roots[0].files {
@@ -177,7 +177,7 @@ jet_cli_doctest_line_span: fn(source: String, line: Int) -> Span Never! {
 // output. A mismatch fails the claim with E2901 and is added to `mismatches`,
 // unless `update` records the rewrite of a one-line rendering in `rewrites`
 // instead.
-jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetCLIDocTest, color: Bool, update: Bool, rewrites: &[JetCLIDocExpectation], mismatches: &[JetCLITestStop]) -> String Err! {
+jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetCLIDocTest, color: Bool, update: Bool, rewrites: ^[JetCLIDocExpectation], mismatches: ^[JetCLITestStop]) -> String Err! {
     parts := jet_cli_native_test_wire_parts(wire)
     pieces: parts.stdout.split(JET_CLI_DOCTEST_OPEN).to_list()
     output := pieces[0]

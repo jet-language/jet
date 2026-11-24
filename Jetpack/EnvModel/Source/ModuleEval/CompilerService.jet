@@ -92,7 +92,7 @@ module_values_program: fn(items: [Item], source: String, environment: [String:Ct
 // Every module value of `program`, computed by the sibling compiler in one
 // request (JetCLI `jet_config_module_values`), or the first diagnostic of
 // its check, at its span in the program.
-module_values_evaluate: fn(program: &&String, base_dir: String) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
+module_values_evaluate: fn(program: ^^String, base_dir: String) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
     // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
     response: envmodel_compiler_service(JET_COMPILER_SERVICE_MODULE_VALUES, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(err)
     outcome: compiler_service_module_values_outcome(response) ?? return Err(CompilerServiceError{detail: "the compiler's answer is not a module-values response"})

@@ -58,38 +58,38 @@ WIN_NT_ROW: 2
 
 // sqlite3_aggregate_context for a context of three i64 fields, zeroed
 // when it is made: its Vdbe.aggs slot, -1 for none.
-window_ctx_ints: fn(v: &conn.Vdbe, n_byte: Int) -> Int Never! {
+window_ctx_ints: fn(v: ^conn.Vdbe, n_byte: Int) -> Int Never! {
     k: api.aggregate_context(v, n_byte)
     if k >= 0 && v.aggs[k].ints.len() == 0 -> v.aggs[k].ints = [Int]{0, 0, 0}
     k
 }
 
 // One more in i64 field f of context k.
-window_ctx_bump: fn(v: &conn.Vdbe, k: Int, f: Int) Never! {
+window_ctx_bump: fn(v: ^conn.Vdbe, k: Int, f: Int) Never! {
     v.aggs[k].ints[f] = v.aggs[k].ints[f] + 1
 }
 
 // row_numberStepFunc.
-row_number_step: fn(v: &conn.Vdbe) Never! {
+row_number_step: fn(v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 8)
     if k >= 0 -> v.aggs[k].i += 1
 }
 
 // row_numberValueFunc.
-row_number_value: fn(v: &conn.Vdbe) Never! {
+row_number_value: fn(v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 8)
     x: if k >= 0 -> v.aggs[k].i else -> 0
     api.result_int64(v, x)
 }
 
 // dense_rankStepFunc.
-dense_rank_step: fn(v: &conn.Vdbe) Never! {
+dense_rank_step: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k >= 0 -> v.aggs[k].ints[WIN_CC_STEP] = 1
 }
 
 // dense_rankValueFunc.
-dense_rank_value: fn(v: &conn.Vdbe) Never! {
+dense_rank_value: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k < 0 {
         return
@@ -104,7 +104,7 @@ dense_rank_value: fn(v: &conn.Vdbe) Never! {
 
 // nth_valueStepFunc: the value of the row whose position in the frame is
 // the second argument, a positive integer.
-nth_value_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
+nth_value_step: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 24)
     if k < 0 {
         return
@@ -133,7 +133,7 @@ nth_value_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
 }
 
 // nth_valueFinalizeFunc and first_valueFinalizeFunc.
-nth_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe, n_byte: Int) Never! {
+nth_value_finalize: fn(db: conn.Conn, v: ^conn.Vdbe, n_byte: Int) Never! {
     k: api.aggregate_context(v, n_byte)
     if k < 0 || v.aggs[k].vals.len() == 0 {
         return
@@ -144,7 +144,7 @@ nth_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe, n_byte: Int) Never! {
 }
 
 // first_valueStepFunc.
-first_value_step: fn(v: &conn.Vdbe) Never! {
+first_value_step: fn(v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 24)
     if k < 0 || v.aggs[k].vals.len() > 0 {
         return
@@ -154,7 +154,7 @@ first_value_step: fn(v: &conn.Vdbe) Never! {
 }
 
 // rankStepFunc.
-rank_step: fn(v: &conn.Vdbe) Never! {
+rank_step: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k < 0 {
         return
@@ -166,7 +166,7 @@ rank_step: fn(v: &conn.Vdbe) Never! {
 }
 
 // rankValueFunc.
-rank_value: fn(v: &conn.Vdbe) Never! {
+rank_value: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k < 0 {
         return
@@ -177,19 +177,19 @@ rank_value: fn(v: &conn.Vdbe) Never! {
 }
 
 // percent_rankStepFunc and cume_distStepFunc.
-call_count_total_step: fn(v: &conn.Vdbe) Never! {
+call_count_total_step: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k >= 0 -> window_ctx_bump(v, k, WIN_CC_TOTAL)
 }
 
 // percent_rankInvFunc and cume_distInvFunc.
-call_count_step_inverse: fn(v: &conn.Vdbe) Never! {
+call_count_step_inverse: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k >= 0 -> window_ctx_bump(v, k, WIN_CC_STEP)
 }
 
 // percent_rankValueFunc.
-percent_rank_value: fn(v: &conn.Vdbe) Never! {
+percent_rank_value: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k < 0 {
         return
@@ -201,7 +201,7 @@ percent_rank_value: fn(v: &conn.Vdbe) Never! {
 }
 
 // cume_distValueFunc.
-cume_dist_value: fn(v: &conn.Vdbe) Never! {
+cume_dist_value: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 0)
     if k < 0 {
         return
@@ -211,7 +211,7 @@ cume_dist_value: fn(v: &conn.Vdbe) Never! {
 }
 
 // ntileStepFunc.
-ntile_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
+ntile_step: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k < 0 {
         return
@@ -227,13 +227,13 @@ ntile_step: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
 }
 
 // ntileInvFunc.
-ntile_inverse: fn(v: &conn.Vdbe) Never! {
+ntile_inverse: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k >= 0 -> window_ctx_bump(v, k, WIN_NT_ROW)
 }
 
 // ntileValueFunc.
-ntile_value: fn(v: &conn.Vdbe) Never! {
+ntile_value: fn(v: ^conn.Vdbe) Never! {
     k: window_ctx_ints(v, 24)
     if k < 0 || v.aggs[k].ints[WIN_NT_PARAM] <= 0 {
         return
@@ -254,7 +254,7 @@ ntile_value: fn(v: &conn.Vdbe) Never! {
 }
 
 // last_valueStepFunc.
-last_value_step: fn(v: &conn.Vdbe) Never! {
+last_value_step: fn(v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 16)
     if k < 0 {
         return
@@ -265,7 +265,7 @@ last_value_step: fn(v: &conn.Vdbe) Never! {
 }
 
 // last_valueInvFunc.
-last_value_inverse: fn(v: &conn.Vdbe) Never! {
+last_value_inverse: fn(v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 16)
     if k < 0 {
         return
@@ -275,7 +275,7 @@ last_value_inverse: fn(v: &conn.Vdbe) Never! {
 }
 
 // last_valueValueFunc.
-last_value_value: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
+last_value_value: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 0)
     if k < 0 || v.aggs[k].vals.len() == 0 {
         return
@@ -285,7 +285,7 @@ last_value_value: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
 }
 
 // last_valueFinalizeFunc.
-last_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
+last_value_finalize: fn(db: conn.Conn, v: ^conn.Vdbe) Never! {
     k: api.aggregate_context(v, 16)
     if k < 0 || v.aggs[k].vals.len() == 0 {
         return
@@ -300,7 +300,7 @@ last_value_finalize: fn(db: conn.Conn, v: &conn.Vdbe) Never! {
 // sqlite3WindowFunctions' WINDOWFUNCX, WINDOWFUNCALL and WINDOWFUNCNOOP
 // entries bind them: a WINDOWFUNCX function's xValue is its xFinalize too.
 // noopStepFunc (which the VM never calls) and noopValueFunc do nothing.
-window_func_call: fn(db: conn.Conn, v: &conn.Vdbe, method: Int) Never! {
+window_func_call: fn(db: conn.Conn, v: ^conn.Vdbe, method: Int) Never! {
     id: v.fctx.impl_id
     step: method == aux.FN_STEP || method == aux.FN_SFUNC
     inverse: method == aux.FN_INVERSE
@@ -338,7 +338,7 @@ window_func_call: fn(db: conn.Conn, v: &conn.Vdbe, method: Int) Never! {
 // sqlite3KeyInfoFromExprList (select.c): the KeyInfo of the terms of
 // `list` from i_start on, with n_extra more fields, their collations and
 // sort orders the terms'.
-key_info_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, list: Int, i_start: Int, n_extra: Int) -> record.KeyInfo Never! {
+key_info_from_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, list: Int, i_start: Int, n_extra: Int) -> record.KeyInfo Never! {
     n_expr: ast.list_len(a, list)
     info := cat.key_info_alloc(p.db, n_expr - i_start, n_extra + 1)
     loop i in i_start..<n_expr {
@@ -367,7 +367,7 @@ WindowRewriteWalker: struct {
     tab: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             op: a.exprs[e].op
             if p.walks[t].u2 >= 0 {
@@ -422,7 +422,7 @@ WindowRewriteWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             save: p.walks[t].u2
             if save == s -> return ast.WRC_CONTINUE
@@ -434,7 +434,7 @@ WindowRewriteWalker: struct {
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -443,7 +443,7 @@ WindowRewriteWalker: struct {
 // selectWindowRewriteEList: rewrite the terms of `elist`, appending what
 // moves to the subquery's result list `sub`; the list, made at the first
 // append when sub is -1.
-select_window_rewrite_elist: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, src: Int, elist: Int, tab: Int, sub: Int) -[DB]> Int Never! {
+select_window_rewrite_elist: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, src: Int, elist: Int, tab: Int, sub: Int) -[DB]> Int Never! {
     w := WindowRewriteWalker{mwin: mwin, src: src, tab: tab}
     cg.walk_push(p, w, sub)
     t: cg.walk_top(p)
@@ -455,7 +455,7 @@ select_window_rewrite_elist: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, src: Int, 
 
 // exprListAppendList: `list` with a copy of each term of `append`, its
 // sort flags kept; with int_to_null an integer literal copies as NULL.
-expr_list_append_list: fn(a: &ast.AST, list0: Int, append: Int, int_to_null: Bool) -> Int Never! {
+expr_list_append_list: fn(a: ^ast.AST, list0: Int, append: Int, int_to_null: Bool) -> Int Never! {
     if append < 0 -> return list0
     list := list0
     n_init: ast.list_len(a, list)
@@ -483,7 +483,7 @@ WindowAggDepthWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].op2 >= p.walks[t].depth {
                 a.exprs[e].op2 += 1
@@ -493,13 +493,13 @@ WindowAggDepthWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             cg.walker_depth_increase(p)
         }
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
             cg.walker_depth_decrease(p)
         }
 
@@ -513,7 +513,7 @@ DisallowAggOrderByWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             if a.exprs[e].op == tk.TK_AGG_FUNCTION && a.exprs[e].agg_info < 0 {
                 name: ast.text(a.exprs[e].token ?? [U8]{})
                 ast.error(a, "misuse of aggregate: {name}()")
@@ -523,13 +523,13 @@ DisallowAggOrderByWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { false }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -537,7 +537,7 @@ DisallowAggOrderByWalker: struct {
 
 // Whether the first terms of `sort` match `ob`, term for term
 // (sqlite3ExprListCompare over pSort cut to pOrderBy's length).
-expr_list_prefix_same: fn(a: &ast.AST, sort: Int, ob: Int) -> Bool Never! {
+expr_list_prefix_same: fn(a: ^ast.AST, sort: Int, ob: Int) -> Bool Never! {
     loop i in 0..<ast.list_len(a, ob) {
         if a.lists[sort].items[i].sort_flags != a.lists[ob].items[i].sort_flags -> return false
         x: ast.list_expr(a, sort, i)
@@ -552,7 +552,7 @@ expr_list_prefix_same: fn(a: &ast.AST, sort: Int, ob: Int) -> Bool Never! {
 // HAVING that yields the columns, aggregates and arguments it uses. A
 // no-op for a SELECT without them; an error code, with the error left,
 // on failure.
-window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+window_rewrite: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     rc := base.OK
     if a.selects[s].win < 0 || a.selects[s].prior >= 0 || a.selects[s].sel_flags & ast.SF_WIN_REWRITE != 0 || ast.in_rename(a) {
         return rc
@@ -675,7 +675,7 @@ window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 
 // sqlite3WindowCodeInit: before sqlite3WhereBegin over the rewritten
 // SELECT s, the cursors and registers sqlite3WindowCodeStep uses.
-window_code_init: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
+window_code_init: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) Never! {
     si0: ast.src_item(a, a.selects[s].src, 0)
     sub: a.items[si0].select
     n_eph_expr: ast.list_len(a, a.selects[sub].elist)
@@ -769,7 +769,7 @@ WINDOW_ENDING_NUM: 4
 // windowCheckValue: code that halts with an error unless register reg,
 // just evaluated for eCond `e_cond`, is a non-negative integer (a
 // positive one for nth_value(), a non-negative number for RANGE).
-window_check_value: fn(p: &cg.Parse, reg: Int, e_cond: Int) Never! {
+window_check_value: fn(p: ^cg.Parse, reg: Int, e_cond: Int) Never! {
     errs: [String]{"frame starting offset must be a non-negative integer", "frame ending offset must be a non-negative integer", "second argument to nth_value must be a positive integer", "frame starting offset must be a non-negative number", "frame ending offset must be a non-negative number"}
     ops: [Int]{opc.OP_GE, opc.OP_GE, opc.OP_GT, opc.OP_GE, opc.OP_GE}
     cg.get_vdbe(p)
@@ -829,7 +829,7 @@ WINDOW_AGGSTEP: 3
 
 // windowReadPeerValues: code that reads the window's ORDER BY (peer)
 // values of the row of cursor csr into the registers from reg.
-window_read_peer_values: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, csr: Int, reg: Int) Never! {
+window_read_peer_values: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, csr: Int, reg: Int) Never! {
     ob: a.windows[s.mwin].order_by
     if ob < 0 {
         return
@@ -843,7 +843,7 @@ window_read_peer_values: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, csr: In
 // function of the window list mwin on the row of cursor csr, its
 // arguments read into the registers from reg; or the inline code of the
 // built-in functions that take none of the function API.
-window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Bool, reg: Int) -[DB]> Never! {
+window_agg_step: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int, csr: Int, inverse: Bool, reg: Int) -[DB]> Never! {
     eph: a.windows[mwin].eph_csr
     b_inverse: if inverse -> 1 else -> 0
     win := mwin
@@ -914,7 +914,7 @@ window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Boo
 // windowAggFinal: code that calls xValue (xFinalize with fin) of each
 // function of the window list, or computes the inline min() and max(),
 // into their result registers.
-window_agg_final: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, fin: Bool) Never! {
+window_agg_final: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, fin: Bool) Never! {
     mwin: s.mwin
     win := mwin
     loop win >= 0 {
@@ -945,7 +945,7 @@ window_agg_final: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, fin: Bool) Nev
 // windowFullScan: code that computes each function of the window list
 // over a scan of the whole current frame (an EXCLUDE frame's way), into
 // the result registers.
-window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) -[DB]> Never! {
+window_full_scan: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Never! {
     mwin: s.mwin
     mw: a.windows[mwin].copy()
     csr: mw.csr_app
@@ -1002,7 +1002,7 @@ window_full_scan: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) -[DB]> Never! 
 // table through the subroutine at s.addr_gosub, computing first the
 // built-in functions that read rows themselves (nth_value(),
 // first_value(), lead(), lag()).
-window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) -[DB]> Never! {
+window_return_one_row: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg) -[DB]> Never! {
     mwin: s.mwin
     if a.windows[mwin].reg_start_rowid != 0 -> window_full_scan(p, a, s) else {
         eph: a.windows[mwin].eph_csr
@@ -1059,7 +1059,7 @@ window_return_one_row: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg) -[DB]> Ne
 // windowInitAccum: code that clears each accumulator of the window list
 // and the state of the built-in functions that keep their own; the first
 // of the registers for the largest argument list.
-window_init_accum: fn(p: &cg.Parse, a: &ast.AST, mwin: Int) -> Int Never! {
+window_init_accum: fn(p: ^cg.Parse, a: ^ast.AST, mwin: Int) -> Int Never! {
     cg.get_vdbe(p)
     n_arg := 0
     win := mwin
@@ -1103,7 +1103,7 @@ window_cache_frame: fn(p: cg.Parse, a: ast.AST, mwin: Int) -> Bool Never! {
 // windowIfNewPeer: code that, when the ORDER BY values from reg_new differ
 // from those from reg_old, copies them over and falls through; else jumps
 // to addr.
-window_if_new_peer: fn(p: &cg.Parse, a: &ast.AST, ob: Int, reg_new: Int, reg_old: Int, addr: Int) Never! {
+window_if_new_peer: fn(p: ^cg.Parse, a: ^ast.AST, ob: Int, reg_new: Int, reg_old: Int, addr: Int) Never! {
     cg.get_vdbe(p)
     if ob >= 0 {
         n_val: ast.list_len(a, ob)
@@ -1121,7 +1121,7 @@ window_if_new_peer: fn(p: &cg.Parse, a: &ast.AST, ob: Int, reg_new: Int, reg_old
 // OP_Gt or OP_Le); for a DESC term, the value less reg_val compared the
 // other way. A value that is no number takes no arithmetic, and for
 // NULLS LAST (BIGNULL) NULL is above everything.
-window_code_range_test: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op0: Int, csr1: Int, reg_val: Int, csr2: Int, lbl: Int) Never! {
+window_code_range_test: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, op0: Int, csr1: Int, reg_val: Int, csr2: Int, lbl: Int) Never! {
     ob: a.windows[s.mwin].order_by
     reg1: cg.get_temp_reg(p)
     reg2: cg.get_temp_reg(p)
@@ -1174,7 +1174,7 @@ window_code_range_test: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op0: Int
 // of sqlite3WindowCodeStep, run when the countdown register (if any)
 // allows; with jump_on_eof, the address of the OP_Goto taken at the end
 // of the stepped cursor, else 0.
-window_code_op: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op: Int, reg_countdown: Int, jump_on_eof: Bool) -[DB]> Int Never! {
+window_code_op: fn(p: ^cg.Parse, a: ^ast.AST, s: WindowCodeArg, op: Int, reg_countdown: Int, jump_on_eof: Bool) -[DB]> Int Never! {
     mw: a.windows[s.mwin].copy()
     ret := 0
     b_peer: mw.frm_type != tk.TK_ROWS
@@ -1283,7 +1283,7 @@ window_expr_gt_zero: fn(p: cg.Parse, a: ast.AST, e: Int) -> Bool Never! {
 // subroutine at addr_gosub (register reg_gosub); ends the loop with
 // sqlite3WhereEnd. The frame shapes and the code each takes are
 // window.c's header comment on this routine.
-window_code_step: fn(p: &cg.Parse, a: &ast.AST, sel: Int, wi: &we.WhereInfo, reg_gosub: Int, addr_gosub: Int) -[DB]> Never! {
+window_code_step: fn(p: ^cg.Parse, a: ^ast.AST, sel: Int, wi: ^we.WhereInfo, reg_gosub: Int, addr_gosub: Int) -[DB]> Never! {
     mwin: a.selects[sel].win
     mw: a.windows[mwin].copy()
     ob: mw.order_by

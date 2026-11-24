@@ -43,23 +43,23 @@ total: fn(n: Node) -> Int {
     }
 }
 
-widen: fn(n: &Node, i: Int) { n = make(5 * i + 4) }
+widen: fn(n: ^Node, i: Int) { n = make(5 * i + 4) }
 
-swap_nodes: fn(a: &Node, b: &Node) {
+swap_nodes: fn(a: ^Node, b: ^Node) {
     held: a.copy()
     a = b.copy()
     b = held
 }
 
-widen_left: fn(n: &Node) {
-    if &n == {
+widen_left: fn(n: ^Node) {
+    if ^n == {
         .Pair(left, _) -> left = make(9)
         .Leaf | .Num(_) | .Name(_) | .Wide(_, _, _, _, _, _, _, _) -> {}
     }
 }
 
-bump: fn(n: &Node) {
-    if &n == {
+bump: fn(n: ^Node) {
+    if ^n == {
         .Num(v) -> v += 100
         .Leaf | .Name(_) | .Pair(_, _) | .Wide(_, _, _, _, _, _, _, _) -> {}
     }

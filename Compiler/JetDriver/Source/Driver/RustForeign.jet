@@ -77,7 +77,7 @@ jet_driver_rust_foreign_mangle: fn(name: String) -> String Never! {
 }
 
 // IdentityBuilder::field: u64 little-endian lengths, followed by exact UTF-8.
-jet_driver_rust_foreign_field: fn(bytes: &[U8], name: String, value: [U8]) Never! {
+jet_driver_rust_foreign_field: fn(bytes: ^[U8], name: String, value: [U8]) Never! {
     name_bytes: name.bytes()
     loop shift in 0..<8 -> bytes.push(U8{(name_bytes.len() >> (shift * 8)) & 255})
     loop byte in name_bytes -> bytes.push(byte)
@@ -248,7 +248,7 @@ jet_driver_rust_foreign_function: fn(declaration: ExternFn) -> JetDriverRustFore
     JetDriverRustForeignFunction{name: declaration.name, params: params, return_type: declaration.return_type, rust_path: declaration.rust_path, generated: declaration.generated, close: close}
 }
 
-jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_identity: ModuleID, entries: &[JetDriverRustForeignEntry], records: &JetDriverRustForeignRecordIndex) Never! {
+jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_identity: ModuleID, entries: ^[JetDriverRustForeignEntry], records: ^JetDriverRustForeignRecordIndex) Never! {
     loop item in items {
         if item == {
             .ExternRust(block) -> {

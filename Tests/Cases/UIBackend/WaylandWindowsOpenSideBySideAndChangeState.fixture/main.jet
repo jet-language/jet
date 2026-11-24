@@ -45,7 +45,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -80,13 +80,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -98,13 +98,13 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push(message.copy())
 }
 
 // xdg_toplevel.configure at `width` x `height` logical units with
 // `states`, then xdg_surface.configure.
-fake_configure: fn(f: &Fake, width: Int, height: Int, states: [Int]) {
+fake_configure: fn(f: ^Fake, width: Int, height: Int, states: [Int]) {
     f.serial += 1
     args := fake_words([Int]{width, height, states.len() * 4})
     loop state in states -> fake_put(args, state)
@@ -114,13 +114,13 @@ fake_configure: fn(f: &Fake, width: Int, height: Int, states: [Int]) {
     fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
 }
 
-fake_close: fn(f: &Fake) {
+fake_close: fn(f: ^Fake) {
     toplevel: f.toplevel
     f.closed = true
     fake_event(f, toplevel, 1, [U8]{})
 }
 
-fake_commit: fn(f: &Fake) {
+fake_commit: fn(f: ^Fake) {
     f.commits += 1
     if f.attached != 0 {
         previous: f.current
@@ -142,7 +142,7 @@ fake_commit: fn(f: &Fake) {
 // set_minimized 13. This compositor maximizes to 400x300, makes
 // fullscreen at 640x480 and leaves fullscreen at 200x100, and closes a
 // window that asks to be minimized.
-fake_toplevel: fn(f: &Fake, opcode: Int, body: [U8]) {
+fake_toplevel: fn(f: ^Fake, opcode: Int, body: [U8]) {
     if opcode == 2 {
         f.title = fake_string(body, 0)
         return
@@ -170,7 +170,7 @@ fake_toplevel: fn(f: &Fake, opcode: Int, body: [U8]) {
     }
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -242,7 +242,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
     }
 }
 
-fake_dispatch: fn(f: &Fake) {
+fake_dispatch: fn(f: ^Fake) {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)
@@ -262,7 +262,7 @@ fake_dispatch: fn(f: &Fake) {
 }
 
 // Serves one window until it disconnects.
-fake_serve: fn(stream: &&net.UnixStream) -[Net, Time]> Fake {
+fake_serve: fn(stream: ^^net.UnixStream) -[Net, Time]> Fake {
     f := Fake{
         stream: stream,
         inbox: [U8]{},

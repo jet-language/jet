@@ -236,7 +236,7 @@ jet_cli_effects_holds: fn(span: Span, offset: Int) -> Bool Never! {
 // Every `#FX` block and comptime scope of `statements` that holds `offset`.
 // Bodies inside expressions (`if` arms, lambdas) are reached through
 // jet_cli_effects_note_expr.
-jet_cli_effects_body_scopes: fn(tables: ASTTables, statements: [StmtNode], offset: Int, scopes: &[JetCLIEffectsScope]) Never! {
+jet_cli_effects_body_scopes: fn(tables: ASTTables, statements: [StmtNode], offset: Int, scopes: ^[JetCLIEffectsScope]) Never! {
     loop statement in statements {
         if ast_stmt(tables, statement) == {
             .AuthorityScope(caps, _, _, body, span) -> {
@@ -280,7 +280,7 @@ jet_cli_effects_body_scopes: fn(tables: ASTTables, statements: [StmtNode], offse
 
 // The expression bodies that hold statements: a lambda holding `offset` is
 // its own function rung, with the effect facts sema settled for it.
-jet_cli_effects_note_expr: fn(tables: ASTTables, scopes: &[JetCLIEffectsScope], expression: ExprNode, offset: Int) Never! {
+jet_cli_effects_note_expr: fn(tables: ASTTables, scopes: ^[JetCLIEffectsScope], expression: ExprNode, offset: Int) Never! {
     if ast_expr(tables, expression) == {
         .Lambda(lambda, _) -> {
             if jet_cli_effects_holds(lambda.span, offset) {
@@ -323,7 +323,7 @@ jet_cli_effects_scopes_sorted: fn(scopes: [JetCLIEffectsScope]) -> [JetCLIEffect
 // where the module is written, outermost first), so a function an inline
 // module or a generic module instance lowered to a file-level copy keeps
 // them; `caps` adds the type and trait caps around it.
-jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func, caps: [ModuleCap], offset: Int) Never! {
+jet_cli_effects_take: fn(found: ^JetCLIEffectsSite, key: String, function: Func, caps: [ModuleCap], offset: Int) Never! {
     if function.compiler_generated || !jet_cli_effects_holds(function.span, offset) {
         return
     }
@@ -345,7 +345,7 @@ jet_cli_effects_take: fn(found: &JetCLIEffectsSite, key: String, function: Func,
 // The innermost function holding `offset`, keyed as `jet inspect rights`
 // keys it (jet_cli_rights_collect), and the inline module, type and trait
 // caps around it.
-jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offset: Int, caps: [ModuleCap], found: &JetCLIEffectsSite) Never! {
+jet_cli_effects_locate: fn(items: [Item], alias: String, namespace: String, offset: Int, caps: [ModuleCap], found: ^JetCLIEffectsSite) Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
@@ -453,7 +453,7 @@ jet_cli_effects_declares: fn(directory: String, name: String, target: String) ->
 // The `#FX(…) name: module` caps over the file module `index`, nearest
 // first: the cap where the file is declared, then the caps over the file
 // that declares it.
-jet_cli_effects_file_caps: fn(modules: [JetDriverDocModule], index: Int, depth: Int, rungs: &[JetCLIEffectsRung]) Never! {
+jet_cli_effects_file_caps: fn(modules: [JetDriverDocModule], index: Int, depth: Int, rungs: ^[JetCLIEffectsRung]) Never! {
     if depth > modules.len() {
         return
     }
@@ -501,7 +501,7 @@ jet_cli_effects_package_rung: fn(policy: JetDriverAuthorityPolicy?) -[FS]> JetCL
 // `Time.Wait`) too: no rung grants those, but a `deny` row or `--deny`
 // refuses them, so the explanation names them. Each chain step reads as its
 // source spells it.
-jet_cli_effects_reach_add: fn(reaches: &[JetCLIEffectsReach], name: String, chain: [String], site: String) Never! {
+jet_cli_effects_reach_add: fn(reaches: ^[JetCLIEffectsReach], name: String, chain: [String], site: String) Never! {
     loop reach in reaches {
         if reach.name == name {
             return
@@ -545,7 +545,7 @@ jet_cli_effects_reaches_sorted: fn(reaches: [JetCLIEffectsReach]) -> [JetCLIEffe
 
 // What the function `key` of `doc_module` reaches, each effect with its first
 // call chain (the semantic index witness E0749 and `jet inspect rights` name).
-jet_cli_effects_function_reaches: fn(doc_module: JetDriverDocModule, key: String, summaries: [SemSummary], modules: [JetDriverDocModule], reaches: &[JetCLIEffectsReach]) {
+jet_cli_effects_function_reaches: fn(doc_module: JetDriverDocModule, key: String, summaries: [SemSummary], modules: [JetDriverDocModule], reaches: ^[JetCLIEffectsReach]) {
     summary: semindex_summary(summaries, key) ?? return
     effects: if summary.solved.len() > 0 -> summary.solved else -> summary.direct
     loop name in effects {
@@ -571,7 +571,7 @@ jet_cli_effects_raw_summary: fn(summaries: [SemSummary], raw_key: String) -> Sem
 // What part of a function reaches: its own `direct` effects, and through each
 // call in `edges` (a checked function key at its call span) whatever that
 // callee reaches.
-jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, direct: [EffectRowEntry], edges: [EffectRowEntry], summaries: [SemSummary], modules: [JetDriverDocModule], reaches: &[JetCLIEffectsReach]) {
+jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, direct: [EffectRowEntry], edges: [EffectRowEntry], summaries: [SemSummary], modules: [JetDriverDocModule], reaches: ^[JetCLIEffectsReach]) {
     loop entry in direct {
         jet_cli_effects_reach_add(reaches, entry.name, [String]{owner}, jet_cli_effects_site(doc_module, entry.span.start))
     }
@@ -589,7 +589,7 @@ jet_cli_effects_part_reaches: fn(doc_module: JetDriverDocModule, owner: String, 
 
 // A `#FX` block or comptime scope of the function `key`: the direct effects
 // and calls the checker recorded inside `span`.
-jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, span: Span, summaries: [SemSummary], modules: [JetDriverDocModule], reaches: &[JetCLIEffectsReach]) {
+jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, span: Span, summaries: [SemSummary], modules: [JetDriverDocModule], reaches: ^[JetCLIEffectsReach]) {
     summary: semindex_summary(summaries, key) ?? return
     direct := [EffectRowEntry]{}
     loop function in doc_module.functions {
@@ -783,7 +783,7 @@ jet_cli_effects_cap_row: fn(doc_module: JetDriverDocModule, cap: ModuleCap, kind
 
 // `row` unless the same cap is listed already: a module's cap is read both
 // where the module is written and from each function it binds.
-jet_cli_effects_cap_add: fn(rows: &[JetCLIEffectsCapRow], row: &&JetCLIEffectsCapRow) Never! {
+jet_cli_effects_cap_add: fn(rows: ^[JetCLIEffectsCapRow], row: ^^JetCLIEffectsCapRow) Never! {
     loop listed in rows {
         if listed.file == row.file && listed.line == row.line && listed.cap == row.cap && listed.kind == row.kind && listed.name == row.name {
             return
@@ -796,13 +796,13 @@ jet_cli_effects_cap_add: fn(rows: &[JetCLIEffectsCapRow], row: &&JetCLIEffectsCa
 // module's template is gone from the checked items once its instances are
 // lowered, so its cap is read from the functions it binds, under the
 // template's name.
-jet_cli_effects_function_caps: fn(doc_module: JetDriverDocModule, function: Func, rows: &[JetCLIEffectsCapRow]) Never! {
+jet_cli_effects_function_caps: fn(doc_module: JetDriverDocModule, function: Func, rows: ^[JetCLIEffectsCapRow]) Never! {
     loop cap in function.module_caps {
         jet_cli_effects_cap_add(rows, jet_cli_effects_cap_row(doc_module, cap, "module", cap.owner))
     }
 }
 
-jet_cli_effects_collect_caps: fn(doc_module: JetDriverDocModule, items: [Item], rows: &[JetCLIEffectsCapRow]) Never! {
+jet_cli_effects_collect_caps: fn(doc_module: JetDriverDocModule, items: [Item], rows: ^[JetCLIEffectsCapRow]) Never! {
     loop item in items {
         if item == {
             .CodeModule(definition) -> {

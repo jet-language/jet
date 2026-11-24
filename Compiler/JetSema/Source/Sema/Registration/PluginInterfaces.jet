@@ -45,7 +45,7 @@ SemaPluginInterfaceFacts: struct {
     digest: String,
 }
 
-sema_plugin_put_export: fn(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
+sema_plugin_put_export: fn(exports: ^[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
     loop index in 0..<exports.len() {
         if exports[index].name == export.name {
             exports[index] = export
@@ -59,7 +59,7 @@ sema_plugin_export_after: fn(left: SemaPluginInterfaceExport, right: SemaPluginI
     left.name > right.name
 }
 
-sema_plugin_sort_exports: fn(exports: &[SemaPluginInterfaceExport]) Never! {
+sema_plugin_sort_exports: fn(exports: ^[SemaPluginInterfaceExport]) Never! {
     loop index in 1..<exports.len() {
         item := exports[index]
         cursor := index
@@ -75,7 +75,7 @@ sema_plugin_interface_after: fn(left: SemaPluginInterface, right: SemaPluginInte
     left.identity > right.identity
 }
 
-sema_plugin_sort_interfaces: fn(interfaces: &[SemaPluginInterface]) Never! {
+sema_plugin_sort_interfaces: fn(interfaces: ^[SemaPluginInterface]) Never! {
     loop index in 1..<interfaces.len() {
         item := interfaces[index]
         cursor := index
@@ -87,7 +87,7 @@ sema_plugin_sort_interfaces: fn(interfaces: &[SemaPluginInterface]) Never! {
     }
 }
 
-sema_plugin_put_interface: fn(interfaces: &[SemaPluginInterface], interface: SemaPluginInterface) Never! {
+sema_plugin_put_interface: fn(interfaces: ^[SemaPluginInterface], interface: SemaPluginInterface) Never! {
     loop index in 0..<interfaces.len() {
         if interfaces[index].identity == interface.identity {
             interfaces[index] = interface
@@ -118,7 +118,7 @@ sema_plugin_normalize_artifact: fn(raw: String) -> String? {
 
 // Each literal artifact path keeps its own interface: two artifacts that share
 // a file name are different Components.
-sema_plugin_put_alias: fn(aliases: &[SemaPluginArtifactAlias], artifact: String, identity: String) Never! {
+sema_plugin_put_alias: fn(aliases: ^[SemaPluginArtifactAlias], artifact: String, identity: String) Never! {
     loop alias in aliases {
         if alias.artifact == artifact {
             return

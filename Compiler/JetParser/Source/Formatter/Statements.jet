@@ -214,7 +214,7 @@ jfmt_policy_value_display: fn(value: PolicyValue) -> String Never! {
 
 // One `#Policy(…)` declaration entry, shared by block markers and the
 // standalone policy rule (Rust repeats this match in both places).
-jfmt_fmt_policy_entry: fn(f: &JetFmt, declaration: PolicyDeclaration) {
+jfmt_fmt_policy_entry: fn(f: ^JetFmt, declaration: PolicyDeclaration) {
     jfmt_write(f, jfmt_policy_key_name(declaration.key))
     if declaration.value == {
         .Limit(limit) -> jfmt_write(f, "({limit})")
@@ -365,7 +365,7 @@ jfmt_src_range_valid: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     start >= 0 && start <= end && end <= f.src_bytes.len()
 }
 
-jfmt_fmt_statement_switch_attr: fn(f: &JetFmt, marker: Marker, body: [Stmt]) {
+jfmt_fmt_statement_switch_attr: fn(f: ^JetFmt, marker: Marker, body: [Stmt]) {
     body_start: if body.len() > 0 -> jfmt_stmt_start(body[0]) else -> marker.span.end
     body_is_block := false
     loop token in f.source_toks {
@@ -405,7 +405,7 @@ jfmt_fmt_statement_switch_attr: fn(f: &JetFmt, marker: Marker, body: [Stmt]) {
 // form. Text joined with `+` is E0109 while `+=` appends it, so a text
 // operand keeps the expanded form too. `grouping` counts the parentheses
 // around the value.
-jfmt_fmt_expanded_compound: fn(f: &JetFmt, target: LValue, op_span: Span, value: Expr, grouping: Int) -> Bool {
+jfmt_fmt_expanded_compound: fn(f: ^JetFmt, target: LValue, op_span: Span, value: Expr, grouping: Int) -> Bool {
     if value == .Paren(inner, _, _) {
         return jfmt_fmt_expanded_compound(f, target, op_span, inner, grouping + 1)
     }
@@ -468,7 +468,7 @@ jfmt_text_operand: fn(expr: Expr) -> Bool Never! {
     false
 }
 
-jfmt_fmt_block_stmts: fn(f: &JetFmt, body: [Stmt]) { jfmt_fmt_block_lines(f, body, [Marker]{}) }
+jfmt_fmt_block_stmts: fn(f: ^JetFmt, body: [Stmt]) { jfmt_fmt_block_lines(f, body, [Marker]{}) }
 
 // Where `stmt` starts for the gap before it: an expression statement or an
 // assigned field or element starts at its leftmost operand (jfmt_expr_start),
@@ -484,7 +484,7 @@ jfmt_stmt_gap_next: fn(stmt: Stmt) -> Int Never! {
 
 // A block's statements and, for a function body, its `#X: value` marker
 // lines, each printed where it was written.
-jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
+jfmt_fmt_block_lines: fn(f: ^JetFmt, body: [Stmt], markers: [Marker]) {
     if f.simplify && markers.len() == 0 -> jfmt_note_inline_temporaries(f, body)
     index := 0
     marker_index := 0
@@ -536,7 +536,7 @@ jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
 // author wrote before one kept. Only a block that opens with `{` before its
 // first line and closes with `}` after its last owns them; an arrow body
 // leaves them to the enclosing block.
-jfmt_emit_block_close_comments: fn(f: &JetFmt, first_start: Int, last_end: Int) {
+jfmt_emit_block_close_comments: fn(f: ^JetFmt, first_start: Int, last_end: Int) {
     if !jfmt_src_range_valid(f, first_start, last_end) {
         return
     }
@@ -587,7 +587,7 @@ jfmt_fenced_statement_for: fn(f: JetFmt, stmt: Stmt) -> FencedStatement? Never! 
     None
 }
 
-jfmt_fmt_fenced_statement: fn(f: &JetFmt, fact: FencedStatement) {
+jfmt_fmt_fenced_statement: fn(f: ^JetFmt, fact: FencedStatement) {
     preserve_layout := false
     loop comment in f.comments {
         if fact.span.start <= comment.span.start && comment.span.start < fact.span.end {
@@ -605,7 +605,7 @@ jfmt_fmt_fenced_statement: fn(f: &JetFmt, fact: FencedStatement) {
     if preserve_layout -> jfmt_skip_verbatim_comments(f, fact.span.end)
 }
 
-jfmt_fmt_fenced_names: fn(f: &JetFmt, fence: FencedNames) {
+jfmt_fmt_fenced_names: fn(f: ^JetFmt, fence: FencedNames) {
     if fence.range == .Val(range) {
         jfmt_write(f, "<: {range.start}..{range.end} :>")
         return
@@ -664,7 +664,7 @@ jfmt_fmt_fenced_names: fn(f: &JetFmt, fence: FencedNames) {
     jfmt_write(f, ":>")
 }
 
-jfmt_write_fence_fragment: fn(f: &JetFmt, start: Int, end: Int, preserve_layout: Bool) {
+jfmt_write_fence_fragment: fn(f: ^JetFmt, start: Int, end: Int, preserve_layout: Bool) {
     if preserve_layout {
         if jfmt_src_range_valid(f, start, end) {
             text: jfmt_src_text(f, start, end)
@@ -696,7 +696,7 @@ jfmt_write_fence_fragment: fn(f: &JetFmt, start: Int, end: Int, preserve_layout:
     }
 }
 
-jfmt_write_normalized_source_fragment: fn(f: &JetFmt, fragment: String) {
+jfmt_write_normalized_source_fragment: fn(f: ^JetFmt, fragment: String) {
     bytes: fragment.bytes()
     starts_with_space: bytes.len() > 0 && jfmt_is_ascii_space(bytes[0])
     ends_with_space: bytes.len() > 0 && jfmt_is_ascii_space(bytes[bytes.len() - 1])
@@ -724,7 +724,7 @@ jfmt_write_normalized_source_fragment: fn(f: &JetFmt, fragment: String) {
 // Emit leading comments and preserve section breaks on either side of,
 // and between, comment groups. A single boolean for the whole gap can move
 // a comment across a section boundary and attach it to the wrong phase.
-jfmt_emit_leading_statement_gap: fn(f: &JetFmt, start: Int, end: Int) {
+jfmt_emit_leading_statement_gap: fn(f: ^JetFmt, start: Int, end: Int) {
     cursor := start
     loop f.comment_i < f.comments.len() {
         text: f.comments[f.comment_i].text.copy()
@@ -768,7 +768,7 @@ jfmt_source_has_blank_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never!
 // Render a single simple statement (no leading indent/newline) for
 // the inline brace-body path. The caller guarantees `is_simple_stmt`. A
 // fenced statement (`<: … :>`) prints from its source, as in a body of lines.
-jfmt_fmt_stmt_inline: fn(f: &JetFmt, stmt: Stmt) {
+jfmt_fmt_stmt_inline: fn(f: ^JetFmt, stmt: Stmt) {
     if jfmt_fenced_statement_for(f, stmt) == .Val(fact) {
         jfmt_fmt_fenced_statement(f, fact)
         return
@@ -776,14 +776,14 @@ jfmt_fmt_stmt_inline: fn(f: &JetFmt, stmt: Stmt) {
     jfmt_fmt_stmt(f, stmt)
 }
 
-jfmt_fmt_marker_arg_separator: fn(f: &JetFmt, first: &Bool, multiline: Bool) {
+jfmt_fmt_marker_arg_separator: fn(f: ^JetFmt, first: ^Bool, multiline: Bool) {
     if first -> first = false else if multiline {
         jfmt_write(f, ",")
         jfmt_newline(f)
     } else { jfmt_write(f, ", ") }
 }
 
-jfmt_fmt_block_marker: fn(f: &JetFmt, marker: JetFmtBlockMarker, source_start: Int) {
+jfmt_fmt_block_marker: fn(f: ^JetFmt, marker: JetFmtBlockMarker, source_start: Int) {
     jfmt_write(f, "#")
     if marker.negated -> jfmt_write(f, "!")
     jfmt_write(f, marker.name)
@@ -838,7 +838,7 @@ jfmt_fmt_block_marker: fn(f: &JetFmt, marker: JetFmtBlockMarker, source_start: I
 // The body after the ` {` of a block statement whose source ends at `end`:
 // an empty one stays `{}` (jfmt_fmt_empty_block), where jfmt_fmt_body would
 // open it onto a blank line.
-jfmt_fmt_block_body: fn(f: &JetFmt, body: [Stmt], end: Int) {
+jfmt_fmt_block_body: fn(f: ^JetFmt, body: [Stmt], end: Int) {
     if body.len() == 0 && jfmt_empty_block_before(f, end) == .Val(braces) {
         jfmt_fmt_empty_block(f, braces)
         return
@@ -846,7 +846,7 @@ jfmt_fmt_block_body: fn(f: &JetFmt, body: [Stmt], end: Int) {
     jfmt_fmt_body(f, body)
 }
 
-jfmt_fmt_loop_label: fn(f: &JetFmt, label: NamedSpan?) {
+jfmt_fmt_loop_label: fn(f: ^JetFmt, label: NamedSpan?) {
     // Loop labels use declaration spelling.
     if label == .Val(named) -> jfmt_write(f, "{named.name}: ")
 }
@@ -854,7 +854,7 @@ jfmt_fmt_loop_label: fn(f: &JetFmt, label: NamedSpan?) {
 // `#Allow(…) stmt` and `#Unregistered stmt`: the rows whose target starts
 // where this statement starts, which for an assigned element or field is
 // its leftmost operand (`counts[key] = 1`), not its `[…]` or its name.
-jfmt_fmt_statement_rules: fn(f: &JetFmt, stmt: Stmt) {
+jfmt_fmt_statement_rules: fn(f: ^JetFmt, stmt: Stmt) {
     if f.inline_rules.len() == 0 {
         return
     }
@@ -883,7 +883,7 @@ jfmt_comptime_else_chain: fn(f: JetFmt, body: [Stmt]) -> Bool {
     }
 }
 
-jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
+jfmt_fmt_stmt: fn(f: ^JetFmt, stmt: Stmt) {
     is_switched: if stmt == {
         .Switched(_, _, _) -> true
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
@@ -1194,7 +1194,7 @@ jfmt_defer_braced: fn(f: JetFmt, span: Span) -> Bool Never! {
     index < f.src_bytes.len() && f.src_bytes[index] == 123
 }
 
-jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
+jfmt_fmt_for_stmt: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
     header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, body, span, label)
     if ast_loop_destructures(var, body) -> jfmt_fmt_effect_loop_body(f, body[1..<body.len()], header_end, arrow_body, header_end) else {
         jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
@@ -1204,7 +1204,7 @@ jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
 // A template loop's body is template text, kept as written: a braced body
 // written over several lines keeps one line per statement, one written on
 // one line keeps its braces, and an arrow body stays an arrow.
-jfmt_fmt_template_loop_stmt: fn(f: &JetFmt, stmt: Stmt) {
+jfmt_fmt_template_loop_stmt: fn(f: ^JetFmt, stmt: Stmt) {
     if stmt == .For(var, var_span, var2, kind, body, span, arrow_body, label, _) {
         header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, body, span, label)
         statements: if ast_loop_destructures(var, body) -> body[1..<body.len()] else -> body
@@ -1223,7 +1223,7 @@ jfmt_fmt_template_loop_stmt: fn(f: &JetFmt, stmt: Stmt) {
 
 // A destructuring loop head (`loop {a, b} in rows`) prints its pattern
 // from the generated binding that opens the body; false for any other loop.
-jfmt_fmt_loop_head_pattern: fn(f: &JetFmt, var: String, body: [Stmt]) -> Bool {
+jfmt_fmt_loop_head_pattern: fn(f: ^JetFmt, var: String, body: [Stmt]) -> Bool {
     if !ast_loop_destructures(var, body) -> return false
     if body[0] == .Val(binding) {
         if binding.pattern == .Val(pattern) {
@@ -1236,7 +1236,7 @@ jfmt_fmt_loop_head_pattern: fn(f: &JetFmt, var: String, body: [Stmt]) -> Bool {
 
 // `loop` through the last clause of a `for` loop head; returns where the
 // head ends in the source.
-jfmt_fmt_for_head: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, label: NamedSpan?) -> Int {
+jfmt_fmt_for_head: fn(f: ^JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, label: NamedSpan?) -> Int {
     jfmt_fmt_loop_label(f, label)
     jfmt_write(f, "loop ")
     // The bindingless form writes its subject bare. The
@@ -1307,7 +1307,7 @@ jfmt_fmt_for_head: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
 // outermost expression in redundant parens. A condition is its own statement
 // slot, so it renders at the lowest precedence; precedence-required parens on
 // nested sub-expressions are still added by `fmt_expr`.
-jfmt_fmt_cond: fn(f: &JetFmt, cond: Expr) {
+jfmt_fmt_cond: fn(f: ^JetFmt, cond: Expr) {
     saved: f.in_condition
     f.in_condition = true
     jfmt_fmt_expr(f, cond, JFMT_PREC_OR_FALLBACK)
@@ -1318,7 +1318,7 @@ jfmt_fmt_cond: fn(f: &JetFmt, cond: Expr) {
 // When `inline` is set and the branch holds only its value
 // expression (no leading statements, no inner comment, author wrote it on
 // one line, fits width 100), keep it as `{ value }`. Otherwise expand.
-jfmt_fmt_value_block: fn(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
+jfmt_fmt_value_block: fn(f: ^JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
     jfmt_write(f, "{{")
     if inline && jfmt_try_inline_value_block(f, stmts, value) {
         return
@@ -1351,7 +1351,7 @@ jfmt_value_block_inlineable: fn(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
 }
 
 // `open_from` is a source position at or before the body's `{`.
-jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_body: Bool, open_from: Int) {
+jfmt_fmt_effect_loop_body: fn(f: ^JetFmt, body: [Stmt], header_end: Int, arrow_body: Bool, open_from: Int) {
     if arrow_body && body.len() == 1 {
         mark: jfmt_mark(f)
         jfmt_write(f, " ")
@@ -1401,7 +1401,7 @@ jfmt_is_explicit_drop: fn(stmt: Stmt) -> Bool {
 // `#if` lead). Shared by `Stmt.Switch` and `Stmt.ComptimeSwitch`.
 // A table written on one line stays on one line when it fits, as
 // `jfmt_fmt_guard_expr` keeps a value table.
-jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
+jfmt_fmt_dispatch: fn(f: ^JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
     if jfmt_one_line_trial_lost(f) {
         return
     }
@@ -1463,7 +1463,7 @@ jfmt_switch_written_on_one_line: fn(f: JetFmt, start: Int, arms: [SwitchArm]) ->
     jfmt_written_on_one_line(f, Span{start: start, end: f.source_toks[close].span.end})
 }
 
-jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
+jfmt_fmt_dispatch_table: fn(f: ^JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
     table_op: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     statement_table: jfmt_table_is_statements(f, arms, else_body)
     jfmt_fmt_expr(f, subject, JFMT_PREC_OR_FALLBACK)
@@ -1500,7 +1500,7 @@ jfmt_fmt_dispatch_table: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_b
 }
 
 // The trivia before an `else ->` arm, shared by both dispatch shapes.
-jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
+jfmt_fmt_dispatch_else_lead: fn(f: ^JetFmt, arms: [SwitchArm], compact: Bool) {
     if compact {
         if arms.len() > 0 -> jfmt_write(f, ", ")
         return
@@ -1518,7 +1518,7 @@ jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
 
 // The comment written on the last line of an `else ->` arm, which the
 // table's `}` would otherwise carry out of it.
-jfmt_fmt_dispatch_else_trail: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
+jfmt_fmt_dispatch_else_trail: fn(f: ^JetFmt, arms: [SwitchArm], compact: Bool) {
     if compact || arms.len() == 0 {
         return
     }
@@ -1528,7 +1528,7 @@ jfmt_fmt_dispatch_else_trail: fn(f: &JetFmt, arms: [SwitchArm], compact: Bool) {
     jfmt_emit_trailing(f, span.end)
 }
 
-jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
+jfmt_fmt_guard_dispatch: fn(f: ^JetFmt, arms: [SwitchArm], else_body: [Stmt]?, span: Span) {
     if jfmt_one_line_trial_lost(f) {
         return
     }
@@ -1547,7 +1547,7 @@ jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, s
     jfmt_fmt_guard_dispatch_table(f, arms, else_body, false)
 }
 
-jfmt_fmt_guard_dispatch_table: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
+jfmt_fmt_guard_dispatch_table: fn(f: ^JetFmt, arms: [SwitchArm], else_body: [Stmt]?, compact: Bool) {
     statement_table: jfmt_table_is_statements(f, arms, else_body)
     jfmt_table_open(f, compact)
     loop index in 0..<arms.len() {
@@ -1581,7 +1581,7 @@ jfmt_fmt_guard_dispatch_table: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stm
 // tuple so the existing arm IR can carry it through sema and IR lowering. That carrier is
 // not user syntax; always print its canonical arm-table spelling instead of
 // leaking the tuple or its sentinel field.
-jfmt_fmt_readiness_head: fn(f: &JetFmt, cond: Expr) -> Bool {
+jfmt_fmt_readiness_head: fn(f: ^JetFmt, cond: Expr) -> Bool {
     head: jfmt_readiness_head_of(cond) ?? return false
     if head == {
         .Receive(binding, source) -> {
@@ -1647,7 +1647,7 @@ jfmt_parse_decimal_i64: fn(text: String) -> Int? Never! {
 // (jfmt_value_tail_begin), an arrow-form `if` would be read as the body's
 // value; an arm the author braced keeps its braces there, so the `if` stays
 // a statement.
-jfmt_fmt_classic_switch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?, start: Int) {
+jfmt_fmt_classic_switch: fn(f: ^JetFmt, arms: [SwitchArm], else_body: [Stmt]?, start: Int) {
     if arms.len() == 0 {
         return
     }
@@ -1693,7 +1693,7 @@ jfmt_authored_braced_loop_exit: fn(f: JetFmt, body: [Stmt]) -> Bool {
     body.len() == 1 && jfmt_is_loop_break_stmt(body[0]) && jfmt_single_stmt_braces(f, body[0]) != None
 }
 
-jfmt_emit_classic_if_condition_trivia: fn(f: &JetFmt, condition_start: Int) {
+jfmt_emit_classic_if_condition_trivia: fn(f: ^JetFmt, condition_start: Int) {
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < condition_start {
         text: f.comments[f.comment_i].text.copy()
         jfmt_write(f, text)
@@ -1702,7 +1702,7 @@ jfmt_emit_classic_if_condition_trivia: fn(f: &JetFmt, condition_start: Int) {
     }
 }
 
-jfmt_fmt_switch_arm: fn(f: &JetFmt, subject: Expr, table_op: BinOp, arm: SwitchArm, force_braces: Bool, statement_table: Bool) {
+jfmt_fmt_switch_arm: fn(f: ^JetFmt, subject: Expr, table_op: BinOp, arm: SwitchArm, force_braces: Bool, statement_table: Bool) {
     jfmt_fmt_switch_cond(f, subject, table_op, arm.cond, JFMT_PREC_OR_FALLBACK)
     jfmt_write(f, " ")
     jfmt_write(f, "->")
@@ -1731,7 +1731,7 @@ jfmt_dispatch_else_start: fn(f: JetFmt, after: Int) -> Int? Never! {
 // statements) every braceless arm stays braceless even past the width limit:
 // braces would turn a block's last table into an `if` value chain, or make a
 // value arm (`-> None`) a line that does nothing.
-jfmt_fmt_arm_body: fn(f: &JetFmt, body: [Stmt], force_braces: Bool, statement_table: Bool) {
+jfmt_fmt_arm_body: fn(f: ^JetFmt, body: [Stmt], force_braces: Bool, statement_table: Bool) {
     if body.len() == 0 {
         jfmt_write(f, " {{}}")
         return
@@ -1821,7 +1821,7 @@ jfmt_stmt_is_direct_exit: fn(statement: Stmt) -> Bool Never! {
 // multiple statements, scoped blocks, comments, and marked controls.
 // `open_from` is a source position at or before the body's `{`, or -1 when
 // unknown; an empty body found there stays `{}` (jfmt_fmt_empty_block).
-jfmt_fmt_control_body_after_header: fn(f: &JetFmt, body: [Stmt], force_braces: Bool, open_from: Int) {
+jfmt_fmt_control_body_after_header: fn(f: ^JetFmt, body: [Stmt], force_braces: Bool, open_from: Int) {
     if body.len() == 0 && open_from >= 0 && jfmt_empty_block_after(f, open_from) == .Val(braces) {
         jfmt_write(f, " {{")
         jfmt_fmt_empty_block(f, braces)
@@ -1890,7 +1890,7 @@ jfmt_arm_body_was_braceless: fn(f: JetFmt, body: [Stmt]) -> Bool {
     !jfmt_span_has_comment(f, between_start, source_end)
 }
 
-jfmt_fmt_switch_cond: fn(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, prec: Int) {
+jfmt_fmt_switch_cond: fn(f: ^JetFmt, subject: Expr, table_op: BinOp, cond: Expr, prec: Int) {
     // If the whole expression is an Or of
     // subject-table_op atoms, emit it with `|` alternation syntax instead of `||`.
     if jfmt_is_all_subject_alts(f, subject, table_op, cond) {
@@ -1991,7 +1991,7 @@ jfmt_dispatch_op: fn(f: JetFmt, subject: Expr, arms: [SwitchArm]) -> BinOp Never
     found ?? BinOp.Eq
 }
 
-jfmt_collect_dispatch_ops: fn(f: JetFmt, subject: Expr, e: Expr, found: &BinOp?) Never! {
+jfmt_collect_dispatch_ops: fn(f: JetFmt, subject: Expr, e: Expr, found: ^BinOp?) Never! {
     if e == .Binary(op, lhs, rhs, _, _) {
         if jfmt_bin_op_is_comparison(op) && jfmt_same_subject(f, lhs, subject) {
             // Mixed predicate + distributed leaves keep the first distributed
@@ -2025,7 +2025,7 @@ jfmt_is_subject_alt_leaf: fn(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr)
 }
 
 // Emit alternates with `|` separators (caller adds outer parens if needed).
-jfmt_fmt_arm_alternates: fn(f: &JetFmt, subject: Expr, table_op: BinOp, e: Expr) {
+jfmt_fmt_arm_alternates: fn(f: ^JetFmt, subject: Expr, table_op: BinOp, e: Expr) {
     if e == .Binary(op, lhs, rhs, _, _) {
         if op == BinOp.Or {
             jfmt_fmt_arm_alternates(f, subject, table_op, lhs)
@@ -2064,7 +2064,7 @@ jfmt_same_subject: fn(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
     jfmt_src_text(f, a_start, a_end) == jfmt_src_text(f, subject_start, subject_end)
 }
 
-jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
+jfmt_fmt_binding: fn(f: ^JetFmt, b: Binding) {
     if b.meta == .Val(meta) {
         jfmt_fmt_meta_attr(f, meta)
         jfmt_write(f, " ")
@@ -2119,7 +2119,7 @@ jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
 // wrote: `#run { value }` stays braced, and `#run value` stays bare when the
 // value is one postfix operand (a name, a call, a member, an index, a slice
 // or a literal). Any other value takes the braces.
-jfmt_fmt_prepared_value: fn(f: &JetFmt, value: Expr) {
+jfmt_fmt_prepared_value: fn(f: ^JetFmt, value: Expr) {
     if jfmt_prepared_operand(value) && !jfmt_value_was_braced(f, value) {
         jfmt_write(f, "#run ")
         jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
@@ -2142,14 +2142,14 @@ jfmt_prepared_operand: fn(value: Expr) -> Bool {
     }
 }
 
-jfmt_fmt_bind_names: fn(f: &JetFmt, elems: [BindName]) {
+jfmt_fmt_bind_names: fn(f: ^JetFmt, elems: [BindName]) {
     loop index in 0..<elems.len() {
         if index > 0 -> jfmt_write(f, ", ")
         jfmt_write(f, elems[index].name)
     }
 }
 
-jfmt_fmt_bind_pattern: fn(f: &JetFmt, pat: BindPattern) {
+jfmt_fmt_bind_pattern: fn(f: ^JetFmt, pat: BindPattern) {
     if pat == {
         .Struct(type_name, _, fields, rest, _) -> {
             // Emit `Type{x, y}`.
@@ -2203,7 +2203,7 @@ jfmt_fmt_bind_pattern: fn(f: &JetFmt, pat: BindPattern) {
     }
 }
 
-jfmt_fmt_lvalue: fn(f: &JetFmt, lv: LValue) {
+jfmt_fmt_lvalue: fn(f: ^JetFmt, lv: LValue) {
     if lv == {
         .Local(name, _) -> { jfmt_write(f, name) }
         .Index(base, index, _, _) -> {

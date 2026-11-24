@@ -142,7 +142,7 @@ booking_model: fn(commands: [BookingCommand]) -> Dyn {
             .Retry(handle, creates) -> {
                 old_key: booking_key(handle)
                 // `remove`
-                // writes `states`, so the written place carries `&`.
+                // writes `states`, so the written place carries `^`.
                 states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }

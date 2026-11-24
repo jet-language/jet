@@ -201,7 +201,7 @@ JetCLIDap: struct {
     // its index plus 1, which the `source` request reads.
     sources: [String]{[String]{}},
 
-    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    handle: fn(^self, session: ^NativeSession, input: ^^JetCLIDapRequest, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
         // Another task's frames are read within the request that names them.
         session.focus = None
@@ -548,7 +548,7 @@ JetCLIDap: struct {
     // `setBreakpoints`: the source's breakpoints become the requested lines,
     // each with its condition and log message, compiled where it traps. One
     // whose condition or message doesn't compile there is not placed.
-    set_breakpoints: fn(&self, session: &NativeSession, request: JetCLIDapRequest) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
+    set_breakpoints: fn(^self, session: ^NativeSession, request: JetCLIDapRequest) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
         file := ""
         specs := [JetCLIDapBreakpoint]{}
         loop member in request.arguments {
@@ -610,7 +610,7 @@ JetCLIDap: struct {
     // placed in its frame, which must be of this stop (E2238's What
     // otherwise); one no watch can take is not verified, with E2237's What.
     // Each refusal's `jetCode` names its code.
-    set_data: fn(&self, session: &NativeSession, request: JetCLIDapRequest) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
+    set_data: fn(^self, session: ^NativeSession, request: JetCLIDapRequest) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
         ids := [String]{}
         loop member in request.arguments {
             if member.key == "breakpoints" && member.value == .Array(items) {
@@ -669,7 +669,7 @@ JetCLIDap: struct {
     // Run the program as the console run command `word` says, or, for "",
     // as `configurationDone` does: from its start, to the start of its
     // entry (NativeSession.program_entry) under `stopOnEntry`.
-    start: fn(&self, session: &NativeSession, word: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled NativeDebugError! {
+    start: fn(^self, session: ^NativeSession, word: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled NativeDebugError! {
         if word != "" -> return session.run(word)
         if !self.stop_on_entry {
             first: session.launch(self.args) ?? return Err(err)
@@ -691,7 +691,7 @@ JetCLIDap: struct {
     // has the program's first Jet frame. A breakpoint the program reaches
     // first, or its end, is the stop instead. None when the image names no
     // entry.
-    to_start: fn(&self, session: &NativeSession) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled? NativeDebugError! {
+    to_start: fn(^self, session: ^NativeSession) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeSettled? NativeDebugError! {
         number := -1
         if session.break_in_entry() == {
             .Ok(found) -> number = found ?? return Ok(None)
@@ -714,7 +714,7 @@ JetCLIDap: struct {
     // next stop (JetCLIDap.waiting); any other request is answered, and the
     // program continues. A replay's runs are made as recorded, without
     // stopping for requests.
-    run_on: fn(&self, session: &NativeSession, word: String, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    run_on: fn(^self, session: ^NativeSession, word: String, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         how := word
         loop {
             starting: how == ""
@@ -784,7 +784,7 @@ JetCLIDap: struct {
 
     // The end of the session: a launched program ends, an attached one
     // goes on (NativeSession.close).
-    end: fn(&self, session: &NativeSession) Never! {
+    end: fn(^self, session: ^NativeSession) Never! {
         session.close()
         self.done = true
     }
@@ -794,7 +794,7 @@ JetCLIDap: struct {
     // `evaluate` name it by, with the pc `disassemble` lists its code from;
     // with `raw`, then its machine frames. A task with no stack yet (a
     // queued one) has none.
-    stack: fn(&self, session: &NativeSession, task: Int, raw: Bool) -> String NativeDebugError! {
+    stack: fn(^self, session: ^NativeSession, task: Int, raw: Bool) -> String NativeDebugError! {
         if !(self.focus(session, task) ?? return Err(err)) {
             return Ok("{{\"stackFrames\":[],\"totalFrames\":0}}")
         }
@@ -826,7 +826,7 @@ JetCLIDap: struct {
     // from (NativeSession.source_file), else `path` itself, made absolute.
     // A Core source is no file: the `source` request reads it by its
     // `sourceReference` (NativeSession.source_text).
-    source: fn(&self, session: &NativeSession, file: String, path: String) -> String Never! {
+    source: fn(^self, session: ^NativeSession, file: String, path: String) -> String Never! {
         name: foundation_json_quote(dap_files.basename(file))
         if path.starts_with(MODULE_CORE_PREFIX) {
             return "{{\"name\":{name},\"path\":{foundation_json_quote(path)},\"sourceReference\":{self.source_reference(path)}}}"
@@ -838,7 +838,7 @@ JetCLIDap: struct {
     // One instruction `disassemble` answers: its address, bytes, text and
     // the code it is in, its source and line when its function has them;
     // an address no code is known at is `invalid`, as DAP asks.
-    instruction: fn(&self, session: &NativeSession, row: NativeListedRow) -> String Never! {
+    instruction: fn(^self, session: ^NativeSession, row: NativeListedRow) -> String Never! {
         address: native_debug_hex(row.address)
         if !row.valid {
             return "{{\"address\":\"{address}\",\"instruction\":\"(no code)\",\"presentationHint\":\"invalid\"}}"
@@ -850,7 +850,7 @@ JetCLIDap: struct {
 
     // Read task `task`'s frames (NativeSession.focus_task) unless the
     // program stopped in it; false when it has no stack.
-    focus: fn(self, session: &NativeSession, task: Int) -> Bool NativeDebugError! {
+    focus: fn(self, session: ^NativeSession, task: Int) -> Bool NativeDebugError! {
         session.focus = None
         if task == self.task -> return Ok(true)
         session.focus_task(task)
@@ -858,7 +858,7 @@ JetCLIDap: struct {
 
     // The `sourceReference` of the Core source `path`: its index in
     // `sources` plus 1, added when first named.
-    source_reference: fn(&self, path: String) -> Int Never! {
+    source_reference: fn(^self, path: String) -> Int Never! {
         loop (index, named) in self.sources {
             if named == path -> return index + 1
         }
@@ -869,7 +869,7 @@ JetCLIDap: struct {
     // The id of task `task`'s frame `index` at this stop: its row in
     // `frames`, added when first listed. None once the rows fill the frame
     // id's low bits.
-    frame_id: fn(&self, task: Int, index: Int) -> Int? Never! {
+    frame_id: fn(^self, task: Int, index: Int) -> Int? Never! {
         key: jet_cli_dap_frame_key(task, index)
         row: self.rows.get(key) ?? {
             if self.frames.len() >= 1 << JET_CLI_DAP_FRAME_BITS -> return None
@@ -896,7 +896,7 @@ JetCLIDap: struct {
     // fault is an `exception` one, described by its status or signal. The
     // stop is a new one: the frame ids and variable references of the last
     // name nothing.
-    report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait, FFI.Asm]> Never! {
+    report: fn(^self, session: ^NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait, FFI.Asm]> Never! {
         self.tell(session, settled.said)
         self.stops = (self.stops + 1) & (JET_CLI_DAP_STOPS - 1)
         self.frames = [JetCLIDapFrame]{}
@@ -937,7 +937,7 @@ JetCLIDap: struct {
 
     // What a run said on the way (`said`: the program's output, logpoints'
     // messages, failed conditions), then the program's new output.
-    tell: fn(&self, session: &NativeSession, said: [NativeSaid]) -[FS, IO, Time.Wait]> Never! {
+    tell: fn(^self, session: ^NativeSession, said: [NativeSaid]) -[FS, IO, Time.Wait]> Never! {
         loop line in said {
             self.event("output", "{{\"category\":\"{line.category}\",\"output\":{foundation_json_quote(line.text)}}}")
         }
@@ -948,17 +948,17 @@ JetCLIDap: struct {
     }
 
     // A run the native debugger could not finish ends the session.
-    stopped_by: fn(&self, failure: NativeDebugError) -[IO, Time.Wait]> Never! {
+    stopped_by: fn(^self, failure: NativeDebugError) -[IO, Time.Wait]> Never! {
         self.event("output", "{{\"category\":\"stderr\",\"output\":{foundation_json_quote("{failure.detail}\n")}}}")
         self.event("terminated", "{{}}")
     }
 
-    respond: fn(&self, request: JetCLIDapRequest, body: String) -[IO, Time.Wait]> Never! {
+    respond: fn(^self, request: JetCLIDapRequest, body: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":true,\"command\":{foundation_json_quote(request.command)},\"body\":{body}}}")
     }
 
-    fail: fn(&self, request: JetCLIDapRequest, message: String) -[IO, Time.Wait]> Never! {
+    fail: fn(^self, request: JetCLIDapRequest, message: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":{foundation_json_quote(message)}}}")
     }
@@ -969,7 +969,7 @@ JetCLIDap: struct {
     // program's reads end at once. None once `request` is refused: a
     // `stdin` that is no path, or the adapter's own stdin, which carries the
     // protocol, is E2236, and a file that can't be read E2105.
-    stdin_of: fn(&self, request: JetCLIDapRequest, members: [{key: String, value: Dyn}]) -[FS, IO, Time.Wait]> String? {
+    stdin_of: fn(^self, request: JetCLIDapRequest, members: [{key: String, value: Dyn}]) -[FS, IO, Time.Wait]> String? {
         loop member in members {
             if member.key != "stdin" -> next
             path := ""
@@ -993,7 +993,7 @@ JetCLIDap: struct {
 
     // `request`, refused with the registered diagnostic `code` and its
     // `detail` (refuse_with).
-    refuse: fn(&self, request: JetCLIDapRequest, code: String, detail: String) -[IO, Time.Wait]> Never! {
+    refuse: fn(^self, request: JetCLIDapRequest, code: String, detail: String) -[IO, Time.Wait]> Never! {
         self.refuse_with(request, native_debug_report(code, detail))
     }
 
@@ -1001,7 +1001,7 @@ JetCLIDap: struct {
     // jet.invalidArguments, E2238 jet.staleReference, any other
     // jet.unavailable), whose format is the report's What and whose
     // `jetCode` is the code.
-    refuse_with: fn(&self, request: JetCLIDapRequest, report: Diagnostic) -[IO, Time.Wait]> Never! {
+    refuse_with: fn(^self, request: JetCLIDapRequest, report: Diagnostic) -[IO, Time.Wait]> Never! {
         error := {name: "jet.unavailable", id: 22034}
         if report.code == NATIVE_ATTACH_INVALID -> error = {name: "jet.invalidArguments", id: 22032}
         if report.code == JET_CLI_DAP_STALE -> error = {name: "jet.staleReference", id: 22036}
@@ -1009,7 +1009,7 @@ JetCLIDap: struct {
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":\"{error.name}\",\"body\":{{\"error\":{{\"id\":{error.id},\"format\":{foundation_json_quote(report.what)},\"showUser\":true,\"variables\":{{\"jetCode\":\"{report.code}\"}}}}}}}}")
     }
 
-    event: fn(&self, name: String, body: String) -[IO, Time.Wait]> Never! {
+    event: fn(^self, name: String, body: String) -[IO, Time.Wait]> Never! {
         self.seq += 1
         jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"event\",\"event\":\"{name}\",\"body\":{body}}}")
     }
@@ -1018,7 +1018,7 @@ JetCLIDap: struct {
 // Answer requests until stdin ends or the editor disconnects: those that
 // waited for a stop first, then the next on stdin. `fix` compiles `entry`
 // with `deep_checks`, as the program's build did, when it is `fixable`.
-jet_cli_debug_dap: fn(session: &NativeSession, entry: String, deep_checks: DeepChecks, fixable: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+jet_cli_debug_dap: fn(session: ^NativeSession, entry: String, deep_checks: DeepChecks, fixable: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
     dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false, fixable: fixable}
     loop !dap.done {
         request := JetCLIDapRequest{seq: 0, command: "", arguments: [{key: String, value: Dyn}]{}}
@@ -1132,7 +1132,7 @@ jet_cli_dap_request: fn(text: String) -> JetCLIDapRequest Never! {
 }
 
 // The members of a JSON object, taken out of it; none for another value.
-jet_cli_dap_members: fn(value: &&Dyn) -> [{key: String, value: Dyn}] Never! {
+jet_cli_dap_members: fn(value: ^^Dyn) -> [{key: String, value: Dyn}] Never! {
     if value.move() == {
         .Object(fields) -> fields
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> [{key: String, value: Dyn}]{}
@@ -1140,7 +1140,7 @@ jet_cli_dap_members: fn(value: &&Dyn) -> [{key: String, value: Dyn}] Never! {
 }
 
 // The strings of the array member `name`, in order, taken out of `members`.
-jet_cli_dap_texts_of: fn(members: &&[{key: String, value: Dyn}], name: String) -> [String] Never! {
+jet_cli_dap_texts_of: fn(members: ^^[{key: String, value: Dyn}], name: String) -> [String] Never! {
     fields := members.move()
     loop fields.len() > 0 {
         field := fields.pop() ?? break
@@ -1163,7 +1163,7 @@ jet_cli_dap_texts_of: fn(members: &&[{key: String, value: Dyn}], name: String) -
 
 // The members of the object member `name`, taken out of `members`; none
 // when it has none.
-jet_cli_dap_object_of: fn(members: &&[{key: String, value: Dyn}], name: String) -> [{key: String, value: Dyn}] Never! {
+jet_cli_dap_object_of: fn(members: ^^[{key: String, value: Dyn}], name: String) -> [{key: String, value: Dyn}] Never! {
     fields := members.move()
     loop fields.len() > 0 {
         field := fields.pop() ?? break
@@ -1211,7 +1211,7 @@ jet_cli_dap_offset: fn(members: [{key: String, value: Dyn}], name: String) -> In
 
 // `threads`: each task of the stopped program by its id, named by its
 // label, its id and its state, with what it waits on.
-jet_cli_dap_threads: fn(session: &NativeSession) -> String NativeDebugError! {
+jet_cli_dap_threads: fn(session: ^NativeSession) -> String NativeDebugError! {
     tasks: session.task_rows() ?? return Err(err)
     rows := [String]{}
     loop row in tasks {
@@ -1225,7 +1225,7 @@ jet_cli_dap_threads: fn(session: &NativeSession) -> String NativeDebugError! {
 // Whether the stopped thread has yet to run any of the program's own code:
 // no machine frame of its stack lies in a function of the image, only in
 // the runtime that starts the program.
-jet_cli_dap_starting: fn(session: &NativeSession) -> Bool NativeDebugError! {
+jet_cli_dap_starting: fn(session: ^NativeSession) -> Bool NativeDebugError! {
     session.focus = None
     machine: session.unwind() ?? return Err(err)
     loop (index, frame) in machine {
@@ -1245,7 +1245,7 @@ jet_cli_dap_frame_key: fn(task: Int, index: Int) -> Int Never! {
 
 // `variables` of the machine frame `index`'s `[raw] Locals`: its pc and
 // canonical frame address.
-jet_cli_dap_raw_variables: fn(session: &NativeSession, index: Int) -> String NativeDebugError! {
+jet_cli_dap_raw_variables: fn(session: ^NativeSession, index: Int) -> String NativeDebugError! {
     machine: session.unwind() ?? return Err(err)
     if index < 0 || index >= machine.len() -> return Ok("{{\"variables\":[]}}")
     pc: "{{\"name\":\"pc\",\"value\":\"{native_debug_hex(machine[index].pc)}\",\"variablesReference\":0}}"
@@ -1255,7 +1255,7 @@ jet_cli_dap_raw_variables: fn(session: &NativeSession, index: Int) -> String Nat
 
 // The locals of frame `frame` (an index in the session's backtrace). The
 // innermost frame stays selected, as stepping needs.
-jet_cli_dap_frame_locals: fn(session: &NativeSession, frame: Int) -> [NativeLocal] NativeDebugError! {
+jet_cli_dap_frame_locals: fn(session: ^NativeSession, frame: Int) -> [NativeLocal] NativeDebugError! {
     if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
     locals: session.locals() ?? return Err(err)
     if frame > 0 -> _: session.select_frame(0) ?? return Err(err)
@@ -1265,7 +1265,7 @@ jet_cli_dap_frame_locals: fn(session: &NativeSession, frame: Int) -> [NativeLoca
 // Frame `frame` (an index in the session's backtrace, a machine frame's from
 // JET_CLI_DAP_RAW) as `registers` and `memory` read it; None past the
 // outermost. The innermost frame stays selected, as stepping needs.
-jet_cli_dap_panel_frame: fn(session: &NativeSession, frame: Int) -> NativePanelFrame? NativeDebugError! {
+jet_cli_dap_panel_frame: fn(session: ^NativeSession, frame: Int) -> NativePanelFrame? NativeDebugError! {
     if frame >= JET_CLI_DAP_RAW -> return native_panel_machine(session, frame - JET_CLI_DAP_RAW)
     if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
     at := NativePanelFrame?{None}
@@ -1281,7 +1281,7 @@ jet_cli_dap_panel_frame: fn(session: &NativeSession, frame: Int) -> NativePanelF
 // else its locals by name, with their Jet types, each with bytes of its own
 // with their address as its `memoryReference`; for a machine frame (from
 // JET_CLI_DAP_RAW), its `[raw] Locals`.
-jet_cli_dap_variables: fn(session: &NativeSession, frame: Int, registers: Bool{false}) -> String NativeDebugError! {
+jet_cli_dap_variables: fn(session: ^NativeSession, frame: Int, registers: Bool{false}) -> String NativeDebugError! {
     if frame < 0 -> return Ok("{{\"variables\":[]}}")
     if registers -> return jet_cli_dap_registers(session, frame)
     if frame >= JET_CLI_DAP_RAW {
@@ -1313,7 +1313,7 @@ jet_cli_dap_variables: fn(session: &NativeSession, frame: Int, registers: Bool{f
 // `variables` of frame `frame`'s Registers scope: the console's `registers`
 // rows (native_registers_at), each register's value as
 // jet_cli_dap_register_value gives it.
-jet_cli_dap_registers: fn(session: &NativeSession, frame: Int) -> String NativeDebugError! {
+jet_cli_dap_registers: fn(session: ^NativeSession, frame: Int) -> String NativeDebugError! {
     at := NativePanelFrame?{None}
     if jet_cli_dap_panel_frame(session, frame) == {
         .Ok(found) -> { at = found }
@@ -1343,7 +1343,7 @@ jet_cli_dap_register_value: fn(row: NativeRegisterRow) -> String Never! {
 // can't be read, as `memory` reads them (native_memory_view: the program's
 // own bytes under the debugger's traps), in base64, and how many after them
 // can't be read, which an editor skips before it reads on.
-jet_cli_dap_memory: fn(session: &NativeSession, address: Int, count: Int) -> String Never! {
+jet_cli_dap_memory: fn(session: ^NativeSession, address: Int, count: Int) -> String Never! {
     view: native_memory_view(session, None, address, count)
     read := 0
     loop read < count && view.mapped[read] -> read += 1
@@ -1355,7 +1355,7 @@ jet_cli_dap_memory: fn(session: &NativeSession, address: Int, count: Int) -> Str
 // `evaluate`: `text` in frame `frame` (the innermost when the request names
 // none), through the session's evaluator. The innermost frame stays
 // selected, as stepping needs.
-jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeEvalRefused! {
+jet_cli_dap_evaluate: fn(session: ^NativeSession, text: String, frame: Int) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeEvalRefused! {
     if frame > 0 {
         _: session.select_frame(frame) ?? return Err(NativeEvalRefused{message: err.detail})
     }
@@ -1374,7 +1374,7 @@ jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -[FS
 // or, unless `place`, find only whether it can be watched there
 // (NativeSession.watch). The innermost frame stays selected, as stepping
 // needs.
-jet_cli_dap_watch: fn(session: &NativeSession, name: String, frame: Int, place: Bool{true}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeWatched NativeDebugError! {
+jet_cli_dap_watch: fn(session: ^NativeSession, name: String, frame: Int, place: Bool{true}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeWatched NativeDebugError! {
     if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
     found: session.watch(name, place: place) ?? return Err(err)
     if frame > 0 -> _: session.select_frame(0) ?? return Err(err)

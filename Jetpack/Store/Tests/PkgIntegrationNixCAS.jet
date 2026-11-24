@@ -22,25 +22,25 @@ S3CASReader: struct {
     bytes: [U8],
     at: Int,
 
-    take_bytes: fn(&self, size: Int) -> [U8] {
+    take_bytes: fn(^self, size: Int) -> [U8] {
         result: self.bytes[self.at..<(self.at + size)]
         self.at += size
         result
     }
 
-    number: fn(&self, size: Int) -> Int {
+    number: fn(^self, size: Int) -> Int {
         bytes: self.take_bytes(size)
         value := 0
         loop i in 0..<size -> value |= Int{bytes[i]} << (8 * i)
         value
     }
 
-    field: fn(&self) -> [U8] {
+    field: fn(^self) -> [U8] {
         size: self.number(4)
         self.take_bytes(size)
     }
 
-    output: fn(&self) -> S3CASOutput {
+    output: fn(^self) -> S3CASOutput {
         root_mode: self.number(4)
         count: self.number(4)
         nodes := [S3CASNode]{}
@@ -56,15 +56,15 @@ S3CASReader: struct {
     }
 }
 
-s3cas_add: fn(out: &[U8], bytes: [U8]) {
+s3cas_add: fn(out: ^[U8], bytes: [U8]) {
     loop byte in bytes -> out.push(byte)
 }
 
-s3cas_number: fn(out: &[U8], value: Int, size: Int) {
+s3cas_number: fn(out: ^[U8], value: Int, size: Int) {
     loop i in 0..<size -> out.push(U8{(value >> (8 * i)) & 255})
 }
 
-s3cas_field: fn(out: &[U8], bytes: [U8]) {
+s3cas_field: fn(out: ^[U8], bytes: [U8]) {
     s3cas_number(out, bytes.len(), 4)
     s3cas_add(out, bytes)
 }

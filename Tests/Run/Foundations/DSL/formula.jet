@@ -62,18 +62,18 @@ parse: fn(source: String) -> Book? {
     Val(Book{cells: cells, order: order})
 }
 
-valid_operand: fn(operand: String, book: Book, visiting: &[String]) -> Bool {
+valid_operand: fn(operand: String, book: Book, visiting: ^[String]) -> Bool {
     if Int.parse(operand) == .Ok(_) -> return true
     return valid_cell(operand, book.copy(), visiting)
 }
 
-valid_formula: fn(formula: Formula, book: Book, visiting: &[String]) -> Bool {
+valid_formula: fn(formula: Formula, book: Book, visiting: ^[String]) -> Bool {
     if formula.kind == 0 -> return true
     if formula.kind == 3 -> return valid_operand(formula.left, book.copy(), visiting)
     return valid_operand(formula.left, book.copy(), visiting) && valid_operand(formula.right, book.copy(), visiting)
 }
 
-valid_cell: fn(name: String, book: Book, visiting: &[String]) -> Bool {
+valid_cell: fn(name: String, book: Book, visiting: ^[String]) -> Bool {
     if visiting.contains(name.copy()) -> return false
     formula: book.cells.get(name.copy()) ?? return false
     visiting.push(name.copy())
@@ -94,7 +94,7 @@ depends_on_operand: fn(
     operand: String,
     target: String,
     book: Book,
-    seen: &[String],
+    seen: ^[String],
 ) -> Bool {
     if Int.parse(operand) == .Ok(_) -> return false
     if operand == target -> return true
@@ -105,7 +105,7 @@ depends_on_formula: fn(
     formula: Formula,
     target: String,
     book: Book,
-    seen: &[String],
+    seen: ^[String],
 ) -> Bool {
     if formula.kind == 0 -> return false
     if formula.kind == 3 -> return depends_on_operand(formula.left, target, book.copy(), seen)
@@ -116,7 +116,7 @@ depends_on_cell: fn(
     name: String,
     target: String,
     book: Book,
-    seen: &[String],
+    seen: ^[String],
 ) -> Bool {
     if seen.contains(name.copy()) -> return false
     formula: book.cells.get(name.copy()) ?? return false
@@ -129,8 +129,8 @@ depends_on_cell: fn(
 resolve_operand: fn(
     operand: String,
     book: Book,
-    values: &[String:Int],
-    visiting: &[String],
+    values: ^[String:Int],
+    visiting: ^[String],
 ) -> Int? {
     if Int.parse(operand) == .Ok(value) -> return Val(value)
     return eval_cell(operand, book.copy(), values, visiting)
@@ -139,8 +139,8 @@ resolve_operand: fn(
 eval_cell: fn(
     name: String,
     book: Book,
-    values: &[String:Int],
-    visiting: &[String],
+    values: ^[String:Int],
+    visiting: ^[String],
 ) -> Int? {
     if values.get(name.copy()) == .Val(cached) -> return Val(cached)
     if visiting.contains(name.copy()) -> return None

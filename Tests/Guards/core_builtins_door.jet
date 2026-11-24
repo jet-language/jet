@@ -18,7 +18,7 @@ CBD_CEILING: 225
 
 CBD_SKIPPED: [String]{"Tests", ".jet", "target", "node_modules"}
 
-cbd_walk: fn(path: String, out: &[String]) {
+cbd_walk: fn(path: String, out: ^[String]) {
     if !cbd_files.is_dir(path) {
         if path.ends_with(".jet") -> out.push(path.copy())
         return
@@ -52,7 +52,7 @@ cbd_ident_end: fn(raw: [U8], at: Int) -> Int Never! {
 // Each reserved `__` word of `text`, added to `words`: a word that starts
 // with two underscores and does not continue another word. A `//` comment
 // names nothing; a string runs to its closing quote or the line's end.
-cbd_spelled: fn(text: String, words: &[String:Bool]) Never! {
+cbd_spelled: fn(text: String, words: ^[String:Bool]) Never! {
     raw: text.bytes()
     at := 0
     quoted := false

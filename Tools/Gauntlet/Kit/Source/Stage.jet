@@ -346,7 +346,7 @@ unavailable_tier: fn(rule: TierRule, reason: String) -> Dyn {
 
 // The row of `language`: staged, built, verified and timed. A batch-steps
 // Jet row leaves its state reset in `jet_reset`.
-stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! {
+stage_row: fn(st: Staging, language: String, jet_reset: ^Reset) -> Dyn IOError! {
     base: base_language(language)
     source_dir: path_joined(st.entry_dir, language_source_dir(language))
     source_file: language_file(base)
@@ -455,7 +455,7 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
 
 // A batch-steps row: its steps verified in order from its state baseline,
 // then timed as one sequence.
-stage_steps: fn(st: Staging, language: String, staged: String, artifact: String, row: &Dyn, jet_reset: &Reset) IOError! {
+stage_steps: fn(st: Staging, language: String, staged: String, artifact: String, row: ^Dyn, jet_reset: ^Reset) IOError! {
     commands: items_at(st.entry, "spec/steps").map(fn(step) { run_command(language, artifact, words_of(step)) })
     reset: make_state_reset(staged)
     if language == "jet" -> jet_reset = reset.copy()
@@ -471,7 +471,7 @@ stage_steps: fn(st: Staging, language: String, staged: String, artifact: String,
 
 // A service row: its probe sequence verified and its startup, latencies and
 // peak memory measured.
-stage_service: fn(st: Staging, language: String, staged: String, artifact: String, row: &Dyn) IOError! {
+stage_service: fn(st: Staging, language: String, staged: String, artifact: String, row: ^Dyn) IOError! {
     service: run_service(st.s, st.entry, staged, run_command(language, artifact, []), st.runs)
     row["command"] = words(run_command(language, artifact, ["<port>"]))
     metrics := dyn_at(row, "metrics")
@@ -504,7 +504,7 @@ stage_service: fn(st: Staging, language: String, staged: String, artifact: Strin
 
 // A web row: its configured run verified, its artifact measured and its
 // runs timed with that artifact in every sample.
-stage_web: fn(st: Staging, language: String, staged: String, row: &Dyn) IOError! {
+stage_web: fn(st: Staging, language: String, staged: String, row: ^Dyn) IOError! {
     configured: language_spec_value(member(st.entry, "spec/run") ?? dyn_at(st.entry, "run"), language)
     command: command_from_spec(configured, language, st.s.jet_bin, Val(["node", "runner.mjs"])) ?? []
     shell: entry_shell(st.entry)
@@ -533,7 +533,7 @@ stage_web: fn(st: Staging, language: String, staged: String, row: &Dyn) IOError!
 
 // A batch row: its peer started, its run verified from the fixture and
 // timed, then its peer stopped.
-stage_batch: fn(st: Staging, language: String, staged: String, artifact: String, fixture_reset: Reset, row: &Dyn) IOError! {
+stage_batch: fn(st: Staging, language: String, staged: String, artifact: String, fixture_reset: Reset, row: ^Dyn) IOError! {
     peer: dyn_at(st.entry, "spec/peer")
     peer_service := Service?{None}
     if truthy(Val(peer)) {
@@ -566,26 +566,26 @@ disqualified: fn(row: Dyn, reason: String) -> Dyn {
     out
 }
 
-disqualified_row: fn(row: &Dyn, reason: String) {
+disqualified_row: fn(row: ^Dyn, reason: String) {
     row["reason"] = Dyn.Text(reason.copy())
     row["disqualified"] = Dyn.Bool(true)
 }
 
 // `row` disqualified because its `kind` verification failed for `reason`.
-failed: fn(row: &Dyn, kind: String, reason: String) {
+failed: fn(row: ^Dyn, kind: String, reason: String) {
     row["reason"] = Dyn.Text(reason.copy())
     row["disqualified"] = Dyn.Bool(true)
     row["verification"] = verification_of("failed", kind, Val(Dyn.Text(reason.copy())))
 }
 
 // `row` ok, its `kind` verification passed.
-passed: fn(row: &Dyn, kind: String) {
+passed: fn(row: ^Dyn, kind: String) {
     row["status"] = Dyn.Text("ok")
     row["verification"] = verification_of("passed", kind, None)
 }
 
 // `row` broken, its timed samples invalid.
-invalid_runs: fn(row: &Dyn) {
+invalid_runs: fn(row: ^Dyn) {
     row["status"] = Dyn.Text("broken")
     failed(row, "timed_run", "measured run samples are invalid")
 }
@@ -600,7 +600,7 @@ verification_of: fn(status: String, kind: String, reason: Dyn?) -> Dyn {
 
 // A timed row's metrics: its source metrics, runtime and build medians and
 // the size of its `artifact`.
-put_run_metrics: fn(row: &Dyn, artifact: String) {
+put_run_metrics: fn(row: ^Dyn, artifact: String) {
     metrics := dyn_at(row, "metrics")
     put_runtime_metrics(metrics, dyn_at(row, "runtime"))
     put_build_metrics(metrics, dyn_at(row, "build"))
@@ -608,13 +608,13 @@ put_run_metrics: fn(row: &Dyn, artifact: String) {
     row["metrics"] = metrics
 }
 
-put_runtime_metrics: fn(metrics: &Dyn, runtime: Dyn) {
+put_runtime_metrics: fn(metrics: ^Dyn, runtime: Dyn) {
     metrics["runtime_wall_seconds"] = dyn_at(runtime, "median/wall_seconds")
     metrics["runtime_peak_rss_kb"] = dyn_at(runtime, "median/peak_rss_kb")
     metrics["runtime_first_stdout_seconds"] = dyn_at(runtime, "median/time_to_first_stdout_seconds")
 }
 
-put_build_metrics: fn(metrics: &Dyn, build: Dyn) {
+put_build_metrics: fn(metrics: ^Dyn, build: Dyn) {
     metrics["cold_build_seconds"] = dyn_at(build, "cold/wall_seconds")
     metrics["warm_build_seconds"] = dyn_at(build, "warm/wall_seconds")
 }
@@ -849,7 +849,7 @@ cache_states: fn(st: Staging, jet_dir: String, commands: [[String]], reset: Rese
 }
 
 // One cache state of a service's run tier.
-service_state: fn(st: Staging, jet_dir: String, prefix: [String], before: &Before) -> Dyn IOError! {
+service_state: fn(st: Staging, jet_dir: String, prefix: [String], before: ^Before) -> Dyn IOError! {
     prepare(before)
     service: run_service(st.s, st.entry, jet_dir, prefix, 1)
     failure: or_null(service, "failure")
@@ -863,7 +863,7 @@ service_state: fn(st: Staging, jet_dir: String, prefix: [String], before: &Befor
 }
 
 // One cache state of a batch entry's run tier.
-runs_state: fn(st: Staging, jet_dir: String, commands: [[String]], before: &Before) -> Dyn IOError! {
+runs_state: fn(st: Staging, jet_dir: String, commands: [[String]], before: ^Before) -> Dyn IOError! {
     first: if commands.len() > 0 -> commands[0].copy() else -> [String]{}
     runtime: if commands.len() > 1 -> measure_steps(st.s, jet_dir, commands, st.runs, before) else -> measure_runs(st.s, jet_dir, first, st.runs, .Plain, before, Dyn.Null)
     valid: is_true(runtime, "valid")
@@ -882,7 +882,7 @@ runs_state: fn(st: Staging, jet_dir: String, commands: [[String]], before: &Befo
 // The run tier broken when a gated cache state is; otherwise it carries the
 // slower gated state's runtime and metrics, so it never reads faster than
 // either.
-settle_run_tier: fn(tier: &Dyn, metric: String, source_metrics: Dyn, kind: String) {
+settle_run_tier: fn(tier: ^Dyn, metric: String, source_metrics: Dyn, kind: String) {
     gated: GATED_STATE_ORDER.map(fn(state) { dyn_at(tier, "cache_states/{state}") })
     if gated.find(fn(state) { dyn_at(state, "status") != Dyn.Text("ok") }) == .Val(failed_state) {
         reason: "{or_text(member(failed_state, "cache_state"), "gated")} cache state: {or_text(member(failed_state, "reason"), "unmeasured")}"
@@ -976,7 +976,7 @@ failed_run: fn(run: ToolRun) -> String {
 }
 
 // The samples of `count` timed runs of `command`, each after `before`.
-measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: Shell, before: &Before, receipt: Dyn) -> Dyn IOError! {
+measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: Shell, before: ^Before, receipt: Dyn) -> Dyn IOError! {
     samples := [Dyn]{}
     loop _ in 0..<count {
         prepare(before)
@@ -1001,7 +1001,7 @@ measure_runs: fn(s: Stager, cwd: String, command: [String], count: Int, shell: S
 
 // The samples of `count` timed runs of `commands` as one sequence, each
 // after `before`.
-measure_steps: fn(s: Stager, cwd: String, commands: [[String]], count: Int, before: &Before) -> Dyn IOError! {
+measure_steps: fn(s: Stager, cwd: String, commands: [[String]], count: Int, before: ^Before) -> Dyn IOError! {
     samples := [Dyn]{}
     loop _ in 0..<count {
         prepare(before)
@@ -1020,7 +1020,7 @@ no_reset: fn() -> Reset {
 }
 
 // Runs `before`'s reset, then readies its cache state.
-prepare: fn(before: &Before) IOError! {
+prepare: fn(before: ^Before) IOError! {
     restore(before.reset)
     if {
         before.cache_state == "edited" -> {
@@ -1406,7 +1406,7 @@ measured_asset: fn(name: String) -> Bool {
     !ASSET_NAME_PART.split(name.lower()).any(fn(part) { part == "manifest" || part == "log" })
 }
 
-record_tree: fn(source_dir: String, dir: String, found: &[WebFile]) IOError! {
+record_tree: fn(source_dir: String, dir: String, found: ^[WebFile]) IOError! {
     loop item in files.list_dir(dir) {
         full: files.join(dir, item.name)
         if item.is_dir -> record_tree(source_dir, full, found) else {
@@ -1415,7 +1415,7 @@ record_tree: fn(source_dir: String, dir: String, found: &[WebFile]) IOError! {
     }
 }
 
-record_asset: fn(source_dir: String, file: String, found: &[WebFile]) IOError! {
+record_asset: fn(source_dir: String, file: String, found: ^[WebFile]) IOError! {
     identity: files.normalize(file)
     relative: files.relative(identity, source_dir)
     loop known in found {
@@ -1432,7 +1432,7 @@ record_asset: fn(source_dir: String, file: String, found: &[WebFile]) IOError! {
 
 // Records `file` (unless it is the harness's runner) and every module it
 // imports, exports from or loads by URL, once each.
-visit_module: fn(source_dir: String, file: String, harness_entry: String, seen: &[String], found: &[WebFile]) IOError! {
+visit_module: fn(source_dir: String, file: String, harness_entry: String, seen: ^[String], found: ^[WebFile]) IOError! {
     identity: files.normalize(file)
     if seen.contains(identity) {
         return
@@ -1646,7 +1646,7 @@ start_service: fn(s: Stager, cwd: String, command: [String], shell: Shell, repor
 // Polls the service until it answers its readiness probe: the seconds from
 // the launcher's start line (just before the service's exec) to the answer,
 // the launcher's clock running `offset_ns` ahead of this program's.
-wait_for_ready: fn(service: &Service, port: Int, config: Dyn, report: String, offset_ns: Int) -> Float Err! {
+wait_for_ready: fn(service: ^Service, port: Int, config: Dyn, report: String, offset_ns: Int) -> Float Err! {
     protocol: or_text(member(config, "protocol"), "http")
     started: time.instant()
     loop started.elapsed_millis() < SERVICE_READY_MS {
@@ -1747,10 +1747,10 @@ stop_peer: fn(peer: Service?) {
 }
 
 // Whether the service has exited.
-ended: fn(service: &Service) -> Bool { service.exit != None || (service.child.exited() ?? true) }
+ended: fn(service: ^Service) -> Bool { service.exit != None || (service.child.exited() ?? true) }
 
 // How the service ended, once it does within `timeout_ms`.
-wait_for_exit: fn(service: &Service, timeout_ms: Int) -> ServiceExit {
+wait_for_exit: fn(service: ^Service, timeout_ms: Int) -> ServiceExit {
     if service.exit == .Val(known) -> return known.copy()
     started: time.instant()
     loop !(service.child.exited() ?? true) {
@@ -1769,7 +1769,7 @@ wait_for_exit: fn(service: &Service, timeout_ms: Int) -> ServiceExit {
 
 // Stops the service and every process of its tree: TERM to each, then KILL
 // to the ones still running after five seconds.
-stop_process: fn(service: &Service) {
+stop_process: fn(service: ^Service) {
     if !ended(service) {
         pids: process_tree_pids(service.child.id())
         signal_process_tree(pids, "TERM")

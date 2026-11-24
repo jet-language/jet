@@ -42,7 +42,7 @@ FingerprintBudget: struct {
         FingerprintBudget{entries: 0, nodes: 0, bytes: 0, exceeded: false}
     }
 
-    push: fn(&self, inputs: &[DefinitionInput], name: String, bytes: [U8]) Never! {
+    push: fn(^self, inputs: ^[DefinitionInput], name: String, bytes: [U8]) Never! {
         length: bytes.len()
         if self.entries >= MAX_TREE_FILES || self.bytes + length > MAX_TREE_TOTAL_BYTES {
             self.exceeded = true
@@ -53,7 +53,7 @@ FingerprintBudget: struct {
         inputs.push(DefinitionInput{name: name, bytes: bytes})
     }
 
-    visit: fn(&self) -> Bool Never! {
+    visit: fn(^self) -> Bool Never! {
         if self.nodes >= MAX_TREE_FILES {
             self.exceeded = true
             return false
@@ -62,7 +62,7 @@ FingerprintBudget: struct {
         true
     }
 
-    allow_file: fn(&self, length: Int) -> Bool Never! {
+    allow_file: fn(^self, length: Int) -> Bool Never! {
         if length > MAX_TREE_FILE_BYTES || self.bytes + length > MAX_TREE_TOTAL_BYTES {
             self.exceeded = true
             return false
@@ -171,7 +171,7 @@ env_hook_fingerprint_from_inputs: fn(root: String, requested_preset: String?, re
     env_hook_finish_definition_fingerprint(root, requested_preset, requested_environment, budget, inputs)
 }
 
-env_hook_finish_definition_fingerprint: fn(root: String, requested_preset: String?, requested_environment: String?, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> String? Never! {
+env_hook_finish_definition_fingerprint: fn(root: String, requested_preset: String?, requested_environment: String?, budget: ^FingerprintBudget, inputs: ^[DefinitionInput]) -[FS, Env]> String? Never! {
     project_files: [String]{UNIFIED_LOCK_FILE, PACKAGE_FILE}
     loop relative in project_files -> env_hook_add_input(root, relative, "project", budget, inputs)
     host: sys.get("HOSTNAME") ?? ""
@@ -231,7 +231,7 @@ env_hook_normal_component_count: fn(path: String) -> Int Never! {
     count
 }
 
-env_hook_add_input: fn(root: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput]) -[FS, Env]> {
+env_hook_add_input: fn(root: String, relative: String, kind: String, budget: ^FingerprintBudget, inputs: ^[DefinitionInput]) -[FS, Env]> {
     if budget.exceeded {
         return
     }
@@ -249,7 +249,7 @@ env_hook_add_input: fn(root: String, relative: String, kind: String, budget: &Fi
     env_hook_add_input_path(root_real, path, relative, kind, budget, inputs, visited, 0)
 }
 
-env_hook_add_input_path: fn(root: String, path: String, relative: String, kind: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], visited: &[String:Bool], depth: Int) -[FS, Env]> {
+env_hook_add_input_path: fn(root: String, path: String, relative: String, kind: String, budget: ^FingerprintBudget, inputs: ^[DefinitionInput], visited: ^[String:Bool], depth: Int) -[FS, Env]> {
     if budget.exceeded {
         return
     }
@@ -329,7 +329,7 @@ env_hook_system_time_debug: fn(modified: DateTime) -> String Never! {
     "Some(SystemTime {{ tv_sec: {seconds}, tv_nsec: {nanos} }})"
 }
 
-env_hook_collect_definition_files: fn(root: String, current: String, budget: &FingerprintBudget, inputs: &[DefinitionInput], depth: Int) -[FS, Env]> {
+env_hook_collect_definition_files: fn(root: String, current: String, budget: ^FingerprintBudget, inputs: ^[DefinitionInput], depth: Int) -[FS, Env]> {
     if budget.exceeded || depth > MAX_TREE_DEPTH || !budget.visit() {
         budget.exceeded = true
         return

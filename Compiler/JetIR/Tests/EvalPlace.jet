@@ -15,14 +15,14 @@ place_test_fn: fn(name: String, params: Int, temps: Int) -> IRFunction {
     f
 }
 
-place_test_call: fn(f: &IRFunction, callee: Int, args: [Int]) {
+place_test_call: fn(f: ^IRFunction, callee: Int, args: [Int]) {
     start: ir_args(f, args)
     _ := ir_emit(f, IROp.Call, -1, callee, start, args.len(), 1)
 }
 
 // A condition (row 0) of one parameter that compares it, then does what
 // `body` adds; row 1 is what it calls.
-place_test_module: fn(body: &&IRFunction, callee: &&IRFunction) -> IRModule {
+place_test_module: fn(body: ^^IRFunction, callee: ^^IRFunction) -> IRModule {
     m := ir_module_new()
     m.functions.push(body.move())
     m.functions.push(callee.move())
@@ -117,7 +117,7 @@ place_test_module: fn(body: &&IRFunction, callee: &&IRFunction) -> IRModule {
 }
 
 // A String type that drops through the runtime, as a program's does.
-place_test_string: fn(m: &IRModule) -> Int {
+place_test_string: fn(m: ^IRModule) -> Int {
     ir_intern_type(m, "String", IRType{ty: TYPE_ID_STRING, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"})
 }
 

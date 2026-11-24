@@ -94,7 +94,7 @@ provider_realize_adapter: fn(plan: AdapterPlan, ctx: ProviderCtx, expected: Cach
 // A failed adapter recipe: record the refusal as a logged step, preserve the
 // scratch tree for `--shell-on-fail`, persist the attempt, and report E1275
 // for a sandbox refusal or E1273 for a failed step.
-provider_adapter_failure: fn(plan: AdapterPlan, ctx: ProviderCtx, staged: String, out_dir: String, attempt: &BuildAttempt, diagnostic: RecipeDiagnostic) -[FS, Env, Rand]> ProviderError Never! {
+provider_adapter_failure: fn(plan: AdapterPlan, ctx: ProviderCtx, staged: String, out_dir: String, attempt: ^BuildAttempt, diagnostic: RecipeDiagnostic) -[FS, Env, Rand]> ProviderError Never! {
     if attempt.steps.len() == 0 {
         attempt.push_step(
             StepLog{

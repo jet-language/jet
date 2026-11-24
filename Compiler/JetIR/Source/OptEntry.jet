@@ -24,7 +24,7 @@ use jet_foundation.[Type, compiler_threads_single]
 // The most instructions a head (its test, If, arm and Return) may have.
 IR_OPT_ENTRY_LIMIT: 8
 
-ir_opt_entry: fn(m: IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
+ir_opt_entry: fn(m: IRModule, functions: ^[IRFunction], recursive: [Bool], keys: [String]) Never! {
     clone: ir_interned_name(m, "jet_rt_int_clone") ?? -2
     guards := [[IRFunction]]{}
     any := false
@@ -235,7 +235,7 @@ ir_opt_entry_site: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String]
 // The call at `at` of `caller` behind its guard: the head with its
 // parameters reading the call's arguments, the returned value into the
 // call's result and the drops after the call; Else the call through `last`.
-ir_opt_entry_splice: fn(f: &IRFunction, caller: IRFunction, guard: IRFunction, at: Int, last: Int) Never! {
+ir_opt_entry_splice: fn(f: ^IRFunction, caller: IRFunction, guard: IRFunction, at: Int, last: Int) Never! {
     line: caller.code_line[at]
     map := [Int]{}
     loop slot in 0..<guard.slot_type.len() {

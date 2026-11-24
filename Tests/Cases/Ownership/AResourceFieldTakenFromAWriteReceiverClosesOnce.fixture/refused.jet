@@ -5,11 +5,11 @@ Res: struct {
     name: String,
 
     impl Close {
-        close: fn(&&self) { print("close {self.name}") }
+        close: fn(^^self) { print("close {self.name}") }
     }
 }
 
-next: fn(r: &&Res) -> Res {
+next: fn(r: ^^Res) -> Res {
     if r.name == "a" -> panic("stop")
     Res{name: "b"}
 }
@@ -17,7 +17,7 @@ next: fn(r: &&Res) -> Res {
 Holder: struct {
     r: Res,
 
-    step: fn(&self) { self.r = next(self.r.move()) }
+    step: fn(^self) { self.r = next(self.r.move()) }
 }
 
 run: fn() {

@@ -210,12 +210,12 @@ jet_cli_codemod_host: fn(action: String, path: String, yes: Bool, color: Bool, j
     JetDriverVerbOutput{stdout: stdout, stderr: run.warning, exit_code: JET_DRIVER_EXIT_OK}
 }
 
-jet_cli_codemod_failed: fn(run: &JetCLICodemodRun, err: JetCLIReadError) -> Bool Never! {
+jet_cli_codemod_failed: fn(run: ^JetCLICodemodRun, err: JetCLIReadError) -> Bool Never! {
     run.failure = Val(err.message.copy())
     false
 }
 
-jet_cli_codemod_print: fn(run: &JetCLICodemodRun, line: String) Never! { run.out.push("{line}\n") }
+jet_cli_codemod_print: fn(run: ^JetCLICodemodRun, line: String) Never! { run.out.push("{line}\n") }
 
 jet_cli_codemod_error: fn(message: String) -> JetCLIReadError Never! { jet_cli_read_error(message) }
 
@@ -231,7 +231,7 @@ jet_cli_codemod_object: fn(value: JetCLIStatusValue, message: String) -> JetCLIC
 }
 
 // Remove `key` (the last duplicate wins, as Rust's map insert keeps it).
-jet_cli_codemod_take: fn(object: &JetCLICodemodObject, key: String) -> JetCLIStatusValue? Never! {
+jet_cli_codemod_take: fn(object: ^JetCLICodemodObject, key: String) -> JetCLIStatusValue? Never! {
     found := -1
     loop index in 0..<object.fields.len() {
         if object.fields[index].name == key && !object.taken[index] {
@@ -257,13 +257,13 @@ jet_cli_codemod_reject_unknown: fn(object: JetCLICodemodObject, what: String) Je
     Err(jet_cli_codemod_error("unknown field(s) in {what}: {names.join(", ")}"))
 }
 
-jet_cli_codemod_take_string_opt: fn(object: &JetCLICodemodObject, key: String) -> String? JetCLIReadError! {
+jet_cli_codemod_take_string_opt: fn(object: ^JetCLICodemodObject, key: String) -> String? JetCLIReadError! {
     value: jet_cli_codemod_take(object, key) ?? return Ok(None)
     if value == .Text(text) -> return Ok(Val(text.copy()))
     Err(jet_cli_codemod_error("`{key}` must be text"))
 }
 
-jet_cli_codemod_take_string: fn(object: &JetCLICodemodObject, key: String) -> String JetCLIReadError! {
+jet_cli_codemod_take_string: fn(object: ^JetCLICodemodObject, key: String) -> String JetCLIReadError! {
     text: jet_cli_codemod_take_string_opt(object, key)
     Ok(text ?? return Err(jet_cli_codemod_error("codemod object missing `{key}`")))
 }
@@ -275,12 +275,12 @@ jet_cli_codemod_number: fn(value: JetCLIStatusValue, key: String) -> Int JetCLIR
     Err(jet_cli_codemod_error("`{key}` must be a non-negative integer"))
 }
 
-jet_cli_codemod_take_number_opt: fn(object: &JetCLICodemodObject, key: String) -> Int? JetCLIReadError! {
+jet_cli_codemod_take_number_opt: fn(object: ^JetCLICodemodObject, key: String) -> Int? JetCLIReadError! {
     value: jet_cli_codemod_take(object, key) ?? return Ok(None)
     Ok(Val(jet_cli_codemod_number(value, key)))
 }
 
-jet_cli_codemod_take_number: fn(object: &JetCLICodemodObject, key: String) -> Int JetCLIReadError! {
+jet_cli_codemod_take_number: fn(object: ^JetCLICodemodObject, key: String) -> Int JetCLIReadError! {
     number: jet_cli_codemod_take_number_opt(object, key)
     Ok(number ?? return Err(jet_cli_codemod_error("codemod object missing `{key}`")))
 }
@@ -297,30 +297,30 @@ jet_cli_codemod_number_default: fn(value: JetCLIStatusValue, key: String, defaul
     Ok(default)
 }
 
-jet_cli_codemod_take_bool: fn(object: &JetCLICodemodObject, key: String, default: Bool) -> Bool JetCLIReadError! {
+jet_cli_codemod_take_bool: fn(object: ^JetCLICodemodObject, key: String, default: Bool) -> Bool JetCLIReadError! {
     value: jet_cli_codemod_take(object, key) ?? return Ok(default)
     if value == .Bool(flag) -> return Ok(flag)
     Err(jet_cli_codemod_error("`{key}` must be true or false"))
 }
 
-jet_cli_codemod_take_array_opt: fn(object: &JetCLICodemodObject, key: String) -> [JetCLIStatusValue]? JetCLIReadError! {
+jet_cli_codemod_take_array_opt: fn(object: ^JetCLICodemodObject, key: String) -> [JetCLIStatusValue]? JetCLIReadError! {
     value: jet_cli_codemod_take(object, key) ?? return Ok(None)
     if value == .Array(values) -> return Ok(Val(values.copy()))
     Err(jet_cli_codemod_error("`{key}` must be an array"))
 }
 
-jet_cli_codemod_take_array: fn(object: &JetCLICodemodObject, key: String) -> [JetCLIStatusValue] JetCLIReadError! {
+jet_cli_codemod_take_array: fn(object: ^JetCLICodemodObject, key: String) -> [JetCLIStatusValue] JetCLIReadError! {
     values: jet_cli_codemod_take_array_opt(object, key)
     Ok(values ?? return Err(jet_cli_codemod_error("codemod object missing `{key}`")))
 }
 
-jet_cli_codemod_take_object_opt: fn(object: &JetCLICodemodObject, key: String) -> JetCLICodemodObject? JetCLIReadError! {
+jet_cli_codemod_take_object_opt: fn(object: ^JetCLICodemodObject, key: String) -> JetCLICodemodObject? JetCLIReadError! {
     value: jet_cli_codemod_take(object, key) ?? return Ok(None)
     if value == .Object(_) -> return Ok(Val(jet_cli_codemod_object(value, "expected JSON object")))
     Err(jet_cli_codemod_error("`{key}` must be an object"))
 }
 
-jet_cli_codemod_take_object: fn(object: &JetCLICodemodObject, key: String) -> JetCLICodemodObject JetCLIReadError! {
+jet_cli_codemod_take_object: fn(object: ^JetCLICodemodObject, key: String) -> JetCLICodemodObject JetCLIReadError! {
     found: jet_cli_codemod_take_object_opt(object, key)
     Ok(found ?? return Err(jet_cli_codemod_error("codemod object missing `{key}`")))
 }
@@ -879,7 +879,7 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
 
 // Rust pattern_tree: a node whose trimmed text is a capture sentinel becomes
 // that capture.
-jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source: String, captures: [JetCLICodemodCaptured], variadic: [String], pattern: &[JetCLICodemodPatternNode]) -> Int Never! {
+jet_cli_codemod_pattern_node: fn(forest: JetCLICodemodForest, index: Int, source: String, captures: [JetCLICodemodCaptured], variadic: [String], pattern: ^[JetCLICodemodPatternNode]) -> Int Never! {
     tree: forest.trees[index]
     text: foundation_byte_text(source.bytes(), tree.span.start, tree.span.end).trim()
     loop capture in captures {
@@ -968,7 +968,7 @@ jet_cli_codemod_tree_key: fn(forest: JetCLICodemodForest, index: Int) -> String 
     "{tree.class}:{tree.shape}:[{signature.join(", ")}]:[{slots.join(";")}]"
 }
 
-jet_cli_codemod_bind: fn(name: String, text: String, key: String, captures: &[JetCLICodemodCaptured]) -> Bool Never! {
+jet_cli_codemod_bind: fn(name: String, text: String, key: String, captures: ^[JetCLICodemodCaptured]) -> Bool Never! {
     loop capture in captures {
         if capture.name == name -> return capture.key == key
     }
@@ -976,12 +976,12 @@ jet_cli_codemod_bind: fn(name: String, text: String, key: String, captures: &[Je
     true
 }
 
-jet_cli_codemod_rollback: fn(captures: &[JetCLICodemodCaptured], checkpoint: Int) Never! {
+jet_cli_codemod_rollback: fn(captures: ^[JetCLICodemodCaptured], checkpoint: Int) Never! {
     loop captures.len() > checkpoint -> _: captures.pop()
 }
 
 // Rust match_typed_tree.
-jet_cli_codemod_match_tree: fn(pattern: JetCLICodemodPattern, at: Int, forest: JetCLICodemodForest, index: Int, source: String, captures: &[JetCLICodemodCaptured]) -> Bool Never! {
+jet_cli_codemod_match_tree: fn(pattern: JetCLICodemodPattern, at: Int, forest: JetCLICodemodForest, index: Int, source: String, captures: ^[JetCLICodemodCaptured]) -> Bool Never! {
     node: pattern.nodes[at]
     candidate: forest.trees[index]
     if node.capture == .Val(name) {
@@ -1004,7 +1004,7 @@ jet_cli_codemod_match_tree: fn(pattern: JetCLICodemodPattern, at: Int, forest: J
 
 // Rust match_children/walk: a variadic capture matches a run of same-class
 // children of a list slot, longest first, with backtracking.
-jet_cli_codemod_match_children: fn(pattern: JetCLICodemodPattern, wanted: [Int], pi: Int, forest: JetCLICodemodForest, candidates: [Int], ci: Int, kind: String, source: String, captures: &[JetCLICodemodCaptured]) -> Bool Never! {
+jet_cli_codemod_match_children: fn(pattern: JetCLICodemodPattern, wanted: [Int], pi: Int, forest: JetCLICodemodForest, candidates: [Int], ci: Int, kind: String, source: String, captures: ^[JetCLICodemodCaptured]) -> Bool Never! {
     if pi == wanted.len() -> return ci == candidates.len()
     node: pattern.nodes[wanted[pi]]
     if node.capture == .Val(name) {
@@ -1140,7 +1140,7 @@ jet_cli_codemod_file_index: fn(files: JetCLICodemodFiles, path: String) -> Int N
     -1
 }
 
-jet_cli_codemod_add_file: fn(files: &JetCLICodemodFiles, path: String, bytes: [U8]) Never! {
+jet_cli_codemod_add_file: fn(files: ^JetCLICodemodFiles, path: String, bytes: [U8]) Never! {
     if jet_cli_codemod_file_index(files, path) >= 0 {
         return
     }
@@ -1157,7 +1157,7 @@ jet_cli_codemod_add_file: fn(files: &JetCLICodemodFiles, path: String, bytes: [U
 }
 
 // Rust read_fingerprint: the first read of a path pins its hash.
-jet_cli_codemod_read_fingerprint: fn(path: String, inputs: &[String:String]) -[FS]> [U8] JetCLIReadError! {
+jet_cli_codemod_read_fingerprint: fn(path: String, inputs: ^[String:String]) -[FS]> [U8] JetCLIReadError! {
     bytes: cli_files.read_bytes(path) ?? return Err(jet_cli_codemod_error("could not read `{path}`: {jet_cli_io_error_text(err)}"))
     if !inputs.has_key(path) -> inputs[path] = jet_cli_source_hash(bytes)
     Ok(bytes)
@@ -1201,7 +1201,7 @@ jet_cli_codemod_overlays: fn(entry: String, files: JetCLICodemodFiles) -[FS]> [J
 }
 
 // Rust render_index_error: the compiler's own refusal, written verbatim.
-jet_cli_codemod_refuse: fn(run: &JetCLICodemodRun, output: JetDriverVerbOutput) -> JetCLIReadError Never! {
+jet_cli_codemod_refuse: fn(run: ^JetCLICodemodRun, output: JetDriverVerbOutput) -> JetCLIReadError Never! {
     run.verbatim = Val(output.copy())
     jet_cli_codemod_error("codemod unit was refused")
 }
@@ -1212,7 +1212,7 @@ jet_cli_codemod_refuse: fn(run: &JetCLICodemodRun, output: JetDriverVerbOutput) 
 // reported errors (a `fixture` root is one): the compile runs every phase past
 // a failure (the driver's keep-going collector), and the diagnostics are the
 // validation step's business, not the index's.
-jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs: &[String:String], run: &JetCLICodemodRun) -> JetCLICodemodIndexed JetCLIReadError! {
+jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs: ^[String:String], run: ^JetCLICodemodRun) -> JetCLICodemodIndexed JetCLIReadError! {
     prepared := jet_cli_prepare_overlays(entry, entry, jet_cli_codemod_overlays(entry, files), false, None, JetDriverCompileMode.Doc)
     if prepared.move() == {
         .Refused(output) -> return Err(jet_cli_codemod_refuse(run, output))
@@ -1355,7 +1355,7 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
     Ok(JetCLICodemodBatch{name: name.move(), project: project, roots: roots, rules: rules, snapshots: snapshots})
 }
 
-jet_cli_codemod_insert_unit: fn(units: &[JetCLICodemodUnit], path: String, fixture: Bool) JetCLIReadError! {
+jet_cli_codemod_insert_unit: fn(units: ^[JetCLICodemodUnit], path: String, fixture: Bool) JetCLIReadError! {
     loop unit in units {
         if unit.entry == path {
             if unit.fixture != fixture {
@@ -1368,7 +1368,7 @@ jet_cli_codemod_insert_unit: fn(units: &[JetCLICodemodUnit], path: String, fixtu
 }
 
 // Rust walk_jet: sorted, no links, every `.jet` file a unit.
-jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: &[JetCLICodemodUnit]) -[FS, Env]> JetCLIReadError! {
+jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: ^[JetCLICodemodUnit]) -[FS, Env]> JetCLIReadError! {
     listed: cli_files.list_dir(directory) ?? return Err(jet_cli_codemod_error("could not read root `{directory}`: {jet_cli_io_error_text(err)}"))
     paths := loop entry in listed -> jet_cli_rooted_join(directory, entry.name)
     paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
@@ -1395,7 +1395,7 @@ jet_cli_codemod_discover_units: fn(batch: JetCLICodemodBatch) -[FS, Env]> [JetCL
     Ok(units)
 }
 
-jet_cli_codemod_push_edit: fn(edits: &JetCLICodemodEdits, path: String, edit: TextEdit) Never! {
+jet_cli_codemod_push_edit: fn(edits: ^JetCLICodemodEdits, path: String, edit: TextEdit) Never! {
     loop index in 0..<edits.paths.len() {
         if edits.paths[index] == path {
             edits.edits[index].push(edit.copy())
@@ -1407,7 +1407,7 @@ jet_cli_codemod_push_edit: fn(edits: &JetCLICodemodEdits, path: String, edit: Te
 }
 
 // Rust dedup_apply_edits.
-jet_cli_codemod_dedup_apply: fn(id: String, edits: JetCLICodemodEdits, files: &JetCLICodemodFiles) -> Int JetCLIReadError! {
+jet_cli_codemod_dedup_apply: fn(id: String, edits: JetCLICodemodEdits, files: ^JetCLICodemodFiles) -> Int JetCLIReadError! {
     order := [Int]{}
     loop index in 0..<edits.paths.len() -> order.push(index)
     order_paths: edits.paths.copy()
@@ -1497,7 +1497,7 @@ jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTa
 }
 
 // Rust apply_rule `Rule.Rename`.
-jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) -> Int JetCLIReadError! {
+jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: ^JetCLICodemodPlan, run: ^JetCLICodemodRun) -> Int JetCLIReadError! {
     anchors := [SemAnchor]{}
     targets := [JetCLISemOpTarget]{}
     loop unit in units {
@@ -1559,7 +1559,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
 }
 
 // Rust apply_rule `Rule.Ast`.
-jet_cli_codemod_apply_ast: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) -> Int JetCLIReadError! {
+jet_cli_codemod_apply_ast: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: ^JetCLICodemodPlan, run: ^JetCLICodemodRun) -> Int JetCLIReadError! {
     edits := JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
     loop unit in units {
         indexed: jet_cli_codemod_index_unit(unit.entry, plan.files, plan.inputs, run)
@@ -1587,7 +1587,7 @@ jet_cli_codemod_first_difference: fn(left: [U8], right: [U8]) -> Int Never! {
 }
 
 // Rust validate_units: each unit checked over the staged overlays.
-jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) JetCLIReadError! {
+jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICodemodUnit], plan: ^JetCLICodemodPlan, run: ^JetCLICodemodRun) JetCLIReadError! {
     loop unit in units {
         overlays: jet_cli_codemod_overlays(unit.entry, plan.files)
         compiled: jet_cli_compile_overlays(unit.entry, unit.entry, overlays, false, None, JetDriverCompileMode.Check, None) ?? return Err(jet_cli_codemod_error("could not check `{unit.entry}`: {err}"))
@@ -1637,7 +1637,7 @@ jet_cli_codemod_validate_units: fn(batch: JetCLICodemodBatch, units: [JetCLICode
 }
 
 // Rust plan_batch.
-jet_cli_codemod_plan_batch: fn(batch: JetCLICodemodBatch, run: &JetCLICodemodRun) -> JetCLICodemodPlan JetCLIReadError! {
+jet_cli_codemod_plan_batch: fn(batch: JetCLICodemodBatch, run: ^JetCLICodemodRun) -> JetCLICodemodPlan JetCLIReadError! {
     units: jet_cli_codemod_discover_units(batch)
     plan := JetCLICodemodPlan{files: JetCLICodemodFiles{paths: [String]{}, before: [[U8]]{}, staged: [[U8]]{}}, count_ids: [String]{}, counts: [Int]{}, validations: [String]{}, inputs: [String:String]{}, semantic_ops: [JetCLISemOp]{}}
     loop unit in units {
@@ -1683,7 +1683,7 @@ jet_cli_codemod_lines: fn(bytes: [U8]) -> [String] Never! {
 }
 
 // Rust print_simple_diff.
-jet_cli_codemod_print_diff: fn(run: &JetCLICodemodRun, before: [U8], after: [U8]) Never! {
+jet_cli_codemod_print_diff: fn(run: ^JetCLICodemodRun, before: [U8], after: [U8]) Never! {
     old: jet_cli_codemod_lines(before)
     new: jet_cli_codemod_lines(after)
     jet_cli_codemod_print(run, "@@ -1,{old.len()} +1,{new.len()} @@")
@@ -1698,7 +1698,7 @@ jet_cli_codemod_print_diff: fn(run: &JetCLICodemodRun, before: [U8], after: [U8]
 }
 
 // Rust print_batch.
-jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPlan, run: &JetCLICodemodRun) -[FS, Env]> JetCLIReadError! {
+jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPlan, run: ^JetCLICodemodRun) -[FS, Env]> JetCLIReadError! {
     changed := 0
     loop index in 0..<plan.files.paths.len() {
         if plan.files.before[index] != plan.files.staged[index] -> changed += 1
@@ -1743,7 +1743,7 @@ jet_cli_codemod_v2_log: fn(batch: JetCLICodemodBatch, changes: [JetCLISourceChan
 }
 
 // Rust run_v2: the plan runs under the project's codemod lock.
-jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, run: &JetCLICodemodRun) JetCLIReadError! {
+jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, run: ^JetCLICodemodRun) JetCLIReadError! {
     project: JetCLIRootedDirectory.open(batch.project, [String]{}, false)
     journal: project.descendant([String]{".jet", "codemods"}, true)
     lock: journal.transaction_lock()
@@ -1809,7 +1809,7 @@ jet_cli_codemod_managed_project: fn(entry: String) -[FS, Env]> String JetCLIRead
 }
 
 // Rust run_v1: the unit's index, every `from` definition and reference.
-jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: &JetCLICodemodRun) JetCLIReadError! {
+jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: ^JetCLICodemodRun) JetCLIReadError! {
     inputs := [String:String]{}
     files: JetCLICodemodFiles{paths: [String]{}, before: [[U8]]{}, staged: [[U8]]{}}
     indexed: jet_cli_codemod_index_unit(codemod.entry, files, inputs, run)
@@ -1864,7 +1864,7 @@ jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: &JetCLICo
 }
 
 // Rust run_object.
-jet_cli_codemod_run_object: fn(path: String, apply: Bool, yes: Bool, run: &JetCLICodemodRun) -> Bool JetCLIReadError! {
+jet_cli_codemod_run_object: fn(path: String, apply: Bool, yes: Bool, run: ^JetCLICodemodRun) -> Bool JetCLIReadError! {
     text: cli_files.read(path) ?? return Err(jet_cli_codemod_error("could not read codemod `{path}`: {jet_cli_io_error_text(err)}"))
     value: jet_cli_status_value_parse(text) ?? return Err(jet_cli_codemod_error("invalid codemod JSON: {err.message}"))
     if value == .Object(_) {
@@ -1928,7 +1928,7 @@ jet_cli_codemod_unhex: fn(text: String) -> [U8] JetCLIReadError! {
 }
 
 // Rust undo.
-jet_cli_codemod_undo: fn(path: String, run: &JetCLICodemodRun) -[FS, Env, Exec, Time]> Bool JetCLIReadError! {
+jet_cli_codemod_undo: fn(path: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, Time]> Bool JetCLIReadError! {
     project: jet_cli_codemod_replay_project(path)
     if !cli_files.exists(path) -> jet_cli_codemod_lock_and_recover(project)
     text: jet_cli_codemod_read_replay_log(project, path) ?? return Err(jet_cli_codemod_error("could not read codemod log `{path}`: {err.message}"))
@@ -1943,7 +1943,7 @@ jet_cli_codemod_undo: fn(path: String, run: &JetCLICodemodRun) -[FS, Env, Exec, 
 }
 
 // Rust undo_v2: the codemod-side checks, then the held source undo.
-jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: String, run: &JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
+jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     if jet_cli_codemod_take_number(object, "schema") != 2 {
         return Err(jet_cli_codemod_error("unsupported codemod log schema"))
@@ -1985,7 +1985,7 @@ jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: Str
 
 // Rust undo_v1: a legacy log restores `before_bytes` or replays its inverse
 // edits over the checkpointed bytes.
-jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path: String, run: &JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
+jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path: String, run: ^JetCLICodemodRun) -[FS, Env, Exec, Time]> JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     name: jet_cli_codemod_take_string_opt(object, "name") ?? "UndoCodemod"
     files: jet_cli_codemod_take_array(object, "files")

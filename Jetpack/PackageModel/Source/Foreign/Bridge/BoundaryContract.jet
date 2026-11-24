@@ -85,7 +85,7 @@ ForeignBoundaryObservation: struct {
     }
 
     // Builders consume the observation (Rust `mut self`), never copying it.
-    with_assumptions: fn(&&self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
+    with_assumptions: fn(^^self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
         out := self
         rows := [String]{}
         loop assumption in assumptions {
@@ -96,7 +96,7 @@ ForeignBoundaryObservation: struct {
         out
     }
 
-    with_evidence: fn(&&self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
+    with_evidence: fn(^^self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
         out := self
         out.evidence = Val(evidence)
         out
@@ -473,7 +473,7 @@ ForeignBoundaryContract: struct {
     }
 
     // Replace one obligation row without creating a parallel evidence store.
-    record_obligation: fn(&self, obligation: ForeignObligationEvidence) ForeignBridgeError! {
+    record_obligation: fn(^self, obligation: ForeignObligationEvidence) ForeignBridgeError! {
         obligation.validate(self.artifact_coverage)
         replaced := false
         loop index in 0..<self.obligations.len() {
@@ -490,7 +490,7 @@ ForeignBoundaryContract: struct {
 
     // Record one basis/checker/assumption row against this contract's exact
     // loaded artifact coverage.
-    set_obligation: fn(&self, name: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String]) ForeignBridgeError! {
+    set_obligation: fn(^self, name: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String]) ForeignBridgeError! {
         self.record_obligation(ForeignObligationEvidence.new(name, basis, checker, assumptions, self.artifact_coverage))
     }
 
@@ -545,7 +545,7 @@ ForeignBoundaryContract: struct {
     }
 
     // Rust takes `mut self` by value: consume, never copy, the contract.
-    attach_derivation: fn(&&self, record: DerivationRecord) -> ForeignBoundaryContract ForeignBridgeError! {
+    attach_derivation: fn(^^self, record: DerivationRecord) -> ForeignBoundaryContract ForeignBridgeError! {
         if !derivation_record_validate(record) {
             return Err(pkg_bridge_error("derivation {record.id} has a non-canonical identity"))
         }
@@ -557,7 +557,7 @@ ForeignBoundaryContract: struct {
         Ok(out)
     }
 
-    attach_evidence: fn(&&self, record: EvidenceRecord) -> ForeignBoundaryContract ForeignBridgeError! {
+    attach_evidence: fn(^^self, record: EvidenceRecord) -> ForeignBoundaryContract ForeignBridgeError! {
         evidence_record_validate(record) ?? return Err(pkg_bridge_error("foreign boundary evidence is invalid: {evidence_expectation_error_text(err)}"))
         derivation: record.derivation ?? return Err(pkg_bridge_error("foreign boundary evidence must reference a checked derivation"))
         if self.derivation != Val(derivation) {
@@ -577,7 +577,7 @@ ForeignBoundaryContract: struct {
     // Consume the checked derivation, evidence, and comparison records before
     // a replacement projection may become selectable. The receipt is the only
     // new record; it references the canonical records.
-    accept_reasoned_replacement: fn(&self, current_identity: ForeignBoundaryIdentity, current_coverage: ForeignArtifactCoverage, derivation: DerivationRecord, evidence: EvidenceRecord, comparison: ComparisonRecord, replacement_identity: String) -> ForeignSourceReceipt ForeignBridgeError! {
+    accept_reasoned_replacement: fn(^self, current_identity: ForeignBoundaryIdentity, current_coverage: ForeignArtifactCoverage, derivation: DerivationRecord, evidence: EvidenceRecord, comparison: ComparisonRecord, replacement_identity: String) -> ForeignSourceReceipt ForeignBridgeError! {
         self.validate()
         if self.replacement_accepted() {
             return Err(pkg_bridge_error("foreign replacement is already accepted for this boundary"))
@@ -608,14 +608,14 @@ ForeignBoundaryContract: struct {
         Ok(receipt)
     }
 
-    record_observation: fn(&self, observation: &&ForeignBoundaryObservation) ForeignBridgeError! {
+    record_observation: fn(^self, observation: ^^ForeignBoundaryObservation) ForeignBridgeError! {
         observation.validate()
         self.observations.push(observation)
     }
 
     // Consume one canonical comparison record. Every sampled case keeps both
     // raw sides; terminal outcomes retain their status/reason as assumptions.
-    record_comparison: fn(&self, record: ComparisonRecord, evidence: EvidenceIdentity?) ForeignBridgeError! {
+    record_comparison: fn(^self, record: ComparisonRecord, evidence: EvidenceIdentity?) ForeignBridgeError! {
         if record.schema_version != TEST_COMPARISON_SCHEMA_VERSION {
             return Err(pkg_bridge_error("unsupported comparison schema version {record.schema_version}"))
         }
@@ -653,14 +653,14 @@ ForeignBoundaryContract: struct {
 
     // Accept a replacement only after the checked workflow persisted its
     // explicit source receipt.
-    accept_replacement: fn(&self) ForeignBridgeError! {
+    accept_replacement: fn(^self) ForeignBridgeError! {
         if self.source_receipt == None {
             return Err(pkg_bridge_error("use accept_reasoned_replacement to attach the checked source receipt"))
         }
         self.mark_replacement_accepted()
     }
 
-    mark_replacement_accepted: fn(&self) ForeignBridgeError! {
+    mark_replacement_accepted: fn(^self) ForeignBridgeError! {
         if !self.source_import {
             return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language}"))
         }

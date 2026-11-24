@@ -420,7 +420,7 @@ impl ProviderFactReport {
 
 // The dependency refs of a Conan `requires`-style array, each recorded as a
 // typed fact under `kind`.
-provider_conan_json_dependencies: fn(facts: &MetadataFacts, value: Dyn?, kind: String, losses: &[String]) -> [String] Never! {
+provider_conan_json_dependencies: fn(facts: ^MetadataFacts, value: Dyn?, kind: String, losses: ^[String]) -> [String] Never! {
     declared: value ?? return [String]{}
     items: pkg_json_array(declared) ?? {
         losses.push("Conan `{kind}` dependencies must be an array")

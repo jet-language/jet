@@ -153,7 +153,7 @@ no_nix_ldd: fn(ldd: String, path: String, host_path: String) -> [String] {
 }
 
 // The /nix/store/NAME root of `path` and of what it resolves to.
-no_nix_store_root: fn(path: String, roots: &[String]) {
+no_nix_store_root: fn(path: String, roots: ^[String]) {
     loop candidate in [path.copy(), no_nix_real(path)] {
         if !candidate.starts_with("/nix/store/") -> next
         rest: candidate.slice(11, candidate.len())
@@ -163,7 +163,7 @@ no_nix_store_root: fn(path: String, roots: &[String]) {
     }
 }
 
-no_nix_roots_of: fn(ldd: String, path: String, host_path: String, roots: &[String]) {
+no_nix_roots_of: fn(ldd: String, path: String, host_path: String, roots: ^[String]) {
     if files.is_file(path) {
         loop word in no_nix_ldd(ldd, path, host_path) -> no_nix_store_root(word, roots)
     }

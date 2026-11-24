@@ -8,7 +8,7 @@ use {
 
 // Each known method reaches its one feature provider; an unknown method
 // answers MethodNotFound.
-lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -> String {
+lsp_handle_request: fn(server: ^LSPServer, method: String, params: Dyn?, id: Dyn) -> String {
     if method == {
         "initialize" -> {
             capabilities: lsp_param(params, "capabilities") ?? Dyn.Null
@@ -73,7 +73,7 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
 
 // Cancellation and tracing need no answer: the loop answers each request in
 // turn, so none is still running when its cancellation arrives.
-lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, stdout: &lsp_request_term.Stdout) IOError! {
+lsp_handle_notification: fn(server: ^LSPServer, method: String, params: Dyn?, stdout: ^lsp_request_term.Stdout) IOError! {
     if method == {
         "exit" -> server.exited = true
         "textDocument/didOpen" -> {

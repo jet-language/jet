@@ -48,7 +48,7 @@ cli_discovery_diagnostic: fn(error: CLIError) -> Diagnostic Never! {
 
 // The nearest Package, environment, or workspace root for a command run
 // below a project directory; `start` when none declares a project.
-cli_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+cli_project_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     if cli_nearest_project_root(cache, start) == {
         .Ok(found) -> found ?? start
         .Err(error) -> cli_report_authority_error(cli_discovery_diagnostic(error))
@@ -57,7 +57,7 @@ cli_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS,
 
 // The nearest workspace declaration, so a package inside a monorepo still
 // sees the monorepo's member index.
-cli_workspace_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+cli_workspace_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     if cli_nearest_workspace_source(cache, start) == {
         .Ok(found) -> if found == {
             .Val(snapshot) -> snapshot.root
@@ -69,14 +69,14 @@ cli_workspace_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, F
 
 // The resolver for `dir` when it is an authority-walk candidate; a missing
 // authority is not an error.
-cli_walk_resolver: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> AuthorityResolver? CLIError! {
+cli_walk_resolver: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env]> AuthorityResolver? CLIError! {
     if AuthorityResolver.open_for_authority_walk(cache, dir) == {
         .Ok(found) -> Ok(found)
         .Err(error) -> if error.is_missing() -> Ok(None) else -> Err(CLIError.Diagnostic(error.diagnostic()))
     }
 }
 
-cli_checked_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> CheckedWorkspaceSource? CLIError! {
+cli_checked_workspace_source: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env]> CheckedWorkspaceSource? CLIError! {
     resolver: cli_walk_resolver(cache, dir) ?? return Ok(None)
     if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> {
@@ -88,7 +88,7 @@ cli_checked_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String)
     }
 }
 
-cli_package_manifest_present: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> Bool CLIError! {
+cli_package_manifest_present: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env]> Bool CLIError! {
     resolver: cli_walk_resolver(cache, dir) ?? return Ok(false)
     if resolver.checked_manifest(".") == {
         .Ok(manifest) -> {
@@ -99,7 +99,7 @@ cli_package_manifest_present: fn(cache: &WorkspaceDeclarationCache, dir: String)
     }
 }
 
-cli_env_file_present: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env]> Bool CLIError! {
+cli_env_file_present: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[FS, Env]> Bool CLIError! {
     resolver: cli_walk_resolver(cache, dir) ?? return Ok(false)
     if resolver.checked_file(ENV_FILE) == {
         .Ok(file) -> {
@@ -110,7 +110,7 @@ cli_env_file_present: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, E
     }
 }
 
-cli_nearest_project_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? CLIError! {
+cli_nearest_project_root: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> String? CLIError! {
     walk := AuthorityResolver.authority_walk_root(start)
     loop {
         if cli_package_manifest_present(cache, walk) || cli_env_file_present(cache, walk) || cli_checked_workspace_source(cache, walk) != None {
@@ -141,7 +141,7 @@ cli_checked_env_file: fn(dir: String) -[FS, Env]> EnvFile? CLIError! {
     Ok(Val(EnvFile.parse(source)))
 }
 
-cli_nearest_workspace_source: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot? CLIError! {
+cli_nearest_workspace_source: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot? CLIError! {
     walk := AuthorityResolver.authority_walk_root(start)
     loop {
         if cli_checked_workspace_source(cache, walk) == .Val(checked) {
@@ -152,12 +152,12 @@ cli_nearest_workspace_source: fn(cache: &WorkspaceDeclarationCache, start: Strin
 }
 
 // The nearest workspace root and its checked source, or `start` alone.
-cli_workspace_root_snapshot: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot CLIError! {
+cli_workspace_root_snapshot: fn(cache: ^WorkspaceDeclarationCache, start: String) -[FS, Env]> WorkspaceRootSnapshot CLIError! {
     found: cli_nearest_workspace_source(cache, start)
     Ok(found ?? WorkspaceRootSnapshot{root: start, source: None})
 }
 
-cli_workspace_root_snapshot_or_exit: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceRootSnapshot Never! {
+cli_workspace_root_snapshot_or_exit: fn(cache: ^WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceRootSnapshot Never! {
     if cli_workspace_root_snapshot(cache, start) == {
         .Ok(snapshot) -> snapshot
         .Err(error) -> cli_report_authority_error(cli_discovery_diagnostic(error))
@@ -168,7 +168,7 @@ cli_workspace_index_required_diagnostic: fn() -> Diagnostic Never! {
     diagnostic_from_registry("E1239", None, "workspace build needs workspace.jet as the index", "an authority declaration is not a member index", "move members into workspace.jet and keep one workspace index")
 }
 
-cli_workspace_snapshot_from_source: fn(resolver: AuthorityResolver, expected: &&WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
+cli_workspace_snapshot_from_source: fn(resolver: AuthorityResolver, expected: ^^WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot CLIError! {
     if envmodel_workspace_load_checked_source(resolver, expected) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(CLIError.Diagnostic(error.diagnostic))
@@ -177,7 +177,7 @@ cli_workspace_snapshot_from_source: fn(resolver: AuthorityResolver, expected: &&
 
 // Evaluate a checked workspace index, write its `.jet/lock` entries, and
 // return the plan. A diagnostic is rendered and reported as exit 2.
-cli_load_workspace_for_source: fn(cache: &WorkspaceDeclarationCache, dir: String, checked: &&CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
+cli_load_workspace_for_source: fn(cache: ^WorkspaceDeclarationCache, dir: String, checked: ^^CheckedWorkspaceSource) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
     if checked.resolver.revalidate_source(checked.source) == {
         .Err(error) -> return Err(cli_render_workspace_error(CLIError.Diagnostic(error.diagnostic())))
         .Ok(_) -> {}
@@ -199,7 +199,7 @@ cli_render_workspace_error: fn(error: CLIError) -[IO, Time.Wait]> CLIError Never
 
 // Write the evaluated workspace into `.jet/lock`. None when no source
 // declares a workspace.
-cli_finish_workspace_load: fn(cache: &WorkspaceDeclarationCache, dir: String, found: WorkspaceSnapshot?) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
+cli_finish_workspace_load: fn(cache: ^WorkspaceDeclarationCache, dir: String, found: WorkspaceSnapshot?) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
     // The snapshot stays the caller's: read it in place.
     if found == .Val(snapshot) {
         if env_workspace_lock_write(cache, dir, snapshot.plan) == {
@@ -221,7 +221,7 @@ cli_finish_workspace_load: fn(cache: &WorkspaceDeclarationCache, dir: String, fo
 
 // The named-source table the current project's env file declares, plus the
 // built-in sources, so explicit CLI refs are project-aware.
-cli_cwd_table: fn(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> SourceTable Never! {
+cli_cwd_table: fn(cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> SourceTable Never! {
     cwd: cli_current_dir()
     dir: cli_project_root(cache, cwd)
     table := if cli_checked_env_file(dir) == {
@@ -239,7 +239,7 @@ cli_cwd_table: fn(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.W
 
 // Add the first-party source declarations after the project's, so a
 // project may override a built-in source without losing that override.
-cli_ensure_builtin_sources: fn(table: &SourceTable) Never! {
+cli_ensure_builtin_sources: fn(table: ^SourceTable) Never! {
     table.ensure_decl(NATIVE_SOURCE_NAME, NATIVE_UPSTREAM, ProviderKind.JetPackage)
     table.ensure_decl(BATTERIES_SOURCE_NAME, BATTERIES_UPSTREAM, ProviderKind.Core)
 }
@@ -255,7 +255,7 @@ cli_builtin_table: fn() -> SourceTable Never! {
 // declaration-resolved index when present, else read from the `.jet/lock`
 // mirror, else empty. An authority source is a boundary, not an index, and
 // never falls through to a stale lock.
-cli_cwd_workspace_index: fn(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceIndex Never! {
+cli_cwd_workspace_index: fn(cache: ^WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> WorkspaceIndex Never! {
     snapshot: cli_workspace_root_snapshot_or_exit(cache, cli_current_dir())
     plan := WorkspacePlan?{None}
     allow_lock := true
@@ -279,7 +279,7 @@ cli_cwd_workspace_index: fn(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Ex
 
 // The workspace plan mirrored in `.jet/lock`, checked through the resolver.
 // A lock that looks like a workspace lock but fails to load is E1202.
-cli_workspace_lock_index: fn(cache: &WorkspaceDeclarationCache, dir: String) -[IO, FS, Env, Exec, Time.Wait]> WorkspacePlan? Never! {
+cli_workspace_lock_index: fn(cache: ^WorkspaceDeclarationCache, dir: String) -[IO, FS, Env, Exec, Time.Wait]> WorkspacePlan? Never! {
     resolver: AuthorityResolver.open(dir) ?? cli_report_authority_error(err.diagnostic())
     lock_file: if resolver.checked_file(UNIFIED_LOCK_FILE) == {
         .Ok(file) -> file

@@ -17,14 +17,14 @@ use jet_wasm.[
     wasm_is_component,
 ]
 
-component_of: fn(bytes: &&[U8]) -> WasmComponent Never! {
+component_of: fn(bytes: ^^[U8]) -> WasmComponent Never! {
     if wasm_decode_component(bytes) == {
         .Ok(component) -> component
         .Err(error) -> panic("decode failed: {error.render()}")
     }
 }
 
-component_failure: fn(bytes: &&[U8]) -> String Never! {
+component_failure: fn(bytes: ^^[U8]) -> String Never! {
     if wasm_decode_component(bytes) == {
         .Ok(_) -> ""
         .Err(error) -> error.render()

@@ -14,7 +14,7 @@ use jet_foundation.[
 // names the effects or functions whose results carry it, and `timing` and
 // `protects` are cases of core.compiler.lang TagTiming and TagProtects. The
 // parser returns the tag in place of the struct; None: the struct is no tag.
-parser_tag_struct: fn(state: &JetParserState, value: StructDef) -> TagDef? {
+parser_tag_struct: fn(state: ^JetParserState, value: StructDef) -> TagDef? {
     declaration: value.marker ?? return None
     if !parser_tag_sites(state, value.name, declaration) -> return None
     from := [NamedSpan]{}
@@ -47,7 +47,7 @@ parser_tag_struct: fn(state: &JetParserState, value: StructDef) -> TagDef? {
 
 // Whether the marker's `sites` name `.TypeUse`; another site beside it is
 // E0734, since a value tag is written only at a type use.
-parser_tag_sites: fn(state: &JetParserState, name: String, declaration: MarkerDecl) -> Bool {
+parser_tag_sites: fn(state: ^JetParserState, name: String, declaration: MarkerDecl) -> Bool {
     loop setting in declaration.params {
         if setting.name != "$sites" -> next
         written: setting.value ?? return false
@@ -72,7 +72,7 @@ parser_tag_sites: fn(state: &JetParserState, name: String, declaration: MarkerDe
 
 // The tag's `#FX` row: each `!Effect` entry is a destination it denies. A
 // ceiling entry, or a row with no denial, is E0734.
-parser_tag_denials: fn(state: &JetParserState, value: StructDef) -> [NamedSpan] {
+parser_tag_denials: fn(state: ^JetParserState, value: StructDef) -> [NamedSpan] {
     deny := [NamedSpan]{}
     if value.cap == .Val(cap) {
         loop entry in cap.entries {
@@ -93,7 +93,7 @@ parser_tag_denials: fn(state: &JetParserState, value: StructDef) -> [NamedSpan] 
 
 // `from: [Effect, module.function, …]`: the sources whose results carry the
 // tag, as written; sema resolves them (E0735).
-parser_tag_from: fn(state: &JetParserState, name: String, written: Expr) -> [NamedSpan] {
+parser_tag_from: fn(state: ^JetParserState, name: String, written: Expr) -> [NamedSpan] {
     from := [NamedSpan]{}
     elements: parser_tag_list(written) ?? {
         parser_tag_error(state, expr_span(written), "`from` on the tag `{name}` is not a list", "`from` lists the effects or functions whose results carry the tag", "write `from: [Effect, module.function]`")
@@ -117,7 +117,7 @@ parser_tag_list: fn(written: Expr) -> [Expr]? {
 
 // `timing: .Free | .Fixed` or `protects: .Secrecy | .Integrity`; another
 // value is E0734.
-parser_tag_case: fn(state: &JetParserState, name: String, field: String, written: Expr, first: String, second: String) -> NamedSpan? {
+parser_tag_case: fn(state: ^JetParserState, name: String, field: String, written: Expr, first: String, second: String) -> NamedSpan? {
     if written == .EnumLit(_, variant, _, _, leading_dot, span, _) {
         if leading_dot && (variant == first || variant == second) {
             return Val(NamedSpan{name: variant, span: span})
@@ -133,7 +133,7 @@ parser_tag_case_type: fn(field: String) -> String Never! {
 
 // A tag struct reaches no sema impl check, so a setting given twice is E0937
 // here, in the words sema uses for any impl.
-parser_tag_repeats: fn(state: &JetParserState, value: StructDef) {
+parser_tag_repeats: fn(state: ^JetParserState, value: StructDef) {
     loop (block_index, block) in value.trait_impls {
         loop (index, constant) in block.constants {
             if parser_tag_given_before(value, block_index, index, constant.name) {
@@ -158,7 +158,7 @@ parser_tag_given_before: fn(value: StructDef, block_index: Int, index: Int, name
 
 // A value tag erases at runtime: a field, a method or a type parameter has
 // no value to belong to (E0732).
-parser_tag_members: fn(state: &JetParserState, value: StructDef) {
+parser_tag_members: fn(state: ^JetParserState, value: StructDef) {
     loop field in value.fields {
         parser_add_error_code(state, "E0732", field.name_span, "the tag `{value.name}` declares a field `{field.name}`, but tags have no fields", "a value tag is a field-less struct that erases at runtime; only a type with values carries fields", "remove the field, or declare a separate struct for the data")
     }
@@ -175,10 +175,10 @@ parser_tag_members: fn(state: &JetParserState, value: StructDef) {
     }
 }
 
-parser_tag_method_error: fn(state: &JetParserState, name: String, method: String, span: Span) {
+parser_tag_method_error: fn(state: ^JetParserState, name: String, method: String, span: Span) {
     parser_add_error_code(state, "E0732", span, "the tag `{name}` declares a method `{method}`, but tags have no methods", "a value tag is a field-less struct that erases at runtime; only a `trait` carries methods and dispatches", "make `{name}` a `trait` if `{method}` should dispatch, or remove the method to keep `{name}` a value tag")
 }
 
-parser_tag_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
+parser_tag_error: fn(state: ^JetParserState, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(state, "E0734", span, what, why, fix)
 }

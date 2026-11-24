@@ -385,7 +385,7 @@ native_image_section_bytes: fn(elf: [U8], section: NativeImageSection, cap: Int)
 
 // The image `symbols`, `segments` and `sections` read in `session`: a
 // dump's image beside it, else the session's program.
-native_image_of: fn(session: &NativeSession) -> String Never! {
+native_image_of: fn(session: ^NativeSession) -> String Never! {
     if session.dump == .Val(dumped) && dumped.image != "" -> return dumped.image
     session.binary
 }
@@ -420,7 +420,7 @@ native_image_session: fn(binary: String) -[FS.Read]> NativeSession NativeDebugEr
 // `sections`, `disassemble` and `help`, refused when the console would
 // refuse it at a stop. None for a command that needs the program running,
 // which starts it. `file`, with the text `lines`, is the program's source.
-native_image_command: fn(session: &NativeSession, line: String, file: String, lines: [String]) -> NativeAnswer? NativeDebugError! {
+native_image_command: fn(session: ^NativeSession, line: String, file: String, lines: [String]) -> NativeAnswer? NativeDebugError! {
     command: line.trim()
     word: command.before(" ")
     operand: if command.contains(" ") -> command.after(" ").trim() else -> ""
@@ -456,7 +456,7 @@ native_image_command: fn(session: &NativeSession, line: String, file: String, li
 // `disassemble` lists it (`file`, with the text `lines`, is the console's
 // own source), with each row's `bytes` when asked; with neither, each
 // executable segment whole, as `segment 0`, `segment 1` and on.
-native_image_code_text: fn(session: &NativeSession, file: String, lines: [String], bytes: Bool{false}) -> String Never! {
+native_image_code_text: fn(session: ^NativeSession, file: String, lines: [String], bytes: Bool{false}) -> String Never! {
     runs := [NativeImageSegment]{}
     if session.dump == .Val(dumped) {
         loop segment in native_image_segments(dumped.memory.backing) {

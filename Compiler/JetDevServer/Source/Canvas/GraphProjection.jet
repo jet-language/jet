@@ -114,7 +114,7 @@ project_checked: fn(path: String, source_id: String, src: String, modules: [JetD
 
 // The graph document with `extra` members added to its `facts` object; that
 // object and the document close together at the end of the text.
-projection_with_facts: fn(projection: &&Projection, extra: String) -> Projection Never! {
+projection_with_facts: fn(projection: ^^Projection, extra: String) -> Projection Never! {
     json: projection.json
     if !json.ends_with("}}}}") -> return projection
     Projection{json: "{json.slice(0, json.len() - 2)}{extra}}}}}", inline_exprs: projection.inline_exprs, graph_anchors: projection.graph_anchors, node_refs: projection.node_refs}
@@ -195,7 +195,7 @@ canvas_game_facts: fn(source_id: String, src: String, entry_module: JetDriverDoc
     facts
 }
 
-collect_game_items: fn(tables: ASTTables, items: [Item], source_id: String, src: String, out: &[CanvasGameFact]) {
+collect_game_items: fn(tables: ASTTables, items: [Item], source_id: String, src: String, out: ^[CanvasGameFact]) {
     loop item in items {
         if item == .Func(function) {
             ast_visit_body(tables, function.body, fn(expression: ExprNode) { note_game_call(tables, out, source_id, src, expression) }, true)
@@ -217,7 +217,7 @@ collect_game_items: fn(tables: ASTTables, items: [Item], source_id: String, src:
 
 // Records `expression` when it is `….assets.image(path)`,
 // `….assets.sound(path)` or `.component<T>()` / `.component(value)`.
-note_game_call: fn(tables: ASTTables, out: &[CanvasGameFact], source_id: String, src: String, expression: ExprNode) {
+note_game_call: fn(tables: ASTTables, out: ^[CanvasGameFact], source_id: String, src: String, expression: ExprNode) {
     if ast_expr(tables, expression) == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
         source_span: game_method_call_span(tables, src, receiver, method_span)
         operation := ""
@@ -337,14 +337,14 @@ output_fact_json: fn(output: SemOutput) -> String {
     "{{\"binding\":{json_str(output.binding)},\"kind\":{json_str(output.kind)},\"name\":{json_str(output.name)},\"entry\":{{\"identity\":{json_str(entry.identity)},\"name\":{json_str(entry.name)},\"module_path\":{json_str(entry.module_path)},\"definition_span\":{span_json(entry.definition_span)},\"reference_span\":{span_json(entry.reference_span)},\"params\":[{json_strs(entry.params)}],\"return_type\":{json_optional_str(entry.return_type)},\"failure_contract\":{json_str(entry.failure_contract)},\"failure_source\":{json_str(entry.failure_source)},\"authority\":{json_str(entry.authority)},\"effects\":[{json_strs(entry.effects)}]}},\"fact_source\":\"semindex_resolved_output\"}}"
 }
 
-collect_module_interfaces: fn(doc_module: JetDriverDocModule, out: &[String]) {
+collect_module_interfaces: fn(doc_module: JetDriverDocModule, out: ^[String]) {
     storage: doc_module.name_ledger ?? return
     permit: storage.guard_read()
     collect_interface_facts(doc_module.items, out, "", doc_module.source, doc_module.name_module_index, doc_module.alias, permit.value)
 }
 
 // `scope` is the enclosing code modules' dotted prefix, `""` at the top.
-collect_interface_facts: fn(items: [Item], out: &[String], scope: String, src: String, module_index: Int, module_alias: String, ledger: NameLedger) {
+collect_interface_facts: fn(items: [Item], out: ^[String], scope: String, src: String, module_index: Int, module_alias: String, ledger: NameLedger) {
     loop item in items {
         if item == .Trait(definition) {
             out.push(trait_fact_json(src, definition, source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)))

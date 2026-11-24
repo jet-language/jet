@@ -124,7 +124,7 @@ JetCLIPerfSyscallShape: struct {
 // Trace `command` (its program's name or path, then its arguments), and
 // count it too when `counts`, and write the trace to `out`, or where any
 // attach writes it.
-jet_cli_perf_attach_syscalls: fn(command: &&[String], counts: Bool, out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
+jet_cli_perf_attach_syscalls: fn(command: ^^[String], counts: Bool, out: String?, allowlist: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetDriverVerbOutput Never! {
     name: command[0]
     path: perf_process.which(name) ?? return jet_cli_perf_failed("Jet can't run `{name}`: no such program file{if name.contains("/") -> "" else -> " on PATH"}", color)
     started: perf_time.instant()
@@ -186,7 +186,7 @@ jet_cli_perf_attach_syscalls: fn(command: &&[String], counts: Bool, out: String?
 // starts is traced from its first stop, a SIGSTOP the trace swallows. A
 // signal for the command is delivered as it comes. Once the command ends,
 // each process it left running is stopped and let go, untraced.
-jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: &JetCLIPerfTracedRun) -[FS.Read, FFI.Asm]> Never! {
+jet_cli_perf_syscalls_follow: fn(trace: X64Trace, run: ^JetCLIPerfTracedRun) -[FS.Read, FFI.Asm]> Never! {
     tracees := [JetCLIPerfTracee]{jet_cli_perf_tracee(trace.pid, trace.pid, true, false)}
     // Each thread's latest place in `tracees`.
     places := [Int:Int]{}
@@ -314,7 +314,7 @@ jet_cli_perf_ptrace_scope: fn() -[FS]> Int? Never! {
 // at its entry the call's number and arguments open it in `open_calls`,
 // those read before the kernel runs it decoded; at its exit the call, its
 // result and the arguments the kernel filled join `calls`.
-jet_cli_perf_syscall_stop: fn(trace: X64Trace, tracees: [JetCLIPerfTracee], at: Int, registers: [Int], open_calls: &[Int:JetCLIPerfCallEntry], calls: &[JetCLIPerfTracedCall]) -[FFI.Asm]> Never! {
+jet_cli_perf_syscall_stop: fn(trace: X64Trace, tracees: [JetCLIPerfTracee], at: Int, registers: [Int], open_calls: ^[Int:JetCLIPerfCallEntry], calls: ^[JetCLIPerfTracedCall]) -[FFI.Asm]> Never! {
     if registers.len() != X64_TRACE_REGISTERS {
         return
     }
@@ -360,7 +360,7 @@ jet_cli_perf_call_exit_kind: fn(kind: String) -> Bool Never! {
 // returned with `result` (None for one that never returned): the arguments
 // decoded at its entry move into it, those the kernel filled are decoded
 // now, when it succeeded. Its entry decoded one text per argument kind.
-jet_cli_perf_call_finish: fn(trace: X64Trace, tracee: JetCLIPerfTracee, entry: &&JetCLIPerfCallEntry, result: Int?) -[FFI.Asm]> JetCLIPerfTracedCall Never! {
+jet_cli_perf_call_finish: fn(trace: X64Trace, tracee: JetCLIPerfTracee, entry: ^^JetCLIPerfCallEntry, result: Int?) -[FFI.Asm]> JetCLIPerfTracedCall Never! {
     number: entry.number
     args: entry.args
     shape: jet_cli_perf_syscall_shape(number)
@@ -498,7 +498,7 @@ jet_cli_perf_file_mode: fn(mode: Int) -> String Never! {
 // The flag names of `value`, `|`-joined: each mask in `masks` whose bits
 // are all set names itself (`names`), in order, and takes its bits; bits no
 // mask took follow in hex. `zero` for no bits at all.
-jet_cli_perf_flags: fn(value: Int, masks: [Int], names: &&[String], zero: &&String) -> String Never! {
+jet_cli_perf_flags: fn(value: Int, masks: [Int], names: ^^[String], zero: ^^String) -> String Never! {
     rest := value & 0xffffffff
     if rest == 0 -> return zero.move()
     parts := [String]{}
@@ -1245,7 +1245,7 @@ jet_cli_perf_syscall_shape: fn(number: Int) -> JetCLIPerfSyscallShape Never! {
 // which were let go untraced. Or it is `unavailable`: the kernel refused
 // the trace with `errno` under Yama's `ptrace_scope` (null without Yama),
 // `reason` says why, and the command ran untraced.
-jet_cli_perf_traced_section: fn(calls: &&[JetCLIPerfTracedCall], processes: Int, left: Int, refused: Int, scope: Int?) -> TraceReceiptSection Never! {
+jet_cli_perf_traced_section: fn(calls: ^^[JetCLIPerfTracedCall], processes: Int, left: Int, refused: Int, scope: Int?) -> TraceReceiptSection Never! {
     sums := [JetCLIPerfTracedSum]{}
     places := [String:Int]{}
     rows := [CanonicalJSON]{}

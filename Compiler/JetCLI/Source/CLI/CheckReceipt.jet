@@ -51,7 +51,7 @@ jet_cli_check_receipt_target: fn(owned: [String]) -> String? Never! {
 // Rust `collect_tree_inputs` for `check`: every `.jet` source and lock under
 // `path`, skipping `.git`, `target` and `build`; under `.jet` only the lock and
 // the generated tree count.
-jet_cli_check_tree_inputs: fn(path: String, out: &[String]) -[FS]> Never! {
+jet_cli_check_tree_inputs: fn(path: String, out: ^[String]) -[FS]> Never! {
     info: cli_files.stat(path) ?? return
     if info.is_symlink {
         return
@@ -89,7 +89,7 @@ jet_cli_check_tree_inputs: fn(path: String, out: &[String]) -[FS]> Never! {
 // tree, and a file target the file plus its owning authorities (manifests,
 // lock, stock entry candidates and generated inputs). The compiled sources a
 // file check reads beyond these join at publication from its snapshot.
-jet_cli_check_receipt_paths: fn(cache: &WorkspaceDeclarationCache, cwd: String, target: String?, file: String) -[FS, Env]> [String] Never! {
+jet_cli_check_receipt_paths: fn(cache: ^WorkspaceDeclarationCache, cwd: String, target: String?, file: String) -[FS, Env]> [String] Never! {
     paths := [String]{}
     raw: target ?? {
         loop root in jet_cli_receipt_authority_roots(cache, cwd) {
@@ -119,7 +119,7 @@ jet_cli_check_receipt_paths: fn(cache: &WorkspaceDeclarationCache, cwd: String, 
 
 // Rust `append_context_path`: a label, the canonical path and what is there
 // now (a file by its digest).
-jet_cli_check_context_path: fn(identity: &[U8], label: String, path: String) -[FS]> Never! {
+jet_cli_check_context_path: fn(identity: ^[U8], label: String, path: String) -[FS]> Never! {
     jet_driver_run_receipt_frame(identity, label.bytes())
     jet_driver_run_receipt_frame(identity, (cli_files.realpath(path) ?? path).bytes())
     info: cli_files.stat(path) ?? {
@@ -144,7 +144,7 @@ jet_cli_check_context_path: fn(identity: &[U8], label: String, path: String) -[F
 // Rust `append_check_context_identity`: a check claim includes its authority
 // and entry-selection state, so a newly created higher-priority entry
 // candidate or authority changes the claim even before it is an input.
-jet_cli_check_context_identity: fn(cache: &WorkspaceDeclarationCache, cwd: String, identity: &[U8]) -[FS, Env]> Never! {
+jet_cli_check_context_identity: fn(cache: ^WorkspaceDeclarationCache, cwd: String, identity: ^[U8]) -[FS, Env]> Never! {
     jet_driver_run_receipt_frame(identity, "check-context-v2".bytes())
     jet_cli_check_context_path(identity, "working-directory", cwd)
     loop root in jet_cli_receipt_authority_roots(cache, cwd) {

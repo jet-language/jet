@@ -296,7 +296,7 @@ wasm_is_component: fn(bytes: [U8]) -> Bool Never! {
     bytes.len() >= 8 && Int{bytes[0]} == 0 && Int{bytes[1]} == 0x61 && Int{bytes[2]} == 0x73 && (Int{bytes[3]}) == 0x6d && (Int{bytes[4]}) == 0x0d && (Int{bytes[6]}) == 0x01
 }
 
-wasm_decode_component: fn(bytes: &&[U8]) -> WasmComponent WasmError! {
+wasm_decode_component: fn(bytes: ^^[U8]) -> WasmComponent WasmError! {
     end: bytes.len()
     reader := WasmReader.new(bytes)
     magic: reader.fixed(4) ?? return Err(WasmError.new("not a WebAssembly Component: unexpected end", 0))
@@ -364,7 +364,7 @@ wasm_decode_component: fn(bytes: &&[U8]) -> WasmComponent WasmError! {
     Ok(out)
 }
 
-wasm_decode_nested_module: fn(section: &WasmReader) -> WasmModule WasmError! {
+wasm_decode_nested_module: fn(section: ^WasmReader) -> WasmModule WasmError! {
     start: section.at
     magic: section.fixed(4)
     version: section.fixed(4)
@@ -379,7 +379,7 @@ wasm_decode_nested_module: fn(section: &WasmReader) -> WasmModule WasmError! {
     Ok(nested)
 }
 
-wasm_read_sort: fn(section: &WasmReader) -> Int WasmError! {
+wasm_read_sort: fn(section: ^WasmReader) -> Int WasmError! {
     at: section.at
     sort: section.byte()
     if sort == WASM_SORT_CORE {
@@ -395,7 +395,7 @@ wasm_read_sort: fn(section: &WasmReader) -> Int WasmError! {
     Ok(sort)
 }
 
-wasm_decode_core_instances: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
+wasm_decode_core_instances: fn(out: ^WasmComponent, section: ^WasmReader) WasmError! {
     count: wasm_count(section, 10000, "core instances")
     loop _ in 0..<count {
         at: section.at
@@ -445,7 +445,7 @@ wasm_core_alias: fn(instance: Int, name: String) -> WasmCoreItem Never! {
     WasmCoreItem{origin: WASM_ORIGIN_ALIAS, instance: instance, name: name, target: -1, options: WasmCanonOptions.none()}
 }
 
-wasm_decode_alias: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
+wasm_decode_alias: fn(out: ^WasmComponent, section: ^WasmReader) WasmError! {
     at: section.at
     sort: wasm_read_sort(section)
     target: section.byte()
@@ -491,7 +491,7 @@ wasm_decode_alias: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
     Err(WasmError.new("malformed alias target 0x{wasm_hex(target)}", at))
 }
 
-wasm_read_canon_options: fn(section: &WasmReader) -> WasmCanonOptions WasmError! {
+wasm_read_canon_options: fn(section: ^WasmReader) -> WasmCanonOptions WasmError! {
     count: wasm_count(section, 16, "canonical options")
     options := WasmCanonOptions.none()
     loop _ in 0..<count {
@@ -510,7 +510,7 @@ wasm_read_canon_options: fn(section: &WasmReader) -> WasmCanonOptions WasmError!
     Ok(options)
 }
 
-wasm_decode_canon: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
+wasm_decode_canon: fn(out: ^WasmComponent, section: ^WasmReader) WasmError! {
     at: section.at
     form: section.byte()
     if form == 0x00 {
@@ -547,7 +547,7 @@ wasm_decode_canon: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
 }
 
 // An import or export name: 0x00 name, or 0x01 name with a version suffix.
-wasm_read_extern_name: fn(section: &WasmReader) -> String WasmError! {
+wasm_read_extern_name: fn(section: ^WasmReader) -> String WasmError! {
     at: section.at
     form: section.byte()
     if form != 0x00 && form != 0x01 {
@@ -562,7 +562,7 @@ wasm_read_extern_name: fn(section: &WasmReader) -> String WasmError! {
 }
 
 // An extern description: (kind, type index). Type bounds return the eq target, or -1 for `sub resource`.
-wasm_read_extern_desc: fn(section: &WasmReader) -> [Int] WasmError! {
+wasm_read_extern_desc: fn(section: ^WasmReader) -> [Int] WasmError! {
     at: section.at
     kind: section.byte()
     if kind == 0x00 {
@@ -592,7 +592,7 @@ wasm_read_extern_desc: fn(section: &WasmReader) -> [Int] WasmError! {
     Ok([Int]{kind, index})
 }
 
-wasm_decode_component_import: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
+wasm_decode_component_import: fn(out: ^WasmComponent, section: ^WasmReader) WasmError! {
     name: wasm_read_extern_name(section)
     desc: wasm_read_extern_desc(section)
     kind: desc[0]
@@ -611,7 +611,7 @@ wasm_decode_component_import: fn(out: &WasmComponent, section: &WasmReader) Wasm
     }
 }
 
-wasm_decode_component_export: fn(out: &WasmComponent, section: &WasmReader) WasmError! {
+wasm_decode_component_export: fn(out: ^WasmComponent, section: ^WasmReader) WasmError! {
     at: section.at
     name: wasm_read_extern_name(section)
     sort: wasm_read_sort(section)
@@ -639,7 +639,7 @@ wasm_decode_component_export: fn(out: &WasmComponent, section: &WasmReader) Wasm
 }
 
 // A component value type reference: a primitive (negative code) or a type index.
-wasm_read_value_type: fn(section: &WasmReader) -> Int WasmError! {
+wasm_read_value_type: fn(section: ^WasmReader) -> Int WasmError! {
     at: section.at
     peek: section.peek() ?? return Err(WasmError.new("unexpected end of value type", at))
     if peek >= 0x73 && peek <= 0x7f {
@@ -654,7 +654,7 @@ wasm_read_value_type: fn(section: &WasmReader) -> Int WasmError! {
     Ok(index)
 }
 
-wasm_read_optional_value_type: fn(section: &WasmReader) -> Int WasmError! {
+wasm_read_optional_value_type: fn(section: ^WasmReader) -> Int WasmError! {
     at: section.at
     flag: section.byte()
     if flag == 0x00 -> return Ok(WASM_CT_NONE)
@@ -662,7 +662,7 @@ wasm_read_optional_value_type: fn(section: &WasmReader) -> Int WasmError! {
     wasm_read_value_type(section)
 }
 
-wasm_read_labels: fn(section: &WasmReader) -> [String] WasmError! {
+wasm_read_labels: fn(section: ^WasmReader) -> [String] WasmError! {
     count: wasm_count(section, 100000, "labels")
     out := [String]{}
     loop _ in 0..<count {
@@ -674,7 +674,7 @@ wasm_read_labels: fn(section: &WasmReader) -> [String] WasmError! {
 
 // One type definition, in the type index space `space` it is being added to
 // (outer aliases inside instance types read the enclosing spaces).
-wasm_read_component_type: fn(section: &WasmReader, space: &[WasmCtype]) -> WasmCtype WasmError! {
+wasm_read_component_type: fn(section: ^WasmReader, space: ^[WasmCtype]) -> WasmCtype WasmError! {
     at: section.at
     form: section.byte()
     if form >= 0x73 && form <= 0x7f {
@@ -765,7 +765,7 @@ wasm_read_component_type: fn(section: &WasmReader, space: &[WasmCtype]) -> WasmC
 }
 
 // An instance (or component) type: its own type space plus export (and import) declarations.
-wasm_read_declarator_type: fn(section: &WasmReader, component: Bool, outer: [WasmCtype]) -> WasmCtype WasmError! {
+wasm_read_declarator_type: fn(section: ^WasmReader, component: Bool, outer: [WasmCtype]) -> WasmCtype WasmError! {
     ty := WasmCtype.of(if component -> WASM_CT_COMPONENT else -> WASM_CT_INSTANCE)
     count: wasm_count(section, 100000, "declarations")
     import_names := [String]{}
@@ -824,7 +824,7 @@ wasm_read_declarator_type: fn(section: &WasmReader, component: Bool, outer: [Was
 
 // A core type in a component: a core func type (params in `types`, results
 // in `inner` as primitives) or a module type, whose declarations are skipped.
-wasm_read_core_type: fn(section: &WasmReader) -> WasmCtype WasmError! {
+wasm_read_core_type: fn(section: ^WasmReader) -> WasmCtype WasmError! {
     at: section.at
     form: section.byte()
     if form == 0x60 {
@@ -857,7 +857,7 @@ wasm_read_core_type: fn(section: &WasmReader) -> WasmCtype WasmError! {
     Err(WasmError.new("malformed core type form 0x{wasm_hex(form)}", at))
 }
 
-wasm_skip_core_import_desc: fn(section: &WasmReader) WasmError! {
+wasm_skip_core_import_desc: fn(section: ^WasmReader) WasmError! {
     at: section.at
     kind: section.byte()
     if kind == WASM_EXTERN_FUNC -> _: section.u32() else if kind == WASM_EXTERN_TABLE {

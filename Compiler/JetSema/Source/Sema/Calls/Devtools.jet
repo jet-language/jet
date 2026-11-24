@@ -32,7 +32,7 @@ sema_call_devtools_is_publish: fn(target: SemaCallDirectTarget, environment: Sem
 
 // The checked publication arguments in Core's source parameter order, or None
 // after reporting why the call is not a gated publication.
-sema_call_devtools_publish_args: fn(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
+sema_call_devtools_publish_args: fn(args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> [CallArg]? {
     if args.len() != 2 || sema_call_devtools_label(args[0]) != "field" || sema_call_devtools_label(args[1]) != "value" {
         diagnostics.push(sema_error("E1404", span, "this published value has no gate", "a published value must name itself with `field:` and `value:`", "write `devtools.publish(field: .state_field, value: <expr>)`"))
         return None
@@ -144,7 +144,7 @@ sema_call_devtools_state_declares: fn(graph: SemaRegistrationGraph, package: Str
 // struct gives every field a value before its first publication (a default, or
 // an optional type). A second `#DevPanel` on the same function is the shared
 // non-repeatable marker refusal (StackedRuleLines), reported before this check.
-sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     marker_span := Span?{None}
     marker_valid := true
     loop marker in func.markers {

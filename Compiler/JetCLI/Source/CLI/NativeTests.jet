@@ -90,7 +90,7 @@ JetNativeTestProperty: struct {
     seed: Int,
 }
 
-jet_native_test_line: fn(cursor: &JetNativeTestCursor) -> String? Never! {
+jet_native_test_line: fn(cursor: ^JetNativeTestCursor) -> String? Never! {
     start: cursor.at
     loop cursor.at < cursor.bytes.len() {
         if cursor.bytes[cursor.at] == (U8{10}) {
@@ -131,7 +131,7 @@ jet_native_test_cases: fn(field: String) -> JetNativeTestProperty? Err! {
 // outcome; all complete records remain authoritative. Malformed complete
 // records are compiler/runtime protocol defects, never test failures. A
 // contract record (JetNativeTestContract) lands in `contracts`.
-jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[JetNativeTestContract]) -> [JetNativeTestRecord] Err! {
+jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: ^[JetNativeTestContract]) -> [JetNativeTestRecord] Err! {
     cursor := JetNativeTestCursor{bytes: output.bytes(), at: 0}
     records := [JetNativeTestRecord]{}
     // The failures since the last test record, by index in `contracts`.
@@ -204,7 +204,7 @@ jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[J
     Ok(records)
 }
 
-jet_native_test_shuffle_next: fn(state: &U64) -> U64 Never! {
+jet_native_test_shuffle_next: fn(state: ^U64) -> U64 Never! {
     state = wrapping(state + U64{0x9E3779B97F4A7C15})
     mixed := state
     mixed = wrapping((mixed ~ (mixed >> 30)) * U64{0xBF58476D1CE4E5B9})
@@ -309,7 +309,7 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
     Ok(selected)
 }
 
-jet_native_test_merge: fn(records: [JetNativeTestRecord], selected: [U64:Int], outcomes: &[U64:String]) Err! {
+jet_native_test_merge: fn(records: [JetNativeTestRecord], selected: [U64:Int], outcomes: ^[U64:String]) Err! {
     loop record in records {
         if selected.get(record.function) == None {
             return Err("native child returned an unselected test identity")
@@ -343,7 +343,7 @@ JetNativeTestRecordsFault: struct {
     cause: String,
 }
 
-jet_native_test_read_records: fn(path: String, receipt: ProcessReceipt, contracts: &[JetNativeTestContract], fault: &JetNativeTestRecordsFault?) -> [JetNativeTestRecord] Err! {
+jet_native_test_read_records: fn(path: String, receipt: ProcessReceipt, contracts: ^[JetNativeTestContract], fault: ^JetNativeTestRecordsFault?) -> [JetNativeTestRecord] Err! {
     text: native_test_files.read(path) ?? {
         native_test_files.remove(path).drop("the record read already failed")
         fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
@@ -363,7 +363,7 @@ jet_native_test_read_records: fn(path: String, receipt: ProcessReceipt, contract
 
 // Ties the failures at `pending` (indexes in `contracts`, in record order) to
 // the test `id` whose record followed them; the final one is `last`.
-jet_native_test_contracts_attribute: fn(contracts: &[JetNativeTestContract], pending: [Int], id: U64) Never! {
+jet_native_test_contracts_attribute: fn(contracts: ^[JetNativeTestContract], pending: [Int], id: U64) Never! {
     loop (index, at) in pending {
         contracts[at].test_id = Val(id)
         contracts[at].last = index == pending.len() - 1
@@ -466,7 +466,7 @@ jet_cli_native_test_width: fn(cores: Int, available: Int?, claim: Int) -> Int Ne
 // (a panicking exit handler, a teardown fault) fails that test with
 // the fatal text: the process outlived the body, so the record alone isn't
 // the test's whole outcome.
-jet_native_test_one: fn(test: JetNativeTestCase, receipt: ProcessReceipt, path: String, contracts: &[JetNativeTestContract], fault: &JetNativeTestRecordsFault?) -> String Err! {
+jet_native_test_one: fn(test: JetNativeTestCase, receipt: ProcessReceipt, path: String, contracts: ^[JetNativeTestContract], fault: ^JetNativeTestRecordsFault?) -> String Err! {
     start: contracts.len()
     records: jet_native_test_read_records(path, receipt, contracts, fault)
     // A child that died before its record still ran only `test`.
@@ -489,7 +489,7 @@ jet_native_test_one: fn(test: JetNativeTestCase, receipt: ProcessReceipt, path: 
 // The outcome a rerun child settles. After a batch that streamed every
 // outcome before dying, a child that ran clean keeps the batch's outcome (it
 // observed the batch's state); a child that died keeps its fatal outcome.
-jet_native_test_settle: fn(outcomes: &[U64:String], streamed: [U64:String], id: U64, wire: String, success: Bool) Never! {
+jet_native_test_settle: fn(outcomes: ^[U64:String], streamed: [U64:String], id: U64, wire: String, success: Bool) Never! {
     kept: if success -> streamed.get(id) ?? wire else -> wire
     outcomes.add(id, kept).drop("only missing tests are retried")
 }
@@ -532,7 +532,7 @@ jet_native_test_alone_run: fn(spec: ProcessSpec) -> ProcessReceipt IOError! {
 // (BuildTests.jet ir_test_main): each runs alone after it, so a change it
 // makes to the environment or working directory reaches no other test.
 // A records file it can't create, write or read sets `fault`.
-jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: &JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
+jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: ^JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
     clean: spec.env_remove(ENV_JET_NATIVE_TEST_ID).env_remove(ENV_JET_NATIVE_TEST_REPORT_PATH).env_remove(ENV_JET_NATIVE_TEST_RECORDS_PATH)
     // The spec each test that runs alone starts from.
     alone := clean.env_remove(ENV_JET_NATIVE_TEST_ID)
@@ -702,7 +702,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
 
 // The canonical report of `outcomes`, by the harness `spec` names; a records
 // file it can't write sets `fault`.
-jet_cli_native_test_report: fn(spec: ProcessSpec, outcomes: JetNativeTestOutcomes, records_path: String, fault: &JetNativeTestRecordsFault?) -> JetNativeTestRun Err! {
+jet_cli_native_test_report: fn(spec: ProcessSpec, outcomes: JetNativeTestOutcomes, records_path: String, fault: ^JetNativeTestRecordsFault?) -> JetNativeTestRun Err! {
     clean: spec.env_remove(ENV_JET_NATIVE_TEST_ID).env_remove(ENV_JET_NATIVE_TEST_REPORT_PATH).env_remove(ENV_JET_NATIVE_TEST_RECORDS_PATH)
     native_test_files.write(records_path, outcomes.wires.join("")) ?? {
         fault = Val(JetNativeTestRecordsFault{path: records_path.copy(), cause: jet_cli_io_error_text(err)})

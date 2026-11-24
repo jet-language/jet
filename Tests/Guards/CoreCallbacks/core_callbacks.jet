@@ -102,7 +102,7 @@ cc_public: fn(name: String) -> Bool Never! { !name.starts_with("_") }
 
 // What is wrong with `function`, called `name`, by the rule above. `callers`
 // gains `name` when the function takes a callback.
-cc_problems: fn(name: String, function: Func, callers: &[String]) -> [String] Never! {
+cc_problems: fn(name: String, function: Func, callers: ^[String]) -> [String] Never! {
     own := [String]{}
     loop param in function.type_params -> own.push("{param.name}")
     problems := [String]{}
@@ -134,7 +134,7 @@ cc_reviewed: fn(name: String) -> Bool Never! {
     false
 }
 
-cc_check: fn(name: String, function: Func, out: &CoreCallbackFindings) {
+cc_check: fn(name: String, function: Func, out: ^CoreCallbackFindings) {
     found: cc_problems(name, function, out.callers)
     if !cc_reviewed(name) {
         loop problem in found -> out.problems.push(problem)
@@ -145,7 +145,7 @@ cc_check: fn(name: String, function: Func, out: &CoreCallbackFindings) {
     }
 }
 
-cc_check_methods: fn(row: CoreDeclarationSource, owner: String, methods: [Func], out: &CoreCallbackFindings) {
+cc_check_methods: fn(row: CoreDeclarationSource, owner: String, methods: [Func], out: ^CoreCallbackFindings) {
     if !row.owned_types.contains(owner) {
         return
     }
@@ -157,7 +157,7 @@ cc_check_methods: fn(row: CoreDeclarationSource, owner: String, methods: [Func],
 }
 
 // The findings over `source`, the text of the source module `row`.
-cc_read: fn(row: CoreDeclarationSource, source: String, out: &CoreCallbackFindings) {
+cc_read: fn(row: CoreDeclarationSource, source: String, out: ^CoreCallbackFindings) {
     parsed: parse_generated_source(source.bytes())
     loop item in parsed.program.items {
         if item == .Func(function) && row.members.contains(function.name) && cc_public(function.name) {

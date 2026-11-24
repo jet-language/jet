@@ -99,7 +99,7 @@ push_rng: fn() -> drbg.HMACDrbg PushError! {
 }
 
 /// The key pair whose private scalar is `private` (32 bytes).
-push_key_pair: fn<R: RNG>(private: [U8], rng: &R) -> PushKeyPair PushError! {
+push_key_pair: fn<R: RNG>(private: [U8], rng: ^R) -> PushKeyPair PushError! {
     grp: push_group() ?? return Err(err)
     d: push_scalar(grp, private) ?? return Err(err)
     q: ecp.ecp_mul(grp, d, grp.g, rng) ?? return Err(push_fail("the private key gives no public point"))
@@ -108,7 +108,7 @@ push_key_pair: fn<R: RNG>(private: [U8], rng: &R) -> PushKeyPair PushError! {
 }
 
 /// A fresh key pair drawn from `rng`.
-push_key_pair_new: fn<R: RNG>(rng: &R) -> PushKeyPair PushError! {
+push_key_pair_new: fn<R: RNG>(rng: ^R) -> PushKeyPair PushError! {
     grp: push_group() ?? return Err(err)
     d: ecp.gen_privkey(grp, rng) ?? return Err(push_fail("no private key could be drawn"))
     private: bn.write_binary(d, 32) ?? return Err(push_fail("the private key does not encode"))
@@ -117,7 +117,7 @@ push_key_pair_new: fn<R: RNG>(rng: &R) -> PushKeyPair PushError! {
 
 /// The P-256 private scalar (32 bytes) of the PEM or DER key `key`: an APNs
 /// signing key (`.p8`, PKCS#8) or a SEC1 EC key.
-push_ec_private: fn<R: RNG>(key: String, rng: &R) -> [U8] PushError! {
+push_ec_private: fn<R: RNG>(key: String, rng: ^R) -> [U8] PushError! {
     parsed: pkparse.pk_parse_key(key.bytes(), None, rng) ?? return Err(push_fail("the key does not parse"))
     if parsed.kind != .Val(.ECKey) && parsed.kind != .Val(.ECDSA) {
         return Err(push_fail("the key is no EC key"))
@@ -150,7 +150,7 @@ push_collapse_key: fn(run_key: String, to: String, open: String) -> String Never
 /// public key is `ua_public` (65 bytes) and whose authentication secret is
 /// `auth_secret` (16 bytes), sealed with a fresh key pair and salt from
 /// `rng` (RFC 8291 section 3).
-push_web_seal: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], rng: &R) -> [U8] PushError! {
+push_web_seal: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], rng: ^R) -> [U8] PushError! {
     sender: push_key_pair_new(rng) ?? return Err(err)
     salt := cipher.zero_bytes(16)
     if !rng.fill(salt) -> return Err(push_fail("the system entropy source failed"))
@@ -163,7 +163,7 @@ push_web_seal: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], rng: 
 /// `salt || rs || idlen || keyid || ciphertext` (RFC 8188 section 2.1),
 /// with `sender`'s public key as the key ID. `rng` blinds the key
 /// agreement.
-push_web_encrypt: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], sender: PushKeyPair, salt: [U8], rng: &R) -> [U8] PushError! {
+push_web_encrypt: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], sender: PushKeyPair, salt: [U8], rng: ^R) -> [U8] PushError! {
     if plain.len() > PUSH_PAYLOAD_MAX {
         return Err(push_fail("a push payload is at most {PUSH_PAYLOAD_MAX} bytes, not {plain.len()}"))
     }
@@ -214,7 +214,7 @@ push_web_encrypt: fn<R: RNG>(plain: [U8], ua_public: [U8], auth_secret: [U8], se
 /// seconds) and `sub` `contact` (a `mailto:` or `https:` URL), and is
 /// signed ES256 by `sender` with an RFC 6979 nonce; `rng` blinds the
 /// signing. `now` (Unix seconds) bounds `expires` to 24 hours ahead.
-push_vapid_authorization: fn<R: RNG>(audience: String, contact: String, now: Int, expires: Int, sender: PushKeyPair, rng: &R) -> String PushError! {
+push_vapid_authorization: fn<R: RNG>(audience: String, contact: String, now: Int, expires: Int, sender: PushKeyPair, rng: ^R) -> String PushError! {
     if expires <= now || expires - now > PUSH_VAPID_MAX_SECONDS {
         return Err(push_fail("a VAPID token expires within 24 hours, not in {expires - now} seconds"))
     }
@@ -230,7 +230,7 @@ push_vapid_authorization: fn<R: RNG>(audience: String, contact: String, now: Int
 /// subscription (RFC 8291). `key` is also the `Topic`, which replaces a
 /// push still waiting at the push service. `now` is Unix seconds; the VAPID
 /// token is good for 12 hours.
-push_web_request: fn<R: RNG>(to: PushSubscription, sender: PushKeyPair, contact: String, now: Int, key: String, title: String, body: String, open: String, rng: &R) -> PushRequest PushError! {
+push_web_request: fn<R: RNG>(to: PushSubscription, sender: PushKeyPair, contact: String, now: Int, key: String, title: String, body: String, open: String, rng: ^R) -> PushRequest PushError! {
     audience: push_origin(to.endpoint) ?? return Err(push_fail("a subscription's endpoint is no http or https URL: {to.endpoint}"))
     payload: "{{\"title\":{push_json_text(title)},\"body\":{push_json_text(body)},\"tag\":{push_json_text(key)},\"open\":{push_json_text(open)}}}"
     sealed: push_web_seal(payload.bytes(), to.public, to.auth_secret, rng) ?? return Err(err)
@@ -250,7 +250,7 @@ push_web_request: fn<R: RNG>(to: PushSubscription, sender: PushKeyPair, contact:
 /// whose header names the signing key `key_id` and whose claims are `iss`
 /// the team ID and `iat` `now` (Unix seconds), signed by the P-256 scalar
 /// `private`. APNs takes one for up to an hour.
-push_apns_token: fn<R: RNG>(team_id: String, key_id: String, now: Int, private: [U8], rng: &R) -> String PushError! {
+push_apns_token: fn<R: RNG>(team_id: String, key_id: String, now: Int, private: [U8], rng: ^R) -> String PushError! {
     header: "{{\"alg\":\"ES256\",\"kid\":{push_json_text(key_id)}}}"
     push_jwt_es256(header, "{{\"iss\":{push_json_text(team_id)},\"iat\":{now}}}", private, rng)
 }
@@ -280,7 +280,7 @@ push_apns_request: fn(origin: String, device_token: String, topic: String, provi
 /// with `iss` the account's `client_email`, the messaging scope, `aud`
 /// `token_uri`, `iat` `now` and `exp` an hour later, signed by the
 /// account's RSA key `key` (PEM).
-push_fcm_token_request: fn<R: RNG>(client_email: String, token_uri: String, now: Int, key: String, rng: &R) -> PushRequest PushError! {
+push_fcm_token_request: fn<R: RNG>(client_email: String, token_uri: String, now: Int, key: String, rng: ^R) -> PushRequest PushError! {
     parsed := pkparse.pk_parse_key(key.bytes(), None, rng) ?? return Err(push_fail("the service account's key does not parse"))
     if parsed.kind != .Val(.RSA) -> return Err(push_fail("the service account's key is no RSA key"))
     claims: "{{\"iss\":{push_json_text(client_email)},\"scope\":\"{PUSH_FCM_SCOPE}\",\"aud\":{push_json_text(token_uri)},\"iat\":{now},\"exp\":{now + 3600}}}"
@@ -313,7 +313,7 @@ push_fcm_request: fn(origin: String, project: String, access_token: String, devi
 
 /// The compact JWT of the JSON `header` and `claims`, signed ES256 by the
 /// private scalar `private` (RFC 7515 section 7.1).
-push_jwt_es256: fn<R: RNG>(header: String, claims: String, private: [U8], rng: &R) -> String PushError! {
+push_jwt_es256: fn<R: RNG>(header: String, claims: String, private: [U8], rng: ^R) -> String PushError! {
     signing_input: "{base64.encode_url(header.bytes())}.{base64.encode_url(claims.bytes())}"
     signature: push_es256(private, signing_input.bytes(), rng) ?? return Err(err)
     Ok("{signing_input}.{base64.encode_url(signature)}")
@@ -321,7 +321,7 @@ push_jwt_es256: fn<R: RNG>(header: String, claims: String, private: [U8], rng: &
 
 /// The ES256 signature of `data` by the private scalar `private`: `r || s`,
 /// 32 bytes each (RFC 7518 section 3.4), with the RFC 6979 nonce.
-push_es256: fn<R: RNG>(private: [U8], data: [U8], rng: &R) -> [U8] PushError! {
+push_es256: fn<R: RNG>(private: [U8], data: [U8], rng: ^R) -> [U8] PushError! {
     grp: push_group() ?? return Err(err)
     d: push_scalar(grp, private) ?? return Err(err)
     hash: hashes.hash(.SHA256, data)
@@ -544,7 +544,7 @@ priv push_senders: fn() -> PushSenders Never! {
     held.value.copy()
 }
 
-priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: &R) -[Net, Time.Wait]> PushOutcome Never! {
+priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: ^R) -[Net, Time.Wait]> PushOutcome Never! {
     senders: push_senders()
     apns: senders.apns ?? return push_failed("no APNs settings")
     bearer := senders.apns_token.copy()
@@ -570,7 +570,7 @@ priv push_deliver_apns: fn<R: RNG>(token: String, key: String, title: String, bo
     PushOutcome{reason: "APNs answered {response.status} {answer}", gone: gone}
 }
 
-priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: &R) -[Net, Time.Wait]> PushOutcome Never! {
+priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, body: String, open: String, now: Int, rng: ^R) -[Net, Time.Wait]> PushOutcome Never! {
     senders: push_senders()
     fcm: senders.fcm ?? return push_failed("no FCM settings")
     bearer := senders.fcm_token.copy()
@@ -597,7 +597,7 @@ priv push_deliver_fcm: fn<R: RNG>(token: String, key: String, title: String, bod
     PushOutcome{reason: "FCM answered {response.status} {answer}", gone: response.status == 404}
 }
 
-priv push_deliver_web: fn<R: RNG>(endpoint: String, p256dh: String, auth: String, key: String, title: String, body: String, open: String, now: Int, rng: &R) -[Net, Time.Wait]> PushOutcome Never! {
+priv push_deliver_web: fn<R: RNG>(endpoint: String, p256dh: String, auth: String, key: String, title: String, body: String, open: String, now: Int, rng: ^R) -[Net, Time.Wait]> PushOutcome Never! {
     senders: push_senders()
     web: senders.web ?? return push_failed("no Web Push settings")
     sender: senders.web_key ?? return push_failed("no Web Push settings")

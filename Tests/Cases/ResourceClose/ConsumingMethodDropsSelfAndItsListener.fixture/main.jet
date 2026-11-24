@@ -4,9 +4,9 @@ Res: struct {
     ports: [Int],
     listeners: [TCPListener],
 
-    release_empty: fn(&&self) {}
+    release_empty: fn(^^self) {}
 
-    release_field: fn(&&self) { _held: self.listeners }
+    release_field: fn(^^self) { _held: self.listeners }
 }
 
 make: fn() -> Res NetError! {
@@ -18,7 +18,7 @@ make: fn() -> Res NetError! {
     Ok(Res{ports: [Int]{port}, listeners: held})
 }
 
-release_free: fn(r: &&Res) {}
+release_free: fn(r: ^^Res) {}
 
 try_bind: fn(label: String, port: Int) {
     if net.tcp_listen("127.0.0.1:{port}") == {

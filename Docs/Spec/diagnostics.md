@@ -390,7 +390,7 @@ Neither CLI help nor a website page is an alternate diagnostic catalog.
 
 `jet explain <token>` answers a sigil or operator from the syntax dictionary
 ([`SyntaxDictionaryData.jet`](../../Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet)) in
-plain words: every meaning by position (`&&` on a parameter type takes the
+plain words: every meaning by position (`^^` on a parameter type takes the
 value; between two values it is logical and), an example for each, what happens afterwards, and
 related codes. The REPL `?` and LSP hover show the same text. The registry
 constant and owning decision appear only with `--verbose`.

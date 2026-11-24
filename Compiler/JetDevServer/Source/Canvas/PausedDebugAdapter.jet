@@ -27,7 +27,7 @@ PausedDebugSessionAdapter: struct {
 
     is_paused: fn(self) -> Bool Never! { self.state == .Paused }
 
-    refresh_snapshot: fn(&self, identity: SessionIdentity, snapshot: DebugSnapshot) PausedEvaluateError! {
+    refresh_snapshot: fn(^self, identity: SessionIdentity, snapshot: DebugSnapshot) PausedEvaluateError! {
         if identity.session_id != self.identity.session_id || identity.source_id != self.identity.source_id || identity.source_revision != self.identity.source_revision {
             return Err(paused_error("paused debugger refresh changed session or source identity"))
         }
@@ -37,7 +37,7 @@ PausedDebugSessionAdapter: struct {
         self.validate()
     }
 
-    inject_into: fn(self, host: &PausedEvaluateHost) PausedEvaluateError! {
+    inject_into: fn(self, host: ^PausedEvaluateHost) PausedEvaluateError! {
         if self.state != .Paused {
             host.clear_session()
             return Ok()
@@ -101,12 +101,12 @@ PausedDebugSessionAdapter: struct {
         evaluator_completed(request.identity, request.scope_id, Val(value), usage)
     }
 
-    resume: fn(&self, host: &PausedEvaluateHost) Never! {
+    resume: fn(^self, host: ^PausedEvaluateHost) Never! {
         self.state = .Running
         self.clear_if_current(host)
     }
 
-    cancel: fn(&self, host: &PausedEvaluateHost, reason: String) PausedEvaluateError! {
+    cancel: fn(^self, host: ^PausedEvaluateHost, reason: String) PausedEvaluateError! {
         self.state = .Canceled
         if self.host_is_current(host) {
             if host.cancel_session(reason) == .Err(failure) {
@@ -117,12 +117,12 @@ PausedDebugSessionAdapter: struct {
         Ok()
     }
 
-    exit: fn(&self, host: &PausedEvaluateHost) Never! {
+    exit: fn(^self, host: ^PausedEvaluateHost) Never! {
         self.state = .Finished
         self.clear_if_current(host)
     }
 
-    stale: fn(&self, host: &PausedEvaluateHost) Never! {
+    stale: fn(^self, host: ^PausedEvaluateHost) Never! {
         self.state = .Stale
         self.clear_if_current(host)
     }
@@ -185,7 +185,7 @@ PausedDebugSessionAdapter: struct {
         }
     }
 
-    clear_if_current: fn(self, host: &PausedEvaluateHost) Never! {
+    clear_if_current: fn(self, host: ^PausedEvaluateHost) Never! {
         if self.host_is_current(host) -> host.clear_session()
     }
 }

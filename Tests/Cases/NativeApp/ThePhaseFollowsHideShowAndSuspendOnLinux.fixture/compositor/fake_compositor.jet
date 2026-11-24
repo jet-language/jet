@@ -52,7 +52,7 @@ Fake: struct {
 
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat"}
 
-fake_put: fn(out: &[U8], value: Int) {
+fake_put: fn(out: ^[U8], value: Int) {
     v: value & 4294967295
     out.push(U8{v & 255})
     out.push(U8{(v >> 8) & 255})
@@ -87,13 +87,13 @@ fake_string: fn(bytes: [U8], at: Int) -> String {
     String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
 }
 
-fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+fake_event: fn(f: ^Fake, object: Int, opcode: Int, args: [U8]) {
     fake_put(f.out, object)
     fake_put(f.out, ((args.len() + 8) << 16) + opcode)
     loop b in args -> f.out.push(b)
 }
 
-fake_flush: fn(f: &Fake) -[Net, Time]> {
+fake_flush: fn(f: ^Fake) -[Net, Time]> {
     if f.out.len() == 0 {
         return
     }
@@ -105,13 +105,13 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
     }
 }
 
-fake_fail: fn(f: &Fake, message: String) {
+fake_fail: fn(f: ^Fake, message: String) {
     if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
 }
 
 // xdg_toplevel.configure at 200x100 with `states`, then
 // xdg_surface.configure.
-fake_configure: fn(f: &Fake, states: [Int]) {
+fake_configure: fn(f: ^Fake, states: [Int]) {
     f.serial += 1
     toplevel: f.toplevel
     xdg_surface: f.xdg_surface
@@ -121,7 +121,7 @@ fake_configure: fn(f: &Fake, states: [Int]) {
     fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
 }
 
-fake_close: fn(f: &Fake) {
+fake_close: fn(f: ^Fake) {
     toplevel: f.toplevel
     fake_event(f, toplevel, 1, [U8]{})
     f.records.push("closed the window")
@@ -130,7 +130,7 @@ fake_close: fn(f: &Fake) {
 
 // A commit of the window's surface: its frame callbacks are done, and the
 // first buffer is its first frame.
-fake_commit: fn(f: &Fake) {
+fake_commit: fn(f: ^Fake) {
     f.commits += 1
     callbacks: f.callbacks.copy()
     f.callbacks = [Int]{}
@@ -153,7 +153,7 @@ fake_commit: fn(f: &Fake) {
 
 // The next step, once the app heard the line `heard` of phases.txt, or a
 // failure when it never does; whether the app heard it.
-fake_heard: fn(f: &Fake, heard: String) -[FS.Read]> Bool {
+fake_heard: fn(f: ^Fake, heard: String) -[FS.Read]> Bool {
     phases: files.read("phases.txt") ?? ""
     if phases.contains(heard) {
         f.checked = 0
@@ -166,7 +166,7 @@ fake_heard: fn(f: &Fake, heard: String) -[FS.Read]> Bool {
     false
 }
 
-fake_step: fn(f: &Fake) -[FS]> {
+fake_step: fn(f: ^Fake) -[FS]> {
     if f.phase == 1 && fake_heard(f, "\n2 VisibilityChanged:") {
         fake_configure(f, [Int]{ACTIVATED})
         f.records.push("showed the window again")
@@ -186,7 +186,7 @@ fake_step: fn(f: &Fake) -[FS]> {
     if f.phase == 3 && fake_heard(f, "\n5 Woke:") -> fake_close(f)
 }
 
-fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
+fake_request: fn(f: ^Fake, object: Int, opcode: Int, body: [U8]) {
     if object == 1 && opcode == 1 {
         f.registry = fake_u32(body, 0)
         registry: f.registry
@@ -249,7 +249,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
     }
 }
 
-fake_dispatch: fn(f: &Fake) {
+fake_dispatch: fn(f: ^Fake) {
     at := 0
     loop f.inbox.len() - at >= 8 {
         object: fake_u32(f.inbox, at)

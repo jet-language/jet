@@ -1,4 +1,4 @@
-// `&place` is the exclusive write window for any place, a
+// `^place` is the exclusive write window for any place, a
 // name followed by field or index projections. The callee edits the owner's
 // storage directly; nothing is copied in or out.
 Node: struct {
@@ -16,11 +16,11 @@ Pair: struct {
     right: Int,
 }
 
-add: fn(set: &[String], name: String) { set.push(name.copy()) }
+add: fn(set: ^[String], name: String) { set.push(name.copy()) }
 
-bump: fn(value: &Int) { value += 1 }
+bump: fn(value: ^Int) { value += 1 }
 
-swap: fn(a: &Int, b: &Int) {
+swap: fn(a: ^Int, b: ^Int) {
     held: a
     a = b
     b = held
@@ -53,11 +53,11 @@ run: fn() {
 // keeps its list's length edits the window in place, so the owner sees every
 // change without a copy. A callee that may push, pop, or reassign the list
 // cannot take a window; pass the whole list instead.
-scale: fn(xs: &[Int], factor: Int) {
+scale: fn(xs: ^[Int], factor: Int) {
     loop index in 0..<xs.len() -> xs[index] = xs[index] * factor
 }
 
-scale_and_sort: fn(xs: &[Int]) {
+scale_and_sort: fn(xs: ^[Int]) {
     scale(xs, 10)
     xs.sort()
 }

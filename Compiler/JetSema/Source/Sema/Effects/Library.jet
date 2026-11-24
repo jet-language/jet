@@ -131,7 +131,7 @@ sema_library_effect_kernel_list: fn(cap: ModuleCap?) -> [String] Never! {
     kernel
 }
 
-sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity: String, module_index: Int, items: [Item]) Never! {
+sema_library_effect_collect: fn(effects: ^[SemaLibraryEffect], package_identity: String, module_index: Int, items: [Item]) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -203,7 +203,7 @@ sema_library_effect_parent_problem: fn(problem: Diagnostic) -> SemaLibraryEffect
 // and its kernel (the parent's limit, or the narrower `#FX(…)` list above
 // it). `states` holds 0 (not yet), 1 (on the walk) or 2 (done) per effect;
 // meeting an effect on the walk is a cycle.
-sema_library_effect_resolve: fn(effects: &[SemaLibraryEffect], graph: SemaRegistrationGraph, states: &[Int], index: Int) Never! {
+sema_library_effect_resolve: fn(effects: ^[SemaLibraryEffect], graph: SemaRegistrationGraph, states: ^[Int], index: Int) Never! {
     if states[index] != 0 {
         return
     }
@@ -232,7 +232,7 @@ sema_library_effect_resolve: fn(effects: &[SemaLibraryEffect], graph: SemaRegist
 // The parent `written` of the effect `name` declared in module
 // `module_index`: an open Prelude effect, or a package effect that module
 // can name, resolved first.
-sema_library_effect_parent: fn(effects: &[SemaLibraryEffect], graph: SemaRegistrationGraph, states: &[Int], name: String, written: NamedSpan, module_index: Int) -> SemaLibraryEffectParent Never! {
+sema_library_effect_parent: fn(effects: ^[SemaLibraryEffect], graph: SemaRegistrationGraph, states: ^[Int], name: String, written: NamedSpan, module_index: Int) -> SemaLibraryEffectParent Never! {
     if EFFECT_VOCABULARY_ROOTS.contains(sema_effect_root(written.name)) {
         if !sema_library_effect_open_parent(written.name) {
             return sema_library_effect_parent_problem(sema_library_effect_parent_family(name, written))
@@ -265,14 +265,14 @@ sema_library_effect_parent_family: fn(name: String, written: NamedSpan) -> Diagn
 }
 
 // The package effects `source` declares whose parent is wrong (E0758).
-sema_library_effect_check_parents: fn(effects: [SemaLibraryEffect], module_index: Int, diagnostics: &[Diagnostic]) {
+sema_library_effect_check_parents: fn(effects: [SemaLibraryEffect], module_index: Int, diagnostics: ^[Diagnostic]) {
     loop declared in effects {
         if declared.module_index != module_index -> next
         if declared.problem == .Val(problem) -> diagnostics.push(problem.copy())  // copy: the effect list is read again by later modules.
     }
 }
 
-sema_library_effect_add_names: fn(names: &[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
+sema_library_effect_add_names: fn(names: ^[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
     token: "{declared.package_identity}/{declared.name}"
     // copy: each name keeps its own kernel and ancestors.
     names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy(), fields: declared.fields.copy()})
@@ -442,7 +442,7 @@ sema_library_effect_list_denial_diagnostic: fn(name: String, entry: String, span
 }
 
 // The `#FX(…)` above each library effect in `items` holds no `!` entry.
-sema_library_effect_check_lists: fn(items: [Item], diagnostics: &[Diagnostic]) {
+sema_library_effect_check_lists: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -456,7 +456,7 @@ sema_library_effect_check_lists: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?, diagnostics: &[Diagnostic]) {
+sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?, diagnostics: ^[Diagnostic]) {
     written: cap ?? return
     if !sema_library_effect_declared(items, name) {
         return
@@ -529,7 +529,7 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
 // or a function that denies a Prelude effect reaches one whose row names a
 // kind of it, and its body does not already reach the denied effect itself
 // (sema_effect_check_node reports that). `solved` is the node's solved row.
-sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], solved: [String], diagnostics: &[Diagnostic]) {
+sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], solved: [String], diagnostics: ^[Diagnostic]) {
     rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
     loop denial in rare.library_denials {
         denied: denial.name
@@ -564,7 +564,7 @@ sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], s
 // `Log`) may reach `audit.Audit`, the effects it is a kind of, and kinds of
 // `audit.Audit`; `billing.Audit`, another kind of `Log`, needs `Log` or
 // `billing.Audit` in the row.
-sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffectReach, reached: [String], diagnostics: &[Diagnostic]) {
+sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffectReach, reached: [String], diagnostics: ^[Diagnostic]) {
     rare: node.rare ?? return
     if rare.library_rows.len() == 0 {
         return
@@ -620,7 +620,7 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
 // `e0740`: a function whose row names values of a struct effect, and not
 // the bare effect, reaches another value of it, or a function whose row
 // names the bare effect, which stands for every value.
-sema_library_effect_check_values: fn(node: SemaEffectNode, reached: [String], diagnostics: &[Diagnostic]) {
+sema_library_effect_check_values: fn(node: SemaEffectNode, reached: [String], diagnostics: ^[Diagnostic]) {
     rare: node.rare ?? return
     if !sema_library_effect_has_value(rare.library_rows) {
         return

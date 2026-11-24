@@ -439,7 +439,7 @@ value_projection_absent: fn(id: String, name: String, type_name: String, source:
     value_projection(id, name, type_name, source, Publication.Absent, None)
 }
 
-validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, depth: Int, ids: &[String:Bool], nodes: &Int) PausedEvaluateError! {
+validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, depth: Int, ids: ^[String:Bool], nodes: ^Int) PausedEvaluateError! {
     if depth > MAX_VALUE_DEPTH {
         return Err(paused_error("paused value exceeds the maximum projection depth"))
     }
@@ -475,7 +475,7 @@ validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, dept
     Ok()
 }
 
-measure_projection: fn(value: ValueProjection, depth: Int, usage: &EvaluationUsage) Never! {
+measure_projection: fn(value: ValueProjection, depth: Int, usage: ^EvaluationUsage) Never! {
     if value.publication == .Absent {
         return
     }
@@ -594,7 +594,7 @@ PausedSession: struct {
     budget: EvaluationBudget,
     cancellation: Cancellation,
 
-    cancel: fn(&self, reason: String) PausedEvaluateError! {
+    cancel: fn(^self, reason: String) PausedEvaluateError! {
         self.cancellation = cancellation_requested(reason)
         self.state = .Canceled
         Ok()
@@ -1064,14 +1064,14 @@ PausedEvaluateHost: struct {
     session: PausedSession?,
     evaluator_result: EvaluatorResult?,
 
-    set_session: fn(&self, session: PausedSession) Never! { self.session = Val(session) }
+    set_session: fn(^self, session: PausedSession) Never! { self.session = Val(session) }
 
-    clear_session: fn(&self) Never! {
+    clear_session: fn(^self) Never! {
         self.session = None
         self.evaluator_result = None
     }
 
-    cancel_session: fn(&self, reason: String) PausedEvaluateHostError! {
+    cancel_session: fn(^self, reason: String) PausedEvaluateHostError! {
         session := self.session ?? return Err(PausedEvaluateHostError.SessionUnavailable)
         if session.cancel(reason) == .Err(failure) {
             return Err(PausedEvaluateHostError.InvalidRequest{detail: failure.message})
@@ -1087,11 +1087,11 @@ PausedEvaluateHost: struct {
         }
     }
 
-    set_evaluator_result: fn(&self, result: EvaluatorResult) Never! {
+    set_evaluator_result: fn(^self, result: EvaluatorResult) Never! {
         self.evaluator_result = Val(result)
     }
 
-    clear_evaluator_result: fn(&self) Never! { self.evaluator_result = None }
+    clear_evaluator_result: fn(^self) Never! { self.evaluator_result = None }
 
     handle_inspect: fn(self, raw: String) -> String PausedEvaluateHostError! {
         response: self.inspect_request(raw)
@@ -1104,13 +1104,13 @@ PausedEvaluateHost: struct {
         Ok(inspect(session, request) ?? return Err(PausedEvaluateHostError.Rejected{rejection: err}))
     }
 
-    handle_evaluate: fn(&self, raw: String) -> String PausedEvaluateHostError! {
+    handle_evaluate: fn(^self, raw: String) -> String PausedEvaluateHostError! {
         response: self.evaluate_request(raw)
         Ok(response.json())
     }
 
     // The injected evaluator result is consumed by the request it answers.
-    evaluate_request: fn(&self, raw: String) -> EvaluateResponse PausedEvaluateHostError! {
+    evaluate_request: fn(^self, raw: String) -> EvaluateResponse PausedEvaluateHostError! {
         session: self.session ?? return Err(PausedEvaluateHostError.SessionUnavailable)
         request: parse_evaluate_request(raw) ?? return Err(PausedEvaluateHostError.InvalidRequest{detail: err.message})
         result: self.evaluator_result ?? return Err(PausedEvaluateHostError.EvaluatorUnavailable)
@@ -1181,11 +1181,11 @@ reject: fn(operation: String, request_id: String, identity: SessionIdentity, sco
 }
 
 // The root is always retained; descendants stop at the node and byte budgets.
-project_root: fn(value: ValueProjection, identity: SessionIdentity, budget: EvaluationBudget, stats: &ProjectionStats) -> ValueProjection Never! {
+project_root: fn(value: ValueProjection, identity: SessionIdentity, budget: EvaluationBudget, stats: ^ProjectionStats) -> ValueProjection Never! {
     project_node(value, identity, budget, 1, true, stats) ?? value_projection_absent(value.id, value.name, value.type_name, value.source)
 }
 
-project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: EvaluationBudget, depth: Int, root: Bool{false}, stats: &ProjectionStats) -> ValueProjection? Never! {
+project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: EvaluationBudget, depth: Int, root: Bool{false}, stats: ^ProjectionStats) -> ValueProjection? Never! {
     if value.publication == .Absent -> return None
     if !root && stats.usage.nodes >= budget.max_nodes {
         stats.truncated = true

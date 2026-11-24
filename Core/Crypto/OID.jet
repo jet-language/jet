@@ -594,7 +594,7 @@ numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
 
 /// One decimal component at `text[p]`, moving `p` past it
 /// (oid_parse_number). At least one digit is required.
-parse_number: fn(text: [U8], p: &Int) -> Int asn1.ASN1Error! {
+parse_number: fn(text: [U8], p: ^Int) -> Int asn1.ASN1Error! {
     num := 0
     digits := 0
     loop p < text.len() && text[p] >= (U8{48}) && text[p] <= (U8{57}) {
@@ -612,7 +612,7 @@ parse_number: fn(text: [U8], p: &Int) -> Int asn1.ASN1Error! {
 
 /// Appends a subidentifier in base 128, high groups first, each but the
 /// last with the continuation bit (oid_subidentifier_encode_into).
-push_subidentifier: fn(out: &[U8], value: Int) {
+push_subidentifier: fn(out: ^[U8], value: Int) {
     count := 1
     rest := value >> 7
     loop rest != 0 {

@@ -159,7 +159,7 @@ BusyHandler: struct {
 
 // sqlite3InvokeBusyHandler with sqliteDefaultBusyCallback (the HAVE_USLEEP
 // schedule): true to retry the lock.
-busy_invoke: fn(b: &BusyHandler) -[DB]> Bool Never! {
+busy_invoke: fn(b: ^BusyHandler) -[DB]> Bool Never! {
     if b.timeout <= 0 || b.n_busy < 0 -> return false
     count: b.n_busy
     n: BUSY_DELAYS.len()
@@ -237,7 +237,7 @@ le_get4: fn(b: [U8], at: Int) -> Int Never! {
     Int{b[at]} | Int{b[at + 1]} << 8 | Int{b[at + 2]} << 16 | Int{b[at + 3]} << 24
 }
 
-le_put4: fn(b: &[U8], at: Int, v: Int) Never! {
+le_put4: fn(b: ^[U8], at: Int, v: Int) Never! {
     b[at] = U8{v & 255}
     b[at + 1] = U8{(v >> 8) & 255}
     b[at + 2] = U8{(v >> 16) & 255}
@@ -247,7 +247,7 @@ le_put4: fn(b: &[U8], at: Int, v: Int) Never! {
 // A little-endian (native) 16-bit word.
 le_get2: fn(b: [U8], at: Int) -> Int Never! { Int{b[at]} | Int{b[at + 1]} << 8 }
 
-le_put2: fn(b: &[U8], at: Int, v: Int) Never! {
+le_put2: fn(b: ^[U8], at: Int, v: Int) Never! {
     b[at] = U8{v & 255}
     b[at + 1] = U8{(v >> 8) & 255}
 }
@@ -255,7 +255,7 @@ le_put2: fn(b: &[U8], at: Int, v: Int) Never! {
 // A field of the snapshot header.
 hdr_get: fn(w: Wal, off: Int) -> Int Never! { le_get4(w.hdr, off) }
 
-hdr_set: fn(w: &Wal, off: Int, v: Int) Never! { le_put4(w.hdr, off, v & os.U32_MASK) }
+hdr_set: fn(w: ^Wal, off: Int, v: Int) Never! { le_put4(w.hdr, off, v & os.U32_MASK) }
 
 // pWal->hdr.mxFrame.
 wal_mx_frame: fn(w: Wal) -> Int Never! { le_get4(w.hdr, HDR_MXFRAME) }
@@ -277,13 +277,13 @@ wal_frame_offset: fn(frame: Int, sz_page: Int) -> Int Never! {
 wal_local: fn(w: Wal) -> Bool Never! { w.exclusive_mode == WAL_HEAPMEMORY_MODE || w.shm_unreliable }
 
 // Keep the first shared-memory error.
-shm_fail: fn(w: &Wal, rc: Int) Never! {
+shm_fail: fn(w: ^Wal, rc: Int) Never! {
     if rc != base.OK && w.shm_rc == base.OK -> w.shm_rc = rc
 }
 
 // The result of a call that read or wrote the wal-index: rc, or the
 // shared-memory error it hit (C's SEH_EXCEPT).
-wal_shm_result: fn(w: &Wal, rc: Int) -> Int Never! {
+wal_shm_result: fn(w: ^Wal, rc: Int) -> Int Never! {
     e: w.shm_rc
     w.shm_rc = base.OK
     if e != base.OK && rc == base.OK -> return e
@@ -292,7 +292,7 @@ wal_shm_result: fn(w: &Wal, rc: Int) -> Int Never! {
 
 // Read n bytes of region 0 at `offset` into buf[at..]: the shared header
 // (walIndexHdr) and checkpoint information (walCkptInfo).
-wi_read: fn(w: &Wal, db: &file.SQLFile, offset: Int, buf: &[U8], at: Int, n: Int) -[DB]> Never! {
+wi_read: fn(w: ^Wal, db: ^file.SQLFile, offset: Int, buf: ^[U8], at: Int, n: Int) -[DB]> Never! {
     if wal_local(w) {
         if w.wi.len() == 0 || w.wi[0].len() == 0 {
             loop i in 0..<n -> buf[at + i] = U8{0}
@@ -309,7 +309,7 @@ wi_read: fn(w: &Wal, db: &file.SQLFile, offset: Int, buf: &[U8], at: Int, n: Int
 }
 
 // Write data[at..<at+n] to region 0 at `offset`.
-wi_write: fn(w: &Wal, db: &file.SQLFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Never! {
+wi_write: fn(w: ^Wal, db: ^file.SQLFile, offset: Int, data: [U8], at: Int, n: Int) -[DB]> Never! {
     if wal_local(w) {
         if w.wi.len() == 0 || w.wi[0].len() == 0 {
             return
@@ -321,27 +321,27 @@ wi_write: fn(w: &Wal, db: &file.SQLFile, offset: Int, data: [U8], at: Int, n: In
 }
 
 // A 32-bit word of the shared header or checkpoint information.
-wi_get4: fn(w: &Wal, db: &file.SQLFile, offset: Int) -[DB]> Int Never! {
+wi_get4: fn(w: ^Wal, db: ^file.SQLFile, offset: Int) -[DB]> Int Never! {
     b := wal_zeros(4)
     wi_read(w, db, offset, b, 0, 4)
     le_get4(b, 0)
 }
 
-wi_set4: fn(w: &Wal, db: &file.SQLFile, offset: Int, v: Int) -[DB]> Never! {
+wi_set4: fn(w: ^Wal, db: ^file.SQLFile, offset: Int, v: Int) -[DB]> Never! {
     b := wal_zeros(4)
     le_put4(b, 0, v & os.U32_MASK)
     wi_write(w, db, offset, b, 0, 4)
 }
 
 // The shared header aHdr[0], 48 bytes.
-wi_live_hdr: fn(w: &Wal, db: &file.SQLFile) -[DB]> [U8] Never! {
+wi_live_hdr: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> [U8] Never! {
     h := wal_zeros(HDR_SIZE)
     wi_read(w, db, 0, h, 0, HDR_SIZE)
     h
 }
 
 // Widen the changed range of region i to cover lo..<hi.
-wi_dirty: fn(w: &Wal, i: Int, lo: Int, hi: Int) Never! {
+wi_dirty: fn(w: ^Wal, i: Int, lo: Int, hi: Int) Never! {
     if w.wi_hi[i] <= w.wi_lo[i] {
         w.wi_lo[i] = lo
         w.wi_hi[i] = hi
@@ -352,18 +352,18 @@ wi_dirty: fn(w: &Wal, i: Int, lo: Int, hi: Int) Never! {
 }
 
 // Store words in region i's copy.
-wi_put4: fn(w: &Wal, i: Int, at: Int, v: Int) Never! {
+wi_put4: fn(w: ^Wal, i: Int, at: Int, v: Int) Never! {
     le_put4(w.wi[i], at, v)
     wi_dirty(w, i, at, at + 4)
 }
 
-wi_put2: fn(w: &Wal, i: Int, at: Int, v: Int) Never! {
+wi_put2: fn(w: ^Wal, i: Int, at: Int, v: Int) Never! {
     le_put2(w.wi[i], at, v)
     wi_dirty(w, i, at, at + 2)
 }
 
 // memset of region i's copy over lo..<hi.
-wi_zero: fn(w: &Wal, i: Int, lo: Int, hi: Int) Never! {
+wi_zero: fn(w: ^Wal, i: Int, lo: Int, hi: Int) Never! {
     if hi <= lo {
         return
     }
@@ -373,7 +373,7 @@ wi_zero: fn(w: &Wal, i: Int, lo: Int, hi: Int) Never! {
 
 // Write the changed ranges of the region copies to the shared memory,
 // never the header bytes of region 0, which are written in place.
-wal_flush: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
+wal_flush: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Never! {
     local: wal_local(w)
     loop i in 0..<w.wi.len() {
         lo := w.wi_lo[i]
@@ -389,7 +389,7 @@ wal_flush: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
 }
 
 // The region copies no longer show the shared memory (a new snapshot).
-wal_stale_all: fn(w: &Wal) Never! {
+wal_stale_all: fn(w: ^Wal) Never! {
     if wal_local(w) {
         return
     }
@@ -402,7 +402,7 @@ wal_stale_all: fn(w: &Wal) Never! {
 
 // Drop what the writer changed without committing: the regions it changed
 // are read again.
-wal_drop_dirty: fn(w: &Wal) Never! {
+wal_drop_dirty: fn(w: ^Wal) Never! {
     local: wal_local(w)
     loop i in 0..<w.wi.len() {
         if w.wi_hi[i] > w.wi_lo[i] && !local -> w.wi_fresh[i] = false
@@ -412,7 +412,7 @@ wal_drop_dirty: fn(w: &Wal) Never! {
 }
 
 // Forget every region copy (sqlite3_free of the apWiData pages).
-wal_free_pages: fn(w: &Wal) Never! {
+wal_free_pages: fn(w: ^Wal) Never! {
     loop i in 0..<w.wi.len() {
         w.wi[i] = [U8]{}
         w.wi_fresh[i] = false
@@ -423,7 +423,7 @@ wal_free_pages: fn(w: &Wal) Never! {
 
 // walIndexPage with walIndexPageRealloc: region i into w.wi[i]; present is
 // false for C's null page.
-wal_index_page: fn(w: &Wal, db: &file.SQLFile, i: Int, present: &Bool) -[DB]> Int Never! {
+wal_index_page: fn(w: ^Wal, db: ^file.SQLFile, i: Int, present: ^Bool) -[DB]> Int Never! {
     present = false
     loop w.wi.len() <= i {
         w.wi.push([U8]{})
@@ -497,7 +497,7 @@ wal_checksum: fn(native: Bool, a: [U8], at: Int, n: Int, s1_in: Int, s2_in: Int)
 
 // walIndexWriteHdr: publish w.hdr as the shared header, after the region
 // bytes the writer changed.
-wal_index_write_hdr: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
+wal_index_write_hdr: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Never! {
     wal_flush(w, db)
     w.hdr[HDR_ISINIT] = U8{1}
     hdr_set(w, HDR_VERSION, WALINDEX_MAX_VERSION)
@@ -511,7 +511,7 @@ wal_index_write_hdr: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
 
 // walEncodeFrame: the 24-byte header of the frame of page pgno whose data
 // is data[at..<at+sz_page], into frame; it advances the running checksum.
-wal_encode_frame: fn(w: &Wal, pgno: Int, n_truncate: Int, data: [U8], at: Int, frame: &[U8]) Never! {
+wal_encode_frame: fn(w: ^Wal, pgno: Int, n_truncate: Int, data: [U8], at: Int, frame: ^[U8]) Never! {
     util.put4(frame, 0, pgno)
     util.put4(frame, 4, n_truncate)
     if w.re_cksum == 0 {
@@ -530,7 +530,7 @@ wal_encode_frame: fn(w: &Wal, pgno: Int, n_truncate: Int, data: [U8], at: Int, f
 
 // walDecodeFrame: whether frame (header then page data) is a valid frame
 // of this log; it advances the running checksum.
-wal_decode_frame: fn(w: &Wal, frame: [U8], pgno: &Int, n_truncate: &Int) -> Bool Never! {
+wal_decode_frame: fn(w: ^Wal, frame: [U8], pgno: ^Int, n_truncate: ^Int) -> Bool Never! {
     loop k in 0..<8 {
         if frame[8 + k] != w.hdr[HDR_SALT + k] -> return false
     }
@@ -549,24 +549,24 @@ wal_decode_frame: fn(w: &Wal, frame: [U8], pgno: &Int, n_truncate: &Int) -> Bool
 
 // walLockShared, walUnlockShared, walLockExclusive and walUnlockExclusive:
 // no-ops in exclusive mode.
-wal_lock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Int Never! {
+wal_lock_shared: fn(w: ^Wal, db: ^file.SQLFile, idx: Int) -[DB]> Int Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE -> return base.OK
     file.file_shm_lock(db, idx, 1, os.SHM_LOCK | os.SHM_SHARED)
 }
 
-wal_unlock_shared: fn(w: &Wal, db: &file.SQLFile, idx: Int) -[DB]> Never! {
+wal_unlock_shared: fn(w: ^Wal, db: ^file.SQLFile, idx: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
     _: file.file_shm_lock(db, idx, 1, os.SHM_UNLOCK | os.SHM_SHARED)
 }
 
-wal_lock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Int Never! {
+wal_lock_exclusive: fn(w: ^Wal, db: ^file.SQLFile, idx: Int, n: Int) -[DB]> Int Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE -> return base.OK
     file.file_shm_lock(db, idx, n, os.SHM_LOCK | os.SHM_EXCLUSIVE)
 }
 
-wal_unlock_exclusive: fn(w: &Wal, db: &file.SQLFile, idx: Int, n: Int) -[DB]> Never! {
+wal_unlock_exclusive: fn(w: ^Wal, db: ^file.SQLFile, idx: Int, n: Int) -[DB]> Never! {
     if w.exclusive_mode != WAL_NORMAL_MODE {
         return
     }
@@ -594,7 +594,7 @@ WalHashLoc: struct {
 wal_hash_loc: fn() -> WalHashLoc Never! { WalHashLoc{page: 0, pgno_at: 0, zero: 0} }
 
 // walHashGet.
-wal_hash_get: fn(w: &Wal, db: &file.SQLFile, i: Int, loc: &WalHashLoc) -[DB]> Int Never! {
+wal_hash_get: fn(w: ^Wal, db: ^file.SQLFile, i: Int, loc: ^WalHashLoc) -[DB]> Int Never! {
     present := false
     rc := wal_index_page(w, db, i, present)
     if present {
@@ -628,7 +628,7 @@ wal_frame_pgno: fn(w: Wal, frame: Int) -> Int Never! {
 
 // walCleanupHash: remove the entries for frames past mxFrame from the last
 // hash table.
-wal_cleanup_hash: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
+wal_cleanup_hash: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Never! {
     mx: wal_mx_frame(w)
     if mx == 0 {
         return
@@ -647,7 +647,7 @@ wal_cleanup_hash: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
 }
 
 // walIndexAppend: index frame `frame` as holding page pgno.
-wal_index_append: fn(w: &Wal, db: &file.SQLFile, frame: Int, pgno: Int) -[DB]> Int Never! {
+wal_index_append: fn(w: ^Wal, db: ^file.SQLFile, frame: Int, pgno: Int) -[DB]> Int Never! {
     loc := wal_hash_loc()
     rc: wal_hash_get(w, db, wal_frame_page(frame), loc)
     if rc != base.OK -> return rc
@@ -669,7 +669,7 @@ wal_index_append: fn(w: &Wal, db: &file.SQLFile, frame: Int, pgno: Int) -[DB]> I
 
 // The frames of one wal-index region during recovery (the loop body of
 // walIndexRecover over iPg): true when every frame up to `last` was valid.
-recover_region: fn(w: &Wal, db: &file.SQLFile, first: Int, last: Int, sz_page: Int, frame: &[U8], saved: &WalCksum, rc: &Int) -[DB]> Bool Never! {
+recover_region: fn(w: ^Wal, db: ^file.SQLFile, first: Int, last: Int, sz_page: Int, frame: ^[U8], saved: ^WalCksum, rc: ^Int) -[DB]> Bool Never! {
     sz_frame: sz_page + WAL_FRAME_HDRSIZE
     f := first
     loop f <= last {
@@ -693,7 +693,7 @@ recover_region: fn(w: &Wal, db: &file.SQLFile, first: Int, last: Int, sz_page: I
 }
 
 // The body of walIndexRecover from reading the log to its finished label.
-recover_log: fn(w: &Wal, db: &file.SQLFile, saved: &WalCksum) -[DB]> Int Never! {
+recover_log: fn(w: ^Wal, db: ^file.SQLFile, saved: ^WalCksum) -[DB]> Int Never! {
     n_size := 0
     rc := file.file_size(w.fd, n_size)
     if rc != base.OK || n_size <= WAL_HDRSIZE -> return rc
@@ -741,7 +741,7 @@ recover_log: fn(w: &Wal, db: &file.SQLFile, saved: &WalCksum) -[DB]> Int Never! 
 }
 
 // walIndexRecover: rebuild the wal-index from the log file.
-wal_index_recover: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
+wal_index_recover: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Int Never! {
     i_lock: WAL_ALL_BUT_WRITE + (if w.ckpt_lock -> 1 else -> 0)
     rc := wal_lock_exclusive(w, db, i_lock, read_lock(0) - i_lock)
     if rc != base.OK -> return rc
@@ -770,14 +770,14 @@ wal_index_recover: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
 }
 
 // walIndexClose.
-wal_index_close: fn(w: &Wal, db: &file.SQLFile, delete: Bool) -[DB]> Never! {
+wal_index_close: fn(w: ^Wal, db: ^file.SQLFile, delete: Bool) -[DB]> Never! {
     wal_free_pages(w)
     if w.exclusive_mode != WAL_HEAPMEMORY_MODE -> file.file_shm_unmap(db, delete)
 }
 
 // sqlite3WalOpen: open the log `name` of database file db into w;
 // no_shm is heap-memory mode.
-wal_open: fn(w: &Wal, db: &file.SQLFile, name: String, no_shm: Bool, mx_wal_size: Int) -[DB]> Int Never! {
+wal_open: fn(w: ^Wal, db: ^file.SQLFile, name: String, no_shm: Bool, mx_wal_size: Int) -[DB]> Int Never! {
     w = wal_closed()
     w.read_lock = -1
     w.mx_wal_size = mx_wal_size
@@ -802,7 +802,7 @@ wal_open: fn(w: &Wal, db: &file.SQLFile, name: String, no_shm: Bool, mx_wal_size
 }
 
 // sqlite3WalLimit.
-wal_limit: fn(w: &Wal, limit: Int) Never! {
+wal_limit: fn(w: ^Wal, limit: Int) Never! {
     if w.open -> w.mx_wal_size = limit
 }
 
@@ -814,7 +814,7 @@ WalIterator: struct {
     frames: [Int],
 }
 
-wal_iterator_init: fn(w: &Wal, db: &file.SQLFile, n_backfill: Int, iter: &WalIterator) -[DB]> Int Never! {
+wal_iterator_init: fn(w: ^Wal, db: ^file.SQLFile, n_backfill: Int, iter: ^WalIterator) -[DB]> Int Never! {
     last: wal_mx_frame(w)
     n_segment: wal_frame_page(last) + 1
     keys := [Int]{}
@@ -842,7 +842,7 @@ wal_iterator_init: fn(w: &Wal, db: &file.SQLFile, n_backfill: Int, iter: &WalIte
 }
 
 // walBusyLock.
-wal_busy_lock: fn(w: &Wal, db: &file.SQLFile, busy: &BusyHandler, use_busy: Bool, idx: Int, n: Int) -[DB]> Int Never! {
+wal_busy_lock: fn(w: ^Wal, db: ^file.SQLFile, busy: ^BusyHandler, use_busy: Bool, idx: Int, n: Int) -[DB]> Int Never! {
     rc := wal_lock_exclusive(w, db, idx, n)
     loop use_busy && rc == base.BUSY && busy_invoke(busy) -> rc = wal_lock_exclusive(w, db, idx, n)
     rc
@@ -855,7 +855,7 @@ wal_pagesize: fn(w: Wal) -> Int Never! {
 }
 
 // walRestartHdr: start the log over with salt1 as the second salt.
-wal_restart_hdr: fn(w: &Wal, db: &file.SQLFile, salt1: [U8]) -[DB]> Never! {
+wal_restart_hdr: fn(w: ^Wal, db: ^file.SQLFile, salt1: [U8]) -[DB]> Never! {
     w.n_ckpt += 1
     hdr_set(w, HDR_MXFRAME, 0)
     // C reads aSalt[0] big-endian and stores the sum as a native word.
@@ -871,7 +871,7 @@ wal_restart_hdr: fn(w: &Wal, db: &file.SQLFile, salt1: [U8]) -[DB]> Never! {
 
 // The backfill of walCheckpoint while it holds READ_LOCK(0): copy the
 // iterator's frames in n_backfill+1..mx_safe to the database file.
-ckpt_backfill: fn(w: &Wal, db: &file.SQLFile, iter: WalIterator, mx_safe: Int, mx_page: Int, sz_page: Int, sync_flags: Int, buf: &[U8]) -[DB]> Int Never! {
+ckpt_backfill: fn(w: ^Wal, db: ^file.SQLFile, iter: WalIterator, mx_safe: Int, mx_page: Int, sz_page: Int, sync_flags: Int, buf: ^[U8]) -[DB]> Int Never! {
     n_backfill: wi_get4(w, db, CKPT_NBACKFILL)
     wi_set4(w, db, CKPT_ATTEMPTED, mx_safe)
     rc := file.file_sync(w.fd, ckpt_sync_flags(sync_flags))
@@ -907,7 +907,7 @@ ckpt_backfill: fn(w: &Wal, db: &file.SQLFile, iter: WalIterator, mx_safe: Int, m
 
 // walCheckpoint: copy as much of the log as the readers allow into the
 // database file; FULL, RESTART and TRUNCATE then wait for the readers.
-wal_checkpoint_run: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler, use_busy: Bool, sync_flags: Int, buf: &[U8]) -[DB]> Int Never! {
+wal_checkpoint_run: fn(w: ^Wal, db: ^file.SQLFile, mode: Int, busy: ^BusyHandler, use_busy: Bool, sync_flags: Int, buf: ^[U8]) -[DB]> Int Never! {
     rc := base.OK
     x_busy := use_busy
     sz_page: wal_pagesize(w)
@@ -962,7 +962,7 @@ wal_checkpoint_run: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler
 }
 
 // walLimitSize: truncate the log to at most n_max bytes.
-wal_limit_size: fn(w: &Wal, n_max: Int) -[DB]> Never! {
+wal_limit_size: fn(w: ^Wal, n_max: Int) -[DB]> Never! {
     sz := 0
     rx: file.file_size(w.fd, sz)
     if rx == base.OK && sz > n_max -> _: file.file_truncate(w.fd, n_max)
@@ -970,7 +970,7 @@ wal_limit_size: fn(w: &Wal, n_max: Int) -[DB]> Never! {
 
 // sqlite3WalClose. checkpoint is C's zBuf != 0: checkpoint and delete the
 // log when this is the last connection; buf has page_size bytes.
-wal_close: fn(w: &Wal, db: &file.SQLFile, sync_flags: Int, page_size: Int, checkpoint: Bool, buf: &[U8]) -[DB]> Int Never! {
+wal_close: fn(w: ^Wal, db: ^file.SQLFile, sync_flags: Int, page_size: Int, checkpoint: Bool, buf: ^[U8]) -[DB]> Int Never! {
     rc := base.OK
     if !w.open -> return rc
     is_delete := false
@@ -998,7 +998,7 @@ wal_close: fn(w: &Wal, db: &file.SQLFile, sync_flags: Int, page_size: Int, check
 
 // walIndexTryHdr: load the shared header into w.hdr; true when it is
 // being written or damaged.
-wal_index_try_hdr: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Bool Never! {
+wal_index_try_hdr: fn(w: ^Wal, db: ^file.SQLFile, changed: ^Bool) -[DB]> Bool Never! {
     h1 := wal_zeros(HDR_SIZE)
     h2 := wal_zeros(HDR_SIZE)
     wi_read(w, db, 0, h1, 0, HDR_SIZE)
@@ -1018,7 +1018,7 @@ wal_index_try_hdr: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Bool Ne
 
 // walIndexReadHdr: read the shared header, running recovery when it is
 // damaged.
-wal_index_read_hdr: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int Never! {
+wal_index_read_hdr: fn(w: ^Wal, db: ^file.SQLFile, changed: ^Bool) -[DB]> Int Never! {
     present := false
     rc := wal_index_page(w, db, 0, present)
     if rc != base.OK {
@@ -1077,7 +1077,7 @@ wal_index_read_hdr: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int Ne
 // The body of walBeginShmUnreliable after READ_LOCK(0) is held and the
 // shared memory is confirmed unreliable: check that the log has no commit
 // past the header recovered into heap memory.
-shm_unreliable_check: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int Never! {
+shm_unreliable_check: fn(w: ^Wal, db: ^file.SQLFile, changed: ^Bool) -[DB]> Int Never! {
     w.hdr = wi_live_hdr(w, db)
     sz_wal := 0
     rc := file.file_size(w.fd, sz_wal)
@@ -1116,7 +1116,7 @@ shm_unreliable_check: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int 
 
 // walBeginShmUnreliable: a read transaction over the heap-memory index of
 // an unreliable read-only -shm file.
-wal_begin_shm_unreliable: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int Never! {
+wal_begin_shm_unreliable: fn(w: ^Wal, db: ^file.SQLFile, changed: ^Bool) -[DB]> Int Never! {
     rc := wal_lock_shared(w, db, read_lock(0))
     if rc != base.OK {
         if rc == base.BUSY -> rc = WAL_RETRY
@@ -1138,7 +1138,7 @@ wal_begin_shm_unreliable: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> 
 }
 
 // walTryBeginRead: one attempt at a read lock on a consistent snapshot.
-wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool, cnt: &Int) -[DB]> Int Never! {
+wal_try_begin_read: fn(w: ^Wal, db: ^file.SQLFile, changed: ^Bool, use_wal: Bool, cnt: ^Int) -[DB]> Int Never! {
     cnt += 1
     if cnt > 5 {
         delay := 1
@@ -1208,7 +1208,7 @@ wal_try_begin_read: fn(w: &Wal, db: &file.SQLFile, changed: &Bool, use_wal: Bool
 
 // sqlite3WalBeginReadTransaction: changed is set when the snapshot differs
 // from the previous one (the pager's cache is then stale).
-wal_begin_read_transaction: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Int Never! {
+wal_begin_read_transaction: fn(w: ^Wal, db: ^file.SQLFile, changed: ^Bool) -[DB]> Int Never! {
     cnt := 0
     rc := WAL_RETRY
     loop rc == WAL_RETRY -> rc = wal_try_begin_read(w, db, changed, false, cnt)
@@ -1216,7 +1216,7 @@ wal_begin_read_transaction: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]
 }
 
 // sqlite3WalEndReadTransaction.
-wal_end_read_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
+wal_end_read_transaction: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Never! {
     _: wal_end_write_transaction(w, db)
     if w.read_lock >= 0 {
         slot: read_lock(w.read_lock)
@@ -1226,7 +1226,7 @@ wal_end_read_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Never! {
 }
 
 // walFindFrame.
-wal_find_frame_in: fn(w: &Wal, db: &file.SQLFile, pgno: Int, frame: &Int) -[DB]> Int Never! {
+wal_find_frame_in: fn(w: ^Wal, db: ^file.SQLFile, pgno: Int, frame: ^Int) -[DB]> Int Never! {
     frame = 0
     last: wal_mx_frame(w)
     if last == 0 || (w.read_lock == 0 && !w.shm_unreliable) -> return base.OK
@@ -1257,14 +1257,14 @@ wal_find_frame_in: fn(w: &Wal, db: &file.SQLFile, pgno: Int, frame: &Int) -[DB]>
 
 // sqlite3WalFindFrame: the last frame of page pgno in the snapshot, or 0
 // when the page is read from the database file.
-wal_find_frame: fn(w: &Wal, db: &file.SQLFile, pgno: Int, frame: &Int) -[DB]> Int Never! {
+wal_find_frame: fn(w: ^Wal, db: ^file.SQLFile, pgno: Int, frame: ^Int) -[DB]> Int Never! {
     rc: wal_find_frame_in(w, db, pgno, frame)
     wal_shm_result(w, rc)
 }
 
 // sqlite3WalReadFrame: the page data of a frame into out[0..<min(n_out,
 // page size)].
-wal_read_frame: fn(w: &Wal, frame: Int, n_out: Int, out: &[U8]) -[DB]> Int Never! {
+wal_read_frame: fn(w: ^Wal, frame: Int, n_out: Int, out: ^[U8]) -[DB]> Int Never! {
     sz: wal_pagesize(w)
     n: if n_out > sz -> sz else -> n_out
     file.file_read(w.fd, out, n, wal_frame_offset(frame, sz) + WAL_FRAME_HDRSIZE)
@@ -1278,7 +1278,7 @@ wal_dbsize: fn(w: Wal) -> Int Never! {
 
 // sqlite3WalBeginWriteTransaction: the write lock on the newest snapshot,
 // else BUSY or BUSY_SNAPSHOT.
-wal_begin_write_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
+wal_begin_write_transaction: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Int Never! {
     if w.read_only != WAL_RDWR -> return base.READONLY
     rc := wal_lock_exclusive(w, db, WAL_WRITE_LOCK, 1)
     if rc != base.OK -> return rc
@@ -1297,7 +1297,7 @@ wal_begin_write_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
 }
 
 // sqlite3WalEndWriteTransaction.
-wal_end_write_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
+wal_end_write_transaction: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Int Never! {
     if w.write_lock {
         wal_unlock_exclusive(w, db, WAL_WRITE_LOCK, 1)
         w.write_lock = false
@@ -1311,7 +1311,7 @@ wal_end_write_transaction: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
 // sqlite3WalUndo: drop the uncommitted frames. pgnos gets the page of each,
 // in frame order, for the pager's xUndo (pagerUndoCallback), which runs
 // against the restored snapshot.
-wal_undo: fn(w: &Wal, db: &file.SQLFile, pgnos: &[Int]) -[DB]> Int Never! {
+wal_undo: fn(w: ^Wal, db: ^file.SQLFile, pgnos: ^[Int]) -[DB]> Int Never! {
     if !w.write_lock -> return base.OK
     mx_old: wal_mx_frame(w)
     w.hdr = wi_live_hdr(w, db)
@@ -1329,7 +1329,7 @@ wal_savepoint: fn(w: Wal) -> [Int] Never! {
 }
 
 // sqlite3WalSavepointUndo.
-wal_savepoint_undo: fn(w: &Wal, db: &file.SQLFile, data: &[Int]) -[DB]> Int Never! {
+wal_savepoint_undo: fn(w: ^Wal, db: ^file.SQLFile, data: ^[Int]) -[DB]> Int Never! {
     if data[3] != w.n_ckpt {
         // The log was restarted since the savepoint: undo all of it.
         data[0] = 0
@@ -1346,7 +1346,7 @@ wal_savepoint_undo: fn(w: &Wal, db: &file.SQLFile, data: &[Int]) -[DB]> Int Neve
 
 // walRestartLog: a writer whose readers are all past the log starts it
 // over.
-wal_restart_log: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
+wal_restart_log: fn(w: ^Wal, db: ^file.SQLFile) -[DB]> Int Never! {
     rc := base.OK
     if w.read_lock != 0 -> return rc
     if wi_get4(w, db, CKPT_NBACKFILL) > 0 {
@@ -1377,7 +1377,7 @@ WalWriter: struct {
 
 // walWriteToLog: data[0..<amt] at offset, syncing when the write crosses
 // the sync point.
-wal_write_to_log: fn(w: &Wal, wr: WalWriter, data: [U8], amt: Int, offset: Int) -[DB]> Int Never! {
+wal_write_to_log: fn(w: ^Wal, wr: WalWriter, data: [U8], amt: Int, offset: Int) -[DB]> Int Never! {
     if offset < wr.sync_point && offset + amt >= wr.sync_point {
         first: wr.sync_point - offset
         rc := file.file_write(w.fd, data, first, offset)
@@ -1391,7 +1391,7 @@ wal_write_to_log: fn(w: &Wal, wr: WalWriter, data: [U8], amt: Int, offset: Int) 
 }
 
 // walWriteOneFrame.
-wal_write_one_frame: fn(w: &Wal, wr: WalWriter, pgno: Int, data: [U8], n_truncate: Int, offset: Int) -[DB]> Int Never! {
+wal_write_one_frame: fn(w: ^Wal, wr: WalWriter, pgno: Int, data: [U8], n_truncate: Int, offset: Int) -[DB]> Int Never! {
     frame := wal_zeros(WAL_FRAME_HDRSIZE)
     wal_encode_frame(w, pgno, n_truncate, data, 0, frame)
     rc: wal_write_to_log(w, wr, frame, WAL_FRAME_HDRSIZE, offset)
@@ -1401,7 +1401,7 @@ wal_write_one_frame: fn(w: &Wal, wr: WalWriter, pgno: Int, data: [U8], n_truncat
 
 // walRewriteChecksums: recompute the checksums of frames re_cksum..last
 // after frames of this transaction were overwritten in place.
-wal_rewrite_checksums: fn(w: &Wal, last: Int) -[DB]> Int Never! {
+wal_rewrite_checksums: fn(w: ^Wal, last: Int) -[DB]> Int Never! {
     sz_page: w.sz_page
     buf := wal_zeros(sz_page + WAL_FRAME_HDRSIZE)
     frame := wal_zeros(WAL_FRAME_HDRSIZE)
@@ -1424,7 +1424,7 @@ wal_rewrite_checksums: fn(w: &Wal, last: Int) -[DB]> Int Never! {
 }
 
 // The WAL file header of walFrames when the log starts over.
-wal_write_header: fn(w: &Wal, sz_page: Int, sync_flags: Int) -[DB]> Int Never! {
+wal_write_header: fn(w: ^Wal, sz_page: Int, sync_flags: Int) -[DB]> Int Never! {
     hdr := wal_zeros(WAL_HDRSIZE)
     util.put4(hdr, 0, WAL_MAGIC)
     util.put4(hdr, 4, WAL_MAX_VERSION)
@@ -1451,7 +1451,7 @@ wal_write_header: fn(w: &Wal, sz_page: Int, sync_flags: Int) -[DB]> Int Never! {
 
 // walFrames: append the pages of `list` (slots of pc, sorted by page
 // number) to the log; a commit then publishes the new snapshot.
-wal_frames_in: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, list: [Int], n_truncate: Int, is_commit: Bool, sync_flags: Int) -[DB]> Int Never! {
+wal_frames_in: fn(w: ^Wal, db: ^file.SQLFile, pc: ^cache.PCache, sz_page: Int, list: [Int], n_truncate: Int, is_commit: Bool, sync_flags: Int) -[DB]> Int Never! {
     i_first := 0
     live: wi_live_hdr(w, db)
     if live != w.hdr -> i_first = le_get4(live, HDR_MXFRAME) + 1
@@ -1547,7 +1547,7 @@ wal_frames_in: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, l
 }
 
 // sqlite3WalFrames.
-wal_frames: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, list: [Int], n_truncate: Int, is_commit: Bool, sync_flags: Int) -[DB]> Int Never! {
+wal_frames: fn(w: ^Wal, db: ^file.SQLFile, pc: ^cache.PCache, sz_page: Int, list: [Int], n_truncate: Int, is_commit: Bool, sync_flags: Int) -[DB]> Int Never! {
     rc: wal_frames_in(w, db, pc, sz_page, list, n_truncate, is_commit, sync_flags)
     wal_shm_result(w, rc)
 }
@@ -1555,7 +1555,7 @@ wal_frames: fn(w: &Wal, db: &file.SQLFile, pc: &cache.PCache, sz_page: Int, list
 // sqlite3WalCheckpoint: n_log and n_ckpt get the log's frame count and the
 // frames checkpointed. A checkpoint that could not run in `mode` answers
 // BUSY. buf has n_buf (the page size) bytes.
-wal_checkpoint: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler, use_busy: Bool, sync_flags: Int, n_buf: Int, buf: &[U8], n_log: &Int, n_ckpt: &Int) -[DB]> Int Never! {
+wal_checkpoint: fn(w: ^Wal, db: ^file.SQLFile, mode: Int, busy: ^BusyHandler, use_busy: Bool, sync_flags: Int, n_buf: Int, buf: ^[U8], n_log: ^Int, n_ckpt: ^Int) -[DB]> Int Never! {
     if w.read_only != WAL_RDWR -> return base.READONLY
     changed := false
     mode2 := mode
@@ -1595,7 +1595,7 @@ wal_checkpoint: fn(w: &Wal, db: &file.SQLFile, mode: Int, busy: &BusyHandler, us
 }
 
 // sqlite3WalCallback: the frame count of the last commit, once.
-wal_callback: fn(w: &Wal) -> Int Never! {
+wal_callback: fn(w: ^Wal) -> Int Never! {
     if !w.open -> return 0
     ret: w.callback
     w.callback = 0
@@ -1605,7 +1605,7 @@ wal_callback: fn(w: &Wal) -> Int Never! {
 // sqlite3WalExclusiveMode: op 1 enters exclusive mode, 0 leaves it, -1
 // asks; the result is whether the connection is (op 0: now) in normal mode
 // (op 1: 1).
-wal_exclusive_mode: fn(w: &Wal, db: &file.SQLFile, op: Int) -[DB]> Int Never! {
+wal_exclusive_mode: fn(w: ^Wal, db: ^file.SQLFile, op: Int) -[DB]> Int Never! {
     if op == 0 {
         if w.exclusive_mode == WAL_NORMAL_MODE -> return 0
         w.exclusive_mode = WAL_NORMAL_MODE

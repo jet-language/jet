@@ -234,7 +234,7 @@ reach_test_load_module: fn(source: String, module_name: String, owned: [String],
 }
 
 // Each `.jet` file under `dir`, skipping test caches.
-reach_test_sources: fn(dir: String, out: &[String]) {
+reach_test_sources: fn(dir: String, out: ^[String]) {
     // copy: list_dir takes its path, and the panic text still names `dir`.
     entries: fs.list_dir(dir.copy()) ?? panic("cannot list {dir}: {err}")
     loop entry in entries {
@@ -573,7 +573,7 @@ reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDrive
 
 // Counts the methods of `methods` whose names the compiler spells as a
 // literal, and adds to `missing` each one JET_DRIVER_MEMBER_ROUTES lacks.
-reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: &[String], missing: &[String]) Never! {
+reach_test_spelled_methods: fn(methods: [Func], literals: [String:Bool], found: ^[String], missing: ^[String]) Never! {
     loop method in methods {
         if method.name.starts_with("__") || literals.get(method.name) == None -> next
         if !found.contains(method.name) -> found.push(method.name)

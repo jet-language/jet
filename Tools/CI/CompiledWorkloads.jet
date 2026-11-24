@@ -377,11 +377,11 @@ octal: fn(value: Int) -> String Never! {
     digits
 }
 
-put: fn(buffer: &[U8], bytes: [U8]) Never! {
+put: fn(buffer: ^[U8], bytes: [U8]) Never! {
     loop byte in bytes -> buffer.push(byte)
 }
 
-put_text: fn(buffer: &[U8], text: String) Never! {
+put_text: fn(buffer: ^[U8], text: String) Never! {
     put(buffer, text.bytes())
     buffer.push(U8{0})
 }
@@ -393,7 +393,7 @@ file_sha256: fn(path: String) -[FS]> String Never! {
 
 // --- digests -----------------------------------------------------------------
 
-collect_files: fn(root: String, relative: String, out: &[String]) -[FS]> Problem! {
+collect_files: fn(root: String, relative: String, out: ^[String]) -[FS]> Problem! {
     path: "{root}/{relative}"
     meta: files.stat(path) ?? return Err(problem("`{relative}` cannot be read: {err}"))
     if meta.is_dir {
@@ -443,7 +443,7 @@ TreeEntry: struct {
     mode: String,
 }
 
-walk_tree: fn(relative: String, path: String, out: &[TreeEntry]) -[FS]> Problem! {
+walk_tree: fn(relative: String, path: String, out: ^[TreeEntry]) -[FS]> Problem! {
     meta: files.stat(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     kind: if meta.is_dir -> "dir" else if meta.is_symlink -> "symlink" else if meta.is_file -> "file" else -> ""
     if kind == "" -> return Err(problem("`{path}` is not a file, directory or link"))
@@ -604,7 +604,7 @@ Owners: struct {
     live: [String:Bool],
 }
 
-require_live_loss_owner: fn(contract: Contract, owners: &Owners, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
+require_live_loss_owner: fn(contract: Contract, owners: ^Owners, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
     if full("#[0-9]+", owner) {
         live := false
         if owners.live.get(owner) == .Val(known) -> live = known else {
@@ -623,7 +623,7 @@ require_live_loss_owner: fn(contract: Contract, owners: &Owners, owner: String, 
     Err(problem("loss owner is not a card or ratified non-goal: {context}"))
 }
 
-require_manifest_loss_owner: fn(contract: Contract, owners: &Owners, task: String, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
+require_manifest_loss_owner: fn(contract: Contract, owners: ^Owners, task: String, owner: String, context: String) -[Env, Exec, FS, Time, Time.Wait]> Problem! {
     expected: at(contract.task_loss, task)
     if expected == "" || owner != expected {
         shown: if expected == "" -> "missing" else -> expected.copy()
@@ -1236,7 +1236,7 @@ near: fn(actual: Float, expected: Float) -> Bool Never! {
 }
 
 // Ascending insertion sort; sample lists are a handful of values.
-sort_floats: fn(values: &[Float]) {
+sort_floats: fn(values: ^[Float]) {
     loop index in 1..<values.len() {
         current: values[index]
         at := index
@@ -3620,7 +3620,7 @@ peer_supports: fn(targets: String, target: String) -> Bool Never! {
     false
 }
 
-remember_tool: fn(rows: &Rows, info: ToolInfo) {
+remember_tool: fn(rows: ^Rows, info: ToolInfo) {
     loop index in 0..<rows.tools.len() {
         if rows.tools[index].language == info.language {
             rows.tools[index] = info
@@ -4085,7 +4085,7 @@ source_entry: fn(source: String, language: String) -[FS]> String Problem! {
     Err(problem("source directory has no conventional {language} entry: {source}"))
 }
 
-closure_walk: fn(file: String, out: &[String]) -[FS]> Problem! {
+closure_walk: fn(file: String, out: ^[String]) -[FS]> Problem! {
     meta: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
     if meta.is_dir {
         if files.basename(file) == ".jet" -> return Ok()
@@ -4891,7 +4891,7 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     "compiled workload report: produced platform={platform} report={report}"
 }
 
-add_samples: fn(state: Producer, rows: &Rows, task: String, language: String, metric: String, values: [Int], unit: String, method: String) Problem! {
+add_samples: fn(state: Producer, rows: ^Rows, task: String, language: String, metric: String, values: [Int], unit: String, method: String) Problem! {
     if values.len() != state.sample_count {
         return Err(problem("sample count does not match policy: {task}/{language}/{metric}"))
     }
@@ -4962,7 +4962,7 @@ TaskPaths: struct {
 
 // One sample of one side: cold build, warmed source-edit rebuild, native and
 // hostile runs, the diagnostic probe and a deployment of the artifact closure.
-measure_sample: fn(state: Producer, task: [String:String], peer: [String:String], side: &Side, sample: Int, paths: TaskPaths) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
+measure_sample: fn(state: Producer, task: [String:String], peer: [String:String], side: ^Side, sample: Int, paths: TaskPaths) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     task_id: at(task, "task_id")
     normal_input: "{paths.work}/input-{side.name}-{sample}"
     hostile_input: "{paths.work}/hostile-{side.name}-{sample}"
@@ -5022,7 +5022,7 @@ side_hostile: fn(state: Producer, task: [String:String], peer: [String:String], 
     side_run(state, task, peer, side, hostile_input, cwd)
 }
 
-side_samples: fn(state: Producer, rows: &Rows, task_id: String, side: Side, order: String) Problem! {
+side_samples: fn(state: Producer, rows: ^Rows, task_id: String, side: Side, order: String) Problem! {
     count: state.sample_count
     language: side.language
     methods: side.diagnostic_methods.join("|")
@@ -5191,7 +5191,7 @@ tier_evidence: fn(state: Producer, task: [String:String], peer: [String:String],
     found
 }
 
-tier_rows_for: fn(state: Producer, rows: &Rows, task: [String:String], peer: [String:String], tiers: [[String:String]], evidence: TierEvidence, jet_side: Side, peer_side: Side) {
+tier_rows_for: fn(state: Producer, rows: ^Rows, task: [String:String], peer: [String:String], tiers: [[String:String]], evidence: TierEvidence, jet_side: Side, peer_side: Side) {
     task_id: at(task, "task_id")
     platform: state.platform
     launcher: state.launcher
@@ -5245,7 +5245,7 @@ tier_rows_for: fn(state: Producer, rows: &Rows, task: [String:String], peer: [St
 }
 
 // Paired, interleaved samples of Jet and the selected peer for one task.
-measure_task: fn(state: Producer, rows: &Rows, task: [String:String], adapter: [String:String], peer: [String:String], jet_tool: ToolInfo, tiers: [[String:String]]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
+measure_task: fn(state: Producer, rows: ^Rows, task: [String:String], adapter: [String:String], peer: [String:String], jet_tool: ToolInfo, tiers: [[String:String]]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     task_id: at(task, "task_id")
     work: "{state.work}/{task_id}"
     files.create_dir_all(work) ?? return Err(problem("`{work}` cannot be created: {err}"))
@@ -5331,7 +5331,7 @@ coverage_key_path: fn(key: String) -> String Never! {
 }
 
 // Every peer candidate, selected or not, measured natively on its own.
-run_peer_coverage: fn(state: Producer, rows: &Rows, peer: [String:String], task: [String:String], adapter: [String:String], metrics: [[String:String]]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
+run_peer_coverage: fn(state: Producer, rows: ^Rows, peer: [String:String], task: [String:String], adapter: [String:String], metrics: [[String:String]]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     key: peer_key(peer)
     task_id: at(task, "task_id")
     language: at(peer, "language")

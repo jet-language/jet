@@ -107,7 +107,7 @@ find_rightmost: fn(a: ast.AST, s0: Int) -> Int Never! {
 // whose table has a column z_col (not a hidden one with ignore_hidden), as
 // the item and the column, -1 for none. With mark_used the column's use is
 // recorded (C's non-NULL piTab).
-table_and_column_index: fn(db: conn.Conn, a: &ast.AST, src: Int, i_start: Int, i_end: Int, z_col: [U8], ignore_hidden: Bool, mark_used: Bool) -> {tab: Int, col: Int} Never! {
+table_and_column_index: fn(db: conn.Conn, a: ^ast.AST, src: Int, i_start: Int, i_end: Int, z_col: [U8], ignore_hidden: Bool, mark_used: Bool) -> {tab: Int, col: Int} Never! {
     loop i in i_start..<(i_end + 1) {
         si: ast.src_item(a, src, i)
         t: a.items[si].tab
@@ -122,7 +122,7 @@ table_and_column_index: fn(db: conn.Conn, a: &ast.AST, src: Int, i_start: Int, i
 
 // unsetJoinExpr: undo sqlite3SetJoinExpr for join i_table (every join when
 // negative); with `nullable` a column of i_table keeps EP_CAN_BE_NULL.
-unset_join_expr: fn(a: &ast.AST, e0: Int, i_table: Int, nullable: Bool) Never! {
+unset_join_expr: fn(a: ^ast.AST, e0: Int, i_table: Int, nullable: Bool) Never! {
     e := e0
     loop e >= 0 {
         if i_table < 0 || (ast.has(a, e, ast.EP_OUTER_ON) && a.exprs[e].w == i_table) {
@@ -147,7 +147,7 @@ unset_join_expr: fn(a: &ast.AST, e0: Int, i_table: Int, nullable: Bool) Never! {
 
 // The coalesce() call sqlite3ProcessJoin builds over `args` (C's static
 // tkCoalesce token, which no statement text holds).
-coalesce_function: fn(a: &ast.AST, args: Int) -> Int Never! {
+coalesce_function: fn(a: ^ast.AST, args: Int) -> Int Never! {
     e: ast.expr_alloc(a, tk.TK_FUNCTION, Val("coalesce".bytes()), true)
     a.exprs[e].w = -1
     a.exprs[e].x = args
@@ -159,7 +159,7 @@ coalesce_function: fn(a: &ast.AST, args: Int) -> Int Never! {
 // sqlite3ProcessJoin: NATURAL joins become USING joins, and the USING and
 // ON constraints join the WHERE clause marked EP_OUTER_ON or EP_INNER_ON.
 // The number of errors.
-process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
+process_join: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -> Int Never! {
     src: a.selects[s].src
     n: ast.src_len(a, src)
     loop i in 0..<(n - 1) {
@@ -259,13 +259,13 @@ process_join: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Int Never! {
 
 // innerLoopLoadRow: the result columns of s into the registers from
 // reg_result.
-inner_loop_load_row: fn(p: &cg.Parse, a: &ast.AST, s: Int, reg_result: Int, ecel_flags: Int) -[DB]> Never! {
+inner_loop_load_row: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, reg_result: Int, ecel_flags: Int) -[DB]> Never! {
     elist: a.selects[s].elist
     _: ex.expr_code_expr_list(p, a, elist, reg_result, 0, ecel_flags)
 }
 
 // makeSorterRecord: the OP_MakeRecord of the sorter entry; its register.
-make_sorter_record: fn(p: &cg.Parse, a: &ast.AST, sort: SortCtx, s: Int, reg_base: Int, n_base: Int) -[DB]> Int Never! {
+make_sorter_record: fn(p: ^cg.Parse, a: ^ast.AST, sort: SortCtx, s: Int, reg_base: Int, n_base: Int) -[DB]> Int Never! {
     n_ob_sat: sort.n_ob_sat
     p.f.n_mem += 1
     reg_out: p.f.n_mem
@@ -278,7 +278,7 @@ make_sorter_record: fn(p: &cg.Parse, a: &ast.AST, sort: SortCtx, s: Int, reg_bas
 // the sorter. reg_orig_data is the unpacked row when the record holds all
 // of it, else 0; n_prefix_reg the registers before reg_data free for the
 // sort key.
-push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data: Int, reg_orig_data: Int, n_data: Int, n_prefix_reg: Int) -[DB]> Never! {
+push_onto_sorter: fn(p: ^cg.Parse, a: ^ast.AST, sort: ^SortCtx, s: Int, reg_data: Int, reg_orig_data: Int, n_data: Int, n_prefix_reg: Int) -[DB]> Never! {
     b_seq: if sort.sort_flags & SORTFLAG_USE_SORTER == 0 -> 1 else -> 0
     ob: sort.order_by
     n_expr: ast.list_len(a, ob)
@@ -355,7 +355,7 @@ push_onto_sorter: fn(p: &cg.Parse, a: &ast.AST, sort: &SortCtx, s: Int, reg_data
 }
 
 // codeOffset: skip to i_continue while the OFFSET counter is positive.
-code_offset: fn(p: &cg.Parse, i_offset: Int, i_continue: Int) Never! {
+code_offset: fn(p: ^cg.Parse, i_offset: Int, i_continue: Int) Never! {
     if i_offset > 0 -> _: cg.op3(p, opc.OP_IF_POS, i_offset, i_continue, 1)
 }
 
@@ -363,7 +363,7 @@ code_offset: fn(p: &cg.Parse, i_offset: Int, i_continue: Int) Never! {
 // reg_elem (one per term of elist) is new, by the e_tnct_type strategy:
 // the table i_tab (returned), a comparison with the previous row (its
 // first register returned) or nothing (0).
-code_distinct: fn(p: &cg.Parse, a: &ast.AST, e_tnct_type: Int, i_tab: Int, addr_repeat: Int, elist: Int, reg_elem: Int) -[DB]> Int Never! {
+code_distinct: fn(p: ^cg.Parse, a: ^ast.AST, e_tnct_type: Int, i_tab: Int, addr_repeat: Int, elist: Int, reg_elem: Int) -[DB]> Int Never! {
     n_result_col: ast.list_len(a, elist)
     if e_tnct_type == cg.WHERE_DISTINCT_ORDERED {
         reg_prev: p.f.n_mem + 1
@@ -394,7 +394,7 @@ code_distinct: fn(p: &cg.Parse, a: &ast.AST, e_tnct_type: Int, i_tab: Int, addr_
 // fixDistinctOpenEph: after codeDistinct, the OP_OpenEphemeral at
 // i_open_eph_addr goes when the strategy needs no table, becoming the
 // OP_Null that clears the previous row (i_val) for the ordered one.
-fix_distinct_open_eph: fn(p: &cg.Parse, a: ast.AST, e_tnct_type: Int, i_val: Int, i_open_eph_addr: Int) Never! {
+fix_distinct_open_eph: fn(p: ^cg.Parse, a: ast.AST, e_tnct_type: Int, i_val: Int, i_open_eph_addr: Int) Never! {
     if cg.n_err(a) != 0 || (e_tnct_type != cg.WHERE_DISTINCT_UNIQUE && e_tnct_type != cg.WHERE_DISTINCT_ORDERED) {
         return
     }
@@ -412,7 +412,7 @@ fix_distinct_open_eph: fn(p: &cg.Parse, a: ast.AST, e_tnct_type: Int, i_val: Int
 // selectInnerLoop: the body of the loop over the rows of SELECT s: its
 // result row, from the table src_tab when that is not negative, through
 // `sort` (when it has an ORDER BY) and `distinct` to `dest`.
-select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &SortCtx, distinct: DistinctCtx, dest: &cg.SelectDest, i_continue: Int, i_break: Int) -[DB]> Never! {
+select_inner_loop: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, src_tab: Int, sort: ^SortCtx, distinct: DistinctCtx, dest: ^cg.SelectDest, i_continue: Int, i_break: Int) -[DB]> Never! {
     has_distinct: distinct.e_tnct_type
     has_sort: sort.order_by >= 0
     e_dest: dest.e_dest
@@ -562,7 +562,7 @@ select_inner_loop: fn(p: &cg.Parse, a: &ast.AST, s: Int, src_tab: Int, sort: &So
 
 // generateSortTail: the loop that reads the sorter `sort` filled and sends
 // its rows (n_column columns) to dest.
-generate_sort_tail: fn(p: &cg.Parse, a: &ast.AST, s: Int, sort: &SortCtx, n_column0: Int, dest: &cg.SelectDest) Never! {
+generate_sort_tail: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, sort: ^SortCtx, n_column0: Int, dest: ^cg.SelectDest) Never! {
     addr_break: sort.label_done
     addr_continue: cg.v_make_label(p)
     addr_once := 0
@@ -742,7 +742,7 @@ column_type_impl: fn(p: cg.Parse, a: ast.AST, srcs: [Int], e: Int) -> ColumnOrig
 
 // generateColumnTypes: the declared types and origins of the result
 // columns elist over FROM list src.
-generate_column_types: fn(p: &cg.Parse, a: &ast.AST, src: Int, elist: Int) Never! {
+generate_column_types: fn(p: ^cg.Parse, a: ^ast.AST, src: Int, elist: Int) Never! {
     srcs: [Int]{src}
     loop i in 0..<ast.list_len(a, elist) {
         e: ast.list_expr(a, elist, i)
@@ -756,7 +756,7 @@ generate_column_types: fn(p: &cg.Parse, a: &ast.AST, src: Int, elist: Int) Never
 
 // sqlite3GenerateColumnNames: the names of the result columns of SELECT
 // s0 (its compound's left-most SELECT), once per statement.
-generate_column_names: fn(p: &cg.Parse, a: &ast.AST, s0: Int) Never! {
+generate_column_names: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int) Never! {
     if p.f.col_names_set {
         return
     }
@@ -805,7 +805,7 @@ name_with_counter: fn(z: [U8], n: Int, cnt: Int) -> [U8] Never! {
 // sqlite3ColumnsFromExprList: the columns, uniquely named, of a table to
 // hold the rows of result list elist (their types and collations unset);
 // none on error.
-columns_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, elist: Int) -[DB]> [conn.Column] Never! {
+columns_from_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, elist: Int) -[DB]> [conn.Column] Never! {
     n_col := ast.list_len(a, elist)
     if n_col > 32767 -> n_col = 32767
     cols := [conn.Column]{}
@@ -870,7 +870,7 @@ std_type_for_affinity: fn(aff: Int) -> [U8]? Never! {
 // sqlite3SubqueryColumnTypes: the types, collations and affinities (aff
 // by default) of the columns of table t, a subquery, view or CTE, from
 // the SELECT s0 that computes it.
-subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) Never! {
+subquery_column_types: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, s0: Int, aff: Int) Never! {
     if p.db.malloc_failed || ast.in_rename(a) {
         return
     }
@@ -919,7 +919,7 @@ subquery_column_types: fn(p: &cg.Parse, a: &ast.AST, t: Int, s0: Int, aff: Int) 
 
 // sqlite3ResultSetOfSelect: a Table, in p.db.tables, of the result columns
 // of SELECT s0 with default affinity aff; -1 on error.
-result_set_of_select: fn(p: &cg.Parse, a: &ast.AST, s0: Int, aff: Int) -[DB]> Int Never! {
+result_set_of_select: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int, aff: Int) -[DB]> Int Never! {
     saved: p.db.flags
     p.db.flags = util.clear_bits(p.db.flags, conn.SQLITE_FULL_COL_NAMES) | conn.SQLITE_SHORT_COL_NAMES
     select_prep(p, a, s0, -1)
@@ -948,7 +948,7 @@ result_set_of_select: fn(p: &cg.Parse, a: &ast.AST, s0: Int, aff: Int) -[DB]> In
 // computeLimitRegisters: the LIMIT counter (iLimit), and the OFFSET
 // counter (iOffset) with LIMIT+OFFSET after it, of SELECT s, once; a LIMIT
 // of 0 jumps to i_break.
-compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) -[DB]> Never! {
+compute_limit_registers: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, i_break: Int) -[DB]> Never! {
     if a.selects[s].ilimit != 0 {
         return
     }
@@ -986,7 +986,7 @@ compute_limit_registers: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_break: Int) -[D
 
 // multiSelectCollSeq: the collation of result column i_col of compound s,
 // from its left-most term that has one; -1 for none.
-multi_select_coll_seq: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_col: Int) -> Int Never! {
+multi_select_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, i_col: Int) -> Int Never! {
     ret := -1
     prior: a.selects[s].prior
     if prior >= 0 -> ret = multi_select_coll_seq(p, a, prior, i_col)
@@ -1001,7 +1001,7 @@ multi_select_coll_seq: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_col: Int) -> Int 
 // multiSelectOrderByKeyInfo: the KeyInfo of compound s's ORDER BY and
 // n_extra more columns; a term without COLLATE takes its column's
 // collation as an explicit one.
-multi_select_order_by_key_info: fn(p: &cg.Parse, a: &ast.AST, s: Int, n_extra: Int) -> record.KeyInfo Never! {
+multi_select_order_by_key_info: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, n_extra: Int) -> record.KeyInfo Never! {
     ob: a.selects[s].order_by
     n_ob: ast.list_len(a, ob)
     ki := cat.key_info_alloc(p.db, n_ob + n_extra, 1)
@@ -1023,7 +1023,7 @@ multi_select_order_by_key_info: fn(p: &cg.Parse, a: &ast.AST, s: Int, n_extra: I
 // generateWithRecursiveQuery: a WITH RECURSIVE query, s being the
 // recursive terms and its priors the setup query, through a Queue table
 // of rows still to output and, for UNION, a Distinct table of every row.
-generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Never! {
+generate_with_recursive_query: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> Never! {
     src: a.selects[s].src
     n_col: ast.list_len(a, a.selects[s].elist)
     if a.selects[s].win >= 0 {
@@ -1126,7 +1126,7 @@ generate_with_recursive_query: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.S
 // multiSelectValues: a compound of VALUES rows (all UNION ALL, no ORDER
 // BY, no LIMIT but 1) coded row by row without recursion; -1 when a
 // window function makes it the general case's.
-multi_select_values: fn(p: &cg.Parse, a: &ast.AST, s0: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+multi_select_values: fn(p: ^cg.Parse, a: ^ast.AST, s0: Int, dest: ^cg.SelectDest) -[DB]> Int Never! {
     n_row := 1
     s := s0
     b_show_all: a.selects[s].limit < 0
@@ -1156,7 +1156,7 @@ has_anchor: fn(a: ast.AST, s0: Int) -> Bool Never! {
 }
 
 // The UNION ALL case of multiSelect; `end` for its goto multi_select_end.
-multi_select_all: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end: &Bool) -[DB]> Int Never! {
+multi_select_all: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, d: ^cg.SelectDest, end: ^Bool) -[DB]> Int Never! {
     prior: a.selects[s].prior
     a.selects[prior].ilimit = a.selects[s].ilimit
     a.selects[prior].ioffset = a.selects[s].ioffset
@@ -1195,7 +1195,7 @@ multi_select_all: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end: 
 
 // The UNION and EXCEPT case of multiSelect: both sides into one temporary
 // table (a SELECT to the right's when dest is one), then that table out.
-multi_select_union: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end: &Bool) -[DB]> Int Never! {
+multi_select_union: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, d: ^cg.SelectDest, end: ^Bool) -[DB]> Int Never! {
     prior: a.selects[s].prior
     prior_op: cg.SRT_UNION
     union_tab := 0
@@ -1246,7 +1246,7 @@ multi_select_union: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end
 
 // The INTERSECT case of multiSelect: the left side into tab1, the right
 // into tab2, then the rows of tab1 that tab2 has.
-multi_select_intersect: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest, end: &Bool) -[DB]> Int Never! {
+multi_select_intersect: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, d: ^cg.SelectDest, end: ^Bool) -[DB]> Int Never! {
     prior: a.selects[s].prior
     tab1: p.f.n_tab
     tab2: p.f.n_tab + 1
@@ -1294,7 +1294,7 @@ multi_select_intersect: fn(p: &cg.Parse, a: &ast.AST, s: Int, d: &cg.SelectDest,
 
 // multiSelect: compound SELECT s (the right-most term; its prior the
 // terms to the left) to dest.
-multi_select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+multi_select: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> Int Never! {
     rc := base.OK
     prior: a.selects[s].prior
     d := dest.copy()
@@ -1360,7 +1360,7 @@ multi_select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]>
 // the previous row (in the registers after reg_prev, with reg_prev set
 // once there is one) unless reg_prev is 0, and returning through
 // reg_return; the LIMIT jumps to i_break.
-generate_output_subroutine: fn(p: &cg.Parse, a: &ast.AST, s: Int, inp: cg.SelectDest, dest: &cg.SelectDest, reg_return: Int, reg_prev: Int, key_dup: record.KeyInfo, i_break: Int) -[DB]> Int Never! {
+generate_output_subroutine: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, inp: cg.SelectDest, dest: ^cg.SelectDest, reg_return: Int, reg_prev: Int, key_dup: record.KeyInfo, i_break: Int) -[DB]> Int Never! {
     addr: cg.v_current_addr(p)
     i_continue: cg.v_make_label(p)
     if reg_prev != 0 {
@@ -1410,7 +1410,7 @@ generate_output_subroutine: fn(p: &cg.Parse, a: &ast.AST, s: Int, inp: cg.Select
 // as a merge of two coroutines, the terms left of the split and those
 // from it, each in ORDER BY order; UNION, EXCEPT and INTERSECT drop
 // repeats in the output subroutines. Nonzero on error.
-multi_select_order_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+multi_select_order_by: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> Int Never! {
     label_end: cg.v_make_label(p)
     label_cmpr: cg.v_make_label(p)
     op: a.selects[s].op
@@ -1598,7 +1598,7 @@ SubstContext: struct {
 }
 
 // substExpr: e with the substitution made; the expression to keep.
-subst_expr: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, e: Int) -> Int Never! {
+subst_expr: fn(p: ^cg.Parse, a: ^ast.AST, sc: SubstContext, e: Int) -> Int Never! {
     if e < 0 -> return -1
     both_on: ast.EP_OUTER_ON | ast.EP_INNER_ON
     if ast.has(a, e, both_on) && a.exprs[e].w == sc.i_table -> a.exprs[e].w = sc.i_new_table
@@ -1665,7 +1665,7 @@ subst_expr: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, e: Int) -> Int Never
 }
 
 // substExprList.
-subst_expr_list: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, list: Int) Never! {
+subst_expr_list: fn(p: ^cg.Parse, a: ^ast.AST, sc: SubstContext, list: Int) Never! {
     loop i in 0..<ast.list_len(a, list) {
         x: ast.list_expr(a, list, i)
         n: subst_expr(p, a, sc, x)
@@ -1675,7 +1675,7 @@ subst_expr_list: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, list: Int) Neve
 
 // substSelect: the substitution throughout SELECT s0, and its priors with
 // do_prior.
-subst_select: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, s0: Int, do_prior: Bool) Never! {
+subst_select: fn(p: ^cg.Parse, a: ^ast.AST, sc: SubstContext, s0: Int, do_prior: Bool) Never! {
     s := s0
     loop s >= 0 {
         subst_expr_list(p, a, sc, a.selects[s].elist)
@@ -1703,27 +1703,27 @@ ColUsedWalker: struct {
     hits: [Int],
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             if a.exprs[e].op == tk.TK_COLUMN && a.exprs[e].itable == self.cursor && a.exprs[e].icolumn >= 0 {
                 self.hits.push(e)
             }
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
 // recomputeColumnsUsed: FROM item si's colUsed from what SELECT s uses.
-recompute_columns_used: fn(p: &cg.Parse, a: &ast.AST, s: Int, si: Int) Never! {
+recompute_columns_used: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, si: Int) Never! {
     if a.items[si].tab < 0 {
         return
     }
@@ -1737,7 +1737,7 @@ recompute_columns_used: fn(p: &cg.Parse, a: &ast.AST, s: Int, si: Int) Never! {
 // srclistRenumberCursors: new cursors for the items of src but i_except
 // and of its subqueries, old+1 mapping to new in csr_map (csr_map[0] its
 // size).
-srclist_renumber_cursors: fn(p: &cg.Parse, a: &ast.AST, csr_map: &[Int], src: Int, i_except: Int) Never! {
+srclist_renumber_cursors: fn(p: ^cg.Parse, a: ^ast.AST, csr_map: ^[Int], src: Int, i_except: Int) Never! {
     loop i in 0..<ast.src_len(a, src) {
         if i == i_except -> next
         si: ast.src_item(a, src, i)
@@ -1761,7 +1761,7 @@ RenumberWalker: struct {
     csr_map: [Int],
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! {
             op: a.exprs[e].op
             if op == tk.TK_COLUMN || op == tk.TK_IF_NULL_ROW {
                 a.exprs[e].itable = renumber_mapping(self.csr_map, a.exprs[e].itable)
@@ -1772,15 +1772,15 @@ RenumberWalker: struct {
             ast.WRC_CONTINUE
         }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
@@ -1792,7 +1792,7 @@ renumber_mapping: fn(m: [Int], c: Int) -> Int Never! {
 
 // renumberCursors: new cursors for the FROM items of SELECT s (but
 // i_except) and their subqueries, with every reference following.
-renumber_cursors: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_except: Int, csr_map: &[Int]) Never! {
+renumber_cursors: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, i_except: Int, csr_map: ^[Int]) Never! {
     src: a.selects[s].src
     srclist_renumber_cursors(p, a, csr_map, src, i_except)
     w := RenumberWalker{csr_map: csr_map.copy()}
@@ -1808,7 +1808,7 @@ find_leftmost_exprlist: fn(a: ast.AST, s0: Int) -> Int Never! {
 
 // compoundHasDifferentAffinities: whether a result column's affinity
 // differs between the terms of compound s.
-compound_has_different_affinities: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never! {
+compound_has_different_affinities: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -> Bool Never! {
     list: a.selects[s].elist
     loop ii in 0..<ast.list_len(a, list) {
         e: ast.list_expr(a, list, ii)
@@ -1826,7 +1826,7 @@ compound_has_different_affinities: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool
 // flattenSubquery: merge the subquery of FROM item i_from of SELECT s
 // into s (is_agg: s is an aggregate) when the restrictions select.c lists
 // allow it; whether it did.
-flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Bool) -[DB]> Bool Never! {
+flatten_subquery: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, i_from: Int, is_agg: Bool) -[DB]> Bool Never! {
     saved_auth: p.f.auth_context
     if cg.opt_disabled(p, cg.OPT_QUERY_FLATTENER) -> return false
     src := a.selects[s].src
@@ -2009,7 +2009,7 @@ flatten_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i_from: Int, is_agg: Boo
 // constInsert: COLUMN=VALUE expression e (column col, constant val) joins
 // the pairs unless the column is fixed or present, the value has an
 // affinity, or the comparison is not BINARY.
-const_insert: fn(p: &cg.Parse, a: &ast.AST, t: Int, col: Int, val: Int, e: Int) Never! {
+const_insert: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, col: Int, val: Int, e: Int) Never! {
     if ast.has(a, col, ast.EP_FIXED_COL) {
         return
     }
@@ -2034,7 +2034,7 @@ const_insert: fn(p: &cg.Parse, a: &ast.AST, t: Int, col: Int, val: Int, e: Int) 
 }
 
 // findConstInWhere: the AND-connected COLUMN=CONSTANT terms of e.
-find_const_in_where: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int) Never! {
+find_const_in_where: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, e: Int) Never! {
     if e < 0 {
         return
     }
@@ -2059,7 +2059,7 @@ find_const_in_where: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int) Never! {
 // propagateConstantExprRewriteOne: a column of the pairs (unless blob
 // affinity with ignore_aff_blob) is marked EP_FIXED_COL with a copy of
 // its value on the left.
-propagate_constant_rewrite_one: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int, ignore_aff_blob: Bool) -> Int Never! {
+propagate_constant_rewrite_one: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, e: Int, ignore_aff_blob: Bool) -> Int Never! {
     if p.db.malloc_failed -> return ast.WRC_PRUNE
     if a.exprs[e].op != tk.TK_COLUMN -> return ast.WRC_CONTINUE
     if ast.has(a, e, ast.EP_FIXED_COL | p.walks[t].u) -> return ast.WRC_CONTINUE
@@ -2086,7 +2086,7 @@ PropagateConstWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             t: cg.walk_top(p)
             if p.walks[t].e_code != 0 {
                 op: a.exprs[e].op
@@ -2105,13 +2105,13 @@ PropagateConstWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
@@ -2119,7 +2119,7 @@ PropagateConstWalker: struct {
 
 // propagateConstants: the WHERE-clause constant propagation of SELECT s
 // (see select.c); the number of changes.
-propagate_constants: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+propagate_constants: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     n_chng := 0
     loop {
         w := PropagateConstWalker{unused: 0}
@@ -2148,7 +2148,7 @@ propagate_constants: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 // pushDownWhereTerms: copies of the terms of the outer WHERE `wh` that
 // constrain FROM item i_src of src_list alone go to the WHERE (HAVING for
 // an aggregate) of each term of its subquery sub; the number pushed.
-push_down_where_terms: fn(p: &cg.Parse, a: &ast.AST, sub: Int, wh0: Int, src_list: Int, i_src: Int) -[DB]> Int Never! {
+push_down_where_terms: fn(p: ^cg.Parse, a: ^ast.AST, sub: Int, wh0: Int, src_list: Int, i_src: Int) -[DB]> Int Never! {
     if wh0 < 0 -> return 0
     si: ast.src_item(a, src_list, i_src)
     if a.selects[sub].sel_flags & (ast.SF_RECURSIVE | ast.SF_MULTI_PART) != 0 -> return 0
@@ -2217,7 +2217,7 @@ push_down_where_terms: fn(p: &cg.Parse, a: &ast.AST, sub: Int, wh0: Int, src_lis
 
 // disableUnusedSubqueryResultColumns: the result columns of FROM item
 // si's subquery that nothing reads become NULL; how many.
-disable_unused_subquery_result_columns: fn(p: &cg.Parse, a: &ast.AST, si: Int) -> Int Never! {
+disable_unused_subquery_result_columns: fn(p: ^cg.Parse, a: ^ast.AST, si: Int) -> Int Never! {
     if a.items[si].is_correlated || a.items[si].is_cte -> return 0
     t: a.items[si].tab
     sub: a.items[si].select
@@ -2264,7 +2264,7 @@ disable_unused_subquery_result_columns: fn(p: &cg.Parse, a: &ast.AST, si: Int) -
 // minMaxQuery: for the one aggregate e, WHERE_ORDERBY_MIN or _MAX with
 // the ORDER BY (its argument) that finds the answer first, when e is
 // min() or max() of one argument.
-min_max_query: fn(p: &cg.Parse, a: &ast.AST, e: Int) -> {ret: Int, ob: Int} Never! {
+min_max_query: fn(p: ^cg.Parse, a: ^ast.AST, e: Int) -> {ret: Int, ob: Int} Never! {
     elist: a.exprs[e].x
     if elist < 0 || ast.list_len(a, elist) != 1 || ast.has(a, e, ast.EP_WIN_FUNC) || cg.opt_disabled(p, cg.OPT_MIN_MAX_OPT) {
         return {ret: cg.WHERE_ORDERBY_NORMAL, ob: -1}
@@ -2305,7 +2305,7 @@ is_simple_count: fn(p: cg.Parse, a: ast.AST, s: Int, ai: Int) -> Int Never! {
 
 // sqlite3IndexedByLookup: the index FROM item si's INDEXED BY names, in
 // its u2; an error when its table has none.
-indexed_by_lookup: fn(p: &cg.Parse, a: &ast.AST, si: Int) -> Int Never! {
+indexed_by_lookup: fn(p: ^cg.Parse, a: ^ast.AST, si: Int) -> Int Never! {
     t: a.items[si].tab
     z: a.items[si].indexed_by ?? [U8]{}
     ix := p.db.tables[t].index
@@ -2329,23 +2329,23 @@ ConvertCompoundWalker: struct {
     unused: Int,
 
     impl SQLWalker {
-        walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! { ast.WRC_CONTINUE }
+        walk_expr_cb: fn(^self, a: ^ast.AST, e: Int) -> Int Never! { ast.WRC_CONTINUE }
 
-        walk_has_select_cb: fn(&self) -> Bool Never! { true }
+        walk_has_select_cb: fn(^self) -> Bool Never! { true }
 
-        walk_select_cb: fn(&self, a: &ast.AST, s: Int) -> Int Never! {
+        walk_select_cb: fn(^self, a: ^ast.AST, s: Int) -> Int Never! {
             convert_compound_select_to_subquery(a, s)
         }
 
-        walk_has_select_cb2: fn(&self) -> Bool Never! { false }
+        walk_has_select_cb2: fn(^self) -> Bool Never! { false }
 
-        walk_select_cb2: fn(&self, a: &ast.AST, s: Int) Never! {}
+        walk_select_cb2: fn(^self, a: ^ast.AST, s: Int) Never! {}
 
-        walk_win_defn: fn(&self, a: &ast.AST) -> Bool Never! { false }
+        walk_win_defn: fn(^self, a: ^ast.AST) -> Bool Never! { false }
     }
 }
 
-convert_compound_select_to_subquery: fn(a: &ast.AST, s: Int) -> Int Never! {
+convert_compound_select_to_subquery: fn(a: ^ast.AST, s: Int) -> Int Never! {
     if a.selects[s].prior < 0 -> return ast.WRC_CONTINUE
     ob: a.selects[s].order_by
     if ob < 0 -> return ast.WRC_CONTINUE
@@ -2385,7 +2385,7 @@ convert_compound_select_to_subquery: fn(a: &ast.AST, s: Int) -> Int Never! {
 
 // cannotBeFunction: an error when FROM item si has table-valued function
 // arguments.
-cannot_be_function: fn(a: &ast.AST, si: Int) -> Bool Never! {
+cannot_be_function: fn(a: ^ast.AST, si: Int) -> Bool Never! {
     if a.items[si].is_tab_func {
         ast.error(a, "'{ast.text(a.items[si].name ?? [U8]{})}' is not a function")
         return true
@@ -2410,7 +2410,7 @@ search_with: fn(a: ast.AST, w0: Int, z: [U8]) -> {cte: Int, with: Int} Never! {
 // resolveFromTermToCte: FROM item si as a reference to a CTE in scope
 // (Cte.zCteErr, here cte_err, holds the message prefix for an illegal
 // recursive reference): 0 no match, 1 matched, 2 error.
-resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Never! {
+resolve_from_term_to_cte: fn(p: ^cg.Parse, a: ^ast.AST, si: Int) -[DB]> Int Never! {
     if a.ctx.cur_with < 0 -> return 0
     if cg.n_err(a) != 0 -> return 0
     if a.items[si].database != None -> return 0
@@ -2519,7 +2519,7 @@ resolve_from_term_to_cte: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Neve
 
 // sqlite3SelectPopWith: the WITH of compound s (its right-most term's)
 // leaves scope.
-select_pop_with: fn(a: &ast.AST, s: Int) Never! {
+select_pop_with: fn(a: ^ast.AST, s: Int) Never! {
     if a.ctx.cur_with >= 0 && a.selects[s].prior < 0 {
         w: a.selects[find_rightmost(a, s)].with_clause
         if w >= 0 -> a.ctx.cur_with = a.withs[w].outer
@@ -2528,7 +2528,7 @@ select_pop_with: fn(a: &ast.AST, s: Int) Never! {
 
 // sqlite3ExpandSubquery: the ephemeral Table of FROM subquery si's
 // result columns.
-expand_subquery: fn(p: &cg.Parse, a: &ast.AST, si: Int) -[DB]> Int Never! {
+expand_subquery: fn(p: ^cg.Parse, a: ^ast.AST, si: Int) -[DB]> Int Never! {
     sel := a.items[si].select
     tb: conn.table_alloc(p.db)
     a.items[si].tab = tb
@@ -2566,7 +2566,7 @@ join_bytes: fn(parts: [[U8]], sep: U8) -> [U8] Never! {
 // of the SELECT of a view or CTE, a Table for a subquery), the joins'
 // ON and USING terms, and the "*" and "TABLE.*" result columns expanded.
 // The walk's e_code renumbers selId (a view's copy).
-select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+select_expander: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
     sel_flags: a.selects[s].sel_flags
     a.selects[s].sel_flags = sel_flags | ast.SF_EXPANDED
     if p.db.malloc_failed -> return ast.WRC_ABORT
@@ -2799,17 +2799,17 @@ ExpanderWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             select_expander(p, a, s)
         }
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
             select_pop_with(a, s)
         }
 
@@ -2818,7 +2818,7 @@ ExpanderWalker: struct {
 }
 
 // sqlite3SelectExpand: SELECT s and its subqueries expanded.
-select_expand: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+select_expand: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
     if a.ctx.has_compound {
         cw := ConvertCompoundWalker{unused: 0}
         _: ast.walk_select<ConvertCompoundWalker>(cw, a, s)
@@ -2835,17 +2835,17 @@ TypeInfoWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
 
         has_select: fn(self) -[]> Bool Never! { true }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { true }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
             select_add_subquery_type_info(p, a, s)
         }
 
@@ -2855,7 +2855,7 @@ TypeInfoWalker: struct {
 
 // selectAddSubqueryTypeInfo: the column types of the FROM subqueries'
 // tables of s, once name resolution is done.
-select_add_subquery_type_info: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
+select_add_subquery_type_info: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) Never! {
     if a.selects[s].sel_flags & ast.SF_HAS_TYPE_INFO != 0 {
         return
     }
@@ -2873,7 +2873,7 @@ select_add_subquery_type_info: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
 
 // sqlite3SelectPrep: SELECT s expanded, its names resolved (in outer_nc,
 // -1 for none) and its subqueries' column types set.
-select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
+select_prep: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, outer_nc: Int) -[DB]> Never! {
     if p.db.malloc_failed {
         return
     }
@@ -2899,7 +2899,7 @@ select_prep: fn(p: &cg.Parse, a: &ast.AST, s: Int, outer_nc: Int) -[DB]> Never! 
 
 // analyzeAggFuncArgs: the columns the arguments (and ORDER BY and FILTER)
 // of the aggregate functions of AggInfo ai use, under NameContext nc.
-analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) -[DB]> Never! {
+analyze_agg_func_args: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int, nc: Int) -[DB]> Never! {
     p.ncs[nc].nc_flags = p.ncs[nc].nc_flags | ast.NC_IN_AGG_FUNC
     loop i in 0..<p.aggs[ai].funcs.len() {
         e: p.aggs[ai].funcs[i].f_expr
@@ -2916,7 +2916,7 @@ analyze_agg_func_args: fn(p: &cg.Parse, a: &ast.AST, ai: Int, nc: Int) -[DB]> Ne
 // optimizeAggregateUseOfIndexedExpr: the AggInfo columns past the
 // accumulator ones recomputed, the sorter wide enough for the indexed
 // expressions.
-optimize_aggregate_use_of_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, s: Int, ai: Int, nc: Int) -[DB]> Never! {
+optimize_aggregate_use_of_indexed_expr: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, ai: Int, nc: Int) -[DB]> Never! {
     n_acc: p.aggs[ai].n_accumulator
     loop p.aggs[ai].cols.len() > n_acc -> _: p.aggs[ai].cols.pop()
     if p.aggs[ai].n_sorting_column > 0 {
@@ -2936,7 +2936,7 @@ IdxEprRefWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             ai: a.exprs[e].agg_info
             if ai < 0 -> return ast.WRC_CONTINUE
             op: a.exprs[e].op
@@ -2955,20 +2955,20 @@ IdxEprRefWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { false }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // aggregateConvertIndexedExprRefToColumn.
-aggregate_convert_indexed_expr_ref_to_column: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
+aggregate_convert_indexed_expr_ref_to_column: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int) -[DB]> Never! {
     w := IdxEprRefWalker{unused: 0}
     cg.walk_push(p, w, 0)
     loop i in 0..<p.aggs[ai].funcs.len() {
@@ -2980,14 +2980,14 @@ aggregate_convert_indexed_expr_ref_to_column: fn(p: &cg.Parse, a: &ast.AST, ai: 
 
 // assignAggregateRegisters: one register per AggInfo column and function,
 // from iFirstReg.
-assign_aggregate_registers: fn(p: &cg.Parse, ai: Int) Never! {
+assign_aggregate_registers: fn(p: ^cg.Parse, ai: Int) Never! {
     p.aggs[ai].i_first_reg = p.f.n_mem + 1
     p.f.n_mem += p.aggs[ai].cols.len() + p.aggs[ai].funcs.len()
 }
 
 // resetAccumulator: the accumulator registers set to NULL, with the
 // DISTINCT and ORDER BY tables of the aggregates opened.
-reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
+reset_accumulator: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int) -[DB]> Never! {
     n_reg: p.aggs[ai].funcs.len() + p.aggs[ai].cols.len()
     if n_reg == 0 {
         return
@@ -3033,7 +3033,7 @@ reset_accumulator: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
 
 // finalizeAggFunctions: OP_AggFinal for each aggregate, after the deferred
 // OP_AggStep calls, in ORDER BY order, of an ORDER BY aggregate.
-finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
+finalize_agg_functions: fn(p: ^cg.Parse, a: ^ast.AST, ai: Int) -[DB]> Never! {
     loop i in 0..<p.aggs[ai].funcs.len() {
         f: p.aggs[ai].funcs[i].copy()
         list: a.exprs[f.f_expr].x
@@ -3078,7 +3078,7 @@ finalize_agg_functions: fn(p: &cg.Parse, a: &ast.AST, ai: Int) -[DB]> Never! {
 // updateAccumulator: the accumulators of AggInfo ai updated from the
 // current row; with reg_acc (and no min() or max()) the accumulator
 // columns load only while reg_acc holds 0.
-update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_distinct_type: Int) -[DB]> Never! {
+update_accumulator: fn(p: ^cg.Parse, a: ^ast.AST, reg_acc: Int, ai: Int, e_distinct_type: Int) -[DB]> Never! {
     if cg.n_err(a) != 0 {
         return
     }
@@ -3186,7 +3186,7 @@ update_accumulator: fn(p: &cg.Parse, a: &ast.AST, reg_acc: Int, ai: Int, e_disti
 
 // explainSimpleCount: the plan line of "SELECT count(*) FROM t" (through
 // index ix, or -1).
-explain_simple_count: fn(p: &cg.Parse, a: ast.AST, t: Int, ix: Int) Never! {
+explain_simple_count: fn(p: ^cg.Parse, a: ast.AST, t: Int, ix: Int) Never! {
     if a.ctx.explain != 2 {
         return
     }
@@ -3203,7 +3203,7 @@ HavingToWhereWalker: struct {
     unused: Int,
 
     impl WalkCb {
-        on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
+        on_expr: fn(self, p: ^cg.Parse, a: ^ast.AST, e: Int) -[DB]> Int Never! {
             if a.exprs[e].op == tk.TK_AND -> return ast.WRC_CONTINUE
             t: cg.walk_top(p)
             s: p.walks[t].u
@@ -3223,20 +3223,20 @@ HavingToWhereWalker: struct {
 
         has_select: fn(self) -[]> Bool Never! { false }
 
-        on_select: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
+        on_select: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Int Never! {
             ast.WRC_CONTINUE
         }
 
         has_select2: fn(self) -[]> Bool Never! { false }
 
-        on_select2: fn(self, p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {}
+        on_select2: fn(self, p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {}
 
         win_defn: fn(self) -[]> Bool Never! { false }
     }
 }
 
 // havingToWhere.
-having_to_where: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
+having_to_where: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Never! {
     w := HavingToWhereWalker{unused: 0}
     cg.walk_push(p, w, s)
     _: cg.pwalk_expr(p, a, a.selects[s].having)
@@ -3267,7 +3267,7 @@ is_self_join_view: fn(db: conn.Conn, a: ast.AST, tab_list: Int, this_si: Int, i_
 // countOfViewOptimization: "SELECT count(*) FROM (a UNION ALL b ..)"
 // becomes "SELECT (SELECT count(*) FROM a) + (SELECT count(*) FROM b) ..";
 // whether it did.
-count_of_view_optimization: fn(p: &cg.Parse, a: &ast.AST, s: Int) -> Bool Never! {
+count_of_view_optimization: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -> Bool Never! {
     if a.selects[s].sel_flags & ast.SF_AGGREGATE == 0 -> return false
     elist: a.selects[s].elist
     if ast.list_len(a, elist) != 1 -> return false
@@ -3374,7 +3374,7 @@ from_clause_term_can_be_coroutine: fn(p: cg.Parse, a: ast.AST, tab_list: Int, i0
 
 // The join strength reduction of FROM term i of SELECT s, once its WHERE
 // shows the term cannot be the NULL row of its join.
-simplify_join: fn(a: &ast.AST, s: Int, i: Int) Never! {
+simplify_join: fn(a: ^ast.AST, s: Int, i: Int) Never! {
     tab_list: a.selects[s].src
     w: a.selects[s].where_expr
     si: ast.src_item(a, tab_list, i)
@@ -3411,7 +3411,7 @@ simplify_join: fn(a: &ast.AST, s: Int, i: Int) Never! {
 // join simplification, then the ORDER BY removal and flattening of a
 // subquery term. The next term to look at (0 after a flattening, which
 // restarts the loop), or -1 on error.
-simplify_from_term: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, is_agg: Bool, e_dest: Int, sort: &SortCtx) -[DB]> Int Never! {
+simplify_from_term: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, i: Int, is_agg: Bool, e_dest: Int, sort: ^SortCtx) -[DB]> Int Never! {
     tab_list: a.selects[s].src
     si: ast.src_item(a, tab_list, i)
     jt: a.items[si].jointype
@@ -3455,7 +3455,7 @@ simplify_from_term: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, is_agg: Bool, 
 // The code of subquery FROM term i (item si, SELECT sub) of SELECT s: a
 // co-routine, a reuse of a CTE's or an earlier term's materialization, or
 // a materialization into the term's ephemeral table.
-code_from_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, si: Int, sub: Int) -[DB]> Never! {
+code_from_subquery: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, i: Int, si: Int, sub: Int) -[DB]> Never! {
     tab_list: a.selects[s].src
     t: a.items[si].tab
     if from_clause_term_can_be_coroutine(p, a, tab_list, i, a.selects[s].sel_flags) {
@@ -3522,7 +3522,7 @@ code_from_subquery: fn(p: &cg.Parse, a: &ast.AST, s: Int, i: Int, si: Int, sub: 
 // sqlite3Select's second FROM loop: the null READ authorizations of
 // tables nothing reads, then the code of every subquery term, after the
 // push-down and unused-column optimizations. Whether it failed.
-code_from_subqueries: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Bool Never! {
+code_from_subqueries: fn(p: ^cg.Parse, a: ^ast.AST, s: Int) -[DB]> Bool Never! {
     tab_list: a.selects[s].src
     loop i in 0..<ast.src_len(a, tab_list) {
         si: ast.src_item(a, tab_list, i)
@@ -3558,7 +3558,7 @@ code_from_subqueries: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Bool Never! {
 // The GROUP BY aggregate loop of SELECT s (AggInfo ai, NameContext nc):
 // the rows in GROUP BY order, from the planner or through a sorter, with
 // the output and accumulator-reset subroutines. Whether it failed.
-select_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sort: &SortCtx, distinct: DistinctCtx, ai: Int, nc: Int, order_by_grp: Bool, addr_end: Int, where_e: Int) -[DB]> Bool Never! {
+select_group_by: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest, sort: ^SortCtx, distinct: DistinctCtx, ai: Int, nc: Int, order_by_grp: Bool, addr_end: Int, where_e: Int) -[DB]> Bool Never! {
     tab_list: a.selects[s].src
     group_by: a.selects[s].group_by
     having: a.selects[s].having
@@ -3705,7 +3705,7 @@ select_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sor
 // The aggregate of SELECT s without GROUP BY (AggInfo ai): OP_Count for a
 // simple count(*), else one pass that accumulates, finalizes and outputs
 // the single row. Whether it failed.
-select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sort: &SortCtx, ai: Int, min_max_flag: Int, min_max_ob: Int, where_e: Int, addr_end: Int) -[DB]> Bool Never! {
+select_agg_no_group_by: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest, sort: ^SortCtx, ai: Int, min_max_flag: Int, min_max_ob: Int, where_e: Int, addr_end: Int) -[DB]> Bool Never! {
     tab_list: a.selects[s].src
     t: is_simple_count(p, a, s, ai)
     if t >= 0 {
@@ -3785,7 +3785,7 @@ select_agg_no_group_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDe
 // The aggregate half of sqlite3Select (an aggregate or GROUP BY query):
 // the AggInfo and its analysis, then the GROUP BY loop or the single-row
 // aggregate. Whether it failed.
-select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, sort: &SortCtx, distinct: DistinctCtx) -[DB]> Bool Never! {
+select_aggregate: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest, sort: ^SortCtx, distinct: DistinctCtx) -[DB]> Bool Never! {
     tab_list: a.selects[s].src
     elist: a.selects[s].elist
     group_by: a.selects[s].group_by
@@ -3845,7 +3845,7 @@ select_aggregate: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest, so
 
 // The body of sqlite3Select after sqlite3SelectPrep: its result code, and
 // whether the caller pops the EXPLAIN QUERY PLAN level (see above).
-select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> {rc: Int, pop: Bool} Never! {
+select_body: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> {rc: Int, pop: Bool} Never! {
     if a.selects[s].sel_flags & ast.SF_UF_SRC_CHECK != 0 {
         src: a.selects[s].src
         p0: ast.src_item(a, src, 0)
@@ -3984,7 +3984,7 @@ select_body: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> 
 
 // sqlite3Select: the code of SELECT s, its rows going to dest; 1 when
 // there was an error, else 0.
-select: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDest) -[DB]> Int Never! {
+select: fn(p: ^cg.Parse, a: ^ast.AST, s: Int, dest: ^cg.SelectDest) -[DB]> Int Never! {
     cg.get_vdbe(p)
     if s < 0 || cg.n_err(a) != 0 -> return 1
     if cg.auth_check(p, a, conn.AUTH_SELECT, None, None, None) != 0 -> return 1
@@ -4016,7 +4016,7 @@ select_test_has_op: fn(p: cg.Parse, opcode: Int) -> Bool Never! {
 }
 
 // "SELECT 1" with the extra clauses the caller sets.
-select_test_one: fn(a: &ast.AST) -> Int Never! {
+select_test_one: fn(a: ^ast.AST) -> Int Never! {
     one: ast.expr(a, tk.TK_INTEGER, "1".bytes())
     elist: ast.expr_list_append(a, -1, one)
     ast.select_new(a, elist, -1, -1, -1, -1, -1, 0, -1)

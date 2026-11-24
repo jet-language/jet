@@ -17,7 +17,7 @@ Table: struct {
     rows: [String],
 }
 
-insert: fn(table: &Table, row: String) -[SQL.Write]> {
+insert: fn(table: ^Table, row: String) -[SQL.Write]> {
     print("INSERT INTO {table.name} VALUES ('{row}')")
     table.rows.push(row.copy())
 }
@@ -32,7 +32,7 @@ select: fn(table: Table, prefix: String) -[SQL.Read]> [String] {
 }
 
 // A caller that names the whole effect may read and write.
-seed: fn(table: &Table) -[SQL]> {
+seed: fn(table: ^Table) -[SQL]> {
     names: [String]{"ada", "alan", "grace"}
     loop name in names -> insert(table, name)
 }

@@ -523,7 +523,7 @@ open_regular_path: fn(path: String, label: String, limit: Int) -[FS]> files.File
 
 // Every byte of the open file, refusing more than `limit` bytes and a file
 // that changes while it is read.
-read_bounded: fn(reader: &files.FileReader, limit: Int, label: String) -[FS]> [U8] StageError! {
+read_bounded: fn(reader: ^files.FileReader, limit: Int, label: String) -[FS]> [U8] StageError! {
     start: reader.stat() ?? return Err(failed("{label} cannot be inspected: {err}"))
     if start.size > limit -> return Err(failed("{label} exceeds the {limit} byte bound"))
     bytes := [U8]{}
@@ -560,7 +560,7 @@ wanted: fn(size: Int, total: Int) -> Int Never! {
 }
 
 // The two open files hold the same bytes, and neither changed meanwhile.
-compare_files: fn(source: &files.FileReader, destination: &files.FileReader, limit: Int, label: String) -[FS]> StageError! {
+compare_files: fn(source: ^files.FileReader, destination: ^files.FileReader, limit: Int, label: String) -[FS]> StageError! {
     source_stat: source.stat() ?? return Err(failed("{label} source cannot be inspected: {err}"))
     destination_stat: destination.stat() ?? return Err(failed("{label} destination cannot be inspected: {err}"))
     if source_stat.size != destination_stat.size {
@@ -621,7 +621,7 @@ remove_owned: fn(parent: files.Directory, name: String, identity: files.Stat?) -
 
 // Copy the rest of `source` into `writer` and make it durable; the written
 // file's identity.
-fill_from: fn(source: &files.FileReader, writer: &files.FileWriter, limit: Int, label: String) -[FS]> files.Stat StageError! {
+fill_from: fn(source: ^files.FileReader, writer: ^files.FileWriter, limit: Int, label: String) -[FS]> files.Stat StageError! {
     start: source.stat() ?? return Err(failed("{label} source cannot be inspected: {err}"))
     total := 0
     loop total < start.size {
@@ -639,7 +639,7 @@ fill_from: fn(source: &files.FileReader, writer: &files.FileWriter, limit: Int, 
     writer.stat() ?? return Err(failed("{label} temporary file cannot be inspected: {err}"))
 }
 
-fill_bytes: fn(writer: &files.FileWriter, bytes: [U8], label: String) -[FS]> files.Stat StageError! {
+fill_bytes: fn(writer: ^files.FileWriter, bytes: [U8], label: String) -[FS]> files.Stat StageError! {
     writer.write_bytes(bytes) ?? return Err(failed("{label} temporary file cannot be written: {err}"))
     writer.fsync() ?? return Err(failed("{label} temporary file cannot be synced: {err}"))
     writer.stat() ?? return Err(failed("{label} temporary file cannot be inspected: {err}"))
@@ -673,7 +673,7 @@ place: fn(parent: files.Directory, temporary: String, name: String, identity: fi
 
 // Publish the open `source` as `name` in `destination` once: an existing
 // file must already hold the same bytes.
-copy_open_file: fn(source: &files.FileReader, destination: files.Directory, name: String, limit: Int, label: String) -[Env, FS, Rand]> StageError! {
+copy_open_file: fn(source: ^files.FileReader, destination: files.Directory, name: String, limit: Int, label: String) -[Env, FS, Rand]> StageError! {
     existing: entry_at(destination, name, label) ?? return Err(err)
     if existing == .Present(found) {
         if found.is_symlink -> return Err(failed("{label} destination must not be a symlink"))
@@ -1175,7 +1175,7 @@ validate_manifest: fn(bytes: [U8], channel: String) -> Manifest StageError! {
 }
 
 // One manifest target; `seen` collects the revision/system keys so far.
-validate_target: fn(item: Dyn, seen: &[String]) -> Target StageError! {
+validate_target: fn(item: Dyn, seen: ^[String]) -> Target StageError! {
     require_exact_fields(item, TARGET_FIELDS, "index manifest target") ?? return Err(err)
     revision: text_field(item, "revision") ?? ""
     if !hex_text(revision, 40) -> return Err(failed("index manifest revision is malformed"))

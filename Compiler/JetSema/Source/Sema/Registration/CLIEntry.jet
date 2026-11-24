@@ -55,7 +55,7 @@ sema_cli_entry_output_wrapper: fn(address: String) -> String {
 // Parse-time step for each user file: the entry file's typed entries and
 // every file's `#CLI` projections. The fragment lexes as generated code: its
 // `__` names are the compiler's.
-sema_cli_entry_expand: fn(program: &Program) {
+sema_cli_entry_expand: fn(program: ^Program) {
     targets: sema_cli_entry_pending(program.items)
     entries := sema_cli_entry_projections(program.items)
     if targets.len() == 0 && entries.len() == 0 {
@@ -107,7 +107,7 @@ sema_cli_entry_expand: fn(program: &Program) {
 
 // Post-load step for the entries that waited: `imported` holds the items of
 // the other loaded user modules sema_cli_entry_module_needed kept.
-sema_cli_entry_expand_imported: fn(program: &Program, imported: [Item]) {
+sema_cli_entry_expand_imported: fn(program: ^Program, imported: [Item]) {
     loop target in sema_cli_entry_pending(program.items) {
         // A qualified entry's parameter type is the defining module's own
         // `T`, so the wrapper names it through the same alias.
@@ -494,7 +494,7 @@ sema_cli_entry_label: fn(input: SemaCLIInput) -> String Never! {
 // `__refusal` and returns `None` (sema_cli_entry_projections). `marks` records
 // which inputs argv named (`T.merge`). With `argv_given` the vector is the
 // parser's `__argv` parameter, else the parse reads it.
-sema_cli_entry_parse: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool, argv_given: Bool) {
+sema_cli_entry_parse: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool, argv_given: Bool) {
     if spec.table == .Val(table) {
         lines.push(table.copy())
         argv: if argv_given -> "__argv" else -> "__jet_cli_args.__cli_argv()"
@@ -524,7 +524,7 @@ sema_cli_entry_parse: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: Str
 // `__v{slot}` (a flag in `__f{slot}`), the value of its variable in
 // `__e{slot}` and, with `marks`, whether argv named it in `__x{slot}`. With
 // `argv_given` the vector is the parser's `__argv` parameter.
-sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool, argv_given: Bool) {
+sema_cli_entry_direct: fn(lines: ^[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool, argv_given: Bool) {
     root: spec.root
     if !argv_given -> lines.push("    __argv: __jet_cli_args.__cli_argv()")
     lines.push("    __help: {sema_cli_entry_text(spec.help)}")
@@ -737,7 +737,7 @@ sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: St
 
 // One refusal of the written parser; `message` is its text expression. When
 // `condition` is not empty, only that case refuses.
-sema_cli_entry_fail: fn(lines: &[String], condition: String, message: String, projection: Bool) {
+sema_cli_entry_fail: fn(lines: ^[String], condition: String, message: String, projection: Bool) {
     guarded: condition.bytes().len() > 0
     if guarded -> lines.push("    if {condition} {{")
     if projection {
@@ -751,7 +751,7 @@ sema_cli_entry_fail: fn(lines: &[String], condition: String, message: String, pr
 }
 
 // Ends an argv arm: the next word is the next argument.
-sema_cli_entry_next: fn(lines: &[String]) {
+sema_cli_entry_next: fn(lines: ^[String]) {
     lines.push("    __i += 1")
     lines.push("    next")
 }
@@ -761,7 +761,7 @@ sema_cli_entry_next: fn(lines: &[String]) {
 // `fallback` on any other. A word an earlier arm holds is dropped from a
 // later one, so the first input to name a word keeps it, as the first of a
 // chain of guards would. With no arm left, `fallback` runs unguarded.
-sema_cli_entry_table: fn(lines: &[String], subject: String, arms: [SemaCLIArm], fallback: [String]) {
+sema_cli_entry_table: fn(lines: ^[String], subject: String, arms: [SemaCLIArm], fallback: [String]) {
     seen := [String]{}
     table := [String]{}
     loop arm in arms {
@@ -795,7 +795,7 @@ sema_cli_entry_usage: fn(message: String) -> String Never! {
 
 // Stores the text expression `value` as input `slot` once it fits the input
 // (Args.jet cli_store_error); with `marks` it records that argv named it.
-sema_cli_entry_store: fn(lines: &[String], input: SemaCLIInput, slot: Int, value: String, projection: Bool, marks: Bool) {
+sema_cli_entry_store: fn(lines: ^[String], input: SemaCLIInput, slot: Int, value: String, projection: Bool, marks: Bool) {
     name: sema_cli_entry_text(input.name)
     if input.kind == 1 {
         sema_cli_entry_fail(lines, "!__jet_cli_args.__cli_is_int({value})", "__jet_cli_args.__cli_int_refusal({name}, {value})", projection)
@@ -824,7 +824,7 @@ sema_cli_entry_fallback: fn(input: SemaCLIInput, slot: Int) -> String? Never! {
 }
 
 // The `__args` binding of the decoded value.
-sema_cli_entry_bind: fn(lines: &[String], spec: SemaCLIEntrySpec, type_ref: String) {
+sema_cli_entry_bind: fn(lines: ^[String], spec: SemaCLIEntrySpec, type_ref: String) {
     binder: if spec.assigned.len() > 0 -> " :=" else -> ":"
     lines.push("    __args{binder} {type_ref}{{{spec.literal.join(", ")}}}")
     loop line in spec.assigned -> lines.push(line.copy())
@@ -896,14 +896,14 @@ sema_cli_entry_projections: fn(items: [Item]) -> [String] {
             sema_cli_entry_bind(decode, spec, name)
             decode.push("    Val(__args)")
             sources.push(sema_cli_entry_refusing(name, SEMA_CLI_DECODE_METHOD, "", "{SEMA_CLI_DECODE_METHOD}_raw(__refusal)"))
-            parsers.push("{name}.{SEMA_CLI_DECODE_METHOD}_raw: fn(__refusal: &String) -> {name}? {{\n{decode.join("\n")}\n}}\n")
+            parsers.push("{name}.{SEMA_CLI_DECODE_METHOD}_raw: fn(__refusal: ^String) -> {name}? {{\n{decode.join("\n")}\n}}\n")
             if sema_cli_entry_member_declared(items, definition, "merge") -> next
             merge := [String]{}
             sema_cli_entry_parse(merge, spec, "__jet_cli_process.exit(0)", true, true, false)
             fields: loop input in spec.inputs -> "{input.field}: if {input.explicit} -> args.{input.field} else -> settings.{input.field}"
             merge.push("    Val({name}{{{fields.join(", ")}}})")
             sources.push(sema_cli_entry_refusing(name, "merge", "args: {name}, settings: {name}", "__jet_cli_merge(args, settings, __refusal)"))
-            parsers.push("{name}.__jet_cli_merge: fn(args: {name}, settings: {name}, __refusal: &String) -> {name}? {{\n{merge.join("\n")}\n}}\n")
+            parsers.push("{name}.__jet_cli_merge: fn(args: {name}, settings: {name}, __refusal: ^String) -> {name}? {{\n{merge.join("\n")}\n}}\n")
         }
     }
     loop parser in parsers -> sources.push(parser)

@@ -87,7 +87,7 @@ BrowserWebState: struct {
     }
 
     // A projection from another session, or one that resets, starts a new host.
-    sync: fn(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
+    sync: fn(^self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
         if projection.protocol != JET_DEVTOOLS_PROTOCOL {
             return Err("devtools projection protocol does not match jet.devtools.v1")
         }
@@ -130,7 +130,7 @@ BrowserWebState: struct {
 
 // The session's current projection under every browser grant; Canvas alone
 // provides the source tools.
-browser_web_sync_session: fn(state: &BrowserWebState, session: ResidentDevSession) Err! {
+browser_web_sync_session: fn(state: ^BrowserWebState, session: ResidentDevSession) Err! {
     projection: session.devtools_events_since(state.host.sequence)
     panels: session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.all()) ?? return Err("browser panel catalog rejected projection: {err}")
     state.tools.source = session.canvas_port() != 0
@@ -525,7 +525,7 @@ browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement)
     html.join("")
 }
 
-browser_web_render_group: fn(html: &[String], frame: BrowserDevtoolsFrame, index: Int, workbench: Bool, any_open: Bool) {
+browser_web_render_group: fn(html: ^[String], frame: BrowserDevtoolsFrame, index: Int, workbench: Bool, any_open: Bool) {
     member_count := 0
     available_count := 0
     open_count := 0
@@ -573,7 +573,7 @@ browser_web_render_group: fn(html: &[String], frame: BrowserDevtoolsFrame, index
     html.push("</div></details>")
 }
 
-browser_web_render_attention: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+browser_web_render_attention: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
     status: frame.status
     failing_file := String?{None}
     if status.diagnostic == .Val(diagnostic) {
@@ -630,14 +630,14 @@ browser_web_render_attention: fn(html: &[String], frame: BrowserDevtoolsFrame) {
     html.push("</div></section>")
 }
 
-browser_web_render_source_tool: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+browser_web_render_source_tool: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
     if !frame.tools.source {
         return
     }
     html.push("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
 }
 
-browser_web_render_panel: fn(html: &[String], panel: BrowserPanelView, selection: BrowserSelection?) {
+browser_web_render_panel: fn(html: ^[String], panel: BrowserPanelView, selection: BrowserSelection?) {
     node_id := String?{None}
     if selection == .Val(selected) {
         if selected.panel_id == panel.panel_id -> node_id = selected.node_id
@@ -654,7 +654,7 @@ browser_web_render_panel: fn(html: &[String], panel: BrowserPanelView, selection
     html.push("</article>")
 }
 
-browser_web_render_selected: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+browser_web_render_selected: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
     selection: frame.selection ?? return
     panel: browser_web_find_panel(frame.panels, selection.panel_id) ?? return
     html.push("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>")
@@ -664,7 +664,7 @@ browser_web_render_selected: fn(html: &[String], frame: BrowserDevtoolsFrame) {
     html.push("</section>")
 }
 
-browser_web_render_inspector: fn(html: &[String], frame: BrowserDevtoolsFrame) {
+browser_web_render_inspector: fn(html: ^[String], frame: BrowserDevtoolsFrame) {
     html.push("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
     if frame.selection == .Val(selection) {
         if browser_web_find_panel(frame.panels, selection.panel_id) == .Val(panel) {
@@ -685,7 +685,7 @@ browser_web_find_panel: fn(panels: [BrowserPanelView], panel_id: String) -> Brow
 
 // The crumbs to the selected node, then its detail; false when no node is
 // selected or the panel no longer holds it.
-browser_web_render_focus: fn(html: &[String], panel: BrowserPanelView, node_id: String?) -> Bool {
+browser_web_render_focus: fn(html: ^[String], panel: BrowserPanelView, node_id: String?) -> Bool {
     id: node_id ?? ""
     path := [BrowserWebCrumb]{}
     found: id != "" && browser_web_crumbs(panel.nodes, id, path)
@@ -693,7 +693,7 @@ browser_web_render_focus: fn(html: &[String], panel: BrowserPanelView, node_id: 
     found && browser_web_render_found(html, panel.panel_id, panel.nodes, id)
 }
 
-browser_web_crumbs: fn(nodes: [BrowserNode], node_id: String, path: &[BrowserWebCrumb]) -> Bool {
+browser_web_crumbs: fn(nodes: [BrowserNode], node_id: String, path: ^[BrowserWebCrumb]) -> Bool {
     loop node in nodes {
         path.push(BrowserWebCrumb{id: "{node.id}", label: "{node.label}"})
         if node.id == node_id || browser_web_crumbs(node.children, node_id, path) -> return true
@@ -702,7 +702,7 @@ browser_web_crumbs: fn(nodes: [BrowserNode], node_id: String, path: &[BrowserWeb
     false
 }
 
-browser_web_render_crumbs: fn(html: &[String], panel: BrowserPanelView, path: [BrowserWebCrumb]) {
+browser_web_render_crumbs: fn(html: ^[String], panel: BrowserPanelView, path: [BrowserWebCrumb]) {
     panel_id: browser_web_html_escape(panel.panel_id)
     html.push("<div class=\"crumbs\"><span>{browser_web_html_escape(panel.title)}</span>")
     if path.len() > 1 {
@@ -713,7 +713,7 @@ browser_web_render_crumbs: fn(html: &[String], panel: BrowserPanelView, path: [B
     html.push("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>")
 }
 
-browser_web_render_found: fn(html: &[String], panel_id: String, nodes: [BrowserNode], node_id: String) -> Bool {
+browser_web_render_found: fn(html: ^[String], panel_id: String, nodes: [BrowserNode], node_id: String) -> Bool {
     loop node in nodes {
         if node.id == node_id {
             browser_web_render_node_detail(html, panel_id, node)
@@ -725,7 +725,7 @@ browser_web_render_found: fn(html: &[String], panel_id: String, nodes: [BrowserN
 }
 
 // A node's leaf children render as a key/value list, the rest as a node list.
-browser_web_render_node_detail: fn(html: &[String], panel_id: String, node: BrowserNode) {
+browser_web_render_node_detail: fn(html: ^[String], panel_id: String, node: BrowserNode) {
     status := ""
     if node.status == .Val(text) {
         status = " <small class=\"mono\">{browser_web_html_escape(text)}</small>"
@@ -758,7 +758,7 @@ browser_web_is_leaf: fn(node: BrowserNode) -> Bool {
     node.children.len() == 0 && node.value != None
 }
 
-browser_web_render_nodes: fn(html: &[String], panel_id: String, nodes: [BrowserNode], selected: String?, skip_leaves: Bool) {
+browser_web_render_nodes: fn(html: ^[String], panel_id: String, nodes: [BrowserNode], selected: String?, skip_leaves: Bool) {
     panel: browser_web_html_escape(panel_id)
     loop node in nodes {
         if skip_leaves && browser_web_is_leaf(node) -> next
@@ -893,7 +893,7 @@ browser_web_effect_json: fn(outcome: BrowserHostEffect) -> String {
     "{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"effect\":{body}}}"
 }
 
-browser_web_dispatch: fn(state: &BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
+browser_web_dispatch: fn(state: ^BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
     outcome: state.host.dispatch(action)
     Ok(browser_web_effect_json(outcome))
 }

@@ -71,7 +71,7 @@ DoctorReport: struct {
     checks: [DoctorCheck],
 
     // Run every check against the resolved Jetpack root and `project`.
-    run: fn(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
+    run: fn(verification: ^StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
         roots: pkg_resolve_roots()
         DoctorReport{
             checks: [DoctorCheck]{
@@ -157,7 +157,7 @@ cli_doctor_io_kind: fn(error: IOError) -> String Never! {
 
 // ── Hangar ──
 
-cli_doctor_check_hangar: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
+cli_doctor_check_hangar: fn(verification: ^StoreVerification, roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
     hangar: roots.hangar_dir()
     // A fresh machine has no Hangar yet; that is normal, not a health
     // problem — the first realize creates it.

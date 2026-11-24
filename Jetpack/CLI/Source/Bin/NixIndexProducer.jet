@@ -549,7 +549,7 @@ cli_nix_index_contains_field_string: fn(value: Dyn, field: String, needle: Strin
 }
 
 // Every text value of `field` anywhere in `value`.
-cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[String]) Never! {
+cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: ^[String]) Never! {
     if value == {
         .Object(fields) -> {
             loop entry in fields {
@@ -572,7 +572,7 @@ cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[Str
 }
 
 // Every `/nix/store/` text value anywhere in `value`.
-cli_nix_index_collect_store_paths: fn(value: Dyn, paths: &[String]) Never! {
+cli_nix_index_collect_store_paths: fn(value: Dyn, paths: ^[String]) Never! {
     if value == {
         .Text(text) -> {
             if text != NIX_DEFAULT_STORE_DIR && cli_paths.is_relative_to(cli_paths.of(text), cli_paths.of(NIX_DEFAULT_STORE_DIR)) && !paths.contains(text) {
@@ -616,7 +616,7 @@ cli_nix_index_read_hydra_output_paths: fn(path: String, system: String) -[FS]> [
     Ok(cli_sorted_unique(output_paths))
 }
 
-cli_nix_index_collect_json_files: fn(path: String, found: &[String]) -[FS]> CLIToolError! {
+cli_nix_index_collect_json_files: fn(path: String, found: ^[String]) -[FS]> CLIToolError! {
     metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect Hydra build input: {err}"))
     if metadata.is_symlink {
         return Err(CLIToolError.new("Hydra build input `{path}` must not be a symlink"))

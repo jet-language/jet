@@ -100,7 +100,7 @@ IROptInlined: struct {
 // once-called ones (O2). `inline` says which callees are taken: Auto by
 // size, Marked every `#Inline(Always)` one past the size limits and nothing
 // else (ir_opt_inline_marked_module).
-ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: &IROptReport) -> IRFunction? Never! {
+ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: ^IROptReport) -> IRFunction? Never! {
     limit: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
     budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
     growth := if level >= 2 -> IR_OPT_INLINE_GROWTH_O2 else -> IR_OPT_INLINE_GROWTH_O1
@@ -294,7 +294,7 @@ ir_opt_inline_marked: fn(bodies: [[IRFunction]], callee: Int) -> Bool Never! {
 // call (sema refuses such a cycle, E0917). Each site taken is one row of
 // `report`. The module is marked done (IRModule.marked_inlined): a second
 // run leaves it as it is, and IR Lint holds it to no marked call left.
-ir_opt_inline_marked_module: fn(m: &IRModule, report: &IROptReport, threads: CompilerThreads{compiler_threads_single()}) Never! {
+ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: CompilerThreads{compiler_threads_single()}) Never! {
     if m.marked_inlined {
         return
     }
@@ -537,7 +537,7 @@ ir_opt_marked_calls: fn(m: IRModule) -> Int Never! {
 // ones it calls, onto `order`. `state[g]` is 0 before g's walk, 1 during it
 // and 2 after; a marked call of a function still being walked closes a
 // cycle, so that callee is `recursive`.
-ir_opt_inline_marked_walk: fn(bodies: [[IRFunction]], marked: [Bool], id: Int, state: &[Int], recursive: &[Bool], order: &[Int]) Never! {
+ir_opt_inline_marked_walk: fn(bodies: [[IRFunction]], marked: [Bool], id: Int, state: ^[Int], recursive: ^[Bool], order: ^[Int]) Never! {
     state[id] = 1
     f: bodies[id][0]
     loop at in 0..<f.op.len() {
@@ -623,7 +623,7 @@ ir_opt_divisor: fn(f: IRFunction, at: Int) -> Int? Never! {
 // callee's slots belong to the new inline site (IRFunction.slot_site), and
 // the slots standing for its parameters stay parameters of that site
 // (IRFunction.slot_formal). Only debug information reads either.
-ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, callee: IRFunction) Never! {
+ir_opt_splice: fn(m: IRModule, f: ^IRFunction, caller: IRFunction, at: Int, callee: IRFunction) Never! {
     site_line: caller.code_line[at]
     f.frame_bound = ir_frame_bound_add(f.frame_bound, callee.frame_bound)
     same_file: callee.source_file == caller.source_file
@@ -716,7 +716,7 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
 // The call's result slot `dst` takes the returned `value`: a move, or for an
 // aggregate not in the inlined body's own frame storage (`own`) a copy of
 // its bytes into fresh frame storage, as the call's result storage.
-ir_opt_result: fn(m: IRModule, f: &IRFunction, dst: Int, value: Int, own: Bool, line: Int) Never! {
+ir_opt_result: fn(m: IRModule, f: ^IRFunction, dst: Int, value: Int, own: Bool, line: Int) Never! {
     ty: ir_x64_type(m, f, dst)
     if ty.kind == .Aggregate && !own {
         _ := ir_emit(f, IROp.StackAddress, dst, ty.size, ty.align, -1, line)
@@ -728,7 +728,7 @@ ir_opt_result: fn(m: IRModule, f: &IRFunction, dst: Int, value: Int, own: Bool, 
 
 // Callee instruction `k` with its slots through `map` (its argument list
 // copied into `f`'s args pool).
-ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], line: Int) Never! {
+ir_opt_emit_mapped: fn(f: ^IRFunction, callee: IRFunction, k: Int, map: [Int], line: Int) Never! {
     op: callee.op[k]
     dst: if callee.dst[k] >= 0 -> map[callee.dst[k]] else -> -1
     a := callee.a[k]
@@ -959,7 +959,7 @@ IROptInlineTestSplice: struct {
     lines: [Int],
 }
 
-ir_opt_inline_test_splice: fn(m: &IRModule) -> IROptInlineTestSplice Never! {
+ir_opt_inline_test_splice: fn(m: ^IRModule) -> IROptInlineTestSplice Never! {
     f: m.functions.pop() ?? panic("no f")
     g := m.functions.pop() ?? panic("no g")
     at := -1

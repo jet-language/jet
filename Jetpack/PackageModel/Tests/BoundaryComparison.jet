@@ -109,14 +109,14 @@ pkg_boundary_test_comparison: fn(candidate: String, declared_equal: Bool) -> Com
     pkg_boundary_test_compare(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample(candidate, declared_equal)})
 }
 
-pkg_boundary_test_accept: fn(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> ForeignSourceReceipt ForeignBridgeError! {
+pkg_boundary_test_accept: fn(contract: ^ForeignBoundaryContract, comparison: ComparisonRecord) -> ForeignSourceReceipt ForeignBridgeError! {
     derivation: pkg_boundary_test_derivation(contract.copy())
     current_identity: contract.identity.copy()
     current_coverage: contract.artifact_coverage.copy()
     contract.accept_reasoned_replacement(current_identity, current_coverage, derivation, pkg_boundary_test_evidence(derivation), comparison, "replacement")
 }
 
-pkg_boundary_test_accept_error: fn(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> String Never! {
+pkg_boundary_test_accept_error: fn(contract: ^ForeignBoundaryContract, comparison: ComparisonRecord) -> String Never! {
     if pkg_boundary_test_accept(contract, comparison) == {
         .Ok(_) -> panic("replacement must be refused")
         .Err(error) -> error.message

@@ -42,7 +42,7 @@ dn_interop_case: fn(path: String, text: String) -[]> Bool {
 // Every line under `path` that spells a refused name, as `path:line: spelling`.
 // Symbolic links, hidden entries, build output and installed node modules are
 // skipped, and so are files that are not text.
-dn_lines: fn(path: String, out: &[String]) -[FS]> {
+dn_lines: fn(path: String, out: ^[String]) -[FS]> {
     if dn_files.is_symlink(path) {
         return
     }
@@ -316,7 +316,7 @@ dn_line_tool: fn(kind: String, line: String, fenced: Bool) -[]> String? {
 }
 
 // Every run of an outside tool in `text`, as `path:line: tool`.
-dn_text_runs: fn(path: String, text: String, out: &[String]) -[]> {
+dn_text_runs: fn(path: String, text: String, out: ^[String]) -[]> {
     kind: dn_run_kind(path, text)
     if kind == "" {
         return
@@ -334,7 +334,7 @@ dn_text_runs: fn(path: String, text: String, out: &[String]) -[]> {
 // Every run of an outside tool under `base/rel`, its paths relative to `base`.
 // Under Compiler, Core and Jetpack only paths inside a Tests tree are read,
 // and under Docs no markdown.
-dn_runs_under: fn(base: String, rel: String, tests_only: Bool, out: &[String]) -[FS]> {
+dn_runs_under: fn(base: String, rel: String, tests_only: Bool, out: ^[String]) -[FS]> {
     path: if base == "" -> rel.copy() else -> "{base}/{rel}"
     if dn_files.is_symlink(path) {
         return

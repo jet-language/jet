@@ -22,7 +22,7 @@ debug_test_state: fn(path: String, source_id: String) -> Shared<CanvasHostState>
     canvas_host_new(path, source_id, "127.0.0.1") ?? panic("state: {err.message}")
 }
 
-debug_test_answer: fn(sessions: &DebugSessions, host: &PausedEvaluateHost, path: String, source_id: String, request: String) -> String {
+debug_test_answer: fn(sessions: ^DebugSessions, host: ^PausedEvaluateHost, path: String, source_id: String, request: String) -> String {
     sessions.answer(host, jet_cli_canvas_debug_host(), debug_test_state(path, source_id), path, source_id, request) ?? panic("answer: {err.kind}: {err.message}")
 }
 

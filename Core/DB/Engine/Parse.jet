@@ -48,79 +48,79 @@ LIKE_NOT_BIT: 2147483648
 // z is NULL; object arguments are arena indexes, -1 for NULL.
 SQLBuilder: trait {
     // sqlite3FinishCoding.
-    finish_coding: fn(&self, a: &ast.AST) -[DB]> Never!,
+    finish_coding: fn(^self, a: ^ast.AST) -[DB]> Never!,
     // sqlite3BeginTransaction / sqlite3EndTransaction / sqlite3Savepoint.
-    begin_transaction: fn(&self, a: &ast.AST, kind: Int) -[DB]> Never!,
-    end_transaction: fn(&self, a: &ast.AST, op: Int) -[DB]> Never!,
-    savepoint: fn(&self, a: &ast.AST, op: Int, name: ast.SQLTok) -[DB]> Never!,
+    begin_transaction: fn(^self, a: ^ast.AST, kind: Int) -[DB]> Never!,
+    end_transaction: fn(^self, a: ^ast.AST, op: Int) -[DB]> Never!,
+    savepoint: fn(^self, a: ^ast.AST, op: Int, name: ast.SQLTok) -[DB]> Never!,
     // sqlite3StartTable.
-    start_table: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) -[DB]> Never!,
+    start_table: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) -[DB]> Never!,
     // sqlite3EndTable: `cons` and `end` are the tokens ending the column
     // list and the statement, `select` the CREATE TABLE AS query.
-    end_table: fn(&self, a: &ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) -[DB]> Never!,
+    end_table: fn(^self, a: ^ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) -[DB]> Never!,
     // sqlite3AddColumn.
-    add_column: fn(&self, a: &ast.AST, name: ast.SQLTok, typ: ast.SQLTok) -[DB]> Never!,
+    add_column: fn(^self, a: ^ast.AST, name: ast.SQLTok, typ: ast.SQLTok) -[DB]> Never!,
     // sqlite3AddDefaultValue: the expression and its text, sql[start, end).
-    add_default_value: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) -[DB]> Never!,
+    add_default_value: fn(^self, a: ^ast.AST, e: Int, start: Int, end: Int) -[DB]> Never!,
     // sqlite3AddNotNull.
-    add_not_null: fn(&self, a: &ast.AST, on_error: Int) -[DB]> Never!,
+    add_not_null: fn(^self, a: ^ast.AST, on_error: Int) -[DB]> Never!,
     // sqlite3AddPrimaryKey.
-    add_primary_key: fn(&self, a: &ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) -[DB]> Never!,
+    add_primary_key: fn(^self, a: ^ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) -[DB]> Never!,
     // sqlite3CreateIndex.
-    create_index: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) -[DB]> Never!,
+    create_index: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) -[DB]> Never!,
     // sqlite3AddCheckConstraint: the expression and its text, sql[start, end).
-    add_check_constraint: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) -[DB]> Never!,
+    add_check_constraint: fn(^self, a: ^ast.AST, e: Int, start: Int, end: Int) -[DB]> Never!,
     // sqlite3CreateForeignKey / sqlite3DeferForeignKey.
-    create_foreign_key: fn(&self, a: &ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) -[DB]> Never!,
-    defer_foreign_key: fn(&self, a: &ast.AST, deferred: Int) -[DB]> Never!,
+    create_foreign_key: fn(^self, a: ^ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) -[DB]> Never!,
+    defer_foreign_key: fn(^self, a: ^ast.AST, deferred: Int) -[DB]> Never!,
     // sqlite3AddCollateType.
-    add_collate_type: fn(&self, a: &ast.AST, name: ast.SQLTok) -[DB]> Never!,
+    add_collate_type: fn(^self, a: ^ast.AST, name: ast.SQLTok) -[DB]> Never!,
     // sqlite3AddGenerated.
-    add_generated: fn(&self, a: &ast.AST, e: Int, typ: ast.SQLTok) -[DB]> Never!,
+    add_generated: fn(^self, a: ^ast.AST, e: Int, typ: ast.SQLTok) -[DB]> Never!,
     // sqlite3DropTable.
-    drop_table: fn(&self, a: &ast.AST, name: Int, is_view: Int, no_err: Int) -[DB]> Never!,
+    drop_table: fn(^self, a: ^ast.AST, name: Int, is_view: Int, no_err: Int) -[DB]> Never!,
     // sqlite3CreateView.
-    create_view: fn(&self, a: &ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) -[DB]> Never!,
+    create_view: fn(^self, a: ^ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) -[DB]> Never!,
     // sqlite3Select with the SRT_Output destination (cmd ::= select).
-    select_output: fn(&self, a: &ast.AST, select: Int) -[DB]> Never!,
+    select_output: fn(^self, a: ^ast.AST, select: Int) -[DB]> Never!,
     // sqlite3DeleteFrom.
-    delete_from: fn(&self, a: &ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) -[DB]> Never!,
+    delete_from: fn(^self, a: ^ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) -[DB]> Never!,
     // sqlite3AddReturning.
-    add_returning: fn(&self, a: &ast.AST, list: Int) -[DB]> Never!,
+    add_returning: fn(^self, a: ^ast.AST, list: Int) -[DB]> Never!,
     // sqlite3Update.
-    update: fn(&self, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) -[DB]> Never!,
+    update: fn(^self, a: ^ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) -[DB]> Never!,
     // sqlite3Insert.
-    insert: fn(&self, a: &ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) -[DB]> Never!,
+    insert: fn(^self, a: ^ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) -[DB]> Never!,
     // sqlite3DropIndex.
-    drop_index: fn(&self, a: &ast.AST, name: Int, if_exists: Int) -[DB]> Never!,
+    drop_index: fn(^self, a: ^ast.AST, name: Int, if_exists: Int) -[DB]> Never!,
     // sqlite3Vacuum.
-    vacuum: fn(&self, a: &ast.AST, name: ast.SQLTok, into: Int) -[DB]> Never!,
+    vacuum: fn(^self, a: ^ast.AST, name: ast.SQLTok, into: Int) -[DB]> Never!,
     // sqlite3Pragma.
-    pragma: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) -[DB]> Never!,
+    pragma: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) -[DB]> Never!,
     // sqlite3BeginTrigger / sqlite3FinishTrigger / sqlite3DropTrigger.
-    begin_trigger: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) -[DB]> Never!,
-    finish_trigger: fn(&self, a: &ast.AST, steps: Int, all: ast.SQLTok) -[DB]> Never!,
-    drop_trigger: fn(&self, a: &ast.AST, name: Int, no_err: Int) -[DB]> Never!,
+    begin_trigger: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) -[DB]> Never!,
+    finish_trigger: fn(^self, a: ^ast.AST, steps: Int, all: ast.SQLTok) -[DB]> Never!,
+    drop_trigger: fn(^self, a: ^ast.AST, name: Int, no_err: Int) -[DB]> Never!,
     // sqlite3Attach / sqlite3Detach.
-    attach: fn(&self, a: &ast.AST, filename: Int, dbname: Int, key: Int) -[DB]> Never!,
-    detach: fn(&self, a: &ast.AST, dbname: Int) -[DB]> Never!,
+    attach: fn(^self, a: ^ast.AST, filename: Int, dbname: Int, key: Int) -[DB]> Never!,
+    detach: fn(^self, a: ^ast.AST, dbname: Int) -[DB]> Never!,
     // sqlite3Reindex / sqlite3Analyze.
-    reindex: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never!,
-    analyze: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never!,
+    reindex: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never!,
+    analyze: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) -[DB]> Never!,
     // sqlite3AlterRenameTable, sqlite3AlterBeginAddColumn,
     // sqlite3AlterFinishAddColumn, sqlite3AlterDropColumn,
     // sqlite3AlterRenameColumn.
-    alter_rename_table: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never!,
-    alter_begin_add_column: fn(&self, a: &ast.AST, src: Int) -[DB]> Never!,
-    alter_finish_add_column: fn(&self, a: &ast.AST, col_def: ast.SQLTok) -[DB]> Never!,
-    alter_drop_column: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never!,
-    alter_rename_column: fn(&self, a: &ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) -[DB]> Never!,
+    alter_rename_table: fn(^self, a: ^ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never!,
+    alter_begin_add_column: fn(^self, a: ^ast.AST, src: Int) -[DB]> Never!,
+    alter_finish_add_column: fn(^self, a: ^ast.AST, col_def: ast.SQLTok) -[DB]> Never!,
+    alter_drop_column: fn(^self, a: ^ast.AST, src: Int, name: ast.SQLTok) -[DB]> Never!,
+    alter_rename_column: fn(^self, a: ^ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) -[DB]> Never!,
     // sqlite3VtabBeginParse, sqlite3VtabFinishParse, sqlite3VtabArgInit,
     // sqlite3VtabArgExtend.
-    vtab_begin_parse: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) -[DB]> Never!,
-    vtab_finish_parse: fn(&self, a: &ast.AST, end: ast.SQLTok) -[DB]> Never!,
-    vtab_arg_init: fn(&self, a: &ast.AST) -[DB]> Never!,
-    vtab_arg_extend: fn(&self, a: &ast.AST, t: ast.SQLTok) -[DB]> Never!,
+    vtab_begin_parse: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) -[DB]> Never!,
+    vtab_finish_parse: fn(^self, a: ^ast.AST, end: ast.SQLTok) -[DB]> Never!,
+    vtab_arg_init: fn(^self, a: ^ast.AST) -[DB]> Never!,
+    vtab_arg_extend: fn(^self, a: ^ast.AST, t: ast.SQLTok) -[DB]> Never!,
 }
 
 // yyStackEntry.
@@ -183,13 +183,13 @@ find_reduce_action: fn(stateno: Int, look: Int) -> Int Never! {
 }
 
 // yyStackOverflow: pop everything and report the %stack_overflow error.
-stack_overflow: fn(p: &SQLParser, a: &ast.AST) Never! {
+stack_overflow: fn(p: ^SQLParser, a: ^ast.AST) Never! {
     p.tos = 0
     ast.error(a, "parser stack overflow")
 }
 
 // yy_shift.
-shift: fn(p: &SQLParser, a: &ast.AST, new_state: Int, major: Int, minor: ast.SQLTok) Never! {
+shift: fn(p: ^SQLParser, a: ^ast.AST, new_state: Int, major: Int, minor: ast.SQLTok) Never! {
     p.tos += 1
     if p.tos > tables.YYSTACKDEPTH - 1 {
         p.tos -= 1
@@ -201,7 +201,7 @@ shift: fn(p: &SQLParser, a: &ast.AST, new_state: Int, major: Int, minor: ast.SQL
 }
 
 // The %syntax_error code of parse.y.
-syntax_error: fn(a: &ast.AST, t: ast.SQLTok) Never! {
+syntax_error: fn(a: ^ast.AST, t: ast.SQLTok) Never! {
     if sql_byte(a.ctx.sql, t.z) != 0 {
         txt: ast.tok_text(a, t)
         off: ast.tok_offset(a, t)
@@ -213,7 +213,7 @@ syntax_error: fn(a: &ast.AST, t: ast.SQLTok) Never! {
 // no error symbol: a token that cannot shift is reported, unless one of
 // the last three tokens already was, and dropped; at the end of the input
 // the parse fails.
-parse_token: fn<B: SQLBuilder>(p: &SQLParser, b: &B, a: &ast.AST, major: Int, minor: ast.SQLTok) -[DB]> Never! {
+parse_token: fn<B: SQLBuilder>(p: ^SQLParser, b: ^B, a: ^ast.AST, major: Int, minor: ast.SQLTok) -[DB]> Never! {
     end_of_input: major == 0
     act := p.stack[p.tos].stateno
     loop {
@@ -247,7 +247,7 @@ parse_token: fn<B: SQLBuilder>(p: &SQLParser, b: &B, a: &ast.AST, major: Int, mi
 
 // yy_reduce: run rule `rule` (its action, then the goto) with lookahead
 // token `look`; the action now current.
-reduce: fn<B: SQLBuilder>(p: &SQLParser, b: &B, a: &ast.AST, rule: Int, look: ast.SQLTok) -[DB]> Int Never! {
+reduce: fn<B: SQLBuilder>(p: ^SQLParser, b: ^B, a: ^ast.AST, rule: Int, look: ast.SQLTok) -[DB]> Int Never! {
     m: p.tos
     nrhs: tables.YY_RULE_NRHS[rule]
     lhs: m + nrhs + 1
@@ -269,7 +269,7 @@ reduce: fn<B: SQLBuilder>(p: &SQLParser, b: &B, a: &ast.AST, rule: Int, look: as
 // Helpers of parse.y's %include blocks.
 
 // tokenExpr: a leaf node for one token, dequoted when quoted.
-token_expr: fn(a: &ast.AST, op: Int, t: ast.SQLTok) -> Int Never! {
+token_expr: fn(a: ^ast.AST, op: Int, t: ast.SQLTok) -> Int Never! {
     z: ast.tok_bytes(a, t)
     e := ast.zero_expr(op)
     e.flags = ast.EP_LEAF
@@ -284,7 +284,7 @@ token_expr: fn(a: &ast.AST, op: Int, t: ast.SQLTok) -> Int Never! {
 
 // parserDoubleLinkSelect: point each SELECT of a compound at the next and
 // check the compound's length.
-double_link_select: fn(a: &ast.AST, p: Int) Never! {
+double_link_select: fn(a: ^ast.AST, p: Int) Never! {
     if a.selects[p].prior < 0 {
         return
     }
@@ -312,7 +312,7 @@ double_link_select: fn(a: &ast.AST, p: Int) Never! {
 }
 
 // attachWithToSelect.
-attach_with_to_select: fn(a: &ast.AST, sel: Int, w: Int) -> Int Never! {
+attach_with_to_select: fn(a: ^ast.AST, sel: Int, w: Int) -> Int Never! {
     if sel >= 0 {
         a.selects[sel].with_clause = w
         double_link_select(a, sel)
@@ -322,7 +322,7 @@ attach_with_to_select: fn(a: &ast.AST, sel: Int, w: Int) -> Int Never! {
 
 // binaryToUnaryIfNull: "x IS NULL" and "x IS NOT NULL" become TK_ISNULL
 // and TK_NOTNULL.
-binary_to_unary_if_null: fn(a: &ast.AST, y: Int, e: Int, op: Int) Never! {
+binary_to_unary_if_null: fn(a: ^ast.AST, y: Int, e: Int, op: Int) Never! {
     if e >= 0 && y >= 0 && a.exprs[y].op == tk.TK_NULL && !ast.in_rename(a) {
         a.exprs[e].op = op
         ast.expr_delete(a, a.exprs[e].right)
@@ -332,7 +332,7 @@ binary_to_unary_if_null: fn(a: &ast.AST, y: Int, e: Int, op: Int) Never! {
 
 // parserAddExprIdListTerm: one name of an index-column-style list; COLLATE
 // or a sort order is an error outside a legacy schema.
-add_expr_id_list_term: fn(a: &ast.AST, prior: Int, name: ast.SQLTok, has_collate: Int, sort_order: Int) -> Int Never! {
+add_expr_id_list_term: fn(a: ^ast.AST, prior: Int, name: ast.SQLTok, has_collate: Int, sort_order: Int) -> Int Never! {
     p: ast.expr_list_append(a, prior, -1)
     if (has_collate != 0 || sort_order != ast.SO_UNDEFINED) && !a.init_busy {
         txt: ast.tok_text(a, name)
@@ -356,7 +356,7 @@ span_text: fn(a: ast.AST, t: ast.SQLTok) -> String Never! { ast.tok_text(a, t) }
 // slot's current value.
 
 // Rules 0-99: commands, CREATE TABLE, DROP, CREATE VIEW, SELECT heads.
-actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, rule: Int, look: ast.SQLTok, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
+actions_ddl: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, rule: Int, look: ast.SQLTok, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
     if rule == {
         // explain ::= EXPLAIN
         0 -> {
@@ -718,7 +718,7 @@ actions_ddl: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, r
 
 // Rules 100-177: result columns, FROM, ORDER BY, LIMIT, DELETE, UPDATE,
 // INSERT, upserts, id lists.
-actions_query: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, rule: Int, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
+actions_query: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, rule: Int, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
     if rule == {
         // selcollist ::= sclp scanpt expr scanpt as
         100 -> {
@@ -1001,7 +1001,7 @@ actions_query: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int,
 // seltablist ::= stl_prefix LP seltablist RP as on_using (rule 113): a
 // parenthesized FROM list. One table moves up into the outer list; more
 // become a nested-FROM subquery.
-nested_from_term: fn(a: &ast.AST, s: [SQLStackEntry], m: Int) -> ast.SQLTok Never! {
+nested_from_term: fn(a: ^ast.AST, s: [SQLStackEntry], m: Int) -> ast.SQLTok Never! {
     prefix: sv(s, m - 5)
     inner: sv(s, m - 3)
     alias_tok: st(s, m - 1)
@@ -1039,7 +1039,7 @@ nested_from_term: fn(a: &ast.AST, s: [SQLStackEntry], m: Int) -> ast.SQLTok Neve
 }
 
 // Rules 178-257: expressions, CREATE INDEX, DROP INDEX, VACUUM, PRAGMA.
-actions_expr: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, rule: Int, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
+actions_expr: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, rule: Int, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
     if rule == {
         // expr ::= ID|INDEXED|JOIN_KW
         178 -> tv(token_expr(a, tk.TK_ID, st(s, m)))
@@ -1376,7 +1376,7 @@ actions_expr: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, 
 // constant; one constant non-vector term becomes "=" (the unary plus keeps
 // the term's affinity from being used); one subquery becomes IN (SELECT);
 // a vector left side compares against a VALUES list.
-in_list: fn(a: &ast.AST, lhs: Int, not: Int, list: Int) -> ast.SQLTok Never! {
+in_list: fn(a: ^ast.AST, lhs: Int, not: Int, list: Int) -> ast.SQLTok Never! {
     e := lhs
     if list < 0 {
         ast.expr_unmap_and_delete(a, e)
@@ -1416,7 +1416,7 @@ in_list: fn(a: &ast.AST, lhs: Int, not: Int, list: Int) -> ast.SQLTok Never! {
 
 // Rules 258-339: triggers, RAISE, ATTACH, REINDEX, ANALYZE, ALTER, virtual
 // tables, WITH, windows.
-actions_trigger: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: Int, rule: Int, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
+actions_trigger: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST, s: [SQLStackEntry], m: Int, rule: Int, keep: ast.SQLTok) -[DB]> ast.SQLTok Never! {
     if rule == {
         // cmd ::= createkw trigger_decl BEGIN trigger_cmd_list END
         258 -> {
@@ -1730,7 +1730,7 @@ actions_trigger: fn<B: SQLBuilder>(b: &B, a: &ast.AST, s: [SQLStackEntry], m: In
 // with the message in a.ctx.errmsg and where parsing stopped in a.ctx.tail.
 // Freeing Parse.pNewTable and Parse.pNewTrigger after a failed parse is the
 // builder's, which owns them.
-run_parser: fn<B: SQLBuilder>(b: &B, a: &ast.AST) -[DB]> Int Never! {
+run_parser: fn<B: SQLBuilder>(b: ^B, a: ^ast.AST) -[DB]> Int Never! {
     mx := a.limits[ast.LIMIT_SQL_LENGTH]
     a.ctx.rc = base.OK
     p := new_parser()
@@ -1789,133 +1789,133 @@ SQLRecorder: struct {
     sel: Int,
 
     impl SQLBuilder {
-        finish_coding: fn(&self, a: &ast.AST) Never! { self.log.push("finish") }
+        finish_coding: fn(^self, a: ^ast.AST) Never! { self.log.push("finish") }
 
-        begin_transaction: fn(&self, a: &ast.AST, kind: Int) Never! {
+        begin_transaction: fn(^self, a: ^ast.AST, kind: Int) Never! {
             self.log.push("begin {kind}")
         }
 
-        end_transaction: fn(&self, a: &ast.AST, op: Int) Never! { self.log.push("end {op}") }
+        end_transaction: fn(^self, a: ^ast.AST, op: Int) Never! { self.log.push("end {op}") }
 
-        savepoint: fn(&self, a: &ast.AST, op: Int, name: ast.SQLTok) Never! {
+        savepoint: fn(^self, a: ^ast.AST, op: Int, name: ast.SQLTok) Never! {
             t: ast.tok_text(a, name)
             self.log.push("savepoint {op} {t}")
         }
 
-        start_table: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) Never! {
+        start_table: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, is_temp: Int, is_view: Int, is_virtual: Int, no_err: Int) Never! {
             t1: ast.tok_text(a, name1)
             t2: ast.tok_text(a, name2)
             self.log.push("start_table {t1}|{t2} temp={is_temp} view={is_view} virtual={is_virtual} noerr={no_err}")
         }
 
-        end_table: fn(&self, a: &ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) Never! {
+        end_table: fn(^self, a: ^ast.AST, cons: ast.SQLTok, end: ast.SQLTok, tab_opts: Int, select: Int) Never! {
             t: ast.tok_text(a, end)
             self.log.push("end_table {t} opts={tab_opts} select={select}")
         }
 
-        add_column: fn(&self, a: &ast.AST, name: ast.SQLTok, typ: ast.SQLTok) Never! {
+        add_column: fn(^self, a: ^ast.AST, name: ast.SQLTok, typ: ast.SQLTok) Never! {
             t1: ast.tok_text(a, name)
             t2: ast.tok_text(a, typ)
             self.log.push("column {t1} {t2}")
         }
 
-        add_default_value: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
+        add_default_value: fn(^self, a: ^ast.AST, e: Int, start: Int, end: Int) Never! {
             t: ast.text(a.ctx.sql[start..<end].copy())
             self.log.push("default {t}")
         }
 
-        add_not_null: fn(&self, a: &ast.AST, on_error: Int) Never! {
+        add_not_null: fn(^self, a: ^ast.AST, on_error: Int) Never! {
             self.log.push("not_null {on_error}")
         }
 
-        add_primary_key: fn(&self, a: &ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) Never! {
+        add_primary_key: fn(^self, a: ^ast.AST, list: Int, on_error: Int, autoinc: Int, sort_order: Int) Never! {
             self.log.push("primary_key list={list} onerr={on_error} autoinc={autoinc} order={sort_order}")
         }
 
-        create_index: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) Never! {
+        create_index: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tbl: Int, list: Int, on_error: Int, start: ast.SQLTok, where_expr: Int, sort_order: Int, if_not_exist: Int, idx_type: Int) Never! {
             t: ast.tok_text(a, name1)
             n: ast.list_len(a, list)
             self.log.push("create_index {t} cols={n} onerr={on_error} type={idx_type}")
         }
 
-        add_check_constraint: fn(&self, a: &ast.AST, e: Int, start: Int, end: Int) Never! {
+        add_check_constraint: fn(^self, a: ^ast.AST, e: Int, start: Int, end: Int) Never! {
             t: ast.text(a.ctx.sql[start..<end].copy())
             self.log.push("check {t}")
         }
 
-        create_foreign_key: fn(&self, a: &ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) Never! {
+        create_foreign_key: fn(^self, a: ^ast.AST, from_cols: Int, to: ast.SQLTok, to_cols: Int, flags: Int) Never! {
             t: ast.tok_text(a, to)
             self.log.push("foreign_key {t} flags={flags}")
         }
 
-        defer_foreign_key: fn(&self, a: &ast.AST, deferred: Int) Never! {
+        defer_foreign_key: fn(^self, a: ^ast.AST, deferred: Int) Never! {
             self.log.push("defer {deferred}")
         }
 
-        add_collate_type: fn(&self, a: &ast.AST, name: ast.SQLTok) Never! {
+        add_collate_type: fn(^self, a: ^ast.AST, name: ast.SQLTok) Never! {
             t: ast.tok_text(a, name)
             self.log.push("collate {t}")
         }
 
-        add_generated: fn(&self, a: &ast.AST, e: Int, typ: ast.SQLTok) Never! {
+        add_generated: fn(^self, a: ^ast.AST, e: Int, typ: ast.SQLTok) Never! {
             t: ast.tok_text(a, typ)
             self.log.push("generated {t}")
         }
 
-        drop_table: fn(&self, a: &ast.AST, name: Int, is_view: Int, no_err: Int) Never! {
+        drop_table: fn(^self, a: ^ast.AST, name: Int, is_view: Int, no_err: Int) Never! {
             self.log.push("drop_table view={is_view} noerr={no_err}")
         }
 
-        create_view: fn(&self, a: &ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) Never! {
+        create_view: fn(^self, a: ^ast.AST, begin: ast.SQLTok, name1: ast.SQLTok, name2: ast.SQLTok, cols: Int, select: Int, is_temp: Int, no_err: Int) Never! {
             t: ast.tok_text(a, name1)
             self.log.push("create_view {t}")
         }
 
-        select_output: fn(&self, a: &ast.AST, select: Int) Never! {
+        select_output: fn(^self, a: ^ast.AST, select: Int) Never! {
             self.sel = select
             self.log.push("select")
         }
 
-        delete_from: fn(&self, a: &ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) Never! {
+        delete_from: fn(^self, a: ^ast.AST, src: Int, where_expr: Int, order_by: Int, limit: Int) Never! {
             self.log.push("delete")
         }
 
-        add_returning: fn(&self, a: &ast.AST, list: Int) Never! {
+        add_returning: fn(^self, a: ^ast.AST, list: Int) Never! {
             n: ast.list_len(a, list)
             self.log.push("returning {n}")
         }
 
-        update: fn(&self, a: &ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) Never! {
+        update: fn(^self, a: ^ast.AST, src: Int, changes: Int, where_expr: Int, on_error: Int, order_by: Int, limit: Int, upsert: Int) Never! {
             n: ast.src_len(a, src)
             self.log.push("update src={n} onerr={on_error}")
         }
 
-        insert: fn(&self, a: &ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) Never! {
+        insert: fn(^self, a: ^ast.AST, src: Int, select: Int, cols: Int, on_error: Int, upsert: Int) Never! {
             up: upsert >= 0
             self.log.push("insert onerr={on_error} upsert={up}")
         }
 
-        drop_index: fn(&self, a: &ast.AST, name: Int, if_exists: Int) Never! {
+        drop_index: fn(^self, a: ^ast.AST, name: Int, if_exists: Int) Never! {
             self.log.push("drop_index {if_exists}")
         }
 
-        vacuum: fn(&self, a: &ast.AST, name: ast.SQLTok, into: Int) Never! {
+        vacuum: fn(^self, a: ^ast.AST, name: ast.SQLTok, into: Int) Never! {
             self.log.push("vacuum")
         }
 
-        pragma: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) Never! {
+        pragma: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, value: ast.SQLTok, minus: Int) Never! {
             t1: ast.tok_text(a, name1)
             t2: ast.tok_text(a, name2)
             v: ast.tok_text(a, value)
             self.log.push("pragma {t1}|{t2}={v} minus={minus}")
         }
 
-        begin_trigger: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) Never! {
+        begin_trigger: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, tr_tm: Int, op: Int, columns: Int, table: Int, when: Int, is_temp: Int, no_err: Int) Never! {
             t: ast.tok_text(a, name1)
             self.log.push("begin_trigger {t} time={tr_tm} op={op}")
         }
 
-        finish_trigger: fn(&self, a: &ast.AST, steps: Int, all: ast.SQLTok) Never! {
+        finish_trigger: fn(^self, a: ^ast.AST, steps: Int, all: ast.SQLTok) Never! {
             t: ast.tok_text(a, all)
             n := 0
             st := steps
@@ -1926,57 +1926,57 @@ SQLRecorder: struct {
             self.log.push("finish_trigger steps={n} {t}")
         }
 
-        drop_trigger: fn(&self, a: &ast.AST, name: Int, no_err: Int) Never! {
+        drop_trigger: fn(^self, a: ^ast.AST, name: Int, no_err: Int) Never! {
             self.log.push("drop_trigger")
         }
 
-        attach: fn(&self, a: &ast.AST, filename: Int, dbname: Int, key: Int) Never! {
+        attach: fn(^self, a: ^ast.AST, filename: Int, dbname: Int, key: Int) Never! {
             self.log.push("attach")
         }
 
-        detach: fn(&self, a: &ast.AST, dbname: Int) Never! { self.log.push("detach") }
+        detach: fn(^self, a: ^ast.AST, dbname: Int) Never! { self.log.push("detach") }
 
-        reindex: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! {
+        reindex: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! {
             self.log.push("reindex")
         }
 
-        analyze: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! {
+        analyze: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok) Never! {
             self.log.push("analyze")
         }
 
-        alter_rename_table: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) Never! {
+        alter_rename_table: fn(^self, a: ^ast.AST, src: Int, name: ast.SQLTok) Never! {
             self.log.push("rename_table")
         }
 
-        alter_begin_add_column: fn(&self, a: &ast.AST, src: Int) Never! {
+        alter_begin_add_column: fn(^self, a: ^ast.AST, src: Int) Never! {
             self.log.push("begin_add_column")
         }
 
-        alter_finish_add_column: fn(&self, a: &ast.AST, col_def: ast.SQLTok) Never! {
+        alter_finish_add_column: fn(^self, a: ^ast.AST, col_def: ast.SQLTok) Never! {
             t: ast.tok_text(a, col_def)
             self.log.push("finish_add_column {t}")
         }
 
-        alter_drop_column: fn(&self, a: &ast.AST, src: Int, name: ast.SQLTok) Never! {
+        alter_drop_column: fn(^self, a: ^ast.AST, src: Int, name: ast.SQLTok) Never! {
             self.log.push("drop_column")
         }
 
-        alter_rename_column: fn(&self, a: &ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) Never! {
+        alter_rename_column: fn(^self, a: ^ast.AST, src: Int, old_name: ast.SQLTok, new_name: ast.SQLTok) Never! {
             self.log.push("rename_column")
         }
 
-        vtab_begin_parse: fn(&self, a: &ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) Never! {
+        vtab_begin_parse: fn(^self, a: ^ast.AST, name1: ast.SQLTok, name2: ast.SQLTok, module_name: ast.SQLTok, if_not_exists: Int) Never! {
             t: ast.tok_text(a, module_name)
             self.log.push("vtab_begin {t}")
         }
 
-        vtab_finish_parse: fn(&self, a: &ast.AST, end: ast.SQLTok) Never! {
+        vtab_finish_parse: fn(^self, a: ^ast.AST, end: ast.SQLTok) Never! {
             self.log.push("vtab_finish")
         }
 
-        vtab_arg_init: fn(&self, a: &ast.AST) Never! { self.log.push("vtab_arg") }
+        vtab_arg_init: fn(^self, a: ^ast.AST) Never! { self.log.push("vtab_arg") }
 
-        vtab_arg_extend: fn(&self, a: &ast.AST, t: ast.SQLTok) Never! {
+        vtab_arg_extend: fn(^self, a: ^ast.AST, t: ast.SQLTok) Never! {
             x: ast.tok_text(a, t)
             self.log.push("vtab_extend {x}")
         }
@@ -1986,7 +1986,7 @@ SQLRecorder: struct {
 new_recorder: fn() -> SQLRecorder Never! { SQLRecorder{log: [String]{}, sel: -1} }
 
 // Parse `sql` into a fresh arena with the recorder.
-parse_with: fn(a: &ast.AST, r: &SQLRecorder, sql: String) -> Int Never! {
+parse_with: fn(a: ^ast.AST, r: ^SQLRecorder, sql: String) -> Int Never! {
     ast.begin_statement(a, sql.bytes())
     run_parser<SQLRecorder>(r, a)
 }

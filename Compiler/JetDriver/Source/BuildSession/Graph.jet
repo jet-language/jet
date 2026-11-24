@@ -24,7 +24,7 @@ build_session_contains_int: fn(values: [Int], value: Int) -> Bool Never! {
     false
 }
 
-build_session_append_int: fn(values: &[Int], value: Int) Never! {
+build_session_append_int: fn(values: ^[Int], value: Int) Never! {
     if !build_session_contains_int(values, value) -> values.push(value)
 }
 
@@ -66,7 +66,7 @@ build_session_cycle: fn(edges: [[Int]], names: [String]) -> [String]? Never! {
     None
 }
 
-build_session_target_actions: fn(state: BuildSessionState, id: Int, selected: &[Int]) Never! {
+build_session_target_actions: fn(state: BuildSessionState, id: Int, selected: ^[Int]) Never! {
     pending := [Int]{id}
     seen := [Int]{}
     loop pending.len() > 0 {
@@ -278,9 +278,9 @@ build_session_graph: fn(session: BuildSession, returned: BuildSessionValue) -> B
     {graph: Val(build_session_project(permit.value)), diagnostic: None}
 }
 
-build_session_finish: fn(session: &BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
+build_session_finish: fn(session: ^BuildSession, returned: BuildSessionValue) -> BuildSessionFinish Never! {
     permit := session.storage.guard_edit()
-    state := &permit.value
+    state := ^permit.value
     if !state.active {
         return {plan: None, diagnostics: [BuildSessionDiagnostic]{build_session_diag(state, "build context expired")}}
     }

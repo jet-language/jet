@@ -218,7 +218,7 @@ numbers_value: fn(p: NumbersModel, seed: Int) -> Int {
 }
 
 // 1. Records built in a loop, scored through trait values.
-records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, score_a: Int, score_b: Int, r: &Seeded) -> Worker {
+records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, score_a: Int, score_b: Int, r: ^Seeded) -> Worker {
     name: "{unit_name}_build_records"
     count: r.int(3, 6)
     a: r.int(3, 29)
@@ -253,7 +253,7 @@ records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, s
 }
 
 // 2. Enum values built by a value match, consumed by a variant match.
-shapes_worker: fn(unit_name: String, shape: String, r: &Seeded) -> Worker {
+shapes_worker: fn(unit_name: String, shape: String, r: ^Seeded) -> Worker {
     name: "{unit_name}_match_shapes"
     count: r.int(4, 8)
     a: r.int(3, 41)
@@ -291,7 +291,7 @@ shapes_worker: fn(unit_name: String, shape: String, r: &Seeded) -> Worker {
 }
 
 // 3. String keys, interpolation, and a map read through `??`.
-words_worker: fn(unit_name: String, r: &Seeded) -> Worker {
+words_worker: fn(unit_name: String, r: ^Seeded) -> Worker {
     name: "{unit_name}_count_words"
     words: [String]{r.pick(MIXED_WORDS), r.pick(MIXED_WORDS), r.pick(MIXED_WORDS), r.pick(MIXED_WORDS)}
     buckets: r.int(2, 5)
@@ -328,7 +328,7 @@ words_worker: fn(unit_name: String, r: &Seeded) -> Worker {
 }
 
 // 4. Optional values mapped through closures, and a local closure.
-options_worker: fn(unit_name: String, constant_value: Int, r: &Seeded) -> Worker {
+options_worker: fn(unit_name: String, constant_value: Int, r: ^Seeded) -> Worker {
     name: "{unit_name}_map_options"
     k0: r.int(1, 30)
     k1: r.int(31, 60)
@@ -363,7 +363,7 @@ options_worker: fn(unit_name: String, constant_value: Int, r: &Seeded) -> Worker
 }
 
 // 5. Integer loops and ordered arm tables.
-numbers_worker: fn(unit_name: String, r: &Seeded) -> Worker {
+numbers_worker: fn(unit_name: String, r: ^Seeded) -> Worker {
     name: "{unit_name}_settle_numbers"
     limit: r.int(20, 60)
     a: r.int(2, 9)
@@ -396,7 +396,7 @@ numbers_worker: fn(unit_name: String, r: &Seeded) -> Worker {
 
 // One unit: a record struct, a shape enum, the section trait's impl, five
 // worker functions of different construct mixes, and the unit total.
-mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
+mixed_unit: fn(m: Int, u: Int, r: ^Seeded, stats: ^Stats) -> Generated {
     unit_name: "section_{m}_unit_{u}"
     rec: "RecordM{m}U{u}"
     shape: "ShapeM{m}U{u}"

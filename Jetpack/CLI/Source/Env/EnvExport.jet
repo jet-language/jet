@@ -34,7 +34,7 @@ cli_cmd_env_hook: fn(theme: Theme, parsed: CLIParsed) -[IO, Env, Time.Wait]> Int
 
 // `jet env export <shell>` — the statements that load the nearest `env.jet`
 // into the current shell, or unload it once the shell leaves that tree.
-cli_cmd_env_export: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_cmd_env_export: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     shell: if parsed.positional.len() > 1 -> Val(parsed.positional[1]) else -> String?{None}
     // An unknown shell from an installed hook is not worth a diagnostic on
     // every prompt: emit nothing and let the shell keep its environment.
@@ -105,7 +105,7 @@ EnvExportStop: struct {
 // Realize, trust, compose, and render the activation of `root`. Every
 // refusal before the script is final returns exit 0 so the previous
 // activation stays live; a rejected activation render exits 2.
-cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, kind: ShellKind, root: String, target_hash: String?, active: Bool, base_path: String, watched_reload_ready: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> String EnvExportStop! {
+cli_env_export_activate: fn(verification: ^StoreVerification, cache: ^WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, kind: ShellKind, root: String, target_hash: String?, active: Bool, base_path: String, watched_reload_ready: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> String EnvExportStop! {
     keep: EnvExportStop{code: EXIT_OK}
     // Realize with `root` as cwd so the cwd-relative plan and realize path
     // composes it exactly like `jet env` would from inside it. This process

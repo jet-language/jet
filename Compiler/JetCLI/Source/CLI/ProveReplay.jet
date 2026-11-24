@@ -708,7 +708,7 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
 // The frames of one HTTP hop: NetRequest, NetDns once it resolved,
 // NetResponse when the program saw a reply, a NetChunk per 512 KiB it read,
 // and NetEnd. `request_id` is the NetRequest frame's sequence.
-jet_cli_replay_net_frames: fn(payloads: &[[U8]], kinds: &[Int], read: JetCLIReplayRead, call: Int, salt: [U8]) Never! {
+jet_cli_replay_net_frames: fn(payloads: ^[[U8]], kinds: ^[Int], read: JetCLIReplayRead, call: Int, salt: [U8]) Never! {
     hop: jet_cli_replay_net_hop(read.bytes) ?? panic("a Net journal record is checked when it is read")
     request_id: payloads.len()
     payloads.push(canonical_json_bytes(CanonicalJSON.Object(jet_cli_replay_net_request_fields(hop, call, request_id, read.site_id, salt))))
@@ -838,7 +838,7 @@ JetCLIReplayCursor: struct {
     bad: Bool,
 }
 
-jet_cli_replay_cursor_u64: fn(cursor: &JetCLIReplayCursor) -> Int Never! {
+jet_cli_replay_cursor_u64: fn(cursor: ^JetCLIReplayCursor) -> Int Never! {
     if cursor.bad || cursor.at + 8 > cursor.bytes.len() {
         cursor.bad = true
         return 0
@@ -852,7 +852,7 @@ jet_cli_replay_cursor_u64: fn(cursor: &JetCLIReplayCursor) -> Int Never! {
     value
 }
 
-jet_cli_replay_cursor_bytes: fn(cursor: &JetCLIReplayCursor) -> [U8] Never! {
+jet_cli_replay_cursor_bytes: fn(cursor: ^JetCLIReplayCursor) -> [U8] Never! {
     size: jet_cli_replay_cursor_u64(cursor)
     if cursor.bad || size > cursor.bytes.len() - cursor.at {
         cursor.bad = true
@@ -863,7 +863,7 @@ jet_cli_replay_cursor_bytes: fn(cursor: &JetCLIReplayCursor) -> [U8] Never! {
     out
 }
 
-jet_cli_replay_cursor_text: fn(cursor: &JetCLIReplayCursor) -> String Never! {
+jet_cli_replay_cursor_text: fn(cursor: ^JetCLIReplayCursor) -> String Never! {
     bytes: jet_cli_replay_cursor_bytes(cursor)
     text: String.from_bytes(bytes) ?? {
         cursor.bad = true
@@ -874,7 +874,7 @@ jet_cli_replay_cursor_text: fn(cursor: &JetCLIReplayCursor) -> String Never! {
 
 // The request part of a hop record (Core's `__client_net_request`), the
 // rest of the hop empty.
-jet_cli_replay_net_request_read: fn(cursor: &JetCLIReplayCursor) -> JetCLIReplayNetHop Never! {
+jet_cli_replay_net_request_read: fn(cursor: ^JetCLIReplayCursor) -> JetCLIReplayNetHop Never! {
     hop := JetCLIReplayNetHop{hop: 0, method: "", scheme: "", host: "", port: 0, target: "", names: [String]{}, values: [String]{}, body: None, stage: 0, addresses: [[U8]]{}, sends: 0, stream: [U8]{}, answered: false, status: 0, reply_names: [String]{}, reply_values: [String]{}, ending: ""}
     hop.hop = jet_cli_replay_cursor_u64(cursor)
     hop.method = jet_cli_replay_cursor_text(cursor)
@@ -1027,7 +1027,7 @@ jet_cli_replay_header_bytes: fn(artifact_id: String, run: JetCLIReplayRun, salt:
 }
 
 // `value` (at least zero) as `width` little-endian bytes.
-jet_cli_replay_put_le: fn(out: &[U8], value: Int, width: Int) Never! {
+jet_cli_replay_put_le: fn(out: ^[U8], value: Int, width: Int) Never! {
     rest := value
     loop _ in 0..<width {
         out.push(checked(U8{rest %% 256}) ?? panic("replay wire byte"))
@@ -2776,7 +2776,7 @@ JetCLIReplayCore: struct {
 // routes with no source declaration, its call record's effect. A call with
 // neither reaches no authority and leaves the list; a dotted call through no
 // import alias then stays a boundary. Sites keep their walk order.
-jet_cli_replay_resolve: fn(sites: &[JetCLIReplaySite], input: String) {
+jet_cli_replay_resolve: fn(sites: ^[JetCLIReplaySite], input: String) {
     sources: if jet_cli_core_sources(input) == {
         .Loaded(loaded) -> loaded
         .Missing(_, _) -> [JetDriverCoreSource]{}
@@ -2800,7 +2800,7 @@ jet_cli_replay_resolve: fn(sites: &[JetCLIReplaySite], input: String) {
     }
 }
 
-jet_cli_replay_core_authority: fn(core: &JetCLIReplayCore, module_name: String, member: String) -> String? {
+jet_cli_replay_core_authority: fn(core: ^JetCLIReplayCore, module_name: String, member: String) -> String? {
     loop (index, source) in core.sources {
         if source.module_name != module_name || core.parsed.contains(index) -> next
         core.parsed.push(index)
@@ -2851,7 +2851,7 @@ jet_cli_replay_aliases: fn(imports: [ImportDecl]) -> [String:String] Never! {
     aliases
 }
 
-jet_cli_replay_local_names: fn(items: [Item], names: &[String]) {
+jet_cli_replay_local_names: fn(items: [Item], names: ^[String]) {
     loop item in items {
         if item == {
             .Func(func) -> { names.push(func.name.copy()) }
@@ -2863,7 +2863,7 @@ jet_cli_replay_local_names: fn(items: [Item], names: &[String]) {
     }
 }
 
-jet_cli_replay_items: fn(tables: ASTTables, items: [Item], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_items: fn(tables: ASTTables, items: [Item], aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     loop item in items {
         if item == {
             .Func(func) -> { jet_cli_replay_block(tables, func.body, aliases, locals, sites) }
@@ -2893,15 +2893,15 @@ jet_cli_replay_items: fn(tables: ASTTables, items: [Item], aliases: [String:Stri
     }
 }
 
-jet_cli_replay_boundary: fn(operation: String, sites: &[JetCLIReplaySite]) {
+jet_cli_replay_boundary: fn(operation: String, sites: ^[JetCLIReplaySite]) {
     sites.push(JetCLIReplaySite{operation: operation, authority: None, owner: ""})
 }
 
-jet_cli_replay_block: fn(tables: ASTTables, body: [StmtNode], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_block: fn(tables: ASTTables, body: [StmtNode], aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     loop statement in body -> jet_cli_replay_stmt(tables, statement, aliases, locals, sites)
 }
 
-jet_cli_replay_stmt: fn(tables: ASTTables, statement: StmtNode, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_stmt: fn(tables: ASTTables, statement: StmtNode, aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     if ast_stmt(tables, statement) == {
         .Expr(value) -> { jet_cli_replay_expr(tables, value, aliases, locals, sites) }
         .Val(binding) -> {
@@ -3022,7 +3022,7 @@ jet_cli_replay_stmt: fn(tables: ASTTables, statement: StmtNode, aliases: [String
     }
 }
 
-jet_cli_replay_fallback: fn(tables: ASTTables, fallback: OrFallback, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_fallback: fn(tables: ASTTables, fallback: OrFallback, aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     if fallback == {
         .Value(value) -> { jet_cli_replay_expr(tables, value, aliases, locals, sites) }
         .Block(body, value, _) -> {
@@ -3044,11 +3044,11 @@ jet_cli_replay_fallback: fn(tables: ASTTables, fallback: OrFallback, aliases: [S
     }
 }
 
-jet_cli_replay_exprs: fn(tables: ASTTables, values: [ExprNode], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_exprs: fn(tables: ASTTables, values: [ExprNode], aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     loop value in values -> jet_cli_replay_expr(tables, value, aliases, locals, sites)
 }
 
-jet_cli_replay_expr: fn(tables: ASTTables, value: ExprNode, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_expr: fn(tables: ASTTables, value: ExprNode, aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     if ast_expr(tables, value) == {
         .Str(parts, _, _) -> {
             loop part in parts {
@@ -3213,7 +3213,7 @@ jet_cli_replay_expr: fn(tables: ASTTables, value: ExprNode, aliases: [String:Str
     }
 }
 
-jet_cli_replay_pattern: fn(tables: ASTTables, pattern: PatternNode, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_pattern: fn(tables: ASTTables, pattern: PatternNode, aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     if ast_pattern(tables, pattern) == {
         .Variant(_, bindings, _, _) -> {
             loop slot in bindings -> jet_cli_replay_slot(tables, slot, aliases, locals, sites)
@@ -3267,7 +3267,7 @@ jet_cli_replay_pattern: fn(tables: ASTTables, pattern: PatternNode, aliases: [St
     }
 }
 
-jet_cli_replay_slot: fn(tables: ASTTables, slot: PatSlot, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_slot: fn(tables: ASTTables, slot: PatSlot, aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     if slot == {
         .Wildcard -> {}
         .Bind(_, _) -> {}
@@ -3282,7 +3282,7 @@ jet_cli_replay_slot: fn(tables: ASTTables, slot: PatSlot, aliases: [String:Strin
 // A direct call. A bare name is a local function, an ambient terminal
 // builtin, or an imported Core member; a dotted name is `module.member`
 // through an import alias. Anything else is opaque to the replay authority.
-jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String], sites: ^[JetCLIReplaySite]) {
     dot: name.rfind(".")
     if dot < 0 {
         if locals.contains(name) {
@@ -3311,7 +3311,7 @@ jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String]
 
 // `receiver.method(…)`: a Core member through an import alias, else a
 // method of a value, which the replay authority cannot see into.
-jet_cli_replay_method: fn(tables: ASTTables, receiver: ExprNode, method: String, aliases: [String:String], sites: &[JetCLIReplaySite]) {
+jet_cli_replay_method: fn(tables: ASTTables, receiver: ExprNode, method: String, aliases: [String:String], sites: ^[JetCLIReplaySite]) {
     path: jet_cli_replay_receiver_path(tables, receiver) ?? ""
     owner: jet_cli_replay_module(path, aliases) ?? ""
     if owner == "" {

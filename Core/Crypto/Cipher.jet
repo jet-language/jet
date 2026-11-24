@@ -37,7 +37,7 @@ AESKey: struct {
     dk: [U8],
 
     impl Close {
-        close: fn(&&self) {
+        close: fn(^^self) {
             sk := self.sk.move()
             loop i in 0..<sk.len() -> sk[i] = U64{0}
             rk := self.rk.move()
@@ -48,13 +48,13 @@ AESKey: struct {
     }
 
     impl ForwardBlock {
-        encrypt_one: fn(self, b: &[U8]) Never! { encrypt_in_place(self, b) }
+        encrypt_one: fn(self, b: ^[U8]) Never! { encrypt_in_place(self, b) }
 
-        ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+        ctr32_blocks: fn(self, ctr: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
             blocks(self, CTR32, ctr, src, off, count, out)
         }
 
-        cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+        cbc_blocks: fn(self, iv: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
             blocks(self, CBC_ENC, iv, src, off, count, out)
         }
     }
@@ -111,7 +111,7 @@ zero_bytes: fn(count: Int) -> [U8] Never! {
 }
 
 /// Grow `out`'s capacity by exactly `count` bytes before they are appended.
-reserve: fn(out: &[U8], count: Int) Never! {
+reserve: fn(out: ^[U8], count: Int) Never! {
     if !mem.__list_reserve_exact<U8>(out, count) -> panic("cipher output allocation failed")
 }
 
@@ -123,7 +123,7 @@ bytes_of: fn(src: [U8], off: Int, count: Int) -> [U8] Never! {
     out
 }
 
-wipe_words: fn(w: &[U64]) Never! {
+wipe_words: fn(w: ^[U64]) Never! {
     loop i in 0..<w.len() -> w[i] = U64{0}
 }
 
@@ -138,7 +138,7 @@ low_byte: fn(x: U64) -> U8 Never! { wrapping(U8{x}) }
 // Bitsliced AES. q[j] holds bit j of every byte of four blocks: bit
 // 16 * row + 4 * column + slot.
 
-swap_planes: fn(q: &[U64], a: Int, b: Int, low: U64, high: U64, shift: Int) Never! {
+swap_planes: fn(q: ^[U64], a: Int, b: Int, low: U64, high: U64, shift: Int) Never! {
     x: q[a]
     y: q[b]
     q[a] = x & low | (y & low) << shift
@@ -147,7 +147,7 @@ swap_planes: fn(q: &[U64], a: Int, b: Int, low: U64, high: U64, shift: Int) Neve
 
 /// The bit-matrix transpose between byte-interleaved blocks and bit planes;
 /// it is its own inverse.
-ortho: fn(q: &[U64]) Never! {
+ortho: fn(q: ^[U64]) Never! {
     l1: U64{0x5555555555555555}
     h1: U64{0xaaaaaaaaaaaaaaaa}
     swap_planes(q, 0, 1, l1, h1, 1)
@@ -180,7 +180,7 @@ gather: fn(x: U64) -> U64 Never! {
 }
 
 /// Block `slot`'s four little-endian words into q[slot] and q[slot + 4].
-interleave_in: fn(q: &[U64], slot: Int, b: [U8], off: Int) Never! {
+interleave_in: fn(q: ^[U64], slot: Int, b: [U8], off: Int) Never! {
     x0: spread(le32(b, off))
     x1: spread(le32(b, off + 4))
     x2: spread(le32(b, off + 8))
@@ -189,7 +189,7 @@ interleave_in: fn(q: &[U64], slot: Int, b: [U8], off: Int) Never! {
     q[slot + 4] = x1 | x3 << 8
 }
 
-put_word: fn(out: &[U8], at: Int, w: U64) Never! {
+put_word: fn(out: ^[U8], at: Int, w: U64) Never! {
     out[at] = low_byte(w)
     out[at + 1] = low_byte(w >> 8)
     out[at + 2] = low_byte(w >> 16)
@@ -197,7 +197,7 @@ put_word: fn(out: &[U8], at: Int, w: U64) Never! {
 }
 
 /// Block `slot` of q into out[at..<at + 16].
-interleave_out: fn(q: [U64], slot: Int, out: &[U8], at: Int) Never! {
+interleave_out: fn(q: [U64], slot: Int, out: ^[U8], at: Int) Never! {
     q0: q[slot]
     q1: q[slot + 4]
     put_word(out, at, gather(q0))
@@ -209,7 +209,7 @@ interleave_out: fn(q: [U64], slot: Int, out: &[U8], at: Int) Never! {
 /// The AES S-box on every byte of the planes: the Boyar-Peralta circuit's
 /// top linear layer, 32 AND gates of GF(2^4) inversion, then its bottom
 /// linear layer. x0 is a byte's most significant bit.
-sbox: fn(q: &[U64]) Never! {
+sbox: fn(q: ^[U64]) Never! {
     x0: q[7]
     x1: q[6]
     x2: q[5]
@@ -345,7 +345,7 @@ sbox: fn(q: &[U64]) Never! {
 
 /// The affine map T(y) = A^-1(y + 0x63) on the planes. It is an involution
 /// with S^-1 = T . S . T, since S(x) = A(x^-1) + 0x63.
-inv_affine: fn(q: &[U64]) Never! {
+inv_affine: fn(q: ^[U64]) Never! {
     q0: ~q[0]
     q1: ~q[1]
     q2: q[2]
@@ -364,21 +364,21 @@ inv_affine: fn(q: &[U64]) Never! {
     q[0] = q2 ~ q5 ~ q7
 }
 
-inv_sbox: fn(q: &[U64]) Never! {
+inv_sbox: fn(q: ^[U64]) Never! {
     inv_affine(q)
     sbox(q)
     inv_affine(q)
 }
 
 /// ShiftRows: row r of every block rotates left by r columns.
-shift_rows: fn(q: &[U64]) Never! {
+shift_rows: fn(q: ^[U64]) Never! {
     loop i in 0..<8 {
         x: q[i]
         q[i] = x & U64{0x000000000000ffff} | (x & U64{0x00000000fff00000}) >> 4 | (x & U64{0x00000000000f0000}) << 12 | (x & U64{0x0000ff0000000000}) >> 8 | (x & U64{0x000000ff00000000}) << 8 | (x & U64{0xf000000000000000}) >> 12 | (x & U64{0x0fff000000000000}) << 4
     }
 }
 
-inv_shift_rows: fn(q: &[U64]) Never! {
+inv_shift_rows: fn(q: ^[U64]) Never! {
     loop i in 0..<8 {
         x: q[i]
         q[i] = x & U64{0x000000000000ffff} | (x & U64{0x000000000fff0000}) << 4 | (x & U64{0x00000000f0000000}) >> 12 | (x & U64{0x000000ff00000000}) << 8 | (x & U64{0x0000ff0000000000}) >> 8 | (x & U64{0x000f000000000000}) << 12 | (x & U64{0xfff0000000000000}) >> 4
@@ -394,7 +394,7 @@ row_opposite: fn(x: U64) -> U64 Never! { (x << 32) | x >> 32 }
 /// MixColumns: a0' = 2(a0 + a1) + a1 + a2 + a3 for every column, where
 /// doubling moves plane j to j + 1 and folds plane 7 into planes 0, 1, 3
 /// and 4 (x^8 = x^4 + x^3 + x + 1).
-mix_columns: fn(q: &[U64]) Never! {
+mix_columns: fn(q: ^[U64]) Never! {
     q0: q[0]
     q1: q[1]
     q2: q[2]
@@ -424,7 +424,7 @@ mix_columns: fn(q: &[U64]) Never! {
 /// InvMixColumns as MixColumns after the circulant (05, 00, 04, 00):
 /// circ(0e, 0b, 0d, 09) = circ(02, 03, 01, 01) * circ(05, 00, 04, 00), so
 /// a_r' = a_r + 4 (a_r + a_{r+2}) and then MixColumns.
-inv_mix_columns: fn(q: &[U64]) Never! {
+inv_mix_columns: fn(q: ^[U64]) Never! {
     w0: q[0] ~ row_opposite(q[0])
     w1: q[1] ~ row_opposite(q[1])
     w2: q[2] ~ row_opposite(q[2])
@@ -445,13 +445,13 @@ inv_mix_columns: fn(q: &[U64]) Never! {
     mix_columns(q)
 }
 
-add_round_key: fn(q: &[U64], sk: [U64], round: Int) Never! {
+add_round_key: fn(q: ^[U64], sk: [U64], round: Int) Never! {
     base: round * 8
     loop i in 0..<8 -> q[i] = q[i] ~ sk[base + i]
 }
 
 /// FIPS 197 section 5.1 Cipher on the four blocks in q.
-encrypt_planes: fn(k: AESKey, q: &[U64]) Never! {
+encrypt_planes: fn(k: AESKey, q: ^[U64]) Never! {
     add_round_key(q, k.sk, 0)
     loop round in 1..<k.rounds {
         sbox(q)
@@ -465,7 +465,7 @@ encrypt_planes: fn(k: AESKey, q: &[U64]) Never! {
 }
 
 /// FIPS 197 section 5.3 InvCipher on the four blocks in q.
-decrypt_planes: fn(k: AESKey, q: &[U64]) Never! {
+decrypt_planes: fn(k: AESKey, q: ^[U64]) Never! {
     add_round_key(q, k.sk, k.rounds)
     round := k.rounds - 1
     loop round > 0 {
@@ -482,7 +482,7 @@ decrypt_planes: fn(k: AESKey, q: &[U64]) Never! {
 
 /// `count` (1 to 4) blocks of `src` from `off` through the cipher into
 /// out[at..], in place. Unused slots carry zeros.
-crypt4: fn(k: AESKey, decrypt: Bool, q: &[U64], src: [U8], off: Int, count: Int, out: &[U8], at: Int) Never! {
+crypt4: fn(k: AESKey, decrypt: Bool, q: ^[U64], src: [U8], off: Int, count: Int, out: ^[U8], at: Int) Never! {
     loop slot in 0..<4 {
         if slot < count -> interleave_in(q, slot, src, off + 16 * slot) else {
             q[slot] = U64{0}
@@ -496,7 +496,7 @@ crypt4: fn(k: AESKey, decrypt: Bool, q: &[U64], src: [U8], off: Int, count: Int,
 }
 
 /// SubWord (FIPS 197 section 5.2) of a 32-bit word.
-sub_word: fn(q: &[U64], x: U64) -> U64 Never! {
+sub_word: fn(q: ^[U64], x: U64) -> U64 Never! {
     wipe_words(q)
     q[0] = x
     ortho(q)
@@ -509,7 +509,7 @@ sub_word: fn(q: &[U64], x: U64) -> U64 Never! {
 #Overflow(.Wrapping) xtime: fn(a: U8) -> U8 Never! { (a << 1) ~ U8{0x1b} & U8{0} - (a >> 7) }
 
 /// InvMixColumns of the round key at rk[off..<off + 16] into out[at..].
-inv_mix_key: fn(rk: [U8], off: Int, out: &[U8], at: Int) Never! {
+inv_mix_key: fn(rk: [U8], off: Int, out: ^[U8], at: Int) Never! {
     loop c in 0..<4 {
         i: off + 4 * c
         a0: rk[i]
@@ -630,13 +630,13 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
 // ---------------------------------------------------------------------------
 // Block operations.
 
-xor_into: fn(dst: &[U8], at: Int, a: [U8], a_off: Int, b: [U8], b_off: Int, count: Int) Never! {
+xor_into: fn(dst: ^[U8], at: Int, a: [U8], a_off: Int, b: [U8], b_off: Int, count: Int) Never! {
     loop i in 0..<count -> dst[at + i] = a[a_off + i] ~ b[b_off + i]
 }
 
 /// Add one to the 16-byte counter as a big-endian integer of its last
 /// `width` bytes (16 for CTR, 4 for CTR32). The counter is public.
-increment: fn(ctr: &[U8], width: Int) Never! {
+increment: fn(ctr: ^[U8], width: Int) Never! {
     carry := U64{1}
     loop i in 0..<width {
         n: U64{ctr[15 - i]} + carry
@@ -648,7 +648,7 @@ increment: fn(ctr: &[U8], width: Int) Never! {
 /// The tweak times x in GF(2^128), little-endian (IEEE 1619-2007 section
 /// 5.2): a one-bit left shift with x^128 = x^7 + x^2 + x + 1, without a
 /// branch on the secret carry.
-#Overflow(.Wrapping) xts_double: fn(t: &[U8]) Never! {
+#Overflow(.Wrapping) xts_double: fn(t: ^[U8]) Never! {
     a := U64{0}
     b := U64{0}
     loop i in 0..<8 {
@@ -667,7 +667,7 @@ increment: fn(ctr: &[U8], width: Int) Never! {
 /// `iv` is the 16-byte chaining value the operation updates (see CBC_ENC
 /// and below). The host leaf runs them when it can; otherwise the
 /// bitsliced rounds run, four independent blocks at a time.
-blocks: fn(k: AESKey, op: Int, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+blocks: fn(k: AESKey, op: Int, iv: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
     if count <= 0 {
         return
     }
@@ -679,7 +679,7 @@ blocks: fn(k: AESKey, op: Int, iv: &[U8], src: [U8], off: Int, count: Int, out: 
 }
 
 /// `blocks` on the bitsliced rounds alone.
-blocks_portable: fn(k: AESKey, op: Int, iv: &[U8], src: [#Secret U8], off: Int, count: Int, out: &[U8]) Never! {
+blocks_portable: fn(k: AESKey, op: Int, iv: ^[U8], src: [#Secret U8], off: Int, count: Int, out: ^[U8]) Never! {
     if count <= 0 {
         return
     }
@@ -764,7 +764,7 @@ blocks_portable: fn(k: AESKey, op: Int, iv: &[U8], src: [#Secret U8], off: Int, 
 }
 
 /// One block of `src` at `off` encrypted into out[at..<at + 16], in place.
-encrypt_block: fn(k: AESKey, src: [U8], off: Int, out: &[U8], at: Int) Never! {
+encrypt_block: fn(k: AESKey, src: [U8], off: Int, out: ^[U8], at: Int) Never! {
     one := [U8]{}
     blocks(k, ECB_ENC, zero_bytes(16), src, off, 1, one)
     loop i in 0..<16 -> out[at + i] = one[i]
@@ -772,7 +772,7 @@ encrypt_block: fn(k: AESKey, src: [U8], off: Int, out: &[U8], at: Int) Never! {
 }
 
 /// The 16-byte block `b` replaced by its encryption.
-encrypt_in_place: fn(k: AESKey, b: &[U8]) Never! {
+encrypt_in_place: fn(k: AESKey, b: ^[U8]) Never! {
     one := [U8]{}
     blocks(k, ECB_ENC, zero_bytes(16), b, 0, 1, one)
     loop i in 0..<16 -> b[i] = one[i]
@@ -785,28 +785,28 @@ encrypt_in_place: fn(k: AESKey, b: &[U8]) Never! {
 /// 16-byte blocks. The key must hold an encryption schedule.
 ForwardBlock: trait {
     /// The 16-byte block `b` replaced by its encryption.
-    encrypt_one: fn(self, b: &[U8]) Never!,
+    encrypt_one: fn(self, b: ^[U8]) Never!,
     /// `count` whole blocks of `src` from `off` XORed with the keystream of
     /// the counter block `ctr`, appended to `out`; `ctr` ends incremented
     /// by `count` in its last 32 bits (the CTR32 operation of `blocks`).
-    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!,
+    ctr32_blocks: fn(self, ctr: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never!,
     /// `count` whole blocks of `src` from `off` CBC-encrypted from the
     /// chaining value `iv`, appended to `out`; `iv` ends holding the last
     /// ciphertext block (the CBC_ENC operation of `blocks`).
-    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!,
+    cbc_blocks: fn(self, iv: ^[U8], src: [U8], off: Int, count: Int, out: ^[U8]) Never!,
 }
 
 // ---------------------------------------------------------------------------
 // The SP 800-38A modes, with mbedtls's streaming offsets.
 
 /// ECB over `count` whole blocks.
-ecb: fn(k: AESKey, decrypt: Bool, src: [U8], off: Int, count: Int, out: &[U8]) Never! {
+ecb: fn(k: AESKey, decrypt: Bool, src: [U8], off: Int, count: Int, out: ^[U8]) Never! {
     blocks(k, if decrypt -> ECB_DEC else -> ECB_ENC, zero_bytes(16), src, off, count, out)
 }
 
 /// CBC over `len` bytes, a multiple of 16; false, appending nothing, for
 /// any other length.
-cbc: fn(k: AESKey, decrypt: Bool, iv: &[U8], src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+cbc: fn(k: AESKey, decrypt: Bool, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if len %% 16 != 0 -> return false
     blocks(k, if decrypt -> CBC_DEC else -> CBC_ENC, iv, src, off, len /% 16, out)
     true
@@ -816,7 +816,7 @@ cbc: fn(k: AESKey, decrypt: Bool, iv: &[U8], src: [U8], off: Int, len: Int, out:
 /// the current keystream block and `offset` the bytes of it already used;
 /// the new offset is returned (mbedtls_aes_crypt_ctr). As there, `stream`
 /// ends holding the last keystream block used.
-ctr: fn(k: AESKey, offset: Int, counter: &[U8], stream: &[U8], src: [U8], off: Int, len: Int, out: &[U8]) -> Int Never! {
+ctr: fn(k: AESKey, offset: Int, counter: ^[U8], stream: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Int Never! {
     n := offset
     at := off
     end: off + len
@@ -847,7 +847,7 @@ ctr: fn(k: AESKey, offset: Int, counter: &[U8], stream: &[U8], src: [U8], off: I
 
 /// CFB128 over `len` bytes; `offset` bytes of the current block are used.
 /// Returns the new offset (mbedtls_aes_crypt_cfb128).
-cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: &[U8], src: [U8], off: Int, len: Int, out: &[U8]) -> Int Never! {
+cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Int Never! {
     n := offset
     at := off
     end: off + len
@@ -877,7 +877,7 @@ cfb128: fn(k: AESKey, decrypt: Bool, offset: Int, iv: &[U8], src: [U8], off: Int
 
 /// CFB8 over `len` bytes: one block encryption per byte
 /// (mbedtls_aes_crypt_cfb8).
-cfb8: fn(k: AESKey, decrypt: Bool, iv: &[U8], src: [U8], off: Int, len: Int, out: &[U8]) Never! {
+cfb8: fn(k: AESKey, decrypt: Bool, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) Never! {
     ks := zero_bytes(16)
     reserve(out, len)
     loop i in 0..<len {
@@ -892,7 +892,7 @@ cfb8: fn(k: AESKey, decrypt: Bool, iv: &[U8], src: [U8], off: Int, len: Int, out
 }
 
 /// OFB over `len` bytes; returns the new offset (mbedtls_aes_crypt_ofb).
-ofb: fn(k: AESKey, offset: Int, iv: &[U8], src: [U8], off: Int, len: Int, out: &[U8]) -> Int Never! {
+ofb: fn(k: AESKey, offset: Int, iv: ^[U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Int Never! {
     n := offset
     at := off
     end: off + len
@@ -943,7 +943,7 @@ xts_key: fn(key: [#Secret U8], decrypt: Bool) -> XTSKey? Never! {
 /// XTS-AES over one data unit of `len` bytes, 16 up to 2^20 blocks, with
 /// ciphertext stealing for a partial last block (IEEE 1619-2007 sections
 /// 5.3.2 and 5.4.2). False, appending nothing, for any other length.
-xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: Int, out: &[U8]) -> Bool Never! {
+xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: Int, out: ^[U8]) -> Bool Never! {
     if len < 16 || len > 16777216 -> return false
     full := len /% 16
     leftover: len %% 16
@@ -990,7 +990,7 @@ xts: fn(xk: XTSKey, decrypt: Bool, data_unit: [U8], src: [U8], off: Int, len: In
 /// The 16-byte block doubled in GF(2^128), big-endian (SP 800-38B section
 /// 6.1): a one-bit left shift, then 0x87 into the last byte when the shifted
 /// out bit was set, without a branch on it.
-#Overflow(.Wrapping) cmac_double: fn(b: &[U8]) Never! {
+#Overflow(.Wrapping) cmac_double: fn(b: ^[U8]) Never! {
     carry: U8{0} - (b[0] >> 7)
     loop i in 0..<15 -> b[i] = (b[i] << 1) | b[i + 1] >> 7
     b[15] = (b[15] << 1) ~ U8{0x87} & carry
@@ -1056,7 +1056,7 @@ KWP_ICV2: [U8]{0xa6, 0x59, 0x59, 0xa6}
 
 /// W (SP 800-38F section 6.1, algorithm 1) over buf = A || R1 || ... || Rn
 /// in place: 6n rounds of A || R_i encrypted, then A ^= t.
-kw_w: fn(k: AESKey, buf: &[U8]) Never! {
+kw_w: fn(k: AESKey, buf: ^[U8]) Never! {
     n: buf.len() /% 8 - 1
     block := zero_bytes(16)
     one := zero_bytes(16)
@@ -1080,7 +1080,7 @@ kw_w: fn(k: AESKey, buf: &[U8]) Never! {
 }
 
 /// W^-1 (SP 800-38F section 6.1, algorithm 2) in place.
-kw_w_inverse: fn(k: AESKey, buf: &[U8]) Never! {
+kw_w_inverse: fn(k: AESKey, buf: ^[U8]) Never! {
     n: buf.len() /% 8 - 1
     block := zero_bytes(16)
     one := [U8]{}
@@ -1216,7 +1216,7 @@ CBCPadding: enum {
 /// Fill out[data_len..<len] with `mode`'s padding, so out[0..<len] is one
 /// padded block (mbedtls's add_*_padding). `.Unpadded` writes nothing, as
 /// mbedtls has no add function for it.
-cbc_add_padding: fn(mode: CBCPadding, out: &[U8], len: Int, data_len: Int) Never! {
+cbc_add_padding: fn(mode: CBCPadding, out: ^[U8], len: Int, data_len: Int) Never! {
     if mode == .Unpadded {
         return
     }

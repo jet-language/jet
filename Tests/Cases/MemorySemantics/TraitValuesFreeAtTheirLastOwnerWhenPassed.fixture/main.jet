@@ -13,7 +13,7 @@ Context: struct {
 }
 
 Sink: trait {
-    finish: fn(&&self) -[]> Int,
+    finish: fn(^^self) -[]> Int,
     peek: fn(self) -[]> Int,
 }
 
@@ -22,7 +22,7 @@ Worker: struct {
     n: Int,
 
     impl Sink {
-        finish: fn(&&self) -[]> Int { self.n + 2 }
+        finish: fn(^^self) -[]> Int { self.n + 2 }
 
         peek: fn(self) -[]> Int { self.n + 1 }
     }
@@ -38,9 +38,9 @@ read_it: fn(k: Sink) -> Int { k.peek() }
 
 read_twice: fn(k: Sink) -> Int { read_it(k) + read_it(k) }
 
-own_it: fn(k: &&Sink) -> Int { k.peek() }
+own_it: fn(k: ^^Sink) -> Int { k.peek() }
 
-keep_it: fn(k: &&Sink) -> Holder { Holder{sink: k} }
+keep_it: fn(k: ^^Sink) -> Holder { Holder{sink: k} }
 
 read: fn(s: Shared<Context>) {
     a: make(s, 1)

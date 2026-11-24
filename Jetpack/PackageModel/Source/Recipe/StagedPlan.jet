@@ -62,7 +62,7 @@ BuildPlanFragment: struct {
 
     // Actions by name; every set-like field sorted so emission order never
     // changes the identity.
-    write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
+    write_canonical: fn(self, writer: ^RecipeCanonicalWriter) Never! {
         actions := self.actions
         actions.sort_by(fn(action) { action.name })
         writer.push_count(actions.len())
@@ -240,7 +240,7 @@ StagedPlanAction: struct {
         Ok(StagedPlanLock{action_identity: identity, fragment_digest: fragment_digest, stage: self.stage, stage_bound: self.stage_bound, inputs: self.inputs, authority: self.authority})
     }
 
-    write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
+    write_canonical: fn(self, writer: ^RecipeCanonicalWriter) Never! {
         writer.push_text(self.name)
         writer.push_count(self.stage)
         writer.push_count(self.stage_bound)
@@ -427,7 +427,7 @@ pkg_staged_detect_cycle: fn(dependencies: [String:[String]]) StagedPlanError! {
 }
 
 // Depth-first walk from `node`; `stack` is the path that reached it.
-pkg_staged_visit: fn(node: String, dependencies: [String:[String]], states: &[String:StagedPlanVisit], stack: [String]) StagedPlanError! {
+pkg_staged_visit: fn(node: String, dependencies: [String:[String]], states: ^[String:StagedPlanVisit], stack: [String]) StagedPlanError! {
     if states.get(node) == {
         .Val(state) -> {
             if state == StagedPlanVisit.Done {

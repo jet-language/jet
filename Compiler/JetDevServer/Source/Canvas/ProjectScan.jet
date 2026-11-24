@@ -219,7 +219,7 @@ parent_dir: fn(dir: String) -> String? Never! {
 
 // The nearest workspace source above `start`. A refused root or source is a
 // malformed boundary carrying its diagnostic.
-find_workspace_boundary: fn(cache: &WorkspaceDeclarationCache, start: String) -> WorkspaceBoundary? {
+find_workspace_boundary: fn(cache: ^WorkspaceDeclarationCache, start: String) -> WorkspaceBoundary? {
     opened: AuthorityResolver.open(start) ?? {
         if err.is_missing() -> return None
         return Val(malformed_boundary(start, err.diagnostic()))
@@ -302,7 +302,7 @@ within_any: fn(path: String, roots: [String]) -> Bool {
 }
 
 // The workspace source at `root`, and an index source's evaluated members.
-workspace_view: fn(cache: &WorkspaceDeclarationCache, root: String) -> WorkspaceView {
+workspace_view: fn(cache: ^WorkspaceDeclarationCache, root: String) -> WorkspaceView {
     resolver: AuthorityResolver.open(root) ?? {
         return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: Val(err.diagnostic()), source_failed: true}
     }
@@ -328,7 +328,7 @@ workspace_view: fn(cache: &WorkspaceDeclarationCache, root: String) -> Workspace
 // The project's own files, each read through the project's authority root:
 // the entry, env.jet, the package and workspace manifests, the lock and the
 // discovered sources. The first refusal is the project's diagnostic.
-collect_project_files: fn(cache: &WorkspaceDeclarationCache, project_root: String, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> ProjectFiles {
+collect_project_files: fn(cache: ^WorkspaceDeclarationCache, project_root: String, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> ProjectFiles {
     paths := [String:Bool]{}
     diagnostic := Diagnostic?{None}
     push_existing(paths, entry_path)
@@ -390,13 +390,13 @@ collect_project_files: fn(cache: &WorkspaceDeclarationCache, project_root: Strin
     ProjectFiles{records: records, diagnostic: diagnostic}
 }
 
-keep_first: fn(slot: &Diagnostic?, diagnostic: Diagnostic) {
+keep_first: fn(slot: ^Diagnostic?, diagnostic: Diagnostic) {
     if slot == None -> slot = Val(diagnostic)
 }
 
 // A path that is present (a missing path is skipped); a regular file with
 // more than one hard link is skipped, since Canvas never edits through one.
-push_existing: fn(paths: &[String:Bool], path: String) {
+push_existing: fn(paths: ^[String:Bool], path: String) {
     info: scan_files.stat(path) ?? {
         if err == .NotFound(_) {
             return
@@ -444,7 +444,7 @@ workspace_project_json: fn(project_root: String, workspace_root: String?) -> Str
 // The project's package directories: the manifest and ecosystem roots and the
 // workspace members, or the entry's own directory when it carries an inline
 // Package.
-project_package_dirs: fn(cache: &WorkspaceDeclarationCache, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> [String] {
+project_package_dirs: fn(cache: ^WorkspaceDeclarationCache, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> [String] {
     dirs := [String:Bool]{}
     if manifest_root == .Val(root) -> dirs[root] = true
     if ecosystem_root == .Val(root) -> dirs[root] = true
@@ -483,7 +483,7 @@ inline_entry_dir: fn(entry_path: String) -> String? {
 
 // The entry's own Package when it lies in `dir`, else the Package rooted at
 // `dir`.
-canonical_package_facts: fn(cache: &WorkspaceDeclarationCache, dir: String, entry_path: String) -> PackageFacts ManifestError! {
+canonical_package_facts: fn(cache: ^WorkspaceDeclarationCache, dir: String, entry_path: String) -> PackageFacts ManifestError! {
     if path_is_within(entry_path, dir) {
         entry_facts: pkg_package_facts_for_entry(cache, entry_path)
         if entry_facts == .Val(facts) -> return Ok(facts)
@@ -531,7 +531,7 @@ sorted_output_names: fn(facts: PackageFacts) -> [String] Never! {
     names
 }
 
-package_targets_json: fn(cache: &WorkspaceDeclarationCache, project_root: String, entry_path: String, dir: String) -> [String] {
+package_targets_json: fn(cache: ^WorkspaceDeclarationCache, project_root: String, entry_path: String, dir: String) -> [String] {
     facts: canonical_package_facts(cache, dir, entry_path) ?? return [String]{canonical_package_error(project_root, dir, err.diagnostic)}
     head: "\"package\":{json_str(facts.name)},\"package_path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, scan_files.join(dir, PACKAGE_FILE)))}"
     rows := [String]{}
@@ -546,7 +546,7 @@ package_targets_json: fn(cache: &WorkspaceDeclarationCache, project_root: String
     rows
 }
 
-package_project_json: fn(cache: &WorkspaceDeclarationCache, project_root: String, entry_path: String, dir: String) -> String {
+package_project_json: fn(cache: ^WorkspaceDeclarationCache, project_root: String, entry_path: String, dir: String) -> String {
     facts: canonical_package_facts(cache, dir, entry_path) ?? return canonical_package_error(project_root, dir, err.diagnostic)
     deps: loop view in pkg_dependency_views(facts.deps) -> "{{\"name\":{json_str(view.name)},\"source\":{json_str(view.source)}}}"
     profiles: loop view in pkg_target_profile_views(facts.targets) -> "{{\"name\":{json_str(view.name)},\"profile\":{json_str(view.profile)}}}"

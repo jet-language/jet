@@ -99,7 +99,7 @@ sema_lifecycle_inline_parameter: fn(parameters: [Param], name: String) -> Int? N
 // Walks the body in the order it runs. False when the body holds an
 // expression this walk doesn't follow (a lambda, a block, a branch, a
 // literal with fields, a type argument): such a call is never inlined.
-sema_lifecycle_inline_walk: fn(expr: Expr, parameters: [Param], operand: Bool, conditional: Bool, body: &SemaLifecycleInlineBody) -> Bool Never! {
+sema_lifecycle_inline_walk: fn(expr: Expr, parameters: [Param], operand: Bool, conditional: Bool, body: ^SemaLifecycleInlineBody) -> Bool Never! {
     if expr == {
         .Ident(name, span, _) -> {
             if {
@@ -156,8 +156,8 @@ sema_lifecycle_inline_walk: fn(expr: Expr, parameters: [Param], operand: Bool, c
 }
 
 // The arguments of a call in such a body, in order; a spread or a marked
-// argument (`&x`, `&&x`) is not followed.
-sema_lifecycle_inline_walk_args: fn(args: [CallArg], parameters: [Param], conditional: Bool, body: &SemaLifecycleInlineBody) -> Bool Never! {
+// argument (`^x`, `^^x`) is not followed.
+sema_lifecycle_inline_walk_args: fn(args: [CallArg], parameters: [Param], conditional: Bool, body: ^SemaLifecycleInlineBody) -> Bool Never! {
     loop argument in args {
         if argument.spread || argument.mark != None -> return false
         if !sema_lifecycle_inline_walk(argument.expr, parameters, false, conditional, body) {
@@ -371,7 +371,7 @@ sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaS
 
 // Each function's `#Deprecated` payload, and in `inlines` each one whose
 // marker writes `inline: true`.
-sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: &[U32:CoreMarkerApplication], inlines: &[U32:Bool]) Never! {
+sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: ^[U32:CoreMarkerApplication], inlines: ^[U32:Bool]) Never! {
     loop function in functions {
         payload: sema_lifecycle_marker(function.declaration.markers, function.symbol.name) ?? next
         payloads[function.symbol.id.id] = payload
@@ -491,7 +491,7 @@ sema_lifecycle_edit: fn(payload: CoreMarkerApplication, span: Span) -> TextEdit?
 // `inline: true`, so `jet fix` migrates a call by `inline_edit`
 // (sema_lifecycle_inline_edit) and never by a rename; a use with no such
 // edit is edited by hand.
-sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, inlined: Bool, inline_edit: TextEdit?, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
+sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, inlined: Bool, inline_edit: TextEdit?, source: String, span: Span, edition: String, result: ^SemaLifecycleResult, seen: ^[String:Bool]) {
     key: "{source}|{span.start}|{span.end}|{payload.member}"
     if seen.get(key) != None {
         return

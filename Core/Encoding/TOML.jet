@@ -122,7 +122,7 @@ TOMLParser: struct {
         Val(self.bytes[self.index])
     }
 
-    bump: fn(&self) -> U8? {
+    bump: fn(^self) -> U8? {
         b: self.peek() ?? return None
         self.index += 1
         if b == (U8{10}) {
@@ -143,7 +143,7 @@ TOMLParser: struct {
         )
     }
 
-    skip_ws: fn(&self) -> Bool EncodingError! {
+    skip_ws: fn(^self) -> Bool EncodingError! {
         if self.index < 0 -> return Err(self.fail("TOML parser index became negative"))
         loop {
             if self.peek() == {
@@ -179,7 +179,7 @@ TOMLParser: struct {
         true
     }
 
-    skip_space: fn(&self) -> Bool EncodingError! {
+    skip_space: fn(^self) -> Bool EncodingError! {
         self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         loop {
             if self.peek() == {
@@ -200,7 +200,7 @@ TOMLParser: struct {
         true
     }
 
-    document: fn(&self) -> Bool EncodingError! {
+    document: fn(^self) -> Bool EncodingError! {
         current := [String]{}
         self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
         loop self.eof() == false {
@@ -234,7 +234,7 @@ TOMLParser: struct {
         true
     }
 
-    parse_header: fn(&self) -> [String] EncodingError! {
+    parse_header: fn(^self) -> [String] EncodingError! {
         _: self.bump()
         array := false
         b0: self.peek() ?? (U8{0})
@@ -267,7 +267,7 @@ TOMLParser: struct {
         Ok(keys)
     }
 
-    parse_key: fn(&self) -> String EncodingError! {
+    parse_key: fn(^self) -> String EncodingError! {
         self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b: self.peek() ?? return Err(self.fail("expected a key"))
         if b == (U8{34}) -> return self.parse_basic_string()
@@ -284,7 +284,7 @@ TOMLParser: struct {
         Ok(String.from_bytes(out) ?? "")
     }
 
-    parse_dotted_key: fn(&self) -> [String] EncodingError! {
+    parse_dotted_key: fn(^self) -> [String] EncodingError! {
         keys := [String]{}
         key: self.parse_key()
         keys.push(key)
@@ -298,7 +298,7 @@ TOMLParser: struct {
         Ok(keys)
     }
 
-    parse_value: fn(&self) -> Dyn EncodingError! {
+    parse_value: fn(^self) -> Dyn EncodingError! {
         self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b: self.peek() ?? return Err(self.fail("expected a value"))
         n: b
@@ -322,7 +322,7 @@ TOMLParser: struct {
         }
     }
 
-    parse_word: fn(&self, spelling: String, value: Dyn) -> Dyn EncodingError! {
+    parse_word: fn(^self, spelling: String, value: Dyn) -> Dyn EncodingError! {
         loop b in spelling.bytes() {
             got: self.bump() ?? return Err(self.fail("expected `{spelling}`"))
             if got != b -> return Err(self.fail("expected `{spelling}`"))
@@ -335,7 +335,7 @@ TOMLParser: struct {
         Ok(value)
     }
 
-    parse_basic_string: fn(&self) -> String EncodingError! {
+    parse_basic_string: fn(^self) -> String EncodingError! {
         _: self.bump()
         out := [U8]{}
         loop {
@@ -362,7 +362,7 @@ TOMLParser: struct {
         }
     }
 
-    parse_literal_string: fn(&self) -> String EncodingError! {
+    parse_literal_string: fn(^self) -> String EncodingError! {
         _: self.bump()
         out := [U8]{}
         loop {
@@ -375,7 +375,7 @@ TOMLParser: struct {
         }
     }
 
-    parse_array: fn(&self) -> Dyn EncodingError! {
+    parse_array: fn(^self) -> Dyn EncodingError! {
         _: self.bump()
         enter_nesting(self) ?? return Err(err)
         items := [Dyn]{}
@@ -403,7 +403,7 @@ TOMLParser: struct {
         }
     }
 
-    parse_inline_table: fn(&self) -> Dyn EncodingError! {
+    parse_inline_table: fn(^self) -> Dyn EncodingError! {
         _: self.bump()
         enter_nesting(self) ?? return Err(err)
         // Dyn objects retain insertion order; `names` holds where each key
@@ -447,7 +447,7 @@ TOMLParser: struct {
         }
     }
 
-    parse_number_or_text: fn(&self) -> Dyn EncodingError! {
+    parse_number_or_text: fn(^self) -> Dyn EncodingError! {
         start: self.index
         loop {
             b: self.peek() ?? break
@@ -503,15 +503,15 @@ TOMLParser: struct {
         return Err(self.fail("unsupported TOML bare value; quote text or use a TOML number, boolean, or datetime"))
     }
 
-    ensure_table: fn(&self, keys: [String]) { self.root = ensure_table_path(self.root, keys, 0) }
+    ensure_table: fn(^self, keys: [String]) { self.root = ensure_table_path(self.root, keys, 0) }
 
-    ensure_array_table: fn(&self, keys: [String]) {
+    ensure_array_table: fn(^self, keys: [String]) {
         self.root = ensure_array_path(self.root, keys, 0)
     }
 
     // Where `path` is first defined, and that of each table it implies that
     // is not defined yet.
-    __record: fn(&self, path: [String], line: Int, column: Int) Never! {
+    __record: fn(^self, path: [String], line: Int, column: Int) Never! {
         loop count in 1..path.len() {
             name: defined_key(self.root, path, count, 0)
             if self.defined.get(name) == None -> self.defined[name] = {line: line, column: column}
@@ -521,7 +521,7 @@ TOMLParser: struct {
     // A key about to be defined at `path`: a repeat of a defined key is an
     // error unless duplicates are allowed. The first definition is the key's
     // own, else that of the nearest table or value holding it.
-    __define: fn(&self, path: [String], at: Int, line: Int, column: Int) EncodingError! {
+    __define: fn(^self, path: [String], at: Int, line: Int, column: Int) EncodingError! {
         if !has_path(self.root, path, 0) {
             self.__record(path, line, column)
             return
@@ -545,7 +545,7 @@ TOMLParser: struct {
         syntax_error(EncodingFormat.TOML, at, line, column, name, "duplicate key `{name}` (first at line {first.line}, column {first.column})")
     }
 
-    assign: fn(&self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
+    assign: fn(^self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
         path := [String]{}
         loop k in table -> path.push(k.copy())
         loop k in key -> path.push(k.copy())
@@ -558,7 +558,7 @@ TOMLParser: struct {
 // toml surface.
 priv nesting: module {
     // Opens one array or inline table, bounded by `EncodingLimits.safe().max_depth`.
-    enter_nesting: fn(parser: &TOMLParser) EncodingError! {
+    enter_nesting: fn(parser: ^TOMLParser) EncodingError! {
         parser.depth += 1
         max_depth: EncodingLimits.safe().max_depth
         if parser.depth > max_depth {
@@ -989,7 +989,7 @@ toml_leaf: fn(value: Dyn) -> String Never! {
 // A float keeps its own spelling when it is a JSON number token (`+` dropped),
 // else its shortest decimal spelling; `inf` and `nan` have no lexeme and stay
 // `Float`. Rust twin: jet-foundation.
-number_tree: fn(clean: &&String, value: Float) -> Dyn Never! {
+number_tree: fn(clean: ^^String, value: Float) -> Dyn Never! {
     unsigned := clean.move()
     raw: unsigned.bytes()
     if raw.len() > 0 && raw[0] == (U8{43}) {

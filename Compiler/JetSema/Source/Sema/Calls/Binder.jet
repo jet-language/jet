@@ -260,7 +260,7 @@ sema_call_default_refs: fn(params: [SemaCallParam], sources: [SemaCallArgSource]
     refs
 }
 
-sema_call_append_rewritten_written: fn(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) Never! {
+sema_call_append_rewritten_written: fn(taken: ^[CallArg?], rewritten: ^[CallArg], sources: ^[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) Never! {
     // copy: the written argument is taken out of `taken` (the slot is set to None on the next
     // line). Jet has no take on an element of the write-borrowed list, so it is copied, then
     // cleared.
@@ -270,19 +270,19 @@ sema_call_append_rewritten_written: fn(taken: &[CallArg?], rewritten: &[CallArg]
     sources.push(SemaCallArgSource.Written{index: original_index})
 }
 
-sema_call_append_rewritten_default: fn(rewritten: &[CallArg], sources: &[SemaCallArgSource], default_arg: CallArg?, parameter: Int) Never! {
+sema_call_append_rewritten_default: fn(rewritten: ^[CallArg], sources: ^[SemaCallArgSource], default_arg: CallArg?, parameter: Int) Never! {
     default_value: default_arg ?? return
     rewritten.push(default_value)
     sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
-sema_call_append_rewritten_default_ref: fn(default_refs: &[FunctionDefaultRef], sources: &[SemaCallArgSource], default_ref: FunctionDefaultRef?, parameter: Int) Never! {
+sema_call_append_rewritten_default_ref: fn(default_refs: ^[FunctionDefaultRef], sources: ^[SemaCallArgSource], default_ref: FunctionDefaultRef?, parameter: Int) Never! {
     value: default_ref ?? return
     default_refs.push(value)
     sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
-sema_call_append_remaining_written: fn(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], source_index: Int) Never! {
+sema_call_append_remaining_written: fn(taken: ^[CallArg?], rewritten: ^[CallArg], sources: ^[SemaCallArgSource], source_index: Int) Never! {
     written: taken[source_index] ?? return
     rewritten.push(written.copy())
     sources.push(SemaCallArgSource.Written{index: source_index})
@@ -313,7 +313,7 @@ sema_call_make_default_arg: fn(param: SemaCallParam, parameter: Int, params: [Se
     Val(CallArg{convention: param.convention, expr: default_expr, span: call_span, flags: flags, label: None, spread: false})
 }
 
-sema_call_rewrite_args: fn(params: [SemaCallParam], args: &[CallArg], slots: [[Int]], call_span: Span) -> SemaCallBinding Never! {
+sema_call_rewrite_args: fn(params: [SemaCallParam], args: ^[CallArg], slots: [[Int]], call_span: Span) -> SemaCallBinding Never! {
     // Copy the source list into optional cells so each written expression is
     // moved at most once. This preserves its original source index even when
     // labels reorder the declaration slots.
@@ -356,7 +356,7 @@ sema_call_rewrite_args: fn(params: [SemaCallParam], args: &[CallArg], slots: [[I
     SemaCallBinding{slots: [Int]{}, sources: sources, default_refs: default_refs, source_ordered: sema_call_source_ordered(sources), rewrote: false}
 }
 
-sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: ^[CallArg], call_span: Span, diagnostics: ^[Diagnostic]) -> SemaCallBinding? {
     slots := [[Int]]{}
     loop _ in params -> slots.push([Int]{})
     source_slots := [Int]{}
@@ -532,21 +532,21 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
     binding
 }
 
-sema_call_bind_signature: fn(callee: String, signature: Type, parameter_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+sema_call_bind_signature: fn(callee: String, signature: Type, parameter_offset: Int, args: ^[CallArg], call_span: Span, diagnostics: ^[Diagnostic]) -> SemaCallBinding? {
     params: sema_call_params_from_type_after(signature, parameter_offset) ?? return None
     sema_call_bind_args(callee, params, args, call_span, diagnostics)
 }
 
-sema_call_bind_direct: fn(callee: String, signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+sema_call_bind_direct: fn(callee: String, signature: Type, args: ^[CallArg], call_span: Span, diagnostics: ^[Diagnostic]) -> SemaCallBinding? {
     sema_call_bind_signature(callee, signature, 0, args, call_span, diagnostics)
 }
 
-sema_call_bind_value: fn(signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+sema_call_bind_value: fn(signature: Type, args: ^[CallArg], call_span: Span, diagnostics: ^[Diagnostic]) -> SemaCallBinding? {
     params: sema_call_params_from_value_type(signature) ?? return None
     sema_call_bind_args("this function value", params, args, call_span, diagnostics)
 }
 
-sema_call_bind_method: fn(method: String, signature: Type, receiver_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+sema_call_bind_method: fn(method: String, signature: Type, receiver_offset: Int, args: ^[CallArg], call_span: Span, diagnostics: ^[Diagnostic]) -> SemaCallBinding? {
     sema_call_bind_signature(method, signature, receiver_offset, args, call_span, diagnostics)
 }
 
@@ -567,7 +567,7 @@ sema_call_argument_convention: fn(param: SemaCallParam, arg: CallArg) -> SemaCal
 }
 
 // An unmarked named place (a name plus fields, indexes, or a range) passed to
-// a write parameter: the call writes it as `&place` did, and a range place is
+// a write parameter: the call writes it as `^place` did, and a range place is
 // a write window (`sort_part(values[0..2])`).
 sema_call_unmarked_write_place: fn(param: SemaCallParam, arg: CallArg) -> Bool Never! {
     arg.convention == AccessConvention.Read && param.convention == AccessConvention.Write && sema_receiver_mark_place_root(arg.expr) != None

@@ -56,7 +56,7 @@ JetEvalIRComptime: struct {
 // (IRProgram.comptime_values); otherwise the roots are a build invocation
 // (IRProgram.invocation). The build runs on up to `threads` compiler
 // threads (ir_build_roots_in); its module is the same on any count.
-jet_eval_ir_comptime_build: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, interner: &&Interner, item_keys: [String], type_defs: &&[TTypeDef], impls: &&[TImplDef], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], comptime_values: Bool, threads: CompilerThreads{compiler_threads_single()}) -> JetEvalIRComptime {
+jet_eval_ir_comptime_build: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTable, interner: ^^Interner, item_keys: [String], type_defs: ^^[TTypeDef], impls: ^^[TImplDef], constants: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], comptime_values: Bool, threads: CompilerThreads{compiler_threads_single()}) -> JetEvalIRComptime {
     program := ir_program_new(functions, decls, symbols, interner, type_defs, impls, IRSourceTexts{}, constants)
     jet_eval_ir_watched_sources(program)
     program.comptime_values = comptime_values
@@ -70,7 +70,7 @@ jet_eval_ir_comptime_build: fn(functions: &&[FnBody], decls: DeclTable, symbols:
 // of the compile-time code built from it starts its line in the batch's line
 // table and a breakpoint on any line finds its code. Every other build reads
 // none: the hook is closed.
-jet_eval_ir_watched_sources: fn(program: &IRProgram) Never! {
+jet_eval_ir_watched_sources: fn(program: ^IRProgram) Never! {
     if !build_debug_on() -> return
     permit: BUILD_DEBUG.guard_read()
     ir_program_take_sources(program, ir_source_index(ir_source_texts(permit.value.sources)))
@@ -86,7 +86,7 @@ jet_eval_ir_watched_sources: fn(program: &IRProgram) Never! {
 // in only when the table grew since the program last took it, and types by
 // the run's `interner` (jet_eval_ir_build_interner). The build
 // runs on up to `threads` compiler threads, as jet_eval_ir_comptime_build's.
-jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: &&[FnBody], decls: DeclTable, symbols: SymbolTable, interner: Interner, item_keys: [String], landed: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], taken_keys: &NameTable, taken: &[Int], threads: CompilerThreads) -> JetEvalIRComptime {
+jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: ^^[FnBody], decls: DeclTable, symbols: SymbolTable, interner: Interner, item_keys: [String], landed: ^^[TConstantDef], foreign: ^^[SemaCheckedForeignFunction], taken_keys: ^NameTable, taken: ^[Int], threads: CompilerThreads) -> JetEvalIRComptime {
     program := jet_eval_ir_program_take(declared)
     program.comptime_values = true
     if symbol_table_count(program.symbols) != symbol_table_count(symbols) {
@@ -117,7 +117,7 @@ jet_eval_ir_build_interner: fn(interner: Interner) -> Interner Never! {
 
 // Builds the roots `item_keys` of `program` on up to `threads` compiler
 // threads; `cell` then holds the program.
-jet_eval_ir_comptime_roots: fn(cell: Shared<[IRProgram]>, program: &&IRProgram, item_keys: [String], threads: CompilerThreads) -> JetEvalIRComptime {
+jet_eval_ir_comptime_roots: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram, item_keys: [String], threads: CompilerThreads) -> JetEvalIRComptime {
     kept := ir_build_roots_in(program, item_keys, threads)
     jet_eval_ir_program_put(cell, kept.program.move())
     built := kept.result.move()
@@ -135,7 +135,7 @@ jet_eval_ir_program_take: fn(cell: Shared<[IRProgram]>) -> IRProgram Never! {
     program.move()
 }
 
-jet_eval_ir_program_put: fn(cell: Shared<[IRProgram]>, program: &&IRProgram) {
+jet_eval_ir_program_put: fn(cell: Shared<[IRProgram]>, program: ^^IRProgram) {
     held := cell.guard_edit()
     held.value.push(program)
 }
@@ -145,7 +145,7 @@ jet_eval_ir_build_failure_text: fn(failure: IRBuildFailure) -> String Never! {
 }
 
 // The data of the word `word` of type row `row`.
-jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, row: Int) -> TComptimeValue? {
+jet_eval_ir_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, word: Int, row: Int) -> TComptimeValue? {
     kind: m.types[row].kind
     if kind == {
         .Unit -> return Val(TComptimeValue.Unit)
@@ -347,7 +347,7 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
     }
 }
 
-jet_eval_ir_transport_fail: fn(s: &JetEvalIRState, ty: Type) -> TComptimeValue? Never! {
+jet_eval_ir_transport_fail: fn(s: ^JetEvalIRState, ty: Type) -> TComptimeValue? Never! {
     if ty == .Fn(_, _, _, _, _, _) {
         jet_eval_ir_function_value_refused(s, type_name(ty))
         return None
@@ -360,7 +360,7 @@ jet_eval_ir_transport_fail: fn(s: &JetEvalIRState, ty: Type) -> TComptimeValue? 
 // as the record its checked declaration spells, which ir_default_err_drift
 // holds to that layout: message, code, cause and the metadata record (typed
 // identity, context frames, conversion history, details).
-jet_eval_ir_err_data: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, error: Int) -> TComptimeValue? {
+jet_eval_ir_err_data: fn(s: ^JetEvalIRState, p: IRProgram, ty: Type, error: Int) -> TComptimeValue? {
     if ir_default_err_drift(p, ty) == .Val(drift) {
         jet_eval_ir_problem(s, "the default Err declaration against the native JetErr: {drift}")
         return None
@@ -424,14 +424,14 @@ jet_eval_ir_err_data: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, error: Int)
 }
 
 // The String whose header word is at byte `offset` of `base`.
-jet_eval_ir_err_text: fn(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
+jet_eval_ir_err_text: fn(s: ^JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
     header: jet_eval_ir_read_word(s, base + Int{offset}) ?? return None
     text: jet_eval_ir_text(s, header) ?? return None
     Val(TComptimeValue.String{value: text})
 }
 
 // The `String?` whose header word (0: none) is at byte `offset` of `base`.
-jet_eval_ir_err_optional_text: fn(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
+jet_eval_ir_err_optional_text: fn(s: ^JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
     header: jet_eval_ir_read_word(s, base + Int{offset}) ?? return None
     if header == 0 {
         return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}})
@@ -443,7 +443,7 @@ jet_eval_ir_err_optional_text: fn(s: &JetEvalIRState, base: Int, offset: I64) ->
 // The native inline List at `list` (length, capacity, data) of `stride`-byte
 // rows, each read as a `record` of the texts `texts` names in order, then the
 // Int `number` names.
-jet_eval_ir_err_rows: fn(s: &JetEvalIRState, list: Int, stride: Int, record: String, texts: [String], number: String?) -> TComptimeValue? {
+jet_eval_ir_err_rows: fn(s: ^JetEvalIRState, list: Int, stride: Int, record: String, texts: [String], number: String?) -> TComptimeValue? {
     count: jet_eval_ir_read_word(s, list) ?? return None
     data: jet_eval_ir_read_word(s, list + 16) ?? return None
     rows := [TComptimeValue]{}
@@ -468,7 +468,7 @@ jet_eval_ir_err_rows: fn(s: &JetEvalIRState, list: Int, stride: Int, record: Str
 // jet_eval_ir_err_data: a compiler value that is an Err (a BuildError's
 // record) keeps its typed identity, context, conversions and details when
 // compile-time code converts it to the default Err.
-jet_eval_ir_err_word: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, value: TComptimeValue) -> Int? {
+jet_eval_ir_err_word: fn(s: ^JetEvalIRState, p: IRProgram, ty: Type, value: TComptimeValue) -> Int? {
     if ir_default_err_drift(p, ty) == .Val(drift) {
         jet_eval_ir_problem(s, "the default Err declaration against the native JetErr: {drift}")
         return None
@@ -504,7 +504,7 @@ jet_eval_ir_err_word: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, value: TCom
 }
 
 // The native details holder of the present `__jet_ErrorDetails` `value`.
-jet_eval_ir_err_details: fn(s: &JetEvalIRState, value: TComptimeValue) -> Int? {
+jet_eval_ir_err_details: fn(s: ^JetEvalIRState, value: TComptimeValue) -> Int? {
     record: if value == .Present(inner) -> inner else -> value
     details: jet_eval_ir_err_record(s, record) ?? return None
     holder: jet_eval_ir_err_zeroed(s, Int{ERR_DETAILS_BYTES}) ?? return None
@@ -527,14 +527,14 @@ jet_eval_ir_err_details: fn(s: &JetEvalIRState, value: TComptimeValue) -> Int? {
 }
 
 // The fields of record `value`.
-jet_eval_ir_err_record: fn(s: &JetEvalIRState, value: TComptimeValue) -> [TComptimeField]? Never! {
+jet_eval_ir_err_record: fn(s: ^JetEvalIRState, value: TComptimeValue) -> [TComptimeField]? Never! {
     if value == .Struct(_, fields) -> return Val(fields)
     jet_eval_ir_problem(s, "a default Err part that is not a record: {value}")
     None
 }
 
 // Field `name` of an Err record part.
-jet_eval_ir_err_member: fn(s: &JetEvalIRState, fields: [TComptimeField], name: String) -> TComptimeValue? Never! {
+jet_eval_ir_err_member: fn(s: ^JetEvalIRState, fields: [TComptimeField], name: String) -> TComptimeValue? Never! {
     loop field in fields {
         if field.name == name -> return Val(field.value)
     }
@@ -542,7 +542,7 @@ jet_eval_ir_err_member: fn(s: &JetEvalIRState, fields: [TComptimeField], name: S
     None
 }
 
-jet_eval_ir_err_int: fn(s: &JetEvalIRState, fields: [TComptimeField], name: String) -> Int? Never! {
+jet_eval_ir_err_int: fn(s: ^JetEvalIRState, fields: [TComptimeField], name: String) -> Int? Never! {
     value: jet_eval_ir_err_member(s, fields, name) ?? return None
     if value == .Int(number) -> return Val(number)
     jet_eval_ir_problem(s, "default Err field `{name}` is not an Int: {value}")
@@ -550,7 +550,7 @@ jet_eval_ir_err_int: fn(s: &JetEvalIRState, fields: [TComptimeField], name: Stri
 }
 
 // `bytes` zeroed bytes of the child's runtime heap.
-jet_eval_ir_err_zeroed: fn(s: &JetEvalIRState, bytes: Int) -> Int? {
+jet_eval_ir_err_zeroed: fn(s: ^JetEvalIRState, bytes: Int) -> Int? {
     base: jet_eval_native_alloc(s, bytes, 8) ?? return None
     at := 0
     loop at < bytes {
@@ -561,7 +561,7 @@ jet_eval_ir_err_zeroed: fn(s: &JetEvalIRState, bytes: Int) -> Int? {
 }
 
 // Writes the runtime String of text `value` as the header word at `at`.
-jet_eval_ir_err_put_text: fn(s: &JetEvalIRState, at: Int, value: TComptimeValue) -> Bool {
+jet_eval_ir_err_put_text: fn(s: ^JetEvalIRState, at: Int, value: TComptimeValue) -> Bool {
     text: if value == .String(raw) -> raw else -> {
         jet_eval_ir_problem(s, "a default Err text that is not a String: {value}")
         return false
@@ -571,7 +571,7 @@ jet_eval_ir_err_put_text: fn(s: &JetEvalIRState, at: Int, value: TComptimeValue)
 }
 
 // Writes the `String?` `value` at `at`: its header word, or 0 when absent.
-jet_eval_ir_err_put_optional_text: fn(s: &JetEvalIRState, at: Int, value: TComptimeValue) -> Bool {
+jet_eval_ir_err_put_optional_text: fn(s: ^JetEvalIRState, at: Int, value: TComptimeValue) -> Bool {
     if value == .Failed(_) -> return true
     if value == .Present(present) -> return jet_eval_ir_err_put_text(s, at, present)
     jet_eval_ir_err_put_text(s, at, value)
@@ -579,7 +579,7 @@ jet_eval_ir_err_put_optional_text: fn(s: &JetEvalIRState, at: Int, value: TCompt
 
 // Writes the records of list `value` as the native inline List at `list` of
 // `stride`-byte rows (the inverse of jet_eval_ir_err_rows).
-jet_eval_ir_err_put_rows: fn(s: &JetEvalIRState, list: Int, stride: Int, value: TComptimeValue, texts: [String], number: String?) -> Bool {
+jet_eval_ir_err_put_rows: fn(s: ^JetEvalIRState, list: Int, stride: Int, value: TComptimeValue, texts: [String], number: String?) -> Bool {
     rows: if value == .List(values) -> values else -> {
         jet_eval_ir_problem(s, "a default Err row list that is not a List: {value}")
         return false
@@ -647,7 +647,7 @@ jet_eval_ir_type_display: fn(ty: Type) -> String Never! {
 
 // The word of a member of type row `row` at byte `offset` of `base`: an
 // aggregate is its address, anything else is loaded.
-jet_eval_ir_member_word: fn(m: &IRModule, s: &JetEvalIRState, base: Int, offset: Int, row: Int) -> Int? Never! {
+jet_eval_ir_member_word: fn(m: ^IRModule, s: ^JetEvalIRState, base: Int, offset: Int, row: Int) -> Int? Never! {
     kind: m.types[row].kind
     if kind == .Aggregate -> return Val(base + offset)
     width: if kind == {
@@ -665,7 +665,7 @@ jet_eval_ir_member_word: fn(m: &IRModule, s: &JetEvalIRState, base: Int, offset:
     jet_eval_ir_read_as(s, base + offset, width, signed)
 }
 
-jet_eval_ir_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, members: [IRMember]) -> [TComptimeField]? {
+jet_eval_ir_fields: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, base: Int, members: [IRMember]) -> [TComptimeField]? {
     output := [TComptimeField]{}
     loop member in members {
         value: jet_eval_ir_member_value(m, p, s, base, member) ?? return None
@@ -674,7 +674,7 @@ jet_eval_ir_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int
     Val(output)
 }
 
-jet_eval_ir_cached_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, slot: Int) -> [TComptimeField]? {
+jet_eval_ir_cached_fields: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, base: Int, slot: Int) -> [TComptimeField]? {
     count: s.struct_members_cache[slot].len()
     output := [TComptimeField]{}
     loop index in 0..<count {
@@ -685,7 +685,7 @@ jet_eval_ir_cached_fields: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, ba
     Val(output)
 }
 
-jet_eval_ir_member_value: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, member: IRMember) -> TComptimeValue? {
+jet_eval_ir_member_value: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, base: Int, member: IRMember) -> TComptimeValue? {
     if member.boxed {
         boxed: jet_eval_ir_read(s, base + member.offset, 8) ?? return None
         word: jet_eval_ir_member_word(m, s, boxed, 0, member.ty) ?? return None
@@ -697,7 +697,7 @@ jet_eval_ir_member_value: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, bas
 
 // An enum case: variant `index` of declaration `definition` instanced at
 // `type_args`, its payload read from the box at `boxed` when the enum is boxed.
-jet_eval_ir_enum_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, definition: Int, type_args: [Type], index: Int, boxed: Int, has_box: Bool) -> TComptimeValue? {
+jet_eval_ir_enum_data: fn(m: ^IRModule, p: IRProgram, s: ^JetEvalIRState, definition: Int, type_args: [Type], index: Int, boxed: Int, has_box: Bool) -> TComptimeValue? {
     declaration: p.types[definition]
     if declaration.kind == .Enum(variants, _) {
         if index < 0 || index >= variants.len() {

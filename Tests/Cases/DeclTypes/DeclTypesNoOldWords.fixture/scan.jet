@@ -35,7 +35,7 @@ old_declaration: fn(line: String) -> Bool {
     words.len() == 2 && words[0].ends_with(":") && names_a_type(words[0]) && OLD_WORDS.contains(words[1])
 }
 
-scan: fn(path: String, hits: &[String], count: &Int) -[FS.Read]> {
+scan: fn(path: String, hits: ^[String], count: ^Int) -[FS.Read]> {
     loop entry in files.list_dir(path) ?? panic("cannot list {path}: {err}") {
         if entry.name.starts_with(".") || SKIPPED.contains(entry.name) -> next
         child: "{path}/{entry.name}"

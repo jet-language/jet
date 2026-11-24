@@ -5,7 +5,7 @@ use {
     process: core.process
 }
 
-store_test_closure_ingest: fn(verification: &StoreVerification, roots: HangarRoots, name: String, references: [String], payload: String, provenance: String) -> IngestedObject Never! {
+store_test_closure_ingest: fn(verification: ^StoreVerification, roots: HangarRoots, name: String, references: [String], payload: String, provenance: String) -> IngestedObject Never! {
     source: files.join(roots.root, "fixture-{name}")
     files.create_dir_all(source) ?? panic("fixture dir")
     files.write(files.join(source, "payload"), payload) ?? panic("fixture payload")
@@ -31,7 +31,7 @@ store_test_independent_physical_bytes: fn(paths: [String]) -> Int Never! {
     total
 }
 
-store_test_physical_walk: fn(path: String, seen: &[FileID:Bool]) -> Int Never! {
+store_test_physical_walk: fn(path: String, seen: ^[FileID:Bool]) -> Int Never! {
     metadata: files.stat(path) ?? panic("stat")
     if seen.has_key(metadata.id) -> return 0
     seen[metadata.id] = true
@@ -45,7 +45,7 @@ store_test_physical_walk: fn(path: String, seen: &[FileID:Bool]) -> Int Never! {
 }
 
 // Register under the Hangar lock.
-store_test_register_entry_locked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+store_test_register_entry_locked: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_register_entry_unlocked(verification, roots, entry)
 }
@@ -257,14 +257,14 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     store_test_drop_roots(roots)
 }
 
-store_test_register_with_hook: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, hook: fn()) -> Bool StoreError! {
+store_test_register_with_hook: fn(verification: ^StoreVerification, roots: HangarRoots, entry: StoreEntry, hook: fn()) -> Bool StoreError! {
     _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_register_entry_unlocked_with_hook(verification, roots, entry, hook)
 }
 
 // Give each entry a hashed `payload` dependency object and optionally make it
 // an admitted Nix record.
-store_test_batch_entries: fn(verification: &StoreVerification, roots: HangarRoots, prefix: String, nix: Bool) -> [StoreEntry] Never! {
+store_test_batch_entries: fn(verification: ^StoreVerification, roots: HangarRoots, prefix: String, nix: Bool) -> [StoreEntry] Never! {
     entries := [StoreEntry]{}
     loop index in 0..<3 {
         entry := store_test_closure_ingest(verification, roots, "{prefix}-{index}", [String]{}, "bytes", "registration-test").entry
@@ -290,7 +290,7 @@ store_test_batch_entries: fn(verification: &StoreVerification, roots: HangarRoot
     entries
 }
 
-store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entries: [StoreEntry]) Never! {
+store_test_assert_hashed_at_most_once: fn(verification: ^StoreVerification, entries: [StoreEntry]) Never! {
     loop entry in entries {
         // Sealed verification manifests allow zero content hashes when a
         // valid seal is trusted; the batch contract is at most one.

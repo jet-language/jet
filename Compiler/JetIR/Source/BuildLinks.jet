@@ -37,7 +37,7 @@ ir_link_inner: fn(ty: Type) -> Type? Never! { foundation_link_inner(ir_untag(ty)
 ir_link_share: fn() -> String Never! { "#link.share" }
 
 // Marks `row` as a live-link row with its own drop glue and shared retain.
-ir_mark_link: fn(m: &IRModule, row: Int) -> Int Never! {
+ir_mark_link: fn(m: ^IRModule, row: Int) -> Int Never! {
     if m.types[row].drop == "" {
         m.types[row].drop = ir_drop_key(m, row)
         m.types[row].clone = ir_link_share()
@@ -50,7 +50,7 @@ ir_link_row: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].clone == ir
 
 // Lays out `@inner` as an 8-byte counted pointer row. Uses `ir_pointee_lays_out`
 // so recursive structs (`next: @Node?`) break cycles cleanly.
-ir_link_row_for: fn(m: &IRModule, p: IRProgram, ty: Type, inner: Type, laying: [String]) -> Int? Never! {
+ir_link_row_for: fn(m: ^IRModule, p: IRProgram, ty: Type, inner: Type, laying: [String]) -> Int? Never! {
     if !ir_pointee_lays_out(m, p, inner, laying) -> return None
     tid: ir_intern_tid(m, p, ty)
     interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, tid, 8, 8, IRClass.Pointer, false, 64, ""))
@@ -62,7 +62,7 @@ ir_link_row_for: fn(m: &IRModule, p: IRProgram, ty: Type, inner: Type, laying: [
 
 // Retains a `@T` handle when copying/aliasing: kept links increment their
 // local or atomic refcount; brief and null handles are no-ops.
-ir_link_retain: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Never! {
+ir_link_retain: fn(m: ^IRModule, b: ^IRBuilder, slot: Int, row: Int) -> Int Never! {
     shared: ir_fresh_temp(m, b, row)
     ir_emit(b.f, IROp.Move, shared, slot, -1, -1, b.line)
     word_row: ir_word_row(m)
@@ -90,7 +90,7 @@ ir_link_retain: fn(m: &IRModule, b: &IRBuilder, slot: Int, row: Int) -> Int Neve
 
 // Drop glue body for a `@T` row: releases a kept link; when the last owner
 // leaves, drops the inline `T` payload at `block + 24` and frees the block.
-ir_link_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, at: Int) Never! {
+ir_link_drop_body: fn(m: ^IRModule, p: IRProgram, a: ^IRBuilder, row: Int, at: Int) Never! {
     inner_ty: ir_link_inner(ir_row_ty(m, p, row)) ?? return
     inner_row: ir_value_type(m, p, inner_ty) ?? return
     word_row: ir_word_row(m)
@@ -133,7 +133,7 @@ ir_link_drop_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, row: Int, at: I
 
 // Payload address word of a `@T` handle: `h ^ BRIEF` for a brief link, or
 // `(h & ~1) + 24` for a kept local/shared link.
-ir_link_data_word: fn(m: &IRModule, b: &IRBuilder, handle: Int) -> Int Never! {
+ir_link_data_word: fn(m: ^IRModule, b: ^IRBuilder, handle: Int) -> Int Never! {
     word_row: ir_word_row(m)
     raw: ir_copy_word(m, b, handle, word_row)
     zero: ir_word_const(m, b, 0)
@@ -155,7 +155,7 @@ ir_link_data_word: fn(m: &IRModule, b: &IRBuilder, handle: Int) -> Int Never! {
 }
 
 // Payload pointer (`IRTypeKind.Pointer`) of a `@T` handle.
-ir_link_data_ptr: fn(m: &IRModule, b: &IRBuilder, handle: Int) -> Int Never! {
+ir_link_data_ptr: fn(m: ^IRModule, b: ^IRBuilder, handle: Int) -> Int Never! {
     word: ir_link_data_word(m, b, handle)
     pointer_row: ir_pointer_row(m)
     ir_copy_word(m, b, word, pointer_row)
@@ -163,7 +163,7 @@ ir_link_data_ptr: fn(m: &IRModule, b: &IRBuilder, handle: Int) -> Int Never! {
 
 // Calls a dynamic exclusivity hook on a kept `@T` handle (local or shared);
 // brief and null handles are no-ops.
-ir_link_excl_op: fn(m: &IRModule, b: &IRBuilder, handle: Int, local_sym: String, shared_sym: String) Never! {
+ir_link_excl_op: fn(m: ^IRModule, b: ^IRBuilder, handle: Int, local_sym: String, shared_sym: String) Never! {
     word_row: ir_word_row(m)
     raw: ir_copy_word(m, b, handle, word_row)
     zero: ir_word_const(m, b, 0)
@@ -186,24 +186,24 @@ ir_link_excl_op: fn(m: &IRModule, b: &IRBuilder, handle: Int, local_sym: String,
     ir_end(b.f, b.line)
 }
 
-ir_link_read_enter: fn(m: &IRModule, b: &IRBuilder, handle: Int) Never! {
+ir_link_read_enter: fn(m: ^IRModule, b: ^IRBuilder, handle: Int) Never! {
     ir_link_excl_op(m, b, handle, "jet_rt_link_read_enter_local", "jet_rt_link_read_enter_shared")
 }
 
-ir_link_read_leave: fn(m: &IRModule, b: &IRBuilder, handle: Int) Never! {
+ir_link_read_leave: fn(m: ^IRModule, b: ^IRBuilder, handle: Int) Never! {
     ir_link_excl_op(m, b, handle, "jet_rt_link_read_leave_local", "jet_rt_link_read_leave_shared")
 }
 
-ir_link_write_enter: fn(m: &IRModule, b: &IRBuilder, handle: Int) Never! {
+ir_link_write_enter: fn(m: ^IRModule, b: ^IRBuilder, handle: Int) Never! {
     ir_link_excl_op(m, b, handle, "jet_rt_link_write_enter_local", "jet_rt_link_write_enter_shared")
 }
 
-ir_link_write_leave: fn(m: &IRModule, b: &IRBuilder, handle: Int) Never! {
+ir_link_write_leave: fn(m: ^IRModule, b: ^IRBuilder, handle: Int) Never! {
     ir_link_excl_op(m, b, handle, "jet_rt_link_write_leave_local", "jet_rt_link_write_leave_shared")
 }
 
 // Lowers `__jet_link.<op>(...)` static calls emitted by Sema's `Links.jet`.
-ir_link_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: String, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
+ir_link_static_call: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, op: String, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     if op == "new_local" || op == "link_local" {
         return ir_link_alloc(m, p, b, ty, args, false, span)
     }
@@ -216,7 +216,7 @@ ir_link_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op:
 
 // Allocates a kept local or `#Shared` `@T` link block, moves `args[0]` into
 // `block + 24`, and returns the owned `@T` handle.
-ir_link_alloc: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [BodyCallArg], shared: Bool, span: Span) -> Int Never! {
+ir_link_alloc: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, args: [BodyCallArg], shared: Bool, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(b, span, "live link creation expects 1 argument")
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     inner_ty: ir_link_inner(ty) ?? return ir_type_fail(b, span, ty)
@@ -243,7 +243,7 @@ ir_link_alloc: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Bo
 }
 
 // `a.same(b)`: true iff both links target the same storage address.
-ir_link_same: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], span: Span) -> Int Never! {
+ir_link_same: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, args: [BodyCallArg], span: Span) -> Int Never! {
     if args.len() != 2 -> return ir_fail_slot(b, span, "live link .same expects 2 arguments")
     left: ir_expr(m, p, b, args[0].value)
     if ir_failed(b) || left < 0 -> return -1
@@ -262,7 +262,7 @@ ir_link_same: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg],
 
 // Resolves a brief `@place` address without taking a write lock on any
 // dereferenced link along the path.
-ir_link_brief_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
+ir_link_brief_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, place: Int, span: Span) -> Int Never! {
     node: ir_body_node(p, b, place)
     if node.kind == .Deref(pointer) {
         if ir_link_inner(ir_ty(m, p, b, pointer)) != None {
@@ -314,7 +314,7 @@ ir_link_brief_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int,
 
 // Lowers a brief `@place` (`TExprKind.Borrow` with `@T` result type) into a
 // zero-allocation tagged handle pointing directly at the place's storage.
-ir_link_brief: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
+ir_link_brief: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     address: ir_link_brief_address(m, p, b, value, span)
     if ir_failed(b) || address < 0 -> return -1
@@ -330,7 +330,7 @@ ir_link_brief: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
 // Standalone read deref of a `@T` link (`p.hp`, `p == q`, `x: p.*`). If `link`
 // is a fresh temporary (`(@Player{hp: 10}).hp`), copies the read value before
 // releasing the temporary so nothing dangles.
-ir_link_deref_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: Int, span: Span) -> Int Never! {
+ir_link_deref_read: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, value: Int, span: Span) -> Int Never! {
     link: ir_expr(m, p, b, value)
     if ir_failed(b) || link < 0 -> return -1
     ir_link_read_enter(m, b, link)
@@ -349,7 +349,7 @@ ir_link_deref_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, valu
 
 // Call-scoped read deref of a `@T` link: keeps read exclusivity active across
 // the entire call and releases it in `ir_write_backs`.
-ir_link_read_deref_scoped: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, pointer: Int, backs: &[IRWriteBack], span: Span) -> Int Never! {
+ir_link_read_deref_scoped: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, pointer: Int, backs: ^[IRWriteBack], span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     link: ir_expr(m, p, b, pointer)
     if ir_failed(b) || link < 0 -> return -1
@@ -364,7 +364,7 @@ ir_link_read_deref_scoped: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Typ
 
 // Write-place address of a `@T` deref: acquires exclusive write access on the
 // link and records the matching release in `backs`.
-ir_link_write_deref_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, pointer: Int, backs: &[IRWriteBack], span: Span) -> Int Never! {
+ir_link_write_deref_address: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, row: Int, pointer: Int, backs: ^[IRWriteBack], span: Span) -> Int Never! {
     link: ir_expr(m, p, b, pointer)
     if ir_failed(b) || link < 0 -> return -1
     ir_link_write_enter(m, b, link)

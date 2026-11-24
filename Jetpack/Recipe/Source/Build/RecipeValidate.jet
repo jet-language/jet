@@ -52,7 +52,7 @@ RunReport: struct {
         RunReport{fetches: [FetchRecord]{}, effects: [String]{}, plan_fingerprint: "", sandbox_class: "non-executing", sandbox_policy: "no child launched"}
     }
 
-    add_effect: fn(&self, name: String) Never! {
+    add_effect: fn(^self, name: String) Never! {
         if self.effects.contains(name) {
             return
         }
@@ -61,7 +61,7 @@ RunReport: struct {
     }
 
     // The first executed child fixes the run's sandbox class and policy.
-    record_sandbox: fn(&self, class: String, policy: String) Never! {
+    record_sandbox: fn(^self, class: String, policy: String) Never! {
         if self.sandbox_class == "non-executing" {
             self.sandbox_class = class.copy()
             self.sandbox_policy = policy.copy()

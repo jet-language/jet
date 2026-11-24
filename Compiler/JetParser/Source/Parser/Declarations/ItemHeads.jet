@@ -15,7 +15,7 @@ use jet_lexer.[
     TOKEN_SEMI,
 ]
 
-parser_c_module_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_c_module_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     if parser_kind_at(state, offset) != TOKEN_HASH || parser_kind_at(state, offset + 1) != TOKEN_IDENT {
         return false
     }
@@ -24,7 +24,7 @@ parser_c_module_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never!
     (word == "Import" || word == "Bindgen") && parser_kind_at(state, offset + 2) == TOKEN_KW_MODULE
 }
 
-parser_item_declaration_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
+parser_item_declaration_ahead_at: fn(state: ^JetParserState, offset: Int) -> Bool Never! {
     kind: parser_kind_at(state, offset)
     if parser_output_ahead_at(state, offset) || parser_output_defaults_ahead_at(state, offset) {
         return true

@@ -7,7 +7,7 @@ use {
 }
 
 // One framed JSON-RPC message: its header counts bytes, not characters.
-lsp_write_message: fn(stdout: &lsp_diag_term.Stdout, json: String) -[IO]> IOError! {
+lsp_write_message: fn(stdout: ^lsp_diag_term.Stdout, json: String) -[IO]> IOError! {
     stdout.write("Content-Length: {json.count_bytes()}\r\n\r\n{json}") ?? return Err(err)
     stdout.flush() ?? return Err(err)
 }
@@ -26,7 +26,7 @@ lsp_strip_dot_slash: fn(path: String) -> String Never! {
 
 // The dirty documents, sorted, then each open document whose last check read
 // one of them. Draining clears the dirty set.
-lsp_dirty_documents: fn(state: &LSPDiagnosticState) -> [String] Never! {
+lsp_dirty_documents: fn(state: ^LSPDiagnosticState) -> [String] Never! {
     dirty := [String]{}
     dirty_set := [String:Bool]{}
     changed := [String]{}
@@ -75,7 +75,7 @@ lsp_checked_module_paths: fn(checked: LSPChecked) -> [String] Never! {
 // always has a group, even an empty one. A target the previous publication
 // wrote gets an empty group (a clear) unless another root still holds it and
 // this check no longer read it.
-lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPChecked, targets: &[String:Bool]) -> [String:[Int]] Never! {
+lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPChecked, targets: ^[String:Bool]) -> [String:[Int]] Never! {
     groups := [String:[Int]]{}
     groups[uri] = [Int]{}
     loop (index, diagnostic) in checked.diagnostics {
@@ -215,14 +215,14 @@ lsp_retain_document_diagnostics: fn(diagnostics: [Diagnostic], path: String, tex
 
 // Republish every dirty document and the open documents that read one. The
 // loop runs this before each request, so a request sees current diagnostics.
-lsp_flush_dirty: fn(server: &LSPServer, stdout: &lsp_diag_term.Stdout) IOError! {
+lsp_flush_dirty: fn(server: ^LSPServer, stdout: ^lsp_diag_term.Stdout) IOError! {
     pending: lsp_dirty_documents(server.diagnostic_state)
     loop uri in pending -> lsp_publish_document_diagnostics(server, uri, stdout) ?? return Err(err)
 }
 
 // The publication is recorded only after every write and flush succeeded, so
 // a failed write leaves the previous publication's facts in place.
-lsp_publish_document_diagnostics: fn(server: &LSPServer, uri: String, stdout: &lsp_diag_term.Stdout) IOError! {
+lsp_publish_document_diagnostics: fn(server: ^LSPServer, uri: String, stdout: ^lsp_diag_term.Stdout) IOError! {
     doc: server.diagnostic_state.docs.get(uri) ?? return
     checked: server.check(doc)
     targets := [String:Bool]{}
@@ -316,13 +316,13 @@ lsp_workspace_diagnostic_response: fn(server: LSPServer, params: Dyn?, id: Dyn) 
 // didClose drops the document and its kept semantic tokens and marks the
 // open documents that read it dirty, then clears each URI only this root's
 // publication held. The state changes even when a clear's write fails.
-lsp_close_document: fn(server: &LSPServer, uri: String, stdout: &lsp_diag_term.Stdout) -[IO]> IOError! {
+lsp_close_document: fn(server: ^LSPServer, uri: String, stdout: ^lsp_diag_term.Stdout) -[IO]> IOError! {
     _ := server.published.remove(uri)
     _ := server.semantic_results.remove(uri)
     lsp_close_document_state(server.diagnostic_state, uri, stdout) ?? return Err(err)
 }
 
-lsp_close_document_state: fn(state: &LSPDiagnosticState, uri: String, stdout: &lsp_diag_term.Stdout) -[IO]> IOError! {
+lsp_close_document_state: fn(state: ^LSPDiagnosticState, uri: String, stdout: ^lsp_diag_term.Stdout) -[IO]> IOError! {
     if state.docs.remove(uri) == .Val(doc) {
         readers := [String]{}
         loop (root, modules) in state.checked_modules {

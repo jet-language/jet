@@ -20,8 +20,8 @@ run: fn() {
         {position: 30, velocity: 4},
     }
     task.group g {
-        left: &particles[0]
-        right: &particles[2]
+        left: ^particles[0]
+        right: ^particles[2]
         print(
             task.all {{
                 left.position += left.velocity
@@ -39,7 +39,7 @@ run: fn() {
     // One borrow on its own is the same law with one child. The write still
     // lands on the owner, because the group joins before the block ends.
     task.group solo {
-        only: &particles[1]
+        only: ^particles[1]
         done: task {
             only.position += only.velocity
             only.position

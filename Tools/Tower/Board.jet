@@ -547,7 +547,7 @@ load_archive: fn(place: Place, keep: ArchiveKeep) -[FS]> Archive Failure! {
 }
 
 // Every row `find_by_ref` could pick for the asked ref keeps its text.
-kept_cards: fn(rows: &[CardRow], keep: ArchiveKeep) Never! {
+kept_cards: fn(rows: ^[CardRow], keep: ArchiveKeep) Never! {
     ref := ""
     if keep == .Card(asked) -> ref = asked.copy()
     wanted: if ref == "" -> None else -> ref_number(ref)
@@ -557,7 +557,7 @@ kept_cards: fn(rows: &[CardRow], keep: ArchiveKeep) Never! {
     }
 }
 
-kept_decisions: fn(rows: &[DecisionRow], keep: ArchiveKeep) Never! {
+kept_decisions: fn(rows: ^[DecisionRow], keep: ArchiveKeep) Never! {
     ref := ""
     if keep == .Decision(asked) -> ref = asked.copy()
     loop at in 0..<rows.len() {
@@ -819,7 +819,7 @@ cards_by_milestone: fn(cards: [CardRow], archived: [CardRow]) -> [String:[Linked
     index
 }
 
-link_cards: fn(index: &[String:[Linked]], cards: [CardRow]) Never! {
+link_cards: fn(index: ^[String:[Linked]], cards: [CardRow]) Never! {
     loop card in cards {
         if card.milestone == "" -> next
         linked := index.get(card.milestone) ?? [Linked]{}
@@ -1184,7 +1184,7 @@ Citations: struct {
     locations: [[String]],
 }
 
-cite: fn(citations: &Citations, id: String, at: String) Never! {
+cite: fn(citations: ^Citations, id: String, at: String) Never! {
     if citations.slots.get(id) == .Val(slot) {
         citations.locations[slot].push(at.copy())
         return
@@ -1200,7 +1200,7 @@ finding: fn(rule: String, ref: String, msg: String) -> Dyn Never! {
 
 // The text spec files under `dir` as lint.mjs walks them: entries in
 // localeCompare order, dot names skipped, symlinked directories not entered.
-spec_files: fn(dir: String, out: &[String]) -[FS]> Failure! {
+spec_files: fn(dir: String, out: ^[String]) -[FS]> Failure! {
     listed := files.list_dir(dir) ?? return Err(fail("E_IO", "cannot list {dir}: {err}"))
     listed.sort_by(fn(left: DirEntry, right: DirEntry) { unicode.collate(left.name, right.name) })
     loop entry in listed {

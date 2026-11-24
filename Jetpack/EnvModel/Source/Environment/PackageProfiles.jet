@@ -72,7 +72,7 @@ PackageProfilePlan: struct {
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
-    finalize: fn(&&self) -> PackageProfilePlan Never! {
+    finalize: fn(^^self) -> PackageProfilePlan Never! {
         updated := self
         lines := [String]{"jet-package-profile-plan-v1\n"}
         lines.push(envmodel_fingerprint_line("name", updated.name))
@@ -143,7 +143,7 @@ PackageProfileSet: struct {
 
     // An equal re-declaration merges its source modules; different facts
     // under one name conflict.
-    insert_checked: fn(&self, profile: PackageProfileSpec) PackageProfileError! {
+    insert_checked: fn(^self, profile: PackageProfileSpec) PackageProfileError! {
         if self.profiles.get(profile.name) == .Val(existing) {
             if existing.extends != profile.extends || existing.packages != profile.packages || existing.collisions != profile.collisions {
                 return Err(PackageProfileError.Conflict(profile.name))

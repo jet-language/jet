@@ -3,17 +3,17 @@ Error: Jet.UseWhileWriteActive: `values` is being changed in this call, so it ca
     |
   4 |     &values.push(values.remove(0, .Slot))
     |                         ^^^^^^
- Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
- Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `values.copy()`
+ Why: While something is being changed through the write-access marker `^`, nobody else may be looking at it
+ Fix: Pass the write-access marker `^` (`^values`) only once, or copy first with `values.copy()`
 More: jet-lang.dev/e/Jet.UseWhileWriteActive
 
-Error: Jet.MissingReceiverMark: This call writes `values`, but `values` has no `&` mark
+Error: Jet.MissingReceiverMark: This call writes `values`, but `values` has no `^` mark
   --> builtin_mut_receiver_uses_two_phase_reservation_2.jet:3:18
     |
   4 |     &values.push(values.remove(0, .Slot))
     |                  ^^^^^^
- Why: The method is declared with `&self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments
- Fix: Write `&values`
+ Why: The method is declared with `^self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(^buf)` and `consume(^text)` mark arguments
+ Fix: Write `^values`
 More: jet-lang.dev/e/Jet.MissingReceiverMark
 
 Error: Jet.BindingTypeMismatch: Argument 1 to `.push()` should be Int (a whole number), not Int?

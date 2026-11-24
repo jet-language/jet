@@ -279,7 +279,7 @@ BuiltinFuncs: struct {
 
 // sqlite3InsertBuiltinFuncs for one FuncDef: a name seen before joins its
 // chain second, after the first of the name, as C links it.
-insert_builtin: fn(b: &BuiltinFuncs, def: &&conn.FuncDef) Never! {
+insert_builtin: fn(b: ^BuiltinFuncs, def: ^^conn.FuncDef) Never! {
     i: b.defs.len()
     other: conn.hash_find(b.hash, def.name)
     b.defs.push(def)
@@ -293,7 +293,7 @@ insert_builtin: fn(b: &BuiltinFuncs, def: &&conn.FuncDef) Never! {
 }
 
 // One entry of the tables: `methods` is a set of M_* bits.
-bf: fn(b: &BuiltinFuncs, name: String, n_arg: Int, flags: Int, user_data: Int, impl_id: Int, methods: Int) Never! {
+bf: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, flags: Int, user_data: Int, impl_id: Int, methods: Int) Never! {
     def := conn.FuncDef{
         n_arg: n_arg,
         flags: flags | conn.FUNC_BUILTIN | base.UTF8,
@@ -310,24 +310,24 @@ bf: fn(b: &BuiltinFuncs, name: String, n_arg: Int, flags: Int, user_data: Int, i
 }
 
 // FUNCTION, FUNCTION2 (with `extra` flags) and VFUNCTION (not CONSTANT).
-bf_scalar: fn(b: &BuiltinFuncs, name: String, n_arg: Int, i_arg: Int, need_coll: Bool, impl_id: Int, extra: Int) Never! {
+bf_scalar: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, i_arg: Int, need_coll: Bool, impl_id: Int, extra: Int) Never! {
     nc: if need_coll -> conn.FUNC_NEEDCOLL else -> 0
     bf(b, name, n_arg, conn.FUNC_CONSTANT | nc | extra, i_arg, impl_id, M_SFUNC)
 }
 
 // INLINE_FUNC and TEST_FUNC.
-bf_inline: fn(b: &BuiltinFuncs, name: String, n_arg: Int, i_arg: Int, flags: Int) Never! {
+bf_inline: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, i_arg: Int, flags: Int) Never! {
     bf(b, name, n_arg, conn.FUNC_INLINE | conn.FUNC_CONSTANT | flags, i_arg, FI_NOOP, M_SFUNC)
 }
 
 // WAGGREGATE: xValue and xInverse as `methods` has them.
-bf_agg: fn(b: &BuiltinFuncs, name: String, n_arg: Int, arg: Int, need_coll: Bool, impl_id: Int, methods: Int, flags: Int) Never! {
+bf_agg: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, arg: Int, need_coll: Bool, impl_id: Int, methods: Int, flags: Int) Never! {
     nc: if need_coll -> conn.FUNC_NEEDCOLL else -> 0
     bf(b, name, n_arg, nc | flags, arg, impl_id, M_STEP | M_FINAL | methods)
 }
 
 // JFUNCTION.
-bf_json: fn(b: &BuiltinFuncs, name: String, n_arg: Int, use_cache: Bool, b_ws: Bool, b_rs: Bool, b_jsonb: Bool, i_arg: Int, impl_id: Int) Never! {
+bf_json: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, use_cache: Bool, b_ws: Bool, b_rs: Bool, b_jsonb: Bool, i_arg: Int, impl_id: Int) Never! {
     flags := conn.FUNC_DETERMINISTIC | conn.FUNC_CONSTANT
     if use_cache -> flags |= conn.FUNC_RUNONLY
     if b_rs -> flags |= conn.FUNC_SUBTYPE
@@ -337,7 +337,7 @@ bf_json: fn(b: &BuiltinFuncs, name: String, n_arg: Int, use_cache: Bool, b_ws: B
 }
 
 // WINDOWFUNCX, WINDOWFUNCALL and WINDOWFUNCNOOP: all four methods.
-bf_window: fn(b: &BuiltinFuncs, name: String, n_arg: Int, impl_id: Int) Never! {
+bf_window: fn(b: ^BuiltinFuncs, name: String, n_arg: Int, impl_id: Int) Never! {
     bf(b, name, n_arg, conn.FUNC_WINDOW, 0, impl_id, M_STEP | M_FINAL | M_VALUE | M_INVERSE)
 }
 
@@ -560,7 +560,7 @@ find_function: fn(db: conn.Conn, name: [U8], n_arg: Int, enc: Int) -> conn.FuncD
 // sqlite3FindFunction with createFlag: the index in db.funcs of the
 // connection's function `name` taking n_arg arguments in encoding enc,
 // added blank (its name lowered) when no perfect match exists.
-find_or_create_function: fn(db: &conn.Conn, name: [U8], n_arg: Int, enc: Int) -> Int Never! {
+find_or_create_function: fn(db: ^conn.Conn, name: [U8], n_arg: Int, enc: Int) -> Int Never! {
     first: conn.hash_find(db.func_hash, name)
     i := first
     loop i >= 0 {
@@ -581,7 +581,7 @@ find_or_create_function: fn(db: &conn.Conn, name: [U8], n_arg: Int, enc: Int) ->
 
 // sqlite3FindCollSeq by name: the id of collation `name`, -1 when there is
 // none; `create` adds an undefined entry for it (encoding 0).
-find_coll_seq: fn(db: &conn.Conn, name: [U8], create: Bool) -> Int Never! {
+find_coll_seq: fn(db: ^conn.Conn, name: [U8], create: Bool) -> Int Never! {
     id: conn.find_coll(db, name)
     if id >= 0 || !create -> return id
     new_id: db.colls.len()
@@ -600,7 +600,7 @@ coll_defined: fn(db: conn.Conn, id: Int) -> Bool Never! {
 // sqlite3GetCollSeq: `id` if it names a defined collation, else -1 with
 // "no such collation sequence" left in the Parse. No collation-needed
 // callback exists, and every defined collation serves every encoding.
-get_coll_seq: fn(p: &cg.Parse, a: &ast.AST, id: Int, name: [U8]) -> Int Never! {
+get_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, id: Int, name: [U8]) -> Int Never! {
     if id >= 0 && coll_defined(p.db, id) -> return id
     ast.error(a, "no such collation sequence: {ast.text(name)}")
     a.ctx.rc = base.ERROR_MISSING_COLLSEQ
@@ -609,7 +609,7 @@ get_coll_seq: fn(p: &cg.Parse, a: &ast.AST, id: Int, name: [U8]) -> Int Never! {
 
 // sqlite3LocateCollSeq: while the schema loads, an unknown name gets an
 // undefined entry and no error.
-locate_coll_seq: fn(p: &cg.Parse, a: &ast.AST, name: [U8]) -> Int Never! {
+locate_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, name: [U8]) -> Int Never! {
     busy: p.db.init.busy
     id: find_coll_seq(p.db, name, busy)
     if !busy && (id < 0 || !coll_defined(p.db, id)) -> return get_coll_seq(p, a, id, name)
@@ -618,7 +618,7 @@ locate_coll_seq: fn(p: &cg.Parse, a: &ast.AST, name: [U8]) -> Int Never! {
 
 // sqlite3CheckCollSeq: SQLITE_OK when `id` (or no collation, -1) may be
 // used.
-check_coll_seq: fn(p: &cg.Parse, a: &ast.AST, id: Int) -> Int Never! {
+check_coll_seq: fn(p: ^cg.Parse, a: ^ast.AST, id: Int) -> Int Never! {
     if id < 0 || coll_defined(p.db, id) -> return base.OK
     name: conn.coll_name(p.db, id)
     if get_coll_seq(p, a, id, name) < 0 -> return base.ERROR
@@ -627,7 +627,7 @@ check_coll_seq: fn(p: &cg.Parse, a: &ast.AST, id: Int) -> Int Never! {
 
 // sqlite3SetTextEncoding (the default collation is BINARY in every
 // encoding).
-set_text_encoding: fn(db: &conn.Conn, enc: Int) Never! {
+set_text_encoding: fn(db: ^conn.Conn, enc: Int) Never! {
     db.enc = enc
     conn.expire_prepared_statements(db, 1)
 }
@@ -639,7 +639,7 @@ set_text_encoding: fn(db: &conn.Conn, enc: Int) Never! {
 // None), reading the schema first; an eponymous virtual table serves a
 // name no CREATE made. -1 with the error left in the Parse, unless
 // LOCATE_NOERR.
-locate_table: fn(p: &cg.Parse, a: &ast.AST, flags: Int, name: [U8], db_name: [U8]?) -[DB]> Int Never! {
+locate_table: fn(p: ^cg.Parse, a: ^ast.AST, flags: Int, name: [U8], db_name: [U8]?) -[DB]> Int Never! {
     g := p.up
     if p.db.m_db_flags & conn.DBFLAG_SCHEMA_KNOWN_OK == 0 && g.read_schema(p, a) != base.OK {
         return -1
@@ -665,7 +665,7 @@ locate_table: fn(p: &cg.Parse, a: &ast.AST, flags: Int, name: [U8], db_name: [U8
 }
 
 // sqlite3LocateTableItem: FROM item `si`, within its schema when it has one.
-locate_table_item: fn(p: &cg.Parse, a: &ast.AST, flags: Int, si: Int) -[DB]> Int Never! {
+locate_table_item: fn(p: ^cg.Parse, a: ^ast.AST, flags: Int, si: Int) -[DB]> Int Never! {
     item: a.items[si]
     db_name := item.database
     if item.schema >= 0 {
@@ -697,7 +697,7 @@ visible_rowid: fn(db: conn.Conn, t: Int) -> Bool Never! {
 
 // sqlite3ColumnSetExpr: make `e` the DEFAULT (or generated) expression of
 // column `col` of table t.
-column_set_expr: fn(p: &cg.Parse, a: &ast.AST, t: Int, col: Int, e: Int) Never! {
+column_set_expr: fn(p: ^cg.Parse, a: ^ast.AST, t: Int, col: Int, e: Int) Never! {
     list: p.db.tables[t].dflt_list
     i_dflt: p.db.tables[t].cols[col].i_dflt
     if i_dflt == 0 || list < 0 || ast.list_len(a, list) < i_dflt {
@@ -719,7 +719,7 @@ column_expr: fn(db: conn.Conn, a: ast.AST, t: Int, col: Int) -> Int Never! {
 }
 
 // sqlite3ColumnSetColl.
-column_set_coll: fn(db: &conn.Conn, t: Int, col: Int, coll: [U8]) Never! {
+column_set_coll: fn(db: ^conn.Conn, t: Int, col: Int, coll: [U8]) Never! {
     db.tables[t].cols[col].coll = coll
     db.tables[t].cols[col].col_flags = db.tables[t].cols[col].col_flags | conn.COLFLAG_HASCOLL
 }
@@ -744,7 +744,7 @@ primary_key_index: fn(db: conn.Conn, t: Int) -> Int Never! {
 
 // sqlite3AllocateIndexObject: a new index slot of n_col columns (the last
 // one the rowid's, outside the key), every entry zero.
-allocate_index_object: fn(db: &conn.Conn, n_col: Int) -> Int Never! {
+allocate_index_object: fn(db: ^conn.Conn, n_col: Int) -> Int Never! {
     ix: conn.index_alloc(db)
     ai_column := [Int]{}
     sort_order := [Int]{}
@@ -863,7 +863,7 @@ key_info_alloc: fn(db: conn.Conn, n: Int, x: Int) -> record.KeyInfo Never! {
 
 // sqlite3KeyInfoOfIndex: the KeyInfo of index ix, or None after an error.
 // An index naming a missing collation is withdrawn from the planner.
-key_info_of_index: fn(p: &cg.Parse, a: &ast.AST, ix: Int) -> record.KeyInfo? Never! {
+key_info_of_index: fn(p: ^cg.Parse, a: ^ast.AST, ix: Int) -> record.KeyInfo? Never! {
     if cg.n_err(a) > 0 -> return None
     idx: p.db.indexes[ix]
     key := if idx.uniq_not_null -> key_info_alloc(p.db, idx.n_key_col, idx.n_column - idx.n_key_col) else -> key_info_alloc(p.db, idx.n_column, 0)

@@ -87,7 +87,7 @@ Clock: struct {
         clock_state_now(guard.value)
     }
 
-    set: fn(&self, value: Int) Never! {
+    set: fn(^self, value: Int) Never! {
         guard := self.state.guard_edit()
         if guard.value == {
             .Manual(_) -> { guard.value = ClockState.Manual(value) }
@@ -100,18 +100,18 @@ Clock: struct {
         }
     }
 
-    tick: fn(&self, millis: Int) -> Int Never! {
+    tick: fn(^self, millis: Int) -> Int Never! {
         next: saturating_add_ns(self.now(), millis)
         self.set(next)
         self.now()
     }
 
-    advance: fn(&self, to_ms: Int) -> Int Never! {
+    advance: fn(^self, to_ms: Int) -> Int Never! {
         self.set(to_ms)
         self.now()
     }
 
-    wait: fn(&self, duration: Duration) -> Int Never! {
+    wait: fn(^self, duration: Duration) -> Int Never! {
         next: saturating_add_ns(self.now(), duration_whole_ms(duration))
         self.set(next)
         self.now()
@@ -159,7 +159,7 @@ Clock: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.__show() }
+        debug: fn(^^self) -> String { self.__show() }
     }
 }
 
@@ -723,7 +723,7 @@ LocalDate: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 
     period_total: fn(self, value: Period, unit: String) -> Float Never! {
@@ -837,7 +837,7 @@ LocalTime: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 
     impl Encode {
@@ -1024,7 +1024,7 @@ DateTime: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 
     period_total: fn(self, value: Period, unit: String) -> Float Never! {
@@ -1136,7 +1136,7 @@ Period: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 
     impl Equatable {
@@ -1265,7 +1265,7 @@ Zone: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 }
 
@@ -1366,7 +1366,7 @@ ZonedDateTime: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 
     // The Dyn.DateTime payload decodes as itself; RFC 3339 text decodes as
@@ -1437,7 +1437,7 @@ Instant: struct {
     }
 
     impl Debug {
-        debug: fn(&&self) -> String { self.to_string() }
+        debug: fn(^^self) -> String { self.to_string() }
     }
 
     __now: fn() -[Time]> Instant Never! { instant() }

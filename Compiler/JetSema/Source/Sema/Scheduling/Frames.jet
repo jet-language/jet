@@ -457,7 +457,7 @@ sema_frame_event_index: fn(events: [FrameEventIndex], token: String) -> Int Neve
     -1
 }
 
-sema_frame_check_async_uses: fn(operations: [FrameOperation], events: [FrameEventIndex], dependencies: &[FrameDependency], keys: &[FrameDependencyKey]) -> String? {
+sema_frame_check_async_uses: fn(operations: [FrameOperation], events: [FrameEventIndex], dependencies: ^[FrameDependency], keys: ^[FrameDependencyKey]) -> String? {
     loop (index, operation) in operations {
         if operation.completion == {
             .Pending(token) -> {
@@ -515,7 +515,7 @@ sema_frame_retentions: fn(operations: [FrameOperation], events: [FrameEventIndex
     retentions
 }
 
-sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], conservative: &[String]) -> [FrameReuse] {
+sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], conservative: ^[String]) -> [FrameReuse] {
     uses := [FrameUse]{}
     loop (index, operation) in operations {
         loop access in operation.accesses {
@@ -688,7 +688,7 @@ sema_frame_resource_label: fn(identity: ResourceIdentity) -> String Never! {
     }
 }
 
-sema_frame_push_dependency: fn(dependencies: &[FrameDependency], keys: &[FrameDependencyKey], before: Int, after: Int, resource: String, reason: String) Never! {
+sema_frame_push_dependency: fn(dependencies: ^[FrameDependency], keys: ^[FrameDependencyKey], before: Int, after: Int, resource: String, reason: String) Never! {
     loop key in keys {
         if key.before == before && key.after == after && key.resource == resource {
             return
@@ -707,7 +707,7 @@ sema_frame_has_transfer: fn(transfers: [FrameTransfer], wanted: FrameTransfer) -
     false
 }
 
-sema_frame_sort_dependencies: fn(rows: &[FrameDependency]) Never! {
+sema_frame_sort_dependencies: fn(rows: ^[FrameDependency]) Never! {
     loop i in 1..<rows.len() {
         item := rows[i]
         j := i
@@ -726,7 +726,7 @@ sema_frame_dependency_gt: fn(left: FrameDependency, right: FrameDependency) -> B
     left.reason > right.reason
 }
 
-sema_frame_sort_transfers: fn(rows: &[FrameTransfer]) Never! {
+sema_frame_sort_transfers: fn(rows: ^[FrameTransfer]) Never! {
     loop i in 1..<rows.len() {
         item := rows[i]
         j := i
@@ -746,7 +746,7 @@ sema_frame_transfer_gt: fn(left: FrameTransfer, right: FrameTransfer) -> Bool Ne
     left.to_device > right.to_device
 }
 
-sema_frame_sort_reuse: fn(rows: &[FrameReuse]) Never! {
+sema_frame_sort_reuse: fn(rows: ^[FrameReuse]) Never! {
     loop i in 1..<rows.len() {
         item := rows[i]
         j := i
@@ -771,7 +771,7 @@ sema_frame_reuse_gt: fn(left: FrameReuse, right: FrameReuse) -> Bool Never! {
     left.next_resource > right.next_resource
 }
 
-sema_frame_sort_uses: fn(rows: &[FrameUse]) Never! {
+sema_frame_sort_uses: fn(rows: ^[FrameUse]) Never! {
     loop i in 1..<rows.len() {
         item := rows[i]
         j := i

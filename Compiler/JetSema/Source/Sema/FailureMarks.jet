@@ -53,7 +53,7 @@ sema_failure_marks_marker: fn(marker: Marker) -> Bool Never! {
 
 // A package or module `failures: .Explicit` declaration, or the function's
 // own `#Policy(failures: .Explicit)` marker.
-sema_failure_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
+sema_failure_marks_apply_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
     position: sema_scope_module_policy(table, graph, module_identity)
     table.failures_explicit = table.policy_rows[position].failures_explicit
     loop marker in markers {
@@ -63,7 +63,7 @@ sema_failure_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistrat
 
 // A block `#Policy(failures: .Explicit) { … }` turns the policy on for its
 // body. Returns the enclosing setting for the matching pop.
-sema_failure_marks_push_policy: fn(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
+sema_failure_marks_push_policy: fn(table: ^SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
     previous: table.failures_explicit
     loop declaration in declarations {
         if sema_failure_marks_declaration(declaration) -> table.failures_explicit = true
@@ -99,7 +99,7 @@ sema_failure_marks_written: fn(value: Expr, conversion: TryConvert, note: Expr?,
 
 // A call written `call()?`: under the policy it checks as the unmarked call
 // does, which owes no mark; outside it the `?` is refused.
-sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if !scopes.failures_explicit {
         mark: Span{start: span.end - 1, end: span.end}
         diagnostics.push(sema_error("E-ERR-PROPAGATE", mark, "A bare `?` has no meaning.", "Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.", "remove the trailing `?`, or write `?(text)` to add one context frame."))
@@ -116,7 +116,7 @@ sema_failure_marks_check_written: fn(value: Expr, span: Span, expected: Type?, e
 // report is an obligation of the bundle failure solve while the callee's
 // failure set is still inferred: a callee the solve finds infallible owes no
 // mark.
-sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_failure_marks_require: fn(expr: Expr, conversion: TTryConvert, callee: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
     if conversion == .Never {
         return
     }

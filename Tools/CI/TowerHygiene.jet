@@ -74,12 +74,12 @@ physical: fn(dir: String) -[FS]> String Never! { files.realpath(dir) ?? dir.copy
 
 inside: fn(path: String, dir: String) -> Bool Never! { path == dir || path.starts_with("{dir}/") }
 
-append_text: fn(buffer: &[U8], text: String) Never! {
+append_text: fn(buffer: ^[U8], text: String) Never! {
     buffer.extend(text.bytes())
     buffer.push(U8{0})
 }
 
-walk: fn(root: String, dir: String, buffer: &[U8]) -[FS]> Bool Never! {
+walk: fn(root: String, dir: String, buffer: ^[U8]) -[FS]> Bool Never! {
     entries: files.list_dir(dir) ?? return false
     names := loop entry in entries -> entry.name
     names.sort()

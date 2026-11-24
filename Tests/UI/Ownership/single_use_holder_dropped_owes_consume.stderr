@@ -4,7 +4,7 @@ Error: Jet.SingleUseDropped: `holder` still owes `consume`
  39 |     holder: BlockHolder{block: block}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(holder) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `^^` parameter, or `return` it — or write `#Unsafe("reason") { consume(holder) }` to discard it deliberately
 More: jet-lang.dev/e/Jet.SingleUseDropped
 
 Error: Jet.SingleUseDropped: `holder` still owes `consume`
@@ -13,7 +13,7 @@ Error: Jet.SingleUseDropped: `holder` still owes `consume`
  44 |     holder: Holder{lease: acquire("record"), count: 1}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(holder) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `^^` parameter, or `return` it — or write `#Unsafe("reason") { consume(holder) }` to discard it deliberately
 More: jet-lang.dev/e/Jet.SingleUseDropped
 
 Error: Jet.SingleUseDropped: `nested` still owes `consume`
@@ -22,7 +22,7 @@ Error: Jet.SingleUseDropped: `nested` still owes `consume`
  45 |     nested: Nested{inner: Holder{lease: acquire("nested"), count: 2}}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(nested) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `^^` parameter, or `return` it — or write `#Unsafe("reason") { consume(nested) }` to discard it deliberately
 More: jet-lang.dev/e/Jet.SingleUseDropped
 
 Error: Jet.SingleUseDropped: `slot` still owes `consume`
@@ -31,5 +31,5 @@ Error: Jet.SingleUseDropped: `slot` still owes `consume`
  46 |     slot: Slot.Held{lease: acquire("payload")}
     |     ^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(slot) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `^^` parameter, or `return` it — or write `#Unsafe("reason") { consume(slot) }` to discard it deliberately
 More: jet-lang.dev/e/Jet.SingleUseDropped

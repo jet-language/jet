@@ -29,7 +29,7 @@ jet_cli_gate_entries_at: fn(ledger: GateLedger, source: String, span: Span) -> [
 
 // Project the provenance that the canonical fact resolver already settled.
 // A forced writer is one build gate, not a new build-fact policy mechanism.
-jet_cli_gate_append_build_facts: fn(ledger: &GateLedger, facts: [EffectiveFact]) Never! {
+jet_cli_gate_append_build_facts: fn(ledger: ^GateLedger, facts: [EffectiveFact]) Never! {
     loop fact in facts {
         loop contribution in fact.provenance {
             if !contribution.force -> next
@@ -43,7 +43,7 @@ jet_cli_gate_append_build_facts: fn(ledger: &GateLedger, facts: [EffectiveFact])
 // `build.allow`, then its lock's authority (else each locked package's effect
 // grants), workspace build grants and forced overrides, as external rows. Rows
 // are pushed in the Rust BTreeMap order (sorted keys).
-jet_cli_gate_append_package_writers: fn(ledger: &GateLedger, snapshot: JetDriverAuthorizedSourceSnapshot) {
+jet_cli_gate_append_package_writers: fn(ledger: ^GateLedger, snapshot: JetDriverAuthorizedSourceSnapshot) {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
         facts: jet_cli_root_package_facts(root) ?? break
@@ -91,7 +91,7 @@ jet_cli_gate_append_package_writers: fn(ledger: &GateLedger, snapshot: JetDriver
 // `append_authority_entries` over one `authority:` block written at `source`.
 // Its own bound is `authority.allow`/`authority.deny` (#5070), the rest keep
 // their Rust subjects.
-jet_cli_gate_append_authority: fn(ledger: &GateLedger, authority: PackageAuthority, source: String) {
+jet_cli_gate_append_authority: fn(ledger: ^GateLedger, authority: PackageAuthority, source: String) {
     held: "{source} authority"
     granted: "{source} authority.grants"
     if authority.allow == .Val(allow) {

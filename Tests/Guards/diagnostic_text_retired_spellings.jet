@@ -15,14 +15,14 @@ DR_SOURCE_ROOTS: [String]{"Compiler/JetParser/Source", "Compiler/JetSema/Source"
 DR_ROWS_PATH: "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
 
 // Every retired spelling `text` teaches, reported at `place`.
-dr_report: fn(place: String, text: String, violations: &[String]) {
+dr_report: fn(place: String, text: String, violations: ^[String]) {
     loop spelling in DR_RETIRED_SPELLINGS {
         if text.contains(spelling) -> violations.push("{place}: teaches the retired {spelling}")
     }
 }
 
 // The text fields of the registry rows whose status is not Retired.
-dr_registry_violations: fn(violations: &[String]) {
+dr_registry_violations: fn(violations: ^[String]) {
     text: dr_files.read(DR_ROWS_PATH) ?? panic("read {DR_ROWS_PATH}: {err}")
     keys: [String]{"meaning", "what", "why", "fix", "next"}
     retired := false
@@ -35,7 +35,7 @@ dr_registry_violations: fn(violations: &[String]) {
 }
 
 // Every line of the diagnostic-writing sources that is not a comment.
-dr_source_violations: fn(violations: &[String]) {
+dr_source_violations: fn(violations: ^[String]) {
     loop root in DR_SOURCE_ROOTS {
         loop path in s2_syntax_paths(root) {
             if !path.ends_with(".jet") -> next

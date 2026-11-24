@@ -29,7 +29,7 @@ failure_label: fn(error: TaskFailure) -> String {
 // How the task ended, and whether it ended no earlier than its deadline,
 // `low` ms after `watch` started, and before `high` ms. A deadline is kept
 // in whole milliseconds, so it can pass up to 1 ms before `low`.
-report: fn(name: String, handle: &&Task<Int>, watch: time.Stopwatch, low: Int, high: Int) {
+report: fn(name: String, handle: ^^Task<Int>, watch: time.Stopwatch, low: Int, high: Int) {
     if handle.join() == {
         .Ok(_) -> { print("{name}: finished") }
         .Err(error) -> {
