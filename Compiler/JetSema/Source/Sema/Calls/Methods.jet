@@ -45,6 +45,8 @@ use jet_foundation.[
     AppRouteRoot,
     diagnostic_registry_row,
     diagnostic_with_edit,
+    DURATION_SOURCE_METHODS,
+    duration_source_method_takes,
     expr_span,
     effect_scope_base,
     OWNED_TRAITS,
@@ -479,6 +481,35 @@ sema_call_try_int_abs_source: fn(receiver: Expr, receiver_value: TExpr, method: 
     source_args: [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     scopes.ownership_call_depth += 1
     value := sema_call_core_check_source_owned(target, "Int.abs", type_args, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.ownership_call_depth -= 1
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+// A Duration method runs its core.time source function: `d.in(.Seconds)` is
+// `core.time.__duration_in(d, .Seconds)`, the receiver its first argument and
+// the call's own (labeled) arguments after it. Another name or argument count
+// is no Duration method.
+sema_call_try_duration_source: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if sema_expr_unwrap_tag(receiver_value.ty) != (Type.Named{name: "Duration"}) {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    if !duration_source_method_takes(method, args.len()) {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    api: "Duration.{method}"
+    member: "__duration_{method}"
+    identity: sema_call_core_module_identity(environment, program, "core.time") ?? {
+        diagnostics.push(sema_error("E0003", span, "{api} source module is not loaded", "this receiver operation executes core.time.{member} on the Duration", "add `use time: core.time`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    target: sema_call_core_source_target(environment, program, identity, member, type_args, span, true, diagnostics) ?? {
+        diagnostics.push(sema_error("E0003", span, "{api} source function is not available", "this receiver operation requires the core.time.{member} declaration", "load the registered Core time source function"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    loop argument in args -> source_args.push(argument.copy())  // copy: the method call keeps its arguments.
+    scopes.ownership_call_depth += 1
+    value: sema_call_core_check_source_owned(target, api, type_args, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.ownership_call_depth -= 1
     SemaMethodSpecialCheck{handled: true, value: value}
 }
@@ -2083,7 +2114,7 @@ sema_call_builtin_method_arities: fn(receiver: Type, method: String) -> [Int] Ne
     owner: sema_call_method_leaf(sema_call_receiver_method_label(ty))
     loop arity in 0..<4 {
         known: if owner == {
-            "Duration" -> sema_time_duration_result(method, arity) != None || (method == "round" && arity >= 1)
+            "Duration" -> duration_source_method_takes(method, arity)
             "Decimal" | "Fraction" -> sema_value_method_precise_result(owner, method, arity) != None
             "Clock" -> (method == "now" && arity == 0) || ((method == "tick" || method == "advance" || method == "wait") && arity == 1)
             "Task" -> ((method == "join" || method == "detach" || method == "resume" || method == "cancel" || method == "trace") && arity == 0) || (method == "pause" && arity < 2)
@@ -2099,7 +2130,7 @@ sema_call_builtin_method_pool: fn(receiver: Type) -> [String] Never! {
     owner: sema_call_method_leaf(sema_call_receiver_method_label(sema_expr_unwrap_tag(receiver)))
     if owner == {
         "Duration" -> {
-            pool = [String]{"in", "is_zero", "total_seconds", "difference", "abs", "negated", "sign", "total_in", "round"}
+            loop row in DURATION_SOURCE_METHODS -> pool.push(row.name)
         }
         "Decimal" -> {
             pool = [String]{"add", "sub", "mul", "div", "rounded", "equal", "compare", "to_string", "to_float"}

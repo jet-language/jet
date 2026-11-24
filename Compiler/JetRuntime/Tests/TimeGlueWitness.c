@@ -11,9 +11,8 @@ typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { int64_t fields[3]; } Triple;
 typedef struct { int64_t hour,minute,second; uint32_t nanos,padding; } Local;
 typedef struct { int64_t ns; } Duration;
-typedef struct { int64_t tag; } Unit;
 _Static_assert(sizeof(Triple)==24 && sizeof(Local)==32 && offsetof(Local,nanos)==24,"civil ABI");
-_Static_assert(sizeof(Duration)==8 && sizeof(Unit)==8,"duration ABI");
+_Static_assert(sizeof(Duration)==8,"duration ABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -48,9 +47,6 @@ extern int64_t jet_rt_record_get_duration_ns(Duration *);
 extern Text *jet_rt_handle_show_duration(Duration *);
 extern Text *jet_rt_handle_display_duration(Duration *);
 extern Text *jet_rt_handle_debug_duration(Duration *);
-extern Unit *jet_rt_handle_clone_duration_unit(Unit *);
-extern void jet_rt_handle_drop_duration_unit(Unit *);
-extern bool jet_rt_handle_eq_duration_unit(Unit *,Unit *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[16];
 static size_t count;
 static unsigned intercepted;
@@ -133,12 +129,6 @@ static void durations(void) {
         watch(a,8,8); watch(b,8,8); jet_rt_handle_drop_duration(a); jet_rt_handle_drop_duration(b); done();
     }
     jet_rt_handle_drop_duration(NULL);
-    for(int64_t i=0;i<6;++i) {
-        Unit *a=jet_rt_alloc(8,8); a->tag=i; Unit *b=jet_rt_handle_clone_duration_unit(a);
-        assert(a!=b && jet_rt_handle_eq_duration_unit(a,b)); b->tag=(i+1)%6; assert(!jet_rt_handle_eq_duration_unit(a,b));
-        watch(a,8,8); watch(b,8,8); jet_rt_handle_drop_duration_unit(a); jet_rt_handle_drop_duration_unit(b); done();
-    }
-    jet_rt_handle_drop_duration_unit(NULL);
 }
 int main(int argc,char **argv) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);

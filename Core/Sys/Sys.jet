@@ -1424,7 +1424,7 @@ limit_duration: fn(raw: Int?) -> Duration? {
 
 limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
     span: value ?? return Ok(None)
-    if span.sign() < 0 {
+    if span.ns < 0 {
         return Err(
             IOError.InvalidInput(
                 IOContext{
@@ -1437,8 +1437,8 @@ limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
         )
     }
     // Whole seconds, rounded up when a fraction of a second is left over.
-    whole: span.total_seconds()
-    if (Duration.seconds(whole) ?? span).difference(span).is_zero() -> return Ok(Val(whole))
+    whole: span.ns /% 1000000000
+    if span.ns %% 1000000000 == 0 -> return Ok(Val(whole))
     Ok(Val(whole + 1))
 }
 

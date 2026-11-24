@@ -4561,6 +4561,8 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if stream.handled -> return stream
     process := sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if process.handled -> return process
+    duration: sema_call_try_duration_source(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if duration.handled -> return duration
     time := sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if time.handled -> return time
     app := sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

@@ -159,11 +159,11 @@ sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, 
 
 // The tail of Rust `is_known_enum`: Core enum leaves (`core_enum_cases`), the
 // compiler-owned payload families (`core_enum_payload_variants`) and the
-// compiler-owned unit and hook enums, known whether or not the program
-// imports them. A Core enum a loaded Core source declares (`NetError`)
-// resolves through its symbol instead.
+// compiler-owned hook enums, known whether or not the program imports them. A
+// Core enum a loaded Core source declares (`NetError`) resolves through its
+// symbol instead.
 sema_expression_core_enum_name: fn(name: String) -> Bool Never! {
-    core_enum_cases(name) != None || core_enum_payload_variants(name) != None || sema_expression_compiler_unit_enum_variants(name) != None || sema_expression_hook_decision_variants(name) != None
+    core_enum_cases(name) != None || core_enum_payload_variants(name) != None || sema_expression_hook_decision_variants(name) != None
 }
 
 SemaExpressionEnumPath: struct {
@@ -986,13 +986,6 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         checked: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         return checked.value
     }
-    // A compiler-owned unit-only enum (`DurationUnit`) has neither a source
-    // declaration nor generated Core rows.
-    if sema_expression_compiler_unit_enum_variants(resolved_name) == .Val(compiler_variants) {
-        if sema_expression_type_symbol(scopes, environment, program, resolved_name) == None {
-            return sema_expression_compiler_unit_enum_literal(resolved_name, compiler_variants, variant, args, variant_span, span, expected, environment, program, diagnostics)
-        }
-    }
     // A Core enum with no loaded declaration (`IOError`, a bare `Key`) builds
     // its variant from the Core enum rows.
     owner_symbol: sema_expression_type_symbol(scopes, environment, program, resolved_name)
@@ -1624,28 +1617,6 @@ sema_expression_case_owners: fn(variant: String, span: Span, expected: Type?, en
 sema_expression_missing_fields: fn(what: String, why: String, missing: [String], span: Span) -> Diagnostic {
     listed: missing.join(", ")
     sema_error("E0303", span, "{what} is missing fields: {listed}", why, "add: {listed}")
-}
-
-// Rust `core_duration_unit_variants`: the closed unit list `duration.in(unit)`
-// and the Duration constructors take.
-sema_expression_compiler_unit_enum_variants: fn(name: String) -> [String]? Never! {
-    if name == "DurationUnit" {
-        return Val([String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"})
-    }
-    None
-}
-
-sema_expression_compiler_unit_enum_literal: fn(enum_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !variants.contains(variant) {
-        diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
-        return None
-    }
-    if args.len() != 0 {
-        diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
-        return None
-    }
-    value: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
-    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 // Rust `check_enum_payload_assignable`: a payload value that doesn't fit its

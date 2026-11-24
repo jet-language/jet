@@ -429,3 +429,42 @@ builtin_method_bind: fn(ty: Type, receiver: Type) -> Type Never! {
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
+
+// The Duration methods whose bodies are core.time source functions:
+// `d.name(…)` is the call `core.time.__duration_name(d, …)`, taking from
+// `minimum` to `maximum` arguments (`round` binds its `increment` and
+// `rounding_mode` defaults). A `shared` name is also a method of receivers
+// outside core.time (`x.abs()`, `xs.difference(ys)`), so spelling it alone
+// does not load core.time.
+DurationSourceMethod: struct {
+    name: String,
+    minimum: Int,
+    maximum: Int,
+    shared: Bool,
+}
+
+DURATION_SOURCE_METHODS: [DurationSourceMethod]{
+    {name: "in", minimum: 1, maximum: 1, shared: false},
+    {name: "is_zero", minimum: 0, maximum: 0, shared: true},
+    {name: "total_seconds", minimum: 0, maximum: 0, shared: false},
+    {name: "difference", minimum: 1, maximum: 1, shared: true},
+    {name: "abs", minimum: 0, maximum: 0, shared: true},
+    {name: "negated", minimum: 0, maximum: 0, shared: false},
+    {name: "sign", minimum: 0, maximum: 0, shared: true},
+    {name: "total_in", minimum: 1, maximum: 1, shared: false},
+    {name: "round", minimum: 1, maximum: 3, shared: true},
+}
+
+// The DURATION_SOURCE_METHODS row named `method`, if one is.
+duration_source_method: fn(method: String) -> DurationSourceMethod? {
+    loop row in DURATION_SOURCE_METHODS {
+        if row.name == method -> return Val(row)
+    }
+    None
+}
+
+// Whether `d.method(…)` with `count` arguments is a Duration source method.
+duration_source_method_takes: fn(method: String, count: Int) -> Bool {
+    row: duration_source_method(method) ?? return false
+    count >= row.minimum && count <= row.maximum
+}

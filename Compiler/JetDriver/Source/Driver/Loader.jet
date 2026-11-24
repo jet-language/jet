@@ -18,6 +18,7 @@ use {
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
         CORE_RECORD_SOURCE_DEMANDS,
+        DURATION_SOURCE_METHODS,
         BOUNDARY_TYPED_HEADS,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -102,6 +103,7 @@ use {
         TOKEN_EQ,
         TOKEN_HASH,
         TOKEN_IDENT,
+        TOKEN_KW_IN,
         TOKEN_KW_FN,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -4547,6 +4549,12 @@ JetDriverCoreDemandNames: struct {
     context_name: Int,
     context_marker_name: Int,
     context_fields: [Int],
+    // Per DURATION_SOURCE_METHODS row, the id of its name (`in` is a keyword
+    // token, matched by kind), and whether the source spells `Duration` or a
+    // Time literal (`5s`): a dotted call of a `shared` method (`x.abs()`)
+    // demands core.time only beside such a spelling.
+    duration_methods: [Int],
+    duration_spelled: Bool,
 }
 
 jet_driver_core_demand_name: fn(tables: TokenTables, text: String) -> Int Never! {
@@ -4601,7 +4609,32 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     loop at in JET_DRIVER_PRELUDE_FAILURE_STATICS {
         prelude_failure_names.push(jet_driver_core_demand_name(tables, BUILTIN_STATIC_ROWS[at].method))
     }
-    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), prelude_failure_names: prelude_failure_names, bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
+    duration_methods := [Int]{}
+    loop row in DURATION_SOURCE_METHODS -> duration_methods.push(jet_driver_core_demand_name(tables, row.name))
+    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), prelude_failure_names: prelude_failure_names, bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields, duration_methods: duration_methods, duration_spelled: jet_driver_duration_spelled(tables)}
+}
+
+// Whether the source spells `Duration` or a literal of a Time unit (`5s`).
+jet_driver_duration_spelled: fn(tables: TokenTables) -> Bool Never! {
+    if jet_driver_core_demand_name(tables, "Duration") >= 0 -> return true
+    suffixes := [Int]{}
+    loop family in SEMA_UNITS_CATALOG {
+        if family.family != "Time" -> next
+        loop member in family.members {
+            id: jet_driver_core_demand_name(tables, member.name)
+            if id > 0 -> suffixes.push(id)
+        }
+    }
+    if suffixes.len() == 0 -> return false
+    loop literal in tables.literals {
+        if suffixes.contains(name_index(literal.suffix)) -> return true
+    }
+    false
+}
+
+// Whether the token at `index` names a dotted call's method: `.m(` or `?.m(`.
+jet_driver_dotted_call: fn(tokens: [Token], from: Int, to: Int, index: Int) -> Bool Never! {
+    index > from && (tokens[index - 1].kind == TOKEN_DOT || tokens[index - 1].kind == TOKEN_QUESTION_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN
 }
 
 // The words besides its name that demand a bare Core type's module: `url`
@@ -4755,6 +4788,17 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.timeout_name && index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == names.task_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && !demand.source_modules.contains("core.time") {
                 demand.source_modules.push("core.time")
             }
+            // A Duration method runs its core.time source function
+            // (DURATION_SOURCE_METHODS); Sema decides whether the receiver is
+            // a Duration.
+            if collect_bare && name > 0 && jet_driver_dotted_call(tokens, from, to, index) && !demand.source_modules.contains("core.time") {
+                loop (at, method_name) in names.duration_methods {
+                    if method_name == name && (names.duration_spelled || !DURATION_SOURCE_METHODS[at].shared) {
+                        demand.source_modules.push("core.time")
+                        break
+                    }
+                }
+            }
             if name == names.input_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) {
                 method := token_decoded(tables, tokens[index + 2])
                 if !demand.input_methods.contains(method) {
@@ -4786,6 +4830,9 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                     }
                 }
             }
+        }
+        if collect_bare && tokens[index].kind == TOKEN_KW_IN && jet_driver_dotted_call(tokens, from, to, index) && !demand.source_modules.contains("core.time") {
+            demand.source_modules.push("core.time")
         }
         if tokens[index].literal < 0 -> next
         loop part in token_string_parts(tables, tokens[index]) {
