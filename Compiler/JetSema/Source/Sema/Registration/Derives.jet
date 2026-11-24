@@ -142,6 +142,9 @@ SemaDeriveExpansion: struct {
     // a breakpoint waits on pauses its expansion (sema_derive_debug_stop);
     // None otherwise.
     origin: SemaTemplateOrigin?{None},
+    // Whether a paste may write a reserved `__` name: Core's own templates
+    // and the compiler's derive providers may; a package's template may not.
+    reserved_pastes: Bool{true},
 }
 
 // A marker body's source file, that file's line starts and the marker's
@@ -746,6 +749,7 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
     value: sema_derive_scope_value(expansion, binding) ?? return name
     if value == {
         .Str(text) -> {
+            if sema_derive_paste_refused(expansion, text, span) -> return name.copy()
             if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
             return text
         }
@@ -758,6 +762,7 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
                 spelled = sema_derive_case_spelling(expansion, value)
             }
             if spelled == .Val(text) {
+                if sema_derive_paste_refused(expansion, text, span) -> return name.copy()
                 if expansion.definition_module != "" -> expansion.pasted.push(text.copy())
                 return text
             }
@@ -770,6 +775,16 @@ sema_derive_expand_name: fn(expansion: &SemaDeriveExpansion, name: String, span:
         }
     }
     name.copy()
+}
+
+// A paste is text its template's author writes, so a package's template
+// can't paste a reserved `__` name, as its source can't spell one: the same
+// E0067 the lexer reports, and the one a `#code` paste gets when its text is
+// read back. Only Core's own templates paste one.
+sema_derive_paste_refused: fn(expansion: &SemaDeriveExpansion, text: String, span: Span) -> Bool Never! {
+    if expansion.reserved_pastes || !text.starts_with("__") -> return false
+    sema_derive_fail(expansion, sema_error("E0067", span, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore"))
+    true
 }
 
 sema_derive_expand_type: fn(expansion: &SemaDeriveExpansion, ty: Type) -> Type Never! {
@@ -2211,25 +2226,27 @@ sema_derive_expand_provider_body: fn(body: [DeriveBodyItem], type_info: CtValue,
 // value, its fields the use site's arguments; its `reject(value)` raises one
 // of `reports` at the rule's use site. `origin` is where the body was
 // written, under `jet debug --build` (sema_derive_debug_stop).
-sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, type_info: CtValue, receiver: CtValue?, reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic], origin: SemaTemplateOrigin?{None}) -> [Item]? {
+// `reserved_pastes` is false for a package's rule (sema_derive_paste_refused).
+sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, type_info: CtValue, receiver: CtValue?, reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic], origin: SemaTemplateOrigin?{None}, reserved_pastes: Bool{true}) -> [Item]? {
     scope := [NamedCtValue]{}
     if receiver == .Val(value) -> scope.push(NamedCtValue{name: "self", value: value})
     if sema_derive_struct_field(type_info, "name") == .Val(.Str(name)) {
         scope.push(NamedCtValue{name: "name", value: CtValue.Str{value: name}})
     }
     scope.push(NamedCtValue{name: type_param, value: type_info})
-    sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics, origin)
+    sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics, origin, reserved_pastes)
 }
 
 // Rust `Comptime.expand_template_body`: expand one typed item template in
 // the caller's compile-time scope. A failed expansion reports its one
-// diagnostic and generates nothing.
-sema_derive_expand_template_body: fn(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic]) -> [Item]? {
-    sema_derive_expand_scoped(body, scope, [SemaDeriveReport]{}, None, "", diagnostics)
+// diagnostic and generates nothing. `reserved_pastes` is false for a
+// package's template (sema_derive_paste_refused).
+sema_derive_expand_template_body: fn(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic], reserved_pastes: Bool{true}) -> [Item]? {
+    sema_derive_expand_scoped(body, scope, [SemaDeriveReport]{}, None, "", diagnostics, None, reserved_pastes)
 }
 
-sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic], origin: SemaTemplateOrigin?{None}) -> [Item]? {
-    expansion := SemaDeriveExpansion{scope: scope, failure: None, reports: reports, site: site, definition_module: definition_module, origin: origin}
+sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic], origin: SemaTemplateOrigin?{None}, reserved_pastes: Bool{true}) -> [Item]? {
+    expansion := SemaDeriveExpansion{scope: scope, failure: None, reports: reports, site: site, definition_module: definition_module, origin: origin, reserved_pastes: reserved_pastes}
     items := [Item]{}
     sema_derive_expand_body(expansion, body, items)
     if expansion.failure == .Val(diagnostic) {

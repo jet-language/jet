@@ -270,7 +270,8 @@ sema_derive_template_loop_value: fn(wait: SemaRootLoopValue, table: ModuleTable,
 // driver's first pass), a loop over a value not computed yet is left out
 // without a report; after it, a loop whose value could not be computed is
 // E0956.
-sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue], pending: Bool, diagnostics: &[Diagnostic]) {
+// `reserved_pastes` is true only in a Core module (sema_derive_paste_refused).
+sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue], pending: Bool, reserved_pastes: Bool, diagnostics: &[Diagnostic]) {
     has_loop: loop item in items {
         if item == .TemplateLoop(_) {
             break true
@@ -291,7 +292,7 @@ sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue]
                 next
             }
             body: [DeriveBodyItem]{DeriveBodyItem.Loop{var: template.var, var_span: template.var_span, source: template.source, body: template.body, span: template.span}}
-            generated: sema_derive_expand_template_body(body, scope, diagnostics) ?? next
+            generated: sema_derive_expand_template_body(body, scope, diagnostics, reserved_pastes) ?? next
             loop generated_item in generated -> expanded.push(generated_item)
             next
         }
@@ -478,6 +479,9 @@ SemaUserRule: struct {
     // Under `jet debug --build`: where the body was written (Derives.jet
     // sema_derive_debug_stop); None otherwise.
     origin: SemaTemplateOrigin?{None},
+    // Whether the rule is Core's own, so its pastes may write a reserved `__`
+    // name (Derives.jet sema_derive_paste_refused).
+    reserved_pastes: Bool,
 }
 
 // The effect a template needs to write declarations.
@@ -526,7 +530,7 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: ModuleID,
             origin = Val(SemaTemplateOrigin{file: declaring.source_file.copy(), line_starts: parser_line_starts(declaring.source.bytes()), rule: marker.name.copy()})
         }
     }
-    Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row), receiver: sema_user_rule_receiver(declaration, marker), definition_module: definition_module, origin: origin})
+    Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row), receiver: sema_user_rule_receiver(declaration, marker), definition_module: definition_module, origin: origin, reserved_pastes: module_is_core(resolved.declaring_module_identity)})
 }
 
 // One use site's argument as a known-time value.
@@ -828,7 +832,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 markers: sema_comptime_reflection_written_markers(graph, graph.modules[module_index].module_identity, graph.modules[module_index].program, sema_user_template_catalog(), function.markers, registry) ?? next
                 info: sema_user_template_function_info(graph, module_index, function, markers) ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+                expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
                 if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) {
                     next
                 }
@@ -879,7 +883,7 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
     loop block in blocks {
         marker: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, Val(rule.receiver), rule.reports, Val(block.site), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, Val(rule.receiver), rule.reports, Val(block.site), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, block.name, block.site, expanded, diagnostics) -> next
         loop expanded_item in expanded -> generated.push(expanded_item)
     }
@@ -895,7 +899,7 @@ sema_user_rule_collect_type: fn(graph: SemaRegistrationGraph, module_index: Int,
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, owner)
         info: type_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, Val(owner), owner_span, expanded.move(), generated, diagnostics)
     }
@@ -913,7 +917,7 @@ sema_user_rule_collect_member: fn(graph: SemaRegistrationGraph, module_index: In
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
         if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, owner)
         info: sema_user_template_member_info(type_info, list, member, at) ?? sema_user_template_handle(kind, member)
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, None, marker.span, expanded.move(), generated, diagnostics)
     }
@@ -933,7 +937,7 @@ sema_user_rule_collect_code_module: fn(graph: SemaRegistrationGraph, module_inde
             module_info = sema_user_template_module_info(graph, module_index, code_module)
         }
         info: module_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, None, marker.span, expanded.move(), generated, diagnostics)
     }
@@ -1066,7 +1070,7 @@ sema_user_rule_expand_package: fn(graph: &SemaRegistrationGraph) {
         rule: sema_user_rule_body(graph, graph.entry_module_identity, marker) ?? next
         if package_info == None -> package_info = sema_user_template_package_info(graph)
         info: package_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(graph.modules[entry].program.items, marker.name, None, marker.span, expanded.move(), generated, diagnostics)
     }
@@ -1125,7 +1129,7 @@ sema_user_rule_collect_impl: fn(graph: SemaRegistrationGraph, module_index: Int,
             }
         }
         info: type_info ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin) ?? next
+        expanded: sema_derive_expand_rule_body(rule.body, "target", info, Val(rule.receiver), rule.reports, Val(marker.span), rule.definition_module, diagnostics, rule.origin, rule.reserved_pastes) ?? next
         if !sema_user_rule_row_admits(rule, marker.name, marker.span, expanded, diagnostics) -> next
         sema_user_rule_accept(items, marker.name, Val(type_name), marker.span, expanded.move(), generated, diagnostics)
     }

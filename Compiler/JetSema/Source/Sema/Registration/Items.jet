@@ -1440,10 +1440,11 @@ sema_registration_visibility: fn(is_pub: Bool, is_package_pub: Bool) -> Int Neve
 
 // The registered visibility of a declaration named `name` at a module's top
 // level. A Core item named `__…` is Core's machine space and Core declares it
-// `priv` (E0645), but user source can't spell a `__` name (E0067): the names that
-// reach one are Core's own and the code the compiler generates into any
-// module, which passes visibility. So its symbol is reachable as a public
-// one is, and `priv` keeps it out of Core's listed surface.
+// `priv` (E0645), but user source can't spell a `__` name (E0067), nor can a
+// package's template paste one (Derives.jet sema_derive_paste_refused): the
+// names that reach one are Core's own and the code the compiler generates
+// into any module, which passes visibility. So its symbol is reachable as a
+// public one is, and `priv` keeps it out of Core's listed surface.
 priv sema_registration_item_visibility: fn(module_id: ModuleID, name: String, is_pub: Bool, is_package_pub: Bool) -> Int Never! {
     if module_is_core(module_id) && name.starts_with("__") -> return 2
     sema_registration_visibility(is_pub, is_package_pub)
@@ -4138,7 +4139,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     sema_marker_rules_validate_allow(module_row.program, diagnostics)
     // Root `#loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
-    sema_derive_expand_template_loops(module_row.program.items, owned.loop_values.move(), owned.loop_values_pending, diagnostics)
+    sema_derive_expand_template_loops(module_row.program.items, owned.loop_values.move(), owned.loop_values_pending, module_is_core(module_row.module_identity), diagnostics)
     // A number family's impl becomes one impl per standard size, after the
     // root `#loop`s so a family impl one generates expands too.
     module_row.program.items = sema_derive_expand_family_impls(module_row.program.items.move(), module_row.program.imports, diagnostics)
