@@ -287,14 +287,14 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0939 | MemoArgumentNotHashable | Compiler/JetSema/Source/Sema/MarkerRules.jet:2594 | memoized arguments are hashable |
 | E0940 | MemoLazyIter | Compiler/JetSema/Source/Sema/MarkerRules.jet:2589 | the function collects the values before returning them |
 | E0944 | ComptimeImportAtRuntime | Compiler/JetSema/Source/Sema/ComptimeUse.jet:521 | shipped code imports the module with a plain `use` |
-| E0945 | ToolchainInputOutsideTree | Compiler/JetDriver/Source/Driver/ComptimeInputs.jet:194 | `toolchain:` inputs belong to the toolchain tree's packages |
+| E0945 | ToolchainInputOutsideTree | Compiler/JetDriver/Source/Driver/ComptimeInputs.jet:193 | `toolchain:` inputs belong to the toolchain tree's packages |
 | E0946 | DispatchHoleCount | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | a hole table header holds one hole |
 | E0948 | DispatchHoleCandidatePattern | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:232 | patterns and ranges match against the subject of a plain `if subject == {` table |
 | E0949 | EnumValuesUnavailable | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:1729 | list the values you need yourself |
 | E0950 | FieldMethodClash | Compiler/JetSema/Source/Sema/Expressions/Places.jet:1462 | write the closure that names the one you mean |
 | E0952 | ComptimeFuelExhausted | Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet:299 | a budget, not a power: the work is split, or its binding raises the limit with `#StepLimit(n)` |
 | E0953 | ComptimePanic | Compiler/JetEval/Source/EvalValues.jet:159 | the condition that raises the authored error is changed |
-| E0955 | ComptimeFileUnreadable | Compiler/JetDriver/Source/Driver/BuildAdapter.jet:1168 | the input file exists and is readable |
+| E0955 | ComptimeFileUnreadable | Compiler/JetDriver/Source/Driver/BuildAdapter.jet:1101 | the input file exists and is readable |
 | E0956 | ComptimeConstructNotSupported | Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet:62 | the value is computed at run time, or with constructs the evaluator runs |
 | E0957 | InvalidEmbedPath | Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet:73 | the path is a relative String inside the project |
 | E0959 | MissingLayoutByteFact | Compiler/JetCLI/Source/CLI/ExpandFacts.jet:116 | the type declares a Jet-owned physical layout |
@@ -662,7 +662,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3401 | ImpureCallInPureContext | Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:109 | the function's row declares the effect |
 | E3403 | NondeterminismInPureEval | Compiler/JetSema/Source/Sema/Effects/Checks.jet:720 | the value is passed in |
 | E3412 | ComptimeNetUnavailable | Compiler/JetSema/Source/Sema/Effects/Checks.jet:767 | `core.net.fetch(url, sha256:)` |
-| E3413 | FetchHashMismatch | Compiler/JetDriver/Source/Driver/BuildAdapter.jet:1340 | the pin or the URL is fixed |
+| E3413 | FetchHashMismatch | Compiler/JetDriver/Source/Driver/BuildAdapter.jet:1273 | the pin or the URL is fixed |
 | E3414 | FetchFailed | Compiler/JetSema/Source/Sema/Calls/ComptimeInputs.jet:165 | the URL and arguments are fixed |
 | E3415 | GateDeniedByPolicy | Compiler/JetSema/Source/Sema/GateLedger.jet:555 | the policy owner changes the policy |
 | E3502 | BuildPlanFailed | Compiler/JetSema/Source/Sema/Calls/Build.jet:55 | the plan is fixed |
@@ -671,14 +671,14 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3505 | BuildProbeFailed | Compiler/JetCLI/Source/CLI/BuildExecute.jet:181 | the action's cause is fixed |
 | E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:247 | the step's cause is fixed |
 | E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:584 | generate under another name |
-| E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:514 | one producer per module, and no step waits on its own Jet source |
+| E3511 | GenerationCycle | Compiler/JetDriver/Source/BuildSession/Session.jet:514 | one producer per module, and no step waits on its own Jet source |
 | E3512 | LockedGenerationDrift | Jetpack/PackageModel/Source/Lock/Verify.jet:169 | regenerate and lock again |
 | E3513 | LockedEffectRowWidened | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:553 | lock the new effect row after review |
-| E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:211 | a producer makes the file |
-| E3516 | GenerationRoundLimit | Compiler/JetBuildSession/Source/Session.jet:521 | a shorter chain of generating steps |
-| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:624 | one build entry per package |
+| E3515 | MissingProducer | Compiler/JetDriver/Source/BuildSession/Graph.jet:211 | a producer makes the file |
+| E3516 | GenerationRoundLimit | Compiler/JetDriver/Source/BuildSession/Session.jet:521 | a shorter chain of generating steps |
+| E3520 | DuplicateBuildEntry | Compiler/JetDriver/Source/Driver/BuildQueries.jet:588 | one build entry per package |
 | E3521 | BuildFactConflict | Compiler/JetDriver/Source/Driver/BuildFactChain.jet:429 | one writer per layer |
-| E3530 | ReservedBuildRuleCode | Compiler/JetEval/Source/BuildServices.jet:126 | a code outside the compiler's shape |
+| E3530 | ReservedBuildRuleCode | Compiler/JetDriver/Source/Driver/BuildServices.jet:128 | a code outside the compiler's shape |
 | E3540 | DuplicateCommandOverride | Compiler/JetCLI/Source/CLI/Entry.jet:942 | one override per command |
 | E3541 | OutputSettingUndeclared | Compiler/JetSema/Source/Sema/Calls/Build.jet:267 | an output sets only the settings its package declares |
 | E3542 | OutputSettingWrongType | Compiler/JetSema/Source/Sema/Calls/Build.jet:286 | an output's value has the setting's declared type |

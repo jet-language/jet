@@ -2,7 +2,7 @@
 // This fixture does not claim that an unavailable host service was executed.
 use {
     jet_foundation.[Span]
-    jet_build_session.[
+    jet_driver.[
         BuildSessionError,
         BuildSessionPolicy,
         build_key_debug_text,
@@ -11,8 +11,9 @@ use {
         build_session_error_projection,
         build_session_impure,
         build_session_new,
+        jet_driver_build_failed_diagnostic,
+        jet_driver_build_failed_value,
     ]
-    jet_eval.[jet_eval_build_failed_diagnostic, jet_eval_build_failed_value]
 }
 
 build_services_require: fn(ok: Bool, message: String) Never! {
@@ -114,8 +115,8 @@ build_services_require: fn(ok: Bool, message: String) Never! {
         diagnostic := build_session_error_diag(state, error)
         diagnostic.start = 12
         diagnostic.end = 34
-        failed: jet_eval_build_failed_value(diagnostic) ?? panic("typed error lost failure value")
-        recovered: jet_eval_build_failed_diagnostic(failed, Span{start: 0, end: 0}) ?? panic("typed error lost retained details")
+        failed: jet_driver_build_failed_value(diagnostic) ?? panic("typed error lost failure value")
+        recovered: jet_driver_build_failed_diagnostic(failed, Span{start: 0, end: 0}) ?? panic("typed error lost retained details")
         original_span: recovered.span ?? panic("original source span missing")
         build_services_require(original_span.start == 12 && original_span.end == 34, "original source span")
         if recovered.structured == .Val(.BuildError(report)) {
@@ -140,6 +141,6 @@ build_services_require: fn(ok: Bool, message: String) Never! {
     build_services_require(build_key_debug_text(control) == "\"\\u{{1}}\\u{{7f}}\"", "control Debug uses lowercase hex")
     gate: build_session_impure(state, "run")
     if gate == .Failure(error) {
-        build_services_require(jet_eval_build_failed_value(error) == None, "gate failure is not a fabricated BuildError")
+        build_services_require(jet_driver_build_failed_value(error) == None, "gate failure is not a fabricated BuildError")
     } else { panic("Impure gate lost refusal") }
 }

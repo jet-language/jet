@@ -3,7 +3,7 @@
 // reach this adapter, which records them for `jet dev`.
 use {
     jet_foundation.[Diagnostic, Span, TComptimeValue, Type]
-    jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_session_input, jet_eval_runtime_config]
+    jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_runtime_config]
 }
 
 // The stock dev loop: watch the package and hot reload, no dev server.
@@ -40,7 +40,7 @@ JetDriverDevAdapter: struct {
 jet_driver_dev_host_call: fn(state: Shared<JetDriverDevConfig>, member: String, args: [TComptimeValue]) -> JetEvalBuildReply? {
     if !member.starts_with("Dev.") || args.len() != 2 -> return None
     method: member.slice("Dev.".len(), member.len())
-    value: jet_eval_build_session_input(args[1]) ?? return None
+    value: jet_driver_build_session_input(args[1]) ?? return None
     permit := state.guard_edit()
     if {
         method == "watch" -> {

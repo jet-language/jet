@@ -3,79 +3,12 @@
 // (JET_DRIVER_BUILD_SERVICES) through it.
 use {
     jet_foundation.[SemaNameCase, Span, TComptimeField, TComptimeReport, TComptimeValue, Type, TypeTupleField, foundation_byte_text, sema_casing_ascii_has_case, type_name]
-    jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_context_id, jet_eval_build_field, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value, jet_eval_reflection_calls_to, jet_eval_reflection_marked_functions]
+    jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_reflection_calls_to, jet_eval_reflection_marked_functions]
     build_input_crypto: core.crypto
     build_input_url: core.net.url
-    jet_eval.[jet_eval_build_failed_value]
     jet_parser.[jfmt_escape_str_lit, parse_type_text]
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
     jet_sema.[sema_comptime_reflection_type_id_of, sema_comptime_reflection_type_id_record]
-    jet_build_session.[
-        BuildSession,
-        BuildSessionCall,
-        BuildSessionDiagnostic,
-        BuildSessionReply,
-        BuildSessionState,
-        BuildSessionValue,
-        build_session_action,
-        build_session_add_asset_bundle,
-        build_session_add_doc,
-        build_session_add_executable,
-        build_session_add_install,
-        build_session_add_library,
-        build_session_add_package,
-        build_session_add_publish,
-        build_session_add_test,
-        build_session_args,
-        build_session_at,
-        build_session_call,
-        build_session_compiler,
-        build_session_compiler_add,
-        build_session_compiler_allow_rewrite,
-        build_session_compiler_handoff,
-        build_session_compiler_live,
-        build_session_compiler_report,
-        build_session_compiler_rewrite_body,
-        build_session_contribute,
-        build_session_default,
-        build_session_dependency,
-        build_session_diag,
-        build_session_file_file,
-        build_session_file_folder,
-        build_session_file_path,
-        build_session_folder,
-        build_session_found,
-        build_session_generate,
-        build_session_graph,
-        build_session_host,
-        build_session_image,
-        build_session_jet,
-        build_session_jet_built_from,
-        build_session_made_structs,
-        build_session_option,
-        build_session_pin,
-        build_session_place,
-        build_session_plan,
-        build_session_plugin,
-        build_session_probe,
-        build_session_project_error,
-        build_session_refuse,
-        build_session_run,
-        build_session_set_tree_source,
-        build_session_signing,
-        build_session_source_key,
-        build_session_step_arg,
-        build_session_step_file,
-        build_session_step_input,
-        build_session_step_output,
-        build_session_step_reads,
-        build_session_step_sign,
-        build_session_step_timeout,
-        build_session_step_toolchain,
-        build_session_step_writes,
-        build_session_toolchain,
-        build_session_tree_source,
-    ]
 }
 
 JetDriverBuildAdapter: struct {
@@ -115,7 +48,7 @@ jet_driver_build_host_failure: fn(session: BuildSession, span: Span, message: St
     error := build_session_diag(permit.value, message)
     error.start = span.start
     error.end = span.end
-    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+    JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
 }
 
 jet_driver_build_context_owned: fn(session: BuildSession, owner: Int) -> Bool Never! {
@@ -220,9 +153,9 @@ JET_DRIVER_BUILD_SERVICES: [JetDriverBuildService]{
 // `b.generate`) is placed at its own span.
 jet_driver_build_host_call: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read]> JetEvalBuildReply? Never! {
     if args.len() >= 2 {
-        site: jet_eval_build_field(args[1], "file") ?? TComptimeValue.Unit
-        line: jet_eval_build_field(args[1], "line") ?? TComptimeValue.Unit
-        column: jet_eval_build_field(args[1], "column") ?? TComptimeValue.Unit
+        site: jet_driver_build_field(args[1], "file") ?? TComptimeValue.Unit
+        line: jet_driver_build_field(args[1], "line") ?? TComptimeValue.Unit
+        column: jet_driver_build_field(args[1], "column") ?? TComptimeValue.Unit
         if site == .String(text) && line == .Int(row) && column == .Int(at) {
             placed: build_session_place(session, text, row, at, jet_driver_build_method_name(member).len())
             rest := [TComptimeValue]{}
@@ -257,7 +190,7 @@ jet_driver_build_method_name: fn(member: String) -> String Never! {
 // missing or is not this session's live context. None when it is.
 jet_driver_build_context_problem: fn(session: BuildSession, args: [TComptimeValue]) -> String? Never! {
     if args.len() == 0 -> return Val("build method lost its context")
-    owner: jet_eval_build_context_id(args[0]) ?? return Val("build method requires its checked context")
+    owner: jet_driver_build_context_id(args[0]) ?? return Val("build method requires its checked context")
     if !jet_driver_build_context_owned(session, owner) -> return Val("build context expired")
     None
 }
@@ -266,7 +199,7 @@ jet_driver_build_context_problem: fn(session: BuildSession, args: [TComptimeValu
 jet_driver_build_session_args: fn(args: [TComptimeValue], first: Int) -> [BuildSessionValue]? Never! {
     values := [BuildSessionValue]{}
     loop index in first..<args.len() {
-        values.push(jet_eval_build_session_input(args[index]) ?? return None)
+        values.push(jet_driver_build_session_input(args[index]) ?? return None)
     }
     Val(values)
 }
@@ -284,18 +217,18 @@ jet_driver_build_send: fn(session: &BuildSession, operation: fn(&BuildSessionSta
 jet_driver_build_answer: fn(session: BuildSession, reply: BuildSessionReply, fallible: Bool, span: Span) -> JetEvalBuildReply Never! {
     if reply == {
         .Value(value) -> {
-            data := jet_eval_build_session_output(value)
+            data := jet_driver_build_session_output(value)
             if fallible -> data = TComptimeValue.Present{value: data.move()}
             JetEvalBuildReply.Value{value: data.move()}
         }
         .Failure(error) -> {
-            if fallible && jet_eval_build_failed_value(error) == .Val(value) {
+            if fallible && jet_driver_build_failed_value(error) == .Val(value) {
                 // copy: the reply owns the failure's data value, but `value` is a view of the
-                // payload in jet_eval_build_failed_value's result; Jet has no consuming match to
+                // payload in jet_driver_build_failed_value's result; Jet has no consuming match to
                 // move it out.
                 return JetEvalBuildReply.Value{value: value.copy()}
             }
-            JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+            JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
         }
         .HostRequest(service_method, _) -> jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable")
     }
@@ -334,7 +267,7 @@ jet_driver_build_generate: fn(session: &BuildSession, _host: JetDriverBuildAdapt
             values.push(BuildSessionValue.Text{value: jet_driver_code_site(args[index])})
             next
         }
-        value: jet_eval_build_session_input(args[index]) ?? return jet_driver_build_host_failure(session, span, "build method received a non-data argument")
+        value: jet_driver_build_session_input(args[index]) ?? return jet_driver_build_host_failure(session, span, "build method received a non-data argument")
         if index == 2 {
             // copy: `generated` outlives this loop and is handed to build_session_call, while
             // `source` is only a view of the `.Text` payload inside `value`; Jet has no
@@ -390,7 +323,7 @@ jet_driver_build_compiler: fn(session: &BuildSession, _host: JetDriverBuildAdapt
     values: jet_driver_build_session_args(args, 1) ?? return jet_driver_build_host_failure(session, span, "build method received a non-data argument")
     reply: jet_driver_build_send(session, operation, values, None, impure, span, file)
     if reply == .Value(value) {
-        data := jet_driver_build_compiler_value(jet_eval_build_session_output(value), args[0])
+        data := jet_driver_build_compiler_value(jet_driver_build_session_output(value), args[0])
         if fallible -> data = TComptimeValue.Present{value: data.move()}
         return JetEvalBuildReply.Value{value: data.move()}
     }
@@ -400,11 +333,11 @@ jet_driver_build_compiler: fn(session: &BuildSession, _host: JetDriverBuildAdapt
 // `plan.graph()`: the checked graph a `BuildPlan` projects.
 jet_driver_build_graph: fn(session: &BuildSession, _host: JetDriverBuildAdapter, _member: String, args: [TComptimeValue], _fallible: Bool, _impure: Bool, span: Span, _file: String) -> JetEvalBuildReply Never! {
     if args.len() != 1 -> return jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan")
-    returned: jet_eval_build_session_input(args[0]) ?? return jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan")
+    returned: jet_driver_build_session_input(args[0]) ?? return jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan")
     projected: build_session_graph(session, returned)
-    if projected.diagnostic == .Val(error) -> return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+    if projected.diagnostic == .Val(error) -> return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
     graph: projected.graph ?? return jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph")
-    JetEvalBuildReply.Value{value: jet_eval_build_graph_value(graph)}
+    JetEvalBuildReply.Value{value: jet_driver_build_graph_value(graph)}
 }
 
 // `action` as the arguments of a build session's `action` call: its name,
@@ -427,7 +360,7 @@ jet_driver_build_action_session_strings: fn(values: [String]) -> BuildSessionVal
 // A `Compiler` value carries its build's checked program (the `program` of
 // the `Build` it was made from), which `meta.events` watches.
 jet_driver_build_compiler_value: fn(handle: TComptimeValue, context: TComptimeValue) -> TComptimeValue Never! {
-    program := jet_eval_build_field(context, "program") ?? return handle.copy()
+    program := jet_driver_build_field(context, "program") ?? return handle.copy()
     if handle == .Struct(name, fields) {
         carried := fields.copy()
         carried.push(TComptimeField{name: "program", value: program.move()})
@@ -458,10 +391,10 @@ jet_driver_build_splice_literal: fn(value: BuildSessionValue) -> String? Never! 
 // is refused, since the step would read a file it never declared and its
 // cached result could go stale.
 jet_driver_build_step_arg: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, operation: fn(&BuildSessionState, BuildSessionCall) -> BuildSessionReply Never!, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read]> JetEvalBuildReply Never! {
-    if host.inputs == .Val(inputs) && args.len() == 2 && jet_eval_build_session_input(args[1]) == .Val(.Text(text)) {
+    if host.inputs == .Val(inputs) && args.len() == 2 && jet_driver_build_session_input(args[1]) == .Val(.Text(text)) {
         if jet_driver_build_names_file(inputs, host.base_dir, text) {
             refused: BuildSessionDiagnostic{code: "E3502", what: "`.arg(\"{text}\")` names the package file `{text}`", why: "a step reads only the files it declares, so its cached result can't go stale", fix: "pass it with `.input(\"{text}\")` so the step declares it", start: span.start, end: span.end}
-            return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(refused)}
+            return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(refused)}
         }
     }
     jet_driver_build_part(session, host, member, operation, args, fallible, impure, span, file)
@@ -508,7 +441,7 @@ jet_driver_build_part: fn(session: &BuildSession, _host: JetDriverBuildAdapter, 
 
 // The `Compiler` value a call is made on, as the session holds it.
 jet_driver_compiler_held: fn(args: [TComptimeValue]) -> BuildSessionValue? Never! {
-    if args.len() > 0 -> jet_eval_build_session_input(args[0]) else -> None
+    if args.len() > 0 -> jet_driver_build_session_input(args[0]) else -> None
 }
 
 // A `Compiler` member with no handler at the arity it was called with.
@@ -532,9 +465,9 @@ jet_driver_compiler_events: fn(session: &BuildSession, host: JetDriverBuildAdapt
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     checked: build_session_call(session, build_session_compiler_live, [BuildSessionValue]{held}, None, false, span.start, span.end)
     if checked == .Failure(error) {
-        return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
     }
-    program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+    program: jet_driver_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
     watched: if args[1] == .String(text) -> text.copy() else -> {
         return jet_driver_build_host_failure(session, span, "`{member}` lost its watched name")
     }
@@ -550,20 +483,20 @@ jet_driver_compiler_stages: fn(session: &BuildSession, host: JetDriverBuildAdapt
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     checked: build_session_call(session, build_session_compiler_live, [BuildSessionValue]{held}, None, false, span.start, span.end)
     if checked == .Failure(error) {
-        return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
     }
-    program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
-    stages: jet_eval_build_field(program, "stages") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
+    program: jet_driver_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+    stages: jet_driver_build_field(program, "stages") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
     JetEvalBuildReply.Value{value: stages}
 }
 
 jet_driver_compiler_handoff: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> JetEvalBuildReply Never! {
     if args.len() != 2 -> return jet_driver_compiler_unknown(session, host, member, args, fallible, impure, span, file)
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
-    step: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its place")
+    step: jet_driver_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its place")
     reply: build_session_call(session, build_session_compiler_handoff, [BuildSessionValue]{held, step}, None, false, span.start, span.end)
     if reply == .Value(value) {
-        return JetEvalBuildReply.Value{value: jet_driver_build_compiler_value(jet_eval_build_session_output(value), args[0])}
+        return JetEvalBuildReply.Value{value: jet_driver_build_compiler_value(jet_driver_build_session_output(value), args[0])}
     }
     jet_driver_session_reply(session, reply, span)
 }
@@ -571,7 +504,7 @@ jet_driver_compiler_handoff: fn(session: &BuildSession, host: JetDriverBuildAdap
 jet_driver_compiler_allow_rewrite: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> JetEvalBuildReply Never! {
     if args.len() != 2 -> return jet_driver_compiler_unknown(session, host, member, args, fallible, impure, span, file)
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
-    package: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its package name")
+    package: jet_driver_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its package name")
     reply: build_session_call(session, build_session_compiler_allow_rewrite, [BuildSessionValue]{held, package}, None, false, span.start, span.end)
     jet_driver_session_reply(session, reply, span)
 }
@@ -581,9 +514,9 @@ jet_driver_compiler_find_type: fn(session: &BuildSession, host: JetDriverBuildAd
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     checked: build_session_call(session, build_session_compiler_live, [BuildSessionValue]{held}, None, false, span.start, span.end)
     if checked == .Failure(error) {
-        return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        return JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
     }
-    program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+    program: jet_driver_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
     text: if args[1] == .String(written) -> written.copy() else -> {
         return jet_driver_build_host_failure(session, span, "`{member}` lost its text")
     }
@@ -612,7 +545,7 @@ jet_driver_compiler_add_struct: fn(session: &BuildSession, host: JetDriverBuildA
     // A field's name may be computed, so it is checked before it is
     // written. Its type is a `TypeId` the compiler made, written from
     // its identity as the new module names each type in it.
-    program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+    program: jet_driver_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
     seen := jet_driver_meta_type_rows(program, "scope_types", "identity", "name") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
     loop made in build_session_made_structs(session, held) {
         seen[made.identity.copy()] = made.name.copy()
@@ -622,18 +555,18 @@ jet_driver_compiler_add_struct: fn(session: &BuildSession, host: JetDriverBuildA
         return jet_driver_build_host_failure(session, span, "`{member}` lost its fields")
     }
     loop field in listed {
-        field_name: jet_eval_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
-        field_type: jet_eval_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+        field_name: jet_driver_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
+        field_type: jet_driver_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
         written: if field_name == .String(text) -> text.copy() else -> {
             return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
         }
         if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" {
             return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
         }
-        spelled: if jet_eval_build_field(field_type, "name") == .Val(.String(text)) -> text.copy() else -> {
+        spelled: if jet_driver_build_field(field_type, "name") == .Val(.String(text)) -> text.copy() else -> {
             return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
         }
-        identity: if jet_eval_build_field(field_type, "identity") == .Val(.String(text)) -> text.copy() else -> {
+        identity: if jet_driver_build_field(field_type, "identity") == .Val(.String(text)) -> text.copy() else -> {
             return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
         }
         ty: parse_type_text(identity) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
@@ -651,9 +584,9 @@ jet_driver_compiler_add_struct: fn(session: &BuildSession, host: JetDriverBuildA
     home_module: if args[3] == .String(text) -> text.copy() else -> {
         return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
     }
-    scope: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
-    producer: jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
-    authority: jet_eval_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
+    scope: jet_driver_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+    producer: jet_driver_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
+    authority: jet_driver_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
     reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name.copy()}}, Val(source), false, span.start, span.end)
     if reply == .Value(_) {
         // The new struct's `TypeId`: declared as `name` in the generated
@@ -681,15 +614,15 @@ jet_driver_compiler_report: fn(session: &BuildSession, host: JetDriverBuildAdapt
     }
     // copy: the five finding texts go to the session; the rewrite texts stay here.
     loop index in 0..<5 -> values.push(BuildSessionValue.Text{value: texts[index].copy()})
-    place: jet_eval_build_field(args[8], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard")
-    called_in: if jet_eval_build_field(place, "file") == .Val(.String(text)) -> text.copy() else -> {
+    place: jet_driver_build_field(args[8], "span") ?? return jet_driver_build_host_failure(session, span, "`meta.report` takes a call a `.Calls{{to: f}}` watch heard")
+    called_in: if jet_driver_build_field(place, "file") == .Val(.String(text)) -> text.copy() else -> {
         return jet_driver_build_host_failure(session, span, "`meta.report` lost the file of its call")
     }
-    first: if jet_eval_build_field(place, "start") == .Val(.Int(value)) -> value else -> -1
-    last: if jet_eval_build_field(place, "end") == .Val(.Int(value)) -> value else -> -1
+    first: if jet_driver_build_field(place, "start") == .Val(.Int(value)) -> value else -> -1
+    last: if jet_driver_build_field(place, "end") == .Val(.Int(value)) -> value else -> -1
     rewrite := ""
     if texts[5] != "" {
-        if jet_eval_build_field(args[8], "callee") == .Val(.String(called)) {
+        if jet_driver_build_field(args[8], "callee") == .Val(.String(called)) {
             // copy: the replacement is read again for no other call.
             if called == texts[5] -> rewrite = texts[6].copy()
         }
@@ -714,9 +647,9 @@ jet_driver_compiler_add: fn(session: &BuildSession, host: JetDriverBuildAdapter,
     held: jet_driver_compiler_held(args) ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
     source: jet_driver_compiler_code(args[1], true) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
     if jet_driver_code_writes_unsafe(source) -> return jet_driver_code_unsafe_refusal(span, "meta.add")
-    scope: jet_eval_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
-    producer: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
-    authority: jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
+    scope: jet_driver_build_session_input(args[2]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
+    producer: jet_driver_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
+    authority: jet_driver_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
     reply: build_session_call(session, build_session_compiler_add, [BuildSessionValue]{held, scope, producer, authority}, Val(source), false, span.start, span.end)
     jet_driver_session_reply(session, reply, span)
 }
@@ -733,8 +666,8 @@ jet_driver_compiler_rewrite_named: fn(session: &BuildSession, host: JetDriverBui
 // line is written with.
 jet_driver_compiler_rewrite_heard: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -> JetEvalBuildReply Never! {
     if args.len() != 5 -> return jet_driver_compiler_unknown(session, host, member, args, fallible, impure, span, file)
-    function: jet_eval_build_field(args[1], "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's name")
-    owner: jet_eval_build_field(args[1], "package") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's package")
+    function: jet_driver_build_field(args[1], "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's name")
+    owner: jet_driver_build_field(args[1], "package") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its function's package")
     jet_driver_compiler_rewrite(session, member, args, function, owner, args[4], span)
 }
 
@@ -745,18 +678,18 @@ jet_driver_compiler_rewrite: fn(session: &BuildSession, member: String, args: [T
     source: jet_driver_compiler_code(args[2], false) ?? return jet_driver_build_host_failure(session, span, "`{member}` received code without its source")
     if jet_driver_code_writes_unsafe(source) -> return jet_driver_code_unsafe_refusal(span, "meta.rewrite_body")
     lost: "`{member}` lost its function"
-    named: jet_eval_build_session_input(function) ?? return jet_driver_build_host_failure(session, span, lost)
-    caller: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, lost)
-    package: jet_eval_build_session_input(owner) ?? return jet_driver_build_host_failure(session, span, lost)
-    pasted: jet_eval_build_session_input(paste) ?? return jet_driver_build_host_failure(session, span, lost)
+    named: jet_driver_build_session_input(function) ?? return jet_driver_build_host_failure(session, span, lost)
+    caller: jet_driver_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, lost)
+    package: jet_driver_build_session_input(owner) ?? return jet_driver_build_host_failure(session, span, lost)
+    pasted: jet_driver_build_session_input(paste) ?? return jet_driver_build_host_failure(session, span, lost)
     reply: build_session_call(session, build_session_compiler_rewrite_body, [BuildSessionValue]{held, named, caller, package, pasted}, Val(source), false, span.start, span.end)
     jet_driver_session_reply(session, reply, span)
 }
 
 jet_driver_session_reply: fn(session: &BuildSession, reply: BuildSessionReply, span: Span) -> JetEvalBuildReply Never! {
     if reply == {
-        .Value(value) -> JetEvalBuildReply.Value{value: jet_eval_build_session_output(value)}
-        .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        .Value(value) -> JetEvalBuildReply.Value{value: jet_driver_build_session_output(value)}
+        .Failure(error) -> JetEvalBuildReply.Failure{diagnostic: jet_driver_build_session_diagnostic(error)}
         .HostRequest(service_method, _) -> jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable")
     }
 }
@@ -816,7 +749,7 @@ jet_driver_code_pasted: fn(session: &BuildSession, _host: JetDriverBuildAdapter,
 
 jet_driver_code_paste_refusal: fn(span: Span, name: String, text: String) -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Failure{
-        diagnostic: jet_eval_build_session_diagnostic(
+        diagnostic: jet_driver_build_session_diagnostic(
             BuildSessionDiagnostic{
                 code: "E0357",
                 what: "`#code` pastes \"{text}\" for `#{{{name}}}`, which is not one name or type",
@@ -847,7 +780,7 @@ jet_driver_code_writes_unsafe: fn(source: String) -> Bool Never! {
 
 jet_driver_code_unsafe_refusal: fn(span: Span, call: String) -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Failure{
-        diagnostic: jet_eval_build_session_diagnostic(
+        diagnostic: jet_driver_build_session_diagnostic(
             BuildSessionDiagnostic{
                 code: "E3503",
                 what: "`{call}`'s code writes `#Unsafe`",
@@ -864,7 +797,7 @@ jet_driver_code_unsafe_refusal: fn(span: Span, call: String) -> JetEvalBuildRepl
 // kind's casing, so it declares exactly one thing.
 jet_driver_meta_name_refusal: fn(span: Span, call: String, kind: String, name: String, casing: String) -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Failure{
-        diagnostic: jet_eval_build_session_diagnostic(
+        diagnostic: jet_driver_build_session_diagnostic(
             BuildSessionDiagnostic{
                 code: "E0357",
                 what: "`{call}` was given the {kind} name \"{name}\", which is not an identifier",
@@ -881,7 +814,7 @@ jet_driver_meta_name_refusal: fn(span: Span, call: String, kind: String, name: S
 // can't name: it shares the root module's namespace and imports nothing.
 jet_driver_meta_type_refusal: fn(span: Span, field: String, spelled: String) -> JetEvalBuildReply Never! {
     JetEvalBuildReply.Failure{
-        diagnostic: jet_eval_build_session_diagnostic(
+        diagnostic: jet_driver_build_session_diagnostic(
             BuildSessionDiagnostic{
                 code: "E3502",
                 what: "`meta.add_struct` was given the type `{spelled}` for the field `{field}`, which the generated module can't see",
@@ -903,11 +836,11 @@ jet_driver_meta_type_absent: fn() -> JetEvalBuildReply Never! {
 // each row's `key` field to its `value` field; None when the program lacks
 // the list.
 jet_driver_meta_type_rows: fn(program: TComptimeValue, list: String, key: String, value: String) -> [String:String]? {
-    rows: jet_eval_build_field(program, list) ?? return None
+    rows: jet_driver_build_field(program, list) ?? return None
     found := [String:String]{}
     if rows == .List(values) {
         loop row in values {
-            if jet_eval_build_field(row, key) == .Val(.String(written)) && jet_eval_build_field(row, value) == .Val(.String(answer)) {
+            if jet_driver_build_field(row, key) == .Val(.String(written)) && jet_driver_build_field(row, value) == .Val(.String(answer)) {
                 found[written.copy()] = answer.copy()
             }
         }

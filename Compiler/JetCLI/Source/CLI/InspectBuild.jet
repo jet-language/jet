@@ -63,7 +63,7 @@ use {
     build_files: core.files
     build_math: core.math
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-    jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
+    jet_driver.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer,
         FactContribution,
@@ -401,8 +401,8 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if shadowed.move() == .Val(refusal) -> return refusal
     // Under `write_generated: on` every generated source is written; a
     // module a step reads is that step's input, promised to it, so it is
-    // written before any step runs whatever the option says (JetBuildSession
-    // Schedule.jet).
+    // written before any step runs whatever the option says (JetDriver
+    // BuildSession/Schedule.jet).
     write_all: build_options_value(selected_options, "write_generated") == "on"
     unwritten: jet_cli_generated_write(file, root, generated, graph, write_all, color)
     if unwritten.move() == .Val(refusal) -> return refusal

@@ -3,45 +3,9 @@
 use {
     jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_source_line, diagnostic_source_text, diagnostic_with_source_path, jet_target_layout_item_name, name_find, name_index, name_intern, name_table, name_table_sized, sha256_hex]
     jet_parser.[parse_source]
-    jet_eval.[JetEvalConfig, jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
-    jet_eval.[jet_eval_build_failed_diagnostic]
+    jet_eval.[JetEvalConfig, jet_eval_runtime_config]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
     jet_sema.[SemaGraphResult, SemaSourceOrigin, sema_gate_host_reads]
-    jet_build_session.[
-        BuildSession,
-        BuildSessionCall,
-        BuildSessionDiagnostic,
-        BuildSessionFinding,
-        BuildSessionGeneratedModule,
-        BuildSessionPlan,
-        BuildSessionPolicy,
-        BuildSessionReply,
-        BuildSessionState,
-        BuildSessionValue,
-        build_plan_findings,
-        build_plan_graph,
-        build_plan_selection,
-        build_plan_selected_generated,
-        build_session_abort,
-        build_session_add_executable,
-        build_session_add_source,
-        build_session_append_unique,
-        build_session_call,
-        build_session_compiler,
-        build_session_compiler_allow_rewrite,
-        build_session_package_dir,
-        build_session_made_by,
-        build_session_promised,
-        build_session_refused,
-        build_session_compiler_node,
-        build_session_finish,
-        build_session_new,
-        build_session_set_args,
-        build_session_set_dependencies,
-        build_session_set_identity,
-        build_session_set_jet_source,
-        build_session_set_source,
-    ]
 }
 
 // Rust Driver.compiler_nodes_for_bundle_with_outputs. These are static
@@ -503,7 +467,7 @@ jet_driver_build_query_empty: fn(request: &&JetDriverCompileRequest, diagnostics
 // program span names the source file the span indexes and points there, as a
 // checker's finding about its own source should.
 jet_driver_build_rule_report: fn(error: BuildSessionDiagnostic) -> Diagnostic Never! {
-    report: jet_eval_build_session_diagnostic(error)
+    report: jet_driver_build_session_diagnostic(error)
     if error.file == "" -> return report
     diagnostic_with_source_path(report, error.file, 0)
 }
@@ -730,7 +694,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     jet_driver_build_set_source(session, sources.modules, path)
     config: jet_driver_build_run_config(request, session, sources.host_held, path)
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.run")
-    run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
+    run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_driver_build_context_value(session_id, program)}, config, span)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.run", 1)
     evaluated: run.result.move() ?? {
         build_session_abort(session)
@@ -752,13 +716,13 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         }
         return jet_driver_build_query_stopped(request, errors, ran, staged_failed, build_session_refused(session), problem)
     }
-    if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
+    if returned == .Val(data) && jet_driver_build_failed_diagnostic(data, span) == .Val(diagnostic) {
         build_session_abort(session)
         ran.push(diagnostic)
         checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules)
         return jet_driver_build_query_failed(request, errors, ran, staged_failed || checked)
     }
-    value: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
+    value: jet_driver_build_session_input(returned ?? panic("checked return lost its data")) ?? {
         build_session_abort(session)
         ran.push(jet_driver_diagnostic_without_span("E3502", "`build: fn` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
         checked: jet_driver_build_promise_reports(request, errors, staged_failed, generated_only, session, sources.modules)
@@ -1345,7 +1309,7 @@ jet_driver_build_profiled: fn(request: &JetDriverCompileRequest, scope: &JetDriv
         _: jet_driver_build_profiled_value(session, build_session_compiler_allow_rewrite, [BuildSessionValue]{jet_driver_build_profiled_handle(handle), BuildSessionValue.Text{value: build_session_package_dir(loaded.package_identity)}})
     }
     config: jet_driver_build_run_config(request, session, sources.host_held, request.authorized_sources.entry_path)
-    meta: jet_driver_build_compiler_value(jet_eval_build_session_output(handle), jet_eval_build_context_value(session_id, program))
+    meta: jet_driver_build_compiler_value(jet_driver_build_session_output(handle), jet_driver_build_context_value(session_id, program))
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.run")
     run: jet_driver_invocation_run(inputs, [TComptimeValue]{meta}, config, Span{start: 0, end: 0})
     jet_driver_trace_step_end(request.trace_sink, "build.plan.run", 1)

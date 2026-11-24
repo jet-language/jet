@@ -4,22 +4,6 @@ use {
     jet_foundation.[foundation_json_quote]
     jetpack_foundation.[BuildEffect]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
-    jet_build_session.[
-        BuildSessionAction,
-        BuildSessionGeneratedModule,
-        BuildSessionPlan,
-        BuildSessionScheduleNode,
-        BuildSessionState,
-        build_key_debug_text,
-        build_key_target_kind,
-        build_session_made_by,
-        build_session_project,
-        build_session_schedule,
-        build_session_schedule_input,
-        build_session_schedule_name,
-        build_session_schedule_output,
-        build_session_schedule_output_count,
-    ]
 }
 
 JetDriverBuildExplanation: struct {
@@ -158,8 +142,8 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"schedule\":[{schedule.join(",")}]}}"
 }
 
-// One producer of the plan's generation schedule (JetBuildSession
-// Schedule.jet), whose names and paths `state` holds: its round, kind
+// One producer of the plan's generation schedule (BuildSession/Schedule.jet),
+// whose names and paths `state` holds: its round, kind
 // ("module" or "step") and name, the call that made it and its place
 // (`made_by`), the outputs it promises, and what it waits on: each path, the
 // producer that promises it, and its barrier ("typed" for Jet source,
