@@ -300,9 +300,9 @@ inspect_build_stopped_codes: fn(ran: [Diagnostic]) -> [String] Never! {
 #Test("inspect_build a build cut short reports its stop before the staged report") {
     fuel: diagnostic_from_registry("E0952", None, "Compile-time code ran past its step limit of 10000000 steps", "Compile-time code runs under a step limit", "Split the work so it fits")
     assert_eq(inspect_build_stopped_codes([Diagnostic]{fuel}), [String]{"E0952", "E0107"})
-    cancelled := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGINT from outside jet", "another process sent it SIGINT", "build again without stopping it")
-    cancelled.outside_signal = Val(2)
-    assert_eq(inspect_build_stopped_codes([Diagnostic]{cancelled}), [String]{"E3007", "E0107"})
+    canceled := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGINT from outside jet", "another process sent it SIGINT", "build again without stopping it")
+    canceled.outside_signal = Val(2)
+    assert_eq(inspect_build_stopped_codes([Diagnostic]{canceled}), [String]{"E3007", "E0107"})
     out_of_memory := diagnostic_from_registry("E3007", None, "compile-time code was ended by SIGKILL from outside jet", "the system sent it SIGKILL as memory ran out", "free memory or make the compile-time work smaller")
     out_of_memory.outside_signal = Val(9)
     assert_eq(inspect_build_stopped_codes([Diagnostic]{out_of_memory}), [String]{"E3007", "E0107"})

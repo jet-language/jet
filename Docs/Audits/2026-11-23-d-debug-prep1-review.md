@@ -9,7 +9,7 @@ builds, and what a stop shows.
 - c10: a breakpoint in a prep block, a prep fn recipe, a marker body or fn
   build pauses during `jet build`, with locals, call stack and the step
   count shown.
-- c11: behaviour, step budget and results are the same with or without the
+- c11: behavior, step budget and results are the same with or without the
   debugger, proved by a focused test.
 
 This is the second pass. The first pass repaired the draft with the step
