@@ -169,6 +169,7 @@ lsp_test_action_rows: fn(server: &LSPServer, uri: String, line: Int) -> [Dyn] {
 
 #Test("code actions offer a diagnostic's fixes and marker moves") {
     server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"workspace\":{{\"workspaceEdit\":{{\"documentChanges\":true}}}}}}}}")
     uri: "file:///w/markers.jet"
     lsp_test_open(server, uri, LSP_TEST_MARKERS)
     kinds := [String]{}
@@ -201,4 +202,17 @@ Pixel: struct {
     // A line outside the document is refused.
     outside: "{{{lsp_test_text_document(clean)},\"range\":{{\"start\":{{\"line\":40,\"character\":0}},\"end\":{{\"line\":40,\"character\":0}}}}}}"
     assert_eq(lsp_test_error_code(server, "textDocument/codeAction", outside), -32602)
+}
+
+#Test("a code action's edit is a plain changes map unless documentChanges is negotiated") {
+    server := lsp_test_server()
+    uri: "file:///w/markers.jet"
+    lsp_test_open(server, uri, LSP_TEST_MARKERS)
+    actions: lsp_test_action_rows(server, uri, 3)
+    assert(actions.len() > 0, "the markers line offers actions")
+    loop action in actions {
+        edit: lsp_test_field(action, "edit")
+        assert(lsp_member(edit, "documentChanges") == None, "no documentChanges without the capability")
+        assert(lsp_test_rows(lsp_test_field(lsp_test_field(edit, "changes"), uri)).len() == 1, "each action is one edit")
+    }
 }
