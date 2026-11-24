@@ -92,6 +92,11 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
                 if lsp_layout_markdown(at.view.checked, def) == .Val(layout) {
                     markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{layout}") else -> Val(layout)
                 }
+                // A foreign or generated declaration says where it comes from
+                // and what the check can't know about it.
+                if lsp_origin_markdown(at.view.checked, def) == .Val(origin) {
+                    markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{origin}") else -> Val(origin)
+                }
                 hovered = Val(def)
             }
         }
@@ -164,6 +169,38 @@ lsp_layout_markdown: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
         return Val("Layout on `{summary.target}`: {jet_driver_layout_line(summary)} (not promised)")
     }
     None
+}
+
+// Where a declaration comes from when it isn't handwritten Jet, and the facts
+// the check can't know about it. A foreign function's body lies outside the
+// check, which reads only its declaration; a declaration in a module under
+// `.jet/generated/` was written by the package's build. Each fact the index
+// marks unavailable is named with its reason. None for a handwritten
+// declaration whose facts are all known.
+lsp_origin_markdown: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
+    lines := [String]{}
+    if def.kind == .Function(callable) {
+        if callable.foreign_boundary {
+            lines.push("Origin: foreign. The check reads this declaration, not the foreign body, so what the body does beyond its declared signature is an unknown analysis boundary.")
+        }
+        unknown := [String]{}
+        if callable.failure_unavailable == .Val(missing) -> unknown.push("failure contract ({missing.reason})")
+        if callable.generic_unavailable == .Val(missing) -> unknown.push("generic parameters ({missing.reason})")
+        if unknown.len() > 0 -> lines.push("Unknown to the check: {unknown.join("; ")}.")
+    }
+    if lsp_module_index(checked, def.module_path) == .Val(module_index) {
+        module_ref: checked.modules[module_index]
+        if lsp_generated_module(module_ref.path) || lsp_generated_module(module_ref.physical_path) {
+            lines.push("Origin: generated module `{module_ref.path}`, written by the package's build, not by hand.")
+        }
+    }
+    if lines.len() == 0 -> return None
+    Val(lines.join("\n\n"))
+}
+
+// Whether `path` names a module under a package's `.jet/generated/`.
+lsp_generated_module: fn(path: String) -> Bool Never! {
+    path.starts_with(".jet/generated/") || path.contains("/.jet/generated/")
 }
 
 // The automatic choices the check records on the hovered line of the

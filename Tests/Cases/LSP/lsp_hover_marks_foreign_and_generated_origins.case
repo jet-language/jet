@@ -1,0 +1,39 @@
+# Hover says where a declaration comes from when it isn't handwritten Jet.
+# A call into an `extern rust` block names its foreign origin and each fact
+# the check can't know past that boundary; a call into the module `build: fn`
+# generates names that generated module; a handwritten function carries no
+# origin label.
+fixture: LSPHoverMarksForeignAndGeneratedOrigins.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"extern rust \\\"std\\\" {\\n    rust_max: fn(a: Int, b: Int) -> Int = \\\"std::cmp::max\\\"\\n}\\n\\nbuild: fn(b: Build) {\\n    b.generate(\\\"made\\\") {\\n        generated_value: fn() -> String { \\\"hi\\\" }\\n    }\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/made.jet\\\"], [])\\n    b.default(app)\\n}\\n\\nrun: fn() {\\n    print(generated_value())\\n    print(rust_max(1, 2))\\n}\\n\"}}}"
+recv lsp until $.method = "textDocument/publishDiagnostics"
+json: stdout doc $.params.diagnostics[?severity=1] #= 0
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":14,\"character\":12}}}"
+recv lsp until $.id = 2
+stdout: ~ "rust_max: fn(a: Int, b: Int) -> Int" # the declared signature
+stdout: ~ "Origin: foreign. The check reads this declaration, not the foreign body" # the foreign origin
+stdout: ~ "is an unknown analysis boundary." # what the body does is unknown
+stdout: ~ "Unknown to the check: failure contract (extern Jet boundary has no checked failure contract); generic parameters (extern declarations expose no generic parameter facts)." # each unavailable fact with its reason
+stdout: !~ "std::cmp::max" # the foreign symbol stays behind the boundary
+stdout: !~ "Origin: generated" # the extern block is in a handwritten module
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":13,\"character\":12}}}"
+recv lsp until $.id = 3
+stdout: ~ "generated_value: fn() -> String" # the generated signature
+stdout: ~ "Origin: generated module `" # the generated origin
+stdout: ~ "made.jet`, written by the package's build, not by hand." # names the module the build writes
+stdout: !~ "Origin: foreign" # generated Jet is no foreign body
+stdout: !~ "Unknown to the check" # every fact of a generated Jet function is checked
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":12,\"character\":1}}}"
+recv lsp until $.id = 4
+stdout: ~ "run: fn()" # a handwritten function
+stdout: !~ "Origin:" # carries no origin label
+stdout: !~ "Unknown to the check" # and no unavailable fact
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+json: stdout doc $.result = null
+close lsp
+exit: any # the server exit status after close is not part of this contract
