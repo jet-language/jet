@@ -2103,15 +2103,20 @@ semindex_boundary_witness: fn(function: String, summary: SemSummary, effect_name
 // `visited` list pushed and popped around each step (the scan copied it per
 // step), and a stable merge sort of the rows by function key before the output
 // is built (the insertion sort copied whole effect rows quadratically).
+// `failed` keeps each function and effect whose search failed without meeting
+// the current path: that failure holds on every path, so the search runs once
+// per function and effect instead of once per path to it.
 semindex_effects: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> [SemEffect] {
     index: semindex_index(summaries, modules)
     output := [SemEffect]{}
     visited := [String]{}
+    failed := [String:Bool]{}
+    blocks := 0
     loop row in semindex_key_order(summaries) {
         summary: summaries[row]
         provenance := [SemEffectProvenance]{}
         loop effect_name in summary.solved {
-            found: semindex_witness_at(summary.key, effect_name, summaries, index, visited) ?? next
+            found: semindex_witness_at(summary.key, effect_name, summaries, index, visited, failed, blocks) ?? next
             provenance.push(SemEffectProvenance{effect_name: effect_name, call_path: found.path, spans: found.spans})
         }
         output.push(SemEffect{function: summary.key, direct: summary.direct, callees: summary.edges, inferred: summary.solved, maximal: summary.maximal, provenance: provenance})
@@ -2199,16 +2204,25 @@ semindex_indexed_span: fn(summary: SemSummary, callee: String, index: SemEffectI
     None
 }
 
-// semindex_witness over the index; `visited` is the current path.
-semindex_witness_at: fn(function: String, effect_name: String, summaries: [SemSummary], index: SemEffectIndex, visited: &[String]) -> SemWitness? {
-    if visited.contains(function) -> return None
+// semindex_witness over the index; `visited` is the current path. `blocks`
+// counts the searches stopped by a function on the current path; one that
+// fails without such a stop below it is kept in `failed` and not run again.
+semindex_witness_at: fn(function: String, effect_name: String, summaries: [SemSummary], index: SemEffectIndex, visited: &[String], failed: &[String:Bool], blocks: &Int) -> SemWitness? {
+    if visited.contains(function) {
+        blocks += 1
+        return None
+    }
+    memo: "{effect_name} {function}"
+    if failed.get(memo) != None -> return None
+    before: blocks
     visited.push(function.copy())
-    found: semindex_witness_step(function, effect_name, summaries, index, visited)
+    found: semindex_witness_step(function, effect_name, summaries, index, visited, failed, blocks)
     _ := visited.pop()
+    if found == None && blocks == before -> failed[memo] = true
     found
 }
 
-semindex_witness_step: fn(function: String, effect_name: String, summaries: [SemSummary], index: SemEffectIndex, visited: &[String]) -> SemWitness? {
+semindex_witness_step: fn(function: String, effect_name: String, summaries: [SemSummary], index: SemEffectIndex, visited: &[String], failed: &[String:Bool], blocks: &Int) -> SemWitness? {
     row: index.by_key.get(function) ?? return None
     summary: summaries[row]
     if summary.direct.contains(effect_name) {
@@ -2223,10 +2237,14 @@ semindex_witness_step: fn(function: String, effect_name: String, summaries: [Sem
         if summary.maximal_span == .Val(span) -> spans.push(span.copy())
         return Val(SemWitness{path: [String]{function}, spans: spans})
     }
+    // The function's own panic, as semindex_witness reads it.
+    if effect_name == "Panic" && summary.edges.contains("__jet_panic__") {
+        return Val(SemWitness{path: [String]{function}, spans: [Span]{}})
+    }
     loop callee in summary.edges {
         callee_row: index.by_key.get(callee) ?? next
         if !summaries[callee_row].solved.contains(effect_name) -> next
-        found: semindex_witness_at(callee, effect_name, summaries, index, visited) ?? next
+        found: semindex_witness_at(callee, effect_name, summaries, index, visited, failed, blocks) ?? next
         path := [String]{function}
         loop part in found.path -> path.push(part)
         spans := [Span]{}
