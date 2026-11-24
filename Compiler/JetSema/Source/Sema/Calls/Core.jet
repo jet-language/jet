@@ -1758,7 +1758,8 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
         return None
     }
     if check.context.call_facts.len() != before + 1 {
-        panic("checked Core publication call has no effect obligation")
+        check.context.incomplete_reasons.push("checked Core publication call has no effect obligation")
+        return None
     }
     detail := sema_call_site_detail(check.context.call_facts[before])
     detail.shared_lifetime = Val(lifetime)

@@ -1031,10 +1031,12 @@ sema_call_method_checked_from_value: fn(check: ^SemaBodyCheck, receiver: Expr, r
             if sema_type_graph_nominal_row(graph, owner) == .Val(row) {
                 visible = Val(sema_call_trait_visible(graph, graph.modules[row.module_index].nominals[row.row], environment.module_identity, environment.package_identity))
             } else if !sema_call_builtin_trait(graph, owner) {
-                panic("selected trait method has no canonical owner row")
+                check.context.incomplete_reasons.push("selected trait method has no canonical owner row")
+                return None
             }
         } else if candidate.method.mangled {
-            panic("selected registered method has no canonical callable row")
+            check.context.incomplete_reasons.push("selected registered method has no canonical callable row")
+            return None
         }
         // Only existing non-mangled host references lack a registered row.
         // Graph-free local checks retain their existing declaration rules.
