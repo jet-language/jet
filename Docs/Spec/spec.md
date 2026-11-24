@@ -7835,7 +7835,7 @@ E3502 at its `b.generate` call, and every module the same build had just
 written is put back as it was, so a failed write leaves no module behind.
 Nothing `build: fn` generates is published, written or recorded in the lock
 until the whole function returns, so a build cut short midway, past its step
-limit (E0952), cancelled, or ended as memory runs out, leaves the modules,
+limit (E0952), canceled, or ended as memory runs out, leaves the modules,
 program and lock of the last good build as they were, and the next run
 starts clean. A signal from outside jet that ends only the compile-time
 process `build: fn` runs in, as the system's SIGKILL when memory runs out,
