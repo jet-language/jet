@@ -1,5 +1,6 @@
-// Checked deterministic time handles and the built-in Duration methods. Core's
-// `RNG` is a source record, so its draws are ordinary checked method calls.
+// Checked Clock reads and the built-in Duration methods. Core's `RNG` and
+// `DeterministicWorld` are source records, so their methods are ordinary
+// checked method calls.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -16,7 +17,6 @@ use jet_foundation.[
     TFailureCarrier,
     TagMarker,
     Type,
-    core_identity_is,
     checked_symbol_local,
 ]
 
@@ -283,47 +283,7 @@ sema_call_try_time_handle_method: fn(receiver: Expr, receiver_value: TExpr, meth
         }
         return sema_time_duration_round(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    if sema_time_testing_handle_is(receiver_name, "DeterministicWorld") {
-        return sema_time_world_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
     SemaMethodSpecialCheck{handled: false, value: None}
-}
-
-// The runtime-owned `core.testing` handles keep their bare leaf; a
-// canonical Core identity names the same handle.
-sema_time_testing_handle_is: fn(name: String, leaf: String) -> Bool Never! {
-    name == leaf || core_identity_is(name, "core.testing", leaf)
-}
-
-// One fixed built-in handle method: its checked-tree operation, checked result and
-// declared argument types.
-SemaTimeHandleContract: struct {
-    operation: THandleOp,
-    result: Type,
-    required: [Type],
-}
-
-// Rust `deterministic_world_method_return` (jet-foundation) with the
-// checked-tree ops of `handle_method_op`. The world is read through its
-// receiver, and Rust gives its arguments no declared type, so `advance(2s)`
-// checks its argument as written.
-sema_time_world_contract: fn(method: String, argc: Int) -> SemaTimeHandleContract? {
-    return if {
-        method == "now" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldNow, result: Type.Int, required: [Type]{}})
-        method == "advance" && argc == 1 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldAdvance, result: Type.Int, required: [Type]{}})
-        method == "wait_idle" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldWaitIdle, result: sema_time_named("Unit"), required: [Type]{}})
-        method == "history" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldHistory, result: Type.String, required: [Type]{}})
-        else -> None
-    }
-}
-
-sema_time_world_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    contract: sema_time_world_contract(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    values: sema_time_untyped_values(args, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    sema_time_finish_handle(receiver_value, contract.operation, values, contract.result, "", "DeterministicWorld.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }
 
 // Rust `duration_method_return` / `builtin_method_arg_types` (

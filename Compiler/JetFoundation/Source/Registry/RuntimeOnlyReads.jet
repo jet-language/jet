@@ -1,7 +1,8 @@
 // The runtime exports that answer from the process they run in, whatever
 // effect row they declare: the running task's identity and cancel state, the
-// process id, whether a standard stream is a terminal, the active World's
-// store cells, the device store's cells, the UI host provider's live state,
+// process id, whether a standard stream is a terminal, a World's clock,
+// timers, tasks and history and the active World's store cells, the device
+// store's cells, the UI host provider's live state,
 // and the platform family, module loader, path syntax and SIMD width of the
 // machine the program runs on. A value computed while building would hold the
 // compiler's own answer (a cross build would bake the build machine's
@@ -30,6 +31,10 @@ RUNTIME_ONLY_READS: #run { [RuntimeOnlyRead]{
     RuntimeOnlyRead{symbol: "jet_mod_os_raw", reads: "the OS name of the machine the program runs on"},
     RuntimeOnlyRead{symbol: "jet_rt_world_store_load", reads: "the active World's store cells"},
     RuntimeOnlyRead{symbol: "jet_rt_world_store_replace", reads: "the active World's store cells"},
+    RuntimeOnlyRead{symbol: "jet_world_now", reads: "a World's clock"},
+    RuntimeOnlyRead{symbol: "jet_world_advance", reads: "a World's clock, timers and tasks"},
+    RuntimeOnlyRead{symbol: "jet_world_wait_idle", reads: "a World's tasks"},
+    RuntimeOnlyRead{symbol: "jet_world_history", reads: "a World's history"},
     RuntimeOnlyRead{symbol: "jet_rt_device_load", reads: "the device store's cells"},
     RuntimeOnlyRead{symbol: "jet_rt_device_replace", reads: "the device store's cells"},
     RuntimeOnlyRead{symbol: "jet_compute_simd_lanes", reads: "the f32 SIMD width of the CPU the program runs on"},

@@ -2085,7 +2085,6 @@ sema_call_builtin_method_arities: fn(receiver: Type, method: String) -> [Int] Ne
         known: if owner == {
             "Duration" -> sema_time_duration_result(method, arity) != None || (method == "round" && arity >= 1)
             "Decimal" | "Fraction" -> sema_value_method_precise_result(owner, method, arity) != None
-            "DeterministicWorld" -> sema_time_world_contract(method, arity) != None
             "Clock" -> (method == "now" && arity == 0) || ((method == "tick" || method == "advance" || method == "wait") && arity == 1)
             "Task" -> ((method == "join" || method == "detach" || method == "resume" || method == "cancel" || method == "trace") && arity == 0) || (method == "pause" && arity < 2)
             else -> false
@@ -2108,7 +2107,6 @@ sema_call_builtin_method_pool: fn(receiver: Type) -> [String] Never! {
         "Fraction" -> {
             pool = [String]{"add", "sub", "mul", "div", "numerator", "denominator", "rounded", "to_string", "to_float", "is_zero", "equal"}
         }
-        "DeterministicWorld" -> pool = [String]{"now", "advance", "wait_idle", "history"}
         "Clock" -> pool = [String]{"now", "tick", "advance", "wait"}
         "Task" -> pool = [String]{"join", "detach", "pause", "resume", "cancel", "trace"}
         else -> {
