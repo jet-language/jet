@@ -3992,6 +3992,20 @@ jet_cli_semindex_audit: fn(before_file: String, after_file: String, color: Bool,
     jet_cli_ice("`jet inspect semindex --audit` lost a checked revision")
 }
 
+// `jet inspect semindex --blame <file.jet>`: check the file, then print which
+// recorded semantic operation names each of its definitions
+// (SemanticBlame.jet jet_cli_semantic_blame_report). A file that fails its
+// check stops the command with its `jet inspect semindex` report.
+jet_cli_semindex_blame: fn(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if jet_cli_semindex_side(file, color, json) == {
+        .Stopped(output) -> return output.move()
+        .Indexed(index) -> {
+            source: cli_files.read(file) ?? return jet_cli_ice("`{file}` checked, but reading it again failed: {err}")
+            return JetDriverVerbOutput{stdout: jet_cli_semantic_blame_report(file, source, index, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+    }
+}
+
 // ---- `jet fmt` (`run_fmt` / `run_fmt_stdin`) ----
 
 // `IGNORED_DIRS`: directory walks never enter these.

@@ -878,9 +878,12 @@ jet_cli_inspect_env_host: fn(file: String, source: String, base_dir: String, col
 // `jet inspect semindex <file.jet>`: the semantic index of the checked entry,
 // compiled by the host (`JetCLIPlan.Semindex`). `--audit <before.jet>` makes
 // it the structural audit from that earlier revision to the entry
-// (`semindex-audit`, Host.jet jet_cli_semindex_audit).
+// (`semindex-audit`, Host.jet jet_cli_semindex_audit). `--blame` makes it the
+// semantic blame of the entry's definitions (`semindex-blame`, Host.jet
+// jet_cli_semindex_blame).
 jet_cli_semindex: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     audit := String?{None}
+    blame := false
     file := String?{None}
     index := 0
     loop index < args.len() {
@@ -893,14 +896,21 @@ jet_cli_semindex: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLI
                 }
                 audit = Val(jet_cli_inspect_absolutize(args[index]))
             }
+            argument == "--blame" -> blame = true
             !argument.starts_with("-") && file == .None -> file = Val(jet_cli_inspect_absolutize(argument))
             else -> {}
         }
         index += 1
     }
     path: file ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/Basics/Hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if audit != None && blame {
+        return jet_cli_inspect_b_fail("E2104", "`--audit` and `--blame` are separate reports", "jet inspect semindex --blame main.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
     if audit != None {
         return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "semindex-audit", file: path, subject: audit, json: json, color: color, threads: None, notice: "", project: false}}
+    }
+    if blame {
+        return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "semindex-blame", file: path, subject: None, json: json, color: color, threads: None, notice: "", project: false}}
     }
     JetCLIPlan.Semindex{file: path, color: color, json: json}
 }

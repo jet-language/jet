@@ -1,0 +1,81 @@
+// Semantic blame: which recorded semantic operation last gave each checked
+// definition of a file its meaning. The operations are the codemod and
+// `jet fix` receipts bound to the file's current source hash
+// (SemanticOps.jet jet_cli_sem_ops_for_file). The first receipt that names a
+// definition wins, in the index's definition order. A hand edit records no
+// operation, so a definition no receipt names has none.
+use {
+    jet_foundation.[sha256_hex]
+    jet_semindex.[SemDefinitionFact, SemIndex, semindex_display_text]
+}
+
+// A receipt names a definition through a recorded target (its stable id or
+// its identity after the operation), or, for a rename, through the new name.
+jet_cli_sem_op_names_fact: fn(operation: JetCLISemOp, fact: SemDefinitionFact) -> Bool Never! {
+    loop target in operation.targets {
+        if target.stable_id == fact.stable_id || target.after == fact.human_identity || target.after == fact.name {
+            return true
+        }
+    }
+    if operation.kind == "rename" {
+        if operation.to == .Val(to) {
+            if to == fact.name || to == fact.human_identity -> return true
+        }
+    }
+    false
+}
+
+// For each definition fact, the position of the first receipt naming it.
+jet_cli_semantic_blame: fn(facts: [SemDefinitionFact], receipts: [JetCLISemOp]) -> [Int?] Never! {
+    blamed := [Int?]{}
+    loop fact in facts {
+        found := Int?{None}
+        loop (at, receipt) in receipts {
+            if jet_cli_sem_op_names_fact(receipt, fact) {
+                found = Val(at)
+                break
+            }
+        }
+        blamed.push(found)
+    }
+    blamed
+}
+
+jet_cli_semantic_blame_operation_text: fn(operation: JetCLISemOp) -> String Never! {
+    rule: if operation.rule_id == .Val(id) -> " (rule {id})" else -> ""
+    if operation.kind == "rename" {
+        if operation.from == .Val(from) {
+            if operation.to == .Val(to) -> return "rename {from} -> {to}{rule}"
+        }
+    }
+    "{operation.kind}{rule}"
+}
+
+// `jet inspect semindex --blame <file.jet>` over the file's checked index:
+// one row per definition with the receipt that names it, or none.
+jet_cli_semantic_blame_report: fn(file: String, source: String, index: SemIndex, json: Bool) -> String {
+    receipts: jet_cli_sem_ops_for_file(file, sha256_hex(source))
+    blamed: jet_cli_semantic_blame(index.definition_facts, receipts)
+    if json {
+        rows: loop (at, fact) in index.definition_facts -> {
+            operation: if blamed[at] == .Val(receipt) -> jet_cli_sem_op_value(receipts[receipt]) else -> JetCLIStatusValue.Null
+            jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("stable_id", jet_cli_status_text(fact.stable_id)),
+                    jet_cli_status_field("identity", jet_cli_status_text(semindex_display_text(index, fact.human_identity))),
+                    jet_cli_status_field("kind", jet_cli_status_text(fact.kind)),
+                    jet_cli_status_field("operation", operation),
+                },
+            )
+        }
+        payload: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(file)), jet_cli_status_field("definitions", jet_cli_status_array(rows))})
+        return "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("blame", payload)})}\n"
+    }
+    out := "Semantic blame\n  File: {file}\n"
+    if index.definition_facts.len() == 0 -> return "{out}  No definitions\n"
+    loop (at, fact) in index.definition_facts {
+        operation: if blamed[at] == .Val(receipt) -> jet_cli_semantic_blame_operation_text(receipts[receipt]) else -> "no recorded operation"
+        out = "{out}  {semindex_display_text(index, fact.human_identity)}: {operation}\n"
+    }
+    out
+}

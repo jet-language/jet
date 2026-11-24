@@ -6731,6 +6731,16 @@ fails its check stops the command with that revision's report. A file's name
 is part of its identities, so the two revisions are one module at two paths,
 such as `base/main.jet` and `head/main.jet`.
 
+`jet inspect semindex --blame <file.jet>` checks the file and names, for each
+definition, the recorded semantic operation that gave it its meaning: the
+first codemod or `jet fix` receipt under `.jet/codemods` that is bound to the
+file's current or previous source hash and names the definition, through a
+recorded target or a rename's new name. A hand edit records no operation, so
+a definition no receipt names shows none, and a file edited by hand after its
+last recorded operation no longer matches any receipt. Under `--json` the
+report is the `blame` member (`file`, `definitions` with `stable_id`,
+`identity`, `kind` and `operation`) of the `inspect.semindex` status line.
+
 The registry exposes semantic projections through `semindex`, `output`, and
 related inspect actions; it has no dossier route. Tools consume the checked
 index and command/output schemas rather than reconstructing field mappings. LSP

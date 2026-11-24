@@ -166,7 +166,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0515 | DeepCheckLeavesItsBody | Compiler/JetSema/Source/Sema/Statements.jet:7932 | take the exit out of the `#On(.Deep)` body |
 | E0516 | DeepCheckPropagatesFailure | Compiler/JetSema/Source/Sema/Statements.jet:7969 | handle the failure inside the body |
 | E0517 | DeepCheckChangesState | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3354 | change a copy the body makes itself |
-| E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1772 | no opt-in imports a file that is not there |
+| E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1773 | no opt-in imports a file that is not there |
 | E0604 | UseCycle | Compiler/JetSema/Source/Sema/InlineModules.jet:2389 | move the shared names into a module both import |
 | E0605 | PrivateItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:463 | reach the item through its module's public declarations |
 | E0606 | AmbiguousModule | Compiler/JetCLI/Source/CLI/Project.jet:130 | the full module path names one module |
@@ -524,10 +524,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2238 | DebugStaleReference | Compiler/JetCLI/Source/CLI/DebugDap.jet:135 | refresh the view after the next stop |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:345 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:345 | the string's owner lives as long as the view, or the string is copied |
-| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2106 | the entry resolves |
-| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2107 | the module graph resolves |
-| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2108 | the Core closure resolves |
-| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2109 | every applicable tier lowers |
+| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2107 | the entry resolves |
+| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2108 | the module graph resolves |
+| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2109 | the Core closure resolves |
+| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2110 | every applicable tier lowers |
 | E2393 | ImportWithoutProject | Compiler/JetCLI/Source/CLI/Entry.jet:1666 | the file sits in a package or workspace |
 | E2401 | InvalidDelegationTarget | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3918 | the field implements the trait |
 | E2402 | MissingErrorConversion | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1181 | declare the conversion |
@@ -647,7 +647,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3220 | NoInlineForeignBinder | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1627 | `c`, `cpp` or `asm` |
 | E3222 | InlineForeignBuildFailed | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1643 | the foreign code or signature is fixed |
 | E3223 | AsmOperandMismatch | Compiler/JetSema/Source/Sema/InlineAssembly.jet:22 | operands match the signature |
-| E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1028 | build for Windows |
+| E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1038 | build for Windows |
 | E3261 | InvalidCImportBody | Compiler/JetParser/Source/Parser/Items.jet:1650 | name the C symbol with `= symbol` |
 | E3301 | OsApiOnNoOsTarget | Compiler/JetSema/Source/Sema/Calls/Core.jet:730 | use `core`-level APIs |
 | E3302 | UnknownTarget | Compiler/JetCLI/Source/CLI/Doctor.jet:348 | a supported target |
