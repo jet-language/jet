@@ -1,0 +1,39 @@
+# Each `print` call reports the contract of the declaration it names, alike in `jet check` and in the editor. The ambient `print` takes one or more Printable values, so `print()` is refused. `term.print` under `use core.term` is Core's and takes one String, so `term.print(1)` is refused. The language server publishes the same two reports, and its hover and signature help show each declaration's own parameters.
+fixture: LSPPrintContractMatchesCLI.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports #= 2
+json: stdout doc $.reports[?code="E0103"][0].message = "`print` needs at least one thing to print"
+json: stdout doc $.reports[?code="E0103"][0].span.start = 31
+json: stdout doc $.reports[?code="E0103"][0].span.end = 36
+json: stdout doc $.reports[?code="E0112"][0].message = "`print` wants String (text) for argument 1, but this is Int (a whole number)"
+json: stdout doc $.reports[?code="E0112"][0].span.start = 54
+json: stdout doc $.reports[?code="E0112"][0].span.end = 55
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use core.term\\n\\nrun: fn() {\\n    print()\\n    term.print(1)\\n    print(1, \\\"two\\\")\\n    term.print(\\\"three\\\")\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":5,\"character\":5}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":6,\"character\":10}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/signatureHelp\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":5,\"character\":14}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/signatureHelp\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":6,\"character\":16}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp collect until ndjson $[?id=6] #>= 1
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics #= 2
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics[?code="E0103"][0].message = "`print` needs at least one thing to print"
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics[?code="E0103"][0].range = {"start":{"line":3,"character":4},"end":{"line":3,"character":9}}
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics[?code="E0112"][0].message = "`print` wants String (text) for argument 1, but this is Int (a whole number)"
+json: stdout ndjson $[?params.uri="file://{work}/main.jet"][-1].params.diagnostics[?code="E0112"][0].range = {"start":{"line":4,"character":15},"end":{"line":4,"character":16}}
+json: stdout ndjson $[?id=2][0].result.contents.value ~ "print: fn(values: ...Printable)" # the ambient print takes Printable values
+json: stdout ndjson $[?id=2][0].result.contents.value ~ "Declared in `prelude` as `print`." # the ambient print is the prelude's
+json: stdout ndjson $[?id=3][0].result.contents.value ~ "print: fn(text: String)" # Core's print takes one String
+json: stdout ndjson $[?id=3][0].result.contents.value ~ "Declared in `core.term` as `core.term.print`." # and is Core's declaration
+json: stdout ndjson $[?id=4][0].result.signatures[0].parameters #= 1
+json: stdout ndjson $[?id=4][0].result.signatures[0].parameters[0].label = "values: ...Printable"
+json: stdout ndjson $[?id=4][0].result.activeParameter = 0
+json: stdout ndjson $[?id=5][0].result.signatures[0].parameters #= 1
+json: stdout ndjson $[?id=5][0].result.signatures[0].parameters[0].label = "text: String"
+json: stdout ndjson $[?id=5][0].result.activeParameter = 0
+close lsp

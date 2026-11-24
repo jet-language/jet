@@ -8,13 +8,14 @@
 // The check carries the automatic choices its modules record, which hovers
 // show on their lines. The failure marks are the `?` sites
 // `jet fmt --explicit-failures` finds, from the same compile of the entry
-// under `#Policy(failures: .Explicit)`.
+// under `#Policy(failures: .Explicit)`. A call through a `use core.…` alias
+// shows the Core module's own declaration, read from the Core source.
 use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
     jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_headline]
     jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
-    jet_semindex.[SemSymbol, semindex_build_symbols]
+    jet_semindex.[SemDeclared, SemSymbol, semindex_build_symbols, semindex_declared, semindex_imports]
 }
 
 JetCLILSPChecker: struct {
@@ -69,7 +70,7 @@ JetCLILSPChecker: struct {
                     }
                     index: jet_cli_checked_semindex(result)
                     symbols: semindex_build_symbols(index, result.doc_modules)
-                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules), reports: reports}
+                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules), reports: reports, declared: jet_cli_lsp_declared(entry, result.doc_modules)}
                 }
             }
         }
@@ -154,6 +155,21 @@ jet_cli_failure_mark: fn(sites: &[Int], edit: TextEdit, shift: Int, length: Int)
 jet_cli_lsp_reports: fn(entry: String, given: [JetCLIOverlay], slot: Int, diagnostics: [Diagnostic]) -> [String] Never! {
     if slot < 0 -> return jet_cli_reports_json(None, entry, "", diagnostics)
     jet_cli_reports_json(None, entry, given[slot].source, diagnostics)
+}
+
+// The functions of the Core modules the checked modules import by name, from
+// the Core sources a compile of `entry` reads: the module's own source,
+// without its private parts.
+jet_cli_lsp_declared: fn(entry: String, modules: [JetDriverDocModule]) -> [SemDeclared] {
+    declared := [SemDeclared]{}
+    if !semindex_imports(modules, "core.") -> return declared
+    if jet_cli_core_sources(entry) == .Loaded(rows) {
+        loop row in rows {
+            if row.owner != "" || row.runtime || !semindex_imports(modules, row.module_name) -> next
+            declared.extend(semindex_declared(row.module_name, row.source()))
+        }
+    }
+    declared
 }
 
 // The automatic choices the checked modules record, by module and line, as

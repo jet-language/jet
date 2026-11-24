@@ -4,8 +4,8 @@ use {
     core.encoding.[Dyn]
     jet_driver.[jet_driver_layout_line, jet_driver_layout_summary]
     jet_foundation.[Span, Type, derivation_record_line, derivation_record_notable, derivation_store_subject, foundation_byte_text, foundation_json_quote, type_name]
-    jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
-    jet_semindex.[SemDef, SemIndex, SemSymbolKind, semindex_renamed_identity]
+    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
+    jet_semindex.[SemDeclared, SemDef, SemIndex, SemSymbolKind, semindex_ambient_print, semindex_import_binding, semindex_renamed_identity]
 }
 
 // The view, the byte offset a positional request names, and its 0-based line.
@@ -28,6 +28,55 @@ lsp_hover_markdown: fn(signature: String, summary: String) -> String Never! {
     "```jet\n{signature}\n```\n\n{summary}"
 }
 
+// The declaration a call's name at `offset` reaches that the checked index
+// holds no definition for. A Core function the document imports, through
+// its module (`term.print` under `use core.term`) or by name (`print` under
+// `use core.term.[print]`), is the Core module's own declaration. A free
+// `print` call the source resolves to nothing else is the ambient print.
+lsp_declared_at: fn(view: LSPView, offset: Int) -> SemDeclared? Never! {
+    tokens: view.lexed.tokens
+    at: (loop (position, token) in tokens {
+        if token.span.start > offset -> break -1
+        if token.kind == TOKEN_IDENT && lsp_span_holds(token.span, offset) -> break position
+    } ?? -1)
+    if at < 0 -> return None
+    name: token_text(view.lexed.tables, tokens[at])
+    dotted: at >= 1 && tokens[at - 1].kind == TOKEN_DOT
+    qualified := String?{None}
+    if dotted && at >= 2 && tokens[at - 2].kind == TOKEN_IDENT {
+        if lsp_import_binding(view, token_text(view.lexed.tables, tokens[at - 2])) == .Val(module_name) -> qualified = Val("{module_name}.{name}")
+    }
+    if !dotted -> qualified = lsp_import_binding(view, name)
+    if qualified == .Val(wanted) {
+        loop declared in view.checked.declared {
+            if declared.def.qualified_name == wanted -> return Val(declared)
+        }
+        return None
+    }
+    if dotted || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LPAREN -> return None
+    // A `print` the source declares is that declaration.
+    if lsp_target_at(view, offset) != None -> return None
+    ambient: semindex_ambient_print()
+    if name != ambient.def.name -> return None
+    Val(ambient)
+}
+
+// The Core name an import of the document binds to `local`
+// (JetSemIndex semindex_import_binding).
+lsp_import_binding: fn(view: LSPView, local: String) -> String? Never! {
+    module_path: view.module_path ?? return None
+    module_ref: view.checked.modules[lsp_module_index(view.checked, module_path) ?? return None]
+    bound: semindex_import_binding(module_ref.imports, local) ?? return None
+    if !bound.starts_with("core.") -> return None
+    Val(bound)
+}
+
+// A declaration's hover: its signature and summary, then the module that
+// declares it and the name it is declared as.
+lsp_declared_markdown: fn(declared: SemDeclared) -> String Never! {
+    "{lsp_hover_markdown(declared.symbol.signature, declared.symbol.summary)}\n\nDeclared in `{declared.def.module_path}` as `{declared.def.qualified_name}`."
+}
+
 lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     markdown := String?{None}
@@ -45,6 +94,9 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
                 }
                 hovered = Val(def)
             }
+        }
+        if markdown == None && lsp_declared_at(at.view, at.offset) == .Val(declared) {
+            markdown = Val(lsp_declared_markdown(declared))
         }
         if markdown == None -> markdown = lsp_keyword_hover(at.view, at.offset)
         // How the check knows what is hovered, when its derivation says more
@@ -386,28 +438,43 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     call: lsp_active_call(at.view.lexed, at.offset) ?? return lsp_response(id, "null")
     index: at.view.checked.index ?? return lsp_response(id, "null")
-    target: lsp_target_at(at.view, call.callee.span.start) ?? return lsp_response(id, "null")
-    def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
-    callable: if def.kind == {
+    def := SemDef?{None}
+    label := ""
+    documentation := ""
+    if lsp_target_at(at.view, call.callee.span.start) == .Val(target) {
+        found: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
+        label = found.qualified_name
+        if lsp_symbol_for(at.view.checked.symbols, found) == .Val(symbol) {
+            label = symbol.signature
+            documentation = symbol.summary
+        }
+        def = Val(found)
+    }
+    // A call the index holds no definition for answers from its declaration.
+    if def == None {
+        declared: lsp_declared_at(at.view, call.callee.span.start) ?? return lsp_response(id, "null")
+        label = declared.symbol.signature
+        documentation = declared.symbol.summary
+        def = Val(declared.def)
+    }
+    shown: def ?? return lsp_response(id, "null")
+    callable: if shown.kind == {
         .Function(callable) -> callable
         .Module | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> {
             return lsp_response(id, "null")
         }
     }
-    label := def.qualified_name
-    documentation := ""
-    if lsp_symbol_for(at.view.checked.symbols, def) == .Val(symbol) {
-        label = symbol.signature
-        documentation = symbol.summary
-    }
     rows := [String]{}
     active := call.argument
     loop (position, param) in callable.params {
-        param_label: "{param.name}: {type_name(param.ty)}"
+        rest: if param.variadic -> "..." else -> ""
+        param_label: "{param.name}: {rest}{type_name(param.ty)}"
         rows.push("{{\"label\":{foundation_json_quote(param_label)}}}")
         if call.label == .Val(name) {
             if param.label == name || param.name == name -> active = position
         }
+        // Every argument from a variadic parameter on is that parameter's.
+        if param.variadic && active > position -> active = position
     }
     docs: if documentation == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(documentation)}}}"
     lsp_response(id, "{{\"signatures\":[{{\"label\":{foundation_json_quote(label)}{docs},\"parameters\":[{rows.join(",")}]}}],\"activeSignature\":0,\"activeParameter\":{active}}}")

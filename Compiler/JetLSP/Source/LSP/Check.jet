@@ -6,7 +6,7 @@
 use {
     jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
     jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
-    jet_semindex.[SemIndex, SemSymbol]
+    jet_semindex.[SemDeclared, SemIndex, SemSymbol]
 }
 
 // An open document's unsaved text, checked in place of its file.
@@ -22,7 +22,9 @@ LSPOverlay: struct {
 // of its package generated. `choices` are the automatic choices the checked
 // modules record, as `jet inspect choices` lists them. `reports` are the
 // `jet.report` objects of `diagnostics`, by index, when the host renders
-// them; a published diagnostic carries its own as `data`.
+// them; a published diagnostic carries its own as `data`. `declared` are
+// the functions of the Core modules the checked modules import by name, read
+// from the Core sources the check read (JetSemIndex semindex_declared).
 LSPChecked: struct {
     diagnostics: [Diagnostic],
     modules: [JetDriverDocModule],
@@ -31,6 +33,7 @@ LSPChecked: struct {
     producer: LSPProducer?{None},
     choices: [LSPChoice]{[LSPChoice]{}},
     reports: [String]{[String]{}},
+    declared: [SemDeclared]{[SemDeclared]{}},
 }
 
 // What made a generated module, as the build that made it recorded it

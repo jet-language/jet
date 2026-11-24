@@ -1,0 +1,113 @@
+// Hover and signature help on a `print` call show the contract of the
+// declaration the call names. A free `print` is the ambient prelude print,
+// one or more Printable values. `term.print` through `use core.term` is the
+// Core function, one String. The host reads each Core module a document
+// imports from its Core source. This checker supplies `core.term`'s
+// declaration of `print` as Core/Term/Term.jet writes it.
+use {
+    jet_driver.[JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_semindex.[semindex_declared, semindex_imports]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_server]
+}
+
+LSP_PRINT_URI: "file:///w/main.jet"
+
+// `print` is at line 3, characters 4-9; `term.print`'s `print` is at line 4,
+// characters 9-14.
+LSP_PRINT_SOURCE: `use core.term
+
+run: fn() {
+    print(1, "two")
+    term.print("three")
+}
+`
+
+LSP_PRINT_CORE_TERM: `/// Writes the text and a newline to standard output.
+print: fn(text: String) -[IO, Time.Wait]> Never! {}
+`
+
+LSPPrintChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            plain: LSPFixtureChecker{}
+            checked := plain.check(entry, overlays)
+            if semindex_imports(checked.modules, "core.term") -> checked.declared = semindex_declared("core.term", LSP_PRINT_CORE_TERM)
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+    }
+}
+
+lsp_print_server: fn(text: String) -> LSPServer {
+    server := lsp_server(LSPPrintChecker{})
+    lsp_test_open(server, LSP_PRINT_URI, text)
+    server
+}
+
+lsp_print_hover: fn(server: &LSPServer, line: Int, character: Int) -> String {
+    hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_PRINT_URI, line, character))
+    lsp_test_text(lsp_test_field(hover, "contents"), "value")
+}
+
+// The signature's label, then each parameter's label, then the active
+// parameter's index.
+lsp_print_signature: fn(server: &LSPServer, line: Int, character: Int) -> [String] {
+    help: lsp_test_result(server, "textDocument/signatureHelp", lsp_test_at(LSP_PRINT_URI, line, character))
+    signature: lsp_test_rows(lsp_test_field(help, "signatures"))[0]
+    shown := [String]{lsp_test_text(signature, "label")}
+    loop parameter in lsp_test_rows(lsp_test_field(signature, "parameters")) {
+        shown.push(lsp_test_text(parameter, "label"))
+    }
+    shown.push("{lsp_test_int(help, "activeParameter")}")
+    shown
+}
+
+#Test("hover and signature help on print show the declared contract") {
+    server := lsp_print_server(LSP_PRINT_SOURCE)
+    ambient: lsp_print_hover(server, 3, 5)
+    assert(ambient.contains("print: fn(values: ...Printable)"), "the ambient print takes Printable values")
+    assert(ambient.contains("A call names at least one value."), "and at least one of them")
+    assert(ambient.contains("Declared in `prelude` as `print`."), "the ambient print is the prelude's")
+    term: lsp_print_hover(server, 4, 10)
+    assert(term.contains("print: fn(text: String)"), "`term.print` takes one String")
+    assert(term.contains("Declared in `core.term` as `core.term.print`."), "`term.print` is Core's")
+    assert(!term.contains("Printable"), "and never the ambient contract")
+    // In the second argument of the ambient call, the variadic parameter is
+    // still the active one.
+    variadic: lsp_print_signature(server, 3, 14)
+    assert(variadic[0].contains("print: fn(values: ...Printable)"), "the ambient signature")
+    assert_eq(variadic.len(), 3)
+    assert_eq(variadic[1], "values: ...Printable")
+    assert_eq(variadic[2], "0")
+    single: lsp_print_signature(server, 4, 16)
+    assert(single[0].contains("print: fn(text: String)"), "the Core signature")
+    assert_eq(single.len(), 3)
+    assert_eq(single[1], "text: String")
+    assert_eq(single[2], "0")
+}
+
+#Test("a print the source declares hovers as that declaration") {
+    server := lsp_print_server("print: fn(text: String) {{}}\n\nrun: fn() {{\n    print(\"x\")\n}}\n")
+    local: lsp_print_hover(server, 3, 5)
+    assert(local.contains("print: fn(text: String)"), "the source's own print")
+    assert(!local.contains("Declared in"), "never the ambient one")
+}
+
+#Test("a print imported from core.term by name hovers as Core's") {
+    server := lsp_print_server("use core.term.[print]\n\nrun: fn() {{\n    print(\"x\")\n}}\n")
+    imported: lsp_print_hover(server, 3, 5)
+    assert(imported.contains("print: fn(text: String)"), "the Core contract")
+    assert(imported.contains("Declared in `core.term` as `core.term.print`."), "Core's declaration")
+}
