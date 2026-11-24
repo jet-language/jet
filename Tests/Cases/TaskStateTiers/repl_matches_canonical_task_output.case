@@ -1,10 +1,11 @@
 # tests/task_state_tiers.rs::repl_matches_canonical_task_output at tests/task_state_tiers.rs:69; hand-port
 # jet::REPL::run_transcript(&[SOURCE, "run()"]) == "ok\n42\n". input.txt is the original SOURCE followed by `run()`, the
-# style of Tests/Cases/FactDeclarationTiers/repl_accepts_the_fixture.case.
+# style of Tests/Cases/FactDeclarationTiers/repl_accepts_the_fixture.case. The original compared the bare transcript, so
+# the cooked session's numbered and continuation prompts are removed before the comparison.
 fixture: ReplMatchesCanonicalTaskOutput.fixture
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 step: jet repl
 stdin: ReplMatchesCanonicalTaskOutput.fixture/input.txt
 exit: 0
-stdout: ~ "ok\n42\n" # tests/task_state_tiers.rs:72-76 REPL task output must match the canonical source
+stdout.replace("1 user> ", "").replace("2 user> ", "").replace("3 user> ", "").replace("... ", "").trim_lines: ~ "ok\n42\n" # tests/task_state_tiers.rs:72-76 REPL task output must match the canonical source

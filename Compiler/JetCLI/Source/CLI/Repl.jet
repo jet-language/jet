@@ -832,7 +832,8 @@ jet_cli_repl_record: fn(session: &JetCLIReplSession, output: String, summary: St
     session.turns.push(JetCLIReplTurn{id: session.turns.len() + 1, summary: summary, status: status, folded: folded, pinned: false})
 }
 
-// The `print` note: shown once per session.
+// The `print` note: shown once per session, on stderr, so it never joins the
+// session's output.
 jet_cli_repl_note_print: fn(session: &JetCLIReplSession, text: String) {
     if session.noted_print {
         return
@@ -841,7 +842,7 @@ jet_cli_repl_note_print: fn(session: &JetCLIReplSession, text: String) {
         return
     }
     session.noted_print = true
-    jet_cli_repl_out("{diagnostic_theme_dim(session.color, "note: `print` is from `use core.term` — imported automatically in the REPL")}\n")
+    jet_cli_repl_err("{diagnostic_theme_dim(session.color, "note: `print` is from `use core.term` — imported automatically in the REPL")}\n")
 }
 
 // How a session type reads: nominals without their module qualifier
