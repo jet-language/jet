@@ -1,5 +1,4 @@
-// Read-only unsafe inspection, adapted from origin/port/compiler.
-// The current integration passes module rows rather than a Rust ProgramBundle.
+// Read-only unsafe inspection over module rows.
 use jet_foundation.[Diagnostic, MARKER_UNSAFE, Span, Expr, Call, CallArg, Field, Func, ImplDef, Item, Program, Stmt, Type, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_gate_forbidding, policy_scope_name, policy_value_display]
 
 SemaGateModule: struct {
@@ -1200,7 +1199,8 @@ sema_unsafe_expr_operations: fn(expression: Expr, out: ^[SemaUnsafeOperation]) N
     }
 }
 
-// Rust nested_bodies deliberately excludes Unsafe: nested gates own their proofs.
+// The nested statement bodies, excluding `#Unsafe` blocks: nested gates own
+// their proofs.
 sema_unsafe_nested_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
     if statement == {
         .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [body]

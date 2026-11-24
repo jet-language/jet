@@ -1,11 +1,10 @@
-// Rust (`root_call_candidates`, `select_root_call`,
-// `infer_root_call`): a free function whose first bare-read parameter is marked
-// `#Root` also takes the receiver-first spelling `value.f(args)`. Sema selects
-// the one visible function that accepts the receiver and checks the call as
-// `f(value, args)` (or `alias.f(value, args)` for a function of an imported
-// module), so the typed call is an ordinary call whose argument slot 0 is the
-// receiver. A real instance method of the same name wins the spelling outright
-// (E0105), as does more than one accepting function (E0105).
+// A free function whose first bare-read parameter is marked `#Root` also takes
+// the receiver-first spelling `value.f(args)`. Sema selects the one visible
+// function that accepts the receiver and checks the call as `f(value, args)`
+// (or `alias.f(value, args)` for a function of an imported module), so the
+// typed call is an ordinary call whose argument slot 0 is the receiver. A real
+// instance method of the same name wins the spelling outright (E0105), as does
+// more than one accepting function (E0105).
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -110,10 +109,10 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
     targets
 }
 
-// Whether the receiver's own type declares `method` (Rust
-// `resolve_method_sig`): an inherent or trait method of its registered
-// nominal or of a Core source impl, found as an ordinary method call finds
-// it. A receiver with no registered owner declares none.
+// Whether the receiver's own type declares `method`: an inherent or trait
+// method of its registered nominal or of a Core source impl, found as an
+// ordinary method call finds it. A receiver with no registered owner declares
+// none.
 sema_root_call_owner_declares: fn(receiver_type: Type, method: String, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph ?? return false
     receiver_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false

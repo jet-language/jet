@@ -715,10 +715,10 @@ lands a patch stack directly, with `--scratch-copy` on a fresh clone),
 `Tools/Agent/Suite.jet` (one `jet test
 Compiler --profile` run on a compiler snapshot) and `Tools/Agent/Ballots/Validate.jet` (the ballot validator).
 Tools find state, scratch, queues, published compilers and seeds only through
-the root variables of `Tools/Agent/Orchestrator/Roots.jet` (`jet
-Tools/Agent/Orchestrator/Roots.jet NAME...` prints them; `Tools/Agent/roots.sh`
-and `Tools/Agent/roots.mjs` keep the same table for the shell and node tools
-not yet ported to Jet). Their defaults derive from `$HOME` and the XDG directories; a machine
+the one roots table, `Tools/Agent/roots.env`: Jet tools read it through
+`Tools/Agent/Roots.jet` (`jet Tools/Agent/Roots.jet NAME...` prints them),
+shell tools through `Tools/Agent/roots.sh` and node tools through
+`Tools/Agent/roots.mjs`. Their defaults derive from `$HOME` and the XDG directories; a machine
 sets its own values in the environment or in
 `${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
 committed file spells one machine's home, user, mounts or tool roots:

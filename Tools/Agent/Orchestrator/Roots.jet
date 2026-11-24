@@ -1,44 +1,59 @@
-// The dev tool roots for the orchestrator's Jet twins: the twin of
-// Tools/Agent/roots.sh, which their originals source (gauntlet tool entry
-// roots-sh). A root is what the machine's ${XDG_CONFIG_HOME:-$HOME/.config}/jet/env
-// sets, else the environment's value, else the default derived from $HOME and
-// the XDG directories; the checkout is the one holding the program (three up
-// from its directory, as roots.sh's is two up from its own), unless set.
+// The dev tool roots for Jet tools, the twin of roots.sh and roots.mjs
+// (gauntlet tool entries RootsSh and RootsMjs). The table is
+// Tools/Agent/roots.env, the one every repository tool reads. A root is what
+// the machine's ${XDG_CONFIG_HOME:-$HOME/.config}/jet/env sets, else the
+// environment's value, else the table's default derived from $HOME and the
+// XDG directories; the checkout (JET_DEV_WORKTREE) is the one holding the
+// running program, unless set.
 //
-//   jet Tools/Agent/Orchestrator/Roots.jet NAME...
+//   jet Tools/Agent/Roots.jet NAME...
 //
 // prints `NAME=value` for each root named, as `bash roots.sh NAME...` does,
-// and exits 64 at any other name. Tools/Agent/Roots.jet is the twin of
-// roots.mjs.
+// and exits 64 at any other name. A Jet tool imports the copy in its own
+// directory (`roots: "Roots"`) and calls roots.root(name) or roots.all(): a
+// tool's imports stay inside its directory and a source may not be a link, so
+// Tools/Agent/Orchestrator/Roots.jet is this file byte for byte, which
+// Tests/Guards/tool_roots.jet checks.
 //
-// The env file is read as `.` sources it, in the format roots.sh documents
-// (sys.env_file), with no shell; a command outside it, or an unset
-// ${NAME:?word}, is a failure that roots() passes up, so the program exits 1,
-// as a failing file ends roots.sh.
+// The env file and roots.env are read as `.` sources them, in the format
+// roots.sh documents (sys.env_file, sys.env_text), with no shell; a command
+// outside it, or an unset ${NAME:?word}, is a failure that all() passes up, so
+// the program exits 1, as a failing file ends roots.sh.
 use core.[files, process, sys]
 
-// The eight roots and their values, roots.sh's table: each line's default
-// takes an unset or empty root's place, a later line seeing an earlier one.
-// The checkout is single-quoted, its own quotes escaped, so any path reads
-// back as itself.
-roots: fn() -> [String:String] {
-    sys.env_text(
-        """
-        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
-        JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
-        JET_RUN_ROOT=${{JET_RUN_ROOT:-$JET_SCRATCH_ROOT/run}}
-        JET_BASE_ROOT=${{JET_BASE_ROOT:-$JET_SCRATCH_ROOT/discovery/base}}
-        JET_TARGET_ROOT=${{JET_TARGET_ROOT:-$JET_SCRATCH_ROOT/targets}}
-        JET_SEEDS=${{JET_SEEDS:-${{XDG_DATA_HOME:-$HOME/.local/share}}/jet-seeds}}
-        JET_SEED=${{JET_SEED:-$JET_SEEDS/current}}
-        JET_DEV_WORKTREE=${{JET_DEV_WORKTREE:-'{files.normalize("{sys.executable()}/../../../..").replace("'", "'\\''")}'}}
-        """,
-        sys.env_file("{sys.config_dir() ?? ""}/jet/env"),
-    )
+// The checkout holding the running program: the nearest directory above it
+// that holds the table.
+checkout: fn() -[Env, FS]> String {
+    dir := files.dirname(files.absolute(sys.executable()) ?? sys.executable())
+    loop dir != "/" && dir != "" && !files.exists("{dir}/Tools/Agent/roots.env") -> dir = files.dirname(dir)
+    dir
+}
+
+// The table with the checkout `top` as JET_DEV_WORKTREE's default, single
+// quoted, its own quotes escaped, so any path reads back as itself.
+table: fn(top: String) -[FS]> String IOError! {
+    "{files.read("{top}/Tools/Agent/roots.env")}\nJET_DEV_WORKTREE=${{JET_DEV_WORKTREE:-'{top.replace("'", "'\\''")}'}}\n"
+}
+
+// Every root and its value.
+all: fn() -[Env, FS]> [String:String] IOError! {
+    sys.env_text(table(checkout()), sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
+}
+
+// The root `name` names: None when it is not a root.
+root: fn(name: String) -[Env, FS]> String? IOError! {
+    all().get(name)
+}
+
+// The root `name` names, for a tool that keeps going: when the env file is
+// refused, the environment alone stands in for it, and "" is no root.
+value: fn(name: String) -[Env, FS]> String Never! {
+    vars: all() ?? (sys.env_text(table(checkout()) ?? "", sys.environment()) ?? [String:String]{})
+    vars.get(name) ?? ""
 }
 
 run: fn() {
-    vars: roots()
+    vars: all()
     loop name in process.args() {
         print("{name}={vars.get(name) ?? process.fail(64, "roots: unknown root {name}")}")
     }

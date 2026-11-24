@@ -41,7 +41,7 @@ run: fn() {
     jet: if given.contains("/") && !given.starts_with("/") -> "{files.cwd()}/{given}" else -> given
     rows: files.read(args[0]).tsv_records().filter(fn(cells) { cells.len() >= 3 })
     files.create_dir_all(out)
-    worktree: roots.roots()["JET_DEV_WORKTREE"]
+    worktree: roots.all()["JET_DEV_WORKTREE"]
     specs: rows.map(fn(row) { Sh{"{jet} test Compiler --profile {row[1]} --filter {row[2]}"}.spec().cwd(worktree).stderr(.Stdout).output_limit(268435456).timeout(600s).cpu_affinity(CPUS) })
     results: process.run_all(specs, 6)
     lines := loop at in 0..<rows.len() -> row_line(rows[at], results[at], "{out}/{rows[at][0]}.{rows[at][1]}.{rows[at][2]}.out")

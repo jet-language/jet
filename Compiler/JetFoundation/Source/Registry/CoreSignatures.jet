@@ -775,7 +775,6 @@ core_sig_plugin_load: fn(module_name: String, member: String) -> CoreTypedCallSi
 
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_sig_vault(request.module_name, request.member) == Val(vault) -> return Val(vault)
-    if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
     if core_sig_network(request) == Val(network) -> return Val(network)
     if core_sig_text_and_testing(request) == Val(surface) -> return Val(surface)
     if core_sig_regex(request.module_name, request.member) == Val(regex) -> return Val(regex)
@@ -787,9 +786,6 @@ core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature?
     }
     if core_host_fixed_signature(request.module_name, request.member) == Val(host) {
         return Val(host)
-    }
-    if core_value_fixed_signature(request.module_name, request.member) == Val(value) {
-        return Val(value)
     }
     if core_sig_plugin_load(request.module_name, request.member) == Val(plugin) {
         return Val(plugin)

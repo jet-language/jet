@@ -253,8 +253,8 @@ sema_liveness_is_root: fn(function: Func, is_entry: Bool) -> Bool Never! {
     is_entry && function.name == "run"
 }
 
-// Rust `removable_private_function`: only a bodiless, unmarked function is
-// deleted by the fix; anything else is renamed to `_name`.
+// Only a bodiless, unmarked function is deleted by the fix; anything else is
+// renamed to `_name`.
 sema_liveness_removable: fn(function: Func) -> Bool Never! {
     function.body.len() == 0 && function.meta == None && function.markers.len() == 0 && function.external_type == None && function.inline_foreign == None && function.undo == None && function.web_marker == None && function.pre.len() == 0 && function.post.len() == 0 && !function.compiler_generated && !function.is_unsafe && !function.is_pure && !function.is_reactive && !function.is_replayable && !function.is_job && function.every == None && !function.is_must_use && function.kernel == None
 }

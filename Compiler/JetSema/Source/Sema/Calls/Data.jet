@@ -168,8 +168,8 @@ sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, a
     if !sema_ownership_check_call_receiver(state, receiver, convention, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    // Dyn reads report no receiver convention (Rust `dyn_method_return`), so a
-    // written mark on the receiver is not compared with one.
+    // Dyn reads report no receiver convention, so a written mark on the
+    // receiver is not compared with one.
     if method != "remove" -> sema_receiver_mark_forget(state, receiver)
     value: sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
@@ -999,8 +999,8 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
     if !sema_data_is_json_name(known_type) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    // Rust `check_core_json_lit`: `Dyn.object()` is an empty object and
-    // `Dyn.from(value)` calls the value's Encode contract.
+    // `Dyn.object()` is an empty object and `Dyn.from(value)` calls the value's
+    // Encode contract.
     if sema_data_is_json_name(known_type) && (variant == "object" || variant == "from") {
         count: if variant == "object" -> 0 else -> 1
         if args.len() != count {
@@ -1031,8 +1031,8 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
     }
     expected_payload := sema_data_literal_expected(ty, variant)
     if private_number -> expected_payload = Val(Type.String)
-    // (Rust `is_object_pairs_arg`): a pair-list literal or
-    // local keeps its arrival order; anything else is read as a Map.
+    // A pair-list literal or local keeps its arrival order; anything else is
+    // read as a Map.
     if variant == "Object" && args.len() == 1 && sema_data_object_pairs_argument(args[0].expr, scopes) {
         expected_payload = Val(sema_data_object_pairs_type())
     }
@@ -1241,8 +1241,8 @@ sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], 
 
 // `csv.to_string(rows)` takes explicit row arrays, typed records, or the
 // row-array `Dyn` tree `csv.parse` returns (Docs/Spec/Reference/core-library.md
-// `csv.to_string`); any other Encode value is E0112 (Rust `core_call` csv
-// `to_string`). The checked call carries the inferred `T` of `rows`.
+// `csv.to_string`); any other Encode value is E0112. The checked call carries
+// the inferred `T` of `rows`.
 sema_data_csv_check_rows: fn(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if args.len() != 1 -> return true
     rows: if checked.kind == {

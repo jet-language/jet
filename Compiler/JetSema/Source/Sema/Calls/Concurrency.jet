@@ -149,8 +149,8 @@ sema_call_concurrency_names_module_function: fn(scopes: SemaScopeTable, name: St
 // `para_fold`'s seed) adopts the callback's own result, as a collection
 // callback does; its parameters still have to fit. A lambda whose written
 // parameter types differ from the slot's checks on its own types and is one
-// argument mismatch (E0108, as Rust's builtin-method argument check), shown
-// with the slot's `result` when the caller knows it.
+// argument mismatch (E0108), shown with the slot's `result` when the caller
+// knows it.
 sema_call_concurrency_infer_callback: fn(argument: CallArg, required: Type, method: String, index: Int, result: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     open_result := false
     if required == .Fn(_, ret, _, _, _, _) && ret == None -> open_result = true
@@ -270,8 +270,7 @@ sema_call_concurrency_check_sender: fn(receiver: Expr, receiver_value: TExpr, ar
     // `value` is the payload handed back unsent.
     send_error: Type.Apply{name: sema_core_source_type_name(program, "core.prelude", "SendError"), args: [Type]{payload_ty}}
     result_type: Type.Result{ok: Type.Named{name: "Unit"}, err: send_error}
-    // Rust `receiver_effect_leaf("Sender", "send")`: a send may block on a
-    // bounded channel, so it records `Time.Wait`.
+    // A send may block on a bounded channel, so it records `Time.Wait`.
     if !sema_stream_handle_effect_fact(environment, program, scopes, context, "Sender.send", span, result_type, "Time.Wait", diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -376,7 +375,7 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
     }
     step_type := Type.Fn{params: [Type]{accumulator, element}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     // Each slot is checked even after an earlier one fails, and the fold's
-    // result still crosses the worker boundary, as in Rust's argument loop.
+    // result still crosses the worker boundary.
     step_checked := sema_call_concurrency_infer_callback(args[1], step_type, method, 1, Val(accumulator), environment, program, scopes, state, tail_store, context, diagnostics)
     makes_step := false
     if step_checked == .Val(checked_step) {

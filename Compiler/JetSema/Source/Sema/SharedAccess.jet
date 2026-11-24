@@ -573,8 +573,8 @@ sema_shared_access_without_parens_name: fn(value: Expr) -> String? Never! {
     }
 }
 
-// Rust body_has_blocking_call: a call that can park the loop. A module or
-// receiver call (`time.sleep`, `rx.receive`) counts by its last segment.
+// A call that can park the loop. A module or receiver call (`time.sleep`,
+// `rx.receive`) counts by its last segment.
 sema_shared_access_note_blocking_call: fn(found: ^Bool, expression: Expr) Never! {
     if expression == {
         .Call(call, _) -> {
@@ -592,8 +592,8 @@ sema_shared_access_is_blocking_name: fn(name: String) -> Bool Never! {
     name == "join" || name == "read" || name == "read_line" || name == "receive" || name == "recv" || name == "sleep" || name == "sleep_until" || name == "wait" || name == "yield_now"
 }
 
-// Rust body_writes_shared_field: an assignment to the polled field, or to any
-// element under the handle, in the body or a nested statement block.
+// An assignment to the polled field, or to any element under the handle, in
+// the body or a nested statement block.
 sema_shared_access_statements_write_field: fn(body: [Stmt], handle: String, field: String) -> Bool Never! {
     loop statement in body {
         if sema_shared_access_statement_writes_field(statement, handle, field) -> return true

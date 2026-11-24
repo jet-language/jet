@@ -34,32 +34,28 @@ sema_effective_return_type: fn(return_type: Type?) -> Type Never! {
 
 // The compiler-owned traits OWNED_TRAITS marks `raw_return` are raw protocol
 // ABIs (String, Bool, Ordering, Dyn, and same-type arithmetic), never the
-// implicit failure carrier, for user and derived impls alike (the Rust
-// reference's `uses_raw_protocol_return`).
+// implicit failure carrier, for user and derived impls alike.
 sema_raw_protocol_trait: fn(trait_name: String?) -> Bool Never! {
     name: trait_name ?? return false
     owned: owned_trait(name) ?? return false
     owned.raw_return
 }
 
-// Whether a trait-impl method keeps its declared return raw (the Rust
-// reference's `uses_raw_protocol_function_return`).
+// Whether a trait-impl method keeps its declared return raw.
 sema_raw_protocol_function_return: fn(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
     if sema_raw_protocol_trait(trait_name) -> return true
     func.compiler_generated && (implementation_generated || func.state_types.len() > 0)
 }
 
 // A callable's checked return: a raw protocol return keeps its declared type
-// (Unit when omitted); every other return projects through the failure rail
-// (the Rust reference's `checked_return_types`).
+// (Unit when omitted); every other return projects through the failure rail.
 sema_checked_return_type: fn(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
     if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
     sema_effective_return_type(return_type)
 }
 
-// The stable provenance of a callable's effective failure route, projected
-// from its written return type (the Rust reference's
-// `FailureContract.from_return_type(..).source()`).
+// The stable provenance of a callable's effective failure route, projected from
+// its written return type.
 sema_failure_contract_source: fn(return_type: Type?) -> String Never! {
     failure_contract_source(failure_contract_from_return_type(return_type))
 }
@@ -185,9 +181,7 @@ sema_function_call_metadata: fn(func: Func, owner_key: String, fallback_source_f
 }
 
 // An inline foreign (`#FFI`) function has no Jet body and no failure rail:
-// calls bind to its raw scalar ABI return, which codegen emits unwrapped (the
-// Rust reference's `checked_return_types(.., sig.is_extern)` with
-// `is_extern: f.inline_foreign.is_some()`).
+// calls bind to its raw scalar ABI return, which codegen emits unwrapped.
 sema_function_symbol_type: fn(func: Func, raw_protocol_return: Bool, owner_key: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
     effect_bound: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn{
@@ -200,14 +194,13 @@ sema_function_symbol_type: fn(func: Func, raw_protocol_return: Bool, owner_key: 
     }
 }
 
-// Rust `check_function_body` publishes a function's return-view contract on
-// its signature; with a declared `from` clause callers see the declared
-// sources with access taken from the return type's view
-// leaves. Another module's caller reads this registered signature, so the
-// declared contract is published here, before any body check runs. A trait
-// method publishes its declared contract the same way, so a call through the
-// trait (a trait object's dynamic dispatch or a bounded type parameter) keeps
-// the receiver lent as a direct method call does.
+// A function's return-view contract is published on its signature; with a
+// declared `from` clause callers see the declared sources with access taken
+// from the return type's view leaves. Another module's caller reads this
+// registered signature, so the declared contract is published here, before
+// any body check runs. A trait method publishes its declared contract the same
+// way, so a call through the trait (a trait object's dynamic dispatch or a
+// bounded type parameter) keeps the receiver lent as a direct method call does.
 sema_signature_view_provenance: fn(inferred: ViewProvenanceMap?, declared_map: ViewProvenanceMap?, return_type: Type?) -> ViewProvenanceMap? {
     // copy: the signature publishes its own provenance map, while the inferred map stays on
     // the registered declaration (a read parameter).

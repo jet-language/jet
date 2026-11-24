@@ -228,9 +228,9 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
     }
     required: sema_process_spec_arg_types(method, args.len())
     values: sema_process_check_args(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    // Rust types ProcessSpec builders through `process_spec_method_return`
-    // with no receiver convention and no recorded move: a builder on a named
-    // spec read again later (`clean.env(…).run()` in a loop) is no E0121.
+    // ProcessSpec builders are typed with no receiver convention and no
+    // recorded move: a builder on a named spec read again later
+    // (`clean.env(…).run()` in a loop) is no E0121.
     // The spec still moves like an unmarked owning position, so a later use
     // turns the move into a share and a borrowed parameter keeps its value.
     known_mutating: method != "abilities" && method != "plan" && method != "run" && method != "run_checked" && method != "spawn"

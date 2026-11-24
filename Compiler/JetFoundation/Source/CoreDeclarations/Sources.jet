@@ -103,11 +103,12 @@ core_decl_fn_name: fn(line: String) -> String Never! {
     core_decl_fn_name_at(line, core_decl_attributes_end(line))
 }
 
-// core_decl_fn_name, also reading a `pub name: fn` line.
-core_decl_pub_fn_name: fn(line: String) -> String Never! {
+// core_decl_fn_name, also reading a private `priv name: fn` line: a Core
+// module owns its private `__` members as it owns its public ones.
+core_decl_member_fn_name: fn(line: String) -> String Never! {
     at: core_decl_attributes_end(line)
-    if at >= 0 && core_decl_word_then_space(line, at, "pub") {
-        return core_decl_fn_name_at(line, core_decl_skip_space(line.bytes(), at + 3))
+    if at >= 0 && core_decl_word_then_space(line, at, "priv") {
+        return core_decl_fn_name_at(line, core_decl_skip_space(line.bytes(), at + 4))
     }
     core_decl_fn_name_at(line, at)
 }
@@ -549,7 +550,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
         }
         text: found
         lines: core_decl_source_lines(text)
-        functions: loop line in lines if core_decl_pub_fn_name(line) != "" -> core_decl_pub_fn_name(line)
+        functions: loop line in lines if core_decl_member_fn_name(line) != "" -> core_decl_member_fn_name(line)
         loop member in row.members {
             target: core_decl_text_of(targets, "{row.module_name}.{member}") ?? member
             if target == "" -> next

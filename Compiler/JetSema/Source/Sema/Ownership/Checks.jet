@@ -8,8 +8,8 @@
 // use sema_ownership_check_statements as the ownership-only walk for a body.
 //
 // Jet's `^` is AccessConvention.Write.  It grants a capability to change the
-// named place; it is not a Rust read borrow and is never silently downgraded
-// to Read.
+// named place; it is not a read borrow and is never silently downgraded to
+// Read.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -132,9 +132,9 @@ SemaOwnershipMoveOrigin: struct {
     // take parameter, moved as its name's last use. A later use reports
     // E0209 at the argument (pass a copy with `.copy()`) instead of sharing it.
     implicit_take: String?{None},
-    // The captured name a run-once lambda takes with
-    // `.move()`, when this move is that lambda binding's call. A later call
-    // reports E0121 naming the capture (Rust `moved_use_diagnostic`).
+    // The captured name a run-once lambda takes with `.move()`, when this move
+    // is that lambda binding's call. A later call reports E0121 naming the
+    // capture.
     once_capture: String?{None},
     // The scope depth of the `defer close(name)` that made this move. The
     // value leaves when that scope exits: until then later statements still
@@ -281,20 +281,17 @@ SemaOwnershipState: struct {
     // found that a later use reached.
     share_known: [Span],
     share_found: [SemaOwnershipShareSite],
-    // Unmarked take arguments the typed argument check
-    // found eligible to move at their last use (Rust
-    // `take_unmarked_last_use`); the call ownership check makes the move.
+    // Unmarked take arguments the typed argument check found eligible to move
+    // at their last use; the call ownership check makes the move.
     implicit_take_ok: [Span]{[Span]{}},
-    // Eligible unmarked take arguments whose name another
-    // argument of the same call also names. Such a name has no last use in
-    // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
+    // Eligible unmarked take arguments whose name another argument of the same
+    // call also names. Such a name has no last use in that call: E0209.
     implicit_take_twice: [Span]{[Span]{}},
     // Taken field arguments the typed argument check found to be exact
     // moves into a consuming parameter; the call ownership check records the
     // move, so a later use of the field is E0121.
     exact_field_takes: [Span]{[Span]{}},
-    // Run-once lambdas found in this function, and the
-    // bindings holding them (Rust `once_lambda_sites` / `once_lambdas`).
+    // Run-once lambdas found in this function, and the bindings holding them.
     once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}},
     // Lambda bindings that write a capture, by binding key.
     closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}},
@@ -313,8 +310,8 @@ SemaOwnershipState: struct {
     // E0420: `Type{ uninit }` bindings not yet
     // definitely written on every path reaching this point.
     uninit: [SemaOwnershipUninitFact],
-    // Rust `is_static_move_root`: symbols of this module's `#Persist`, mutable,
-    // and `#Static` bindings, which own one shared storage cell (E0222/E0223).
+    // Symbols of this module's `#Persist`, mutable, and `#Static` bindings,
+    // which own one shared storage cell (E0222/E0223).
     static_roots: [SymbolID],
     // The `#Persist` subset of `static_roots`, which a write borrow may lend.
     persist_roots: [SymbolID],
@@ -737,9 +734,9 @@ sema_ownership_span_same: fn(left: Span, right: Span) -> Bool Never! {
 // ────────────────────────────────────────────────────────────────────────────
 // Copy/clone judgments
 
-// This is the representation-only part of Rust's `type_is_copy` judgment.
-// Nominal types require the parent's trait registry and therefore are not
-// guessed here; callers receive `complete == false` for such a dependency.
+// This is the representation-only part of the copy judgment. Nominal types
+// require the parent's trait registry and therefore are not guessed here;
+// callers receive `complete == false` for such a dependency.
 sema_ownership_type_tuple_is_copy: fn(fields: [TypeTupleField]) -> Bool Never! {
     loop field in fields {
         if !sema_ownership_type_is_copy(field.ty) -> return false
@@ -769,9 +766,9 @@ sema_ownership_type_is_copy: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `Type.is_scalar`: the by-value numeric and boolean leaves (and raw
-// pointers). Unlike Copy it excludes `Char`, carriers, tuples and units; the
-// borrowed-parameter binding and return audits key on exactly this set.
+// The by-value numeric and boolean leaves (and raw pointers). Unlike Copy it
+// excludes `Char`, carriers, tuples and units; the borrowed-parameter binding
+// and return audits key on exactly this set.
 sema_ownership_type_is_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .Float32 | .IntN(_, _) | .Quantity(_, _) -> true
@@ -781,22 +778,21 @@ sema_ownership_type_is_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// A read or write parameter: storage this function borrows and does not own
-// (Rust `param_conv` is `Read` or `Write`). Locals are owned even though
-// they are declared with read access.
+// A read or write parameter: storage this function borrows and does not own.
+// Locals are owned even though they are declared with read access.
 sema_ownership_binding_is_borrowed_param: fn(binding: SemaScopeBinding) -> Bool Never! {
     binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
 }
 
-// Rust `param_conv` is `Read` or `Write`: a borrowed parameter, or a write
-// window bound by a `^place` pattern (Rust `declare_pattern_write_window`).
-// A read pattern payload is an ordinary local there (`param_conv: None`).
+// A borrowed parameter (a `Read` or `Write` convention) or a write window
+// bound by a `^place` pattern lends. A read pattern payload is an ordinary
+// local.
 sema_ownership_binding_lends: fn(binding: SemaScopeBinding) -> Bool Never! {
     sema_ownership_binding_is_borrowed_param(binding) || binding.access == AccessConvention.Write
 }
 
-// Rust `is_edit_shared_guard`: a binding holding a `guard_edit()` lease keeps
-// its acquisition-site write capability even when the binding is immutable.
+// A binding holding a `guard_edit()` lease keeps its acquisition-site write
+// capability even when the binding is immutable.
 sema_ownership_binding_is_edit_shared_guard: fn(binding: SemaScopeBinding) -> Bool Never! {
     ty: binding.symbol.ty ?? return false
     if ty == .Tagged(marker, inner) {
@@ -824,10 +820,10 @@ sema_ownership_writes_temporary_edit_guard: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-// Rust `place_reads_untagged_or_read_shared_guard`: a write that reaches a
-// `.value` held by an untagged or `guard_read()` SharedGuard. A write
-// parameter root keeps its caller-granted capability. The guard type is
-// known only for a binding root (`guard.value`), where every guard lives.
+// A write that reaches a `.value` held by an untagged or `guard_read()`
+// SharedGuard. A write parameter root keeps its caller-granted capability. The
+// guard type is known only for a binding root (`guard.value`), where every
+// guard lives.
 sema_ownership_writes_read_shared_guard: fn(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
@@ -1051,8 +1047,8 @@ sema_ownership_single_use_rows: fn(state: SemaOwnershipState) -> [Int] Never! {
     rows
 }
 
-// Rust `pop_scope` keeps a moved fact only while no declaration of its root
-// at the closing depth or deeper exists.
+// A moved fact survives a scope's close only while no declaration of its root
+// exists at the closing depth or deeper.
 sema_ownership_key_declared_from: fn(state: SemaOwnershipState, id: SymbolID, depth: Int) -> Bool Never! {
     row := sema_ownership_last_row(state, id)
     loop row >= 0 {
@@ -1122,12 +1118,11 @@ sema_ownership_release_loans_from: fn(state: ^SemaOwnershipState, depth: Int) Ne
     }
 }
 
-// Rust `view_is_live_now`: a view stays live while this statement or a later
-// one uses its carrier. A dead view releases its window, so the owner may be
-// read, changed, moved, windowed, or pinned again after the view's last use.
-// A window no name carries (`if ^x.session == {…}` in value position) ends
-// before the next statement, nested ones included: Rust records no view for
-// it at all.
+// A view stays live while this statement or a later one uses its carrier. A
+// dead view releases its window, so the owner may be read, changed, moved,
+// windowed, or pinned again after the view's last use. A window no name
+// carries (`if ^x.session == {…}` in value position) ends before the next
+// statement, nested ones included: no view is recorded for it at all.
 sema_ownership_release_dead_views: fn(state: ^SemaOwnershipState, statement: Stmt, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) {
     loop index in 0..<state.views.len() {
         fact: state.views[index]
@@ -1167,10 +1162,10 @@ sema_ownership_release_view_loans: fn(state: ^SemaOwnershipState, seq: Int, carr
     }
 }
 
-// Rust checks an assignment's target change (`check_lvalue_change`) before
-// it infers the value, so a view the value alone reads is not yet "used in
-// this statement": with no later use it is dead at the write. Release such
-// views before the target write check, as `view_is_live_now` would.
+// An assignment's target change is checked before its value is inferred, so a
+// view the value alone reads is not yet "used in this statement": with no
+// later use it is dead at the write. Release such views before the target
+// write check.
 sema_ownership_release_value_only_views: fn(state: ^SemaOwnershipState, target: LValue, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) {
     target_expr: if target == {
         .Local(name, span) -> Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
@@ -1298,8 +1293,7 @@ sema_ownership_note_place_reference: fn(state: ^SemaOwnershipState, expr: Expr, 
 sema_ownership_finalize_references: fn(state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     loop fact in state.declarations {
         if fact.references == 0 && state.used_ids.get(fact.id.id) == None && !fact.ambient && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
-            // Rust `CheckerReferences.emit_unused_binding_lints`: the
-            // registry row wording, with the `_name` rename as the edit.
+            // The registry row wording, with the `_name` rename as the edit.
             what := "Local binding `{fact.name}` is never read."
             why := "A binding that no later expression reads adds dead code and may hide a computed result that should have been used."
             fix := "Remove the binding when its initializer is side-effect free, or rename `{fact.name}` to `_{fact.name}` when the value must be computed."
@@ -1315,10 +1309,9 @@ sema_ownership_finalize_references: fn(state: ^SemaOwnershipState, diagnostics: 
     }
 }
 
-// `x == None` over a stable optional reads as the presence
-// test `x == .Val(x)`, which rebinds the payload under the same name at the
-// read of `x`. That rebinding is the narrowed `x` itself (Rust refines the
-// one binding's type), so it is not a separate unused local.
+// `x == None` over a stable optional reads as the presence test `x == .Val(x)`,
+// which rebinds the payload under the same name at the read of `x`. That
+// rebinding is the narrowed `x` itself, so it is not a separate unused local.
 sema_ownership_flow_narrowing: fn(state: SemaOwnershipState, fact: SemaOwnershipBindingFact) -> Bool Never! {
     loop reference in state.references {
         if reference.name == fact.name && reference.def_id != fact.id && sema_ownership_span_same(reference.use_span, fact.span) {
@@ -1534,8 +1527,8 @@ sema_ownership_place_from_expr_inner: fn(expr: Expr, scopes: SemaScopeTable) -> 
         }
         .Index(base, index, span, _, _) -> {
             place := sema_ownership_place_from_expr_inner(base, scopes) ?? return None
-            // Rust rewrites `xs[a..b]` to a slice before placing it: a range
-            // operand is a range projection, not an element index.
+            // `xs[a..b]` is a slice before it is placed: a range operand is a
+            // range projection, not an element index.
             if index == .Range(_, _, _, _, _) {
                 place.projections.push("[..]")
                 bounds: sema_ownership_range_bounds(index, index, Val(index))
@@ -1710,8 +1703,8 @@ sema_ownership_places_overlap: fn(left: SemaOwnershipPlace, right: SemaOwnership
     true
 }
 
-// Rust `place_name`: a field projection keeps its name; an element index or a
-// range window is `[…]`, whatever its bounds.
+// A field projection keeps its name; an element index or a range window is
+// `[…]`, whatever its bounds.
 sema_ownership_place_name: fn(place: SemaOwnershipPlace) -> String Never! {
     name := place.root
     loop projection in place.projections {
@@ -2227,10 +2220,9 @@ sema_ownership_diag_view_return_boundary: fn(span: Span) -> Diagnostic {
     sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`")
 }
 
-// Rust `consumed_view_owner` (#4392): a `^^` parameter (or `^^self`) moves into
-// this function and is freed when it returns, so it cannot own a returned
-// view. A consumed view carrier differs: its windows still borrow the
-// caller's owner.
+// A `^^` parameter (or `^^self`) moves into this function and is freed when it
+// returns, so it cannot own a returned view. A consumed view carrier differs:
+// its windows still borrow the caller's owner.
 sema_ownership_consumed_view_owner: fn(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
     loop binding_index in 0..<scopes.bindings.len() {
         if scopes.bindings[binding_index].symbol.id != place.root_id -> next
@@ -2341,11 +2333,10 @@ sema_ownership_diag_live_reference: fn(place: String, span: Span) -> Diagnostic 
     sema_error("E0212", span, "`{place}` already has a live reference that conflicts with this access", "an exclusive write window cannot overlap another live reference to the same place", "finish using the earlier reference before opening this one")
 }
 
-// Rust `check_place_change_with_view_exemption`: changing a place a live
-// view looks into. A pin promises its storage keeps
-// its address, so it reports E0219 with the change it forbids; every other
-// view reports E0212 naming the view and the change. Without a change
-// wording (a receiver hook that knows no method) the general E0212 stays.
+// Changing a place a live view looks into. A pin promises its storage keeps its
+// address, so it reports E0219 with the change it forbids; every other view
+// reports E0212 naming the view and the change. Without a change wording (a
+// receiver hook that knows no method) the general E0212 stays.
 sema_ownership_diag_view_change: fn(fact: SemaOwnershipViewFact, changed: SemaOwnershipPlace, action: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     changed_name: sema_ownership_place_name(changed)
     if action == "" -> return sema_ownership_diag_live_reference(changed_name, span)
@@ -2358,8 +2349,8 @@ sema_ownership_diag_view_change: fn(fact: SemaOwnershipViewFact, changed: SemaOw
     sema_error("E0212", span, "`{changed_name}` cannot {action} while `{view}` is still looking into it", "`{view}` is a live {access} into `{place}`; changing or moving the owner could invalidate that view", "finish using `{view}` before changing `{changed_name}`, narrow the view's scope, or make an owned copy")
 }
 
-// A loan a named view carries is that view's fact (Rust keeps only the
-// fact); an anonymous statement window has no view to name.
+// A loan a named view carries is that view's fact; an anonymous statement
+// window has no view to name.
 sema_ownership_diag_loan_change: fn(state: ^SemaOwnershipState, loan: SemaOwnershipLoan, changed: SemaOwnershipPlace, action: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     if loan.carrier_fact_seq >= 0 {
         loop fact in state.views {
@@ -2371,9 +2362,8 @@ sema_ownership_diag_loan_change: fn(state: ^SemaOwnershipState, loan: SemaOwners
     sema_ownership_diag_live_reference(sema_ownership_place_name(changed), span)
 }
 
-// Rust `check_place_read` (card #1361 / I2): reading a place beside a live
-// exclusive window into it is E0220; reading through the window is the
-// legal path.
+// Reading a place beside a live exclusive window into it is E0220; reading
+// through the window is the legal path.
 sema_ownership_diag_owner_read: fn(fact: SemaOwnershipViewFact, read: SemaOwnershipPlace, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     read_name: sema_ownership_place_name(read)
     view: fact.carrier
@@ -2429,10 +2419,9 @@ sema_ownership_open_reference_for_expr: fn(state: ^SemaOwnershipState, expr: Exp
 }
 
 // The windows a binding statement's initializer (`right: ^xs[1..2]`) or a
-// `ViewMut` list literal's elements open are checked against the other
-// views where the value lands (Rust `record_view_with_exemptions`, Rust
-// `check_list_view_element_aliases`), which name the binding or the
-// element; the open itself does not report that overlap.
+// `ViewMut` list literal's elements open are checked against the other views
+// where the value lands, which name the binding or the element; the open itself
+// does not report that overlap.
 sema_ownership_view_open_deferred: fn(state: SemaOwnershipState, span: Span) -> Bool Never! {
     loop deferred in state.deferred_view_opens {
         if sema_ownership_span_same(deferred, span) -> return true
@@ -2440,11 +2429,10 @@ sema_ownership_view_open_deferred: fn(state: SemaOwnershipState, span: Span) -> 
     false
 }
 
-// Rust `record_view_with_exemptions`: a new view conflicts with a live view
-// over an overlapping place when either of them writes; the binding being
-// recorded and its own earlier facts for the same slot are alternatives, and
-// a window opened through a live view reborrows that view's lineage. False
-// when the open conflicts (its E0212 is pushed).
+// A new view conflicts with a live view over an overlapping place when either
+// of them writes; the binding being recorded and its own earlier facts for the
+// same slot are alternatives, and a window opened through a live view reborrows
+// that view's lineage. False when the open conflicts (its E0212 is pushed).
 sema_ownership_check_binding_view_conflicts: fn(state: ^SemaOwnershipState, carrier: String, carrier_span: Span, source: Expr, places: [SemaOwnershipPlace], access: AccessConvention, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     id: sema_ownership_carrier_id(scopes, carrier, carrier_span) ?? return true
     loop place in places {
@@ -2474,8 +2462,8 @@ sema_ownership_list_view_element_spans: fn(elements: [Expr]) -> [Span] Never! {
     spans
 }
 
-// Rust `check_list_view_element_aliases`: list elements coexist, so an
-// exclusive mutable view cannot overlap another element's view.
+// List elements coexist, so an exclusive mutable view cannot overlap another
+// element's view.
 sema_ownership_check_list_view_element_aliases: fn(state: ^SemaOwnershipState, elements: [Expr], element_ty: Type, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
     direct_mutable: if element_ty == {
         .Apply(name, _) -> name == "ViewMut"
@@ -2558,7 +2546,7 @@ sema_ownership_open_write_reference: fn(state: ^SemaOwnershipState, expr: Expr, 
         return false
     }
     if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) && !sema_ownership_writes_through_view_type(expr, info.symbol.ty) {
-        // Rust `validate_write_place`: a parameter is E0205, a local E0111.
+        // A parameter is E0205, a local E0111.
         if info.symbol.kind == SymbolKind.Parameter {
             param_ty: info.symbol.ty ?? Type.Named{name: "Unit"}
             // A `View<T>` lends read windows only; a `^` marker on it would
@@ -2638,12 +2626,11 @@ sema_ownership_is_share_site: fn(state: SemaOwnershipState, span: Span) -> Bool 
     false
 }
 
-// (Rust `move_is_shareable`): only a whole binding moved
-// by its plain name, whose type is not known to refuse a copy, can later
-// become a share. Rust keys that move on the binding itself
-// (`mark_moved(name)`), so a read payload or view binding moved by name
-// qualifies even though its places chase to projections of its source. The
-// function check confirms the copy against the registry before using it.
+// Only a whole binding moved by its plain name, whose type is not known to
+// refuse a copy, can later become a share. That move is keyed on the binding
+// itself, so a read payload or view binding moved by name qualifies even
+// though its places chase to projections of its source. The function check
+// confirms the copy against the registry before using it.
 // A one-pass source (Iter, Stream, Body) has no copy to give, and
 // `copies: .Explicit` forbids the hidden copy, so either keeps the move and a
 // later use is E0121.
@@ -2682,10 +2669,10 @@ sema_ownership_report_moved: fn(state: ^SemaOwnershipState, moved: SemaOwnership
     diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(shown), moved.origin, span))
 }
 
-// E0209 (Rust `implicit_take_reused`): an argument to a take parameter moved
-// its name, and a later use (or the next loop iteration) still needs the
-// value. A call never copies on its own, so the fix is the explicit copy at
-// the argument; one report per argument however many later uses reach it.
+// E0209: an argument to a take parameter moved its name, and a later use (or
+// the next loop iteration) still needs the value. A call never copies on its
+// own, so the fix is the explicit copy at the argument; one report per argument
+// however many later uses reach it.
 sema_ownership_report_implicit_take_reused: fn(callee: String, name: String, site: Span, reuse: Span, diagnostics: ^[Diagnostic]) {
     loop existing in diagnostics {
         if existing.code == "E0209" && existing.span == .Val(known) {
@@ -2799,9 +2786,9 @@ sema_ownership_diag_moved: fn(place: String, origin: SemaOwnershipMoveOrigin, sp
     labeled
 }
 
-// Rust `one_pass_materializer`: an Iter or ViewIter materializes with
-// `.to_list()` and a Body with `.text(limit)`; a Stream or HTTPBodyChunks has
-// no materializer and is drained with a loop.
+// An Iter or ViewIter materializes with `.to_list()` and a Body with
+// `.text(limit)`; a Stream or HTTPBodyChunks has no materializer and is drained
+// with a loop.
 sema_ownership_one_pass_note: fn(place: String, ty: Type) -> String Never! {
     materializer := ""
     if ty == {
@@ -2889,7 +2876,7 @@ sema_ownership_exact_view_carrier_for_place: fn(state: ^SemaOwnershipState, expr
 }
 
 sema_ownership_diag_invalidated_view: fn(fact: SemaOwnershipViewFact, span: Span) -> Diagnostic {
-    // Rust `check_view_use` names the arena itself, not the fresh slot.
+    // The report names the arena itself, not the fresh slot.
     owner: sema_ownership_view_owner_name(fact.source)
     verb: if fact.invalidated_verb == "" -> "operation" else -> fact.invalidated_verb
     sema_error("E0632", span, "`{owner}` was {verb} here, so the value `{fact.carrier}` points into is gone", "`{fact.carrier}` is a view into `{owner}`; `{owner}.{verb}()` invalidated everything stored in `{owner}`, so reading `{fact.carrier}` now would read freed memory", "use `{fact.carrier}` before `{owner}.{verb}()`, or re-`alloc` after the {verb} to get a fresh value")
@@ -3074,8 +3061,8 @@ sema_ownership_view_reads_binding: fn(state: ^SemaOwnershipState, expr: Expr, sc
     false
 }
 
-// A live write view carried by the expression's root name: a `^place`
-// pattern window (Rust `param_conv` `Write`) or a pin.
+// A live write view carried by the expression's root name: a `^place` pattern
+// window or a pin.
 sema_ownership_write_view_exists_for_expr: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
     loop view in state.views {
         if view.active && view.access == AccessConvention.Write && sema_ownership_view_fact_matches_expr(view, expr, scopes) {
@@ -3100,9 +3087,9 @@ sema_ownership_check_use: fn(state: ^SemaOwnershipState, expr: Expr, scopes: Sem
             sema_ownership_report_moved(state, origin, place, expr_span(expr), diagnostics)
             return false
         }
-        // Rust `check_place_read` reports E0220 and lets the read go on, so
-        // the access that follows still runs its own checks (a write
-        // receiver's E0212).
+        // A read of a viewed place reports E0220 and the read goes on, so the
+        // access that follows still runs its own checks (a write receiver's
+        // E0212).
         if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Read, expr, scopes) == .Val(fact) {
             diagnostics.push(sema_ownership_diag_owner_read(fact, place, expr_span(expr), scopes))
             next
@@ -3125,8 +3112,8 @@ sema_ownership_window_operand_read: fn(loan: SemaOwnershipLoan, span: Span) -> B
     loan.statement_window && span.start >= loan.span.start && span.end <= loan.span.end
 }
 
-// Rust `reject_moved_expr_use` reads the written place without chasing a
-// view alias to its source, so a moved view binding (recorded on itself by
+// A moved-use check reads the written place without chasing a view alias to
+// its source, so a moved view binding (recorded on itself by
 // `sema_ownership_moved_record_places`) answers for its own later uses.
 sema_ownership_report_own_place_moved: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     own: sema_ownership_place_from_expr_inner(expr, scopes) ?? return false
@@ -3135,9 +3122,9 @@ sema_ownership_report_own_place_moved: fn(state: ^SemaOwnershipState, expr: Expr
     true
 }
 
-// Rust `reject_moved_expr_use` on a complete projected place (`state.x`):
-// a move of the place, of a part of it, or of an owner it lies in is a use
-// after move. Read windows and loans are judged by the caller's own checks.
+// On a complete projected place (`state.x`), a move of the place, of a part of
+// it, or of an owner it lies in is a use after move. Read windows and loans
+// are judged by the caller's own checks.
 sema_ownership_check_moved_place_use: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
     if sema_ownership_report_stored_lambda_write(state, places, expr_source_span(expr), diagnostics) {
@@ -3377,11 +3364,11 @@ sema_ownership_place_is_static: fn(place: SemaOwnershipPlace, scopes: SemaScopeT
 }
 
 // `capability` adds the mutability gate on the place's root binding. Without
-// it only the change checks run: Rust `check_write_arg_change` for a `^`
-// argument to a parameter that does not edit, and `record_call_receiver_access`
-// for a handle receiver that writes through the handle. `callee`, `receiver`
-// and `params` describe the call that writes the place, so a changeability
-// error quotes its signature line; `callee` is empty for any other write.
+// it only the change checks run: a `^` argument to a parameter that does not
+// edit, and a handle receiver that writes through the handle. `callee`,
+// `receiver` and `params` describe the call that writes the place, so a
+// changeability error quotes its signature line; `callee` is empty for any
+// other write.
 sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, action: String, callee: String, receiver: AccessConvention?, params: [SemaCallParam], capability: Bool, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     // A `^` argument toward a parameter that does not edit changes nothing.
     if (capability || action != "be passed with write access") && sema_ownership_deep_check_change(expr, if action == "" -> "be edited" else -> action, scopes, diagnostics) {
@@ -3409,8 +3396,8 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
     }
     loop place in places {
         if sema_ownership_place_refuses_write(state, place, scopes) {
-            // Rust's assignment path has no static-borrow check: a constant
-            // can't be changed (E0111).
+            // An assignment has no static-borrow check: a constant can't be
+            // changed (E0111).
             if action == "be assigned" {
                 diagnostics.push(sema_error("E0111", expr_span(expr), "`{places[0].root}` is a constant, so it can't be changed", "static storage is not mutable", "copy the value into a mutable local (`:=`) and change that"))
             } else {
@@ -3444,8 +3431,8 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
     guard_refused: sema_ownership_writes_read_shared_guard(expr, scopes)
     if guard_refused {
         diagnostics.push(sema_ownership_diag_read_shared_guard_write(expr_span(expr)))
-        // Rust `validate_shared_guard_lvalue` runs beside an assignment's own
-        // field or index capability check, so only an assignment goes on.
+        // The shared guard check runs beside an assignment's own field or
+        // index capability check, so only an assignment goes on.
         if action != "be assigned" -> return false
     }
     // A `#Persist` module cell is mutable state lent like a local (its module
@@ -3495,10 +3482,9 @@ sema_ownership_diag_read_view_write: fn(state: ^SemaOwnershipState, expr: Expr, 
     sema_error("E0205", span, "cannot edit through `{root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead")
 }
 
-// Rust's assignment statement checks: a field write through an immutable
-// root is E0205 for a parameter and a local alike; an index write is E0205
-// only for a read parameter and E0111 for any other binding. False for a
-// target that is neither.
+// A field write through an immutable root is E0205 for a parameter and a local
+// alike; an index write is E0205 only for a read parameter and E0111 for any
+// other binding. False for a target that is neither.
 sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: SemaScopeBinding, diagnostics: ^[Diagnostic]) -> Bool {
     param_type: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
     is_param: info.symbol.kind == SymbolKind.Parameter
@@ -3540,7 +3526,7 @@ sema_ownership_report_group_loan_change: fn(state: SemaOwnershipState, changed: 
     false
 }
 
-// `action` is Rust's change wording for a pinned place (E0219), such as
+// `action` is the change wording for a pinned place (E0219), such as
 // "be assigned"; an empty action keeps the general E0212 report.
 sema_ownership_check_write: fn(state: ^SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     sema_ownership_check_write_as(state, expr, action, "", None, [SemaCallParam]{}, true, scopes, diagnostics)
@@ -3645,11 +3631,10 @@ sema_ownership_mark_unmarked_move: fn(state: ^SemaOwnershipState, expr: Expr, sc
     sema_ownership_mark_move_as(state, expr, scopes, consumer, true, diagnostics)
 }
 
-// Rust `note_move_if_direct_ident`: an unmarked owning position (binding,
-// assignment, return, element) moves only a bare name, seen through
-// parentheses and the `Val`/`Ok`/`Err`/tainted constructors. A field or
-// element read there (`m: parts[0]`, `x = row.width`) leaves its owner
-// whole; lowering materializes the copy.
+// An unmarked owning position (binding, assignment, return, element) moves only
+// a bare name, seen through parentheses and the `Val`/`Ok`/`Err`/tainted
+// constructors. A field or element read there (`m: parts[0]`, `x = row.width`)
+// leaves its owner whole; lowering materializes the copy.
 sema_ownership_unmarked_moves_name: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .Ident(_, _, _) -> true
@@ -3686,16 +3671,15 @@ sema_ownership_mark_move_as: fn(state: ^SemaOwnershipState, expr: Expr, scopes: 
     }
     if binding != None {
         info: binding
-        // Rust moves only non-Copy values: every projection of a Copy root
-        // is Copy, so nothing moves and no move conflict exists. A string
-        // view binding is a borrowed `^str` window, Copy in the same way: an
-        // owning destination copies the window or refuses it (E2307), and the
-        // view stays usable. Rust
-        // `note_move_if_direct_ident`: an unmarked owning position moves a
-        // binding without an access convention only; a read or write
-        // parameter or a write window keeps its value (the binding and return
-        // audits report E0120 where it would have to copy). A function item
-        // names immutable code, so naming it as a value moves nothing.
+        // Only non-Copy values move: every projection of a Copy root is Copy,
+        // so nothing moves and no move conflict exists. A string view binding
+        // is a borrowed `^str` window, Copy in the same way: an owning
+        // destination copies the window or refuses it (E2307), and the view
+        // stays usable. An unmarked owning position moves a binding without an
+        // access convention only; a read or write parameter or a write window
+        // keeps its value (the binding and return audits report E0120 where it
+        // would have to copy). A function item names immutable code, so naming
+        // it as a value moves nothing.
         root_ty: info.symbol.ty ?? Type.Named{name: "Unit"}
         if sema_ownership_type_is_copy(root_ty) || info.symbol.kind == SymbolKind.Function || info.string_view || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
             loop place in places {
@@ -3727,12 +3711,10 @@ sema_ownership_mark_move_as: fn(state: ^SemaOwnershipState, expr: Expr, scopes: 
             return false
         }
     }
-    // Named write windows keep ownership with their source (Rust
-    // `note_exact_move`: `param_conv` `Write`). A read payload or view
-    // binding is an ordinary local in Rust, so moving it is no E0201. A
-    // borrowed parameter under an exact `.move()` is refused at the move
-    // itself (E0201); a consuming call or receiver records its move like any
-    // owner.
+    // Named write windows keep ownership with their source. A read payload or
+    // view binding is an ordinary local, so moving it is no E0201. A borrowed
+    // parameter under an exact `.move()` is refused at the move itself
+    // (E0201); a consuming call or receiver records its move like any owner.
     if sema_ownership_report_own_place_moved(state, expr, scopes, diagnostics) -> return false
     // A whole `ViewMut` carrier moves the window itself, not the storage it
     // edits: its loan travels with the value, as `Edit{values: selected}`,
@@ -3800,10 +3782,10 @@ sema_ownership_expr_is_view_mut_carrier: fn(expr: Expr, binding: SemaScopeBindin
     false
 }
 
-// Rust `note_move_if_direct_ident` keys an unmarked move on the binding
-// itself (`mark_moved(name)`), never on the storage a view binding reads:
-// moving `input` in `input: bytes[0..<n]; R{bytes: input}` leaves `bytes`
-// usable. An exact `place.move()` move keeps the chased source places.
+// An unmarked move is keyed on the binding itself, never on the storage a view
+// binding reads: moving `input` in `input: bytes[0..<n]; R{bytes: input}`
+// leaves `bytes` usable. An exact `place.move()` move keeps the chased source
+// places.
 sema_ownership_moved_record_places: fn(expr: Expr, places: [SemaOwnershipPlace], scopes: SemaScopeTable, unmarked: Bool) -> [SemaOwnershipPlace] {
     if !unmarked -> return places.copy()
     name: sema_ownership_moved_name(expr) ?? return places.copy()
@@ -3871,13 +3853,12 @@ sema_ownership_label_moves: fn(state: ^SemaOwnershipState, origin_span: Span, la
 
 // One place a call argument (or receiver) holds for the duration of the call;
 // later arguments that overlap it with a write on either side conflict.
-// `reserved` is Rust's two-phase `&mut self` reservation: a later read does
-// not conflict with it, and it activates after the arguments against only
-// the `retained` loans (Rust `record_call_place_access`). A `^` argument is
-// reserved and retained: nothing writes through it until the call runs, so a
-// later read that ends with its own evaluation (`grow(xs, xs.len())`) passes,
-// while one the call keeps holding, a move, or a second write conflicts at the
-// later argument.
+// `reserved` is a two-phase write reservation: a later read does not conflict
+// with it, and it activates after the arguments against only the `retained`
+// loans. A `^` argument is reserved and retained: nothing writes through it
+// until the call runs, so a later read that ends with its own evaluation
+// (`grow(xs, xs.len())`) passes, while one the call keeps holding, a move, or a
+// second write conflicts at the later argument.
 SemaOwnershipCallAccess: struct {
     place: SemaOwnershipPlace,
     access: AccessConvention,
@@ -3886,19 +3867,18 @@ SemaOwnershipCallAccess: struct {
     retained: Bool,
 }
 
-// Rust `check_call_place_access_kind`: the latest access of the call that
-// overlaps `place` with a write on either side. A later read (not itself a
-// reservation) passes a reserved `^` receiver, which activates after the
-// arguments. `holds` marks an access that outlives its argument's evaluation
-// (a retained read, a move, a lambda capture), which a reserved `^` argument
-// does not let pass.
+// The latest access of the call that overlaps `place` with a write on either
+// side. A later read (not itself a reservation) passes a reserved `^` receiver,
+// which activates after the arguments. `holds` marks an access that outlives
+// its argument's evaluation (a retained read, a move, a lambda capture), which
+// a reserved `^` argument does not let pass.
 sema_ownership_call_access_conflict: fn(accesses: [SemaOwnershipCallAccess], place: SemaOwnershipPlace, access: AccessConvention, reserved: Bool, holds: Bool) -> AccessConvention? Never! {
     index := accesses.len() - 1
     loop index >= 0 {
         active: accesses[index]
         index -= 1
-        // Only a generated borrow stays in Rust's call frame; a finished
-        // scalar or moved argument does not (`check_call_argument_access`).
+        // Only a generated borrow stays in the call frame; a finished scalar
+        // or moved argument does not.
         if !active.retained && !active.reserved -> next
         if !sema_ownership_places_overlap(active.place, place) -> next
         if active.reserved && access != AccessConvention.Write && !reserved && !(active.retained && holds) {
@@ -3911,9 +3891,9 @@ sema_ownership_call_access_conflict: fn(accesses: [SemaOwnershipCallAccess], pla
     None
 }
 
-// Rust `activate_call_reservations`: once the arguments are evaluated, a
-// reserved receiver conflicts with every loan the call still retains. A
-// reserved `^` argument was already checked against each later argument.
+// Once the arguments are evaluated, a reserved receiver conflicts with every
+// loan the call still retains. A reserved `^` argument was already checked
+// against each later argument.
 sema_ownership_activate_call_reservations: fn(accesses: [SemaOwnershipCallAccess], diagnostics: ^[Diagnostic]) -> Bool {
     accepted := true
     loop reservation in accesses {
@@ -3959,8 +3939,8 @@ sema_ownership_binding_is_expiring_secret_loan: fn(state: ^SemaOwnershipState, e
     false
 }
 
-// Rust `reject_expiring_secret_loan_change`: the `.with` callback's loan is
-// read-only; moving, changing or dropping it could let the credential escape.
+// The `.with` callback's loan is read-only; moving, changing or dropping it
+// could let the credential escape.
 sema_ownership_diag_expiring_secret_loan_change: fn(name: String, action: String, span: Span) -> Diagnostic {
     sema_error("E0201", span, "ExpiringSecret loan `{name}` cannot {action}", "the callback receives temporary read access; moving, changing, or dropping it could let the credential escape its expiry boundary", "use the loan only for read-only operations inside this callback")
 }
@@ -4006,11 +3986,10 @@ sema_ownership_diag_place_alias_move: fn(name: String, consumer: String, span: S
     sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "`{name}` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it", "write `{name}.copy()` when {consumer} should receive a copy, or move the place itself with `.move()` when this scope owns it")
 }
 
-// `borrowed_read` is Rust `check_call_argument_access`'s flag: a read argument
-// of a non-scalar read parameter keeps its loan through the call. `single_use`
-// is false for a receiver call: E0142 belongs to direct calls and function
-// values (check_callable_argument_ownership), never to a Core route or a method
-// call.
+// With `borrowed_read`, a read argument of a non-scalar read parameter keeps
+// its loan through the call. `single_use` is false for a receiver call: E0142
+// belongs to direct calls and function values
+// (check_callable_argument_ownership), never to a Core route or a method call.
 sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState, callee: String, params: [SemaCallParam], receiver: AccessConvention?, args: ^[CallArg], scopes: SemaScopeTable, diagnostics: ^[Diagnostic], initial_accesses: ^^[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool, borrowed_read: Bool, single_use: Bool) -> SemaOwnershipCheckResult {
     accesses := initial_accesses
     accepted := initial_accepted
@@ -4024,9 +4003,9 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
             complete = false
             next
         }
-        // Rust CallBinder `substitute_param_refs`: a default's reads of
-        // earlier parameters name the call's own slot temporaries, never a
-        // caller place, so those places take no part in the caller's checks.
+        // A default's reads of earlier parameters name the call's own slot
+        // temporaries, never a caller place, so those places take no part in
+        // the caller's checks.
         binder_rooted := false
         places := [SemaOwnershipPlace]{}
         if arg.flags.binder_refs.len() == 0 {
@@ -4068,9 +4047,9 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
                 .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
             }
         }
-        // E0204 (#4702, Rust `reject_take_while_lent`): an earlier argument
-        // of this call already holds the name, or the projected place
-        // (`pair(d.title, d.title.move())`), a take parameter would receive.
+        // E0204: an earlier argument of this call already holds the name, or
+        // the projected place (`pair(d.title, d.title.move())`), a take
+        // parameter would receive.
         take_lent: param.convention == AccessConvention.Move && !binder_rooted && (sema_ownership_unmarked_moves_name(arg.expr) || sema_ownership_takes_projected_place(arg)) && !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) && sema_ownership_call_places_lent(accesses, places)
         if !binder_rooted && !sema_ownership_check_argument_evaluation(state, accesses, arg, places.len() > 0, scopes, known, diagnostics) {
             accepted = false
@@ -4089,12 +4068,12 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
                 }
             }
             if !binder_rooted {
-                // Rust `check_call_arguments`: only a write parameter gates the
-                // argument's root on write capability; `^` toward a parameter
-                // that does not edit runs the change checks alone.
+                // Only a write parameter gates the argument's root on write
+                // capability; `^` toward a parameter that does not edit runs
+                // the change checks alone.
                 checked: if {
                     // An earlier argument's lambda moved its captures when it
-                    // was built; Rust infers each argument after the previous
+                    // was built; each argument is inferred after the previous
                     // one's captures, so a write to a moved place is E0121.
                     arg.convention == AccessConvention.Write && sema_ownership_moved_before(state, arg.expr, scopes) && !sema_ownership_check_moved_place_use(state, arg.expr, scopes, diagnostics) -> false
                     arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write_argument(state, arg.expr, callee, receiver, params, scopes, diagnostics)
@@ -4110,7 +4089,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
                 if !checked -> accepted = false
             }
             // A name reported in two slots (E0209 below) is settled: it lends
-            // nothing to the call, as in Rust `take_unmarked_last_use`.
+            // nothing to the call.
             twice: decision == SemaCallConventionDecision.NeedsImplicitClone && !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_twice, arg.expr)
             if !twice && (arg.convention != AccessConvention.Move || !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"})) {
                 write: arg.convention == AccessConvention.Write
@@ -4133,8 +4112,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: ^SemaOwnershipState
                 diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_source_span(arg.expr)))
                 next
             }
-            // A name in two argument slots of one call has
-            // no last use there (Rust `named_elsewhere`).
+            // A name in two argument slots of one call has no last use there.
             if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_twice, arg.expr) {
                 accepted = false
                 diagnostics.push(sema_ownership_diag_take_twice(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
@@ -4237,7 +4215,7 @@ sema_ownership_place_root_start: fn(expr: Expr) -> Int? Never! {
 }
 
 // A write window type (`ViewMut<T>`, `ComputeViewMut<T>`): its `^` place
-// construction stays written at a read parameter (Rust `is_window_type`).
+// construction stays written at a read parameter.
 sema_ownership_is_window_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> name == "ViewMut" || name == "ComputeViewMut"
@@ -4246,8 +4224,8 @@ sema_ownership_is_window_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// E0209 (Rust `take_unmarked_last_use` `named_elsewhere`): one call names
-// the same binding in two argument slots, so neither slot is its last use.
+// E0209: one call names the same binding in two argument slots, so neither slot
+// is its last use.
 sema_ownership_diag_take_twice: fn(name: String, callee: String, span: Span) -> Diagnostic {
     consumer: sema_ownership_callee_text(callee)
     sema_error("E0209", span, "`{name}` is passed to {consumer} more than once in this call", "a name used in two arguments of one call has no last use in that call, so {consumer} can't take `{name}` there", "write `{name}.copy()` in the argument that keeps a copy")
@@ -4287,8 +4265,8 @@ sema_ownership_mark_implicit_take: fn(state: ^SemaOwnershipState, expr: Expr, sc
     true
 }
 
-// (Rust `once_lambda_sites`): the lambda at `site` takes
-// its captured `capture` with `.move()`, so it can run only once.
+// The lambda at `site` takes its captured `capture` with `.move()`, so it can
+// run only once.
 sema_ownership_note_once_lambda: fn(state: ^SemaOwnershipState, site: Span, capture: String) Never! {
     loop once in state.once_lambdas {
         if sema_ownership_span_same(once.site, site) {
@@ -4298,8 +4276,7 @@ sema_ownership_note_once_lambda: fn(state: ^SemaOwnershipState, site: Span, capt
     state.once_lambdas.push(SemaOwnershipOnceLambda{site: site, key: "", capture: capture})
 }
 
-// (Rust `once_lambdas`): the binding `key` holds the
-// run-once lambda at `site`.
+// The binding `key` holds the run-once lambda at `site`.
 sema_ownership_bind_once_lambda: fn(state: ^SemaOwnershipState, site: Span, key: String) Never! {
     loop index in 0..<state.once_lambdas.len() {
         if sema_ownership_span_same(state.once_lambdas[index].site, site) {
@@ -4354,7 +4331,6 @@ sema_ownership_diag_stored_lambda_write: fn(name: String, span: Span) -[]> Diagn
     sema_error("E0204", span, "`{name}` is changed by a stored lambda that holds its own copy, so it can't be used here", "a stored lambda owns its captures: its writes land on its copy of `{name}` and never reach `{name}` itself", "call the lambda only where it is bound so it borrows `{name}`, or keep the value in a `Shared` or `Cell` the lambda and this code both reach")
 }
 
-// Rust `lambda_mut_borrow_active`.
 sema_ownership_lambda_write_borrow_active: fn(state: SemaOwnershipState, name: String) -> Bool Never! {
     loop borrow in state.lambda_write_borrows {
         if borrow.name == name -> return true
@@ -4503,14 +4479,13 @@ sema_ownership_call_once_lambda: fn(state: ^SemaOwnershipState, callee: Expr, sc
     }
 }
 
-// (Rust `take_unmarked_last_use`): the typed argument
-// check notes an unmarked argument to a take parameter that moves at its
-// name's last use. Only a plain owned local or take parameter of an ordinary
-// copyable value qualifies: any other argument (a value with cleanup, a type
-// parameter, a task, a view, a string view, a capture inside a lambda body)
-// the typed argument check marks as the parameter's take. Returns the noted
-// binding's symbol key, so the caller can find the same name in a later
-// argument (sema_ownership_note_implicit_take_twice).
+// The typed argument check notes an unmarked argument to a take parameter that
+// moves at its name's last use. Only a plain owned local or take parameter of
+// an ordinary copyable value qualifies: any other argument (a value with
+// cleanup, a type parameter, a task, a view, a string view, a capture inside a
+// lambda body) the typed argument check marks as the parameter's take. Returns
+// the noted binding's symbol key, so the caller can find the same name in a
+// later argument (sema_ownership_note_implicit_take_twice).
 sema_ownership_note_implicit_take: fn(state: ^SemaOwnershipState, expr: Expr, ty: Type, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], scopes: SemaScopeTable) -> String? Never! {
     if expr == .Ident(_, span, _) {
         facts: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, generic_params, false)
@@ -4602,7 +4577,7 @@ sema_ownership_argument_name: fn(arg: CallArg) -> String Never! {
 
 // The small receiver hook is separate because method resolution owns the
 // receiver convention.  It reserves the receiver only for the duration of a
-// call and therefore cannot leak a Rust-style borrow into later statements.
+// call and therefore cannot leak a borrow into later statements.
 sema_ownership_check_call_receiver: fn(state: ^SemaOwnershipState, receiver: Expr, convention: AccessConvention, scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     sema_ownership_check_call_receiver_as(state, receiver, convention, true, "", "", [SemaCallParam]{}, scopes, span, expr_span(receiver), diagnostics)
 }
@@ -4613,12 +4588,11 @@ sema_ownership_check_method_receiver: fn(state: ^SemaOwnershipState, receiver: E
     sema_ownership_check_call_receiver_as(state, receiver, convention, true, "", "`.{method}()`", [SemaCallParam]{}, scopes, span, expr_span(receiver), diagnostics)
 }
 
-// `change_span` anchors the missing write-capability report: the receiver for
-// a built-in method, the method name for a declared one (Rust passes
-// `receiver.span()` or the call span to `check_mutating_method_receiver`).
-// `consumer` names the method a consuming receiver moves into; empty when the
-// caller has no method spelling to show. `params` are the method's, for the
-// signature line a changeability error quotes.
+// `change_span` anchors the missing write-capability report: the receiver for a
+// built-in method, the method name for a declared one. `consumer` names the
+// method a consuming receiver moves into; empty when the caller has no method
+// spelling to show. `params` are the method's, for the signature line a
+// changeability error quotes.
 sema_ownership_check_call_receiver_as: fn(state: ^SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, params: [SemaCallParam], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     sema_ownership_note_call_receiver(state, receiver, convention)
     if scopes.writes_explicit && convention != AccessConvention.Read {
@@ -4757,8 +4731,8 @@ sema_receiver_mark_sign: fn(state: ^SemaOwnershipState, receiver: Expr, signatur
     }
 }
 
-// Rust's handle builders (`ProcessSpec` methods) report no receiver
-// convention: a builder chain `spec = spec.env(…)` neither writes nor takes.
+// The handle builders (`ProcessSpec` methods) report no receiver convention: a
+// builder chain `spec = spec.env(…)` neither writes nor takes.
 sema_receiver_mark_forget: fn(state: ^SemaOwnershipState, receiver: Expr) {
     span: expr_span(receiver)
     index := state.receiver_frames.len() - 1
@@ -4781,19 +4755,19 @@ sema_ownership_check_method_call: fn(state: ^SemaOwnershipState, callee: String,
     sema_ownership_check_method_call_as(state, callee, sema_ownership_receiver_consumer(callee), receiver, receiver_convention, true, false, true, params, args, scopes, span, expr_span(receiver), diagnostics)
 }
 
-// Rust `record_call_receiver_reservation`: ordinary method-call syntax
-// reserves a `^` receiver, evaluates the arguments, then activates the
-// exclusive borrow, so `out.push(out[i])` and `self.f(self.cursor)` read
-// the receiver before the edit begins. `borrowed_read` is false for a
-// built-in collection method, whose arguments retain no call loan;
-// `change_span` is where a missing write capability is reported.
+// Ordinary method-call syntax reserves a `^` receiver, evaluates the arguments,
+// then activates the exclusive borrow, so `out.push(out[i])` and
+// `self.f(self.cursor)` read the receiver before the edit begins.
+// `borrowed_read` is false for a built-in collection method, whose arguments
+// retain no call loan; `change_span` is where a missing write capability is
+// reported.
 sema_ownership_check_two_phase_method_call: fn(state: ^SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, borrowed_read: Bool, params: [SemaCallParam], args: ^[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: ^[Diagnostic]) -> SemaOwnershipCheckResult {
     sema_ownership_check_method_call_as(state, callee, consumer, receiver, receiver_convention, true, receiver_convention == AccessConvention.Write, borrowed_read, params, args, scopes, span, change_span, diagnostics)
 }
 
-// Rust `record_call_receiver_access`: a Core stream or codec handle writes
-// through the handle it names, so a write receiver keeps its call access and
-// change checks but asks no write capability of the binding holding it.
+// A Core stream or codec handle writes through the handle it names, so a write
+// receiver keeps its call access and change checks but asks no write capability
+// of the binding holding it.
 sema_ownership_check_handle_method_call: fn(state: ^SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, params: [SemaCallParam], args: ^[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaOwnershipCheckResult {
     sema_ownership_check_method_call_as(state, callee, sema_ownership_receiver_consumer(callee), receiver, receiver_convention, false, false, true, params, args, scopes, span, expr_span(receiver), diagnostics)
 }
@@ -5003,8 +4977,7 @@ sema_ownership_check_snapshot_receiver_call: fn(state: ^SemaOwnershipState, call
 
 // An allocator handle named as the receiver of `alloc`/`try_alloc` keeps its
 // Read call access but runs no place read on the name: the arena's `[fresh]`
-// views look into storage the handle does not read (Rust
-// `allocator_view_preserving_receiver`).
+// views look into storage the handle does not read.
 sema_ownership_check_allocator_handle_call: fn(state: ^SemaOwnershipState, callee: String, receiver: Expr, params: [SemaCallParam], args: ^[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: ^[Diagnostic]) -> SemaOwnershipCheckResult {
     sema_ownership_note_call_receiver(state, receiver, AccessConvention.Read)
     accesses: loop receiver_place in sema_ownership_places_from_expr_in_state(receiver, scopes, state) -> SemaOwnershipCallAccess{place: receiver_place, access: AccessConvention.Read, span: span, reserved: false, retained: true}
@@ -5058,12 +5031,11 @@ sema_ownership_owner_of_captured_window: fn(state: SemaOwnershipState, owner: St
 // Evaluated access walk
 //
 // What one call argument reads and writes while it is evaluated, and what its
-// lambdas capture when they are built (push_evaluated_access through
-// check_call_argument_captures). `bound` holds the names a lambda parameter or
-// a body binding shadows. A call nested in the argument was checked before this
-// call's accesses existed, so with `nested` the walk replays that call's
-// receiver and argument checks against them, as Rust checks every call against
-// each active call frame.
+// lambdas capture when they are built. `bound` holds the names a lambda
+// parameter or a body binding shadows. A call nested in the argument was
+// checked before this call's accesses existed, so with `nested` the walk
+// replays that call's receiver and argument checks against them: every call is
+// checked against each active call frame.
 
 SemaOwnershipAccessWalk: enum {
     EvaluateNow,
@@ -5101,15 +5073,15 @@ SemaOwnershipLambdaFacts: struct {
     moved: [String],
 }
 
-// The receiver access a method call resolved; `reserved` is a two-phase
-// `^` receiver (Rust `record_call_receiver_reservation`).
+// The receiver access a method call resolved; `reserved` is a two-phase `^`
+// receiver.
 SemaOwnershipReceiverAccess: struct {
     convention: AccessConvention,
     reserved: Bool,
 }
 
-// Rust `capture_place_info`: the capture prefix of a written place, its
-// type, and whether an index or range stopped it.
+// The capture prefix of a written place, its type, and whether an index or
+// range stopped it.
 SemaOwnershipCapturePlace: struct {
     place: SemaOwnershipPlace,
     ty: Type?,
@@ -5118,9 +5090,9 @@ SemaOwnershipCapturePlace: struct {
 
 sema_ownership_span_key: fn(span: Span) -> Int Never! { span.start * 4294967296 + span.end }
 
-// Rust lambda inference leaves the capture modes on the lambda; here the
-// checked lambda records them, and hands back what its own body state
-// recorded for the walk (receiver accesses, field types, inner lambdas).
+// The checked lambda records its capture modes, and hands back what its own
+// body state recorded for the walk (receiver accesses, field types, inner
+// lambdas).
 sema_ownership_note_lambda: fn(state: ^SemaOwnershipState, body: SemaOwnershipState, span: Span, facts: TCaptureFacts) Never! {
     loop (key, value) in body.lambda_facts -> state.lambda_facts[key] = value.copy()
     loop (key, value) in body.receiver_accesses -> state.receiver_accesses[key] = value.copy()
@@ -5135,7 +5107,7 @@ sema_ownership_note_lambda_facts: fn(state: ^SemaOwnershipState, span: Span, fac
     state.lambda_facts[sema_ownership_span_key(span)] = SemaOwnershipLambdaFacts{escapes: facts.escapes, cloned: facts.cloned.copy(), moved: facts.moved.copy()}
 }
 
-// Rust `place_expr_type` for a field read: the checked field type.
+// The place type of a field read: the checked field type.
 sema_ownership_note_place_type: fn(state: ^SemaOwnershipState, span: Span, ty: Type) Never! {
     // copy: `ty` stays with the checked field read.
     state.place_types[sema_ownership_span_key(span)] = ty.copy()
@@ -5147,9 +5119,9 @@ sema_ownership_note_call_views: fn(state: ^SemaOwnershipState, span: Span, facts
     state.call_views[sema_ownership_span_key(span)] = facts.copy()
 }
 
-// Rust `view_call_sources` for an evaluated call argument: the source places
-// a nested call's returned View keeps lent, each with the output slot it
-// fills. A copy of a plain read-only View is an owned value again.
+// The view sources of an evaluated call argument: the source places a nested
+// call's returned View keeps lent, each with the output slot it fills. A copy
+// of a plain read-only View is an owned value again.
 sema_ownership_call_result_views: fn(state: SemaOwnershipState, expr: Expr) -> [SemaCallReturnViewFact] {
     none := [SemaCallReturnViewFact]{}
     if expr == {
@@ -5248,9 +5220,8 @@ sema_ownership_call_view_projected: fn(sources: [SemaCallReturnViewFact], member
     projected
 }
 
-// Rust `record_call_result_views`: a nested call's own accesses end when it
-// returns, but a returned View keeps its source lent as an argument of the
-// enclosing call.
+// A nested call's own accesses end when it returns, but a returned View keeps
+// its source lent as an argument of the enclosing call.
 sema_ownership_record_call_result_views: fn(state: SemaOwnershipState, accesses: ^[SemaOwnershipCallAccess], expr: Expr, diagnostics: ^[Diagnostic]) -> Bool {
     span: expr_span(expr)
     loans := [SemaOwnershipCallAccess]{}
@@ -5282,8 +5253,7 @@ sema_ownership_record_call_result_views: fn(state: SemaOwnershipState, accesses:
     accepted
 }
 
-// Rust `place_from_expr`: a local, parameter or constant and its field,
-// index and range projections.
+// A local, parameter or constant and its field, index and range projections.
 sema_ownership_walk_place_shape: fn(expr: Expr, scopes: SemaScopeTable) -> Bool {
     if expr == {
         .Ident(name, span, _) -> {
@@ -5330,7 +5300,7 @@ sema_ownership_capture_place_info: fn(state: SemaOwnershipState, expr: Expr, sco
     }
 }
 
-// Rust `is_view` of the written root name.
+// Whether the written root name is a view.
 sema_ownership_walk_root_is_view: fn(state: SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
@@ -5342,8 +5312,7 @@ sema_ownership_walk_root_is_view: fn(state: SemaOwnershipState, expr: Expr, scop
     false
 }
 
-// Rust `lookup(name).param_conv.is_none()`: the root is an ordinary local,
-// neither a parameter nor a write window.
+// The root is an ordinary local, neither a parameter nor a write window.
 sema_ownership_walk_root_is_local: fn(scopes: SemaScopeTable, expr: Expr) -> Bool {
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
@@ -5351,7 +5320,7 @@ sema_ownership_walk_root_is_local: fn(scopes: SemaScopeTable, expr: Expr) -> Boo
     scopes.bindings[index].symbol.kind != SymbolKind.Parameter && scopes.bindings[index].access != AccessConvention.Write
 }
 
-// Rust `lookup(owner).ty`: the written root binding's type.
+// The written root binding's type.
 sema_ownership_walk_root_type: fn(scopes: SemaScopeTable, expr: Expr) -> Type? {
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return None
@@ -5364,8 +5333,7 @@ sema_ownership_walk_type_is_copy: fn(ty: Type?) -> Bool Never! {
     false
 }
 
-// Rust `method_receiver_access`: the receiver access the call resolved, else
-// the written `^` mark.
+// The receiver access the call resolved, else the written `^` mark.
 sema_ownership_walk_receiver_access: fn(state: SemaOwnershipState, receiver: Expr) -> AccessConvention Never! {
     unmarked := receiver
     written := false
@@ -5431,15 +5399,14 @@ sema_ownership_collect_lvalue_access: fn(state: ^SemaOwnershipState, target: LVa
     }
 }
 
-// Rust `collect_lambda_requirement_events`: the places the body reads and
-// writes become the lambda's construction requirements. A cloned capture is
-// read whole; an owned non-copy capture the lambda moves (its body moves it,
-// or it escapes without a clone) moves the captured place; a non-escaping
-// lambda that only reads copies a Copy value when it is built, and borrows
-// every other capture, so that capture (every capture of a lambda that
-// writes one, and a view) stays lent through the call that receives the
-// lambda, where the callee may run it: a write beside a borrowed capture in
-// that call conflicts.
+// The places the body reads and writes become the lambda's construction
+// requirements. A cloned capture is read whole; an owned non-copy capture the
+// lambda moves (its body moves it, or it escapes without a clone) moves the
+// captured place; a non-escaping lambda that only reads copies a Copy value
+// when it is built, and borrows every other capture, so that capture (every
+// capture of a lambda that writes one, and a view) stays lent through the call
+// that receives the lambda, where the callee may run it: a write beside a
+// borrowed capture in that call conflicts.
 sema_ownership_collect_lambda_requirement_events: fn(state: ^SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess]) {
     params: loop param in lambda.params -> param.name
     captured := [SemaOwnershipEvaluatedAccess]{}
@@ -5508,8 +5475,8 @@ sema_ownership_collect_evaluated_list: fn(state: ^SemaOwnershipState, values: [E
     }
 }
 
-// Rust's capture-requirement walk of call arguments: a `^` argument lends
-// its place for the call; it never moves the captured owner.
+// The capture-requirement walk of call arguments: a `^` argument lends its
+// place for the call; it never moves the captured owner.
 sema_ownership_collect_argument_requirements: fn(state: ^SemaOwnershipState, args: [CallArg], bound: [String], scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     loop arg in args {
         sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, SemaOwnershipAccessWalk.CaptureRequirements, bound, false, scopes, events, checks)
@@ -5765,8 +5732,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: ^SemaOwnershipState, e
     }
 }
 
-// Rust `Pattern.for_each_value_expr`: the values a pattern compares against
-// or looks up with, in source order.
+// The values a pattern compares against or looks up with, in source order.
 sema_ownership_pattern_value_exprs: fn(pattern: Pattern) -> [Expr] Never! {
     values := [Expr]{}
     sema_ownership_collect_pattern_values(pattern, values)
@@ -5822,7 +5788,7 @@ sema_ownership_collect_slot_values: fn(slot: PatSlot, values: ^[Expr]) Never! {
     }
 }
 
-// Rust `bind_pattern_names`: the names a matched pattern introduces.
+// The names a matched pattern introduces.
 sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: ^[String]) Never! {
     if pattern == {
         .Present(binding, _, inner, _) | .Ok(binding, _, inner, _) | .Err(binding, _, inner, _) -> {
@@ -6012,8 +5978,7 @@ sema_ownership_collect_evaluated_stmt_accesses: fn(state: ^SemaOwnershipState, b
     }
 }
 
-// Rust `collect_call_projection_accesses`: the index and range operands a
-// projected place argument evaluates.
+// The index and range operands a projected place argument evaluates.
 sema_ownership_collect_call_projection_accesses: fn(state: ^SemaOwnershipState, expr: Expr, nested: Bool, scopes: SemaScopeTable, events: ^[SemaOwnershipEvaluatedAccess], checks: ^[SemaOwnershipNestedCheck]) {
     if expr == {
         .Index(base, index, _, _, _) -> {
@@ -6048,8 +6013,8 @@ sema_ownership_append_nested_checks: fn(found: [SemaOwnershipNestedCheck], check
     }
 }
 
-// Rust `check_call_argument_access` (evaluating now) or
-// `check_call_argument_captures` (constructing) of one nested argument.
+// The access check (evaluating now) or the capture check (constructing) of one
+// nested argument.
 sema_ownership_nested_argument_checks: fn(state: ^SemaOwnershipState, arg: CallArg, mode: SemaOwnershipAccessWalk, scopes: SemaScopeTable, checks: ^[SemaOwnershipNestedCheck]) {
     transient := [SemaOwnershipEvaluatedAccess]{}
     inner := [SemaOwnershipNestedCheck]{}
@@ -6075,8 +6040,8 @@ sema_ownership_nested_argument_checks: fn(state: ^SemaOwnershipState, arg: CallA
     sema_ownership_append_nested_events(transient, checks)
 }
 
-// Rust `check_call_receiver_evaluation`, then the resolved receiver access
-// (`record_call_receiver_access` / `_reservation`) at the method name.
+// The receiver's evaluation check, then the resolved receiver access or
+// reservation at the method name.
 sema_ownership_nested_receiver_checks: fn(state: ^SemaOwnershipState, receiver: Expr, method_span: Span, mode: SemaOwnershipAccessWalk, scopes: SemaScopeTable, checks: ^[SemaOwnershipNestedCheck]) {
     transient := [SemaOwnershipEvaluatedAccess]{}
     inner := [SemaOwnershipNestedCheck]{}
@@ -6110,8 +6075,7 @@ sema_ownership_nested_receiver_checks: fn(state: ^SemaOwnershipState, receiver: 
     }
 }
 
-// Rust `infer_call_value`: the callee reads as a receiver, then its lambda
-// captures are built.
+// The callee reads as a receiver, then its lambda captures are built.
 sema_ownership_nested_called_value_checks: fn(state: ^SemaOwnershipState, callee: Expr, mode: SemaOwnershipAccessWalk, scopes: SemaScopeTable, checks: ^[SemaOwnershipNestedCheck]) {
     if mode == SemaOwnershipAccessWalk.EvaluateNow {
         sema_ownership_nested_receiver_value_check(state, callee, scopes, checks)
@@ -6162,9 +6126,9 @@ sema_ownership_check_nested_accesses: fn(accesses: [SemaOwnershipCallAccess], ch
     accepted
 }
 
-// Rust `check_call_argument_access` for what is evaluated before the
-// argument's own place: a composite argument's accesses, or a projected
-// place's index and range operands. Each ends with the evaluation.
+// The access check for what is evaluated before the argument's own place: a
+// composite argument's accesses, or a projected place's index and range
+// operands. Each ends with the evaluation.
 sema_ownership_check_argument_evaluation: fn(state: ^SemaOwnershipState, accesses: [SemaOwnershipCallAccess], arg: CallArg, is_place: Bool, scopes: SemaScopeTable, known: Int, diagnostics: ^[Diagnostic]) -> Bool {
     events := [SemaOwnershipEvaluatedAccess]{}
     checks := [SemaOwnershipNestedCheck]{}
@@ -6185,18 +6149,18 @@ sema_ownership_check_argument_evaluation: fn(state: ^SemaOwnershipState, accesse
     accepted
 }
 
-// Rust `check_call_argument_captures`: constructing the argument's lambdas
-// evaluates their captures now. A capture a non-escaping closure (or a
-// view) retains stays lent through the call; an owned move capture moves.
+// Constructing the argument's lambdas evaluates their captures now. A capture a
+// non-escaping closure (or a view) retains stays lent through the call; an
+// owned move capture moves.
 sema_ownership_check_argument_captures: fn(state: ^SemaOwnershipState, accesses: ^[SemaOwnershipCallAccess], arg: CallArg, scopes: SemaScopeTable, known: Int, diagnostics: ^[Diagnostic]) -> Bool {
     events := [SemaOwnershipEvaluatedAccess]{}
     checks := [SemaOwnershipNestedCheck]{}
     sema_ownership_collect_evaluated_expr_accesses(state, arg.expr, SemaOwnershipAccessWalk.ConstructCaptures, [String]{}, true, scopes, events, checks)
     accepted := sema_ownership_check_nested_accesses(accesses, checks, known, diagnostics)
     loop event in events {
-        // Every construction capture holds against a reserved `^` argument
-        // (Rust `check_call_place_access`): even a cloned one reads the place
-        // while the write is lent, as in a lambda nested in a struct field.
+        // Every construction capture holds against a reserved `^` argument:
+        // even a cloned one reads the place while the write is lent, as in a
+        // lambda nested in a struct field.
         if sema_ownership_call_access_conflict(accesses, event.place, event.access, false, true) == .Val(active) {
             accepted = false
             diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(event.place), active == AccessConvention.Write, sema_ownership_capture_site_span(event.site)))
@@ -6213,8 +6177,8 @@ sema_ownership_check_argument_captures: fn(state: ^SemaOwnershipState, accesses:
     accepted
 }
 
-// Rust `mark_moved_place_exact(place, span, "a lambda that captures it")`.
-// `ty` is the captured root's type.
+// An exact move of `place` by "a lambda that captures it". `ty` is the
+// captured root's type.
 sema_ownership_mark_capture_move: fn(state: ^SemaOwnershipState, place: SemaOwnershipPlace, ty: Type?, span: Span) Never! {
     loop moved in state.moved {
         if sema_ownership_place_exact(moved.place, place) {
@@ -6391,8 +6355,7 @@ sema_ownership_check_expression: fn(state: ^SemaOwnershipState, expr: Expr, scop
             valid := true
             receiver_places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
             // A receiver that names no binding (`String.from_bytes(..)`,
-            // `Int.parse(..)`) is a type or module path, not a value read
-            // (Rust ownership walks only value receivers).
+            // `Int.parse(..)`) is a type or module path, not a value read.
             static_receiver := false
             if receiver == .Ident(receiver_name, receiver_span, _) {
                 static_receiver = sema_scope_resolve_index_at(scopes, receiver_name, receiver_span) == None
@@ -6603,9 +6566,9 @@ sema_ownership_check_ident_reference: fn(state: ^SemaOwnershipState, name: Strin
 // ────────────────────────────────────────────────────────────────────────────
 // Branch and scope state
 
-// Branch facts are joined per key, like Rust `FlowFacts.merge_paths` rows:
-// `slots` holds a key's bucket in `rows` at its id in `names`, and each
-// bucket lists the merged rows of that key in merge order.
+// Branch facts are joined per key, one merged row set per path join: `slots`
+// holds a key's bucket in `rows` at its id in `names`, and each bucket lists
+// the merged rows of that key in merge order.
 sema_ownership_bucket_add: fn(names: ^NameTable, slots: ^[Int], rows: ^[[Int]], key: String, row: Int) Never! {
     if name_column_get(names, slots, key) == .Val(slot) -> rows[slot].push(row) else {
         name_column_set(names, slots, key, rows.len())
@@ -6905,10 +6868,10 @@ sema_ownership_join_reference: fn(index: SemaOwnershipState, limit: Int, anchors
     joined.push(reference.copy())
 }
 
-// The join of two paths of `fork` (Rust `FlowFacts.merge_paths`): what the
-// whole-state join of the fork's state and the two path states adds to the
-// fork's state. `index` holds the fork's rows before the fork's counts;
-// `found` is the share-site list of the join target.
+// The join of two paths of `fork`: what the whole-state join of the fork's
+// state and the two path states adds to the fork's state. `index` holds the
+// fork's rows before the fork's counts; `found` is the share-site list of the
+// join target.
 sema_ownership_path_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork, then_path: SemaOwnershipPath, else_path: SemaOwnershipPath, has_else: Bool, found: [SemaOwnershipShareSite]) -> SemaOwnershipPath Never! {
     next_seq := fork.next_seq
     if then_path.next_seq > next_seq -> next_seq = then_path.next_seq
@@ -7098,9 +7061,9 @@ sema_ownership_join_paths: fn(state: ^SemaOwnershipState, before: SemaOwnershipS
     sema_ownership_keep_mutations(state, else_state)
 }
 
-// This rule branch merge (Rust `UninitState.merge_paths`): a binding left
-// unwritten by either path stays unwritten, and a fixed-list slot counts as
-// written only where every path wrote it.
+// This rule branch merge: a binding left unwritten by either path stays
+// unwritten, and a fixed-list slot counts as written only where every path
+// wrote it.
 sema_ownership_uninit_join: fn(left: [SemaOwnershipUninitFact], right: [SemaOwnershipUninitFact]) -> [SemaOwnershipUninitFact] Never! {
     // copy: the join is the left facts themselves when the right adds none.
     if right.len() == 0 -> return left.copy()
@@ -7171,16 +7134,16 @@ sema_ownership_loop_path_to_depth: fn(path: SemaOwnershipState, target_depth: In
     normalized
 }
 
-// Rust `check_loop_move_backedge`: only a path that reaches the loop's back
-// edge (the end of a body that falls through, or a `next`) can repeat a move.
-// A move this pass of the body made of a binding declared outside the loop
-// (at or below `frame.scope_depth`), still standing here and not already
-// standing at loop entry, gives the value away again on the next iteration:
-// E0121 at the move, labeled as the earlier iteration's, or E0209 for an
-// unmarked take argument. Reinitializing the place in the body clears the
-// move before this point. A move that may become a share (an unmarked move of
-// a whole binding, an unmarked take argument) is reported once and dropped,
-// as a later use would; the next pass checks that site as the copy.
+// Only a path that reaches the loop's back edge (the end of a body that falls
+// through, or a `next`) can repeat a move. A move this pass of the body made of
+// a binding declared outside the loop (at or below `frame.scope_depth`), still
+// standing here and not already standing at loop entry, gives the value away
+// again on the next iteration: E0121 at the move, labeled as the earlier
+// iteration's, or E0209 for an unmarked take argument. Reinitializing the place
+// in the body clears the move before this point. A move that may become a share
+// (an unmarked move of a whole binding, an unmarked take argument) is reported
+// once and dropped, as a later use would; the next pass checks that site as the
+// copy.
 sema_ownership_check_loop_move_backedge: fn(state: ^SemaOwnershipState, frame: SemaLoopValueFrame, diagnostics: ^[Diagnostic]) Never! {
     // Rows that do not repeat stay in place; a repeated row leaves unless it
     // stays standing too. Walked from the back, so the reports reverse after.
@@ -7227,13 +7190,12 @@ sema_ownership_moved_reported: fn(diagnostics: [Diagnostic], site: Span) -> Bool
     false
 }
 
-// The join after a loop (Rust `FlowFacts.after_loop_value`). `fork` is the
-// mark the loop opened before its body (sema_ownership_mark); the body ran in
-// place, so `state` is the state after it. The join base is the fork state,
-// or with `outer` that state after leaving one more scope (a counted loop's
-// own scope). Paths: the base when the body may be skipped, the state after
-// the body when it falls through, and every recorded break, each left down
-// to the base depth.
+// The join after a loop. `fork` is the mark the loop opened before its body
+// (sema_ownership_mark); the body ran in place, so `state` is the state after
+// it. The join base is the fork state, or with `outer` that state after leaving
+// one more scope (a counted loop's own scope). Paths: the base when the body
+// may be skipped, the state after the body when it falls through, and every
+// recorded break, each left down to the base depth.
 sema_ownership_join_loop_value_paths: fn(state: ^SemaOwnershipState, context: SemaCheckContext, frame_index: Int, fork: SemaOwnershipFork, outer: Bool, body_falls_through: Bool, may_skip: Bool) -> Bool Never! {
     target_depth: if outer -> fork.scope_depth - 1 else -> fork.scope_depth
     found: state.share_found.copy()
@@ -7571,8 +7533,8 @@ sema_ownership_reject_frozen_write: fn(state: SemaOwnershipState, expr: Expr, ac
     true
 }
 
-// Rust carries_lending_view/report_lending_view_escape. Element reads do not
-// carry the window, while owning aggregate slots and transparent wrappers do.
+// Whether an expression carries a lending view out. Element reads do not carry
+// the window, while owning aggregate slots and transparent wrappers do.
 sema_ownership_carries_lending_view: fn(expr: Expr, name: String) -> Bool {
     if expr == {
         .Ident(found, _, _) -> return found == name

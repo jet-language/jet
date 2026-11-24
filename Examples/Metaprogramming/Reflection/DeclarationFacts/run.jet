@@ -42,8 +42,14 @@ build: fn(b: Build) {
     shown: [String]{"run.LIMIT", "run.Shape", "run.Shape.Circle", "run.Shape.Square", "run.Point", "run.Point.x", "run.Point.y", "run.Point.norm", "run.Meters", "run.Named", "run.Named.label", "run.helper", "run.helper.count", "run.helper.total"}
     records := [String:String]{}
     loop info in b.program.types() {
-        records[info.identity.identity] = "TypeInfo, kind {info.kind}"
-        if info.kind == "struct" {
+        kind: if info.identity.kind == {
+            .Struct -> "struct"
+            .Enum -> "enum"
+            .Distinct -> "distinct"
+            else -> "other"
+        }
+        records[info.identity.identity] = "TypeInfo, kind {kind}"
+        if info.identity.kind == .Struct {
             loop field in info.fields {
                 records["{info.identity.identity}.{field.name}"] = "FieldInfo of {info.name}"
             }

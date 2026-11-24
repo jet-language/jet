@@ -1,0 +1,15 @@
+// Guard: no compiler phase stops the process on an assumption about checked
+// input. Each `panic(` or `unreachable(` in a phase package's sources becomes
+// a keep-going report or is proven unreachable and deleted; until then
+// Tests/Guards/panic_ratchet.tsv holds each file's count, which may only fall.
+// The rule and its own tests live in Tools/Agent/PanicRatchet.jet.
+use {
+    panic_ratchet_process: core.process
+}
+
+#Test("panic_ratchet") {
+    guards_enter_root()
+    jet: md_jet()
+    ran: panic_ratchet_process.cmd([String]{jet, "Tools/Agent/PanicRatchet.jet"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tools/Agent/PanicRatchet.jet: {err}")
+    assert(ran.code == 0, panic_ratchet_process.combined_output(ran))
+}

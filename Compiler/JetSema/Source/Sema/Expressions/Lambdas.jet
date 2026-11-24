@@ -52,9 +52,9 @@ use jet_foundation.[
 // entered at `frame` reads: the latest-declared one that is either the
 // lambda's own (frame `frame` or deeper) or visible from the lambda's frame.
 // A local of an enclosing block that already closed (a finished loop body
-// keeps its rows in the table) is out of scope at the lambda, as in Rust's
-// lexical `lookup`; counting it made a lambda local of the same name, whose
-// `if` block has since rolled back, read as an outer capture.
+// keeps its rows in the table) is out of scope at the lambda under lexical
+// lookup; counting it made a lambda local of the same name, whose `if` block
+// has since rolled back, read as an outer capture.
 sema_expression_lambda_binding_frame: fn(name: String, use_span: Span, frame: Int, scopes: ^SemaScopeTable) -> Int Never! {
     selected_frame := -1
     selected_start := -1
@@ -1252,8 +1252,8 @@ sema_expression_lambda_collect_reference_keys: fn(state: ^SemaOwnershipState, fi
         reference: state.references[index]
         if sema_expression_lambda_outer_binding_key(reference.def_id, frame, scopes) != None {
             sema_expression_lambda_add_capture_key(keys, reference.def_id)
-            // Rust `block_collect_captures`: a `#Reactive` body writes its
-            // registration's clone, so the lambda only reads the root.
+            // A `#Reactive` body writes its registration's clone, so the lambda
+            // only reads the root.
             if reference.kind == SemaOwnershipReferenceKind.Write && !sema_ownership_in_reactive_body(state, reference.use_span) {
                 sema_expression_lambda_add_capture_key(mutable_keys, reference.def_id)
             }
@@ -1698,8 +1698,8 @@ sema_expression_lambda_block_value_type: fn(statements: [TStmt], fallback: Type)
     fallback.copy()
 }
 
-// Rust `infer_lambda`: a borrowed non-cloneable parameter captured by a
-// lambda that outlives the access, reported at the lambda.
+// A borrowed non-cloneable parameter captured by a lambda that outlives the
+// access, reported at the lambda.
 sema_expression_lambda_capture_diagnostic: fn(name: String, ty: Type, task_body: Bool, span: Span) -> Diagnostic {
     destination: if task_body -> "a spawned task" else -> "a stored lambda"
     sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by {destination}", "this function can access the parameter, but it does not own the value; a capture here takes ownership", "make the parameter owned: `{name}: ^^{type_name(ty)}`")
@@ -2127,7 +2127,7 @@ sema_expression_lambda_return_fits: fn(required: Type, offered: Type, environmen
     sema_type_assignable(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(offered, environment, program))
 }
 
-// Rust `check_lambda` checks the body against the whole expected return: an
+// A lambda body is checked against the whole expected return: an
 // `Ok(…)`/`Err(…)` written as the body's value builds that callback result
 // itself, as a function's `return Ok(…)` does, and so does a value `if` or
 // match whose arms build it (`if f() == { .Ok(b) -> Ok(b) … }`); any other
@@ -2244,12 +2244,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // The body interns into this check's type delta, handed back on every exit.
     sema_check_delta_pass(context.type_delta, lambda_context.type_delta)
     defer sema_check_delta_pass(lambda_context.type_delta, context.type_delta)
-    // Rust `iter_borrowed` (E0507) stays active in a lambda body: a body that
+    // The loop-borrow check (E0507) stays active in a lambda body: a body that
     // changes the collection an enclosing loop reads is refused there too.
     lambda_context.iter_borrowed = context.iter_borrowed.copy()
-    // (Rust `check_lambda`): this lambda is a `task` body when
-    // the spawn named it and no callable is expected of it. The fact and the
-    // propagation it harvests belong to this body alone, never a nested one.
+    // This lambda is a `task` body when the spawn named it and no callable is
+    // expected of it. The fact and the propagation it harvests belong to this
+    // body alone, never a nested one.
     task_body: !inline_loop && expected == None && context.taskgroups.spawn_body
     // A scoped child's captures it has no copy of are left to the spawn
     // check, which borrows them until the join (TCaptureFacts.lent).
@@ -2375,7 +2375,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             // returned value is lifted through `Ok`.
             lambda_scopes.return_type = if expected_ret == .Val(.Result(_, _)) && !task_body -> expected_ret.copy() else -> body_expected.copy()
             if task_body {
-                // Rust infers a callback carrier only for an expected
+                // A callback carrier is inferred only for an expected
                 // callable; a `task` body has none. A failure it propagates
                 // leaves through the enclosing callable's carrier
                 // (`task_body_propagates`), and its Task element stays the
@@ -2387,14 +2387,13 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 lambda_context.callback_return_closed = false
                 lambda_context.callback_return_row = None
             } else {
-                // A callback expected to return a Result
-                // propagates into that carrier. An unannotated callback whose
-                // expected function type returns a plain non-Unit value (or
-                // nothing), or that has no expected function type at all, infers
-                // its carrier from its first propagated call (the Rust reference's
-                // callback failure-carrier inference), so the closure's own type
-                // carries the failure. Every other callback has no failure route:
-                // a fallible call in it is E0403.
+                // A callback expected to return a Result propagates into that
+                // carrier. An unannotated callback whose expected function type
+                // returns a plain non-Unit value (or nothing), or that has no
+                // expected function type at all, infers its carrier from its first
+                // propagated call, so the closure's own type carries the failure.
+                // Every other callback has no failure route: a fallible call in it
+                // is E0403.
                 carrier_source := body_expected
                 if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
                 infers: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
@@ -2433,9 +2432,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     }
 
     first_reference := lambda_state.references.len()
-    // (Rust `record_share_site` keeps one checker-wide
-    // list): a share site the body finds is found for the enclosing function
-    // too, even when that use stops this body's check with its E0121.
+    // A share site the body finds is found for the enclosing function too, even
+    // when that use stops this body's check with its E0121.
     body_result_ty := Type.Named{name: "Unit"}
     executable := TLambdaBody?{None}
     if lambda_work.body == {
@@ -2595,9 +2593,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     loop name in direct_effects -> sema_expression_lambda_append_name(effect_seed, name)
     lambda_work.meta.effect_direct = direct_effects
     lambda_work.meta.effect_solved = effect_seed
-    // Rust `check_lambda` the lambda's call edges, so the
-    // enclosing function's effect node and the lambda's projected row both
-    // reach its callees.
+    // The lambda's call edges, so the enclosing function's effect node and the
+    // lambda's projected row both reach its callees.
     lambda_work.meta.effect_call_edges = effect_edges
     lambda_work.meta.effect_direct_spans = [EffectRowEntry]{}
     loop effect_span in effect_spans {
@@ -2605,14 +2602,13 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     }
     lambda_work.meta.effect_maximal = effect_maximal
 
-    // (Rust `once_lambda_sites`): a `.move()` take of a captured
-    // name inside the body moves it into the lambda, and the lambda runs
-    // once. The capture is gone for the enclosing body too. An explicit
-    // `task ^^name` capture keeps its own capture move. Only a task body, a
-    // lambda called where it is written, and a lambda bound to a local that
-    // only direct calls reach are known to run once (the binding's calls are
-    // counted); any other lambda is passed on or stored, may run again, and
-    // would move the capture again (E0121).
+    // A `.move()` take of a captured name inside the body moves it into the
+    // lambda, and the lambda runs once. The capture is gone for the enclosing
+    // body too. An explicit `task ^^name` capture keeps its own capture move.
+    // Only a task body, a lambda called where it is written, and a lambda bound
+    // to a local that only direct calls reach are known to run once (the
+    // binding's calls are counted); any other lambda is passed on or stored,
+    // may run again, and would move the capture again (E0121).
     if !inline_loop {
         loop moved in lambda_state.moved {
             // A `defer close(name)` of the enclosing body is pending at or
@@ -2764,9 +2760,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     atomic_walk := [String]{}
                     if {
                         // Escaping captures: a task group may flow only through a
-                        // direct `Group` parameter (E1110). Rust's lambda span ends
-                        // where its expression body's span ends (a call's span is its
-                        // name).
+                        // direct `Group` parameter (E1110). A lambda's span ends
+                        // where its expression body's span ends (a call's span is
+                        // its name).
                         escapes && !task_body && capture_ty == (Type.Named{name: "Group"}) -> {
                             escape_span: if ast_lambda_single_expr_span(lambda.body) == .Val(body_span) -> Span{start: lambda.span.start, end: body_span.end} else -> lambda.span
                             diagnostics.push(sema_error("E1110", escape_span, "`{binding.symbol.name}` is a `Group` and cannot escape in a lambda", "a task group is a scoped spawn authority that may flow only through a direct function or method parameter", "move this work to a function or method that takes `{binding.symbol.name}: Group` and call it directly"))
@@ -2844,7 +2840,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                                 borrowed -> {
                                     diagnostics.push(sema_expression_lambda_capture_diagnostic(binding.symbol.name, capture_ty, task_body, lambda.span))
                                     // A task still proves its result and detach
-                                    // crossings (E1102, E1103), as Rust continues.
+                                    // crossings (E1102, E1103).
                                     if !task_body -> return None
                                 }
                                 else -> {
@@ -2879,9 +2875,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         }
     }
 
-    // (Rust `fallible_propagation`): a `task` body that
-    // propagated into the enclosing carrier is not a total lambda, so it keeps
-    // its plain success type rather than taking the Never rail below.
+    // A `task` body that propagated into the enclosing carrier is not a total
+    // lambda, so it keeps its plain success type rather than taking the Never
+    // rail below.
     if task_body && lambda_context.task_body_propagates {
         lambda_work.meta.fallible_propagation = true
     }
@@ -2929,11 +2925,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         return None
     }
     // A concrete lambda's checked body, not a same-named file function,
-    // establishes its failure rail. An unconstrained total value lambda
-    // retains Never instead of acquiring the default Err at the call site.
-    // A `task` body is never called through a binding: its value is the
-    // task's `T` (Rust `infer_task_spawn`), and `join` adds the one
-    // `TaskFailure` rail.
+    // establishes its failure rail. An unconstrained total value lambda retains
+    // Never instead of acquiring the default Err at the call site. A `task`
+    // body is never called through a binding: its value is the task's `T`, and
+    // `join` adds the one `TaskFailure` rail.
     if expected == None && !inline_loop && !task_body && !lambda_work.meta.fallible_propagation && ret_ty != (Type.Named{name: "Unit"}) {
         has_carrier: if ret_ty == {
             .Result(_, _) | .Option(_) -> true
@@ -2947,11 +2942,11 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     }
     ret_slot := Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
-    // Rust `infer_lambda` (`check_aggregate_view_return`): a one-expression
-    // body whose result carries a view proves its owners as a `return` does,
-    // so a view into a local the enclosing function owns is E2305. The
-    // enclosing function's receiver and parameters stay stable sources; the
-    // check only reports, and leaves the lambda's recorded provenance as it was.
+    // A one-expression body whose result carries a view proves its owners as a
+    // `return` does, so a view into a local the enclosing function owns is
+    // E2305. The enclosing function's receiver and parameters stay stable
+    // sources; the check only reports, and leaves the lambda's recorded
+    // provenance as it was.
     if ast_lambda_single_expr_span(lambda.body) != None && program.registration_graph == .Val(view_graph) {
         view_seen := [U32:Bool]{}
         if sema_check_type_contains_view(view_graph, environment.module_identity, ret_ty, view_seen) {
@@ -3091,11 +3086,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // The lambda's flat nodes are rows of its arena, which continues this one.
     sema_arena_take_back(context, lambda_context.arena.move())
     // #3708: the callback's propagated failures stay rows of the enclosing
-    // body (the Rust body walk reads callbacks too); a callback that
-    // propagates into its own inferred carrier is a failure source. Statement
-    // direct sources stay in the lambda body, inline loops included: a
-    // collecting loop's item `Yield` or a `return` inside it never makes the
-    // owner fallible (the Rust reference's `in_lambda_body` gate).
+    // body; a callback that propagates into its own inferred carrier is a
+    // failure source. Statement direct sources stay in the lambda body, inline
+    // loops included: a collecting loop's item `Yield` or a `return` inside it
+    // never makes the owner fallible.
     loop edge_index in failure_edge_start..<lambda_context.failure_edges.len() {
         context.failure_edges.push(lambda_context.failure_edges[edge_index])
     }
@@ -3128,12 +3122,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     Val(checked)
 }
 
-// Rust `fallible_lambda_value` (codegen): a callback whose return is a `Result`
-// carrier (its fn slot's, its written error type's, or its inferred one) had
-// its body checked against the success type, so every success route hands back
-// `Ok(value)`. A value already in a carrier keeps it; one in the default `Err`
-// carrier with the same success type takes the callback's carrier. A `Never`
-// value stops before it returns anything.
+// A callback whose return is a `Result` carrier (its fn slot's, its written
+// error type's, or its inferred one) had its body checked against the success
+// type, so every success route hands back `Ok(value)`. A value already in a
+// carrier keeps it; one in the default `Err` carrier with the same success type
+// takes the callback's carrier. A `Never` value stops before it returns
+// anything.
 sema_expression_lambda_lift_value: fn(value: TExpr, carrier: Type) -> TExpr Never! {
     if carrier == .Result(carrier_ok, _) {
         if value.ty == .Result(value_ok, value_err) {
@@ -3156,9 +3150,9 @@ sema_expression_lambda_lift_value: fn(value: TExpr, carrier: Type) -> TExpr Neve
     value.copy()
 }
 
-// Rust `lift_fallible_lambda_returns`: lift the expression body, or every
-// `return` of a block body (its tail is one), into the `Result` carrier. A
-// shared block body stays as checked, as Rust reuses it unlifted.
+// Lift the expression body, or every `return` of a block body (its tail is
+// one), into the `Result` carrier. A shared block body stays as checked,
+// unlifted.
 sema_expression_lambda_lift_returns: fn(executable: TLambdaBody, carrier: Type) -> TLambdaBody Never! {
     // copy: the lifted body is a new owned TLambdaBody. For a non-Result carrier it equals
     // `executable`, the caller's checked body (a read parameter), which the caller keeps.

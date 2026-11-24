@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // One immutable git-archive export per commit for every proof chain.
 // Usage:
 //   jet Tools/Agent/ProofSource.jet SHA [REPOSITORY]
@@ -16,6 +15,7 @@ use {
     files: core.files
     json: core.encoding.json
     process: core.process
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
@@ -45,11 +45,8 @@ run: fn() {
 
 abort: fn(text: String) -[Exec, IO]> Never { process.fail(1, text) }
 
-// The shared scratch root of Tools/Agent/roots.sh.
-scratch_root: fn() -[Env]> String Never! {
-    cache: process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"
-    process.env_nonempty("JET_SCRATCH_ROOT") ?? (process.env_nonempty("JET_STATE_ROOT") ?? "{cache}/jet-dev")
-}
+// The shared scratch root (Tools/Agent/roots.env).
+scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }
 
 is_full_sha: fn(text: String) -> Bool Never! {
     text.len() == 40 && text.bytes().all(fn(byte) { (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}) })

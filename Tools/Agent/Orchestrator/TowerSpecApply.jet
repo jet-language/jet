@@ -169,7 +169,7 @@ run: fn() {
     spec: json.parse(files.read(args[0]))
     tool: "/Tools/Agent/Orchestrator/TowerSpecApply.jet"
     checkout: if sys.executable().ends_with(tool) -> sys.executable().removesuffix(tool) else -> "."
-    r: roots.roots()
+    r: roots.all()
     repo: files.absolute(process.env_nonempty("TOWER_SPEC_REPO") ?? checkout)
     writer: files.absolute(process.env_nonempty("TOWER_SPEC_WRITER") ?? "{r["JET_STATE_ROOT"]}/scratch/Main/tower-dev.mjs")
     patches: files.absolute(process.env_nonempty("TOWER_SPEC_PATCHES") ?? "{r["JET_SCRATCH_ROOT"]}/lanes/Main")

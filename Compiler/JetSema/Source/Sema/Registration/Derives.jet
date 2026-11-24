@@ -1,8 +1,7 @@
 // Built-in derive providers are the Prelude markers in
 // SEMA_PRELUDE_DERIVE_SOURCE (PreludeDerives.jet). Each selected capability
 // expands the marker's typed template body for one declaration and enters
-// registration as a compiler-generated trait block, exactly like the Rust
-// bootstrap's + `Comptime.expand_derive_body`.
+// registration as a compiler-generated trait block.
 //
 // Expansion is linear in the template: `#if` selects its branch before
 // the branch is expanded, `#loop` pushes one binding onto the shared scope
@@ -31,6 +30,7 @@ use {
         DeriveBodyItem,
         Diagnostic,
         DiagnosticLabel,
+        DiagnosticOrigin,
         DistinctDef,
         EffectRowEntry,
         EnumDef,
@@ -107,6 +107,8 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
+        diagnostic_with_origin,
+        diagnostic_with_source_path,
         expr_source_span,
         expr_span,
         foundation_size_alias,
@@ -118,6 +120,7 @@ use {
         owned_trait_implies,
         owned_trait_requested,
         owned_trait_structural_names,
+        sha256_hex,
         type_name,
     ]
     jet_parser.[
@@ -223,7 +226,7 @@ sema_derive_value_type_name: fn(value: CtValue) -> String Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Static condition evaluation (Rust `MirBridge.static_ct_value`).
+// Static condition evaluation.
 
 sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -> CtValue? Never! {
     if expression == {
@@ -694,9 +697,8 @@ sema_derive_static_binary: fn(op: BinOp, lhs: CtValue, rhs: CtValue) -> CtValue?
     Val(CtValue.Bool{value: result})
 }
 
-// Rust `comptime_literal_expr` / `build_fact_expr`: a template value becomes
-// the literal the parser would have produced for it; a unit enum stays a
-// value-carrying name so the typed boundary can fold it.
+// A template value becomes the literal the parser would have produced for it; a
+// unit enum stays a value-carrying name so the typed boundary can fold it.
 sema_derive_literal_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
     if value == {
         .Int(number) -> Val(Expr.Int{value: number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
@@ -1029,8 +1031,8 @@ sema_derive_fill_variant_bindings: fn(expansion: SemaDeriveExpansion, variant: S
     filled
 }
 
-// Rust `derive_payload_owner`: `self.#{field}` / `rhs.#{field}` inside a reflected
-// variant arm read the arm's payload locals.
+// `self.#{field}` / `rhs.#{field}` inside a reflected variant arm read the arm's
+// payload locals.
 sema_derive_field_payload_owner: fn(expansion: SemaDeriveExpansion, binding: String?) -> String? Never! {
     name: binding ?? return None
     left_value: sema_derive_scope_value(expansion, "left") ?? return None
@@ -1097,9 +1099,9 @@ sema_derive_pattern_test_from_enum_lit: fn(expansion: SemaDeriveExpansion, subje
     Expr.PatternTest{subject: subject, pattern: Pattern.Variant{variant: variant, bindings: bindings, leading_dot: true, span: span}, span: span, id: AST_NODE_GENERATED}
 }
 
-// Rust `coerce_derive_enum_arm`: an enum-literal arm of a reflected switch is a
-// variant pattern over the switch subject. `spliced` says the template arm
-// named a reflected variant (`.#{left}`), not a literal one.
+// An enum-literal arm of a reflected switch is a variant pattern over the
+// switch subject. `spliced` says the template arm named a reflected variant
+// (`.#{left}`), not a literal one.
 sema_derive_coerce_enum_arm: fn(expansion: SemaDeriveExpansion, cond: Expr, subject: Expr, spliced: Bool) -> Expr Never! {
     if cond == {
         .EnumLit(_, variant, _, args, _, span, _) -> sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span, spliced)
@@ -1132,7 +1134,7 @@ sema_derive_cond_splices_variant: fn(cond: Expr) -> Bool Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Expressions (Rust `expand_template_expr` / `expand_template_expr_node`).
+// Expressions.
 
 sema_derive_expand_exprs: fn(expansion: ^SemaDeriveExpansion, expressions: [Expr]) -> [Expr] Never! {
     expanded := [Expr]{}
@@ -1437,7 +1439,7 @@ sema_derive_expand_field: fn(expansion: ^SemaDeriveExpansion, base: Expr, member
 }
 
 // ---------------------------------------------------------------------------
-// Statements (Rust `expand_template_stmts` and friends).
+// Statements.
 
 sema_derive_expand_stmts: fn(expansion: ^SemaDeriveExpansion, stmts: [Stmt]) -> [Stmt] Never! {
     out := [Stmt]{}
@@ -1530,8 +1532,7 @@ sema_derive_expand_loop_block: fn(expansion: ^SemaDeriveExpansion, body: [Stmt],
     loop inner in sema_derive_expand_stmts(expansion, body) -> out.push(inner)
 }
 
-// Rust `eval_template_loop_source`: a reflected list, or a closed list of
-// written type names as text bindings.
+// A reflected list, or a closed list of written type names as text bindings.
 sema_derive_loop_values: fn(expansion: SemaDeriveExpansion, source: Expr) -> [CtValue]? Never! {
     value := sema_derive_static_value(expansion, source)
     if value == None {
@@ -1679,7 +1680,7 @@ sema_derive_expand_stmt: fn(expansion: ^SemaDeriveExpansion, stmt: Stmt) -> Stmt
 }
 
 // ---------------------------------------------------------------------------
-// Items (Rust `expand_template_item`).
+// Items.
 
 sema_derive_expand_markers: fn(expansion: ^SemaDeriveExpansion, markers: [Marker]) -> [Marker] Never! {
     expanded := [Marker]{}
@@ -1880,10 +1881,9 @@ sema_derive_expand_item: fn(expansion: ^SemaDeriveExpansion, item: Item) -> Item
     }
 }
 
-// Rust `expand_derive_items`: a body-level `name: value` binds a template
-// value; items expand against the current scope; a template loop expands its
-// items once per source value; a template `if` expands only the chosen
-// branch, whose bindings end with it.
+// A body-level `name: value` binds a template value; items expand against the
+// current scope; a template loop expands its items once per source value; a
+// template `if` expands only the chosen branch, whose bindings end with it.
 sema_derive_expand_body: fn(expansion: ^SemaDeriveExpansion, body: [DeriveBodyItem], out: ^[Item]) Never! {
     loop body_item in body {
         if expansion.failure != None {
@@ -1908,8 +1908,8 @@ sema_derive_expand_body: fn(expansion: ^SemaDeriveExpansion, body: [DeriveBodyIt
                     }
                     expansion.scope.push(NamedCtValue{name: binding.name, value: known})
                 } else {
-                    // Rust `exec_block`: a statement between template items
-                    // runs against the template scope; it generates nothing.
+                    // A statement between template items runs against the
+                    // template scope; it generates nothing.
                     expanded: sema_derive_expand_stmt(expansion, stmt)
                     sema_derive_exec_stmt(expansion, expanded)
                     if expansion.failure != None {
@@ -1986,8 +1986,8 @@ sema_derive_debug_shown: fn(locals: [BuildDebugLocal], name: String) -> Bool Nev
     false
 }
 
-// Rust's typed selector reports an unknown field as E0302; any other binding
-// the expansion cannot read is E0956.
+// The typed selector reports an unknown field as E0302; any other binding the
+// expansion cannot read is E0956.
 sema_derive_binding_failure: fn(expansion: SemaDeriveExpansion, span: Span, init: Expr) -> Diagnostic Never! {
     if init == .Index(base, index, _, _, _) {
         field := sema_derive_layout_selector(index)
@@ -2014,14 +2014,14 @@ sema_derive_stmt_span: fn(stmt: Stmt) -> Span Never! {
     }
 }
 
-// Rust `jet_e0956_unsupported`: the registered E0956 row with its `what` hole.
+// The registered E0956 row with its `what` hole.
 sema_derive_unsupported: fn(span: Span, what: String) -> Diagnostic Never! {
     sema_error("E0956", span, "`{what}` isn't supported by the current evaluator yet", "the canonical evaluator doesn't cover this construct yet", "report this unsupported construct as a compiler bug")
 }
 
-// Rust `Interp.exec_block` over a template statement: the statement runs
-// against the template scope for its checks (`if`, `reject`) and generates
-// nothing. A binding inside a nested block lives until the block ends.
+// A template statement runs against the template scope for its checks (`if`,
+// `reject`) and generates nothing. A binding inside a nested block lives until
+// the block ends.
 sema_derive_exec_stmts: fn(expansion: ^SemaDeriveExpansion, stmts: [Stmt]) Never! {
     depth: expansion.scope.len()
     loop stmt in stmts {
@@ -2216,8 +2216,8 @@ sema_derive_report_text: fn(definition: ImplDef, name: String, value: CtValue) -
     None
 }
 
-// Rust `Comptime.expand_derive_body`: `name` and the template's `target` are
-// bound to the target's reflected handle.
+// `name` and the template's `target` are bound to the target's reflected
+// handle.
 sema_derive_expand_provider_body: fn(body: [DeriveBodyItem], type_info: CtValue, diagnostics: ^[Diagnostic]) -> [Item]? {
     sema_derive_expand_rule_body(body, "target", type_info, None, [SemaDeriveReport]{}, None, "", diagnostics)
 }
@@ -2237,10 +2237,9 @@ sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, typ
     sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics, origin, reserved_pastes)
 }
 
-// Rust `Comptime.expand_template_body`: expand one typed item template in
-// the caller's compile-time scope. A failed expansion reports its one
-// diagnostic and generates nothing. `reserved_pastes` is false for a
-// package's template (sema_derive_paste_refused).
+// Expand one typed item template in the caller's compile-time scope. A failed
+// expansion reports its one diagnostic and generates nothing. `reserved_pastes`
+// is false for a package's template (sema_derive_paste_refused).
 sema_derive_expand_template_body: fn(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: ^[Diagnostic], reserved_pastes: Bool{true}) -> [Item]? {
     sema_derive_expand_scoped(body, scope, [SemaDeriveReport]{}, None, "", diagnostics, None, reserved_pastes)
 }
@@ -2315,7 +2314,7 @@ sema_derive_ct_str: fn(name: String, value: String) -> NamedCtValue {
 }
 
 // A payload type reads as its written name; a nominal applied to no arguments
-// is the nominal itself (Rust `normalize_recursive_payload_type`).
+// is the nominal itself.
 sema_derive_type_text: fn(ty: Type) -> String {
     if ty == .Apply(name, args) {
         if args.len() == 0 -> return name
@@ -2343,11 +2342,31 @@ sema_derive_field_info: fn(name: String, ty: Type, is_pub: Bool, default: Span?)
     sema_derive_ct_struct("FieldInfo", [NamedCtValue]{sema_derive_ct_str("name", name), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(ty))}, NamedCtValue{name: "is_pub", value: CtValue.Bool{value: is_pub}}, NamedCtValue{name: "default", value: default_info}})
 }
 
-sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], base: String?) -> CtValue {
-    rows := [NamedCtValue]{sema_derive_ct_str("name", name), sema_derive_ct_str("path", name), NamedCtValue{name: "fields", value: CtValue.List{values: fields}}, NamedCtValue{name: "cases", value: CtValue.List{values: cases}}}
-    if base == .Val(text) -> rows.push(sema_derive_ct_str("base", text))
-    rows.push(sema_derive_ct_str("kind", kind))
-    sema_derive_ct_struct("TypeInfo", rows)
+// The partial TypeInfo a builtin derive provider reads. Its `identity` says
+// what the type is: its `kind` (a TypeKind variant), and a distinct type's
+// `base` binding (`bindings`). Its `methods` lists only those a provider
+// asks after (`has_method`).
+sema_derive_type_info: fn(name: String, kind: String, fields: [CtValue], cases: [CtValue], methods: [CtValue], bindings: [CtValue]) -> CtValue {
+    identity: sema_derive_ct_struct(
+        "TypeId",
+        [NamedCtValue]{
+            sema_derive_ct_str("identity", name),
+            sema_derive_ct_str("name", name),
+            NamedCtValue{name: "generic_bindings", value: CtValue.List{values: bindings}},
+            NamedCtValue{name: "kind", value: CtValue.Enum{type_name: "TypeKind", variant: kind, args: [CtEnumArg]{}}},
+        },
+    )
+    sema_derive_ct_struct(
+        "TypeInfo",
+        [NamedCtValue]{
+            sema_derive_ct_str("name", name),
+            sema_derive_ct_str("path", name),
+            NamedCtValue{name: "identity", value: identity},
+            NamedCtValue{name: "fields", value: CtValue.List{values: fields}},
+            NamedCtValue{name: "cases", value: CtValue.List{values: cases}},
+            NamedCtValue{name: "methods", value: CtValue.List{values: methods}},
+        },
+    )
 }
 
 sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
@@ -2360,12 +2379,15 @@ sema_derive_struct_type_info: fn(definition: StructDef) -> CtValue {
         }
         fields.push(sema_derive_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, definition.fields[field_index].is_pub, default))
     }
-    sema_derive_type_info(definition.name, "struct", fields, [CtValue]{}, None)
+    sema_derive_type_info(definition.name, "Struct", fields, [CtValue]{}, [CtValue]{}, [CtValue]{})
 }
 
-// A KeyBy type's derive input: its members compare its `key()` values.
-sema_derive_key_type_info: fn(name: String) -> CtValue {
-    sema_derive_type_info(name, "key", [CtValue]{}, [CtValue]{}, None)
+// A KeyBy type's derive input, `kind` its Struct or Enum: its members
+// compare its `key()` values, so it lists that one method and no fields or
+// cases.
+sema_derive_key_type_info: fn(name: String, kind: String) -> CtValue {
+    key: sema_derive_ct_struct("MethodInfo", [NamedCtValue]{sema_derive_ct_str("name", "key")})
+    sema_derive_type_info(name, kind, [CtValue]{}, [CtValue]{}, [CtValue]{key}, [CtValue]{})
 }
 
 // An enum lists its leaf cases as CaseInfo rows under `cases`, as the
@@ -2398,11 +2420,13 @@ sema_derive_enum_type_info: fn(definition: EnumDef) -> CtValue {
             ),
         )
     }
-    sema_derive_type_info(definition.name, "enum", [CtValue]{}, cases, None)
+    sema_derive_type_info(definition.name, "Enum", [CtValue]{}, cases, [CtValue]{}, [CtValue]{})
 }
 
+// A distinct type binds its base type as `base`, as its TypeId does.
 sema_derive_distinct_type_info: fn(definition: DistinctDef) -> CtValue {
-    sema_derive_type_info(definition.name, "distinct", [CtValue]{}, [CtValue]{}, Val(sema_derive_type_text(definition.base)))
+    base: sema_derive_ct_struct("GenericBindingInfo", [NamedCtValue]{sema_derive_ct_str("name", "base"), NamedCtValue{name: "type", value: sema_derive_type_id(sema_derive_type_text(definition.base))}})
+    sema_derive_type_info(definition.name, "Distinct", [CtValue]{}, [CtValue]{}, [CtValue]{}, [CtValue]{base})
 }
 
 sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: Type) -> Type Never! {
@@ -2473,11 +2497,19 @@ sema_derive_owner_type: fn(name: String, type_params: [TypeParam]) -> Type {
 // (`impl #{name}.Equatable { … }`) and spells the target `#{name}`, which
 // becomes the owner type with its parameters; the impl's methods are the
 // derived members. A failed expansion reports its diagnostic and generates
-// nothing. The template's expansion is taken from or kept in `memo`
+// nothing; that diagnostic's spans are offsets into the template's text, so
+// it is placed in `Prelude/Derives.jet`, not in the target's file. The
+// template's expansion is taken from or kept in `memo`
 // (sema_derive_memo_expand).
 sema_derive_expand_builtin_provider: fn(providers: [MarkerDecl], trait_name: String, target_name: String, target_span: Span, owner_type: Type, type_info: CtValue, memo: ^SemaDeriveMemo, diagnostics: ^[Diagnostic]) -> TraitImplBlock? {
     provider: sema_derive_provider(providers, trait_name) ?? return None
-    expanded: sema_derive_memo_expand(memo, trait_name, provider.body ?? [DeriveBodyItem]{}, type_info, diagnostics) ?? return None
+    failed := [Diagnostic]{}
+    expansion: sema_derive_memo_expand(memo, trait_name, provider.body ?? [DeriveBodyItem]{}, type_info, failed)
+    loop index in 0..<failed.len() {
+        origin: DiagnosticOrigin{display: SEMA_PRELUDE_DERIVE_SOURCE_PATH, path: SEMA_PRELUDE_DERIVE_SOURCE_PATH, source: SEMA_PRELUDE_DERIVE_SOURCE, revision: sha256_hex(SEMA_PRELUDE_DERIVE_SOURCE)}
+        diagnostics.push(diagnostic_with_origin(diagnostic_with_source_path(failed[index], SEMA_PRELUDE_DERIVE_SOURCE_PATH, 0), origin))
+    }
+    expanded: expansion ?? return None
     methods := [Func]{}
     loop item in expanded {
         if item == .Impl(definition) && (definition.trait_name ?? "") == trait_name {
@@ -2642,10 +2674,9 @@ sema_derive_has_codec_method: fn(index: SemaDeriveItemIndex, type_name: String, 
 }
 
 // ---------------------------------------------------------------------------
-// Structural auto-derive selection (Rust `TraitRegistry.compute_auto_derive`
-// for Equatable and Comparable over one module's items). Every requesting
-// declaration is first assumed to derive; one whose own fields fail, and
-// every declaration that relied on it, transitively, loses the derive.
+// Structural auto-derive selection. Every requesting declaration is first
+// assumed to derive; one whose own fields fail, and every declaration that
+// relied on it, transitively, loses the derive.
 //
 // A codec reaches across modules: a field whose type another module declares
 // qualifies when the graph's own fixed point gives that type the codec
@@ -2679,9 +2710,9 @@ sema_derive_candidate_add: fn(readiness: ^SemaDeriveReadiness, name: String, nod
 }
 
 sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
-    // Rust `implements_trait` for a codec: the scalars, the sealed dynamic
-    // tree (`is_data_type_name`, the identity bridge), and the Core value
-    // carriers whose Core source declares their codec (`sema_serde_type_is_admissible`).
+    // A codec admits the scalars, the sealed dynamic tree (`is_data_type_name`,
+    // the identity bridge), and the Core value carriers whose Core source
+    // declares their codec (`sema_serde_type_is_admissible`).
     if owned_trait_codec(trait_name) {
         if name == "Int" || name == "Float" || name == "Bool" || name == "String" || name == "Char" || name == "U8" {
             return true
@@ -2694,8 +2725,7 @@ sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
     if name == "Int" || name == "Bool" || name == "String" || name == "Char" || name == "U8" || name == "Ordering" || name == "Float" || name == "Float32" {
         return true
     }
-    // The Prelude carriers with registered value
-    // equality and order (Rust `register_synthetic_display_debug`).
+    // The Prelude carriers with registered value equality and order.
     if name == "DateTime" || name == "LocalDate" || name == "LocalTime" || name == "Duration" || name == "Instant" || name == "ZonedDateTime" {
         return true
     }
@@ -2703,9 +2733,9 @@ sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
     name == "Range" || name == "TLSVersion" || name == "EncodingErrorKind" || name == "EncodingFormat" || name == "EncodingCause" || name == "EncodingError" || name == "EncodingLimits" || name == "DataError" || name == "DataErrorKind" || name == "DataLimits" || name == "ComputeError"
 }
 
-// Rust `implements_trait` over this module's declarations. A name this
-// module does not declare answers from the other modules' codecs
-// (sema_derive_foreign_ready).
+// Whether `name` implements the trait, answered over this module's
+// declarations. A name this module does not declare answers from the other
+// modules' codecs (sema_derive_foreign_ready).
 sema_derive_implements: fn(readiness: ^SemaDeriveReadiness, items: [Item], name: String) -> Bool {
     if owned_trait_implies("KeyBy", readiness.trait_name) && sema_derive_has_trait_impl(readiness.indexes[readiness.module], name, "KeyBy") {
         return true
@@ -2758,9 +2788,8 @@ sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
 
 sema_derive_type_ready: fn(readiness: ^SemaDeriveReadiness, items: [Item], ty: Type, type_params: [TypeParam]) -> Bool {
     comparable: readiness.trait_name == "Comparable"
-    // Rust `auto_derive_type_ready`: a codec has no wire form for a Result,
-    // a tuple, a tagged or quantity carrier, a compile-time measure, or a map
-    // keyed by anything but `String`.
+    // A codec has no wire form for a Result, a tuple, a tagged or quantity
+    // carrier, a compile-time measure, or a map keyed by anything but `String`.
     codec: owned_trait_codec(readiness.trait_name)
     if ty == {
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(readiness, items, inner, type_params)
@@ -3719,7 +3748,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
-            type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_struct_type_info(definition)
+            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Struct") else -> sema_derive_struct_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
@@ -3733,7 +3762,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
             comparable: keyed || sema_derive_has_name(definition.derives, "Comparable") || name_find(auto_comparable, definition.name) != None
             if !equatable && !comparable -> return blocks.move()
             owner_type: sema_derive_owner_type(definition.name, definition.type_params)
-            type_info: if keyed -> sema_derive_key_type_info(definition.name) else -> sema_derive_enum_type_info(definition)
+            type_info: if keyed -> sema_derive_key_type_info(definition.name, "Enum") else -> sema_derive_enum_type_info(definition)
             loop trait_name in owned_trait_structural_names() {
                 wanted: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next

@@ -56,9 +56,8 @@ sema_time_clock_is_deterministic: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// A pure function's Clock parameter is injected by its caller, so the body
-// reads it as a deterministic clock (Rust Registration `deterministic_clock_type`).
-// None when `ty` is not an untagged Clock.
+// A pure function's Clock parameter is injected by its caller, so the body reads it
+// as a deterministic clock. None when `ty` is not an untagged Clock.
 sema_time_injected_clock: fn(ty: Type) -> Type? Never! {
     if !sema_call_is_clock_type(ty) || sema_time_clock_is_deterministic(ty) -> return None
     // copy: `ty` is a read parameter; the tag's `inner` owns this one

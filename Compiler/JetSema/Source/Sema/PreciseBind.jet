@@ -1,50 +1,66 @@
 // An exact number's operations run core.math's own source. A checked precise
 // operation on a Decimal, Fraction or Complex (`a + b`, `d.to_float()`, a
 // literal's constructor, a Complex magnitude) names the type and the
-// operation; core.math declares the function that runs it as
-// `__{type}_{operation}` (`Decimal` `add` is `__decimal_add`). Once a body is
-// checked, each such operation whose function core.math declares becomes a
-// direct call of it, so Core demand, reachability and lowering follow it as
-// any other call. The rest stay the operation, which JetIR lowers: a Fraction
-// `/`, whose zero divisor stops at the operator's own line before Core runs
-// (ir_precise_division), and, in a program without core.math, every one,
-// through its runtime route (ir_precise_route).
-use jet_foundation.[BodyCallArg, BodyHandleOp, BodyTree, NodeKind, SymbolID, Type, module_is_core]
+// operation; the core.math function that runs it fills the jet_builtins role
+// of the two (sema_precise_role: `Decimal` `add` is DecimalAdd). Once a body
+// is checked, each such operation whose role a core.math function fills
+// becomes a direct call of it, so Core demand, reachability and lowering
+// follow it as any other call. The rest stay the operation, which JetIR
+// lowers: a Fraction `/`, whose zero divisor stops at the operator's own line
+// before Core runs (ir_precise_division), and, in a program without
+// core.math, every one, through its runtime route (ir_precise_route).
+use jet_foundation.[BodyCallArg, BodyHandleOp, BodyTree, NodeKind, SymbolID, Type, module_is_core, sema_casing_pascal_words, sema_casing_snake_words]
 
-// The core.math precise type (`Decimal`, `Fraction`, `Complex`) one of whose
-// operations the core.math function `name` runs (`__decimal_add` runs
-// Decimal's `add`), or None. Only a value of that type reaches it.
-sema_precise_family_owner: fn(name: String) -> String? Never! {
-    loop owner in ["Decimal", "Fraction", "Complex"] {
-        if name.starts_with(sema_precise_function_prefix(owner)) -> return Val(owner)
+// The types whose checked operations run core.math functions.
+SEMA_PRECISE_TYPES: [String]{"Decimal", "Fraction", "Complex"}
+
+// The jet_builtins role of the core.math function that runs `operation` of
+// precise type `owner`: the type, then the operation's words (`Fraction`
+// `try_int` is FractionTryInt).
+sema_precise_role: fn(owner: String, operation: String) -> String Never! {
+    "{owner}{sema_casing_pascal_words(operation)}"
+}
+
+// A precise type and one of its operations.
+SemaPreciseRole: struct {
+    owner: String,
+    operation: String,
+}
+
+// The precise type and operation whose core.math function fills `role`
+// (sema_precise_role), or None for any other role.
+sema_precise_role_operation: fn(role: String) -> SemaPreciseRole? Never! {
+    loop owner in SEMA_PRECISE_TYPES {
+        if role.len() <= owner.len() || !role.starts_with(owner) -> next
+        operation: sema_casing_snake_words(role.slice(owner.len(), role.len()))
+        if sema_precise_role(owner, operation) == role -> return Val(SemaPreciseRole{owner: owner, operation: operation})
     }
     None
 }
 
-// The name every core.math function running an operation of precise type
-// `owner` starts with.
-sema_precise_function_prefix: fn(owner: String) -> String Never! {
-    "__{owner.lower()}_"
-}
-
-// A checked precise operation: the core.math function that would run it and
-// the nodes it passes, in order (a method's receiver first).
+// A checked precise operation: the role of the core.math function that would
+// run it and the nodes it passes, in order (a method's receiver first).
 SemaPreciseOperation: struct {
-    function: String,
+    role: String,
     args: [Int],
 }
 
-// Rewrites each precise operation of the finished body `tree` whose
-// core.math function exists into a direct call of that function.
+// Rewrites each precise operation of the finished body `tree` whose role a
+// core.math function fills into a direct call of that function.
 sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
     if program.registration_graph == .Val(graph) {
         // Found on the first precise operation: most bodies hold none.
         math := -2
+        fillers := [String:String]{}
         loop index in 0..<tree.nodes.len() {
             operation: sema_precise_operation(tree.nodes[index].kind) ?? next
-            if math == -2 -> math = sema_precise_math_module(graph) ?? -1
+            if math == -2 {
+                math = sema_precise_math_module(graph) ?? -1
+                if math >= 0 -> fillers = sema_precise_fillers(graph, math)
+            }
             if math < 0 -> return
-            export: sema_registration_direct_symbol(graph.modules[math], operation.function) ?? next
+            name: fillers.get(operation.role) ?? next
+            export: sema_registration_direct_symbol(graph.modules[math], name) ?? next
             callee: sema_registration_callable_id(graph, export.symbol.id) ?? next
             args := [BodyCallArg]{}
             loop argument in operation.args {
@@ -53,6 +69,19 @@ sema_precise_bind: fn(tree: ^BodyTree, program: SemaProgramTables) Never! {
             tree.nodes[index].kind = NodeKind.Call{callee: callee, type_args: [Type]{}, args: args}
         }
     }
+}
+
+// The name of each function of core.math (registration row `math`) that
+// fills a precise operation's role, by that role.
+sema_precise_fillers: fn(graph: SemaRegistrationGraph, math: Int) -> [String:String] Never! {
+    fillers := [String:String]{}
+    module_row: graph.modules[math]
+    loop function in module_row.functions {
+        if function.declaration.markers.len() == 0 -> next
+        role: sema_core_role(function.declaration.markers, graph, module_row.module_identity)
+        if sema_precise_role_operation(role) != None -> fillers[role] = function.declaration.name.copy()
+    }
+    fillers
 }
 
 // The registration row of the loaded core.math module, or None.
@@ -86,27 +115,29 @@ sema_precise_operation: fn(kind: NodeKind) -> SemaPreciseOperation? Never! {
 // method's; -1 for none) and then `args`. A Fraction `div` stays the
 // operation: JetIR tests its divisor first.
 sema_precise_operation_of: fn(type_name: String, function: String, receiver: Int, args: [Int]) -> SemaPreciseOperation? Never! {
-    if type_name != "Decimal" && type_name != "Fraction" && type_name != "Complex" -> return None
+    if !SEMA_PRECISE_TYPES.contains(type_name) -> return None
     if type_name == "Fraction" && function == "div" -> return None
     values := [Int]{}
     if receiver >= 0 -> values.push(receiver)
     loop argument in args -> values.push(argument)
-    Val(SemaPreciseOperation{function: "{sema_precise_function_prefix(type_name)}{function}", args: values})
+    Val(SemaPreciseOperation{role: sema_precise_role(type_name, function), args: values})
 }
 
-#Test("a precise operation runs the core.math function of its type's prefix") {
-    assert_eq(sema_precise_family_owner("__decimal_add"), Val("Decimal"))
-    assert_eq(sema_precise_family_owner("__fraction_try_int"), Val("Fraction"))
-    assert_eq(sema_precise_family_owner("__complex_abs"), Val("Complex"))
-    assert_eq(sema_precise_family_owner("decimal"), None)
+#Test("a precise operation runs the core.math function that fills its type's and operation's role") {
+    assert_eq(sema_precise_role("Fraction", "from_owned_parts"), "FractionFromOwnedParts")
+    assert_eq(sema_precise_role_operation("DecimalToFloat"), Val(SemaPreciseRole{owner: "Decimal", operation: "to_float"}))
+    assert_eq(sema_precise_role_operation("FractionTryInt"), Val(SemaPreciseRole{owner: "Fraction", operation: "try_int"}))
+    assert_eq(sema_precise_role_operation("ComplexAbs"), Val(SemaPreciseRole{owner: "Complex", operation: "abs"}))
+    assert_eq(sema_precise_role_operation("Decimal"), None)
+    assert_eq(sema_precise_role_operation("AbsF32"), None)
     operation: sema_precise_operation(NodeKind.PreciseBuiltin{type_name: "Decimal", function: "add", args: [Int]{3, 4}}) ?? panic("Decimal add is a precise operation")
-    assert_eq(operation.function, "__decimal_add")
+    assert_eq(operation.role, "DecimalAdd")
     assert_eq(operation.args, [Int]{3, 4})
     method: sema_precise_operation(NodeKind.HandleMethod{receiver: 1, operation: BodyHandleOp.PreciseMethod{type_name: "Decimal", method: "to_float"}, args: [Int]{}}) ?? panic("Decimal to_float is a precise method")
-    assert_eq(method.function, "__decimal_to_float")
+    assert_eq(method.role, "DecimalToFloat")
     assert_eq(method.args, [Int]{1})
     assert_eq(sema_precise_operation(NodeKind.MathBuiltin{type_name: "F32", function: "abs", args: [Int]{2}}), None)
     sum: sema_precise_operation(NodeKind.PreciseBuiltin{type_name: "Fraction", function: "add", args: [Int]{5, 6}}) ?? panic("Fraction add is a precise operation")
-    assert_eq(sum.function, "__fraction_add")
+    assert_eq(sum.role, "FractionAdd")
     assert_eq(sema_precise_operation(NodeKind.PreciseBuiltin{type_name: "Fraction", function: "div", args: [Int]{5, 6}}), None)
 }

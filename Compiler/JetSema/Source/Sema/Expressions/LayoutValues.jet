@@ -259,11 +259,10 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-// `name: Layout{ … }` (Rust Stmt.Layout): `name` is a
-// fresh layout handle in the enclosing scope, and every element of the body
-// (the parser rewrote its `box.anchor` reads to `name.h` / `name.v` calls)
-// is a Constraint, which registers with the handle as it is built (E2933
-// otherwise).
+// `name: Layout{ … }`: `name` is a fresh layout handle in the enclosing scope,
+// and every element of the body (the parser rewrote its `box.anchor` reads to
+// `name.h` / `name.v` calls) is a Constraint, which registers with the handle
+// as it is built (E2933 otherwise).
 sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], output: ^[TStmt]) -> Bool {
     layout_ty: Type.Named{name: "Layout"}
     owner: sema_scope_local_owner_key(scopes)
@@ -352,9 +351,8 @@ sema_layout_element_key: fn(expr: Expr) -> String? {
 }
 
 // `a.width == 200.0` inside a layout: the bare fractional literal compared
-// against a layout value is a Float length (Rust lowered the comparison's
-// literal side as an f64), not the default Decimal; arithmetic (`+ 8.0`)
-// keeps the Decimal default and its E0133.
+// against a layout value is a Float length, not the default Decimal; arithmetic
+// (`+ 8.0`) keeps the Decimal default and its E0133.
 sema_expr_layout_compare_literal: fn(op: BinOp, lhs: Type, right: Expr) -> Bool Never! {
     if op != BinOp.Ge && op != BinOp.Le && op != BinOp.Eq -> return false
     if !sema_expr_decimal_literal_operand(right, false) -> return false

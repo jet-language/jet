@@ -128,11 +128,10 @@ sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: 
 }
 
 // The first diagnostic under one statement of a pure root's body. Its own
-// function, not a walk inline in sema_pure_root_function's loop: the Rust
-// tier (stage 0) holds the visitor closure's write captures (`visited`,
-// `path`) until the loop ends, so the next iteration's closure
-// and the `path.pop()` after the loop are rejected there (E0499); here the
-// walk is the last use of those parameters.
+// function, not a walk inline in sema_pure_root_function's loop, so the
+// visitor closure's write captures (`visited`, `path`) end with this call: the
+// next iteration's closure and the `path.pop()` after the loop are not
+// rejected (E0499), because the walk is the last use of those parameters.
 sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable, places: [SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, statement: Int, shallow: Bool, visited: ^[Bool], path: ^[String]) -> Diagnostic? Never! {
     found := Diagnostic?{None}
     body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_pure_root_visit(root, modules, decls, symbols, places, calls, function, expression, shallow, visited, path, found) })

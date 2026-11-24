@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // The compiler-owned registry census and runner. No oracle, selection filter,
 // skip or Rust emission.
 // Usage (from the repository root):
@@ -26,6 +25,7 @@ use {
     json: core.encoding.json
     process: core.process
     regex: core.regex
+    roots: "Roots"
     sys: core.sys
     time: core.time
 }
@@ -245,11 +245,8 @@ fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "compiler registr
 
 jet_cli: fn() -[Env]> String Never! { process.env_nonempty("JET") ?? "jet" }
 
-// The shared scratch root of Tools/Agent/roots.sh.
-scratch_root: fn() -[Env]> String Never! {
-    cache: process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"
-    process.env_nonempty("JET_SCRATCH_ROOT") ?? (process.env_nonempty("JET_STATE_ROOT") ?? "{cache}/jet-dev")
-}
+// The shared scratch root (Tools/Agent/roots.env).
+scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }
 
 // The checkout holding this script, or else the one around the working directory.
 repo_root: fn() -[Env, Exec, FS, IO]> String Never! {

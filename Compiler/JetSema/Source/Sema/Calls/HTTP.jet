@@ -6,8 +6,6 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
-    CallContractRow,
-    CoreTypedCallSignature,
     Diagnostic,
     EffectRowEntry,
     EnumLitArg,
@@ -22,7 +20,6 @@ use jet_foundation.[
     SymbolKind,
     Type,
     AST_EMPTY_CALL_ARG_FLAGS,
-    core_call_typed_signature,
     type_identity_equal,
     type_name,
 ]
@@ -212,16 +209,6 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
     } else { panic("{owner}.{method} needs a registration graph") }
 }
 
-sema_call_http_core_signature_type: fn(signature: CoreTypedCallSignature) -> Type Never! {
-    parameter_types := [Type]{}
-    parameter_contract := [CallContractRow]{}
-    loop parameter in signature.parameters {
-        parameter_types.push(parameter.ty)
-        parameter_contract.push(CallContractRow{label: parameter.label, zone: parameter.zone})
-    }
-    Type.Fn{params: parameter_types, ret: signature.return_type, effect_bound: None, param_contract: Val(parameter_contract), call_metadata: None, return_view_provenance: None}
-}
-
 sema_call_http_core_synthetic_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
     CallArg{convention: AccessConvention.Read, expr: expression, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
 }
@@ -358,7 +345,6 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
 
-        descriptor_exprs := [Expr]{}
         descriptor_values := [TExpr]{}
         valid := true
         loop field in definition.fields {
@@ -394,55 +380,19 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
                 valid = false
                 next
             }
-            descriptor_exprs.push(descriptor)
             descriptor_values.push(descriptor_value)
         }
         if !valid -> return SemaDirectSpecialCheck{handled: true, value: None}
 
-        input_record: sema_call_core_record("core.web.forms", "input", 2, span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        input_signature: core_call_typed_signature("core.web.forms", "input", 2) ?? {
-            diagnostics.push(sema_error("E0904", span, "`core.web.forms.input` has no source typed call contract", "web.form lowering uses the registered input constructor signature", "use a Core call row with a typed source signature"))
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        input_signature_type := sema_call_http_core_signature_type(input_signature)
-        input_args := [CallArg]{
-            sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: model_name}}, span: span, id: AST_NODE_GENERATED}, span),
-            sema_call_http_core_synthetic_arg(Expr.ListLit{elements: descriptor_exprs, span: span, id: AST_NODE_GENERATED}, span),
-        }
-        _ := sema_call_core_bind_arguments(input_record, input_signature_type, input_args, span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        input_result: input_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
         input_values := [TExpr]{sema_call_http_core_string(model_name, span), sema_tree_node(Type.List{element: Type.Named{name: "WebFormFieldSpec"}}, TExprKind.ListLit{values: descriptor_values}, span)}
-        input_fallibility := sema_call_failure_carrier(Val(input_result))
-        if !sema_call_core_record_effects(input_record, span, [Type]{}, input_result, input_fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        input_call: sema_call_core_tree(input_record, input_values, span, [Type]{}, [Bool]{false, false}, input_result, input_fallibility, None, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        input_call: sema_call_core_source_declared("core.web.forms", "input", [Type]{}, input_values, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         input := sema_call_http_core_unwrap_result(input_call, Type.Named{name: "WebFormInput"}, "web.form could not construct its derived input", span, environment, program, scopes)
 
-        typed_record: sema_call_core_record("core.web.forms", "typed", 2, span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        typed_signature: core_call_typed_signature("core.web.forms", "typed", 2) ?? {
-            diagnostics.push(sema_error("E0904", span, "`core.web.forms.typed` has no source typed call contract", "web.form lowering uses the registered typed action constructor signature", "use a Core call row with a typed source signature"))
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        typed_signature_type := sema_call_http_core_signature_type(typed_signature)
-        typed_args := [CallArg]{
-            sema_call_http_core_synthetic_arg(Expr.Ident{name: "input", span: span, id: AST_NODE_GENERATED}, span),
-            sema_call_http_core_synthetic_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: action_name}}, span: span, id: AST_NODE_GENERATED}, span),
-        }
-        _ := sema_call_core_bind_arguments(typed_record, typed_signature_type, typed_args, span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         // `typed<Model>` is generic in the model only: the form it returns is
         // a `WebFormTyped<Model>`, whose field-naming methods take
         // `FieldRef<Model, T>`.
         model_type: sema_expr_expected_type(Type.Named{name: model_name}, environment, program)
-        typed_type_args: [Type]{model_type.copy()}
-        typed_parameters: loop parameter in typed_signature.type_parameters -> parameter.name
-        typed_declared: typed_signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        typed_result: sema_expr_core_row_type(sema_inference_substitute_type(typed_declared, typed_parameters, typed_type_args), environment, program)
-        typed_fallibility := sema_call_failure_carrier(Val(typed_result))
-        if !sema_call_core_record_effects(typed_record, span, typed_type_args, typed_result, typed_fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
-            return SemaDirectSpecialCheck{handled: true, value: None}
-        }
-        typed_call: sema_call_core_tree(typed_record, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, typed_type_args, [Bool]{false, false}, typed_result, typed_fallibility, None, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        typed_call: sema_call_core_source_declared("core.web.forms", "typed", [Type]{model_type.copy()}, [TExpr]{input, sema_call_http_core_string(action_name, span)}, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         form_type: Type.Apply{name: sema_core_source_type_name(program, "core.web.forms", "WebFormTyped"), args: [Type]{model_type}}
         result := sema_call_http_core_unwrap_result(typed_call, form_type, "web.form could not register its typed action", span, environment, program, scopes)
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}

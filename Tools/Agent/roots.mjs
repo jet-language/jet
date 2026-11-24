@@ -1,55 +1,57 @@
-// The dev tool roots. Repository tools find their state, scratch, queues,
-// published compilers and seeds through these and nothing else; Tools/Agent/
-// roots.sh is the same table for shell tools. A machine sets its own values in
-// the environment (for example in ~/.config/jet/env); without them the
-// defaults derive from $HOME and the XDG directories, so a fresh clone needs
-// no setup. No committed file names one machine's copy (LaneCheck.jet --personal-info).
-//
-//   JET_STATE_ROOT    per-user dev state and caches  ($XDG_CACHE_HOME/jet-dev)
-//   JET_SCRATCH_ROOT  large shared scratch           ($JET_STATE_ROOT)
-//   JET_RUN_ROOT      land queue, locks, slot ledger ($JET_SCRATCH_ROOT/run)
-//   JET_BASE_ROOT     published compilers            ($JET_SCRATCH_ROOT/discovery/base)
-//   JET_TARGET_ROOT   build target dirs              ($JET_SCRATCH_ROOT/targets)
-//   JET_SEEDS         seed store                     ($XDG_DATA_HOME/jet-seeds)
-//   JET_SEED          the admitted seed dir          ($JET_SEEDS/current)
-//   JET_BIN           the jet under test, which `jet test` passes its children; node
-//                     tools run repository Jet tools with it  ($JET_SEED/jet)
+// The dev tool roots for node tools. The table is Tools/Agent/roots.env, the
+// one every repository tool reads; this module asks roots.sh for it, so node
+// tools see exactly what shell and Jet tools see, the machine's
+// ${XDG_CONFIG_HOME:-~/.config}/jet/env included. Repository tools find their
+// state, scratch, queues, published compilers and seeds through these and
+// nothing else (roots.env lists them). No committed file names one machine's
+// copy (LaneCheck.jet --personal-info).
 //
 // Run as a program (`node Tools/Agent/roots.mjs NAME...`), it prints
 // `NAME=value` for each root named, and exits 64 at any other name. Its Jet
-// twin is Tools/Agent/Roots.jet (gauntlet tool entry roots-mjs).
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+// twin is Tools/Agent/Roots.jet (gauntlet tool entry RootsMjs).
+import { execFileSync } from 'node:child_process';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const env = process.env;
-const home = () => env.HOME || homedir();
+const here = dirname(fileURLToPath(import.meta.url));
+const names = ['JET_STATE_ROOT', 'JET_SCRATCH_ROOT', 'JET_RUN_ROOT', 'JET_BASE_ROOT',
+  'JET_TARGET_ROOT', 'JET_SEEDS', 'JET_SEED', 'JET_BIN', 'JET_DEV_WORKTREE'];
+const inputs = [...names, 'HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME'];
 
-export const stateRoot = () => env.JET_STATE_ROOT || join(env.XDG_CACHE_HOME || join(home(), '.cache'), 'jet-dev');
-export const scratchRoot = () => env.JET_SCRATCH_ROOT || stateRoot();
-export const runRoot = () => env.JET_RUN_ROOT || join(scratchRoot(), 'run');
-export const baseRoot = () => env.JET_BASE_ROOT || join(scratchRoot(), 'discovery/base');
-export const targetRoot = () => env.JET_TARGET_ROOT || join(scratchRoot(), 'targets');
-export const seedsRoot = () => env.JET_SEEDS || join(env.XDG_DATA_HOME || join(home(), '.local/share'), 'jet-seeds');
-export const seedDir = () => env.JET_SEED || join(seedsRoot(), 'current');
-export const toolJet = () => env.JET_BIN || join(seedDir(), 'jet');
-
-const roots = {
-  JET_STATE_ROOT: stateRoot,
-  JET_SCRATCH_ROOT: scratchRoot,
-  JET_RUN_ROOT: runRoot,
-  JET_BASE_ROOT: baseRoot,
-  JET_TARGET_ROOT: targetRoot,
-  JET_SEEDS: seedsRoot,
-  JET_SEED: seedDir,
-  JET_BIN: toolJet,
+// Every root, as roots.sh prints them for this process's environment; asked
+// again only when one of the variables they derive from changes.
+let cached = { key: null, roots: null };
+const roots = () => {
+  const key = JSON.stringify(inputs.map((name) => process.env[name] ?? null));
+  if (cached.key !== key) {
+    const out = execFileSync('bash', [join(here, 'roots.sh'), ...names], { encoding: 'utf8' });
+    const values = {};
+    for (const line of out.split('\n')) {
+      const at = line.indexOf('=');
+      if (at > 0) values[line.slice(0, at)] = line.slice(at + 1);
+    }
+    cached = { key, roots: values };
+  }
+  return cached.roots;
 };
+
+export const stateRoot = () => roots().JET_STATE_ROOT;
+export const scratchRoot = () => roots().JET_SCRATCH_ROOT;
+export const runRoot = () => roots().JET_RUN_ROOT;
+export const baseRoot = () => roots().JET_BASE_ROOT;
+export const targetRoot = () => roots().JET_TARGET_ROOT;
+export const seedsRoot = () => roots().JET_SEEDS;
+export const seedDir = () => roots().JET_SEED;
+export const toolJet = () => roots().JET_BIN;
+export const devWorktree = () => roots().JET_DEV_WORKTREE;
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const values = roots();
   for (const name of process.argv.slice(2)) {
-    if (!Object.hasOwn(roots, name)) {
+    if (!Object.hasOwn(values, name)) {
       console.error(`roots: unknown root ${name}`);
       process.exit(64);
     }
-    console.log(`${name}=${roots[name]()}`);
+    console.log(`${name}=${values[name]}`);
   }
 }

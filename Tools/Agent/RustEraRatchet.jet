@@ -12,9 +12,22 @@
 //    pinned upstream Rust library (`library/std/`, `library/core/`,
 //    `library/alloc/`) stays: it is a real external input. Code and strings
 //    are not comments: the foreign bindings write and read real Rust files.
+// 3. No comment in those sources names Rust at all, unless Rust is a foreign
+//    language Jet talks to or measures itself against there: a file with a
+//    `Rust…` or `…Foreign…` path segment (RustForeign, RustBridge, RustSource,
+//    the Foreign/ binders), a Gauntlet or Perf folder, or a comment about
+//    `extern rust`, cargo, rustc, crates.io, an rlib, the Rust toolchain, the
+//    Rust ABI or FFI, or the Rust-mangled symbols the runtime pack rejects.
+//    Any other comment states the contract itself: Jet is the original, so
+//    "as the Rust host did" points nowhere. Until every package is
+//    rewritten, NAMING_BASELINE holds each file's count, which may only fall.
 //
 // Usage (from the repository root): jet Tools/Agent/RustEraRatchet.jet
+// checks; `--write` lowers the NAMING_BASELINE rows to the live counts (and
+// seeds the table when it is missing), and refuses while a file is over its
+// row.
 use {
+    files: core.files
     process: core.process
     term: core.term
 }
@@ -39,6 +52,15 @@ CITATION: Regex{"\w\.rs(?:[^A-Za-z_]|$)"}
 
 // Matched against the lowercased comment.
 PHRASE: Regex{"\brust (?:code\b|crates?\b|prelude|checker)"}
+
+// Each file's count of comments that name Rust (rule 3), one `path<TAB>count`
+// row per file; a file with no row has none.
+NAMING_BASELINE: "Tests/Guards/rust_era_names.tsv"
+
+NAMES_RUST: Regex{"\brust\b"}
+
+// Matched against the lowercased comment: Rust as the foreign language.
+FOREIGN_PHRASE: Regex{"extern rust|externrust|\bcargo\b|\brustc\b|crates\.io|\brlib\b|rust toolchain|foreign rust|rust ffi|rust[- ]abi|rust-mangled|\brust symbols?\b|\b(?:bridge|helper) crates?\b"}
 
 #Error
 RatchetError: struct {
@@ -158,11 +180,114 @@ citation_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     git_lines(argv, true)
 }
 
-rust_era_main: fn() -[Exec, IO, Time.Wait]> Int RatchetError! {
+// Whether `path` is a file where Rust is a foreign language: a `Rust…` or
+// `…Foreign…` segment, a Gauntlet or Perf folder, or a runtime pack, which
+// rejects Rust symbols.
+foreign_path: fn(path: String) -> Bool Never! {
+    loop segment in path.split("/") {
+        if segment.starts_with("Rust") || segment.contains("Foreign") -> return true
+        if segment == "Gauntlet" || segment == "Perf" || segment == "RuntimePack.jet" -> return true
+    }
+    false
+}
+
+// Whether a comment of `path` names Rust where Rust is not the foreign
+// language (rule 3).
+names_rust: fn(path: String, comment: String) -> Bool Never! {
+    lowered: comment.lower()
+    NAMES_RUST.is_match(lowered) && !FOREIGN_PHRASE.is_match(lowered) && !foreign_path(path)
+}
+
+// Each source file's count of comments that name Rust, from `path:line:text`
+// rows of git grep -n.
+naming_counts: fn(rows: [String]) -> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop row in rows {
+        location: row.partition(":")
+        rest: location.tail.partition(":")
+        if !is_source(location.head) || !names_rust(location.head, comment_text(rest.tail)) -> next
+        counts[location.head] = (counts.get(location.head) ?? 0) + 1
+    }
+    counts
+}
+
+naming_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
+    argv := [String]{"git", "grep", "-n", "-I", "-i", "-w", "-e", "rust", "--"}
+    loop root in CITATION_ROOTS -> argv.push(root)
+    git_lines(argv, true)
+}
+
+// The NAMING_BASELINE rows of `text`; a line is `path<TAB>count`.
+parse_baseline: fn(text: String) -> [String:Int] RatchetError! {
+    rows := [String:Int]{}
+    loop line in text.split("\n") {
+        if line.trim() == "" -> next
+        cells: line.partition("\t")
+        count: Int.parse(cells.tail) ?? return Err(RatchetError{message: "{NAMING_BASELINE}: unparsed line `{line}`"})
+        rows[cells.head] = count
+    }
+    Ok(rows)
+}
+
+render_baseline: fn(counts: [String:Int]) -> String Never! {
+    paths := counts.keys().to_list()
+    paths.sort()
+    lines := loop path in paths -> "{path}\t{counts.get(path) ?? 0}"
+    if lines.len() == 0 -> return ""
+    "{lines.join("\n")}\n"
+}
+
+// A line per file over its baseline row (rule 3).
+naming_over: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
+    paths := counts.keys().to_list()
+    paths.sort()
+    over := [String]{}
+    loop path in paths {
+        count: counts.get(path) ?? 0
+        limit: baseline.get(path) ?? 0
+        if count > limit {
+            over.push("{path}: {count} comment(s) name Rust, over its baseline of {limit}; state the contract itself, not the Rust original")
+        }
+    }
+    over
+}
+
+// A line per baseline row above its file's live count.
+naming_under: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
+    paths := baseline.keys().to_list()
+    paths.sort()
+    under := [String]{}
+    loop path in paths {
+        count: counts.get(path) ?? 0
+        limit: baseline.get(path) ?? 0
+        if count < limit {
+            under.push("{path}: {count} comment(s) name Rust, under its baseline of {limit}; lower the row (jet Tools/Agent/RustEraRatchet.jet --write)")
+        }
+    }
+    under
+}
+
+rust_era_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int RatchetError! {
     unread: unread_tables() ?? return Err(err)
     stale: stale_citations(citation_rows() ?? return Err(err))
-    if unread.len() == 0 && stale.len() == 0 {
-        print("rust-era-ratchet: ok (every harness table has a reader; no comment in Compiler, Core or Jetpack cites deleted Rust code)")
+    counts: naming_counts(naming_rows() ?? return Err(err))
+    seeded: files.is_file(NAMING_BASELINE)
+    baseline := [String:Int]{}
+    if seeded {
+        text: files.read(NAMING_BASELINE) ?? return Err(RatchetError{message: "cannot read {NAMING_BASELINE}: {err}"})
+        baseline = parse_baseline(text) ?? return Err(err)
+    }
+    over: if seeded || !write -> naming_over(counts, baseline) else -> [String]{}
+    under := [String]{}
+    if write && over.len() == 0 {
+        files.write(NAMING_BASELINE, render_baseline(counts)) ?? return Err(RatchetError{message: "cannot write {NAMING_BASELINE}: {err}"})
+    } else {
+        under = naming_under(counts, baseline)
+    }
+    if unread.len() == 0 && stale.len() == 0 && over.len() == 0 && under.len() == 0 {
+        total := 0
+        loop path in counts.keys() -> total += counts.get(path) ?? 0
+        print("rust-era-ratchet: ok (every harness table has a reader; no comment in Compiler, Core or Jetpack cites deleted Rust code; {total} comment(s) naming Rust remain in {NAMING_BASELINE})")
         return Ok(0)
     }
     loop table in unread {
@@ -171,12 +296,19 @@ rust_era_main: fn() -[Exec, IO, Time.Wait]> Int RatchetError! {
     loop row in stale {
         term.eprint("{row}: cites deleted Rust code; name the live Jet owner or drop it")
     }
-    term.eprint("rust-era-ratchet: {unread.len()} unread table(s), {stale.len()} stale citation(s)")
+    loop line in over -> term.eprint(line)
+    loop line in under -> term.eprint(line)
+    term.eprint("rust-era-ratchet: {unread.len()} unread table(s), {stale.len()} stale citation(s), {over.len()} file(s) over and {under.len()} under their Rust-naming baseline")
     Ok(1)
 }
 
 run: fn() {
-    code: rust_era_main() ?? process.fail(1, err.message)
+    args: process.args()
+    write: args.len() == 1 && args[0] == "--write"
+    if args.len() > 0 && !write {
+        process.fail(64, "usage: jet Tools/Agent/RustEraRatchet.jet [--write]")
+    }
+    code: rust_era_main(write) ?? process.fail(1, err.message)
     if code != 0 -> process.exit(code)
 }
 
@@ -222,4 +354,36 @@ run: fn() {
         "Jetpack/N.md:1:// Layout.rs",
     }
     assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.|Compiler/F.jet:1:// Layout.rs61-85: native fields.|Jetpack/H.jet:2:// Ported from the Rust code of the old store.|Jetpack/I.jet:8:    x: 1 // as the rust crate did|Core/J.c:3:// Matches the Rust prelude's rounding.|Compiler/K.jet:4:// Rust CheckerMarkers order.")
+}
+
+#Test("a comment naming Rust counts unless Rust is the foreign language there") {
+    rows: [String]{
+        "Compiler/A.jet:3:// Rust `named_leaf`: the last `.` segment.",
+        "Compiler/A.jet:9:    x: 1 // as the Rust reference does",
+        "Compiler/B.jet:4:    note: \"the Rust host\"",
+        "Compiler/B.jet:5:// Trusted and rusty are other words.",
+        "Compiler/C.jet:6:// An `extern rust` function calls through its slot.",
+        "Compiler/C.jet:7:// cargo builds the bridge crate.",
+        "Compiler/C.jet:8:// Not a Rust-mangled name (`_R...`).",
+        "Compiler/JetCLI/Source/CLI/RustForeign.jet:1:// The Rust helper plan.",
+        "Jetpack/Integrations/Source/Foreign/RustBridge/Externs.jet:4:// Rust ABI rows.",
+        "Compiler/Toolchain/RuntimePack.jet:28:// No Rust runtime runs.",
+        "Core/D.c:2:// RUST parity.",
+        "Core/E.md:1:// Rust parity.",
+    }
+    counts: naming_counts(rows)
+    assert_eq(render_baseline(counts), "Compiler/A.jet\t2\nCore/D.c\t1\n")
+}
+
+#Test("the Rust-naming baseline only falls") {
+    baseline: parse_baseline("Compiler/A.jet\t2\nCore/D.c\t1\n") ?? panic("parse: {err.message}")
+    assert_eq(render_baseline(baseline), "Compiler/A.jet\t2\nCore/D.c\t1\n")
+    live := [String:Int]{}
+    live["Compiler/A.jet"] = 3
+    live["Compiler/New.jet"] = 1
+    assert_eq(naming_over(live, baseline).len(), 2)
+    assert_eq(naming_under(live, baseline).len(), 1)
+    unparsed: parse_baseline("Compiler/A.jet\tmany\n") ?? [String:Int]{}
+    assert_eq(unparsed.len(), 0)
+    assert_eq(render_baseline([String:Int]{}), "")
 }

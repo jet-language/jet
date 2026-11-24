@@ -1,0 +1,168 @@
+# Adversarial Design Review: One Checking-Context Record for Sema (`#6999 E`)
+
+**Date:** `2026-11-24`  
+**Base:** dev `68cf40181c`  
+**Card:** `#6999` criterion E ("one checking-context record replaces the threaded environment/program/scopes/state/tail_store/context/diagnostics bundle")
+
+## Verdict: **FAILS as proposed; HOLDS narrowed**
+
+A record that holds all seven parts cannot be built without copying the
+environment and the program tables on every body check, and no record can be
+introduced one area at a time. A record of the three parts each body check
+creates for itself (ownership state, statement tail store, check context)
+holds. It costs no copy and leaves collect-all unchanged, but it must switch in
+one change across the whole checker.
+
+## 1. The design under review
+
+```jet
+SemaCheck: struct {
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: SemaScopeTable,
+    state: SemaOwnershipState,
+    tail_store: SemaStatementTailStore,
+    context: SemaCheckContext,
+    diagnostics: [Diagnostic],
+}
+```
+
+Every checker function would take `check: ^SemaCheck` in place of the bundle
+`environment: SemaScopeEnvironment, program: SemaProgramTables, scopes:
+^SemaScopeTable, state: ^SemaOwnershipState, tail_store:
+^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics:
+^[Diagnostic]`. Here is how access would work:
+
+- A function that reads a part reads `check.environment.module_identity`.
+- A function that writes a part writes `check.scopes.loop_depth = 0`.
+- A callee that needs only some parts gets field borrows:
+  `sema_scope_enter(check.scopes, check.state, key)`.
+- A body entry builds the record with `^^` moves and takes the parts back out
+  with `.move()`.
+
+## 2. Measured facts (JetSema on the base)
+
+| Fact | Count |
+|---|---|
+| Signatures with the exact seven-part bundle | 466 |
+| Functions taking `state`, `tail_store` and `context` | 540 |
+| ...of which form one strongly connected call component | 520 |
+| ...root functions no other bundle function calls | 8 |
+| Call sites passing `state, tail_store, context` | 1,583 |
+| Places a body check creates a tail store (`sema_statement_tail_store_init()`) | 6 (`CheckProgram.jet` x2, `MarkerRules.jet`, `Expressions/NumberNames.jet` x3) |
+| Parameter occurrences in Compiler/: `program` read / `diagnostics` / `environment` read / `state` / `scopes` / `context` / `tail_store` | 1,692 / 1,610 / 1,506 / 831 / 786 / 771 / 555 |
+
+Probes were run with the batch28 compiler against this base:
+
+- **P1. Field borrows:** one `^` record lends a read part and two write parts
+  to one call (`read_and_write(checker.environment, checker.scopes,
+  checker.diagnostics)`). The ownership checker accepts it and the program
+  runs correctly. A record lends its parts without copying them.
+- **P2. Borrowed field:** a field typed `environment: ^Env` is a parse error:
+  `Jet.InvalidStatement: Expected a type, found ^`. A record cannot hold a
+  borrow. Every part must be owned.
+- **P3. Moving a part out of a borrow:** building a record from a `^`
+  parameter (`Check{scopes: scopes.move(), ...}`) is refused with
+  `Jet.MissingMoveMarker: scopes cannot be moved from borrowed storage`. Core
+  has no swap or take primitive. A function that holds borrowed parts cannot
+  lend them to a callee that takes the record.
+- **P4. Compile speed:** I generated two programs, each a chain of 400
+  functions. In one, each function takes the seven parts. In the other, each
+  takes `environment, program, scopes, check: ^Check, diagnostics`, where the
+  record holds three parts. Seven runs each on a shared machine:
+
+  | | `jet check` median | `jet build` median |
+  |---|---|---|
+  | Seven parts | 211 ms | 1,961 ms |
+  | Record | 283 ms | 1,903 ms |
+
+  The run-to-run spread (122 to 330 ms for check, 1,032 to 2,538 ms for build)
+  is larger than either difference. Neither form changes compile speed
+  measurably.
+
+## 3. Attacks
+
+**A1. Copy cost: fails for `environment` and `program`.**
+- Every body check borrows both parts as read parameters.
+  `sema_function_check_pass` receives them read, and
+  `sema_check_comptime_item_in` borrows the environment so that reading its
+  registration graph never copies it.
+- Body threads share the program tables read-only. Each thread reads the
+  module scope in place through `sema_scope_light_copy`.
+- P2 rules out a borrowed field, so an owning record needs a copy of both parts
+  per body check.
+- **Verdict:** they stay read parameters. A read parameter costs nothing.
+
+**A2. Copy cost: fails for `scopes` and `diagnostics`.**
+- The scope table a body check writes is lent by its caller, for example
+  `comptime_scopes.slots[at].table`, and it outlives the check.
+- The diagnostics list collects findings across bodies. Callers keep marks into
+  it (`diagnostics_start: diagnostics.len()`) and rewrite spans after the check.
+- By P3, neither can move into a record without restructuring every lender into
+  a pop-and-push of its slot.
+- **Verdict:** both stay `^` parameters.
+
+**A3. Copy cost: holds for `state`, `tail_store` and `context`.**
+- Every body entry creates all three as locals: `sema_ownership_state_init()`,
+  `sema_statement_tail_store_init()` and `sema_check_context_init()`. They live
+  only for that check.
+- Moving them into a record at the entry is free, and P1 shows callees can
+  borrow them back as fields.
+- No new `.copy()` is needed, so the copy ratchet cannot rise.
+
+**A4. Ownership-checker limits: holds, with one rule.**
+- P1 shows disjoint field borrows of one `^` record pass in a single call.
+- A call that passes both the record and one of its own fields overlaps
+  borrows. Rule: a callee takes either the record or some of its parts, never
+  both.
+- `SemaCheckContext` cannot absorb `state` and `tail_store` as fields of its
+  own. Callers that pass `state` and `context` together would then pass
+  `context.state, context`, which overlap. The three parts must be siblings in
+  a new record.
+
+**A5. Migration: the plan to switch one area at a time fails.**
+- Converting a function to the record requires every caller to hold a record.
+- By P3, a caller holding borrowed parts cannot build one. It can only copy.
+- 520 of the 540 functions form one strongly connected component through
+  `sema_check_expression`, `sema_check_statement` and the Calls/ dispatch.
+  Every member therefore has a caller inside the component.
+- Only the 8 roots and the 20 functions outside the component could convert
+  early, top-down.
+- The switch is one change: about 540 signatures and 1,583 call sites, all
+  mechanical. It cannot be split into hour-sized area submissions.
+
+**A6. Collect-all behavior: holds.**
+- The narrowed record leaves `diagnostics` as it is.
+- No function gains an early exit.
+- A failed check still leaves its findings in the shared list, in the same
+  order.
+
+**A7. Compile speed: neutral.**
+- P4 measures no difference beyond noise.
+- The gain is source size only: two parameters fewer on 540 signatures and two
+  arguments fewer at 1,583 call sites.
+
+## 4. The design that holds
+
+```jet
+// The parts one body check owns: made at its entry, gone at its end.
+SemaBodyCheck: struct {
+    state: SemaOwnershipState,
+    tail_store: SemaStatementTailStore,
+    context: SemaCheckContext,
+}
+```
+
+- Checker signatures become `environment: SemaScopeEnvironment, program:
+  SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck,
+  diagnostics: ^[Diagnostic]`, which is 7 parameters down to 5.
+- The 6 entries build the record from their locals and read
+  `check.context.call_facts` and the like after the body, as they read the
+  locals today.
+- The switch is one mechanical change over the whole component. The tool that
+  makes it is the sound way to land it; hand edits across 1,583 call sites are
+  not.
+
+The other parts of criterion E do not depend on this record and are
+hour-sized: splitting `CheckProgram.jet` and `Statements.jet` by concern, and
+replacing string-built lookup keys with typed keys.

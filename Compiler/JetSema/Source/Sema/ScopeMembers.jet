@@ -360,10 +360,9 @@ sema_scope_members_check: fn(tables: ASTTables, items: [Item], has_scope_member:
     diagnostics
 }
 
-// `check_assertionless_tests`: a top-level `#Test` whose body never calls
-// `assert`/`assert_eq` or `expect(…).snapshot` is L2901. The walk reads every
-// expression the body holds, nested blocks and lambdas included, as Rust's
-// `statements_have_assertion` does.
+// A top-level `#Test` whose body never calls `assert`/`assert_eq` or
+// `expect(…).snapshot` is L2901. The walk reads every expression the body
+// holds, nested blocks and lambdas included.
 sema_scope_members_check_assertionless_tests: fn(tables: ASTTables, items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == .Test(test) {
@@ -398,8 +397,8 @@ sema_scope_members_is_expect_call: fn(expression: Expr) -> Bool Never! {
     }
 }
 
-// Rust `check_marker_body`: each direct-child member is validated against the
-// marker's vocabulary; anything deeper is nested.
+// Each direct-child member is validated against the marker's vocabulary;
+// anything deeper is nested.
 sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnostics: ^[Diagnostic]) {
     loop (index, statement) in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
@@ -412,8 +411,8 @@ sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnosti
     }
 }
 
-// Rust `validate_member`: E0614 for a marker without members or a name outside
-// its vocabulary, E0616 for a `.setup` that is not the first statement.
+// E0614 for a marker without members or a name outside its vocabulary, E0616
+// for a `.setup` that is not the first statement.
 sema_scope_members_validate_member: fn(marker: String, name: String, is_first: Bool, dot_span: Span, diagnostics: ^[Diagnostic]) {
     vocabulary := [String]{}
     if sema_scope_members_vocabulary(marker) == {
@@ -437,8 +436,8 @@ sema_scope_members_validate_member: fn(marker: String, name: String, is_first: B
     }
 }
 
-// Rust `reject_nested` (nested = true, E0618) and `reject_all` (E0615): every
-// dot member anywhere in `body`, through control blocks and member bodies.
+// Nested dot members (nested = true, E0618) or all of them (E0615): every dot
+// member anywhere in `body`, through control blocks and member bodies.
 sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: ^[Diagnostic]) {
     loop statement in body {
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
@@ -453,8 +452,8 @@ sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: ^[Diagnosti
     }
 }
 
-// Rust `child_bodies`: walks every statement block a statement carries, in
-// place (arms in order, then the else body).
+// Walks every statement block a statement carries, in place (arms in order,
+// then the else body).
 sema_scope_members_walk_children: fn(statement: Stmt, nested: Bool, diagnostics: ^[Diagnostic]) {
     if statement == {
         .Switch(_, arms, else_body, _) -> {

@@ -260,10 +260,9 @@ sema_ownership_last_use_statements: fn(statements: [Stmt], name: String) -> Bool
     false
 }
 
-// Rust: jet-sema Checker.is_name_live_after (same answer: some enclosing tail
-// frame reads `name` at or after its start). The last reading statement of each
-// body is computed once per name and reused, instead of rewalking every
-// remaining statement on each query.
+// Whether some enclosing tail frame reads `name` at or after its start. The
+// last reading statement of each body is computed once per name and reused,
+// instead of rewalking every remaining statement on each query.
 sema_ownership_name_live_after: fn(name: String, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> Bool {
     frame_index := context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {

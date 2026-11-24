@@ -346,11 +346,10 @@ sema_call_memory_allocator_method: fn(receiver: Expr, receiver_value: TExpr, nam
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if method == "reset" {
-        // Rust `allocator_view_preserving_receiver`: an allocator's storage is
-        // the runtime's audited interior-mutable storage, so `arena.reset()`
-        // runs no write-capability gate (a `:` arena resets) and invalidates
-        // the arena's views below instead of refusing them. Only `Fixed`
-        // refuses while a view of its owner is live (Rust `check_owner_change`).
+        // An allocator's storage is the runtime's audited interior-mutable
+        // storage, so `arena.reset()` runs no write-capability gate (a `:` arena
+        // resets) and invalidates the arena's views below instead of refusing
+        // them. Only `Fixed` refuses while a view of its owner is live.
         sema_ownership_note_call_receiver(state, receiver, AccessConvention.Write)
         if sema_ownership_block_allocator_refuses(state, sema_ownership_places_from_expr_in_state(receiver, scopes, state), "be reset", span, diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -382,10 +381,9 @@ sema_call_memory_allocator_method: fn(receiver: Expr, receiver_value: TExpr, nam
     }
     payload: sema_check_expression(updated_args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     parameter := SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload.ty), variadic: false}
-    // Rust `alloc_method_return` records no receiver write: `arena.alloc(v)`
-    // reads the allocator handle (only `reset` writes it). On an allocator
-    // name that read is no place read (Rust `allocator_view_preserving_receiver`),
-    // so the arena's own views never meet it; the name's moves were
+    // `arena.alloc(v)` records no receiver write: it reads the allocator
+    // handle (only `reset` writes it). On an allocator name that read is no
+    // place read, so the arena's own views never meet it; the name's moves were
     // checked when it was read (sema_ownership_check_root_base_use).
     ownership := if receiver == .Ident(_, _, _) -> sema_ownership_check_allocator_handle_call(state, "{name}.{method}", receiver, [SemaCallParam]{parameter}, updated_args, scopes, span, diagnostics) else -> sema_ownership_check_method_call(state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete {
@@ -560,8 +558,8 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
         condition: sema_check_expression(args[0].expr, Val(Type.Named{name: "Condition"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         predicate: sema_call_memory_guard_check_lambda(args[1], guard.value_type, Val(Type.Bool), false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if predicate.kind == .Lambda(lambda) {
-            // Rust `finish_shared_guard_method` records no receiver convention for `wait`: the
-            // edit guard is required (E0205 above), but the guard binding takes no `^` mark.
+            // `wait` records no receiver convention: the edit guard is required
+            // (E0205 above), but the guard binding takes no `^` mark.
             if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }

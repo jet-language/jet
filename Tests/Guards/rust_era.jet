@@ -1,0 +1,17 @@
+// Guard: the deleted Rust tree leaves nothing behind. Every harness table
+// has a reader, no comment cites deleted Rust code, and no comment in
+// Compiler, Core or Jetpack names Rust except where Rust is the foreign
+// language. Until each package's comments are rewritten,
+// Tests/Guards/rust_era_names.tsv holds each file's count, which may only
+// fall. The rules and their own tests live in one tool,
+// Tools/Agent/RustEraRatchet.jet, which Tools/Agent/VerifyFull.jet runs too.
+use {
+    rust_era_process: core.process
+}
+
+#Test("rust_era") {
+    guards_enter_root()
+    jet: md_jet()
+    ran: rust_era_process.cmd([String]{jet, "Tools/Agent/RustEraRatchet.jet"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tools/Agent/RustEraRatchet.jet: {err}")
+    assert(ran.code == 0, rust_era_process.combined_output(ran))
+}

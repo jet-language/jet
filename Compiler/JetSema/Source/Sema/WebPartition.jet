@@ -176,8 +176,8 @@ sema_web_partition_check: fn(modules: ^[SemaGraphModuleResult], graph: SemaRegis
             if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
             // A Core callee is no crossing: a browser API reached from a Wasm
             // pin is the E-WEB-TARGET-BROWSER above, and a Core helper that
-            // uses no `Browser` serves both sides, whichever caller pulled
-            // its bucket (Rust partitioned user functions only).
+            // uses no `Browser` serves both sides, whichever caller pulled its
+            // bucket.
             if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_uses_browser(modules, metas[callee])) {
                 next
             }
@@ -583,8 +583,8 @@ sema_web_uses_browser: fn(modules: [SemaGraphModuleResult], meta: SemaWebMeta) -
     sema_web_has_root(modules[meta.slot].functions[meta.row].effects.solved, "Browser")
 }
 
-// Rust `checked_web_bucket`: the marker, the `Browser` effect, the ceiling,
-// a `Stream` result (a JS generator), then Wasm.
+// A function's web bucket, decided in order by the marker, the `Browser`
+// effect, the ceiling, a `Stream` result (a JS generator), then Wasm.
 sema_web_bucket: fn(meta: SemaWebMeta, browser: Bool{false}) -> WebBucket Never! {
     if meta.marker == .Val(marker) {
         if marker == .JS -> return WebBucket.JS
@@ -715,8 +715,8 @@ sema_web_codable: fn(derives: [NamedSpan]) -> Bool Never! {
     true
 }
 
-// Rust `type_show`: source spellings for the common types; any other type
-// is shown in the Rust reference's derived `Debug` form.
+// Source spellings for the common types; any other type is shown in its
+// derived `Debug` form (sema_web_type_debug).
 sema_web_type_show: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"
@@ -743,8 +743,8 @@ sema_web_type_debug_option: fn(ty: Type?) -> String Never! {
     "None"
 }
 
-// The Rust reference's derived `Debug` of its `Type`, for the variants an
-// ABI check can meet.
+// The derived `Debug` form of a `Type`, for the variants an ABI check can
+// meet.
 sema_web_type_debug: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"

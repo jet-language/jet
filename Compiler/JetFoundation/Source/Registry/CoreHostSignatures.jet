@@ -200,6 +200,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins temp_create [U8] TempCreate
     jet_builtins text_window String,U64,U64 String
     jet_builtins suite_snapshot - Test
+    jet_builtins to_bits_f32 F32 Int
+    jet_builtins from_bits_f32 Int F32
     core.testing world fn(DeterministicWorld;Unit) Unit
     core.testing compare [Dyn],fn(Dyn;Dyn),fn(Dyn;Dyn),String TestComparison
     core.testing assert_equal TestComparison Bool
@@ -359,11 +361,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
     core.net __ip_from_bytes ^^[u8] IPAddr
     core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr
-    core.service __active_endpoint String Result<ServiceEndpoint,ServiceError>
-    core.service __endpoint_authority ServiceEndpoint String
-    core.service __authority_signing_key String Result<[u8],ServiceError>
-    core.service __authority_validate ServiceEndpoint Result<Unit,ServiceError>
-    core.service __upgrade_receipt_display ServiceUpgradeReceipt String
     core.service __host_wall_sample - (seconds:Int,nanoseconds:Int,before_epoch:Bool)
     core.service __host_entropy Int [u8]?
     core.service __host_sleep_ns Int -

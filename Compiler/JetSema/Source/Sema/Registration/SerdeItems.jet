@@ -81,13 +81,13 @@ use jet_foundation.[
     NameTable,
 ]
 
-// Rust `expand_builtin_serde_items`: selects each declaration's codecs from
-// its explicit derives and this module's structural auto-derive fixed point,
-// then appends the generated impl headers after the written items. Every
-// question is keyed on `facts`, built once over the unchanged written items:
-// O(items + types × wire fields), not a rescan per type and field. `foreign`
-// holds the codecs other modules give the types these items hold
-// ("{trait}|{leaf}"; sema_derive_foreign_codecs, sema_serde_graph_codecs).
+// Selects each declaration's codecs from its explicit derives and this module's
+// structural auto-derive fixed point, then appends the generated impl headers
+// after the written items. Every question is keyed on `facts`, built once over
+// the unchanged written items: O(items + types × wire fields), not a rescan per
+// type and field. `foreign` holds the codecs other modules give the types these
+// items hold ("{trait}|{leaf}"; sema_derive_foreign_codecs,
+// sema_serde_graph_codecs).
 sema_serde_expand_builtin_items: fn(items: ^[Item], foreign: NameTable) {
     facts: sema_derive_item_index(items)
     auto_encode: sema_derive_auto_selected(items, facts, "Encode", foreign)
@@ -104,11 +104,10 @@ sema_serde_expand_builtin_items: fn(items: ^[Item], foreign: NameTable) {
                 encode: !sema_serde_items_written(encode_impls) && (sema_derive_has_name(definition.derives, "Encode") || name_find(auto_encode, definition.name) != None)
                 decode: !sema_serde_items_written(decode_impls) && (sema_derive_has_name(definition.derives, "Decode") || name_find(auto_decode, definition.name) != None)
                 span: sema_serde_items_derive_span(definition.derives, definition.name_span)
-                // Rust `invalid_serde_derive_impls`: a requested codec whose
-                // field registration reports (E2411/E2415) is not generated,
-                // so the body check does not repeat that problem at a
-                // generated span. (A non-constant default, E2414, is folded
-                // and reported after registration.)
+                // A requested codec whose field registration reports
+                // (E2411/E2415) is not generated, so the body check does not
+                // repeat that problem at a generated span. (A non-constant
+                // default, E2414, is folded and reported after registration.)
                 if encode && !sema_serde_items_generated(encode_impls) && sema_serde_items_struct_valid(items, facts, definition, "Encode", auto_encode) {
                     generated.push(sema_serde_items_struct_encode(definition, span))
                 }
@@ -165,7 +164,7 @@ sema_serde_items_base_is_earlier_distinct: fn(items: [Item], at: Int, definition
     false
 }
 
-// Rust `invalid_serde_derive_impls`, negated, for one declaration and codec.
+// Whether one declaration's derive of a codec is valid.
 sema_serde_items_struct_valid: fn(items: [Item], facts: SemaDeriveItemIndex, definition: StructDef, trait_name: String, auto: NameTable) -> Bool Never! {
     decode: trait_name == "Decode"
     loop field in definition.fields {
@@ -199,11 +198,10 @@ sema_serde_items_union_shapes_invalid: fn(items: [Item], ty: Type, span: Span) -
     problems.len() > 0
 }
 
-// Rust `is_encodable_ty` / `is_decodable_ty` over this module's declarations
-// (`facts` is sema_derive_item_index of `items`, `auto` the names its
-// structural auto-derive selects): an imported (non-local) nominal is
-// trusted — its own declaration answers for its codec, and a use site checks
-// the bound (E0905).
+// Encodability or decodability over this module's declarations (`facts` is
+// sema_derive_item_index of `items`, `auto` the names its structural
+// auto-derive selects): an imported (non-local) nominal is trusted — its own
+// declaration answers for its codec, and a use site checks the bound (E0905).
 sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type, trait_name: String, auto: NameTable) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> true
@@ -260,10 +258,10 @@ sema_serde_items_nominal_codable: fn(items: [Item], facts: SemaDeriveItemIndex, 
     (name != "" && name_find(auto, name) != None) || sema_serde_items_impl_flags(facts, name, trait_name) != 0
 }
 
-// Rust `serde_wire_params`: for a local generic struct or enum, which type
-// parameters a wire type mentions; None for any other name. The first struct
-// or enum `name` answers: normally the indexed position itself; only a
-// duplicate distinct declared first is stepped past.
+// For a local generic struct or enum, which type parameters a wire type
+// mentions; None for any other name. The first struct or enum `name` answers:
+// normally the indexed position itself; only a duplicate distinct declared
+// first is stepped past.
 sema_serde_items_wire_params: fn(items: [Item], facts: SemaDeriveItemIndex, name: String) -> [Bool]? Never! {
     position := sema_derive_nominal_row(facts, name) ?? return None
     loop position < items.len() {
@@ -301,9 +299,9 @@ sema_serde_items_param_flags: fn(params: [TypeParam], wire: [Type]) -> [Bool]? N
     Val(flags)
 }
 
-// Rust `has_explicit_codec` (written) and the already-generated codec set
-// (generated) for `type_name`'s `trait_name`: an impl item, or an inline trait
-// block of the declaration itself (sema_derive_impl_flags bits).
+// The written codec (written) and the already-generated codec set (generated)
+// for `type_name`'s `trait_name`: an impl item, or an inline trait block of the
+// declaration itself (sema_derive_impl_flags bits).
 sema_serde_items_impl_flags: fn(facts: SemaDeriveItemIndex, type_name: String, trait_name: String) -> Int Never! {
     facts.impl_flags[sema_derive_index_find(facts, sema_type_metadata_impl_key(type_name, trait_name))]
 }
@@ -376,8 +374,8 @@ sema_serde_items_denies_unknown: fn(definition: StructDef) -> Bool Never! {
     codable_denies_unknown(definition.type_markers)
 }
 
-// Rust `codec_params`: every type parameter a wire type mentions gains the
-// codec bound (10); phantom or skip-only parameters stay unbounded.
+// Every type parameter a wire type mentions gains the codec bound (10); phantom
+// or skip-only parameters stay unbounded.
 sema_serde_items_codec_params: fn(params: [TypeParam], wire_types: [Type], encode: Bool, decode: Bool) -> [TypeParam] Never! {
     out := [TypeParam]{}
     loop param in params {
@@ -401,8 +399,7 @@ sema_serde_items_codec_params: fn(params: [TypeParam], wire_types: [Type], encod
 }
 
 // ---------------------------------------------------------------------------
-// Items (Rust `struct_codec_items`, `enum_codec_items`, `serde_impl`,
-// `serde_method`).
+// Items.
 
 // The item builders make the header (owner, trait, signature, codec bounds);
 // sema_serde_items_codec_body makes the body when the codec is demanded.
@@ -698,9 +695,9 @@ sema_serde_items_type_args: fn(params: [TypeParam]) -> [Type] Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Struct bodies (Rust `struct_encode_body`, `struct_decode_body`).
+// Struct bodies.
 
-// Rust `serde_field_key`: the field's JSON shape name.
+// The field's JSON shape name.
 sema_serde_items_field_key: fn(definition: StructDef, field: Field) -> String Never! {
     names: sema_checked_field_shape_names(definition, field)
     names.format_key("json") ?? names.text
@@ -752,8 +749,8 @@ sema_serde_items_push_row: fn(pairs: String, key: Expr, value: Expr, pair_type: 
     Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(pairs, span), "push", [Expr]{row}, span)}
 }
 
-// Rust `serde_decode_error_body`: a field's failures join the accumulated
-// list; an absent required key reports E2410 instead.
+// A field's failures join the accumulated list; an absent required key reports
+// E2410 instead.
 sema_serde_items_decode_error_body: fn(error_name: String, missing: String?, key: String?, span: Span) -> [Stmt] Never! {
     forward: sema_serde_items_for_each("jet_serde_field_error", sema_serde_items_ident(error_name, span), [Stmt]{Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "push", [Expr]{sema_serde_items_ident("jet_serde_field_error", span)}, span)}}, span)
     if missing == .Val(missing_name) && key == .Val(key_name) {
@@ -766,10 +763,9 @@ sema_serde_items_decode_error_body: fn(error_name: String, missing: String?, key
     [Stmt]{forward}
 }
 
-// Rust `deny_unknown_allowed_keys`: the struct's own non-skipped keys plus
-// each flattened struct's keys; None when a flattened type is not a struct
-// declared in this module. The storage codec (`stored`) also allows the
-// `#Secret` fields' keys.
+// The struct's own non-skipped keys plus each flattened struct's keys; None
+// when a flattened type is not a struct declared in this module. The storage
+// codec (`stored`) also allows the `#Secret` fields' keys.
 sema_serde_items_allowed_keys: fn(definition: StructDef, items: [Item], stored: Bool) -> [String]? Never! {
     keys := [String]{}
     loop field in definition.fields {
@@ -792,8 +788,8 @@ sema_serde_items_allowed_keys: fn(definition: StructDef, items: [Item], stored: 
     Val(keys)
 }
 
-// Rust `serde_default_expr`: the declaration default, else the `#Default`
-// marker's argument (its folded value when one is known).
+// The declaration default, else the `#Default` marker's argument (its folded
+// value when one is known).
 sema_serde_items_default_expr: fn(field: Field) -> Expr? Never! {
     if field.default == .Val(value) -> return Val(sema_serde_items_named_default(field.ty, value))
     marker := Marker?{None}
@@ -827,8 +823,7 @@ sema_serde_items_named_default: fn(ty: Type, value: Expr) -> Expr {
     value.copy()
 }
 
-// Rust `serde_ct_expr`: a folded compile-time value as the literal that
-// rebuilds it on every tier.
+// A folded compile-time value as the literal that rebuilds it on every tier.
 sema_serde_items_ct_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
     if value == {
         .Int(number) -> Val(Expr.Int{value: number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
@@ -894,8 +889,8 @@ sema_serde_items_ct_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
     }
 }
 
-// Rust `serde_zero_expr`: a skipped field without a default decodes to its
-// type's zero value; a tagged (`#Secret`) field to its inner type's.
+// A skipped field without a default decodes to its type's zero value; a tagged
+// (`#Secret`) field to its inner type's.
 sema_serde_items_zero_expr: fn(ty: Type, span: Span) -> Expr Never! {
     if ty == {
         .Int | .IntN(_, _) -> Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
@@ -1214,16 +1209,15 @@ sema_serde_items_if_else: fn(cond: Expr, body: [Stmt], else_body: [Stmt], span: 
 }
 
 // ---------------------------------------------------------------------------
-// Published-schema migration (Rust `struct_migration_decode`): a
-// decodable `#Codable(published)` struct with `migration` blocks decodes silently
-// from every historical shape through ordinary generated items. Its `decode`
-// runs the current-shape decode first; when that fails, the walk helper
-// matches the object's key set against each historical shape (newest first,
-// exact set), applies the remaining migration steps in order, and the
-// current-shape decode runs once more on the migrated object. A `change` whose
-// old value does not decode returns that failure under the field's key; no
-// match returns the current-shape failures. Each step is linear in the
-// object's entries.
+// Published-schema migration: a decodable `#Codable(published)` struct with
+// `migration` blocks decodes silently from every historical shape through
+// ordinary generated items. Its `decode` runs the current-shape decode first;
+// when that fails, the walk helper matches the object's key set against each
+// historical shape (newest first, exact set), applies the remaining migration
+// steps in order, and the current-shape decode runs once more on the migrated
+// object. A `change` whose old value does not decode returns that failure under
+// the field's key; no match returns the current-shape failures. Each step is
+// linear in the object's entries.
 
 // The `migration` blocks of a non-generic `#Codable(published)` struct, in source
 // order. Empty (no migration chain) when a `change` has no converter: E0910
@@ -1478,11 +1472,9 @@ sema_serde_items_free_call: fn(name: String, args: [Expr], span: Span) -> Expr N
 }
 
 // ---------------------------------------------------------------------------
-// Enum bodies (Rust `enum_encode_body`, `enum_wire_value`, `enum_decode_body`,
-// `enum_decode_variant_body`, `enum_decode_value`).
+// Enum bodies.
 
-// Rust `marker_static_string`: the folded string, else a literal first
-// argument.
+// The folded string, else a literal first argument.
 sema_serde_items_static_string: fn(marker: Marker) -> String? Never! {
     if marker.ct == .Val(value) {
         if value == .Str(text) -> return Val(text)
@@ -1506,8 +1498,8 @@ sema_serde_items_untagged: fn(definition: EnumDef) -> Bool Never! {
     codable_untagged(definition.type_markers)
 }
 
-// Rust `serde_enum_variant_key`: the variant's `#Rename` (its `json:` label
-// first), else the container's casing of the variant name.
+// The variant's `#Rename` (its `json:` label first), else the container's
+// casing of the variant name.
 sema_serde_items_variant_key: fn(variant: Variant, style: String?) -> String Never! {
     loop marker in variant.serde_markers {
         if marker.name != MARKER_RENAME -> next
@@ -1697,9 +1689,9 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
     body
 }
 
-// Rust `enum_decode_value`: a named-payload variant decodes every field under
-// `prefix` and its name, accumulates the failures, and builds the variant
-// when none failed, else returns them all.
+// A named-payload variant decodes every field under `prefix` and its name,
+// accumulates the failures, and builds the variant when none failed, else
+// returns them all.
 sema_serde_items_enum_decode_value: fn(variant: Variant, source: Expr, prefix: String, type_name: String, span: Span) -> [Stmt] Never! {
     fields := [VariantField]{}
     if variant.payload == .Named(named) -> fields = named.copy() else -> return [Stmt]{}

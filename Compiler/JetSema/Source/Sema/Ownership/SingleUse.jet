@@ -1,6 +1,5 @@
-// A `#SingleUse` value carries a job
-// that has to be done exactly once, so the binding that owns it carries the
-// duty to consume it on every path.
+// A `#SingleUse` value carries a job that has to be done exactly once, so the
+// binding that owns it carries the duty to consume it on every path.
 //
 // The duty is one flag on the owning SemaOwnershipBindingFact; consumption is
 // the ordinary move fact of the whole binding, or of each field that holds
@@ -9,10 +8,9 @@
 //   E0141  one path through a branch consumed it and another left it
 //   E0142  a non-owning parameter would borrow or copy it
 //   E0143  `consume(x)` discarded it outside an audited `#Unsafe` region
-// Parameters never own the duty (Rust `single_use_span: None`). A value that
-// holds a task handle owes its job the same way (Rust `type_is_single_use`
-// over `type_requires_owned_iteration`); a bare task's job is `join`, so its
-// undone duty is L1101 rather than E0140.
+// Parameters never own the duty. A value that holds a task handle owes its job
+// the same way; a bare task's job is `join`, so its undone duty is L1101
+// rather than E0140.
 use jet_foundation.[
     ASTTables,
     AccessConvention,
@@ -32,12 +30,10 @@ use jet_foundation.[
     expr_span,
 ]
 
-// Rust `type_is_single_use` over the registry: a value holding a task handle,
-// a `#SingleUse` struct or enum, or the Core `Delivery` handle (Rust
-// `core_single_use_type`). A value that holds one of those owes its duty too:
-// a List, Option, Result, Map, tuple, generic type argument, struct field or
-// enum payload that holds a duty is dropped only once every duty inside it is
-// done.
+// A value holding a task handle, a `#SingleUse` struct or enum, or the Core
+// `Delivery` handle. A value that holds one of those owes its duty too: a List,
+// Option, Result, Map, tuple, generic type argument, struct field or enum
+// payload that holds a duty is dropped only once every duty inside it is done.
 sema_single_use_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if sema_stmt_for_in_type_requires_owned_iteration(ty) -> return true
     if ty == {
@@ -87,7 +83,7 @@ sema_single_use_holder: fn(ty: Type, environment: SemaScopeEnvironment, program:
     false
 }
 
-// Rust `is_task_type`: the task handle itself.
+// The task handle itself.
 sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
     if ty == .Apply(name, _) -> return name == "Task"
     false
@@ -204,8 +200,8 @@ sema_single_use_check_argument: fn(state: SemaOwnershipState, callee: String, pa
     false
 }
 
-// Consumption is a move of the whole binding (Rust `moved.contains(name)`),
-// or a move of each of its `duty_fields` on its own.
+// Consumption is a move of the whole binding, or a move of each of its
+// `duty_fields` on its own.
 sema_single_use_moved: fn(state: SemaOwnershipState, fact: SemaOwnershipBindingFact) -> Bool Never! {
     sema_single_use_moved_in(state.moved, fact)
 }
@@ -230,9 +226,8 @@ sema_single_use_field_moved: fn(moved: [SemaOwnershipMovedPlace], id: SymbolID, 
     false
 }
 
-// Rust `check_single_use_consumed_in_current_scope`: E0140 for each
-// `#SingleUse` binding of the closing scope that is not consumed; an unjoined
-// task handle is L1101.
+// E0140 for each `#SingleUse` binding of the closing scope that is not
+// consumed; an unjoined task handle is L1101.
 sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     loop row in sema_ownership_single_use_rows(state) {
         fact: state.declarations[row]
@@ -262,7 +257,7 @@ sema_single_use_check_return: fn(state: ^SemaOwnershipState, frame_depth: Int, s
     }
 }
 
-// Rust `pop_scope`: the scope-end duty check, then the lexical scope exit.
+// The scope-end duty check, then the lexical scope exit.
 sema_single_use_leave_scope: fn(scopes: ^SemaScopeTable, state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     sema_single_use_check_scope_end(state, diagnostics)
     sema_scope_leave(scopes, state)
@@ -443,8 +438,7 @@ sema_single_use_diag_unaudited: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0143", span, "`{name}` still owes `consume`, and discarding it needs an audited reason", "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down", "wrap it in an audited region: `#Unsafe(\"why discarding this is fine\") {{ consume({name}) }}`")
 }
 
-// (Rust `l1101_unjoined_task`): one duty voice
-// for every task-owes-join site.
+// One duty voice for every task-owes-join site.
 sema_single_use_diag_unjoined: fn(subject: String, why: String, span: Span) -> Diagnostic {
     sema_error("L1101", span, "`{subject}` still owes `join`", why, "join it with `.join()`, use its result, or write `.detach()` to let it go free")
 }

@@ -1,0 +1,208 @@
+// Panic ratchet: no compiler phase stops the process on an assumption about
+// checked input.
+//
+// A `panic(` or `unreachable(` call in a phase package's sources (PHASES)
+// ends the whole compile at its first surprise, so one run cannot report
+// every problem. Each one becomes a keep-going report (a census row the phase
+// records, skipping the item) or is proven unreachable and deleted. Until
+// then BASELINE holds each file's count of such calls, which may only fall.
+// Calls in comments and in `#Test` blocks do not count: a test that panics is
+// the test's own failure.
+//
+// Usage (from the repository root): jet Tools/Agent/PanicRatchet.jet checks;
+// `--write` lowers the BASELINE rows to the live counts (and seeds the table
+// when it is missing), and refuses while a file is over its row.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+// The compiler phases: lexing, parsing, imports, sema, comptime, lowering,
+// machine emission, object and link, and the facts they share. The runtime,
+// the test kit, the CLI and the tools around the compiler are not phases.
+PHASES: [String]{"JetLexer", "JetParser", "JetFoundation", "JetQueries", "JetSema", "JetEval", "JetIR", "JetBackend", "JetDriver"}
+
+// One `path<TAB>count` row per file; a file with no row has none.
+BASELINE: "Tests/Guards/panic_ratchet.tsv"
+
+STOP_CALL: Regex{"(?:^|[^A-Za-z0-9_.])(?:panic|unreachable)\("}
+
+#Error
+RatchetError: struct {
+    message: String,
+}
+
+phase_sources: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
+    argv := [String]{"git", "ls-files", "--"}
+    loop phase in PHASES -> argv.push("Compiler/{phase}/Source")
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(RatchetError{message: "cannot run git ls-files: {err}"})
+    if receipt.code != 0 -> return Err(RatchetError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    paths := [String]{}
+    loop path in receipt.output.split("\n") {
+        if path.ends_with(".jet") -> paths.push(path.copy())
+    }
+    Ok(paths)
+}
+
+// Whether `prefix`, the code before a `//`, leaves no string literal open.
+closes_strings: fn(prefix: String) -> Bool Never! {
+    plain: prefix.replace("\\\\", "").replace("\\\"", "")
+    (plain.split("\"").len() - 1) % 2 == 0
+}
+
+// The code of a source line: everything before its comment, a `//` that
+// starts the line or follows whitespace outside a string literal.
+code_text: fn(line: String) -> String Never! {
+    code := ""
+    first := true
+    loop part in line.split("//") {
+        starts: code.trim() == "" || code.ends_with(" ") || code.ends_with("\t")
+        if !first && starts && closes_strings(code) -> return code
+        code = if first -> part.copy() else -> "{code}//{part}"
+        first = false
+    }
+    code
+}
+
+// The count of process-stopping calls in `source`, outside comments and
+// top-level `#Test` blocks (from a `#Test(` line to the next line `}`).
+stop_calls: fn(source: String) -> Int Never! {
+    count := 0
+    in_test := false
+    loop line in source.split("\n") {
+        if in_test {
+            if line == "}}" -> in_test = false
+            next
+        }
+        if line.starts_with("#Test(") {
+            in_test = !line.ends_with("}}")
+            next
+        }
+        count += STOP_CALL.find_all(code_text(line)).len()
+    }
+    count
+}
+
+live_counts: fn() -[Exec, FS, IO, Time.Wait]> [String:Int] RatchetError! {
+    counts := [String:Int]{}
+    loop path in phase_sources() ?? return Err(err) {
+        source: files.read(path) ?? return Err(RatchetError{message: "cannot read {path}: {err}"})
+        count: stop_calls(source)
+        if count > 0 -> counts[path] = count
+    }
+    Ok(counts)
+}
+
+// The BASELINE rows of `text`; a line is `path<TAB>count`.
+parse_baseline: fn(text: String) -> [String:Int] RatchetError! {
+    rows := [String:Int]{}
+    loop line in text.split("\n") {
+        if line.trim() == "" -> next
+        cells: line.partition("\t")
+        count: Int.parse(cells.tail) ?? return Err(RatchetError{message: "{BASELINE}: unparsed line `{line}`"})
+        rows[cells.head] = count
+    }
+    Ok(rows)
+}
+
+render_baseline: fn(counts: [String:Int]) -> String Never! {
+    paths := counts.keys().to_list()
+    paths.sort()
+    lines: loop path in paths -> "{path}\t{counts.get(path) ?? 0}"
+    if lines.len() == 0 -> return ""
+    "{lines.join("\n")}\n"
+}
+
+// A line per file over its baseline row.
+over_rows: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
+    paths := counts.keys().to_list()
+    paths.sort()
+    over := [String]{}
+    loop path in paths {
+        count: counts.get(path) ?? 0
+        limit: baseline.get(path) ?? 0
+        if count > limit {
+            over.push("{path}: {count} panic or unreachable call(s), over its baseline of {limit}; report the case as a keep-going census row and skip the item")
+        }
+    }
+    over
+}
+
+// A line per baseline row above its file's live count.
+under_rows: fn(counts: [String:Int], baseline: [String:Int]) -> [String] Never! {
+    paths := baseline.keys().to_list()
+    paths.sort()
+    under := [String]{}
+    loop path in paths {
+        count: counts.get(path) ?? 0
+        limit: baseline.get(path) ?? 0
+        if count < limit {
+            under.push("{path}: {count} panic or unreachable call(s), under its baseline of {limit}; lower the row (jet Tools/Agent/PanicRatchet.jet --write)")
+        }
+    }
+    under
+}
+
+panic_ratchet_main: fn(write: Bool) -[Exec, FS, IO, Time.Wait]> Int RatchetError! {
+    counts: live_counts() ?? return Err(err)
+    seeded: files.is_file(BASELINE)
+    baseline := [String:Int]{}
+    if seeded {
+        text: files.read(BASELINE) ?? return Err(RatchetError{message: "cannot read {BASELINE}: {err}"})
+        baseline = parse_baseline(text) ?? return Err(err)
+    }
+    over: if seeded || !write -> over_rows(counts, baseline) else -> [String]{}
+    under := [String]{}
+    if write && over.len() == 0 {
+        files.write(BASELINE, render_baseline(counts)) ?? return Err(RatchetError{message: "cannot write {BASELINE}: {err}"})
+    } else {
+        under = under_rows(counts, baseline)
+    }
+    if over.len() == 0 && under.len() == 0 {
+        total := 0
+        loop path in counts.keys() -> total += counts.get(path) ?? 0
+        print("panic-ratchet: ok ({total} panic or unreachable call(s) in {counts.len()} compiler phase file(s) remain in {BASELINE})")
+        return Ok(0)
+    }
+    loop line in over -> term.eprint(line)
+    loop line in under -> term.eprint(line)
+    term.eprint("panic-ratchet: {over.len()} file(s) over and {under.len()} under their baseline")
+    Ok(1)
+}
+
+run: fn() {
+    args: process.args()
+    write: args.len() == 1 && args[0] == "--write"
+    if args.len() > 0 && !write {
+        process.fail(64, "usage: jet Tools/Agent/PanicRatchet.jet [--write]")
+    }
+    code: panic_ratchet_main(write) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
+}
+
+#Test("a stop call counts in code, not in comments, strings after a comment, or other names") {
+    assert_eq(stop_calls("x: a ?? panic(\"no\")\n"), 1)
+    assert_eq(stop_calls("    unreachable(\"never\") // panic(\"twice\")\n"), 1)
+    assert_eq(stop_calls("// panic(\"only a comment\")\n"), 0)
+    assert_eq(stop_calls("report_panic(x)\nself.panic(x)\n"), 0)
+    assert_eq(stop_calls("a: panic(\"a\") ?? panic(\"b\")\n"), 2)
+}
+
+#Test("top-level test blocks do not count") {
+    source: "f: fn() {{ panic(\"a\") }}\n#Test(\"t\") {{\n    x ?? panic(\"b\")\n}}\n#Test(\"u\") {{ panic(\"c\") }}\ng: fn() {{ unreachable(\"d\") }}\n"
+    assert_eq(stop_calls(source), 2)
+}
+
+#Test("the baseline only falls") {
+    baseline: parse_baseline("Compiler/JetSema/Source/A.jet\t2\n") ?? panic("parse: {err.message}")
+    assert_eq(render_baseline(baseline), "Compiler/JetSema/Source/A.jet\t2\n")
+    live := [String:Int]{}
+    live["Compiler/JetSema/Source/A.jet"] = 3
+    live["Compiler/JetIR/Source/B.jet"] = 1
+    assert_eq(over_rows(live, baseline).len(), 2)
+    live["Compiler/JetSema/Source/A.jet"] = 1
+    assert_eq(under_rows(live, baseline).len(), 1)
+    unparsed: parse_baseline("A.jet\tmany\n") ?? [String:Int]{}
+    assert_eq(unparsed.len(), 0)
+}

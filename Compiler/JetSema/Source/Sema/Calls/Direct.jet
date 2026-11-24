@@ -156,8 +156,8 @@ sema_call_check_special_approx: fn(call: Call, expected: Type?, environment: Sem
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
 
-// Rust `is_debuggable` the values `debug(value)` can show in
-// their Debug form. A nominal needs a registered or auto-derived `Debug`.
+// The values `debug(value)` can show in their Debug form. A nominal needs a
+// registered or auto-derived `Debug`.
 sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
@@ -217,9 +217,9 @@ sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, progr
     }
 }
 
-// Rust `infer_method_call` `.debug()` with no arguments is
-// the Debug protocol method on every debuggable receiver, auto-derived or
-// handwritten alike; it is the same Debug text `{value:Debug}` renders.
+// `.debug()` with no arguments is the Debug protocol method on every
+// debuggable receiver, auto-derived or handwritten alike; it is the same Debug
+// text `{value:Debug}` renders.
 sema_call_try_debug_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "debug" || args.len() != 0 || type_args.len() != 0 || !sema_call_debug_traceable(receiver_value.ty, environment, program) {
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -231,7 +231,7 @@ sema_call_try_debug_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(text, expected, environment, program, diagnostics)}
 }
 
-// The `file.jet:LINE` site of a trace (Rust `check_debug_trace`).
+// The `file.jet:LINE` site of a trace.
 sema_call_debug_site: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
     path: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, call.name_span)
     parts: path.split("/").to_list()
@@ -311,8 +311,7 @@ sema_call_check_special_debug: fn(call: Call, expected: Type?, environment: Sema
     unavailable: sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route")
     unit: Type.Named{name: "Unit"}
     // The trace adds no effect: its stderr write is a known-pure call site, so
-    // pure (`-[]>`) and memoized functions keep their rows (Rust sema records
-    // no effect for `debug`).
+    // pure (`-[]>`) and memoized functions keep their rows.
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "debug", call.name_span, [EffectRowEntry]{}, diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
@@ -374,8 +373,7 @@ sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: Sema
         "panic" -> sema_call_check_ambient_panic(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "assert" -> sema_call_check_ambient_assert(call, environment, program, scopes, state, tail_store, context, diagnostics)
         "assert_eq" -> sema_call_check_ambient_assert_eq(call, environment, program, scopes, state, tail_store, context, diagnostics)
-        // The readable prelude's `eprint: core.term.eprint` (Rust opens it
-        // as a `core.term` item import unless the file is `#NoPrelude`).
+        // The readable prelude's `eprint: core.term.eprint`.
         "eprint" -> {
             if sema_module_no_prelude(environment, program) {
                 return SemaDirectSpecialCheck{handled: false, value: None}
@@ -464,10 +462,9 @@ sema_call_ambient_source_alias: fn(call: Call, module_name: String, member: Stri
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
-// (Rust `check_call_inner`): `close(value)` is ambient
-// sugar for the sole nominal `Close.close(^^self)` protocol, ahead of every
-// declared function. It takes exactly one resource, whose type must implement
-// `Close`, and produces nothing.
+// `close(value)` is ambient sugar for the sole nominal `Close.close(^^self)`
+// protocol, ahead of every declared function. It takes exactly one resource,
+// whose type must implement `Close`, and produces nothing.
 sema_call_check_ambient_close: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if call.args.len() != 1 {
         diagnostics.push(sema_error("E0104", call.name_span, "`close` takes exactly one resource, got {call.args.len()}", "`close` takes one value through its nominal `Close` implementation", "write `close(resource)`"))
@@ -512,9 +509,9 @@ sema_call_close_declared_in_core: fn(graph: SemaRegistrationGraph, environment: 
     module_is_core(graph.modules[row.module_index].module_identity)
 }
 
-// The scalar slots of a built-in math value type's
-// positional constructor (Rust `math_arity`): a lane type's lane count, a
-// vector's dimension, a square matrix's N*N column-major components.
+// The scalar slots of a built-in math value type's positional constructor: a
+// lane type's lane count, a vector's dimension, a square matrix's N*N
+// column-major components.
 sema_call_math_arity: fn(name: String) -> Int Never! {
     if name == {
         "Vec2" -> return 2
@@ -529,8 +526,7 @@ sema_call_math_arity: fn(name: String) -> Int Never! {
     Int.parse(lanes[1]) ?? 0
 }
 
-// Rust `math_scalar_ty`: a lane type's component width; linear-algebra types
-// are Float.
+// A lane type's component width; linear-algebra types are Float.
 sema_call_math_scalar_type: fn(name: String) -> Type Never! {
     if name.starts_with("F32x") -> return Type.Float32
     if name.starts_with("I8x") -> return Type.IntN{signed: true, bits: 8}
@@ -544,10 +540,9 @@ sema_call_math_scalar_type: fn(name: String) -> Type Never! {
     Type.Float
 }
 
-// `Decimal("12.34")` `Complex(re, im)` and
-// `Vec3(x, y, z)`-style math constructors each argument
-// is checked against its component type in order and the call becomes the
-// type's precise or math builtin, as the Rust reference lowering builds it.
+// `Decimal("12.34")`, `Complex(re, im)` and `Vec3(x, y, z)`-style math
+// constructors: each argument is checked against its component type in order
+// and the call becomes the type's precise or math builtin.
 sema_call_check_value_constructor: fn(call: Call, type_name_value: String, components: [Type], math: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != components.len() {
         what := if {
@@ -620,9 +615,9 @@ sema_call_ambient_record_io: fn(api: String, result_type: Type, span: Span, envi
     )
 }
 
-// Rust `is_printable || is_displayable`, plus `Never`. Rust's `is_unit_type`
-// there is a measurement-unit family (sema_expression_displayable), so the
-// `Unit` value of a function without `->` has no display.
+// Printable or displayable, plus `Never`. A unit type here is a
+// measurement-unit family (sema_expression_displayable), so the `Unit` value
+// of a function without `->` has no display.
 sema_call_ambient_printable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == (Type.Named{name: "Never"}) -> return true
     sema_expression_typed_literal_printable(ty, environment, program) || sema_expression_displayable(ty, environment, program)
@@ -654,8 +649,8 @@ sema_call_ambient_print_refusal: fn(ty: Type, span: Span) -> Diagnostic Never! {
 }
 
 // Variadic `print`: every argument is checked on its own and prints its own
-// line, one `Print` per argument in order (Rust `print_values`). It takes
-// values only, so a label (`sep:`) names no parameter: E0764.
+// line, one `Print` per argument in order. It takes values only, so a label
+// (`sep:`) names no parameter: E0764.
 sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() == 0 {
         diagnostics.push(sema_error("E0103", call.name_span, "`print` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. print(\"hello\")"))
@@ -885,8 +880,8 @@ sema_call_try_ambient_input_method: fn(receiver: Expr, method: String, method_sp
 
 // `("core.term", "eprint")` / `("core.term", "readline")`: fixed rows with no typed Source
 // contract. `eprint` is variadic: every printable argument joins, one per line, into the row's
-// single stderr write (the Rust reference lowering's `join_print_args`); `readline` takes an
-// optional String prompt and returns `Result<String, IOError>`.
+// single stderr write; `readline` takes an optional String prompt and returns
+// `Result<String, IOError>`.
 sema_call_try_term_core_call: fn(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.term" {
         return SemaDirectSpecialCheck{handled: false, value: None}
@@ -1025,9 +1020,8 @@ sema_call_try_reflect_core_call: fn(record: CoreCallRecord, args: [CallArg], spa
 // `panic(message)` stops with one String message; the stop is a `Never`
 // value and its `__jet_panic__` reachability edge comes from the checked-tree walk.
 sema_call_check_ambient_panic: fn(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
-    // A direct panic is never a Tensor operation's failure route (Rust
-    // `check_panic_call`): autodiff rejects a differentiated function that
-    // reaches it.
+    // A direct panic is never a Tensor operation's failure route: autodiff
+    // rejects a differentiated function that reaches it.
     sema_compute_note_panic(context, false)
     complete := call.args.len() == 1
     if !complete {
@@ -1224,11 +1218,6 @@ sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], ty
 
     reflect := sema_call_try_reflect_core_call(record, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reflect.handled -> return reflect
-
-    // Every `core.compute` call is recorded before any
-    // route returns, so a source-owned member stays visible to the autodiff
-    // trace check exactly like a transform.
-    _ := sema_compute_record_core_call(record, span, context)
 
     reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reactive.handled -> return reactive
@@ -1503,9 +1492,8 @@ sema_call_default_err_message_into_open_union: fn(value: Expr, err: Type, enviro
 sema_call_check_default_err: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     result: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
-        // #3708: an `Err(...)` that builds a carrier is a failure source of
-        // its own (the Rust reference's checked `Expr.Err`); the empty key
-        // never resolves.
+        // An `Err(...)` that builds a carrier is a failure source of its own;
+        // the empty key never resolves.
         context.failure_edges.push("")
         if result_value == .Result(ok, err) {
             if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None && !sema_call_default_err_message_into_open_union(call.args[0].expr, err, environment, program, scopes, state, tail_store, context) {
@@ -1878,8 +1866,8 @@ sema_call_direct_target_abi: fn(target: SemaCallDirectTarget, environment: SemaS
     }
 }
 
-// Rust `check_direct_call` (L0202 shared_auto_clone): a bare `Shared` name
-// passed to a direct call inside a loop retains the handle once per pass.
+// L0202: a bare `Shared` name passed to a direct call inside a loop retains the
+// handle once per pass.
 sema_call_lint_shared_loop_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
     if scopes.loop_depth <= 0 {
         return
@@ -2227,10 +2215,9 @@ sema_call_check_direct_target_owned: fn(state: ^SemaOwnershipState, target: Sema
     checked
 }
 
-// The Rust direct_calls forms ahead of ordinary name resolution
-// (check_call_inner), taken first by sema_expr_check_direct_call.
-// `measurement(value, uncertainty:)` and 's `apply(policy..., f)` apply
-// only unshadowed.
+// The direct-call forms ahead of ordinary name resolution, taken first by
+// sema_expr_check_direct_call. `measurement(value, uncertainty:)` and
+// `apply(policy..., f)` apply only unshadowed.
 sema_call_try_direct_forms: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.name == "measurement" && sema_scope_resolve_index(scopes, call.name) == None {
         labeled: call.args.len() == 2 && call.args[0].label == None && (if call.args[1].label == {

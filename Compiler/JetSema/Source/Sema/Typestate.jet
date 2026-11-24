@@ -184,7 +184,7 @@ sema_state_drop_met: fn(facts: ^SemaFlowFacts, id: Int) Never! {
 // declarations. Each module's walk (sema_typestate_check_module) reads it,
 // the graph and its own checked module and writes only its own findings, so
 // the walks run on compiler threads beside the side checks
-// (CheckProgram.jet sema_finalize_side_checks) and join in module order.
+// (Finalize.jet sema_finalize_side_checks) and join in module order.
 sema_state_table_of: fn(graph: SemaRegistrationGraph) -> SemaStateTable Never! {
     table := sema_state_table_new()
     loop registered in graph.modules -> sema_state_table_add_items(table, registered.program.items)
@@ -398,7 +398,7 @@ sema_state_node_type: fn(walk: SemaStateWalk, interner: Interner, tree: BodyTree
     Val(foundation_byte_text(bytes, last, bytes.len()))
 }
 
-// Rust `static_method_type_name`: `Type.ctor()` / `Ns.Type.ctor()`.
+// The type a static method call `Type.ctor()` / `Ns.Type.ctor()` names.
 sema_state_static_type: fn(receiver: Expr) -> String? Never! {
     if receiver == {
         .Ident(name, _, _) -> Val(name)
@@ -738,7 +738,7 @@ sema_state_statement: fn(walk: ^SemaStateWalk, interner: Interner, tree: BodyTre
     }
 }
 
-// Rust `entry_state_of`: a spawn starts `Running`.
+// A spawn starts `Running`.
 sema_state_entry: fn(walk: SemaStateWalk, value: Expr) -> String? Never! {
     if value == {
         .OrFallback(inner, _, _, _, _) -> sema_state_entry(walk, inner)
@@ -753,7 +753,7 @@ sema_state_entry: fn(walk: SemaStateWalk, value: Expr) -> String? Never! {
     }
 }
 
-// Rust `result_state_of`: the states a call's result type names.
+// The states a call's result type names.
 sema_state_result: fn(walk: SemaStateWalk, interner: Interner, tree: BodyTree, value: Expr) -> String? Never! {
     if sema_state_table_empty(walk.table) -> return None
     if sema_state_case(walk, interner, tree, value) == .Val(named) -> return Val(named)

@@ -1,4 +1,3 @@
-#!/usr/bin/env jet
 // Land patches on a checkout, queue them for the landing service, run that
 // service, publish what it landed, and run the collect-all census that admits
 // compiler commits and expensive launches.
@@ -177,6 +176,7 @@ use {
     files: core.files
     json: core.encoding.json
     process: core.process
+    roots: "Roots"
     sys: core.sys
     term: core.term
     time: core.time
@@ -381,7 +381,7 @@ jet_binary: fn() -[Env, FS]> String Never! {
     named.copy()
 }
 
-// --- roots (Tools/Agent/roots.sh) -------------------------------------------
+// --- roots (Tools/Agent/roots.env) ------------------------------------------
 
 // `name` as the machine's `${XDG_CONFIG_HOME:-~/.config}/jet/env` leaves it
 // over the environment (the shell tools source the file first), else
@@ -394,12 +394,12 @@ root: fn(name: String, fallback: String) -[Env, FS]> String Never! {
 }
 
 state_root: fn() -[Env, FS]> String Never! {
-    root("JET_STATE_ROOT", "{process.env_nonempty("XDG_CACHE_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.cache"}/jet-dev")
+    roots.value("JET_STATE_ROOT")
 }
 
-scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
+scratch_root: fn() -[Env, FS]> String Never! { roots.value("JET_SCRATCH_ROOT") }
 
-run_root: fn() -[Env, FS]> String Never! { root("JET_RUN_ROOT", "{scratch_root()}/run") }
+run_root: fn() -[Env, FS]> String Never! { roots.value("JET_RUN_ROOT") }
 
 // The top of the checkout the command runs in, "" outside one.
 checkout_top: fn() -[Exec, FS, Env, Time.Wait]> String Never! {
@@ -1023,7 +1023,7 @@ dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
 
 // The seed compiler's directory: $JET_SEED, else the current seed.
 seed_dir: fn() -[Env, FS]> String Never! {
-    named: root("JET_SEED", "{seeds_root()}/current")
+    named: roots.value("JET_SEED")
     files.canonicalize(named) ?? named.copy()
 }
 
@@ -2291,11 +2291,11 @@ tools_checkout: fn() -[Exec, Env, FS, Time.Wait]> String Never! {
 }
 
 seeds_root: fn() -[Env, FS]> String Never! {
-    root("JET_SEEDS", "{process.env_nonempty("XDG_DATA_HOME") ?? "{process.env_nonempty("HOME") ?? ""}/.local/share"}/jet-seeds")
+    roots.value("JET_SEEDS")
 }
 
 base_root: fn() -[Env, FS]> String Never! {
-    root("JET_BASE_ROOT", "{scratch_root()}/discovery/base")
+    roots.value("JET_BASE_ROOT")
 }
 
 // The environment a detached run of this tool starts with: PATH, the roots,
@@ -2309,7 +2309,7 @@ unit_env: fn(tools: String) -[Exec, Env, FS, Time.Wait]> [Setting] Never! {
         Setting{name: "JET_RUN_ROOT", value: run_root()},
         Setting{name: "JET_BASE_ROOT", value: base_root()},
         Setting{name: "JET_SEEDS", value: seeds_root()},
-        Setting{name: "JET_SEED", value: root("JET_SEED", "{seeds_root()}/current")},
+        Setting{name: "JET_SEED", value: roots.value("JET_SEED")},
         Setting{name: "JET_DEV_WORKTREE", value: dev_worktree()},
         Setting{name: "JET_COMPILER_IDENTITY", value: read_identity(seed)},
         Setting{name: "JET_TOOLCHAIN_ROOT", value: tools.copy()},
@@ -2833,7 +2833,6 @@ DIAGNOSTIC_GENERATED: [String]{
     "Tests/diagnostics_coverage_baseline.txt",
     "Tests/diagnostics_coverage_allowlist.tsv",
     "Docs/Site/Dist/e/*",
-    "Docs/Audits/*-diagnostic-safety-audit.md",
 }
 
 // Apply `jobs` but the `aside` ones on the worktree `dir` (a lane's later
@@ -4045,7 +4044,7 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
         }
         files.write("{staged}/.published", "{stamp()}\n") ?? ()
         // The published compiler is stage s1 (built by the seed); a lane A/B must compare s2 with s2.
-        seed_name: files.read_link(root("JET_SEED", "{seeds_root()}/current")) ?? seed_dir()
+        seed_name: files.read_link(roots.value("JET_SEED")) ?? seed_dir()
         files.write("{staged}/GENERATION", "generation=s1\nbuilt_by_seed={seed_name}\nnote=an A/B of a lane s2 against this compiler compares two code generations; build a base s2 for same-generation A/Bs\n") ?? ()
         files.rename(staged, dir) ?? files.remove_all(staged) ?? ()
         state = "published"

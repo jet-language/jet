@@ -89,8 +89,8 @@ sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimension
     }
 }
 
-// Rust dimension_dependencies includes identifiers on either side of any
-// binary operator; the resolver itself admits only multiplication/division.
+// The dependencies include identifiers on either side of any binary operator;
+// the resolver itself admits only multiplication/division.
 sema_units_dimension_dependencies: fn(expression: Expr, names: ^[String]) Never! {
     if expression == {
         .Ident(name, _, _) -> { names.push(name.copy()) }
@@ -102,10 +102,10 @@ sema_units_dimension_dependencies: fn(expression: Expr, names: ^[String]) Never!
     }
 }
 
-// Rust dimension_aliases/dimension_unqualified_names, plus indexed reverse
-// dependencies. Repeated references to one declaration count only once.
-// Rust dimension_aliases visits field bases even when the outer expression
-// is not a valid dimension expression. Unqualified names never visit a field.
+// The aliases and unqualified names of a dimension expression, plus indexed
+// reverse dependencies. Repeated references to one declaration count only
+// once. Aliases visit field bases even when the outer expression is not a
+// valid dimension expression. Unqualified names never visit a field.
 sema_units_dimension_aliases: fn(expression: Expr, aliases: ^NameTable) Never! {
     if expression == {
         .Field(base, _, _, _) -> {
@@ -157,9 +157,9 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
     }
 }
 
-// Rust stable_unit_owner: the owning package identity, and that package's
-// identity joined with the package-root-relative module path. Never derive
-// package identity from cwd, display labels or root text.
+// The owning package identity, and that package's identity joined with the
+// package-root-relative module path. Never derive package identity from cwd,
+// display labels or root text.
 sema_units_owner: fn(input: SemaRegistrationModuleInput) -> {package: String, module_identity: String} Never! {
     {module_identity: "{input.package_identity}.{input.module_path}", package: input.package_identity}
 }
@@ -195,7 +195,7 @@ sema_units_resolve_standard: fn(prelude: ^[UnitFamilyDef]) Never! {
     }
 }
 
-// Rust resolve_unit_dimensions. Visibility is built from exact resolved
+// Unit dimensions resolve here. Visibility is built from exact resolved
 // import edges (the name-ledger import target), not guessed source paths.
 // Reverse edges wake only affected claims; forward references and cycles do
 // not incur a declarations × pending-claims scan each iteration.

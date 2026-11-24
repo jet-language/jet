@@ -35,8 +35,8 @@ sema_units_mention: fn(mentions: SemaUnitSourceMentions, name: String) -> Int? N
     if id == 0 -> None else -> Val(id)
 }
 
-// Rust `is_alphanumeric() || == '_'` on the scalar bytes[at..<end]; ASCII
-// scalars are decided from the byte without building a String.
+// Whether the scalar at bytes[at..<end] is alphanumeric or `_`; an ASCII
+// scalar is decided from the byte without building a String.
 sema_units_ident: fn(bytes: [U8], at: Int, end: Int) -> Bool Never! {
     byte: bytes[at]
     if byte < (U8{128}) {
@@ -175,7 +175,7 @@ sema_units_identifier: fn(mentions: SemaUnitSourceMentions, name: String) -> Boo
     sema_units_mention(mentions, name) != None
 }
 
-// Rust partition_point: the first suffix not less than the member.
+// The first suffix not less than the member.
 sema_units_suffix_start: fn(mentions: SemaUnitSourceMentions, member: String) -> Int Never! {
     low := 0
     high := mentions.suffixes.len()
@@ -201,9 +201,9 @@ sema_units_identifier_span: fn(mentions: SemaUnitSourceMentions, name: String) -
     Val(mentions.spans[id])
 }
 
-// Rust source_unit_member_span: whole type name, then earliest from_, then
-// earliest digit suffix. Prefix suffix matches deliberately need no end boundary.
-// `type_name` is the member's type name (sema_registration_unit_type_name).
+// Whole type name, then earliest from_, then earliest digit suffix. Prefix
+// suffix matches deliberately need no end boundary. `type_name` is the member's
+// type name (sema_registration_unit_type_name).
 sema_units_member_span: fn(mentions: SemaUnitSourceMentions, member: String, type_name: String) -> Span? {
     if sema_units_mention(mentions, type_name) == .Val(id) -> return Val(mentions.spans[id])
     from := Span?{None}

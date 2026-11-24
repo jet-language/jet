@@ -53,7 +53,7 @@ SemaCallTypedArguments: struct {
     required_types: [Type],
     // Each argument's written position (`-1` for a default). When a default
     // reads an earlier parameter, every argument is pinned in
-    // `binder_ref_<site>_<slot>` in the Rust reference's source order.
+    // `binder_ref_<site>_<slot>` in source order.
     source_indices: [Int],
     pin_arguments: Bool{false},
     binder_site: Int{0},
@@ -333,9 +333,8 @@ sema_call_static_text_literal: fn(expression: Expr) -> Bool Never! {
     }
 }
 
-// A view-returning call whose source owner is a temporary (Rust
-// `report_temporary_view_source`). A source span is reported once, whichever
-// of the two codes reached it first.
+// A view-returning call whose source owner is a temporary. A source span is
+// reported once, whichever of the two codes reached it first.
 sema_call_report_temporary_view_source: fn(span: Span, string_view: Bool, diagnostics: ^[Diagnostic]) Never! {
     loop previous in diagnostics {
         if (previous.code == "E2305" || previous.code == "E2307") && previous.span == span {
@@ -672,9 +671,8 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             sema_stmt_uninit_write_arg(args[index], state, scopes, diagnostics)
         }
         decision: sema_call_argument_convention(parameter, args[index])
-        // Rust CallBinder `rewrite` + `register_binder_refs`: a default names
-        // earlier parameters through their declaration-slot temporaries, so
-        // they shadow any caller binding of the same name.
+        // A default names earlier parameters through their declaration-slot
+        // temporaries, so they shadow any caller binding of the same name.
         has_binder_refs: args[index].flags.binder_refs.len() > 0
         binder_start: context.name_references.len()
         // A default written in another module checks in its declaring module's
@@ -689,8 +687,8 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             next
         }
         binder_keys := if has_binder_refs && !default_in_owner -> sema_call_enter_binder_refs(args[index].flags.binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, context, args[index].expr) else -> [SymbolID]{}
-        // Rust `arg_expect`: a self-typed numeric read widens into the
-        // parameter after it is checked on its own.
+        // A self-typed numeric read widens into the parameter after it is
+        // checked on its own.
         may_be_numeric: if required == {
             .Int | .Float | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) -> true
             .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -770,9 +768,9 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
-        // E0205 (Rust `check_direct_call`): a write `SharedGuard` parameter
-        // edits through the guard, so only a `guard_edit()` lease or the
-        // caller's own write binding may enter it.
+        // E0205: a write `SharedGuard` parameter edits through the guard, so
+        // only a `guard_edit()` lease or the caller's own write binding may
+        // enter it.
         if parameter.convention == AccessConvention.Write && sema_call_read_shared_guard_argument(state, required, checked_value.ty, args[index].expr, scopes) {
             diagnostics.push(sema_error("E0205", expr_span(args[index].expr), "a read `SharedGuard` cannot enter a write helper", "the helper can edit through this parameter, so its caller must hold an exclusive Shared guard", "create the guard with `guard_edit()` before passing it to the helper"))
             complete = false
@@ -800,10 +798,9 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, diagnostics, taken_name) {
             return None
         }
-        // A self-typed read that does not fit reports the generic E0108 at
-        // the value; like any other argument, that becomes the call's E0112.
-        // Integer narrowing keeps its own E0108 (Rust check_type_assignable
-        // reports it in place of the argument's E0112).
+        // A self-typed read that does not fit reports the generic E0108 at the
+        // value; like any other argument, that becomes the call's E0112.
+        // Integer narrowing keeps its own E0108.
         slot_start: diagnostics.len()
         widened: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, diagnostics) else -> Val(checked_value)
         value := widened ?? {
@@ -842,11 +839,10 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             }
         }
         if !compatible {
-            // (Rust `check_variadic_bound_tail`,
-            // E1313): a trait-bounded variadic argument is checked against
-            // each bound trait it fails to implement; one that implements
-            // every bound is accepted. A builtin trait stays a named bound
-            // after resolution.
+            // E1313: a trait-bounded variadic argument is checked against each
+            // bound trait it fails to implement; one that implements every
+            // bound is accepted. A builtin trait stays a named bound after
+            // resolution.
             bounds := [String]{}
             if required == .TraitObject(list) -> bounds = list else if sema_call_owned_trait_bound(required_declared) == .Val(trait_name) {
                 bounds = [String]{trait_name}
@@ -898,22 +894,21 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 next
             }
         }
-        // Rust `check_call_argument_access`: a name or field the call takes
-        // (convention `Move`, an implicit take or a generated take) passed to
-        // a consuming parameter is the exact-place move, so the argument
-        // moves out of its owner (MovePlace, clearing its drop flag) instead
-        // of reaching lowering as a bare read that only a last-use proof turns
-        // into a move. A plain name noted as the call's implicit take moves the
-        // same way: a call never copies on its own. A read
-        // parameter or its field has no storage to give up: E0201, never a
-        // silent copy. A write parameter's field keeps the refill move the
-        // last-use pass proves.
+        // A name or field the call takes (convention `Move`, an implicit take
+        // or a generated take) passed to a consuming parameter is the
+        // exact-place move, so the argument moves out of its owner (MovePlace,
+        // clearing its drop flag) instead of reaching lowering as a bare read
+        // that only a last-use proof turns into a move. A plain name noted as
+        // the call's implicit take moves the same way: a call never copies on
+        // its own. A read parameter or its field has no storage to give up:
+        // E0201, never a silent copy. A write parameter's field keeps the
+        // refill move the last-use pass proves.
         taken_convention: args[index].convention == AccessConvention.Move || noted_take
         consuming_mark: !default_in_owner && parameter.convention == AccessConvention.Move && !parameter.variadic && taken_convention && !sema_ownership_type_is_copy(value.ty)
         marked_place: consuming_mark && sema_call_marked_move_place(args[index].expr, value)
         // A bare `name.move()` of a read parameter is reported at the name by the
-        // ownership check below, which names the consumer (Rust
-        // `check_call_argument_access`); a field place reports at the mark.
+        // ownership check below, which names the consumer; a field place reports
+        // at the mark.
         bare_name: args[index].expr == .Ident(_, _, _)
         if marked_place && !bare_name && sema_ownership_reject_read_param_move(state, args[index].expr, scopes, diagnostics) {
             return None
@@ -1209,10 +1204,10 @@ sema_crypto_argument_index: fn(params: [SemaCallParam], slots: [Int], parameter:
     None
 }
 
-// (Rust `check_call_args`): an argument that does not fit its parameter is
-// E0112 about the call, after a checked typed-text rejection. A parameter
-// written as a generic alias is named as written (`required_alias`, from
-// sema_call_alias_shown), with its expansion.
+// An argument that does not fit its parameter is E0112 about the call, after a
+// checked typed-text rejection. A parameter written as a generic alias is named
+// as written (`required_alias`, from sema_call_alias_shown), with its
+// expansion.
 sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, required_alias: String?, offered: Type, value: Expr, span: Span, program: SemaProgramTables) -> Diagnostic {
     // ("core.mem", "volatile_read" | "volatile_write"): the pointer argument is
     // not a typed pointer, or the written value is not the pointer's element
@@ -1301,19 +1296,19 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     context.lambda_escapes = previous_lambda_escapes
     offered: probed ?? return
     offered_ty := sema_call_resolved_type(offered.ty, environment, program)
-    // A lambda checked against a callable keeps its plain return (Rust
-    // `infer_lambda`); the probe above had no target and gave it the total
-    // `Never!` carrier, which the argument never had.
+    // A lambda checked against a callable keeps its plain return; the probe
+    // above had no target and gave it the total `Never!` carrier, which the
+    // argument never had.
     if value == .Lambda(_, _) && offered_ty == .Fn(lambda_params, lambda_ret, lambda_effects, lambda_contract, lambda_metadata, lambda_views) && lambda_ret == .Val(.Result(plain_ret, .Named(never_name))) && never_name == "Never" {
         offered_ty = Type.Fn{params: lambda_params, ret: Val(plain_ret), effect_bound: lambda_effects, param_contract: lambda_contract, call_metadata: lambda_metadata, return_view_provenance: lambda_views}
     }
     // The call still checks a lambda argument's captures against its other
-    // arguments (Rust `check_call`); the probe's checked lambda supplies them.
+    // arguments; the probe's checked lambda supplies them.
     if value == .Lambda(probed_ast, _) && offered.kind == .Lambda(probed_lambda) {
         sema_ownership_note_lambda_facts(state, probed_ast.span, probed_lambda.capture_facts)
     }
-    // Rust's lambda span ends where its expression body's span ends (a
-    // call's span is its name).
+    // A lambda's span ends where its expression body's span ends (a call's
+    // span is its name).
     shown_span := value_span
     if value == .Lambda(shown_lambda, _) && ast_lambda_single_expr_span(shown_lambda.body) == .Val(shown_body_span) {
         shown_span = Span{start: value_span.start, end: shown_body_span.end}
@@ -1674,10 +1669,10 @@ sema_call_pack_variadic_arguments: fn(typed: SemaCallTypedArguments, params: [Se
 sema_call_check_bound_arguments_owned: fn(state: ^SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: ^[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic]) -> {lowered: [TCallArg], pins: [TStmt]}? {
     typing_start: diagnostics.len()
     typed: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, args, environment, program, scopes, state, tail_store, context, span, diagnostics, false) ?? {
-        // Rust `check_call` reports a mismatched argument type and still
-        // checks the call's argument accesses (a lambda argument's captures
-        // against the other arguments). It inferred the arguments in order,
-        // each one's access conflicts before its own mismatch.
+        // A mismatched argument type is reported and the call's argument
+        // accesses are still checked (a lambda argument's captures against the
+        // other arguments). The arguments are inferred in order, each one's
+        // access conflicts before its own mismatch.
         if sema_call_only_argument_mismatches(diagnostics, typing_start) {
             mismatches: loop index in typing_start..<diagnostics.len() -> diagnostics[index]
             loop diagnostics.len() > typing_start -> _ := diagnostics.pop()
@@ -1751,8 +1746,7 @@ sema_call_only_argument_mismatches: fn(diagnostics: [Diagnostic], start: Int) ->
 }
 
 // A `SharedGuard` argument for a write parameter that is neither a
-// `guard_edit()` lease nor a binding the caller holds with write access (Rust
-// `param_conv` `Write`).
+// `guard_edit()` lease nor a binding the caller holds with write access.
 sema_call_read_shared_guard_argument: fn(state: ^SemaOwnershipState, required: Type, offered: Type, expr: Expr, scopes: SemaScopeTable) -> Bool {
     if required == .Apply(guard_name, _) {
         if guard_name != "SharedGuard" -> return false

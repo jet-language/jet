@@ -1,0 +1,564 @@
+// Failure inference: the failure contracts sema infers for functions that
+// write none, solved over the program, and the diagnostics that wait on the
+// solve.
+use jet_foundation.[
+    FnBody,
+    CompilerThreads,
+    DIAGNOSTIC_ERROR,
+    Diagnostic,
+    module_index,
+    Func,
+    NameTable,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
+    SymbolKind,
+    Type,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
+    symbol_find,
+    symbol_is_local,
+    symbol_table_key,
+    CodeModule,
+    FactDecl,
+]
+
+// #3708: a function whose failure contract sema may infer. No contract was
+// written, and nothing else owns its return protocol. A computed field's
+// generated getter is the user's formula, so its failures are inferred like a
+// written method's: a read of `path: String -> stored_path` is no failure
+// source. A `#Memo` field's helper is not: its contract is fixed when it is
+// generated (sema_computed_field_memo_helper_func), because a contract inferred
+// after its body was checked would leave the body built for the other one.
+sema_failure_inference_candidate: fn(func: Func) -> Bool Never! {
+    if !sema_failure_contract_is_default(func.return_type) -> return false
+    if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
+    if sema_computed_field_memo_helper_function(func) -> return false
+    (!func.compiler_generated || sema_computed_field_getter_function(func)) && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
+}
+
+// #3708 "Every function has the structured Error
+// route by default. Sema removes it when impossible." After every body is
+// checked, a greatest fixpoint over the bundle's propagation edges finds the
+// unannotated top-level functions and inherent methods whose failure set is
+// empty. A function used as a value keeps its declared callable type, and a
+// body with a failure source of its own stays fallible. The candidates of
+// each part of the modules `bounds` splits (sema_failure_module_bounds) are
+// found on its own thread, and the parts join in module order, so the solve
+// is the same for any thread count. Returns the inferred-infallible keys.
+sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], bounds: [Int]) -> [String] Never! {
+    address_taken := [U32:Bool]{}
+    loop module_result in modules {
+        loop reference in module_result.name_references {
+            if reference.kind == Val(SymbolKind.Function) && !symbol_is_local(reference.symbol.id) {
+                address_taken[reference.symbol.id.id] = true
+            }
+        }
+    }
+    candidates := [SemaFunctionFailureFacts]{}
+    loop part in sema_failure_candidate_parts(graph, modules, address_taken, bounds, 0) {
+        candidates.extend(part)
+    }
+    // Every declared function is checked as a body job; a per-callable
+    // `#Import(c)` declaration returns before its (empty) body, so its summary
+    // has no failure source and no edge. An unannotated import is therefore a
+    // candidate the solve proves infallible (a C function cannot fail) and
+    // projects onto `T Never!`, instead of an edge no fact ever resolves.
+    imports := [String]{}
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].functions.len() {
+            if !sema_function_is_guest_import(graph.modules[module_index].functions[row].declaration) {
+                next
+            }
+            id: graph.modules[module_index].functions[row].symbol.id
+            if address_taken.get(id.id) != None || !sema_failure_inference_candidate(graph.modules[module_index].functions[row].declaration) {
+                next
+            }
+            imports.push(symbol_table_key(graph.symbols, id))
+        }
+    }
+    if imports.len() > 0 {
+        taken := name_table_sized(candidates.len() + imports.len() + 1)
+        loop facts in candidates -> _ := name_intern(taken, facts.function_key)
+        loop key in imports.move() {
+            if name_find(taken, key) != None -> next
+            _ := name_intern(taken, key)
+            candidates.push(SemaFunctionFailureFacts{function_key: key, direct: false, edges: [String]{}})
+        }
+    }
+    sema_failure_fixpoint(candidates)
+}
+
+// A failure-solve or failure-union thread is admitted for at least this many
+// functions' failure facts (about a millisecond of lookups), so a small
+// program reads them on the calling thread.
+SEMA_FAILURE_FACTS_PER_THREAD: 1024
+
+// Consecutive parts of `modules`, weighed by their failure facts, for as
+// many threads as `threads` admits (compiler_threads_partition).
+sema_failure_module_bounds: fn(modules: [SemaGraphModuleResult], threads: CompilerThreads) -> [Int] Never! {
+    weights := [Int]{}
+    work := 0
+    loop module_result in modules {
+        weights.push(module_result.failure_facts.len())
+        work += module_result.failure_facts.len()
+    }
+    compiler_threads_partition(weights, compiler_threads_admit(threads, modules.len(), work, SEMA_FAILURE_FACTS_PER_THREAD, 0, 0))
+}
+
+// The solve's candidates of parts `at..<bounds.len() - 1`, in part order:
+// the first part on its own thread, the ones after it the same way, and
+// the last on this one.
+sema_failure_candidate_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], address_taken: [U32:Bool], bounds: [Int], at: Int) -> [[SemaFunctionFailureFacts]] Never! {
+    done := [[SemaFunctionFailureFacts]]{}
+    if at + 1 >= bounds.len() -> return done
+    if at + 2 == bounds.len() {
+        done.push(sema_failure_candidate_part(graph, modules, address_taken, bounds[at], bounds[at + 1]))
+        return done
+    }
+    task.group sema_failure_candidate_threads {
+        head: task sema_failure_candidate_part(graph, modules, address_taken, bounds[at], bounds[at + 1])
+        rest: sema_failure_candidate_parts(graph, modules, address_taken, bounds, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+// The solve's candidates among the failure facts of modules `from..<to`.
+sema_failure_candidate_part: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], address_taken: [U32:Bool], from: Int, to: Int) -> [SemaFunctionFailureFacts] Never! {
+    candidates := [SemaFunctionFailureFacts]{}
+    loop module_index in from..<to {
+        source_index: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
+        loop facts in modules[module_index].failure_facts {
+            sema_failure_add_candidate(graph, source_index, facts, address_taken, candidates)
+        }
+    }
+    candidates
+}
+
+// A function the solve may infer: its body has no failure source of its own,
+// it is not used as a value (`address_taken` holds the symbol ids of those
+// that are), and it is an inference candidate.
+sema_failure_add_candidate: fn(graph: SemaRegistrationGraph, source_index: Int, facts: SemaFunctionFailureFacts, address_taken: [U32:Bool], candidates: ^[SemaFunctionFailureFacts]) Never! {
+    if facts.direct {
+        return
+    }
+    if symbol_find(graph.symbols, facts.function_key) == .Val(id) {
+        if address_taken.get(id.id) != None -> return
+    }
+    row: sema_registration_callable_row(graph, facts.function_key) ?? return
+    if !sema_failure_row_in_module(graph, row, source_index) || !sema_failure_row_candidate(graph, row) {
+        return
+    }
+    candidates.push(facts.copy())
+}
+
+// Whether module `source_index` registers the callable at `row`; a method
+// is registered on its impl's module and on its type's.
+sema_failure_row_in_module: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow, source_index: Int) -> Bool Never! {
+    if row == {
+        .Function(module_index, _) -> return module_index == source_index
+        .Foreign(module_index, _) -> return module_index == source_index
+        .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> {}
+    }
+    loop site in sema_failure_method_rows(graph, row) {
+        declaring: if site == {
+            .NominalMethod(module_index, _, _) -> module_index
+            .ImplMethod(module_index, _, _) -> module_index
+            .Function(_, _) | .Foreign(_, _) -> -1
+        }
+        if declaring == source_index -> return true
+    }
+    false
+}
+
+// Whether the solve may infer the failure contract of the callable at `row`:
+// a top-level function, or an inherent method (one in its type's body or in
+// an `impl T { … }` block) that is an inference candidate. A trait-impl
+// method's return is its trait's, so it keeps the route it declares.
+sema_failure_row_candidate: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> Bool Never! {
+    if row == {
+        .Function(module_index, index) -> return sema_failure_inference_candidate(graph.modules[module_index].functions[index].declaration)
+        .NominalMethod(module_index, owner, index) -> {
+            if !sema_failure_inference_candidate(graph.modules[module_index].nominals[owner].methods[index].declaration) {
+                return false
+            }
+        }
+        .ImplMethod(module_index, owner, index) -> {
+            if !sema_failure_inference_candidate(graph.modules[module_index].impls[owner].methods[index].declaration) {
+                return false
+            }
+        }
+        .Foreign(_, _) -> return false
+    }
+    loop site in sema_failure_method_rows(graph, row) {
+        if site == {
+            .NominalMethod(module_index, owner, index) -> {
+                if index < sema_failure_inherent_method_count(graph.modules[module_index].nominals[owner]) {
+                    return true
+                }
+            }
+            .ImplMethod(module_index, owner, _) -> {
+                if graph.modules[module_index].impls[owner].trait_name == None && !graph.modules[module_index].impls[owner].compiler_generated {
+                    return true
+                }
+            }
+            .Function(_, _) | .Foreign(_, _) -> {}
+        }
+    }
+    false
+}
+
+// Every registered row of the method at `row`. A method of an `impl T` block
+// is registered on the impl and again on the nominal `T`
+// (sema_registration_add_impl), under one key.
+sema_failure_method_rows: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> [SemaRegistrationCallableRow] Never! {
+    rows := [SemaRegistrationCallableRow]{}
+    if row == {
+        .NominalMethod(module_index, owner, index) -> {
+            rows.push(SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
+            id: graph.modules[module_index].nominals[owner].methods[index].symbol.id
+            loop reference in sema_registration_impl_rows_named(graph, graph.modules[module_index].nominals[owner].symbol.name) {
+                loop method in 0..<graph.modules[reference.module_index].impls[reference.row].methods.len() {
+                    if graph.modules[reference.module_index].impls[reference.row].methods[method].symbol.id == id {
+                        rows.push(SemaRegistrationCallableRow.ImplMethod{module_index: reference.module_index, owner: reference.row, row: method})
+                    }
+                }
+            }
+        }
+        .ImplMethod(module_index, owner, index) -> {
+            rows.push(SemaRegistrationCallableRow.ImplMethod{module_index: module_index, owner: owner, row: index})
+            id: graph.modules[module_index].impls[owner].methods[index].symbol.id
+            loop reference in sema_registration_nominal_rows_named(graph, graph.modules[module_index].impls[owner].target_type_name) {
+                loop method in 0..<graph.modules[reference.module_index].nominals[reference.row].methods.len() {
+                    if graph.modules[reference.module_index].nominals[reference.row].methods[method].symbol.id == id {
+                        rows.push(SemaRegistrationCallableRow.NominalMethod{module_index: reference.module_index, owner: reference.row, row: method})
+                    }
+                }
+            }
+        }
+        .Function(_, _) | .Foreign(_, _) -> {}
+    }
+    rows
+}
+
+// A nominal registers the methods of its own body first, then those of its
+// trait-impl blocks (sema_registration_nominal), then those of each `impl`
+// block (sema_registration_add_impl); this counts the first.
+sema_failure_inherent_method_count: fn(nominal: SemaRegistrationNominal) -> Int Never! {
+    if nominal.source == .SourceAST(item) {
+        if item == {
+            .Struct(definition) -> return definition.methods.len()
+            .Enum(definition) -> return definition.methods.len()
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    0
+}
+
+// The greatest fixpoint over `candidates`, each of which starts inferred;
+// returns the keys that stay infallible. By propagation: a candidate with an
+// edge to a key that is not (or no longer) inferred falls, and its fall
+// reaches every candidate with an edge to it through `dependents`, so each
+// edge is visited a bounded number of times instead of once per round. Each
+// candidate key has its id in `keys`; `inferred` and `dependents` are by id,
+// `ids` each candidate row's.
+sema_failure_fixpoint: fn(candidates: [SemaFunctionFailureFacts]) -> [String] Never! {
+    keys := name_table_sized(candidates.len() + 1)
+    inferred := [Bool]{false}
+    ids := [Int]{}
+    loop facts in candidates {
+        id: name_index(name_intern(keys, facts.function_key))
+        if id == inferred.len() -> inferred.push(true)
+        ids.push(id)
+    }
+    dependents := loop _ in inferred -> [Int]{}
+    fallen := [Int]{}
+    loop (row, facts) in candidates {
+        own: ids[row]
+        loop edge in facts.edges {
+            target: if name_find(keys, edge) == .Val(name) -> name_index(name) else -> 0
+            if !inferred[target] {
+                if inferred[own] {
+                    inferred[own] = false
+                    fallen.push(own)
+                }
+                next
+            }
+            dependents[target].push(row)
+        }
+    }
+    loop fallen.len() > 0 {
+        id: fallen.pop() ?? break
+        loop row in dependents[id] {
+            caller: ids[row]
+            if inferred[caller] {
+                inferred[caller] = false
+                fallen.push(caller)
+            }
+        }
+    }
+    solved := [String]{}
+    loop (row, facts) in candidates {
+        if inferred[ids[row]] -> solved.push(facts.function_key)
+    }
+    solved
+}
+
+// #3708: discharge each failure-domain obligation whose callee the solve
+// proved infallible (`solved` holds the infallible keys), and emit the rest
+// with the obligation mark removed. Returns whether any obligation survived
+// as an error.
+sema_failure_settle_obligations: fn(diagnostics: ^[Diagnostic], solved: NameTable) -> Bool Never! {
+    mark: sema_failure_obligation_mark()
+    pending: loop diagnostic in diagnostics {
+        if (diagnostic.detail ?? "").starts_with(mark) {
+            break true
+        }
+    } ?? false
+    if !pending -> return false
+    // One pass moves each finding out and back in order (popped twice, so
+    // none is copied): a discharged one stays out, a surviving one comes
+    // back without the mark. Removing each discharged one in place would
+    // shift every finding after it, once per discharge.
+    held := [Diagnostic]{}
+    loop diagnostics.len() > 0 {
+        diagnostic: diagnostics.pop() ?? break
+        held.push(diagnostic)
+    }
+    survived := false
+    loop held.len() > 0 {
+        diagnostic := held.pop() ?? break
+        detail: diagnostic.detail ?? ""
+        if !detail.starts_with(mark) {
+            diagnostics.push(diagnostic)
+            next
+        }
+        lines: detail.split("\n").to_list()
+        callee: lines[0].replace(mark, "")
+        if name_find(solved, callee) != None -> next
+        remainder := [String]{}
+        loop line_index in 1..<lines.len() -> remainder.push(lines[line_index])
+        rest: remainder.join("\n")
+        diagnostic.detail = None
+        if rest != "" -> diagnostic.detail = Val(rest)
+        diagnostics.push(diagnostic)
+        survived = true
+    }
+    survived
+}
+
+// Takes the union solve's pending line (sema_failure_union_pending_mark) off
+// each report in `diagnostics` that carries it: the solve's recheck replaced
+// every report of a body it projected, so one left stands as it was made.
+sema_failure_union_settle_reports: fn(diagnostics: ^[Diagnostic]) Never! {
+    mark: sema_failure_union_pending_mark()
+    loop index in 0..<diagnostics.len() {
+        detail: diagnostics[index].detail ?? ""
+        if !detail.starts_with(mark) -> next
+        rest: detail.replace("{mark}\n", "")
+        diagnostics[index].detail = None
+        if rest != "" -> diagnostics[index].detail = Val(rest)
+    }
+}
+
+// E2404 repeated sites: every call of one callee whose failure domain has no
+// route into the same caller domain is one root, reported once at its first
+// site. `seen` carries the reported domains across the bundle's report lists.
+sema_failure_domain_dedupe: fn(diagnostics: ^[Diagnostic], seen: ^NameTable) Never! {
+    repeated: loop diagnostic in diagnostics {
+        if diagnostic.code == "E2404" {
+            break true
+        }
+    } ?? false
+    if !repeated {
+        return
+    }
+    // A repeated root leaves in place, from the back, so the kept findings
+    // are never copied.
+    repeats := [Int]{}
+    loop (index, diagnostic) in diagnostics {
+        detail: diagnostic.detail ?? ""
+        if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") -> next
+        key: detail.split("\n").to_list()[0]
+        if name_find(seen, key) != None {
+            repeats.push(index)
+            next
+        }
+        _ := name_intern(seen, key)
+    }
+    loop repeats.pop() == .Val(index) -> _ := diagnostics.remove(index, .Slot)
+}
+
+// #3708 for one comptime function closure: the failure rows, function-value
+// uses and failure obligations of its checked bodies. Every function a
+// comptime body reaches is in its closure, so the closure's own solve proves
+// what the bundle solve proves for those callees; the body pass that reuses a
+// body settles its obligations again with the bundle solve.
+SemaComptimeFailureClosure: struct {
+    owners: [Int]{[Int]{}},
+    facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}},
+    address_taken: [U32:Bool]{[U32:Bool]{}},
+    obligations: [Diagnostic]{[Diagnostic]{}},
+}
+
+sema_comptime_failure_closure_add: fn(graph: SemaRegistrationGraph, closure: ^SemaComptimeFailureClosure, result: SemaComptimeFunctionResult) Never! {
+    loop reference in result.name_references {
+        if reference.kind == Val(SymbolKind.Function) && !symbol_is_local(reference.symbol.id) {
+            closure.address_taken[reference.symbol.id.id] = true
+        }
+    }
+    if result.failure == .Val(facts) {
+        if sema_registration_module_index(graph, result.module_identity) == .Val(source_index) {
+            closure.owners.push(source_index)
+            closure.facts.push(facts.copy())
+        }
+    }
+    sema_comptime_push_obligations(result, closure.obligations)
+}
+
+// Settles the closure's obligations with a solve over its rows; each one
+// that survives is reported in `diagnostics`. A discharged callee keeps its
+// carrier, as every function compile-time evaluation reached does in the
+// bundle (sema_failure_project_infallible). Returns whether every obligation
+// was discharged.
+sema_comptime_failure_closure_settle: fn(graph: SemaRegistrationGraph, closure: SemaComptimeFailureClosure, diagnostics: ^[Diagnostic]) -> Bool Never! {
+    if closure.obligations.len() == 0 -> return true
+    candidates := [SemaFunctionFailureFacts]{}
+    loop (index, facts) in closure.facts {
+        sema_failure_add_candidate(graph, closure.owners[index], facts, closure.address_taken, candidates)
+    }
+    solved := name_table_sized(4)
+    loop key in sema_failure_fixpoint(candidates) -> _ := name_intern(solved, key)
+    obligations := closure.obligations
+    if !sema_failure_settle_obligations(obligations, solved) -> return true
+    loop diagnostic in obligations -> diagnostics.push(diagnostic)
+    false
+}
+
+// The diagnostic `diagnostic` defers to the failure solve: the key of the
+// unannotated callee it names (`sema_failure_defer_obligation`).
+sema_failure_obligation_callee: fn(diagnostic: Diagnostic, mark: String) -> String? Never! {
+    detail: diagnostic.detail ?? return None
+    if !detail.starts_with(mark) -> return None
+    lines: detail.split("\n").to_list()
+    Val(lines[0].replace(mark, ""))
+}
+
+// Whether a function check reported an error a keep-going trap answers for.
+// Before the failure solve (`pending_obligations`) an obligation against an
+// unannotated callee is not one yet: the solve discharges it, or the module
+// that keeps it is checked again (`sema_failure_recheck_modules`).
+sema_check_function_failed: fn(diagnostics: [Diagnostic], start: Int, pending_obligations: Bool) -> Bool Never! {
+    if !pending_obligations -> return sema_has_error_since(diagnostics, start)
+    mark: sema_failure_obligation_mark()
+    loop index in start..<diagnostics.len() {
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR && sema_failure_obligation_callee(diagnostics[index], mark) == None {
+            return true
+        }
+    }
+    false
+}
+
+// Whether `module_result` calls one of the functions `ids` holds (by symbol
+// id) or names one as a value.
+sema_failure_module_references: fn(module_result: SemaGraphModuleResult, ids: [U32:Bool]) -> Bool Never! {
+    loop fact in module_result.call_facts {
+        if fact.callee == .Val(callee) && !symbol_is_local(callee) && ids.get(callee.id) != None {
+            return true
+        }
+    }
+    loop reference in module_result.name_references {
+        if !symbol_is_local(reference.symbol.id) && ids.get(reference.symbol.id.id) != None -> return true
+    }
+    false
+}
+
+// The modules the one body check can't keep, in
+// order. A union contract changes what its callers check against (the cases
+// a match names, the typed payloads), so each module that declares a
+// projected function or a minted `#Error enum`, calls a projected function or
+// names one as a value is checked again against the projected graph. A
+// minted type may be named before it existed, which that module's check
+// reported, so after a mint a module with an error is checked again too. A
+// module with a failure obligation against a callee that kept its carrier
+// (`infallible` holds the `T Never!` projections) is checked again against
+// the solved graph: an inferring callback that deferred the callee's failure
+// takes the callee's carrier there, and a keep-going trap sees the error, as
+// it does once the obligations are settled.
+sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], unions: SemaFailureUnionProjected, infallible: [String]) -> [Int] Never! {
+    union_ids := [U32:Bool]{}
+    loop key in unions.keys {
+        if symbol_find(graph.symbols, key) == .Val(id) -> union_ids[id.id] = true
+    }
+    declaring := [Bool]{}
+    loop _ in modules -> declaring.push(false)
+    loop module_index in unions.modules -> declaring[module_index] = true
+    plain_keys := name_table_sized(infallible.len() + 1)
+    loop key in infallible -> _ := name_intern(plain_keys, key)
+    mark: sema_failure_obligation_mark()
+    selected := [Int]{}
+    loop (module_index, module_result) in modules {
+        recheck := declaring[module_index]
+        if !recheck && union_ids.len() > 0 {
+            recheck = sema_failure_module_references(module_result, union_ids)
+        }
+        if !recheck {
+            loop diagnostic in module_result.diagnostics {
+                if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+                callee: sema_failure_obligation_callee(diagnostic, mark)
+                recheck = if callee == .Val(key) -> key == "" || name_find(plain_keys, key) == None else -> unions.minted
+                if recheck -> break
+            }
+        }
+        if recheck -> selected.push(module_index)
+    }
+    selected
+}
+
+// Every body is checked once and the `T Never!` projection is reconciled
+// afterwards. A module checked before the solve projected `projected` takes it
+// here: each projected function's checked signature names the `T Never!`
+// carrier, and a dropped call to one is a discarded result (L0508). Its call
+// sites keep the carrier they were checked against; lowering hands a
+// plain-return callee's value to any `Result` carrier a call site names.
+sema_failure_reconcile_infallible: fn(modules: ^[SemaGraphModuleResult], projected: [String], symbols: SymbolTable) Never! {
+    if projected.len() == 0 {
+        return
+    }
+    keys := name_table_sized(projected.len() + 1)
+    ids := [U32:Bool]{}
+    loop key in projected {
+        _ := name_intern(keys, key)
+        if symbol_find(symbols, key) == .Val(id) -> ids[id.id] = true
+    }
+    loop module_index in 0..<modules.len() {
+        loop function_index in 0..<modules[module_index].functions.len() {
+            if name_find(keys, modules[module_index].functions[function_index].key) != None {
+                sema_failure_reconcile_function(modules[module_index].functions[function_index])
+            }
+        }
+        loop fact_index in 0..<modules[module_index].call_facts.len() {
+            if !modules[module_index].call_facts[fact_index].discarded_if_infallible || modules[module_index].call_facts[fact_index].discarded {
+                next
+            }
+            if modules[module_index].call_facts[fact_index].callee == .Val(callee) && ids.get(callee.id) != None {
+                modules[module_index].call_facts[fact_index].discarded = true
+            }
+        }
+    }
+}
+
+// One projected function's checked signature names the `T Never!` carrier
+// (sema_failure_reconcile_infallible).
+sema_failure_reconcile_function: fn(function: ^FnBody) Never! {
+    if function.ret == .Val(.Result(ok, _)) {
+        ret: Type.Result{ok: ok, err: Type.Named{name: "Never"}}
+        function.ret = Val(ret)
+        failure: sema_failure_carrier(Val(ret))
+        function.failure_carrier = failure
+    }
+}

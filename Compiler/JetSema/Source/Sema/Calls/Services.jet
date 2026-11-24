@@ -68,7 +68,7 @@ sema_services_valid_name: fn(value: String) -> Bool Never! {
     loop index < bytes.len() {
         code := Int{bytes[index]}
         if code < 32 || code == 127 -> return false
-        // Rust char.is_control includes the C1 control range U+0080..U+009F.
+        // The control range includes the C1 range U+0080..U+009F.
         if code == 194 && index + 1 < bytes.len() {
             next_code := Int{bytes[index + 1]}
             if next_code >= 128 && next_code <= 159 -> return false
@@ -201,9 +201,8 @@ sema_services_method_params: fn(types: [Type], accesses: [AccessConvention]) -> 
     params
 }
 
-// The source call `core.service.<member>(receiver, args…)` at `type_args`, as
-// Rust lowers it (`service_method_route` + `core_source_owns_call`); `api`
-// names the call in its diagnostics.
+// The source call `core.service.<member>(receiver, args…)` at `type_args`;
+// `api` names the call in its diagnostics.
 sema_services_source_call: fn(api: String, member: String, type_args: [Type], receiver: Expr, receiver_access: AccessConvention, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     identity: sema_call_core_module_identity(environment, program, "core.service") ?? {
         diagnostics.push(sema_error("E0003", span, "service source module is not loaded", "`{api}` requires Core/Service/Service.jet", "load the registered Core source module"))
@@ -222,11 +221,11 @@ sema_services_source_call: fn(api: String, member: String, type_args: [Type], re
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-// Rust `infer_method_call` routes a service method only when the receiver is
-// that service handle (`handle_ty == "ServiceTree"`, …); a user type's `start`,
-// `send` or `show` keeps its own declaration. A canonical `core.service`
-// identity names the same handle, whether its nominal is source-owned or still
-// has a carrier projection (`ServiceRuntime`, `DeliveryState`).
+// A service method routes only when the receiver is that service handle
+// (`handle_ty == "ServiceTree"`, …); a user type's `start`, `send` or `show`
+// keeps its own declaration. A canonical `core.service` identity names the
+// same handle, whether its nominal is source-owned or still has a carrier
+// projection (`ServiceRuntime`, `DeliveryState`).
 sema_services_receiver_is: fn(ty: Type, owner: String) -> Bool Never! {
     if ty == {
         .Named(name) -> name == owner || core_identity_is(name, "core.service", owner)
@@ -252,8 +251,8 @@ sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, scopes
     if {
         handler == .Ident(identifier, _, _) -> {
             handler_name = identifier
-            // Rust `self.lookup(handler)`: only a body binding is a local; the
-            // root frame holds the module's items and imports.
+            // Only a body binding is a local; the root frame holds the module's
+            // items and imports.
             if sema_scope_resolve_index(scopes, identifier) == .Val(index) && scopes.frames[scopes.bindings[index].frame].parent >= 0 {
                 diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler lifetime is outside the checked builder shape", "service topology values must stay visible to sema before runtime construction", "pass a top-level function, not a local or captured function value"))
                 valid = false
@@ -518,9 +517,9 @@ SemaServiceFunctionRow: struct {
 
 // The checked type name of the Core nominal `leaf` that `module_name` declares:
 // its qualified source name, or the leaf for a compiler-owned nominal. The
-// checked #Job identity is normalized BEFORE the registered source target, the
-// same compiler-owned contract as the Rust method-call checker: enqueue/delay
-// are not string-selected public operations.
+// checked #Job identity is normalized BEFORE the registered source target, a
+// compiler-owned contract: enqueue/delay are not string-selected public
+// operations.
 sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
         loop module_index in 0..<graph.modules.len() {

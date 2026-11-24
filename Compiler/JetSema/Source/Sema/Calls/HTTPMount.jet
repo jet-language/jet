@@ -1305,8 +1305,8 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
 }
 
 // One function body's mounts. Its own function so the visitor closure lends
-// the `mounted` write parameter: the stage-0 Rust tier then lends `graph` to the
-// closure instead of copying the whole registration graph per function.
+// the `mounted` write parameter and `graph` is lent to the closure instead of
+// copying the whole registration graph per function.
 sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: ^[SymbolID]) Never! {
     loop statement in function.body {
         body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_http_collect_mounted(function.tree, expression, graph, identity, mounted) })

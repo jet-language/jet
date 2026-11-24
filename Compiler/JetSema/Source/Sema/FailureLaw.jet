@@ -1,6 +1,5 @@
-// the failure law's declaration side. The Rust reference is
-// `TraitRegistry.register_error_conv` (jet-foundation),
-// `Sema.Prelude.inject_exercised_error_conversions` and the arm.
+// The failure law's declaration side: registered error conversions and the
+// exercised Prelude conversions.
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
@@ -77,11 +76,10 @@ use {
 
 // The standard library's own error family: the members of the
 // `impl <member> -> Err` declarations of Prelude/Errors.jet
-// (SEMA_PRELUDE_ERROR_SOURCE), read at build (the Rust reference's
-// `is_core_error_family_type`). That file says why each member belongs and
-// why `TaskFailure` and component types stay outside. The typed decode's
-// `[FieldError]` list is the one member that is not a named type, and the
-// refused send's `SendError<T>` the one generic member
+// (SEMA_PRELUDE_ERROR_SOURCE), read at build. That file says why each member
+// belongs and why `TaskFailure` and component types stay outside. The typed
+// decode's `[FieldError]` list is the one member that is not a named type, and
+// the refused send's `SendError<T>` the one generic member
 // (sema_core_error_family_source).
 JET_CORE_ERROR_FAMILY: #run sema_core_error_family_names(SEMA_PRELUDE_ERROR_SOURCE)
 
@@ -610,15 +608,15 @@ sema_is_error_conversion_function: fn(func: Func) -> Bool {
     func.name.starts_with("errconv_") && func.params.len() == 1 && func.params[0].name == "self"
 }
 
-// Registration of every declared conversion in one module (the Rust
-// reference's `register_error_conv`): E2406 orphan rule, E2405 duplicate,
-// E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked
-// routine; a rejected one is removed so it never reaches lowering. `items` is
-// rewritten in place, and a list without a conversion is left untouched.
-// The markers above each conversion join `facts` at its Impl site, since the
-// item they were written on is gone after this.
-// `package_types` are the names a sibling member file of the same package declares that
-// this file reaches: types of the package itself for the orphan rule (S28).
+// Registration of every declared conversion in one module: E2406 orphan rule,
+// E2405 duplicate, E2418 cycle and E2419 ambiguity. An accepted conversion
+// becomes its checked routine; a rejected one is removed so it never reaches
+// lowering. `items` is rewritten in place, and a list without a conversion is
+// left untouched. The markers above each conversion join `facts` at its Impl
+// site, since the item they were written on is gone after this.
+// `package_types` are the names a sibling member file of the same package
+// declares that this file reaches: types of the package itself for the orphan
+// rule (S28).
 sema_error_conversion_items: fn(items: ^[Item], facts: ^[AppliedRuleApplication], package_types: [String], diagnostics: ^[Diagnostic]) {
     plain_types: sema_error_conversion_plain_types(items)
     has_conversion: loop index in 0..<items.len() {
@@ -938,15 +936,13 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, 
     Val(Item.Func{value: routine})
 }
 
-// The canonical Prelude conversion of one family member into
-// the default `Err`, identical to its Prelude/Errors.jet declaration. The
-// declaration names the family leaf; the routine binds the exercised source
-// identity (`<corelib>/core.files.IOError`), as the
-// Rust reference binds `from_ty` to the exercised source, so the routine key
-// is the one the propagation site recorded. The routine keeps the declaration's
-// own spans, as Rust keeps the Prelude/Errors.jet spans: its `self` parameter
-// is declared before every use in its body, so span-ordered name resolution
-// finds it.
+// The canonical Prelude conversion of one family member into the default
+// `Err`, identical to its Prelude/Errors.jet declaration. The declaration
+// names the family leaf; the routine binds the exercised source identity
+// (`<corelib>/core.files.IOError`), so the routine key is the one the
+// propagation site recorded. The routine keeps the declaration's own
+// Prelude/Errors.jet spans: its `self` parameter is declared before every use
+// in its body, so span-ordered name resolution finds it.
 sema_prelude_error_conversion: fn(source: Type, diagnostics: ^[Diagnostic]) -> Func? {
     leaf: sema_prelude_conversion_spelling(source)
     parsed: parse_source("impl {leaf} -> Err {{\n{sema_prelude_conversion_body(source, leaf)}}}\n".bytes()) ?? return None
@@ -1098,14 +1094,13 @@ sema_prelude_conversion_demands: fn(module_identity: String, functions: [FnBody]
     out
 }
 
-// Demand-driven injection (the Rust reference's
-// `inject_exercised_error_conversions`): only the conversions this module's
-// propagation sites exercised are checked into routines, and a module that
-// declares its own conversion for a pair keeps it. Every conversion that cannot
-// be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
-// a conversion whose body fails to check is kept as its typed trap.
-// `walked` holds the demands of the functions a compiler thread walked, by
-// position in `functions` (sema_prelude_conversion_demands).
+// Demand-driven injection: only the conversions this module's propagation sites
+// exercised are checked into routines, and a module that declares its own
+// conversion for a pair keeps it. Every conversion that cannot be injected
+// names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING) a conversion
+// whose body fails to check is kept as its typed trap. `walked` holds the
+// demands of the functions a compiler thread walked, by position in `functions`
+// (sema_prelude_conversion_demands).
 sema_inject_prelude_error_conversions: fn(module_identity: String, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: ^[FnBody], walked: [Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], reasons: ^[String], keep_going: Bool) -> Bool {
     demands: sema_prelude_conversion_demands(module_identity, functions, walked)
     complete := true
@@ -1222,9 +1217,9 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: ModuleID
                     }
                     inner := seen
                     inner.push(seen_key)
-                    // Rust `resolve_type`: a re-export alias
-                    // (`HexError: encoding.HexError`) names its target
-                    // from the alias's own module, never this module's leaf.
+                    // A re-export alias (`HexError: encoding.HexError`) names
+                    // its target from the alias's own module, never this
+                    // module's leaf.
                     if definition.target == .Named(target_name) && (target_name.contains(".") || target_name.contains(".")) {
                         home: sema_failure_alias_target_is_error(target_name, module_identity, inner, environment, program)
                         if home != None -> return home
@@ -1309,9 +1304,9 @@ sema_failure_domain_is_error: fn(ty: Type, seen: [String], environment: SemaScop
     }
 }
 
-// The Rust reference's declared-type walk for failure contracts: E2417 for a
-// non-error `!` domain and E2422 for `Never` in a value position. `in_return`
-// admits `Never` as a callable's success slot.
+// The declared-type walk for failure contracts: E2417 for a non-error `!`
+// domain and E2422 for `Never` in a value position. `in_return` admits `Never`
+// as a callable's success slot.
 sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     if ty == {
         .Named(name) -> {
@@ -1506,8 +1501,8 @@ sema_expiring_secret_declared_by: fn(graph: SemaRegistrationGraph, caller: Int) 
     false
 }
 
-// D9: `_` is a pattern wildcard, never a type hole. The Rust reference reports
-// the same E0119 from its declared-type walk.
+// D9: `_` is a pattern wildcard, never a type hole; the declared-type walk
+// reports E0119.
 sema_type_hole: fn(span: Span) -> Diagnostic {
     sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
 }
@@ -1597,7 +1592,7 @@ sema_failure_written_name_unknown: fn(name: String, generic_names: [String], env
     false
 }
 
-// Rust `union_member_has_open_shape`, or a member that mentions one of the
+// A member with an open shape, or a member that mentions one of the
 // signature's type parameters.
 sema_union_member_open: fn(ty: Type, generic_names: [String]) -> Bool Never! {
     if ty == {
@@ -1634,8 +1629,7 @@ sema_check_function_failure_contracts: fn(func: Func, environment: SemaScopeEnvi
     diagnostics.len() == before
 }
 
-// Rust `validate_public_failure_carrier.collect_named`: every nominal name a
-// declared type mentions, in walk order.
+// Every nominal name a declared type mentions, in walk order.
 sema_public_failure_collect_named: fn(ty: Type, out: ^[String]) Never! {
     if ty == {
         .Named(name) -> { out.push(name.copy()) }
@@ -1668,12 +1662,10 @@ sema_public_failure_collect_named: fn(ty: Type, out: ^[String]) Never! {
     }
 }
 
-// (Rust `validate_public_failure_carrier`, E2421): a
-// public fallible function exposes its declared failure carrier, so every
-// nominal the carrier names, and every field of a carrier struct, must be
-// public. Names resolve from the function's own module, as Rust's
-// `struct_owner_module` does; a spelling whose leaf the owner does not
-// declare (an import alias) is skipped, as Rust's ledger lookup misses it.
+// E2421: a public fallible function exposes its declared failure carrier, so
+// every nominal the carrier names, and every field of a carrier struct, must
+// be public. Names resolve from the function's own module; a spelling whose
+// leaf the owner does not declare (an import alias) is skipped.
 sema_check_public_failure_carrier: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     if !func.is_pub {
         return
@@ -1738,9 +1730,9 @@ sema_public_failure_diagnostic: fn(function: String, member: String, span: Span,
     diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.APIChanging)
 }
 
-// Rust `public_failure_visibility_edit`: delete the `priv` marker written on
-// the member's line before its name. A type private because it sits in a
-// `priv module` has no marker of its own, so it gets no edit.
+// Delete the `priv` marker written on the member's line before its name. A type
+// private because it sits in a `priv module` has no marker of its own, so it
+// gets no edit.
 sema_public_failure_visibility_edit: fn(source: String, span: Span) -> TextEdit? {
     bytes: source.bytes()
     end: if span.start < bytes.len() -> span.start else -> bytes.len()
@@ -1845,9 +1837,9 @@ sema_never_return_is_err: fn(value: Expr) -> Bool {
     }
 }
 
-// E2423: the declared bottom contract must have no normal exit.
-// Rust `body_flow`: `panic`, and a call whose resolved callee promises `Never`
-// (a direct call, or a member called through a module alias).
+// E2423: the declared bottom contract must have no normal exit. `panic`, and a
+// call whose resolved callee promises `Never` (a direct call, or a member
+// called through a module alias).
 sema_never_expr_diverges: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
         .Paren(inner, _, _) -> return sema_never_expr_diverges(inner, environment, program, scopes)
@@ -1878,10 +1870,9 @@ sema_never_callee_return_diverges: fn(ret: Type) -> Bool Never! {
     }
 }
 
-// Rust `core_call_diverges` / `imported_call_diverges`: `alias.member(...)`
-// (or `alias.leaf.member(...)` into a Core submodule) through a visible,
-// unshadowed Core or source module alias diverges when the member it resolves
-// to promises `Never` (`cli_process.exit(code)`).
+// `alias.member(...)` (or `alias.leaf.member(...)` into a Core submodule)
+// through a visible, unshadowed Core or source module alias diverges when the
+// member it resolves to promises `Never` (`cli_process.exit(code)`).
 sema_never_module_call_diverges: fn(receiver: Expr, method: String, arity: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     path: sema_expr_core_module_receiver_path(receiver) ?? return false
     if !sema_expr_core_module_alias_visible(path.alias, scopes) -> return false

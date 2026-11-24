@@ -333,9 +333,9 @@ sema_coverage_is_open_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `builtin_type_registry`: the compiler-owned runtime enums (`Ordering`,
-// `RemoveBy`) and the Core registry enums with no source declaration (`Dyn`)
-// are closed sets without a registered nominal.
+// The compiler-owned runtime enums (`Ordering`, `RemoveBy`) and the Core
+// registry enums with no source declaration (`Dyn`) are closed sets without a
+// registered nominal.
 sema_coverage_compiler_enum: fn(ty: Type) -> [String]? {
     name := ""
     if ty == {
@@ -459,8 +459,7 @@ sema_coverage_case_has_payload: fn(ty: Type, name: String, environment: SemaScop
 // case open.
 sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
     table: sema_coverage_table(conditions) ?? return
-    // (Rust `report_refutable_pattern_without_else`):
-    // a text or byte arm can always fail to match, so the table needs `else`.
+    // A text or byte arm can always fail to match, so the table needs `else`.
     if !multi_head {
         has_text := false
         has_binary := false
@@ -664,8 +663,7 @@ sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, 
     }
 }
 
-// Rust `collect_covered_variant_names` / `collect_partial_variant_names`: the
-// heads one arm covers fully, and the heads it only tests with a nested
+// The heads one arm covers fully, and the heads it only tests with a nested
 // payload pattern (S31). A range payload slot covers no head.
 sema_coverage_arm_heads: fn(shape: TPatternShape, full: ^[String], partial: ^[String]) {
     if shape == .Or(alternatives, _) {

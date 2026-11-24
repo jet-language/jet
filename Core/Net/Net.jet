@@ -625,7 +625,7 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
 }
 
 #Builtin.Role(.UnixConnectDeadline) priv __unix_connect_deadline_entry: fn(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
-    core.net.__unix_connect_deadline_host(path, deadline)
+    rt.unix_connect_deadline_host(path, deadline.ns)
 }
 
 unix_read: fn(stream: ^UnixStream) -[Net, Time.Wait]> String NetError! {
@@ -633,12 +633,12 @@ unix_read: fn(stream: ^UnixStream) -[Net, Time.Wait]> String NetError! {
 }
 
 unix_write: fn(stream: ^UnixStream, text: String) -[Net, Time.Wait]> NetError! {
-    core.net.unix_write(stream, text)
+    rt.unix_write(stream, text)
 }
 
 unix_read_bytes: fn(stream: ^UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
-    core.net.unix_read_bytes(stream, n)
+    rt.unix_read_bytes(stream, n)
 }
 
 unix_write_all_bytes: fn(stream: ^UnixStream, bytes: [U8]) -[Net, Time.Wait]> NetError! {
@@ -700,7 +700,7 @@ unix_wait: fn(stream: ^UnixStream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetE
 // (a pipe another task writes to wake this one): bit 1 of the result says
 // `stream` is readable and bit 2 `wake`; 0 says `timeout_ns` passed.
 unix_wait_wake: fn(stream: ^UnixStream, wake: sys.Fd, timeout_ns: Int) -[Net, Time.Wait]> Int NetError! {
-    ready: core.net.__unix_wait_wake_raw(stream, sys.__fd_token(wake), timeout_ns)
+    ready: rt.unix_wait_wake_raw(stream, sys.__fd_token(wake), timeout_ns)
     Ok(ready)
 }
 
@@ -870,7 +870,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
 srv_records: fn(raw: [DNSSRV]) -> [SRVRecord] Never! {
     records := [SRVRecord]{}
     loop row in raw {
-        records.push(SRVRecord{target: core.net.dns_srv_target(row), port: core.net.dns_srv_port(row), priority: core.net.dns_srv_priority(row), weight: core.net.dns_srv_weight(row)})
+        records.push(SRVRecord{target: rt.dns_srv_target(row), port: rt.dns_srv_port(row), priority: rt.dns_srv_priority(row), weight: rt.dns_srv_weight(row)})
     }
     records
 }

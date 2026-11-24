@@ -12,9 +12,8 @@
 // picks it when sema selects that Output. A wrapper whose function and `T` are in the
 // entry file expands right after that file parses; one over an imported `T` or a
 // qualified `entry: module.function` gets the entry's imports then and its wrapper
-// once every module has loaded. The spec follows Rust `command_schema_with_items` and
-// the entry follows Rust `jet_cli_entry`. A program the `#CLI` checks refuse
-// (E1305/E1345) gets no wrapper; the checks report it. Every `#CLI` struct also gets
+// once every module has loaded. A program the `#CLI` checks refuse (E1305/E1345)
+// gets no wrapper; the checks report it. Every `#CLI` struct also gets
 // the decoder behind `args.decode<T>()` and a `T.merge` from the same spec
 // (sema_cli_entry_projections).
 use {
@@ -499,8 +498,7 @@ sema_cli_entry_command_help: fn(command: SemaCLICommand, root: [SemaCLIInput]) -
     " {command.name}{sema_cli_entry_help(command.description, local, [SemaCLICommand]{}, false)}"
 }
 
-// Rust `JetArgsSpec.help`: the help text of one level after the program
-// name.
+// The help text of one level after the program name.
 sema_cli_entry_help: fn(description: String?, local: [SemaCLIInput], commands: [SemaCLICommand], show_version: Bool) -> String Never! {
     s := ""
     positional_count := 0
@@ -1005,10 +1003,9 @@ sema_cli_entry_member_declared: fn(items: [Item], definition: StructDef, name: S
     false
 }
 
-// One command: its inputs and its arm of the dispatch table. A bound
-// function's first parameter of the program type `shared_type` receives the
-// shared program value (Rust `command_payload_params`); every other parameter
-// is one input.
+// One command: its inputs and its arm of the dispatch table. A bound function's
+// first parameter of the program type `shared_type` receives the shared program
+// value; every other parameter is one input.
 sema_cli_entry_command: fn(command: String, description: String?, params: [Param], shared_type: String, callee: String) -> {command: SemaCLICommand, arm: SemaCLIArm}? {
     inputs := [SemaCLIInput]{}
     arguments := [String]{}
@@ -1103,7 +1100,7 @@ sema_cli_entry_optional: fn(ty: Type, source: String) -> String? {
     None
 }
 
-// Rust `expr_default`: the help and fallback text of a literal default.
+// The help and fallback text of a literal default.
 sema_cli_entry_default: fn(expr: Expr) -> String? {
     current: sema_registration_cli_without_parens(expr)
     if current == {

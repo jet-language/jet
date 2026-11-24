@@ -240,7 +240,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: ^[Stri
 // Regenerates every generated file an applied SUB touched, with the seed,
 // from the composed sources.
 regenerate: fn(tree: String, integ: String) {
-    seed: files.canonicalize(roots.roots()["JET_SEED"])
+    seed: files.canonicalize(roots.all()["JET_SEED"])
     // The runtime generator outputs (RuntimeCExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
     files.append_all("{integ}/generators", "Tools/Agent/RuntimeGenerators.jet\tall\n")
@@ -275,7 +275,7 @@ run: fn() {
     }
     tree: args[0]
     integ: args[1]
-    r: roots.roots()
+    r: roots.all()
     g: "{r["JET_STATE_ROOT"]}/scratch/Main"
     if !based(tree, r["JET_DEV_WORKTREE"]) -> stop("integ-apply: init failed", 2)
     files.write("{integ}/generators", "")

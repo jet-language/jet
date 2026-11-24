@@ -59,11 +59,10 @@ sema_call_collections_fixed_join: fn(operation: SemaCollectionOperation, receive
     None
 }
 
-// Rust builtin-method argument inference: every argument is inferred under its contract parameter
-// type, so leading-dot variants and anonymous records (`rows.push(.Ready)`, `map.add(key, {x:
-// 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a
-// `[U64:V]`) checks on its own and then widens into the slot, as Rust `widen_numeric_argument` does
-// after inference.
+// Builtin-method argument inference: every argument is inferred under its contract parameter
+// type, so leading-dot variants and anonymous records (`rows.push(.Ready)`,
+// `map.add(key, {x: 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with
+// `id: Int` on a `[U64:V]`) checks on its own and then widens into the slot after inference.
 sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, borrows_string_view: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     reported: diagnostics.len()
     previous_lending: context.lambda_lending_views
@@ -74,13 +73,13 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
         context.borrow_ctx = true
         context.allow_string_view_read = true
     }
-    // Rust `open_ret`: a callback slot whose result type is still open
-    // (`fn(T)` with no return) accepts any function value; the method's own
-    // shape rules decide its use (a named `fn(T, T) -> Ordering` is the
-    // `sort_by` comparator). Only a lambda, or the `.member` subject
-    // shorthand that is one is checked against the slot. A failure-open slot
-    // (Scopes.jet callback_failure_open, set by the caller for this one
-    // argument) is open to a function value the same way.
+    // A callback slot whose result type is still open (`fn(T)` with no return)
+    // accepts any function value; the method's own shape rules decide its use
+    // (a named `fn(T, T) -> Ordering` is the `sort_by` comparator). Only a
+    // lambda, or the `.member` subject shorthand that is one is checked against
+    // the slot. A failure-open slot (Scopes.jet callback_failure_open, set by
+    // the caller for this one argument) is open to a function value the same
+    // way.
     failure_open: context.callback_failure_open
     open_slot := false
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
@@ -357,7 +356,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         if callback {
             callback_return = Val(sema_call_collections_callback_return(value))
             // Like a direct `f(item)`: the unresolved edge also reaches the
-            // owner from inside a callback (Rust sets `task_body_propagates`).
+            // owner from inside a callback.
             if index == 0 && sema_call_collections_callback_takes_default_route(receiver_value.ty, method, value) {
                 context.failure_direct_source = true
                 context.task_body_propagates = true
@@ -581,9 +580,9 @@ sema_call_set_bits_ready: fn(element: Type, callee: String, span: Span, environm
     false
 }
 
-// Rust lower_method_call: the lazy and iterator-kernel builtins run on
-// `Iter<T>`, so a List or FixedList receiver (and `compare`'s other side) is
-// wrapped as its `lazy()` iterator (wrap_list_as_iter).
+// The lazy and iterator-kernel builtins run on `Iter<T>`, so a List or
+// FixedList receiver (and `compare`'s other side) is wrapped as its `lazy()`
+// iterator (wrap_list_as_iter).
 sema_call_collections_runs_on_iter: fn(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .StepBy | .Take | .Skip | .Dedup | .Chunks | .Windows | .Intersperse | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> true
@@ -596,7 +595,7 @@ sema_call_collections_list_as_iter: fn(value: TExpr, span: Span) -> TExpr Never!
     sema_tree_node(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
 }
 
-// Rust Type.without_user_tags, then a List or FixedList element.
+// The type without user tags, then a List or FixedList element.
 sema_call_collections_list_element: fn(ty: Type) -> Type? Never! {
     return if ty == {
         .Tagged(marker, inner) -> if marker == {
@@ -648,9 +647,9 @@ sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, 
     context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }
 
-// Rust `builtin_receiver_borrow`: a mutating collection method reserves its
-// receiver two-phase, except iterator `next` and the list helpers lowered
-// with an explicit eager `&mut receiver` first argument.
+// A mutating collection method reserves its receiver two-phase, except iterator
+// `next` and the list helpers lowered with an explicit eager `&mut receiver`
+// first argument.
 sema_call_collections_receiver_two_phase: fn(receiver_ty: Type, method: String) -> Bool Never! {
     if method == "next" -> return false
     if method == "remove" || method == "sort_by" || method == "sort_desc" || method == "sort_by_desc" || method == "update_first" || method == "edit_disjoint" {

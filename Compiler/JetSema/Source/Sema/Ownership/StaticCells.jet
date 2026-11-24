@@ -14,8 +14,8 @@ use jet_foundation.[
     expr_span,
 ]
 
-// Rust `is_static_move_root`: registration asks once per module constant and
-// keeps the symbol ids on the module row (`static_roots`).
+// Registration asks once per module constant and keeps the symbol ids on the
+// module row (`static_roots`).
 sema_ownership_is_static_root: fn(declaration: ConstDef) -> Bool Never! {
     if declaration.is_persist || declaration.mutable -> return true
     loop attr in declaration.attrs {
@@ -50,7 +50,7 @@ sema_ownership_push_once: fn(diagnostic: Diagnostic, diagnostics: ^[Diagnostic])
     diagnostics.push(diagnostic.copy())
 }
 
-// Rust `reject_static_mutable_borrow` for a static storage cell; any other
+// A write to a static storage cell is refused as a mutable borrow; any other
 // constant can't be changed at all (E0111).
 sema_ownership_report_static_write: fn(state: ^SemaOwnershipState, place: SemaOwnershipPlace, span: Span, diagnostics: ^[Diagnostic]) {
     if !state.static_roots.contains(place.root_id) {
@@ -61,8 +61,8 @@ sema_ownership_report_static_write: fn(state: ^SemaOwnershipState, place: SemaOw
     sema_ownership_push_once(sema_error("E0223", span, "A mutable borrow of `{name}` cannot escape its persistent or static storage cell", "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell.", "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{name}` with `^` or using a mutating receiver."), diagnostics)
 }
 
-// Rust `reject_partial_static_move`: an exact move of one projection of a
-// static storage cell. True when the move was rejected.
+// An exact move of one projection of a static storage cell. True when the move
+// was rejected.
 sema_ownership_reject_partial_static_move: fn(state: ^SemaOwnershipState, place: SemaOwnershipPlace, expr: Expr, diagnostics: ^[Diagnostic]) -> Bool {
     if place.projections.len() == 0 || !state.static_roots.contains(place.root_id) -> return false
     name: sema_ownership_place_name(place)

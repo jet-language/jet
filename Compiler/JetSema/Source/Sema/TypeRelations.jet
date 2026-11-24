@@ -500,10 +500,9 @@ sema_type_carrier_compatible: fn(required: Type, offered: Type) -> Bool Never! {
                 return true
             }
         }
-        // Rust `type_identity_with_callable_values`: two tags of one marker
-        // compare their payloads; a `core.crypto` nominal tag on either side
-        // is that payload against the other type (`^Secret` meets the
-        // tagged `Secret` of a vault row).
+        // Two tags of one marker compare their payloads; a `core.crypto`
+        // nominal tag on either side is that payload against the other type
+        // (`^Secret` meets the tagged `Secret` of a vault row).
         .Tagged(required_marker, required_inner) -> {
             if offered == .Tagged(offered_marker, offered_inner) {
                 if required_marker == offered_marker {
@@ -830,9 +829,9 @@ sema_type_union_covers: fn(members: [Type], offered_members: [Type]) -> Bool Nev
     true
 }
 
-// Rust `Type.compute_tensor_compatible`: the erased `Tensor` spelling is the
-// storage boundary, so it meets every Tensor-family type (the shaped `Vec` and
-// `Matrix` aliases included) in either direction; two shaped types stay exact.
+// The erased `Tensor` spelling is the storage boundary, so it meets every
+// Tensor-family type (the shaped `Vec` and `Matrix` aliases included) in either
+// direction; two shaped types stay exact.
 sema_type_compute_tensor_compatible: fn(required: Type, offered: Type) -> Bool Never! {
     (sema_type_is_erased_tensor(required) && is_compute_tensor_family(offered)) || (sema_type_is_erased_tensor(offered) && is_compute_tensor_family(required))
 }
@@ -1593,10 +1592,10 @@ sema_type_union_member_leaf: fn(items: [Item], member: Type) -> String Never! {
     sema_name_type_leaf(items, type_unqualified_name(sema_pattern_base_name(member) ?? return ""))
 }
 
-// Rust `resolve_measure`: a fixed length `[T#N]` in a declared member type
-// names an integer constant, a generic length, or a module value argument
-// (generic modules are expanded before registration). A name that is none of
-// these is E0963 at the written type, once per type.
+// A fixed length `[T#N]` in a declared member type names an integer constant, a
+// generic length, or a module value argument (generic modules are expanded
+// before registration). A name that is none of these is E0963 at the written
+// type, once per type.
 sema_type_unknown_measure_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: ^[Diagnostic]) {
     if ty == {
         .FixedList(inner, len) -> {
@@ -1919,10 +1918,9 @@ sema_type_resolve_type_argument: fn(graph: SemaRegistrationGraph, arg: Type, cal
     sema_type_resolve_declared_recursive(graph, arg, caller, generic_params)
 }
 
-// Rust `resolve_measure`: a fixed length spelled by a constant of the module
-// that spells it (`[T#N]`, `[T#(N * 2)]`) is that constant's integer. A name
-// that isn't such a constant (a generic length, a constant computed by code)
-// stays symbolic.
+// A fixed length spelled by a constant of the module that spells it (`[T#N]`,
+// `[T#(N * 2)]`) is that constant's integer. A name that isn't such a constant
+// (a generic length, a constant computed by code) stays symbolic.
 sema_type_resolve_measure: fn(graph: SemaRegistrationGraph, measure: Measure, caller: Int, generic_params: [TGenericParam], depth: Int) -> Measure Never! {
     if measure == {
         .Symbol(kind, name) -> {
@@ -2159,22 +2157,22 @@ sema_type_graph_bare_rename: fn(graph: SemaRegistrationGraph, declared: String, 
     None
 }
 
-// Rust `struct_owner_module`'s tail: a bare type name the caller neither
-// declares nor imports names the one type declaration of that name, among the
-// loaded modules, that the caller can see. Two owners leave it unresolved,
-// unless exactly one of them is in a module the caller's package reaches
-// through its imports (sema_registration_reaches): a package then names the
-// same type under every importer as when it is checked on its own. A
-// built-in typed head names its Core carrier record (`URL` in `core.net.url`,
-// `HTML` in `core.text.html`, …; boundary_head_carrier_module) when that
-// module is loaded, and no other owner; a parameterless Core alias outside the
-// bare-owner and root-type sets is skipped; an alias that re-exports a
-// namespaced type of the same leaf names that type's owner. Core source never
-// imports user code, so a Core caller sees only Core owners. A builtin type
-// no module declares (SYMBOL_BUILTIN_TYPES: `Task`, `Event`, …) has no owner
-// here, so a loaded same-named type (a user module's `Task`,
-// `core.compiler.Event`) never captures its bare spelling: only a caller
-// that declares or imports that name means its own type.
+// A bare type name the caller neither declares nor imports names the one type
+// declaration of that name, among the loaded modules, that the caller can
+// see. Two owners leave it unresolved, unless exactly one of them is in a
+// module the caller's package reaches through its imports
+// (sema_registration_reaches): a package then names the same type under every
+// importer as when it is checked on its own. A built-in typed head names its
+// Core carrier record (`URL` in `core.net.url`, `HTML` in `core.text.html`, …;
+// boundary_head_carrier_module) when that module is loaded, and no other
+// owner; a parameterless Core alias outside the bare-owner and root-type sets
+// is skipped; an alias that re-exports a namespaced type of the same leaf
+// names that type's owner. Core source never imports user code, so a Core
+// caller sees only Core owners. A builtin type no module declares
+// (SYMBOL_BUILTIN_TYPES: `Task`, `Event`, …) has no owner here, so a loaded
+// same-named type (a user module's `Task`, `core.compiler.Event`) never
+// captures its bare spelling: only a caller that declares or imports that
+// name means its own type.
 sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index: Int, name: String) -> SemaRegistrationResolvedSymbol? {
     if symbol_builtin(SymbolKind.Type, name) != None -> return None
     rows: sema_registration_nominal_rows_named(graph, name)
@@ -2275,7 +2273,7 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
     SemaTypeOwnerScan{found: found, ambiguous: false}
 }
 
-// Rust `split_type_name`'s leaf: after the last `.`.
+// A qualified type name's leaf: after the last `.`.
 sema_type_graph_leaf: fn(name: String) -> String Never! {
     if name.cut_last(".") == {
         .Val(parts) -> parts.after
@@ -2401,9 +2399,9 @@ sema_type_trait_identity: fn(graph: SemaRegistrationGraph, caller: Int, name: St
     Val(builtin.id)
 }
 
-// Rust Generics.BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
-// a compiler-owned trait that no source module declares (`bare_bound` in
-// OWNED_TRAITS). Its identity is the bare trait name with no owning module.
+// A generic bound may name a compiler-owned trait that no source module
+// declares (`bare_bound` in OWNED_TRAITS). Its identity is the bare trait name
+// with no owning module.
 sema_type_builtin_trait_symbol: fn(name: String) -> Symbol? {
     owned: owned_trait(name) ?? return None
     if !owned.bare_bound -> return None
@@ -2411,9 +2409,9 @@ sema_type_builtin_trait_symbol: fn(name: String) -> Symbol? {
 }
 
 // A generic bound's trait: the visible declaration of that name, else the
-// builtin trait (Rust `Traits.is_trait_name`). A visible declaration that is
-// not a trait does not hide a builtin one: core.term's cursor struct is named
-// `Reader`, and `<R: Reader>` there still bounds on the Prelude trait.
+// builtin trait. A visible declaration that is not a trait does not hide a
+// builtin one: core.term's cursor struct is named `Reader`, and `<R: Reader>`
+// there still bounds on the Prelude trait.
 sema_type_graph_bound_symbol: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> SemaRegistrationResolvedSymbol? {
     resolved: sema_type_graph_lookup_symbol(graph, module_identity, name)
     builtin: sema_type_builtin_trait_symbol(name)
@@ -2515,9 +2513,9 @@ sema_type_graph_impl_trait: fn(graph: SemaRegistrationGraph, implementation: Sem
     Val(resolved.id.copy())
 }
 
-// Rust `register_struct_trait_impls` / `register_trait_impl_block`: a trait
-// block written inside a struct or enum body implements that trait exactly
-// like an `impl` item. The block's trait name resolves in the owner's module.
+// A trait block written inside a struct or enum body implements that trait
+// exactly like an `impl` item. The block's trait name resolves in the owner's
+// module.
 sema_type_graph_inline_impl_matches_trait: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, trait_symbol: Symbol) -> Bool {
     if nominal.source == .SourceAST(item) {
         if item == {
@@ -2694,9 +2692,8 @@ sema_type_conditional_impl_head: fn(graph: SemaRegistrationGraph, actual: Type, 
 }
 
 // These provider-backed Core owners already implement the consuming runtime
-// Close protocol (Rust `TraitRegistry.synthetic_close_types`). Check the
-// declaring identity, never the display path or an application's same-named
-// struct.
+// Close protocol. Check the declaring identity, never the display path or an
+// application's same-named struct.
 sema_type_provider_close_owner: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> Bool Never! {
     identity: module_text(graph.module_table, nominal.symbol.module_identity)
     // The compiler-owned allocators release their storage when consumed.
@@ -2713,10 +2710,10 @@ sema_type_provider_close_owner: fn(graph: SemaRegistrationGraph, nominal: SemaRe
     }
 }
 
-// Rust `TraitRegistry.type_implements_trait`/`implements_trait` for a bound
-// that names an undeclared builtin trait (Generics.BUILTIN_TRAITS): scalars
-// satisfy the builtin family, containers recurse, and a nominal needs an impl,
-// trait block or derive of that trait name.
+// Bound satisfaction for a bound that names an undeclared builtin trait
+// (Generics.BUILTIN_TRAITS): scalars satisfy the builtin family, containers
+// recurse, and a nominal needs an impl, trait block or derive of that trait
+// name.
 sema_type_builtin_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     scalar_family: bound_name != "Close" && bound_name != "CheckedText"
     arithmetic: owned_trait_arithmetic(bound_name)
@@ -2917,9 +2914,9 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
             return Val(true)
         }
     }
-    // Rust `TraitRegistry.implements_trait`: a scalar satisfies the builtin
-    // trait family by name even where Core declares the trait (`Encode`); a
-    // scalar has no nominal row to carry an impl.
+    // A scalar satisfies the builtin trait family by name even where Core
+    // declares the trait (`Encode`); a scalar has no nominal row to carry an
+    // impl.
     scalar: if actual_resolved == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
         .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
@@ -2930,10 +2927,10 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     sema_type_bound_satisfied_resolved(graph, actual_resolved, bound_name, caller, generic_params)
 }
 
-// A list, fixed array, or optional value is codable exactly when its
-// element is, a map when its key and value are, and an anonymous union when
-// every member is (it codes through its structural enum); the dynamic `Dyn` is
-// the codec tree itself (Rust `TraitRegistry.type_implements_trait`).
+// A list, fixed array, or optional value is codable exactly when its element
+// is, a map when its key and value are, and an anonymous union when every
+// member is (it codes through its structural enum); the dynamic `Dyn` is the
+// codec tree itself.
 sema_type_codec_structural_bound: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     if !owned_trait_through_elements(bound_name) -> return None
     if actual_resolved == {
@@ -3060,14 +3057,14 @@ sema_type_assignable_in_graph_at: fn(graph: SemaRegistrationGraph, required: Typ
     }
 }
 
-// Rust `resolve_type` names a qualified Core type export (`files.Stat`) by
-// its bare leaf, the spelling a fixed Core row returns (`core.files.stat`'s
-// `Stat`). Registration gives the export its owner's canonical identity
-// (the Stat of the core.files module identity), so a canonical Core
-// nominal meets the bare leaf when its owner Core module exports that type
-// and the leaf names nothing in the caller's module. As in Rust, a Core
-// record that only shares a built-in typed head's leaf (`core.files.path`'s
-// `Path`) and the `core.crypto` structs keep their canonical identity.
+// A qualified Core type export (`files.Stat`) is named by its bare leaf, the
+// spelling a fixed Core row returns (`core.files.stat`'s `Stat`). Registration
+// gives the export its owner's canonical identity (the Stat of the core.files
+// module identity), so a canonical Core nominal meets the bare leaf when its
+// owner Core module exports that type and the leaf names nothing in the
+// caller's module. A Core record that only shares a built-in typed head's leaf
+// (`core.files.path`'s `Path`) and the `core.crypto` structs keep their
+// canonical identity.
 sema_type_core_leaf_form: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int) -> Type Never! {
     if ty == {
         .Named(name) -> if sema_type_core_leaf_name(graph, name, caller) == .Val(leaf) -> Type.Named{name: leaf} else -> ty

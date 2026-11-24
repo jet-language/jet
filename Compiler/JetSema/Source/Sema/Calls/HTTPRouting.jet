@@ -304,8 +304,8 @@ sema_http_route_hex_value: fn(code: Int) -> Int Never! {
     }
 }
 
-// The first defect of one static route segment (Rust `decode_static`), or
-// None when it percent-decodes to one safe UTF-8 segment.
+// The first defect of one static route segment, or None when it percent-decodes
+// to one safe UTF-8 segment.
 sema_http_route_static_segment_error: fn(segment: String) -> String? {
     input := segment.bytes()
     decoded := [U8]{}
@@ -424,8 +424,8 @@ sema_http_route_pattern_error: fn(pattern: String) -> String? {
     None
 }
 
-// An interpolated route literal (Rust `check_http_route_constant`) is refused
-// before constant evaluation; its holes render as `{name}` or `{…}`.
+// An interpolated route literal is refused before constant evaluation; its
+// holes render as `{name}` or `{…}`.
 sema_http_route_interpolated_source: fn(expression: Expr) -> String? {
     if expression == .Str(parts, _, _) {
         interpolated := false
@@ -1238,8 +1238,8 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         if request_names.len() > 1 {
             request_ty: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program)
             required: Type.Fn{params: [Type]{request_ty}, ret: Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: Type.Named{name: "HTTPError"}}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-            // Rust expect_core_arg: the handler is checked against the route
-            // handler type, and a type it still does not have is E0112.
+            // The handler is checked against the route handler type, and a type
+            // it still does not have is E0112.
             handler_value: sema_expression_lambda_host_callback(updated_args[1].expr, Val(required), false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             if sema_call_host_callback_assignable(required, handler_value.ty, environment, program) == (.Val(false)) {
                 diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "`{method}` wants {sema_type_show(required)} for argument 2, but this is {sema_type_show(handler_value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, handler_value.ty)))

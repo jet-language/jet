@@ -107,9 +107,8 @@ sema_stream_handle_result: fn(ok: Type, error: Type) -> Type Never! {
     Type.Result{ok: ok, err: error}
 }
 
-// `effect_name` is Rust's exact handle-method row: records only
-// `receiver_effect_leaf` (`Time.Wait` on the blocking channel methods) for
-// these receivers.
+// `effect_name` is the exact handle-method row: these receivers record only
+// `receiver_effect_leaf` (`Time.Wait` on the blocking channel methods).
 sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
@@ -148,8 +147,7 @@ sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) 
         }
         return None
     }
-    // Rust `text_cursor_method_return` / `binary_reader_method_return`: the
-    // cursor and reader methods record no receiver write, so a read binding
+    // The cursor and reader methods record no receiver write, so a read binding
     // or parameter calls them without a `^` mark.
     if owner == "Cursor" {
         if method == "take_until" {
@@ -241,10 +239,9 @@ sema_stream_handle_read_spec: fn(operation: THandleOp, result_type: Type, params
     SemaStreamHandleSpec{operation: operation, result_type: result_type, params: params, receiver_convention: AccessConvention.Read, effect_name: ""}
 }
 
-// Rust `text_cursor_method_return` / `binary_reader_method_return` type the
-// methods of these handles without recording a receiver convention, so a
-// written mark has no convention to be checked against; `lines` on the file
-// and stdin readers records none either.
+// The methods of the text-cursor and binary-reader handles are typed without
+// recording a receiver convention, so a written mark has no convention to be
+// checked against; `lines` on the file and stdin readers records none either.
 sema_stream_handle_reports_no_receiver_convention: fn(owner: String) -> Bool Never! {
     owner == "FileReader" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
 }
@@ -285,9 +282,9 @@ sema_stream_handle_integer_width: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// (Rust `check_shift_arg`): a `Reader`/`Cursor` byte-shift argument that does
-// not fit its fixed parameter is E0112 about the call; every other handle
-// argument is the plain E0108 mismatch.
+// A `Reader`/`Cursor` byte-shift argument that does not fit its fixed parameter
+// is E0112 about the call; every other handle argument is the plain E0108
+// mismatch.
 sema_stream_handle_argument_mismatch: fn(callee: String, required: Type, offered: Type, span: Span, program: SemaProgramTables) -> Diagnostic {
     shift: callee == "Reader.over" || callee == "Reader.take" || callee == "Reader.seek" || callee == "Reader.skip" || callee == "Cursor.over" || callee == "Cursor.take_until"
     if !shift -> return sema_type_mismatch(required, offered, span, program)
@@ -386,8 +383,7 @@ sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, e
     method: sema_stream_handle_method_ref(owner, "lines", program, context)
     value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: [TCallArg]{}}, span)
     checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    // Rust `receiver_effect_leaf`: `FileReader.lines` waits; `StdinHandle`
-    // records no handle effect.
+    // `FileReader.lines` waits; `StdinHandle` records no handle effect.
     effect_name := if owner == "FileReader" -> "Time.Wait" else -> ""
     if !sema_stream_handle_effect_fact(environment, program, scopes, context, "{owner}.lines", span, result_type, effect_name, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}

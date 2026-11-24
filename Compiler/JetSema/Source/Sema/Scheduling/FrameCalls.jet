@@ -106,8 +106,9 @@ sema_frame_direct_call_operation: fn(name: String, args: [CallArg], index: Int, 
     sema_frame_registered_call_operation(name, args, symbol.id, index, program)
 }
 
-// `alias.member(...)` through a visible import: a Core record, or a module's
-// registered callable. None for any other receiver.
+// `alias.member(...)` through a visible import: a Core record, a Core
+// module's registered function, or a module's registered callable. None for
+// any other receiver.
 sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [CallArg], index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameOperationFact? {
     path: sema_expr_core_module_receiver_path(receiver) ?? return None
     if !sema_expr_core_module_alias_visible(path.alias, scopes) -> return None
@@ -118,12 +119,20 @@ sema_frame_module_call_operation: fn(receiver: Expr, method: String, args: [Call
             if core_module_export(module_name) == None -> return None
         }
         // A source-owned row's effects are its Core declaration's.
-        record := core_call(module_name, method) ?? return None
-        declared := [String]{}
-        if sema_call_core_declared_effects(record, environment, program, declared) {
-            record.effects = declared
+        if core_call(module_name, method) == .Val(found) {
+            record := found
+            declared := [String]{}
+            if sema_call_core_declared_effects(record, environment, program, declared) {
+                record.effects = declared
+            }
+            return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", args, index))
         }
-        return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", args, index))
+        // A Core function with no row is its registered declaration.
+        graph: program.registration_graph ?? return None
+        identity: sema_call_core_module_identity(environment, program, module_name) ?? return None
+        module_index: sema_registration_module_index(graph, identity) ?? return None
+        export: sema_registration_resolve_export(graph, module_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? return None
+        return Val(sema_frame_registered_call_operation("{module_name}.{method}", args, export.symbol.id, index, program))
     }
     if path.leaves.len() > 0 -> return None
     graph: program.registration_graph ?? return None
