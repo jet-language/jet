@@ -158,18 +158,18 @@ lsp_completion_after: fn(lexed: Lexed, start: Int) -> LSPCompletionAfter Never! 
     LSPCompletionAfter.Receiver{token: receiver}
 }
 
-// The owner name a value of `ty` has members under: a list is `List`, a map
-// `Map`, else the type's last path segment without arguments.
-lsp_type_owner: fn(ty: Type) -> String Never! {
-    name: type_name(ty)
+// The owner name a value of the type named `name` (type_name) has members
+// under: a list is `List`, a map `Map`, else the type's last path segment
+// without arguments.
+lsp_type_owner: fn(name: String) -> String Never! {
     if name.starts_with("[") -> return if name.contains(":") -> "Map" else -> "List"
     // `find` counts bytes, so the head is cut from the bytes.
-    head := name
-    angle: head.find("<")
-    if angle >= 0 -> head = foundation_byte_text(head.bytes(), 0, angle)
-    question: head.find("?")
-    if question >= 0 -> head = foundation_byte_text(head.bytes(), 0, question)
-    parts: head.split(".").to_list()
+    cut := name.count_bytes()
+    angle: name.find("<")
+    if angle >= 0 -> cut = angle
+    question: name.find("?")
+    if question >= 0 && question < cut -> cut = question
+    parts: foundation_byte_text(name.bytes(), 0, cut).split(".").to_list()
     parts[parts.len() - 1]
 }
 
@@ -187,9 +187,9 @@ lsp_member_scope: fn(view: LSPView, receiver_end: Int) -> LSPMemberScope? Never!
     target: lsp_target_at(view, receiver_end) ?? return None
     def: lsp_definition_at(index, target) ?? return None
     if def.kind == {
-        .Local(_, ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(ty ?? return None)})
-        .Param(ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(ty)})
-        .Field(ty, _) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(ty)})
+        .Local(_, ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty ?? return None))})
+        .Param(ty) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
+        .Field(ty, _) -> Val(LSPMemberScope.Owner{name: lsp_type_owner(type_name(ty))})
         .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> Val(LSPMemberScope.Owner{name: def.name.copy()})
         .Module -> {
             module_path: view.module_path ?? return None

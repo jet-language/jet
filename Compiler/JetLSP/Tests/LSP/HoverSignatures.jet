@@ -1,0 +1,42 @@
+// Hover shows one signature in Jet syntax, the failure a callable gives its
+// callers written after the return as Jet writes it.
+LSP_TEST_SIGNATURES_URI: "file:///w/signatures.jet"
+
+// `scale` is declared on line 13; line 19 calls `parse` at characters 4-9.
+// The fixture checker types no receiver and solves no failure, so hover on
+// a method call and an inferred contract are covered by the LSP cases.
+LSP_TEST_SIGNATURES: `Bad: struct {
+    reason: String
+}
+
+parse: fn(text: String) -> Int Bad! {
+    1
+}
+
+Meter: struct {
+    value: Int
+}
+
+impl Meter {
+    scale: fn(self, by: Int) -> Int {
+        self.value * by
+    }
+}
+
+run: fn(meter: Meter) -> Int {
+    parse("1") + meter.scale(2)
+}
+`
+
+lsp_test_hover_at: fn(server: &LSPServer, uri: String, line: Int, character: Int) -> String {
+    lsp_test_text(lsp_test_field(lsp_test_result(server, "textDocument/hover", lsp_test_at(uri, line, character)), "contents"), "value")
+}
+
+#Test("hover shows one signature in Jet syntax, its failure written after the return") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_SIGNATURES_URI, LSP_TEST_SIGNATURES)
+    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 19, 5), "```jet\nparse: fn(text: String) -> Int Bad!\n```")
+    // The implicit default `Err!` is not written.
+    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 18, 1), "```jet\nrun: fn(meter: Meter) -> Int\n```")
+    assert_eq(lsp_test_hover_at(server, LSP_TEST_SIGNATURES_URI, 13, 6), "```jet\nMeter.scale(by: Int) -> Int\n```")
+}

@@ -3,7 +3,7 @@
 use {
     core.encoding.[Dyn]
     jet_driver.[jet_driver_layout_line, jet_driver_layout_summary]
-    jet_foundation.[Span, Type, derivation_record_line, derivation_record_notable, derivation_store_subject, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[Span, Type, derivation_record_line, derivation_record_notable, derivation_store_subject, foundation_byte_text, foundation_json_quote, type_identity_unqualified_nominals, type_name]
     jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
     jet_semindex.[SemDeclared, SemDef, SemIndex, SemSymbolKind, semindex_ambient_print, semindex_import_binding, semindex_renamed_identity]
 }
@@ -35,10 +35,7 @@ lsp_hover_markdown: fn(signature: String, summary: String) -> String Never! {
 // `print` call the source resolves to nothing else is the ambient print.
 lsp_declared_at: fn(view: LSPView, offset: Int) -> SemDeclared? Never! {
     tokens: view.lexed.tokens
-    at: (loop (position, token) in tokens {
-        if token.span.start > offset -> break -1
-        if token.kind == TOKEN_IDENT && lsp_span_holds(token.span, offset) -> break position
-    } ?? -1)
+    at: lsp_ident_position(tokens, offset)
     if at < 0 -> return None
     name: token_text(view.lexed.tables, tokens[at])
     dotted: at >= 1 && tokens[at - 1].kind == TOKEN_DOT
@@ -61,6 +58,15 @@ lsp_declared_at: fn(view: LSPView, offset: Int) -> SemDeclared? Never! {
     Val(ambient)
 }
 
+// The position in `tokens` of the identifier at `offset`, or -1.
+lsp_ident_position: fn(tokens: [Token], offset: Int) -> Int Never! {
+    loop (position, token) in tokens {
+        if token.span.start > offset -> return -1
+        if token.kind == TOKEN_IDENT && lsp_span_holds(token.span, offset) -> return position
+    }
+    -1
+}
+
 // The Core name an import of the document binds to `local`
 // (JetSemIndex semindex_import_binding).
 lsp_import_binding: fn(view: LSPView, local: String) -> String? Never! {
@@ -75,6 +81,31 @@ lsp_import_binding: fn(view: LSPView, local: String) -> String? Never! {
 // declares it and the name it is declared as.
 lsp_declared_markdown: fn(declared: SemDeclared) -> String Never! {
     "{lsp_hover_markdown(declared.symbol.signature, declared.symbol.summary)}\n\nDeclared in `{declared.def.module_path}` as `{declared.def.qualified_name}`."
+}
+
+// A method call's name at `offset`, which the index resolves to no
+// definition, on a one-name receiver whose type the check knows
+// (lsp_checked_type): the compiler-owned `copy` and `move` every value has,
+// else the method that type's symbols hold, written in the source or built
+// in (`text.trim()`). Its hover is its signature, the receiver's type
+// spelled for `copy` and `move`.
+lsp_method_markdown: fn(view: LSPView, offset: Int) -> String? Never! {
+    tokens: view.lexed.tokens
+    at: lsp_ident_position(tokens, offset)
+    if at < 2 || tokens[at - 1].kind != TOKEN_DOT || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LPAREN -> return None
+    index: view.checked.index ?? return None
+    receiver: lsp_target_at(view, tokens[at - 2].span.start) ?? return None
+    shown: type_name(type_identity_unqualified_nominals(lsp_checked_type(lsp_definition_at(index, receiver) ?? return None) ?? return None))
+    name: token_text(view.lexed.tables, tokens[at])
+    if name == "copy" || name == "move" {
+        summary: if name == "copy" -> "A new value equal to the receiver, which keeps its own." else -> "Takes the value out of the named place it is read from."
+        return Val(lsp_hover_markdown("{shown}.{name}() -> {shown}", summary))
+    }
+    owner: lsp_type_owner(shown)
+    loop symbol in view.checked.symbols {
+        if symbol.name == name && (symbol.owner ?? "") == owner -> return Val(lsp_hover_markdown(symbol.signature, symbol.summary))
+    }
+    None
 }
 
 lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
@@ -103,6 +134,7 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         if markdown == None && lsp_declared_at(at.view, at.offset) == .Val(declared) {
             markdown = Val(lsp_declared_markdown(declared))
         }
+        if markdown == None -> markdown = lsp_method_markdown(at.view, at.offset)
         if markdown == None -> markdown = lsp_keyword_hover(at.view, at.offset)
         // How the check knows what is hovered, when its derivation says more
         // than that the definition checked.

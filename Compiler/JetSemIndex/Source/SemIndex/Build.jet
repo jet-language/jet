@@ -54,10 +54,10 @@ use {
         derivation_record,
         derivation_store_add,
         derivation_store_new,
-        failure_contract_shown_return,
         failure_contract_shown_name,
         failure_contract_shown_type,
         failure_contract_of_function,
+        failure_contract_signature_return,
         failure_contract_source,
         overflow_mode_name,
         sha256_hex,
@@ -321,10 +321,6 @@ semindex_policy_display: fn(policy: CallablePolicy) -> String Never! {
     "{policy.name}({policy.arguments.join(", ")})"
 }
 
-semindex_shown_return: fn(function: Func) -> Type? Never! {
-    failure_contract_shown_return(failure_contract_of_function(function.return_type, function.return_type_span))
-}
-
 semindex_callable_kind: fn(tables: ASTTables, function: Func, source: String) -> SemKind {
     generic_names: loop parameter in function.type_params -> parameter.name
     SemKind.Function{
@@ -368,7 +364,33 @@ semindex_parameter_parts: fn(params: [SemParam]) -> [String] Never! {
     parts
 }
 
-semindex_fn_signature: fn(name: String, callable: SemCallable, ret: Type?, view_provenance: ViewProvenanceMap?) -> String {
+// The tail of a callable's signature after its parameters, as Jet writes
+// it: the effect ceiling, which splits the one arrow (Panic and Mem are
+// deny-only and never shown in a positive ceiling), then the return with
+// the failure the callable gives its callers
+// (failure_contract_signature_return). A unit success writes its failure
+// alone, with no arrow: `fn(path: String) IOError!`.
+semindex_signature_tail: fn(callable: SemCallable) -> String Never! {
+    shown := [String]{}
+    if callable.effects == .Val(rows) {
+        loop row in rows {
+            root: row.name.split(".").to_list()[0]
+            if root != "Panic" && root != "Mem" -> shown.push(row.name)
+        }
+    }
+    ceiling: if {
+        callable.effect_via == .Val(via) -> " -[via {via.name}]>"
+        shown.len() == 0 -> ""
+        else -> " -[{shown.join(", ")}]>"
+    }
+    ret: if callable.failure_contract == .Val(contract) -> failure_contract_signature_return(contract) else -> callable.return_type
+    result: ret ?? return ceiling
+    if ceiling != "" -> return "{ceiling} {type_name(result)}"
+    if result == .Result(ok, _) && ok == (Type.Named{name: "Unit"}) -> return " {type_name(result)}"
+    " -> {type_name(result)}"
+}
+
+semindex_fn_signature: fn(name: String, callable: SemCallable, view_provenance: ViewProvenanceMap?) -> String {
     parts := semindex_parameter_parts(callable.params)
     parameter_index := 0
     loop part_index in 0..<parts.len() {
@@ -384,25 +406,7 @@ semindex_fn_signature: fn(name: String, callable: SemCallable, ret: Type?, view_
         }
         parameter_index += 1
     }
-    shown := [String]{}
-    if callable.effects == .Val(rows) {
-        loop row in rows {
-            root: row.name.split(".").to_list()[0]
-            if root != "Panic" && root != "Mem" -> shown.push(row.name)
-        }
-    }
-    result: if ret == .Val(ty) -> type_name(ty) else -> ""
-    ceiling: if {
-        callable.effect_via == .Val(via) -> " -[via {via.name}]>"
-        shown.len() == 0 -> ""
-        else -> " -[{shown.join(", ")}]>"
-    }
-    suffix: if {
-        ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}"
-        result != "" -> " -> {result}"
-        else -> ""
-    }
-    signature := "{name}: fn({parts.join(", ")}){suffix}"
+    signature := "{name}: fn({parts.join(", ")}){semindex_signature_tail(callable)}"
     if view_provenance == .Val(map) {
         if map.entries.len() == 1 && map.entries[0].slot.len() == 0 {
             signature = "{signature} ; view_source = {sema_compiler_index_view_provenance(map.entries[0].value)}"
@@ -414,11 +418,7 @@ semindex_fn_signature: fn(name: String, callable: SemCallable, ret: Type?, view_
         names: loop policy in callable.policies -> semindex_policy_display(policy)
         signature = "{signature} ; policies=[{names.join(", ")}]"
     }
-    if callable.failure_contract == .Val(contract) {
-        return "{signature}\nfailure: {failure_contract_shown_name(contract)} ({failure_contract_source(contract)})"
-    }
-    reason: if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
-    "{signature}\nfailure: unavailable ({reason})"
+    signature
 }
 
 semindex_method_fact: fn(ctx: SemWalk, owner: String, function: Func, origin: String, origin_trait: String) -> SemMember {
@@ -426,7 +426,7 @@ semindex_method_fact: fn(ctx: SemWalk, owner: String, function: Func, origin: St
     kind: semindex_callable_kind(ctx.tables, function, ctx.source)
     signature := ""
     if kind == .Function(callable) {
-        signature = semindex_fn_signature(function.name, callable, semindex_shown_return(function), function.return_view_provenance)
+        signature = semindex_fn_signature(function.name, callable, function.return_view_provenance)
     }
     semindex_member(ctx, owner, function.name, identity, "method", origin, origin_trait, signature, function.name_span)
 }
@@ -941,13 +941,20 @@ semindex_with_caller_body: fn(frame: SemCallerFrame, slot: String, body: [StmtNo
 
 // One method of a type body, an impl, or a nested trait block. `params`
 // asks for the method's parameter definitions (the type body and impl
-// walks record them; nested trait blocks do not).
+// walks record them; nested trait blocks do not). A compiler-made method
+// has no text of its own (a derive's or a codec's indexes its template, a
+// computed field's getter repeats the formula the struct walk reads): it
+// keeps its member and definition facts, and its types, parameters and
+// body are not walked.
 semindex_method: fn(owner: String, method: Func, origin: String, origin_trait: String, params: Bool, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocModule]) {
-    semindex_func_type_nodes(method, db, ctx)
-    semindex_function_arithmetic(method, db, ctx)
+    if !method.compiler_generated {
+        semindex_func_type_nodes(method, db, ctx)
+        semindex_function_arithmetic(method, db, ctx)
+    }
     identity: semindex_callable_identity(ctx.scope_identity, Val(owner), method.name)
     db.members.push(semindex_method_fact(ctx, owner, method, origin, origin_trait))
     db.defs.push(semindex_def(ctx, identity, method.name, semindex_display(ctx, Val(owner), method.name), method.name_span, semindex_callable_kind(ctx.tables, method, ctx.source)))
+    if method.compiler_generated -> return
     if params -> semindex_param_defs(method.params, identity, db, ctx)
     semindex_with_caller_body(SemCallerFrame{name: method.name, owner: Val(owner), identity: identity}, "method_bodies", method.body, db, ctx, modules)
 }
@@ -1082,8 +1089,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
                 callable: semindex_trait_callable(ctx.tables, sig, ctx.source)
                 identity: semindex_identity("method", ctx.scope_identity, "{t.name}.{sig.name}")
                 db.defs.push(semindex_def(ctx, identity, sig.name, semindex_display(ctx, Val(t.name), sig.name), sig.name_span, SemKind.Function{callable: callable}))
-                return_type: failure_contract_shown_return(failure_contract_of_function(sig.return_type, None))
-                db.members.push(semindex_member(ctx, t.name, sig.name, identity, "method", "trait_requirement", t.name, semindex_fn_signature(sig.name, callable, return_type, None), sig.name_span))
+                db.members.push(semindex_member(ctx, t.name, sig.name, identity, "method", "trait_requirement", t.name, semindex_fn_signature(sig.name, callable, None), sig.name_span))
             }
         }
         .Tag(t) -> {
@@ -2211,8 +2217,7 @@ semindex_inferred_row: fn(definition: SemDef, doc_module: JetDriverDocModule, su
     rows: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
     updated := callable.move()
     updated.effects = Val(rows)
-    ret: if updated.failure_contract == .Val(contract) -> failure_contract_shown_return(contract) else -> updated.return_type
-    signature: semindex_fn_signature(definition.name, updated, ret, view_provenance.get(definition.identity))
+    signature: semindex_fn_signature(definition.name, updated, view_provenance.get(definition.identity))
     Val(SemInferredRow{callable: updated.move(), signature: signature})
 }
 

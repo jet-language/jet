@@ -129,17 +129,29 @@ lsp_symbol_for: fn(symbols: [SemSymbol], def: SemDef) -> SemSymbol? Never! {
     None
 }
 
+// Whether `name` is written at `span` of the document's text: the whole
+// span, or the last segment of a qualified path (`module.name`). A use or a
+// declaration the compiler made (a match subject it names, a derive's
+// method) has a span that spells something else, and names nothing there.
+lsp_written_at: fn(bytes: [U8], span: Span, name: String) -> Bool Never! {
+    width: name.count_bytes()
+    if span.end > bytes.len() || span.end - span.start < width -> return false
+    foundation_byte_text(bytes, span.end - width, span.end) == name
+}
+
 // The declaration at `offset` in the document: the resolved reference
-// covering it, else the definition whose name covers it. The narrowest span
-// wins.
+// covering it, else the definition whose name covers it, each written
+// there (lsp_written_at). The narrowest span wins.
 lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     index: view.checked.index ?? return None
     module_path: view.module_path ?? return None
+    bytes: view.doc.text.bytes()
     best := LSPTarget?{None}
     width := -1
     loop reference in index.references {
         if reference.module_path != module_path || !lsp_span_holds(reference.span, offset) -> next
         anchor: reference.target ?? next
+        if !lsp_written_at(bytes, reference.span, reference.name) -> next
         if width < 0 || reference.span.end - reference.span.start < width {
             best = Val(LSPTarget{module_path: anchor.module_path, span: anchor.def_span})
             width = reference.span.end - reference.span.start
@@ -148,6 +160,7 @@ lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
     loop definition in index.definitions {
         def: definition.def
         if def.module_path != module_path || !lsp_span_holds(def.def_span, offset) -> next
+        if !lsp_written_at(bytes, def.def_span, def.name) -> next
         if width < 0 || def.def_span.end - def.def_span.start < width {
             best = Val(LSPTarget{module_path: def.module_path, span: def.def_span})
             width = def.def_span.end - def.def_span.start

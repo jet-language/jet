@@ -172,13 +172,26 @@ failure_contract_shown_name: fn(contract: FailureContract) -> String Never! {
     type_failure_name(failure_contract_shown_type(contract))
 }
 
-// The return a signature line shows: the shown failure route, or nothing for
-// a unit-success implicit default, which writes no return type. The failure
-// line still shows that route as `Err!`.
-failure_contract_shown_return: fn(contract: FailureContract) -> Type? Never! {
-    written: failure_contract_written(contract)
-    if written == .Default(success, _) && success == (Type.Named{name: "Unit"}) -> return None
-    Val(failure_contract_effective_type(written))
+// The return a signature shows: the failure route the callable gives its
+// callers, as Jet writes it (type_name leaves the implicit default `Err`
+// unwritten), so a contract sema inferred shows the set it solved, its
+// types named as the source names them. A unit-success implicit default
+// writes no return type: None.
+failure_contract_signature_return: fn(contract: FailureContract) -> Type? Never! {
+    if contract == .Default(success, _) && success == (Type.Named{name: "Unit"}) -> return None
+    Val(type_identity_unqualified_nominals(failure_contract_effective_type(contract)))
+}
+
+#Test("a signature's return writes the failure its callers get") {
+    written: Val(Span{start: 0, end: 1})
+    assert(failure_contract_signature_return(failure_contract_of_function(None, None)) == None, "a unit implicit default writes no return")
+    shown: fn(contract: FailureContract) -> String { type_name(failure_contract_signature_return(contract) ?? panic("no return")) }
+    assert_eq(shown(failure_contract_of_function(Val(Type.Int), written)), "Int")
+    assert_eq(shown(failure_contract_of_function(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Bad"}}), written)), "Int Bad!")
+    // Sema solved these contracts for declarations that wrote none.
+    assert_eq(shown(failure_contract_of_function(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "module:3:app:src/geo.jet.Bad"}}), None)), "Int Bad!")
+    assert_eq(shown(failure_contract_of_function(Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Bad"}}), None)), "Bad!")
+    assert_eq(shown(failure_contract_of_function(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}}), None)), "Int Never!")
 }
 
 // Stable tooling projection of where the shown failure route came from;

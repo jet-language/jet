@@ -21,9 +21,6 @@ use {
         Type,
         builtin_static_numeric_row,
         builtin_static_rows,
-        failure_contract_shown_return,
-        failure_contract_shown_name,
-        failure_contract_source,
         type_name,
         marker_decl_signature,
         name_ledger_display_path,
@@ -351,7 +348,7 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
         signature := "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}{failure}"
         summary := "Converts {conversion.source} to {owner}."
         if checked_text_error == .Val(error) {
-            signature = "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}\nfailure: {error} (CheckedText)"
+            signature = "{owner}.{conversion.method}(value: {conversion.source}) -> {owner} {error}!"
             summary = "Validates {conversion.source} through {owner}.CheckedText."
         }
         symbols.push(
@@ -598,35 +595,7 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
         .Function(callable) -> {
             params: semindex_parameter_parts(callable.params).join(", ")
             prefix: if owner == .Val(owner_name) -> "{owner_name}.{name}" else -> "{name}: fn"
-            // The effect ceiling splits the one arrow; Panic
-            // and Mem are deny-only and never shown in a positive ceiling.
-            shown := [String]{}
-            if callable.effects == .Val(row) {
-                loop entry in row {
-                    root: entry.name.split(".").to_list()[0]
-                    if root != "Panic" && root != "Mem" -> shown.push(entry.name)
-                }
-            }
-            result := ""
-            if callable.failure_contract == .Val(contract) {
-                result = if failure_contract_shown_return(contract) == .Val(displayed) -> type_name(displayed) else -> ""
-            } else if callable.return_type == .Val(ret) { result = type_name(ret) }
-            ceiling := ""
-            if callable.effect_via == .Val(via) -> ceiling = " -[via {via.name}]>" else if shown.len() > 0 {
-                ceiling = " -[{shown.join(", ")}]>"
-            }
-            suffix := ""
-            if ceiling != "" -> suffix = if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" {
-                suffix = " -> {result}"
-            }
-            failure := ""
-            if callable.failure_contract == .Val(contract) {
-                failure = "{failure_contract_shown_name(contract)} ({failure_contract_source(contract)})"
-            } else {
-                reason: if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
-                failure = "unavailable ({reason})"
-            }
-            shape = SemSymbolShape{kind: SemSymbolKind.Function, signature: "{prefix}({params}){suffix}\nfailure: {failure}"}
+            shape = SemSymbolShape{kind: SemSymbolKind.Function, signature: "{prefix}({params}){semindex_signature_tail(callable)}"}
         }
         .Struct(fields, _) -> {
             shown: loop field in fields -> "{field.name}: {type_name(field.ty)}"
