@@ -235,10 +235,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1644,
+  "total": 1643,
   "counts": {
     "Compiler": 807,
-    "Core": 170,
+    "Core": 169,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
@@ -5914,61 +5914,54 @@ file in a `Tests/` tree. The ratchet refuses either.
       "file": "Core/Crypto/Crypto.jet",
       "line": 280,
       "column": 5,
-      "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
+      "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
       "line": 286,
       "column": 5,
-      "reason": "vault key import: construct the typed recipient unlock request"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Crypto/Crypto.jet",
-      "line": 292,
-      "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 818,
+      "line": 812,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 845,
+      "line": 839,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1146,
+      "line": 1140,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1244,
+      "line": 1238,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1253,
+      "line": 1247,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1259,
+      "line": 1253,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -11763,13 +11756,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 807 |
-| Core | 170 |
+| Core | 169 |
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 568 |
 | Tools | 28 |
-| **total** | **1644** |
+| **total** | **1643** |
 
 ### Regions
 
@@ -12584,15 +12577,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/Golden/compiler.jet | 32:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 228:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 273:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 280:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 292:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 818:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 845:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1146:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1244:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1253:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1259:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 280:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 286:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 812:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 839:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1140:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1238:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1247:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1253:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/Expert.jet | 289:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
 | Core | Core/Crypto/Expert.jet | 331:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
