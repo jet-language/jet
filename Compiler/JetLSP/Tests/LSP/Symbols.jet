@@ -251,6 +251,39 @@ lsp_test_labels: fn(result: Dyn) -> [String] Never! {
     assert_eq(lsp_test_rows(lsp_test_field(after_call, "items")).len(), 0)
 }
 
+#Test("completion offers the binding snippets at a statement's start in a block") {
+    server := lsp_test_server()
+    uri: "file:///w/bind.jet"
+    lsp_test_open(server, uri, "run: fn() {{\n    \n}}\n\n")
+    snippets := [String]{}
+    loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 1, 4)), "items")) {
+        if lsp_test_int(item, "kind") == 15 {
+            snippets.push("{lsp_test_text(item, "label")}|{lsp_test_text(item, "insertText")}|{lsp_test_int(item, "insertTextFormat")}")
+        }
+    }
+    assert_eq(snippets, [String]{"bind immut (inferred)|${{1:name}}: ${{2:value}}|2", "bind mut|${{1:name}} := ${{2:value}}|2"})
+    outside: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 3, 0)))
+    assert(!outside.contains("bind mut=15"), "no binding starts outside a block")
+}
+
+#Test("completion offers a saved file's declarations with the `use` line they need") {
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"rootUri\":\"file:///w\"}}")
+    uri: "file:///w/second/open.jet"
+    lsp_test_open(server, uri, "run: fn() {{\n    \n}}\n")
+    imports := [String]{}
+    loop item in lsp_test_rows(lsp_test_field(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 1, 4)), "items")) {
+        edits: lsp_member(item, "additionalTextEdits") ?? next
+        edit: lsp_test_rows(edits)[0]
+        imports.push("{lsp_test_text(item, "label")}|{lsp_test_text(item, "insertText")}|{lsp_test_range(lsp_test_field(edit, "range"))}|{lsp_test_text(edit, "newText")}")
+    }
+    // The open file's saved text is not offered: its check reads the open text.
+    assert_eq(imports, [String]{"ClosedFirst|closed.ClosedFirst|0:0-0:0|use first.closed\n", "AddedThird|added.AddedThird|0:0-0:0|use third.added\n"})
+    lsp_test_open(server, uri, "run: fn() {{\n    Add\n}}\n")
+    narrowed: lsp_test_labels(lsp_test_result(server, "textDocument/completion", lsp_test_at(uri, 1, 7)))
+    assert(narrowed.contains("AddedThird=3") && !narrowed.contains("ClosedFirst=3"), "the prefix narrows the saved declarations")
+}
+
 LSP_TEST_MARKERS: `#Codable
 Pixel: struct {
     r: Int

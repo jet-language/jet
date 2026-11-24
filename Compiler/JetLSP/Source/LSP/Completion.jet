@@ -1,14 +1,16 @@
 // Completion from the checked symbols: after `receiver.` the receiver's
 // members (or a module's declarations), elsewhere the names in scope at the
-// cursor, the language's types and keywords included. After a value, a word
-// another language spells for one of its methods completes to the Jet
-// method. In a marked block the `lsp.completion` hooks of its marker's
-// package come first.
+// cursor, the language's types and keywords included, the binding snippets
+// at a statement's start, and the declarations of the workspace's saved
+// files the document does not import yet, each with the `use` line it needs.
+// After a value, a word another language spells for one of its methods
+// completes to the Jet method. In a marked block the `lsp.completion` hooks
+// of its marker's package come first.
 use {
     core.encoding.[Dyn]
     jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
-    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT]
-    jet_semindex.[SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
+    jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_RBRACE]
+    jet_semindex.[SemKind, SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
     jet_sema.[SEMA_METHOD_IDIOMS, SemaMethodIdiom]
 }
 
@@ -31,6 +33,92 @@ lsp_completion_item_kind: fn(kind: SemSymbolKind) -> Int Never! {
 lsp_completion_item_json: fn(symbol: SemSymbol) -> String Never! {
     documentation: if symbol.summary == "" -> "" else -> ",\"documentation\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(symbol.summary)}}}"
     "{{\"label\":{foundation_json_quote(symbol.name)},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)}{documentation}}}"
+}
+
+// The binding snippets, as `label`, `detail` and snippet text.
+LSP_COMPLETION_BIND_SNIPPETS: [[String]]{
+    [String]{"bind immut (inferred)", "name: value", "${{1:name}}: ${{2:value}}"},
+    [String]{"bind mut", "name := value", "${{1:name}} := ${{2:value}}"},
+}
+
+// Whether a word at `start` begins a statement: only blanks precede it on its
+// line, and it is inside a block.
+lsp_completion_statement_start: fn(lexed: Lexed, bytes: [U8], start: Int) -> Bool Never! {
+    at := start
+    loop at > 0 && bytes[at - 1] != (U8{10}) {
+        if bytes[at - 1] != (U8{32}) && bytes[at - 1] != (U8{9}) -> return false
+        at -= 1
+    }
+    depth := 0
+    loop token in lexed.tokens {
+        if token.span.start >= start -> break
+        if token.kind == TOKEN_LBRACE -> depth += 1
+        if token.kind == TOKEN_RBRACE -> depth -= 1
+    }
+    depth > 0
+}
+
+// The completion kind of a top-level declaration, None for other kinds.
+lsp_completion_def_kind: fn(kind: SemKind) -> Int? Never! {
+    if kind == {
+        .Function(_) -> Val(3)
+        .Struct(_, _) -> Val(22)
+        .Enum(_, _) -> Val(13)
+        .Trait -> Val(8)
+        .Type(_) | .Tag -> Val(7)
+        .Const -> Val(21)
+        .Module | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> None
+    }
+}
+
+// The module a saved file below `root` is imported as: `/w/app/store.jet`
+// below `/w` is `app.store`. "" for a file `root` does not hold.
+lsp_completion_module_name: fn(root: String, path: String) -> String Never! {
+    if !lsp_path_below(path, root) || !path.ends_with(".jet") -> return ""
+    from: if root.ends_with("/") -> root.count_bytes() else -> root.count_bytes() + 1
+    if from >= path.count_bytes() - 4 -> return ""
+    path.slice(from, path.count_bytes() - 4).split("/").to_list().join(".")
+}
+
+// Adds the top-level declarations matching `prefix` of the saved files below
+// the first workspace folder holding the document, skipping the files its
+// check already reads: each inserts `module.Name` and adds the file's `use`
+// line at the document's start. True once the answer is full.
+lsp_completion_auto_imports: fn(server: LSPServer, view: LSPView, prefix: String, seen: &[String:Bool], items: &[String]) -> Bool {
+    root := String?{None}
+    loop folder in server.workspace_roots {
+        if lsp_path_below(view.doc.path, folder) {
+            root = Val(folder)
+            break
+        }
+    }
+    folder: root ?? return false
+    saved: server.checker.sources(folder)
+    loop source in saved.move() {
+        if source.path == view.doc.path || lsp_checked_module_at(view.checked, source.path) != None -> next
+        if source.path.ends_with("/package.jet") || source.path.ends_with("/env.jet") -> next
+        module_name: lsp_completion_module_name(folder, source.path)
+        if module_name == "" -> next
+        segments: module_name.split(".").to_list()
+        alias: segments[segments.len() - 1]
+        outline: lsp_saved_outline(source)
+        index: outline.index ?? next
+        methods := [String:Bool]{}
+        loop member in index.members -> methods[member.identity] = true
+        loop definition in index.definitions {
+            def: definition.def
+            if !def.name.starts_with(prefix) || methods.has_key(def.identity) -> next
+            kind: lsp_completion_def_kind(def.kind) ?? next
+            if !lsp_source_spells(outline.modules[0].source, def.def_span, def.name) -> next
+            key: "{def.name}:{kind}:{module_name}"
+            if seen.has_key(key) -> next
+            seen[key] = true
+            if items.len() >= LSP_COMPLETION_LIMIT -> return true
+            edit: "{{\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}},\"newText\":{foundation_json_quote("use {module_name}\n")}}}"
+            items.push("{{\"label\":{foundation_json_quote(def.name)},\"kind\":{kind},\"detail\":{foundation_json_quote("use {module_name}")},\"insertText\":{foundation_json_quote("{alias}.{def.name}")},\"additionalTextEdits\":[{edit}]}}")
+        }
+    }
+    false
 }
 
 // A word the lexer reads: an identifier or a keyword.
@@ -177,6 +265,12 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
         seen["{row.label}:1"] = true
         items.push("{{\"label\":{foundation_json_quote(row.label)},\"kind\":1,\"detail\":{foundation_json_quote(row.detail)}}}")
     }
+    if member == None && lsp_completion_statement_start(view.lexed, bytes, start) {
+        loop snippet in LSP_COMPLETION_BIND_SNIPPETS {
+            if !snippet[0].starts_with(prefix) -> next
+            items.push("{{\"label\":{foundation_json_quote(snippet[0])},\"kind\":15,\"detail\":{foundation_json_quote(snippet[1])},\"insertText\":{foundation_json_quote(snippet[2])},\"insertTextFormat\":2}}")
+        }
+    }
     loop symbol in view.checked.symbols {
         if !symbol.name.starts_with(prefix) -> next
         candidate: if member == .Val(scope) -> lsp_member_candidate(symbol, scope) else -> lsp_scope_candidate(symbol, view.module_path, offset)
@@ -200,6 +294,9 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
             seen["{idiom.rename}:2"] = true
             items.push(item)
         }
+    }
+    if member == None && !incomplete {
+        incomplete = lsp_completion_auto_imports(server, view, prefix, seen, items)
     }
     lsp_response(id, "{{\"isIncomplete\":{incomplete},\"items\":[{items.join(",")}]}}")
 }
