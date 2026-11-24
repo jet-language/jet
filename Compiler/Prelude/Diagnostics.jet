@@ -4982,6 +4982,32 @@ DestructureShapeMismatch: struct {
     }
 }
 
+LoopIndexNamedLikeMember: struct {
+    name: String,
+
+    impl Diagnostic {
+        code: "E0182",
+        safety_class: .Opinion,
+        safety_reason: "The loop would run with the name holding each row's position, and Jet refuses it so a name never holds a number where it reads as a member.",
+        meaning: "A two-name loop over named tuples whose first name, the index, is named like a member",
+        detail: true,
+        no_fix: .Design,
+        fix_next: "Take each row apart with a brace head, `loop {{name, size}} in rows`, or give the index a name no member has.",
+
+        what: fn(self) -> String {
+            "`{self.name}` here holds each row's index, not its `{self.name}` member"
+        }
+
+        why: fn(self) -> String {
+            "In `loop (i, item) in rows` the first name is the position of each item, so a name that is also a member of the rows reads as that member but holds a number"
+        }
+
+        fix: fn(self) -> String {
+            "Take each row apart by its members with a brace head, `loop {{{self.name}, …}} in rows`, or give the index a name that is no member"
+        }
+    }
+}
+
 NumberFamilySize: struct {
     written: String,
     name: String,

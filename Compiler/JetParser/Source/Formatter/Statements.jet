@@ -27,6 +27,7 @@ use {
         Span,
         Stmt,
         SwitchArm,
+        ast_loop_destructures,
         expr_source_start,
         expr_span,
         overflow_mode_name,
@@ -1194,8 +1195,10 @@ jfmt_defer_braced: fn(f: JetFmt, span: Span) -> Bool Never! {
 }
 
 jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
-    header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, span, label)
-    jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
+    header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, body, span, label)
+    if ast_loop_destructures(var, body) -> jfmt_fmt_effect_loop_body(f, body[1..<body.len()], header_end, arrow_body, header_end) else {
+        jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
+    }
 }
 
 // A template loop's body is template text, kept as written: a braced body
@@ -1203,23 +1206,37 @@ jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
 // one line keeps its braces, and an arrow body stays an arrow.
 jfmt_fmt_template_loop_stmt: fn(f: &JetFmt, stmt: Stmt) {
     if stmt == .For(var, var_span, var2, kind, body, span, arrow_body, label, _) {
-        header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, span, label)
+        header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, body, span, label)
+        statements: if ast_loop_destructures(var, body) -> body[1..<body.len()] else -> body
         if {
-            arrow_body -> jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body, header_end)
+            arrow_body -> jfmt_fmt_effect_loop_body(f, statements, header_end, arrow_body, header_end)
             jfmt_source_span_multiline(f, Span{start: header_end, end: span.end}) -> {
                 jfmt_write(f, " {{")
-                jfmt_fmt_body_expanded(f, body)
+                jfmt_fmt_body_expanded(f, statements)
             }
-            else -> jfmt_fmt_control_body_after_header(f, body, true, header_end)
+            else -> jfmt_fmt_control_body_after_header(f, statements, true, header_end)
         }
         return
     }
     jfmt_fmt_stmt(f, stmt)
 }
 
+// A destructuring loop head (`loop {a, b} in rows`) prints its pattern
+// from the generated binding that opens the body; false for any other loop.
+jfmt_fmt_loop_head_pattern: fn(f: &JetFmt, var: String, body: [Stmt]) -> Bool {
+    if !ast_loop_destructures(var, body) -> return false
+    if body[0] == .Val(binding) {
+        if binding.pattern == .Val(pattern) {
+            jfmt_fmt_bind_pattern(f, pattern)
+            return true
+        }
+    }
+    false
+}
+
 // `loop` through the last clause of a `for` loop head; returns where the
 // head ends in the source.
-jfmt_fmt_for_head: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, span: Span, label: NamedSpan?) -> Int {
+jfmt_fmt_for_head: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, label: NamedSpan?) -> Int {
     jfmt_fmt_loop_label(f, label)
     jfmt_write(f, "loop ")
     // The bindingless form writes its subject bare. The
@@ -1227,7 +1244,8 @@ jfmt_fmt_for_head: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
     // produces `loop it in words`, which is not a spelling the parser
     // accepts — `it` is a keyword, not a name.
     bindingless: var2 == None && var == "it"
-    if !bindingless {
+    destructures: jfmt_fmt_loop_head_pattern(f, var, body)
+    if !bindingless && !destructures {
         if var2 == .Val(second) {
             jfmt_write(f, "(")
             source: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN)

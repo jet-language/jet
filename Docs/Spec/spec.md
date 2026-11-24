@@ -748,13 +748,17 @@ loop i := init, i < limit {
 }
 ```
 
-The two-name form over a list or other indexed source yields the index and
-the item, as in `loop (i, row) in rows`. When either name is a member of the
-source's named-tuple items, the form destructures each item by name instead:
-`loop (package, name) in [{package: "a", name: "b"}]` binds `name` to `"b"`,
-in either order. It is the tuple destructure a binding writes, so a name that
-is no member is E0313 and a count that differs from the tuple's is E0315. A
-map keeps its key-value pair.
+The two-name form over a list or other indexed source always yields the index
+and the item, as in `loop (i, row) in rows`; a map yields its key-value pair.
+A brace head takes each item apart instead, with the pattern a binding
+writes: `loop {package, name} in [{package: "a", name: "b"}]` binds `name` to
+`"b"`, in either order, `loop { package: from, name: called } in deps` renames,
+and `loop Dep{name, ..} in deps` takes each struct apart. A name that is no
+member is E0313 and a count that differs from the tuple's is E0315. A paren
+head whose first name is a member of the named-tuple items is E0182, because
+that name would hold the index; the fix is the brace head. `loop {` followed
+by a body stays the infinite loop: only an `in` after the matching `}` makes
+the braces a head.
 
 A source loop may use `-> expression` or a braced value body. Each accepted
 iteration yields one non-unit value. The eager result is a `List` in iteration

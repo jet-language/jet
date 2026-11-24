@@ -1,0 +1,14 @@
+// A paren loop head binds each row's index and the row, so a first name
+// that is also a member of the rows would hold the index where it reads as
+// the member: an error that shows the brace head. The brace head, its
+// renames, and an index named like no member stay quiet.
+pairs: fn() -> [{a: Int, b: Int}] {
+    [{a: 1, b: 2}, {a: 3, b: 4}]
+}
+
+run: fn() {
+    loop (a, b) in pairs() { print("{a} {b.b}") }
+    loop {a, b} in pairs() { print("{a} {b}") }
+    loop { a: left, b: right } in pairs() { print("{left} {right}") }
+    loop (i, pair) in pairs() { print("{i} {pair.a}") }
+}

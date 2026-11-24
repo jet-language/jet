@@ -31,6 +31,7 @@ use {
         TypedLitBody,
         LIST_TYPE_OWNER,
         access_sigil,
+        ast_loop_destructures,
         dimension_display_name,
         expr_source_start,
         expr_is_map_slot_or,
@@ -2000,14 +2001,14 @@ jfmt_fmt_value_loop: fn(f: &JetFmt, body: [Stmt], route_attached: Bool) {
     if controller == {
         .For(var, _, var2, kind, inner, span, _, _, _) -> {
             jfmt_write(f, "loop ")
-            jfmt_fmt_for_header(f, var, var2, kind)
-            current := inner
+            jfmt_fmt_for_header(f, var, var2, kind, inner)
+            current := if ast_loop_destructures(var, inner) -> inner[1..<inner.len()] else -> inner
             loop current.len() == 1 {
                 nested := false
                 if current[0] == .For(next_var, _, next_var2, next_kind, next_body, _, _, _, _) {
                     jfmt_write(f, ", ")
-                    jfmt_fmt_for_header(f, next_var, next_var2, next_kind)
-                    current = next_body
+                    jfmt_fmt_for_header(f, next_var, next_var2, next_kind, next_body)
+                    current = if ast_loop_destructures(next_var, next_body) -> next_body[1..<next_body.len()] else -> next_body
                     nested = true
                 }
                 if !nested -> break
@@ -2051,9 +2052,13 @@ jfmt_fmt_value_loop: fn(f: &JetFmt, body: [Stmt], route_attached: Bool) {
     }
 }
 
-jfmt_fmt_for_header: fn(f: &JetFmt, var: String, var2: NamedSpan?, kind: ForKind) {
+// One `name in source` clause of a loop head; a destructuring head prints
+// its pattern from the generated binding that opens `body`.
+jfmt_fmt_for_header: fn(f: &JetFmt, var: String, var2: NamedSpan?, kind: ForKind, body: [Stmt]) {
+    destructures: jfmt_fmt_loop_head_pattern(f, var, body)
+    if destructures -> jfmt_write(f, " in ")
     // The bindingless form writes its subject bare.
-    if !(var2 == None && var == "it") {
+    if !destructures && !(var2 == None && var == "it") {
         if var2 != None -> jfmt_write(f, "(")
         jfmt_write(f, var)
         if var2 == .Val(second) {
@@ -2134,14 +2139,15 @@ jfmt_fmt_collecting_loop: fn(f: &JetFmt, lambda: Lambda) {
             .For(var, _, var2, kind, body, _, _, _, _) -> {
                 if !first_clause -> jfmt_write(f, ", ")
                 first_clause = false
-                jfmt_fmt_for_header(f, var, var2, kind)
-                if body.len() == 1 {
-                    if body[0] == .For(_, _, _, _, _, _, _, _, _) {
-                        current = body[0]
+                jfmt_fmt_for_header(f, var, var2, kind, body)
+                statements: if ast_loop_destructures(var, body) -> body[1..<body.len()] else -> body
+                if statements.len() == 1 {
+                    if statements[0] == .For(_, _, _, _, _, _, _, _, _) {
+                        current = statements[0]
                         next
                     }
                 }
-                jfmt_fmt_collecting_body(f, body)
+                jfmt_fmt_collecting_body(f, statements)
                 break
             }
             .CountedLoop(init, cond, step, body, _, _, _) -> {

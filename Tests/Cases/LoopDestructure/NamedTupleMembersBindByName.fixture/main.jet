@@ -2,13 +2,30 @@ rows: fn() -> [{package: String, name: String}] {
     [{package: "Compiler/JetCLI", name: "selfcheck"}, {package: "Core", name: "selfcheck-core"}]
 }
 
+Dep: struct {
+    package: String,
+    name: String,
+}
+
 run: fn() {
-    loop (package, name) in [{package: "a", name: "b"}] { print("{package} {name}") }
-    loop (name, package) in rows() { print("{name} checks {package}") }
+    loop {package, name} in [{package: "a", name: "b"}] { print("{package} {name}") }
+    loop {name, package} in rows() { print("{name} checks {package}") }
     loop (index, row) in rows() { print("{index} {row.name}") }
     sizes := 0
-    loop (package, name) in rows() -> sizes += package.len() + name.len()
+    loop {package, name} in rows() -> sizes += package.len() + name.len()
     print(sizes)
     table: ["k": 1]
     loop (key, value) in table { print("{key}={value}") }
+    loop { package: from, name: called } in rows() { print("{called} from {from}") }
+    deps: [Dep{package: "core", name: "args"}]
+    loop Dep{name, ..} in deps { print("dep {name}") }
+    loop Dep{package, ..} in deps { print("dep from {package}") }
+    joined: loop {package, name} in rows() -> "{package}/{name}"
+    print(joined.join(", "))
+    count := 0
+    loop {
+        count += 1
+        if count == 3 -> break
+    }
+    print(count)
 }

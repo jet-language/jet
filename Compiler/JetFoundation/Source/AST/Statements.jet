@@ -155,6 +155,25 @@ ForKind: enum {
     In(collection: Expr, step: Expr?),
 }
 
+// A destructuring loop head (`loop {a, b} in rows`, `loop Row{a, b} in
+// rows`) walks a hidden row named AST_LOOP_ROW_PREFIX plus the head's
+// offset, and its body opens with the head's pattern binding of that row,
+// so every pass sees an ordinary loop and an ordinary destructure.
+AST_LOOP_ROW_PREFIX: "__jet_loop_row_"
+
+// Whether a loop over `var` whose body is `body` has a destructuring head:
+// `var` is a hidden row and `body` opens with the generated binding that
+// takes it apart.
+ast_loop_destructures: fn(var: String, body: [Stmt]) -> Bool Never! {
+    if !var.starts_with(AST_LOOP_ROW_PREFIX) || body.len() == 0 -> return false
+    if body[0] == .Val(binding) {
+        if binding.pattern != None && binding.init == .Ident(name, _, id) {
+            return name == var && id == AST_NODE_GENERATED
+        }
+    }
+    false
+}
+
 LValue: enum {
     Local(name: String, name_span: Span),
     Index(base: Expr, index: Expr, span: Span, kind: IndexKind),

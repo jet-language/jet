@@ -1,7 +1,9 @@
-// #6281 c185: a two-name loop over named tuples binds each name to the
-// member it names, never the first name to the index and the second to the
-// whole tuple. A wrong count or an unknown name is the tuple destructure's
-// own diagnostic; names that name no member keep the index-and-item form.
+// A brace loop head (`loop {package, name} in rows`) takes each named tuple
+// apart by member name, as a binding's brace pattern does, and a struct
+// pattern head (`loop Dep{package, ..} in deps`) takes each struct apart. A
+// paren head always binds the index and the item, so a first name that is a
+// member of the item is E0182. A wrong count or an unknown name in a brace
+// head is the destructure's own diagnostic.
 loop_tuple_errors: fn(source: String) -> [String] {
     codes := [String]{}
     loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
@@ -10,25 +12,42 @@ loop_tuple_errors: fn(source: String) -> [String] {
     codes
 }
 
-#Test("a_two_name_loop_binds_named_tuple_members_by_name") {
+#Test("a_brace_loop_head_binds_named_tuple_members_by_name") {
     accepted: `want_int: fn(value: Int) -> Int { value }
 text_size: fn(value: String) -> Int { value.len() }
 
+Dep: struct {
+    package: String,
+    name: String,
+}
+
 run: fn() {
     total := 0
-    loop (package, name) in [{package: "a", name: "bc"}] {
+    loop {package, name} in [{package: "a", name: "bc"}] {
         total += text_size(name) + text_size(package)
     }
     rows: [{package: "x", name: "y"}]
-    loop (name, package) in rows {
+    loop {name, package} in rows {
         total += text_size("{package}{name}")
     }
+    loop { package: from, name: called } in rows -> total += text_size(from) + text_size(called)
     loop (index, row) in rows {
         total += want_int(index) + text_size(row.name)
     }
+    loop (i, name) in rows {
+        total += want_int(i) + text_size(name.package)
+    }
+    sizes: loop {package, name} in rows -> text_size(package) + text_size(name)
+    total += sizes.len()
+    deps: [Dep{package: "p", name: "n"}]
+    loop Dep{package, ..} in deps -> total += text_size(package)
     table: ["k": 1]
     loop (key, value) in table {
         total += want_int(value) + text_size(key)
+    }
+    loop {
+        total += 1
+        if total > 100 -> break
     }
     print(total)
 }
@@ -36,10 +55,22 @@ run: fn() {
     assert_eq(loop_tuple_errors(accepted).join("; "), "")
 }
 
-#Test("a_loop_tuple_pattern_with_an_unknown_name_is_e0313") {
+#Test("a_paren_loop_head_whose_index_is_named_like_a_member_is_e0182") {
     errors: loop_tuple_errors(
         `run: fn() {
-    loop (package, nme) in [{package: "a", name: "b"}] {
+    loop (package, name) in [{package: "a", name: "b"}] {
+        print("{package} {name.name}")
+    }
+}
+`,
+    )
+    assert_eq(errors.join("; "), "E0182: `package` here holds each row's index, not its `package` member")
+}
+
+#Test("a_brace_loop_head_with_an_unknown_name_is_e0313") {
+    errors: loop_tuple_errors(
+        `run: fn() {
+    loop {package, nme} in [{package: "a", name: "b"}] {
         print(package)
     }
 }
@@ -48,10 +79,10 @@ run: fn() {
     assert(errors.len() == 1 && errors[0].starts_with("E0313: `nme` isn't a member of"), errors.join("; "))
 }
 
-#Test("a_loop_tuple_pattern_with_the_wrong_count_is_e0315") {
+#Test("a_brace_loop_head_with_the_wrong_count_is_e0315") {
     errors: loop_tuple_errors(
         `run: fn() {
-    loop (package, name) in [{package: "a", name: "b", version: 1}] {
+    loop {package, name} in [{package: "a", name: "b", version: 1}] {
         print("{package}{name}")
     }
 }

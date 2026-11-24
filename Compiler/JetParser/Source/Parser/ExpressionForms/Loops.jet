@@ -2,6 +2,9 @@
 // both forms as immediately-called lambdas around ordinary loop statements.
 use {
     jet_foundation.[
+        AST_LOOP_ROW_PREFIX,
+        AST_NODE_GENERATED,
+        BindPattern,
         Binding,
         CallArg,
         Expr,
@@ -34,11 +37,14 @@ use {
     ]
 }
 
+// One `name in source` clause of a loop head. `pattern` is a destructuring
+// head (`{a, b}`, `Row{a, b}`) that takes each item apart.
 ParserExpressionFormLoopClause: struct {
     var: String,
     var_span: Span,
     var2: NamedSpan?,
     kind: ForKind,
+    pattern: BindPattern?{None},
 }
 
 ParserExpressionFormCountedLoop: struct {
@@ -68,6 +74,11 @@ parser_expression_form_loop_stride_here: fn(state: &JetParserState) -> Bool Neve
 }
 
 parser_expression_form_loop_binding: fn(state: &JetParserState) -> ParserExpressionFormLoopClause {
+    if parser_loop_pattern_head_ahead(state) {
+        pattern: parser_parse_bind_pattern(state)
+        span: parser_bind_pattern_span(pattern)
+        return ParserExpressionFormLoopClause{var: "{AST_LOOP_ROW_PREFIX}{span.start}", var_span: span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: span, id: parser_node_id(state)}, step: None}, pattern: Val(pattern)}
+    }
     if parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
         first: parser_expect_name(state, "as the first loop variable")
@@ -79,6 +90,20 @@ parser_expression_form_loop_binding: fn(state: &JetParserState) -> ParserExpress
     }
     first: parser_expect_name(state, "as the loop variable")
     ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None}}
+}
+
+// The loop statement of `clause` over `kind` and `body`. A destructuring
+// head walks the hidden row `clause.var`, and its body opens with the
+// head's pattern binding of that row (AST_LOOP_ROW_PREFIX).
+parser_loop_clause_stmt: fn(clause: ParserExpressionFormLoopClause, kind: ForKind, body: &&[Stmt], span: Span, arrow_body: Bool{false}, label: NamedSpan?{None}) -> Stmt {
+    if clause.pattern == .Val(pattern) {
+        binding := ast_binding("", clause.var_span, false, Expr.Ident{name: clause.var, span: clause.var_span, id: AST_NODE_GENERATED}, None)
+        binding.pattern = Val(pattern)
+        statements := [Stmt]{Stmt.Val{binding: binding}}
+        loop statement in body.move() -> statements.push(statement)
+        return Stmt.For{var: clause.var, var_span: clause.var_span, var2: None, kind: kind, body: statements, span: span, arrow_body: arrow_body, label: label, auto_vectorization: None}
+    }
+    Stmt.For{var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: kind, body: body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: None}
 }
 
 parser_expression_form_loop_separator: fn(state: &JetParserState) {
@@ -320,7 +345,7 @@ parser_expression_form_parse_counted_loop: fn(state: &JetParserState, start: Spa
 
 parser_expression_form_parse_loop: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
     start: parser_bump(state)
-    if parser_current_kind(state) == TOKEN_LBRACE {
+    if parser_current_kind(state) == TOKEN_LBRACE && !parser_loop_pattern_head_ahead(state) {
         block: parser_parse_block(state)
         end: block.span
         loop_stmt: Stmt.Loop{body: block.statements, span: parser_cover(start.span, end), arrow_body: false, label: None}
@@ -331,7 +356,7 @@ parser_expression_form_parse_loop: fn(state: &JetParserState, depth: Int) -> Par
     head: parser_current_kind(state)
     following: parser_kind_at(state, 1)
     binding_head: head == TOKEN_IDENT || head == TOKEN_KW_IT
-    finite_header: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW))
+    finite_header: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW)) || parser_loop_pattern_head_ahead(state)
     if !finite_header {
         parser_add_fatal_code(state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
         return ParsedExpr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}, span: start.span}
@@ -391,7 +416,7 @@ parser_expression_form_parse_loop: fn(state: &JetParserState, depth: Int) -> Par
                     index := clauses.len() - 1
                     loop index >= 0 {
                         clause: clauses[index]
-                        nested = [Stmt]{Stmt.For{var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: clause.kind, body: nested, span: start.span, arrow_body: false, label: None, auto_vectorization: None}}
+                        nested = [Stmt]{parser_loop_clause_stmt(clause, clause.kind, nested.move(), start.span)}
                         index -= 1
                     }
                     loop_stmt = Stmt.Loop{body: nested, span: parser_cover(start.span, exhaustion_span), arrow_body: false, label: Val(NamedSpan{name: result_label, span: start.span})}
@@ -444,7 +469,7 @@ parser_expression_form_parse_loop: fn(state: &JetParserState, depth: Int) -> Par
                 clause: clauses[index]
                 label := NamedSpan?{None}
                 if index == 0 -> label = Val(NamedSpan{name: collect_label, span: start.span})
-                nested = [Stmt]{Stmt.For{var: clause.var, var_span: clause.var_span, var2: clause.var2, kind: clause.kind, body: nested, span: start.span, arrow_body: false, label: label.move(), auto_vectorization: None}}
+                nested = [Stmt]{parser_loop_clause_stmt(clause, clause.kind, nested.move(), start.span, label: label.move())}
                 index -= 1
             }
             if nested.len() > 0 -> loop_stmt = Val(nested[0])
