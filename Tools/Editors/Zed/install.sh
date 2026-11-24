@@ -4,7 +4,7 @@
 # The extension directory is this one (Tools/Editors/Zed). Zed loads a dev
 # extension through a symlink at <zed data>/extensions/installed/jet-lang:
 #   extension.toml        manifest (rendered here from extension.toml.in)
-#   extension.wasm        prebuilt language-server glue (wasm-src/, wasm32-wasip2)
+#   extension.wasm        prebuilt language-server glue (WasmSrc/, wasm32-wasip2)
 #   grammars/jet.wasm     the tree-sitter parser
 #   languages/jet/*.scm   highlights, brackets, indents, outline, overrides
 #
@@ -35,8 +35,8 @@ cd "$ROOT"
 FORCE="${FORCE:-0}"
 GRAMMAR_REPO="$ROOT/grammar-repo"
 GRAMMAR_URI="file://${GRAMMAR_REPO}"
-WASM_SRC="$ROOT/wasm-src"
-TREE_SITTER_SRC="$(cd "$ROOT/../tree-sitter" && pwd)"
+WASM_SRC="$ROOT/WasmSrc"
+TREE_SITTER_SRC="$(cd "$ROOT/../TreeSitter" && pwd)"
 ZED_EXTENSIONS_DIR="${ZED_EXTENSIONS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/zed/extensions}"
 
 # stale TARGET SOURCE... — true when TARGET is missing, empty or older than a source.
