@@ -237,10 +237,10 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1653,
+  "total": 1644,
   "counts": {
     "Compiler": 807,
-    "Core": 179,
+    "Core": 170,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
@@ -4402,35 +4402,35 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProveJournal.jet",
-      "line": 104,
+      "line": 108,
       "column": 5,
       "reason": "the harness main arms the journal before any test, so before any other thread reads it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProveJournal.jet",
-      "line": 171,
+      "line": 210,
       "column": 5,
       "reason": "into lends `capacity` writable bytes for a raw Linux read of stdin"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProveJournal.jet",
-      "line": 187,
+      "line": 235,
       "column": 5,
       "reason": "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProveJournal.jet",
-      "line": 197,
+      "line": 245,
       "column": 9,
       "reason": "cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProveJournal.jet",
-      "line": 205,
+      "line": 253,
       "column": 9,
       "reason": "cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask"
     },
@@ -4591,21 +4591,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RecordReplay.jet",
-      "line": 176,
+      "line": 180,
       "column": 5,
       "reason": "the observation start runs on the main thread before any task"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RecordReplay.jet",
-      "line": 211,
+      "line": 215,
       "column": 5,
       "reason": "the observation start runs on the main thread before any task"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RecordReplay.jet",
-      "line": 255,
+      "line": 259,
       "column": 5,
       "reason": "the observation start runs on the main thread before any task"
     },
@@ -4717,21 +4717,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 333,
+      "line": 375,
       "column": 13,
       "reason": "written under the host lock"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 342,
+      "line": 384,
       "column": 5,
       "reason": "TCGETS writes the kernel termios into the caller's writable 64-byte struct"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteTerm.jet",
-      "line": 352,
+      "line": 394,
       "column": 5,
       "reason": "TCSETS reads the kernel termios from the caller's initialized struct"
     },
@@ -6453,7 +6453,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Data.jet",
-      "line": 276,
+      "line": 277,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
@@ -6474,7 +6474,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Sealed.jet",
-      "line": 161,
+      "line": 162,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
@@ -6488,35 +6488,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 137,
-      "column": 5,
-      "reason": "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Jobs/Jobs.jet",
-      "line": 144,
-      "column": 5,
-      "reason": "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Jobs/Jobs.jet",
-      "line": 284,
+      "line": 281,
       "column": 13,
       "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 605,
+      "line": 602,
       "column": 5,
       "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 623,
+      "line": 620,
       "column": 5,
       "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
@@ -6698,51 +6684,9 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 328,
-      "column": 5,
-      "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Net.jet",
-      "line": 336,
-      "column": 5,
-      "reason": "read the native IP address discriminant"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Net.jet",
-      "line": 399,
+      "line": 393,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Net.jet",
-      "line": 406,
-      "column": 5,
-      "reason": "read socket IP representation; formatting stays in Jet"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Net.jet",
-      "line": 412,
-      "column": 5,
-      "reason": "read native socket port"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Net.jet",
-      "line": 426,
-      "column": 5,
-      "reason": "read native IPv6 socket scope identifier"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Net/Net.jet",
-      "line": 619,
-      "column": 5,
-      "reason": "read the native UDP packet's socket-address carrier"
     },
     {
       "package": "Core",
@@ -6929,203 +6873,196 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 237,
+      "line": 238,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 343,
+      "line": 344,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
     {
       "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1904,
-      "column": 5,
-      "reason": "read the final path component's OS metadata kind without opening an identity handle"
-    },
-    {
-      "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1018,
+      "line": 1020,
       "column": 1,
       "reason": "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1221,
+      "line": 1223,
       "column": 1,
       "reason": "posix set_scheduling: the caller owns the CPU share of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1352,
+      "line": 1354,
       "column": 1,
       "reason": "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1453,
+      "line": 1455,
       "column": 5,
       "reason": "posix getpgid: inspect a process group"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1459,
+      "line": 1461,
       "column": 5,
       "reason": "posix getsid: inspect a process session"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1464,
+      "line": 1466,
       "column": 1,
       "reason": "posix getpriority: the caller vouches that `which` names this process or one it controls"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1472,
+      "line": 1474,
       "column": 1,
       "reason": "posix setpriority: the caller owns the scheduling priority of the process it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1477,
+      "line": 1479,
       "column": 1,
       "reason": "posix utime: the caller owns the file whose timestamps it rewrites"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1487,
+      "line": 1489,
       "column": 1,
       "reason": "posix stop: the caller accepts that the process ends here after the shared cleanup boundary"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1497,
+      "line": 1499,
       "column": 1,
       "reason": "posix pipe: the caller owns both returned descriptors and closes each exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1504,
+      "line": 1506,
       "column": 1,
       "reason": "posix close_fd: the caller owns `fd` and nothing uses it after this call"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1775,
+      "line": 1777,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1795,
+      "line": 1797,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1816,
+      "line": 1818,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1819,
+      "line": 1821,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1822,
+      "line": 1824,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1829,
+      "line": 1831,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1836,
+      "line": 1838,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1839,
+      "line": 1841,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1863,
+      "line": 1865,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1871,
+      "line": 1873,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2070,
+      "line": 2072,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2073,
+      "line": 2075,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2078,
+      "line": 2080,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2086,
+      "line": 2088,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 2091,
+      "line": 2093,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -7139,7 +7076,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Tasks/Tasks.jet",
-      "line": 115,
+      "line": 116,
       "column": 1,
       "reason": "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once"
     },
@@ -11828,13 +11765,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 807 |
-| Core | 179 |
+| Core | 170 |
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
 | Tests | 568 |
 | Tools | 28 |
-| **total** | **1653** |
+| **total** | **1644** |
 
 ### Regions
 
@@ -12433,11 +12370,11 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 338:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's one-word C-ABI export and the restorer its rt_sigreturn rail" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 347:5 | "rt_sigaction reads the saved four-word action from the hub's table and writes no old action" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 594:9 | "rt_sigaction borrows the four-word SIG_IGN or SIG_DFL action on the stack and writes no old action" |
-| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 104:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
-| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 171:5 | "into lends `capacity` writable bytes for a raw Linux read of stdin" |
-| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 187:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |
-| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 197:9 | "cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP" |
-| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 205:9 | "cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask" |
+| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 108:5 | "the harness main arms the journal before any test, so before any other thread reads it" |
+| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 210:5 | "into lends `capacity` writable bytes for a raw Linux read of stdin" |
+| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 235:5 | "cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none" |
+| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 245:9 | "cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP" |
+| Compiler | Compiler/JetRuntime/Source/ProveJournal.jet | 253:9 | "cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 11:5 | "address borrows an initialized aligned word in a live native layout the caller holds" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 17:5 | "address is an aligned word of native storage the caller owns or holds the lock for" |
 | Compiler | Compiler/JetRuntime/Source/RawWords.jet | 23:5 | "address borrows an initialized byte inside the caller's live buffer" |
@@ -12460,9 +12397,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 41:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 81:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 245:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 176:5 | "the observation start runs on the main thread before any task" |
-| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 211:5 | "the observation start runs on the main thread before any task" |
-| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 255:5 | "the observation start runs on the main thread before any task" |
+| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 180:5 | "the observation start runs on the main thread before any task" |
+| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 215:5 | "the observation start runs on the main thread before any task" |
+| Compiler | Compiler/JetRuntime/Source/RecordReplay.jet | 259:5 | "the observation start runs on the main thread before any task" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 99:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 369:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 36:5 | "runtime-init runs before any other thread exists" |
@@ -12478,9 +12415,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 166:9 | "connect(2) reads the owned 23-byte address" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 182:9 | "sendto(2) with MSG_NOSIGNAL reads the owned request" |
 | Compiler | Compiler/JetRuntime/Source/RouteSys.jet | 624:5 | "utimensat borrows the NUL-terminated path and the two owned timespecs for the synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 333:13 | "written under the host lock" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 342:5 | "TCGETS writes the kernel termios into the caller's writable 64-byte struct" |
-| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 352:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
+| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 375:13 | "written under the host lock" |
+| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 384:5 | "TCGETS writes the kernel termios into the caller's writable 64-byte struct" |
+| Compiler | Compiler/JetRuntime/Source/RouteTerm.jet | 394:5 | "TCSETS reads the kernel termios from the caller's initialized struct" |
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 131:13 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/RouteTesting.jet | 140:9 | "written under the host lock" |
 | Compiler | Compiler/JetRuntime/Source/SHA256.jet | 255:5 | "runtime-init runs before any other thread exists" |
@@ -12726,16 +12663,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/XMLEngine.jet | 279:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
 | Core | Core/Encoding/YAML.jet | 589:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
-| Core | Core/Files/Data.jet | 276:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Files/Data.jet | 277:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Core | Core/Files/Files.jet | 666:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
 | Core | Core/Files/Files.jet | 759:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
-| Core | Core/Files/Sealed.jet | 161:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Files/Sealed.jet | 162:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/HTTP/Client.jet | 862:5 | "checked resolver octets and port transferred into the socket carrier" |
-| Core | Core/Jobs/Jobs.jet | 137:5 | "queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does" |
-| Core | Core/Jobs/Jobs.jet | 144:5 | "create the lexical parent with the existing raw recursive mkdir kernel before SQLite open" |
-| Core | Core/Jobs/Jobs.jet | 284:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
-| Core | Core/Jobs/Jobs.jet | 605:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
-| Core | Core/Jobs/Jobs.jet | 623:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 281:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| Core | Core/Jobs/Jobs.jet | 602:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 620:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
 | Core | Core/Mem/Mem.jet | 41:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 47:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
@@ -12761,13 +12696,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Mem/Mem.jet | 307:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
 | Core | Core/Mem/Mem.jet | 349:13 | "the block's bytes went back to the allocator that served them" |
 | Core | Core/Net/Net.jet | 322:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 328:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
-| Core | Core/Net/Net.jet | 336:5 | "read the native IP address discriminant" |
-| Core | Core/Net/Net.jet | 399:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
-| Core | Core/Net/Net.jet | 406:5 | "read socket IP representation; formatting stays in Jet" |
-| Core | Core/Net/Net.jet | 412:5 | "read native socket port" |
-| Core | Core/Net/Net.jet | 426:5 | "read native IPv6 socket scope identifier" |
-| Core | Core/Net/Net.jet | 619:5 | "read the native UDP packet's socket-address carrier" |
+| Core | Core/Net/Net.jet | 393:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3653:1 | "`key` and `iv` are a vector record's, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3656:5 | "a vector record's key and nonce, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3662:1 | "`key` and `iv` are a vector record's, used for that record only" |
@@ -12794,37 +12723,36 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Net/SSL/TLS.jet | 4625:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4628:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4658:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 237:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 343:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
-| Core | Core/Service/Service.jet | 1904:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Sys/Sys.jet | 1018:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
-| Core | Core/Sys/Sys.jet | 1221:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
-| Core | Core/Sys/Sys.jet | 1352:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
-| Core | Core/Sys/Sys.jet | 1453:5 | "posix getpgid: inspect a process group" |
-| Core | Core/Sys/Sys.jet | 1459:5 | "posix getsid: inspect a process session" |
-| Core | Core/Sys/Sys.jet | 1464:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
-| Core | Core/Sys/Sys.jet | 1472:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
-| Core | Core/Sys/Sys.jet | 1477:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
-| Core | Core/Sys/Sys.jet | 1487:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
-| Core | Core/Sys/Sys.jet | 1497:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
-| Core | Core/Sys/Sys.jet | 1504:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 1775:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 1795:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 1816:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 1819:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 1822:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 1829:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 1836:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1839:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1863:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1871:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 2070:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 2073:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 2078:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 2086:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 2091:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Process/Process.jet | 238:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 344:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Sys/Sys.jet | 1020:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
+| Core | Core/Sys/Sys.jet | 1223:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
+| Core | Core/Sys/Sys.jet | 1354:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
+| Core | Core/Sys/Sys.jet | 1455:5 | "posix getpgid: inspect a process group" |
+| Core | Core/Sys/Sys.jet | 1461:5 | "posix getsid: inspect a process session" |
+| Core | Core/Sys/Sys.jet | 1466:1 | "posix getpriority: the caller vouches that `which` names this process or one it controls" |
+| Core | Core/Sys/Sys.jet | 1474:1 | "posix setpriority: the caller owns the scheduling priority of the process it changes" |
+| Core | Core/Sys/Sys.jet | 1479:1 | "posix utime: the caller owns the file whose timestamps it rewrites" |
+| Core | Core/Sys/Sys.jet | 1489:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
+| Core | Core/Sys/Sys.jet | 1499:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
+| Core | Core/Sys/Sys.jet | 1506:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
+| Core | Core/Sys/Sys.jet | 1777:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 1797:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 1818:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 1821:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 1824:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 1831:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 1838:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1841:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1865:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1873:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 2072:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 2075:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 2080:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 2088:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 2093:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/TUI/TUI.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
-| Core | Core/Tasks/Tasks.jet | 115:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
+| Core | Core/Tasks/Tasks.jet | 116:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
 | Core | Core/Testing/Testing.jet | 1513:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
@@ -13574,15 +13502,8 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Data/Data.jet","function":"data_schema_value_type","proof":"Not a core.data export (Compiler/Prelude/Core.rows:69). Its #Unsafe block (Data.jet:3674-3677) only pattern-matches the compiler-private Dyn carriers .Number and .Bytes to name their schema type; it reads no memory, builds or mutates no carrier and returns a static String, so no caller can break those carriers' invariants through it. Every other Dyn shape is matched through the public variants (:3678-3688)."},
   {"file":"Core/Process/Process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
 {"file":"Core/Net/Net.jet","function":"ip_addr","proof":"__ip_from_bytes expects exactly four or sixteen octets. net.jet:136 accepts only parse_ip_bytes success: parse_ipv4_bytes(:960-979) checks four decimal octets <=255, and the IPv6 parser(:982-1048) checks eight 16-bit words including compression before expanding to sixteen bytes. The exact owned list moves at :138; callers cannot substitute a differently sized list after validation."},
-{"file":"Core/Net/Net.jet","function":"ip_to_string_impl","proof":"net.jet:143-144 call __ip_bytes on a borrowed typed IPAddr; Top/NetHTTP.rs:1944-1948 discriminant-matches its native IPv4/IPv6 enum and copies exactly its initialized octets into an owned list. Formatting only reads that list. No caller-selected index, raw pointer or borrowed native storage escapes."},
-{"file":"Core/Net/Net.jet","function":"ip_is_ipv4","proof":"__ip_is_v4 at net.jet:149 only matches the valid native IPAddr discriminant (Top/NetHTTP.rs:1951-1952). Any typed address is admitted; no payload reinterpretation, mutation or memory borrow is returned, only Bool."},
 {"file":"Core/Net/Net.jet","function":"socket_addr_parse","proof":"At net.jet:182-189 parsing produces exactly sixteen IPv6 bytes or four IPv4 bytes, with the IPv6 length checked at :183. parse_port(:846-856) bounds decimal port to 0..65535 and parse_scope(:1144-1154) bounds scope to 0..4294967295 before :193-194 consume the octets and IP into __ip_from_bytes/__socket_from_parts. Flow is the constant zero. Callers cannot select uninitialized representation fields or overflow the U16/U32 transfer."},
-{"file":"Core/Net/Net.jet","function":"socket_host","proof":"__socket_ip at net.jet:199 borrows a valid SocketAddr and copies its native IP enum (Top/NetHTTP.rs:2038-2039). ip_to_string_impl then reads copied octets for source formatting; the caller receives owned text, not a reference into the socket carrier. No raw address is accepted."},
-{"file":"Core/Net/Net.jet","function":"socket_port","proof":"__socket_port at net.jet:202 borrows a typed SocketAddr and widens its initialized native u16 port to Int (Top/NetHTTP.rs:2042-2043). This scalar projection accepts every valid carrier and neither exposes a borrow nor changes socket ownership."},
-{"file":"Core/Net/Net.jet","function":"socket_scope","proof":"__socket_scope at net.jet:215 matches the valid socket enum, returning None for IPv4 or widening the IPv6 u32 scope (Top/NetHTTP.rs:2046-2050). Source substitutes zero for None. No reinterpretation or caller-controlled pointer is involved and only an owned scalar escapes."},
-{"file":"Core/Net/Net.jet","function":"udp_packet_addr","proof":"__udp_packet_addr at net.jet:413 borrows a typed UDPPacket and clones its stored SocketAddr (Top/NetHTTP.rs:2851-2852); the packet remains live during the projection. The return carrier owns its address rather than pointing into packet storage, so releasing the packet cannot invalidate the result."},
 {"file":"Core/HTTP/Client.jet","function":"__build_socket","proof":"Reserved __ name; it copies the resolver octets into a fresh owned list (Client.jet:653-654) and moves it into core.net.__ip_from_bytes, whose runtime refuses any length but 4 or 16 before allocating (JetRuntime HostNetAddress.jet:31-32), so a malformed address cannot overrun the native carrier. U16{port} stops with E3010 when the port does not fit (core-library.md:4172-4173), and jet_http_build_get already rejects ports outside 0..65535 (:590). It returns an owned SocketAddr; no pointer or borrow escapes."},
-{"file":"Core/Jobs/Jobs.jet","function":"queue","proof":"The gates at jobs.jet:130-136 call __path_kind and __create_dir_all_raw with owned String paths computed by queue_default_path/files.dirname, after endpoint authority validation at :124-126. Metadata is a scalar kind query and recursive mkdir returns owned IOError; neither leaf accepts or returns memory addresses. The kind check at :131-132 rejects observed symlinks before the checked SQLite open. Path races do not create a borrowed descriptor or dangling pointer because these are independent pathname operations, not identity-handle transfers."},
 {"file":"Core/Jobs/Jobs.jet","function":"wait","proof":"The unsafe __sleep_ms leaf casts signed milliseconds to unsigned host Duration (Top/ServiceAuthority.rs:3792-3793). jobs.jet:386-387 reject negative/oversized timeout and :393 clamps the exact delay passed at :395 to 1..25, independently of wall-clock movement. No caller can reach the cast with a negative or oversized delay; the leaf only sleeps and exports no memory."},
 {"file":"Core/Jobs/Jobs.jet","function":"queue_publish_transition","proof":"jobs.jet:486 constructs owned JSON fields and :487 clamps negative timestamps before __publish_parts(:489). The provider Top/ServiceAuthority.rs:3772-3787 validates JetDevtoolsEvent::from_parts before publication, owns entity/fields and borrows source/kind only during the call. No native pointer, callback or mutable queue storage is transferred to a sink; caller-chosen observation text cannot escape that validation boundary."},
 {"file":"Core/Jobs/Jobs.jet","function":"queue_publish_status","proof":"jobs.jet:499-502 assemble owned status fields/entity and nonnegative timestamp, then __publish_parts(:504) invokes the existing validating JetDevtoolsEvent::from_parts gate (Top/ServiceAuthority.rs:3779-3786). The sink gets an owned validated event rather than references into JobQueueStatus, so callers cannot make event storage outlive a borrowed source value."},
@@ -13609,7 +13530,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/XMLEngine.jet","function":"byte_text","proof":"__bytes_into_text at xml_engine.jet:174 receives a copy of source[start..<end]. Every local caller slices bytes of an existing String (DOCTYPE/entity/declaration helpers) or Scanner.source, whose sole construction path parse_document_with(:667-669) takes String.bytes(). Boundaries are zero/end or offsets adjacent to ASCII XML delimiters, quotes and whitespace, which cannot lie inside a UTF-8 continuation sequence. Checked list accesses(:172) prevent out-of-storage copies; the exact copied scalar-aligned allocation becomes the String with no intervening mutation or escaping borrow."},
   {"file":"Core/Encoding/XMLEngine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) copies valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
   {"file":"Core/Encoding/YAML.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
-  {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:1365 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
   {"file": "Core/Sys/Sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Sys/Sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Mem/Mem.jet", "function": "reserve", "proof": "A size of zero or less is an AllocError before the gate (Mem.jet:105). __region_reserve maps `bytes` of fresh private pages that no other owner can see, and a refusal answers 0, which is an AllocError too, so a Region never holds address 0. The Region alone keeps the address and length, with `mapped` set, and `close` unmaps them once at that length. A Block holds an address and a size, not a borrow: reading or writing its bytes takes an #Unsafe pointer whose caller vouches for the region."},
