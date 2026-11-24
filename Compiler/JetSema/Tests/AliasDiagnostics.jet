@@ -190,7 +190,25 @@ run: fn() {
 }
 `
     assert_eq(alias_reports(source), "")
-    assert_eq(alias_reports("Meters: Float\n\nrun: fn() {{ print(1) }}\n"), "E0324: a type alias of a plain type needs type parameters — write `Name<T>: …`")
+    assert_eq(alias_reports("Meters: Float\n\nrun: fn() {{ print(1) }}\n"), "E0324: A type alias of a plain type needs type parameters — write `Name<T>: …`")
+}
+
+#Test("an alias of a number family at a standard size names that size's type") {
+    source: `Byte: Unsigned<8>
+
+Ratio: IEEE<8, 23>
+
+widen: fn(value: Byte) -> Int { Int{value} }
+
+scale: fn(value: Ratio) -> Float { Float{value} * 2.0 }
+
+run: fn() {
+    small: U8{7}
+    print(widen(small))
+    print(scale(F32{1.5}))
+}
+`
+    assert_eq(alias_reports(source), "")
 }
 
 #Test("an error about an alias of a module's type names that type by its home") {
