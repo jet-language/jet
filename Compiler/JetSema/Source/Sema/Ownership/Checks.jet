@@ -63,12 +63,6 @@ use jet_foundation.[
     name_column_table,
 ]
 
-SemaOwnershipReferenceKind: enum {
-    Read,
-    Write,
-    Move,
-}
-
 SemaOwnershipProjection: enum {
     Field(name: String, span: Span),
     Index(value: Int?, span: Span),
@@ -256,7 +250,7 @@ SemaOwnershipReference: struct {
     def_id: SymbolID,
     def_span: Span,
     use_span: Span,
-    kind: SemaOwnershipReferenceKind,
+    kind: AccessConvention,
     // The anchor's bucket in SemaOwnershipAnchors (sema_ownership_anchor_key).
     anchor: Int,
 }
@@ -989,7 +983,7 @@ sema_ownership_push_reference: fn(state: ^SemaOwnershipState, reference: ^^SemaO
     sema_ownership_anchor_add(state.anchors, reference.anchor, row)
     slot: sema_ownership_key_slot(state, reference.def_id)
     state.key_facts[slot].references += 1
-    if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes += 1
+    if reference.kind == AccessConvention.Write -> state.key_facts[slot].writes += 1
     state.references.push(reference.move())
 }
 
@@ -1001,7 +995,7 @@ sema_ownership_truncate_references: fn(state: ^SemaOwnershipState, count: Int) N
         }
         slot: state.id_slots.get(reference.def_id.id) ?? next
         state.key_facts[slot].references -= 1
-        if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes -= 1
+        if reference.kind == AccessConvention.Write -> state.key_facts[slot].writes -= 1
     }
 }
 
@@ -1238,12 +1232,12 @@ sema_ownership_declaration_index: fn(state: ^SemaOwnershipState, id: SymbolID) -
 // Lookup is delegated to SemaScopeTable.  If a parent hook forgot to declare
 // the binding in the ownership store, recover one from the canonical Symbol
 // rather than manufacturing a second name-resolution table.
-sema_ownership_note_reference: fn(state: ^SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
+sema_ownership_note_reference: fn(state: ^SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: AccessConvention) -> Bool Never! {
     index: sema_scope_resolve_index_at(scopes, name, use_span) ?? return false
     sema_ownership_note_reference_at(state, name, use_span, scopes, index, kind)
 }
 
-sema_ownership_note_reference_at: fn(state: ^SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, index: Int, kind: SemaOwnershipReferenceKind) -> Bool Never! {
+sema_ownership_note_reference_at: fn(state: ^SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, index: Int, kind: AccessConvention) -> Bool Never! {
     def_id: scopes.bindings[index].symbol.id
     declaration_index := sema_ownership_declaration_index(state, def_id)
     if declaration_index == None {
@@ -1259,7 +1253,7 @@ sema_ownership_note_reference_at: fn(state: ^SemaOwnershipState, name: String, u
     first: sema_ownership_first_row(state, def_id)
     sema_ownership_note_undo(state, fact_index)
     state.declarations[fact_index].references += 1
-    if kind == SemaOwnershipReferenceKind.Write -> state.declarations[fact_index].writes += 1
+    if kind == AccessConvention.Write -> state.declarations[fact_index].writes += 1
     if fact_index != first {
         sema_ownership_mark_dirty(state, fact_index)
         sema_ownership_mark_dirty(state, first)
@@ -1277,7 +1271,7 @@ sema_ownership_expr_root_name: fn(expr: Expr) -> String? Never! {
     }
 }
 
-sema_ownership_note_place_reference: fn(state: ^SemaOwnershipState, expr: Expr, place: SemaOwnershipPlace, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
+sema_ownership_note_place_reference: fn(state: ^SemaOwnershipState, expr: Expr, place: SemaOwnershipPlace, use_span: Span, scopes: SemaScopeTable, kind: AccessConvention) -> Bool Never! {
     valid := sema_ownership_note_reference(state, place.root, use_span, scopes, kind)
     if state.views.len() == 0 -> return valid
     carrier_name: sema_ownership_expr_root_name(expr) ?? return valid
@@ -2403,7 +2397,7 @@ sema_ownership_open_reference_for_expr: fn(state: ^SemaOwnershipState, expr: Exp
             return false
         }
     }
-    kind: if access == AccessConvention.Write -> SemaOwnershipReferenceKind.Write else -> SemaOwnershipReferenceKind.Read
+    kind: if access == AccessConvention.Write -> AccessConvention.Write else -> AccessConvention.Read
     index := 0
     loop index < places.len() {
         place := places[index]
@@ -2571,7 +2565,7 @@ sema_ownership_open_write_reference: fn(state: ^SemaOwnershipState, expr: Expr, 
             loan_seq := sema_ownership_next_sequence(state)
             state.loans.push(SemaOwnershipLoan{place: place, access: AccessConvention.Write, span: span, scope_depth: state.scope_depth, seq: loan_seq, carrier_fact_seq: -1, carrier_id: symbol_none()})
         }
-        sema_ownership_note_place_reference(state, expr, place, span, scopes, SemaOwnershipReferenceKind.Write)
+        sema_ownership_note_place_reference(state, expr, place, span, scopes, AccessConvention.Write)
         index += 1
     }
     true
@@ -3549,7 +3543,7 @@ sema_ownership_check_write_as: fn(state: ^SemaOwnershipState, expr: Expr, action
         places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
         loop place in places {
             sema_ownership_clear_moved(state, place)
-            sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Write)
+            sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, AccessConvention.Write)
         }
     }
     ok
@@ -3682,7 +3676,7 @@ sema_ownership_mark_move_as: fn(state: ^SemaOwnershipState, expr: Expr, scopes: 
         root_ty: info.symbol.ty ?? Type.Named{name: "Unit"}
         if sema_ownership_type_is_copy(root_ty) || info.symbol.kind == SymbolKind.Function || info.string_view || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
             loop place in places {
-                sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
+                sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, AccessConvention.Move)
             }
             return true
         }
@@ -3767,7 +3761,7 @@ sema_ownership_mark_move_as: fn(state: ^SemaOwnershipState, expr: Expr, scopes: 
         }
     }
     loop place in places {
-        sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
+        sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, AccessConvention.Move)
     }
     true
 }
@@ -4948,7 +4942,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(state: ^SemaOwnershipState
     }
     loop place in places {
         sema_ownership_clear_moved(state, place)
-        sema_ownership_note_place_reference(state, receiver, place, expr_span(receiver), scopes, SemaOwnershipReferenceKind.Write)
+        sema_ownership_note_place_reference(state, receiver, place, expr_span(receiver), scopes, AccessConvention.Write)
     }
     true
 }
@@ -6207,7 +6201,7 @@ sema_ownership_check_projected_read: fn(state: ^SemaOwnershipState, expr: Expr, 
     if places.len() > 0 {
         valid := true
         loop place in places {
-            if !sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Read) {
+            if !sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, AccessConvention.Read) {
                 valid = false
             }
         }
@@ -6269,7 +6263,7 @@ sema_ownership_check_expression: fn(state: ^SemaOwnershipState, expr: Expr, scop
             if {
                 places.len() > 0 -> {
                     loop place in places {
-                        if !sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Read) {
+                        if !sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, AccessConvention.Read) {
                             valid = false
                         }
                     }
@@ -6286,7 +6280,7 @@ sema_ownership_check_expression: fn(state: ^SemaOwnershipState, expr: Expr, scop
             if {
                 places.len() > 0 -> {
                     loop place in places {
-                        if !sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Read) {
+                        if !sema_ownership_note_place_reference(state, expr, place, expr_span(expr), scopes, AccessConvention.Read) {
                             valid = false
                         }
                     }
@@ -6559,7 +6553,7 @@ sema_ownership_check_ident_reference: fn(state: ^SemaOwnershipState, name: Strin
     index: sema_scope_resolve_index(scopes, name) ?? return true
     kind: scopes.bindings[index].symbol.kind
     if kind != SymbolKind.Local && kind != SymbolKind.Parameter -> return true
-    sema_ownership_note_reference(state, name, span, scopes, SemaOwnershipReferenceKind.Read)
+    sema_ownership_note_reference(state, name, span, scopes, AccessConvention.Read)
 }
 
 // ────────────────────────────────────────────────────────────────────────────

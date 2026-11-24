@@ -110,9 +110,9 @@ evidence_schedule_access: fn(value: Dyn) -> ResourceAccess EvidenceCodecError! {
     fields: evidence_schedule_object(value, "resource access")
     mode_text: evidence_schedule_text(evidence_schedule_field(fields, "mode"), "resource access mode")
     mode: if mode_text == {
-        "read" -> ResourceAccessMode.Read
-        "write" -> ResourceAccessMode.Write
-        "move" -> ResourceAccessMode.Move
+        "read" -> AccessConvention.Read
+        "write" -> AccessConvention.Write
+        "move" -> AccessConvention.Move
         else -> {
             return Err(evidence_codec_error("unsupported resource access mode `{mode_text}`"))
         }

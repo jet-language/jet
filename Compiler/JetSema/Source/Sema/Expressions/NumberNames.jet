@@ -23,6 +23,7 @@
 // operator operand and a written value alike. A constant computed from other
 // constants keeps its own type.
 use jet_foundation.[
+    AccessConvention,
     BinOp,
     DIAGNOSTIC_ERROR,
     Diagnostic,
@@ -141,7 +142,7 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     }
     if !noted {
         check.context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, scopes, index), Val(SymbolKind.Local)))
-        if !sema_ownership_note_reference(check.state, name, span, scopes, SemaOwnershipReferenceKind.Read) {
+        if !sema_ownership_note_reference(check.state, name, span, scopes, AccessConvention.Read) {
             return SemaNumberNameRead{handled: true, value: None}
         }
     }

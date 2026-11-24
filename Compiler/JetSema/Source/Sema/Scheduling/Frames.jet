@@ -7,7 +7,6 @@ use jet_foundation.[
     CoreCallCompletion,
     CoreCallCompletionKind,
     CoreCallRecord,
-    CoreCallResourceAccessMode,
     DerivationPayload,
     DerivationRecord,
     Expr,
@@ -20,7 +19,6 @@ use jet_foundation.[
     FrameTransfer,
     DerivationMethod,
     ResourceAccess,
-    ResourceAccessMode,
     ResourceIdentity,
     ResourceLayout,
     ResourceRegion,
@@ -75,7 +73,7 @@ sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, args: [
         accesses.push(
             ResourceAccess{
                 resource: identity,
-                mode: sema_frame_core_access_mode(access.mode),
+                mode: access.mode,
                 region: ResourceRegion.Whole,
                 layout: None,
                 temporary: false,
@@ -130,7 +128,7 @@ sema_frame_checked_call_operation: fn(name: String, args: [CallArg], signature_a
         accesses.push(
             ResourceAccess{
                 resource: identity,
-                mode: sema_frame_access_convention(convention),
+                mode: convention,
                 region: ResourceRegion.Whole,
                 layout: None,
                 temporary: false,
@@ -163,22 +161,6 @@ sema_frame_resource_identity: fn(expression: Expr) -> ResourceIdentity? {
     }
 }
 
-sema_frame_core_access_mode: fn(mode: CoreCallResourceAccessMode) -> ResourceAccessMode Never! {
-    if mode == {
-        .Read -> ResourceAccessMode.Read
-        .Write -> ResourceAccessMode.Write
-        .Move -> ResourceAccessMode.Move
-    }
-}
-
-sema_frame_access_convention: fn(convention: AccessConvention) -> ResourceAccessMode Never! {
-    if convention == {
-        .Read -> ResourceAccessMode.Read
-        .Write -> ResourceAccessMode.Write
-        .Move -> ResourceAccessMode.Move
-    }
-}
-
 SemaFrameDMABinding: struct {
     transfer_name: String,
     profile_id: String,
@@ -200,7 +182,7 @@ sema_frame_hardware_register_operation: fn(receiver: Expr, method: String, sourc
     machine: sema_hardware_target_machine(environment, program) ?? return None
     block: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return None
     register: sema_hardware_register_fact(block, path.segments[2]) ?? return None
-    mode := if method == "read" -> ResourceAccessMode.Read else -> ResourceAccessMode.Write
+    mode := if method == "read" -> AccessConvention.Read else -> AccessConvention.Write
     resource: "mmio.{path.profile_id}.{block.name}.{register.name}"
     Val(FrameOperation{
         name: "hardware.register.{path.profile_id}.{block.name}.{register.name}.{method}",
@@ -236,7 +218,7 @@ sema_frame_hardware_dma_start: fn(receiver: Expr, args: [CallArg], source_index:
     operation := FrameOperation{
         name: "hardware.dma.start.{path.profile_id}.{channel}",
         source_index: source_index,
-        accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: buffer}, mode: ResourceAccessMode.Move, region: ResourceRegion.Whole, layout: None, temporary: false}},
+        accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: buffer}, mode: AccessConvention.Move, region: ResourceRegion.Whole, layout: None, temporary: false}},
         completion: FrameCompletion.Pending{token: token},
         completion_provider: Val("jet_dma_transfer"),
         external_effect: true,
@@ -257,7 +239,7 @@ sema_frame_hardware_dma_wait: fn(receiver: Expr, source_index: Int, bindings: [S
     Val(FrameOperation{
         name: "hardware.dma.wait.{binding.profile_id}.{binding.channel}",
         source_index: source_index,
-        accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: binding.buffer_name}, mode: ResourceAccessMode.Move, region: ResourceRegion.Whole, layout: None, temporary: false}},
+        accesses: [ResourceAccess]{ResourceAccess{resource: ResourceIdentity.Named{name: binding.buffer_name}, mode: AccessConvention.Move, region: ResourceRegion.Whole, layout: None, temporary: false}},
         completion: FrameCompletion.Event{token: binding.token},
         completion_provider: Val("jet_dma_transfer"),
         external_effect: true,
@@ -666,11 +648,11 @@ sema_frame_region_overlaps: fn(left: ResourceRegion, right: ResourceRegion) -> B
     }
 }
 
-sema_frame_mode_writes: fn(mode: ResourceAccessMode) -> Bool Never! {
-    mode == ResourceAccessMode.Write || mode == ResourceAccessMode.Move
+sema_frame_mode_writes: fn(mode: AccessConvention) -> Bool Never! {
+    mode == AccessConvention.Write || mode == AccessConvention.Move
 }
 
-sema_frame_mode_name: fn(mode: ResourceAccessMode) -> String Never! {
+sema_frame_mode_name: fn(mode: AccessConvention) -> String Never! {
     if mode == {
         .Read -> "read"
         .Write -> "write"

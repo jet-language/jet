@@ -1368,7 +1368,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         return None
     }
     if op != None {
-        if !sema_ownership_note_reference(check.state, name, name_span, scopes, SemaOwnershipReferenceKind.Read) {
+        if !sema_ownership_note_reference(check.state, name, name_span, scopes, AccessConvention.Read) {
             return None
         }
         if !sema_ownership_check_use(check.state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, scopes, diagnostics) {
