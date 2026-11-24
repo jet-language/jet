@@ -1,0 +1,15 @@
+use process: core.process
+
+// The arm that taints `x` returns, so it never meets the code after the `if`.
+echo_unless: fn(flag: Bool) -> Int {
+    x := "safe-literal"
+    if flag {
+        x = #Input "evil"
+        return 1
+    }
+    receipt: process.cmd(["echo", x]).run() ?? return 2
+    receipt.drop("only the argument flow matters here")
+    0
+}
+
+run: fn() { print(echo_unless(false)) }

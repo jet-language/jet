@@ -7010,6 +7010,20 @@ sema_ownership_path_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork,
     }
 }
 
+// The join of a two-way branch of `fork`: the paths that meet come from the
+// one path rule (sema_flow_reaching), so a branch that leaves (`return`,
+// `break`, `next`) does not reach the code after it and its moves are not
+// moves there. Both reaching join each other; one reaching joins the fork's
+// state; none leaves the fork's state.
+sema_ownership_branch_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork, then_path: SemaOwnershipPath, else_path: SemaOwnershipPath, then_reaches: Bool, else_reaches: Bool, found: [SemaOwnershipShareSite]) -> SemaOwnershipPath Never! {
+    reaching: sema_flow_reaching([Bool]{then_reaches, else_reaches})
+    base: sema_ownership_fork_base(fork)
+    if reaching.len() == 2 -> return sema_ownership_path_join(index, fork, then_path, else_path, true, found)
+    if reaching.len() == 0 -> return sema_ownership_path_join(index, fork, base, base, false, found)
+    if reaching[0] == 0 -> return sema_ownership_path_join(index, fork, then_path, base, false, found)
+    sema_ownership_path_join(index, fork, else_path, base, false, found)
+}
+
 // The join of the paths that reach one merge, each a whole branch, in their
 // order; None without paths. It takes the paths out of `paths`. Joining a
 // growing merge with one path at a time rejoins every earlier path's rows

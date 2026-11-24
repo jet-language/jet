@@ -1,0 +1,7 @@
+# D-FACT-FLOW1: a `break` path carries its taint out of the loop and meets
+# the code after it (Flow.jet's loop rule), so the sink is refused.
+fixture: Fixtures/TaintBreakExitMeetsAfterLoop
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0721"] #>= 1

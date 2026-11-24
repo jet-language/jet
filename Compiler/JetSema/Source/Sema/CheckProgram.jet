@@ -13941,9 +13941,9 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // over 570 ms, so on a quarter it still ends inside the pass, which keeps
 // the rest. Given every thread, the walk took the pass's carriers and
 // sema.effects went from 0.46 s to 1.65 s of wall at 32 threads.
-// Its own reports move onto `reports`; the E0307 reports among
+// Its own reports move onto `reports`; the spans of the E0307 reports among
 // `existing_diagnostics` (the bundle's reports so far) settle switch
-// coverage (sema_taint_coverage_reports).
+// coverage (sema_taint_open_switches).
 sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: &[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
     reports.extend(taken.reports.move())
@@ -13953,7 +13953,7 @@ sema_finalize_walk_inputs: fn(prepared: &&SemaTaintPrepared, existing_diagnostic
     quarter: compiler_threads_capped(threads, (compiler_threads_limit(threads) + 3) /% 4)
     workers: compiler_threads_admit(quarter, taint_weights.len(), work, SEMA_FINALIZE_WALK_MIN_BYTES_PER_THREAD, 0, 0)
     beside: compiler_threads_limit(threads) > 1 && work >= SEMA_FINALIZE_WALK_BESIDE_MIN_BYTES
-    SemaFinalizeWalkInputs{catalog: taken.catalog.move(), coverage: sema_taint_coverage_reports(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers, beside: beside}
+    SemaFinalizeWalkInputs{catalog: taken.catalog.move(), open_switches: sema_taint_open_switches(existing_diagnostics), taint_order: compiler_threads_heaviest_first(taint_weights), workers: workers, beside: beside}
 }
 
 // The effect pass (sema_effects_check_modules) over `modules` with the
@@ -14086,12 +14086,12 @@ sema_finalize_core_jobs: fn(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJo
 }
 
 // What every taint-walking thread reads besides the graph
-// (sema_finalize_walk_inputs): the catalog, the coverage reports, the
-// modules in claim order, how many threads claim them and whether the walk
-// runs beside the effect pass.
+// (sema_finalize_walk_inputs): the catalog, the spans of the coverage
+// reports, the modules in claim order, how many threads claim them and
+// whether the walk runs beside the effect pass.
 SemaFinalizeWalkInputs: struct {
     catalog: SemaTaintCatalog,
-    coverage: [Diagnostic],
+    open_switches: [Span],
     taint_order: [Int],
     workers: Int,
     beside: Bool,
@@ -14154,7 +14154,7 @@ sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinaliz
     claimed := [SemaTaintWalked]{}
     rank := sema_finalize_core_claim(queue)
     if rank >= inputs.taint_order.len() -> return claimed
-    state := SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: inputs.coverage.copy(), fixed_tags: [String]{}}
+    state := SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), flow: sema_taint_flow_start(), diagnostics: [Diagnostic]{}, open_switches: inputs.open_switches.copy(), fixed_tags: [String]{}}
     loop rank < inputs.taint_order.len() {
         module_index: inputs.taint_order[rank]
         found := [Diagnostic]{}

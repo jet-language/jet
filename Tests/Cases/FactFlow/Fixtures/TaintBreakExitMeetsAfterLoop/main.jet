@@ -1,0 +1,20 @@
+use process: core.process
+
+// The tainting turn leaves the loop with `break`; that path meets the code
+// after the loop even though the turn that falls through cleans `x`.
+echo_after_break: fn(flag: Bool) -> Int {
+    x := "safe-literal"
+    loop {
+        if flag {
+            x = #Input "evil"
+            break
+        }
+        x = "clean"
+        break
+    }
+    receipt: process.cmd(["echo", x]).run() ?? return 2
+    receipt.drop("only the argument flow matters here")
+    0
+}
+
+run: fn() { print(echo_after_break(false)) }
