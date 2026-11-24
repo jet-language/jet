@@ -146,6 +146,31 @@ lsp_test_token_data: fn(result: Dyn) -> [Int] Never! {
     assert_eq(lsp_test_error_code(server, "textDocument/semanticTokens/range", malformed), -32602)
 }
 
+#Test("semantic tokens class the names a written type holds, and a retired word is no keyword") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_SHAPES_URI, LSP_TEST_SHAPES)
+    uri: "file:///w/views.jet"
+    lsp_test_open(
+        server,
+        uri,
+        `use shapes
+
+measure: fn(window: View<Int>, grow: ViewMut<Int>, at: shapes.Point) -> Int {
+    window.len() + grow.len() + at.x
+}
+
+archive: fn(names: [String]) -> [String] {
+    names.take(1)
+}
+`,
+    )
+    tokens: lsp_test_stage_tokens(lsp_test_result(server, "textDocument/semanticTokens/full", "{{{lsp_test_text_document(uri)}}}"))
+    expected: [String]{"2:20+4=1", "2:25+3=1", "2:37+7=1", "2:45+3=1", "2:55+6=11", "2:62+5=1", "2:72+3=1"}
+    loop token in expected -> assert(tokens.contains(token), "{token} in {tokens}")
+    // `take` is the lexer's retired word; as `.take(n)` it names a method.
+    assert(!tokens.contains("6:10+4=0"), "`take` is no keyword in {tokens}")
+}
+
 #Test("a semantic tokens delta answers the edit from its kept result, and the full tokens for any other id") {
     server := lsp_test_main_server()
     doc: lsp_test_text_document(LSP_TEST_MAIN_URI)

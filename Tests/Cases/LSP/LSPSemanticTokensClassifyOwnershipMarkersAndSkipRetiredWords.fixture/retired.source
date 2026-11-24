@@ -1,0 +1,24 @@
+#Test("semantic") {
+    assert_eq(clean(2), 2)
+}
+archive: fn(name: &&String, slot: &Int) -> String {
+    slot += 1
+    saved: name.copy()
+    saved
+}
+clean: fn(x: Int) -[]> Int { x }
+measure: fn(window: View<Int>, grow: ViewMut<Int>) -> Int {
+    window.view(0..1).len() + grow.len()
+}
+run: fn() {
+    old: 1
+    while: 2
+    for: 3
+    mut borrowed
+    take borrowed
+    view borrowed
+    text: "view .view stays string content"
+    // view and .view stay comment content
+    print(text, clean(old + while + for + next()))
+}
+next: fn() -> Int { 1 }

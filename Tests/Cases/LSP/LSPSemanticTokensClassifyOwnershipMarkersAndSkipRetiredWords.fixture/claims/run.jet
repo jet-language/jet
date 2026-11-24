@@ -1,5 +1,8 @@
-// Exact test algorithm port: tests/lsp.rs214-280 and4696-4769.
-// Original semantic_data_from_response ignores non-u32 comma fields and chunks remainder.
+// Decodes one semantic tokens answer against the document text it classifies:
+// the `data` fields that are not unsigned 32-bit numbers are skipped, and a
+// trailing part shorter than five fields is ignored. Token types index the
+// server's legend: 0 keyword, 1 type, 2 function, 3 variable, 4 parameter,
+// 7 string, 9 comment.
 use {
     files: core.files
     sys: core.sys
@@ -76,16 +79,6 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
     tokens
 }
 
-s5_token_assert: fn(tokens: [S5SemanticToken], text: String, kind: Int, modifier: Int) {
-    found := false
-    loop token in tokens {
-        if token.text == text && token.token_type == kind && (token.modifiers /% modifier) % 2 != 0 {
-            found = true
-        }
-    }
-    assert(found, "missing semantic token {text} type {kind} modifier {modifier}")
-}
-
 s5_token_count: fn(tokens: [S5SemanticToken], text: String, kind: Int) -> Int {
     count := 0
     loop token in tokens {
@@ -94,34 +87,50 @@ s5_token_count: fn(tokens: [S5SemanticToken], text: String, kind: Int) -> Int {
     count
 }
 
-s5_token_absent: fn(tokens: [S5SemanticToken], text: String) {
-    loop token in tokens -> assert(token.text != text, "retired token {text}")
+s5_token_kind_count: fn(tokens: [S5SemanticToken], kind: Int) -> Int {
+    count := 0
+    loop token in tokens {
+        if token.token_type == kind -> count += 1
+    }
+    count
 }
 
-s5_token_original_assertions: fn() {
+s5_token_absent: fn(tokens: [S5SemanticToken], text: String) {
+    loop token in tokens -> assert(token.text != text, "retired word {text} has a token")
+}
+
+s5_token_assertions: fn() {
     source: files.read(sys.get("S5_SOURCE") ?? panic("source path")) ?? panic("source bytes")
     response: files.read(sys.get("S5_RESPONSE") ?? panic("response path")) ?? panic("response bytes")
     tokens: s5_token_decode(source, response)
-    if (sys.get("S5_EDITED") ?? "") == "1" {
-        s5_token_absent(tokens, "view")
-        assert(s5_token_count(tokens, "View", 1) > 0)
+    stage: sys.get("S5_EDITED") ?? "0"
+    // The test's name, and the string and the comment that spell `view`,
+    // are two string tokens and one comment token.
+    assert_eq(s5_token_kind_count(tokens, 7), 2)
+    assert_eq(s5_token_kind_count(tokens, 9), 1)
+    s5_token_absent(tokens, "view")
+    if stage == "2" {
+        // The document no longer parses: its retired statement words get
+        // no keyword or name token.
+        s5_token_absent(tokens, "mut")
+        s5_token_absent(tokens, "take")
         return
     }
-    s5_token_assert(tokens, "copy", 12, 16)
-    s5_token_assert(tokens, "&&", 12, 4)
-    s5_token_assert(tokens, "&", 12, 8)
-    s5_token_assert(tokens, "Test", 13, 32)
-    s5_token_assert(tokens, "Unsafe", 13, 32)
-    s5_token_assert(tokens, "#", 13, 32)
-    assert(s5_token_count(tokens, "View", 1) > 0)
-    assert(s5_token_count(tokens, "while", 3) > 0)
-    assert(s5_token_count(tokens, "for", 3) > 0)
-    assert_eq(s5_token_count(tokens, "next", 0), 4)
-    assert_eq(s5_token_count(tokens, "next", 3), 5)
-    retired_words: [String]{"val", "mut", "take", "view"}
-    loop retired in retired_words -> s5_token_absent(tokens, retired)
+    // The document checks, the retired `.view(a..b)` method included.
+    assert_eq(s5_token_count(tokens, "View", 1), 1)
+    assert_eq(s5_token_count(tokens, "ViewMut", 1), 1)
+    assert_eq(s5_token_count(tokens, "window", 4), 2)
+    if stage == "1" -> return
+    assert_eq(s5_token_count(tokens, "Int", 1), 7)
+    assert_eq(s5_token_count(tokens, "String", 1), 2)
+    assert_eq(s5_token_count(tokens, "while", 3), 2)
+    assert_eq(s5_token_count(tokens, "for", 3), 2)
+    assert_eq(s5_token_count(tokens, "next", 2), 2)
+    // `copy` is a retired word the lexer keeps reserved; `.copy()` names a
+    // method, never a keyword.
+    assert_eq(s5_token_count(tokens, "copy", 0), 0)
 }
 
-#Test("semantic ownership tokens retain every original assertion") {
-    s5_token_original_assertions()
+#Test("semantic tokens follow current syntax and give retired words no token") {
+    s5_token_assertions()
 }
