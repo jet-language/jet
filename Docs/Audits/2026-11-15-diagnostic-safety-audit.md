@@ -64,8 +64,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0126 | DefaultReadsLaterParameter | Compiler/JetSema/Source/Sema/FunctionHeaders.jet:290 | no opt-in gives a parameter its value early |
 | E0133 | UnsupportedDecimalOperator | Compiler/JetSema/Source/Sema/Expressions.jet:1530 | no opt-in runs an operator Decimal does not define |
 | E0134 | UnknownUnitSuffix | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:182 | no opt-in gives an unknown unit a type |
-| E0135 | LiteralOutsideRange | Compiler/JetSema/Source/Sema/Calls/Static.jet:1839 | a value outside the bounds is not a value of the type |
-| E0136 | RangeValueWithoutCheck | Compiler/JetSema/Source/Sema/Calls/Static.jet:1935 | the fallible `?` form checks the bounds; nothing skips the check |
+| E0135 | LiteralOutsideRange | Compiler/JetSema/Source/Sema/Calls/Static.jet:1842 | a value outside the bounds is not a value of the type |
+| E0136 | RangeValueWithoutCheck | Compiler/JetSema/Source/Sema/Calls/Static.jet:1938 | the fallible `?` form checks the bounds; nothing skips the check |
 | E0139 | ContractUsesEffect | Compiler/JetSema/Source/Sema/Contracts.jet:145 | no opt-in makes an effect run the same whether its check is kept or erased |
 | E0144 | ResultInPrecondition | Compiler/JetSema/Source/Sema/Contracts.jet:613 | a precondition runs before any result exists |
 | E0145 | PersistNotModuleLevel | Compiler/JetParser/Source/Parser/Statements.jet:2227 | no local binding has persistent storage |
@@ -607,7 +607,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2932 | LayoutAxisMismatch | Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet:115 | each constraint stays on one axis |
 | E2933 | InvalidLayoutElement | Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet:289 | the element is a layout comparison |
 | E2937 | UiServiceWithoutCapability | Compiler/JetSema/Source/Sema/CoreUsage.jet:605 | the package declares the capability |
-| E2938 | InvalidShortcut | Compiler/JetSema/Source/Sema/Calls/Static.jet:1955 | a valid `.cmd` key |
+| E2938 | InvalidShortcut | Compiler/JetSema/Source/Sema/Calls/Static.jet:1958 | a valid `.cmd` key |
 | E2941 | UnknownProofLens | Compiler/JetCLI/Source/CLI/Expand.jet:477 | name a defined lens |
 | E2950 | SolverCounterexample | Compiler/JetCLI/Source/CLI/ProveSolverReport.jet:307 | the code or the claim is fixed |
 | E2967 | FrameScheduleConflict | Compiler/JetSema/Source/Sema/Calls/Game.jet:209 | access and completion facts resolve |
