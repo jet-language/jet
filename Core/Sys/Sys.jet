@@ -309,9 +309,9 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 }
 
 current_dir: fn() -[FS, Env]> String IOError! {
-    if core.sys.__current_dir() == {
+    if sys_rt.current_dir() == {
         .Ok(path) -> Ok(path)
-        .Err(cause) -> Err(syscall_input(.Resolve, None, cause))
+        .Err(error) -> Err(syscall_input(.Resolve, None, error.message))
     }
 }
 
@@ -405,7 +405,7 @@ temp_dir: fn() -[Env]> String Never! {
 
 // The running program's path: the built binary, or under `jet run` the
 // script's absolute path. Launching it runs the program again either way.
-executable: fn() -[Env]> String Never! { core.sys.__executable() ?? "" }
+executable: fn() -[Env]> String Never! { sys_rt.executable() ?? "" }
 
 hostname: fn() -[Env, FS]> String Never! { net.gethostname() }
 
@@ -985,7 +985,7 @@ pid: fn() -[Env]> Int Never! { getpid() }
 getpid: fn() -[Env]> Int Never! { sys_rt.pid() }
 
 cpu_count: fn() -[Env]> Int Never! {
-    count: core.sys.__cpu_count() ?? 1
+    count: sys_rt.cpu_count() ?? 1
     if count < 1 -> return 1
     count
 }
@@ -1001,23 +1001,23 @@ TimingHost: enum {
 }
 
 timing_host: fn() -[Env]> TimingHost Never! {
-    if core.sys.__timing_host() == 1 -> TimingHost.Confirmed else -> TimingHost.Unconfirmed
+    if sys_rt.timing_host() == 1 -> TimingHost.Confirmed else -> TimingHost.Unconfirmed
 }
 
-getppid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
+getppid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getppid()) }
 
-getuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
+getuid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getuid()) }
 
-geteuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
+geteuid: fn() -[Env]> Int Never! { posix_identity(sys_rt.geteuid()) }
 
-getgid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
+getgid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getgid()) }
 
-getegid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
+getegid: fn() -[Env]> Int Never! { posix_identity(sys_rt.getegid()) }
 
-getpgrp: fn() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
+getpgrp: fn() -[Env]> Int Never! { posix_identity(sys_rt.getpgrp()) }
 
 #Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it")
-umask: fn(mask: Int) -[FS, Env]> Int Never! { core.sys.__umask(mask) ?? 0 }
+umask: fn(mask: Int) -[FS, Env]> Int Never! { sys_rt.umask(mask) ?? 0 }
 
 exitcode: fn(code: Int) -> Int Never! { code }
 
@@ -1032,9 +1032,9 @@ uptime: fn() -[Time, Env, FS]> Float Never! {
 }
 
 getgroups: fn() -[Env]> [Int] Never! {
-    count: core.sys.__groups_count() ?? return [Int]{}
+    count: sys_rt.groups_count() ?? return [Int]{}
     if count < 0 || count > 2147483647 -> return [Int]{}
-    row: core.sys.__groups_fill(count)
+    row: sys_rt.groups_fill(count)
     if row[0] < 0 -> return [Int]{}
     out := [Int]{}
     loop index in 0..<row[0] -> out.push(row[index + 1])
@@ -1042,7 +1042,7 @@ getgroups: fn() -[Env]> [Int] Never! {
 }
 
 loadavg: fn() -[Env]> [Float] Never! {
-    row: core.sys.__loadavg()
+    row: sys_rt.loadavg()
     if !row.available || row.count < 0 -> return [Float]{0.0, 0.0, 0.0}
     out := [Float]{}
     if row.count > 0 -> out.push(row.first)
@@ -1377,7 +1377,7 @@ priv process_errors: module {
     // IOError kinds.
     process_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
         if errno == 3 {
-            return IOError.NotFound(IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))})
+            return IOError.NotFound(IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(sys_rt.errno_text(errno))})
         }
         limit_error(kind, operation, errno)
     }
@@ -1444,7 +1444,7 @@ limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
 // EPERM (raising a hard limit without privilege) and EINVAL (soft above
 // hard) get their own IOError kinds; the rest keep the errno text.
 limit_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
-    context: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))}
+    context: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(sys_rt.errno_text(errno))}
     if errno == 1 -> return IOError.PermissionDenied(context)
     if errno == 22 -> return IOError.InvalidInput(context)
     IOError.Other(context)
@@ -1489,9 +1489,9 @@ sync: fn() -[FS, Env]> Never! { sys_rt.sync() }
 stop: fn(code: Int) -[Env, Exec]> Never! { process_api.exit(code) }
 
 set_current_dir: fn(path: String) -[FS, Env]> IOError! {
-    if core.sys.__set_current_dir(path) == {
+    if sys_rt.set_current_dir(path) == {
         .Ok(_) -> { Ok() }
-        .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
+        .Err(error) -> Err(syscall_input(.Resolve, Val(path), error.message))
     }
 }
 
@@ -2271,7 +2271,7 @@ posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
     assert(environment().get("JET_ENVIRONMENT_PROBE") == None)
 }
 
-host_env: fn(name: String) -[Env]> String? Never! { decode_host_env(core.sys.__host_env(name)) }
+host_env: fn(name: String) -[Env]> String? Never! { decode_host_env(sys_rt.host_env(name)) }
 
 decode_host_env: fn(raw: [U8]?) -> String? Never! {
     bytes: raw ?? return None
@@ -2349,7 +2349,7 @@ unsupported: fn(operation: String) -> IOError {
 }
 
 syscall_error: fn(operation: IOOperation, resource: String?, errno: Int) -> IOError {
-    syscall_input(operation, resource, core.sys.__errno_text(errno))
+    syscall_input(operation, resource, sys_rt.errno_text(errno))
 }
 
 syscall_input: fn(operation: IOOperation, resource: String?, cause: String) -> IOError {

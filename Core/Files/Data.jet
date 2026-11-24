@@ -21,6 +21,7 @@ use {
     encoding_stream: __core_encoding_stream
     rt: jet.runtime.encoding
     data_rt: jet.runtime.data
+    sys_rt: jet.runtime.sys
 }
 
 /// Read a local file loader's file as its payload; `core.data.snapshot` then
@@ -244,7 +245,7 @@ bridge_status: fn(step: String) -[FS, Env]> DataStatus Never! {
 
 bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
     // Keep opaque native path bytes: PATH need not be UTF-8.
-    path: core.sys.__host_env("PATH") ?? return false
+    path: sys_rt.host_env("PATH") ?? return false
     windows: sys.is_windows()
     delimiter: if windows -> U8{59} else -> U8{58}
     directory := [U8]{}

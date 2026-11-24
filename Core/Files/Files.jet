@@ -14,6 +14,7 @@ use {
     sys: core.sys
     process: core.process
     rt: jet.runtime.files
+    sys_rt: jet.runtime.sys
     host_path: __core_files_path_components
     builtin: jet_builtins
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
@@ -697,7 +698,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
                     operation: .Resolve,
                     resource: Val(directory.path),
                     os_code: Val(row.errno),
-                    cause: Val(core.sys.__errno_text(row.errno)),
+                    cause: Val(sys_rt.errno_text(row.errno)),
                 },
             ),
         )
@@ -2409,7 +2410,7 @@ lock_errno: fn(path: String, code: Int, platform: Int) -> IOError Never! {
     if platform == 0 {
         return IOError.Unsupported(lock_context(path, None, "file locking is unavailable on this operating system"))
     }
-    context: lock_context(path, Val(code), core.sys.__errno_text(code))
+    context: lock_context(path, Val(code), sys_rt.errno_text(code))
     if platform == 3 {
         // std library/std/src/sys/io/error/windows.rs decode_error_kind (blob 6056f177),
         // constants in library/std/src/sys/pal/windows/c/windows_sys.rs (blob 0c865494).
