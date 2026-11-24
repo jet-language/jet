@@ -269,4 +269,10 @@ net: module {
     #Import(c) priv tls_prove_record: fn(tape: [U8]) -[Net]> = "jet_prove_net_record"
 
     #Import(c) priv tls_prove_take: fn(request: [U8]) -[Net]> [U8]? = "jet_prove_net_take"
+
+    // `unix_wait_raw`'s wait, which the descriptor of the token `wake` (a
+    // negative token for none) also ends once it is readable. Bit 1 of the
+    // answer says the stream is readable and bit 2 the wake descriptor; 0
+    // says the time ran out.
+    #Import(c) priv unix_wait_wake_raw: fn(stream: &UnixStream, wake: Int, timeout: Int) -[Net, Time.Wait]> Int NetError! = "jet_net_unix_wait_wake_raw"
 }
