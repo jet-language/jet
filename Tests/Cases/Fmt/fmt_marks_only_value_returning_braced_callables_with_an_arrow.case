@@ -12,7 +12,7 @@
 # Claim: output is stable (tests/fmt.rs:1302-1305)
 # Fixture migrated: unarrowed return forms are retired: rewritten as `-> Int { … }`, `-> Int { 1 }`, `-> Rect { … }`, `-[IO]> Int { … }` (Docs/Spec/syntax-decisions.md: `double: fn(n: Int) -> Int { n * 2 }`; `-[IO]> String {` in Docs/Spec).
 # Fixture migrated: explicit unit `explicit: fn() () {` is replaced by the plain unit form `explicit: fn() { … }` (Docs/Spec/spec.md:237 "a plain `run: fn() { … }`"); `()` return is rejected (E0081).
-# Fixture migrated: error-only contract `fail: fn() Err! { }` is rewritten to `fail: fn() !Err { print(1) }` (empty body `{ }` is reported as E0081 "no body") (Docs/Spec/spec.md:238 `run: fn() !IOError`; Docs/Spec/Reference/core-library.md:403 `AppErr!` follows a return type).
+# Fixture migrated: error-only contract `fail: fn() Err! { }` keeps its suffix spelling `fail: fn() Err! { print(1) }` (an empty body `{ }` is reported as E0081 "no body"; the error type follows the result, as `run: fn() Err!` in Examples/Data/Binary/BinaryCodecs.jet).
 # Fixture migrated: the arrow-insertion claim is dropped: canonical input already carries the arrow; unarrowed input is rejected by jet (E0081).
 # Not ported: the arrow-insertion claim: canonical input already has the arrow; retired unarrowed input is rejected by jet (E0081)
 fixture: FmtMarksOnlyValueReturningBracedCallablesWithAnArrow.fixture
@@ -26,7 +26,7 @@ file: marks/run.jet ~ "concise: fn() -> Int { 1 }" # tests/fmt.rs:1286-1301 the 
 file: marks/run.jet ~ "record: fn() -> Rect { {width: 1, height: 2} }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "impure: fn() { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "explicit: fn() { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
-file: marks/run.jet ~ "fail: fn() !Err { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
+file: marks/run.jet ~ "fail: fn() Err! { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "bounded: fn() -[IO]> Int { return 1 }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "pure: fn() -[]> Int { return 1 }" # tests/fmt.rs:1286-1301 the ten substrings
 file: marks/run.jet ~ "get: fn(self) -> Int {" # tests/fmt.rs:1286-1301 the ten substrings
