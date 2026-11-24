@@ -1,0 +1,23 @@
+# `testing.compare` on two implementations that differ on one case names that
+# case, and replaying its recorded input reproduces the difference; equal
+# implementations pass `assert_equal`. The program is the TestCompare example
+# (Examples/Tooling/Testing/TestCompare/run.jet): `twice` and `twice_but_three`
+# differ only at the input 3, the second of the cases 1, 3 and 5.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step o0: jet run -O0 {root}/Examples/Tooling/Testing/TestCompare/run.jet
+exit: 0
+stdout: ~ "matched\ntrue\n" # equal implementations match and pass assert_equal
+stdout: ~ "mismatch\nfalse\n" # differing implementations do not
+stdout: ~ "case-1\nreference and candidate differ at case-1\n" # the comparison names the differing case
+stdout: ~ "3: 6 vs 9\n" # its recorded input and both recorded outputs
+stdout: ~ "3: 6 vs 9\ntrue\nfalse\n" # replaying the input gives the recorded outputs, which still differ
+
+step o1: jet run -O1 {root}/Examples/Tooling/Testing/TestCompare/run.jet
+exit: 0
+stdout: = {root}/Examples/Tooling/Testing/TestCompare.out
+
+step o2: jet run -O2 {root}/Examples/Tooling/Testing/TestCompare/run.jet
+exit: 0
+stdout: = {root}/Examples/Tooling/Testing/TestCompare.out
