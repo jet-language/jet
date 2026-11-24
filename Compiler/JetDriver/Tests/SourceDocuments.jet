@@ -1,0 +1,123 @@
+// A host document's Jet regions map to host bytes and UTF-16 units through
+// one position map, and its mappings are refused when they don't hold.
+use {
+    jet_driver.[
+        JetDriverHostDocument,
+        JetDriverHostSpan,
+        JetDriverSourceDocument,
+        JetDriverSourceMapping,
+        jet_driver_host_edit,
+        jet_driver_host_span,
+        jet_driver_jet_offset,
+        jet_driver_source_document_problem,
+        jet_driver_utf16_offset,
+    ]
+    jet_foundation.[Span, TextEdit]
+}
+
+source_documents_require: fn(ok: Bool, detail: String) Never! {
+    if !ok -> panic("SourceDocuments: {detail}")
+}
+
+// An emoji, then a script tag whose body is the Jet region at bytes 25..46.
+SOURCE_DOCUMENTS_ONE_REGION: "🙂\n<script lang=\"jet\">\nrun: fn() {{print(1)}}\n</script>\n"
+
+// Two regions with host text between them. The Jet source joins them with a
+// generated line the host does not hold.
+SOURCE_DOCUMENTS_TWO_REGIONS: "<p>a</p>\n<script lang=\"jet\">\nlimit: 3\n</script>\n<p>b</p>\n<script lang=\"jet\">\nrun: fn() {{print(limit)}}\n</script>\n"
+SOURCE_DOCUMENTS_TWO_REGIONS_JET: "limit: 3\n// generated\nrun: fn() {{print(limit)}}\n"
+
+source_documents_one_region: fn() -> JetDriverSourceDocument Never! {
+    JetDriverSourceDocument{
+        path: "panel.jet",
+        source: "run: fn() {{print(1)}}\n",
+        host: Val(JetDriverHostDocument{identity: "panel.html", revision: 7, text: SOURCE_DOCUMENTS_ONE_REGION, mappings: [JetDriverSourceMapping]{JetDriverSourceMapping{host: Span{start: 25, end: 46}, jet: Span{start: 0, end: 21}}}}),
+    }
+}
+
+source_documents_two_regions: fn(mappings: [JetDriverSourceMapping]) -> JetDriverSourceDocument Never! {
+    JetDriverSourceDocument{
+        path: "page.jet",
+        source: SOURCE_DOCUMENTS_TWO_REGIONS_JET,
+        host: Val(JetDriverHostDocument{identity: "page.html", revision: 2, text: SOURCE_DOCUMENTS_TWO_REGIONS, mappings: mappings}),
+    }
+}
+
+// Region 1 is `limit: 3\n` (host 29..38, Jet 0..9); region 2 is the `run`
+// line (host 77..102, Jet 22..47).
+source_documents_two_mappings: fn() -> [JetDriverSourceMapping] Never! {
+    [JetDriverSourceMapping]{
+        JetDriverSourceMapping{host: Span{start: 29, end: 38}, jet: Span{start: 0, end: 9}},
+        JetDriverSourceMapping{host: Span{start: 77, end: 102}, jet: Span{start: 22, end: 47}},
+    }
+}
+
+#Test("the Jet region at host bytes 25..46 sits at UTF-16 units 23..44") {
+    document: source_documents_one_region()
+    source_documents_require(jet_driver_source_document_problem(document) == None, "the region's mapping holds")
+    if jet_driver_host_span(document, Span{start: 0, end: 21}) == {
+        .Mapped(span) -> {
+            source_documents_require(span.start == 25 && span.end == 46, "the region is host bytes 25..46, got {span.start}..{span.end}")
+            source_documents_require(jet_driver_utf16_offset(SOURCE_DOCUMENTS_ONE_REGION, span.start) == 23, "host byte 25 is UTF-16 unit 23")
+            source_documents_require(jet_driver_utf16_offset(SOURCE_DOCUMENTS_ONE_REGION, span.end) == 44, "host byte 46 is UTF-16 unit 44")
+        }
+        .Generated -> source_documents_require(false, "the region maps")
+    }
+    // `print` is Jet bytes 11..16.
+    if jet_driver_host_span(document, Span{start: 11, end: 16}) == {
+        .Mapped(span) -> source_documents_require(span.start == 36 && span.end == 41, "`print` is host bytes 36..41")
+        .Generated -> source_documents_require(false, "`print` maps")
+    }
+    source_documents_require(jet_driver_jet_offset(document, 36) == Val(11), "host byte 36 is Jet byte 11")
+    source_documents_require(jet_driver_jet_offset(document, 46) == Val(21), "the region's end belongs to it")
+    source_documents_require(jet_driver_jet_offset(document, 3) == None, "the emoji is host text")
+}
+
+#Test("two Jet regions map to their own host bytes and generated text maps nowhere") {
+    document: source_documents_two_regions(source_documents_two_mappings())
+    source_documents_require(jet_driver_source_document_problem(document) == None, "both mappings hold")
+    // `limit` in `print(limit)` is Jet bytes 39..44.
+    if jet_driver_host_span(document, Span{start: 39, end: 44}) == {
+        .Mapped(span) -> source_documents_require(span.start == 94 && span.end == 99, "region 2's `limit` is host bytes 94..99, got {span.start}..{span.end}")
+        .Generated -> source_documents_require(false, "region 2 maps")
+    }
+    if jet_driver_host_span(document, Span{start: 0, end: 5}) == {
+        .Mapped(span) -> source_documents_require(span.start == 29 && span.end == 34, "region 1's `limit` is host bytes 29..34")
+        .Generated -> source_documents_require(false, "region 1 maps")
+    }
+    // The generated comment line, and a span across both regions.
+    source_documents_require(jet_driver_host_span(document, Span{start: 10, end: 20}) == JetDriverHostSpan.Generated, "generated text has no host bytes")
+    source_documents_require(jet_driver_host_span(document, Span{start: 0, end: 30}) == JetDriverHostSpan.Generated, "a span across regions has no host bytes")
+    source_documents_require(jet_driver_jet_offset(document, 50) == None, "host text between the regions is not Jet")
+    source_documents_require(jet_driver_jet_offset(document, 81) == Val(26), "host byte 81 is Jet byte 26")
+}
+
+#Test("an edit maps into its region and is refused across generated text") {
+    document: source_documents_two_regions(source_documents_two_mappings())
+    if jet_driver_host_edit(document, TextEdit{span: Span{start: 7, end: 8}, new_text: "4"}) == {
+        .Val(edit) -> source_documents_require(edit.span.start == 36 && edit.span.end == 37 && edit.new_text == "4", "the edit lands on host bytes 36..37")
+        .None -> source_documents_require(false, "an edit inside region 1 maps")
+    }
+    source_documents_require(jet_driver_host_edit(document, TextEdit{span: Span{start: 8, end: 23}, new_text: ""}) == None, "an edit reaching generated text is refused")
+}
+
+#Test("mappings that do not hold are refused") {
+    shifted: [JetDriverSourceMapping]{JetDriverSourceMapping{host: Span{start: 28, end: 37}, jet: Span{start: 0, end: 9}}}
+    source_documents_require(jet_driver_source_document_problem(source_documents_two_regions(shifted)) != None, "a segment whose bytes differ is refused")
+    uneven: [JetDriverSourceMapping]{JetDriverSourceMapping{host: Span{start: 29, end: 38}, jet: Span{start: 0, end: 8}}}
+    source_documents_require(jet_driver_source_document_problem(source_documents_two_regions(uneven)) != None, "a pair of unequal lengths is refused")
+    reversed: [JetDriverSourceMapping]{
+        JetDriverSourceMapping{host: Span{start: 77, end: 102}, jet: Span{start: 22, end: 47}},
+        JetDriverSourceMapping{host: Span{start: 29, end: 38}, jet: Span{start: 0, end: 9}},
+    }
+    source_documents_require(jet_driver_source_document_problem(source_documents_two_regions(reversed)) != None, "mappings out of order are refused")
+    cut: JetDriverSourceDocument{
+        path: "panel.jet",
+        source: "🙂",
+        host: Val(JetDriverHostDocument{identity: "panel.html", revision: 1, text: "🙂", mappings: [JetDriverSourceMapping]{JetDriverSourceMapping{host: Span{start: 1, end: 3}, jet: Span{start: 1, end: 3}}}}),
+    }
+    source_documents_require(jet_driver_source_document_problem(cut) != None, "a mapping inside a character is refused")
+    whole: JetDriverSourceDocument{path: "main.jet", source: "run: fn() {{}}\n"}
+    source_documents_require(jet_driver_source_document_problem(whole) == None, "a whole document has nothing to refuse")
+    source_documents_require(jet_driver_host_span(whole, Span{start: 4, end: 6}) == JetDriverHostSpan.Mapped(Span{start: 4, end: 6}), "a whole document maps a span to itself")
+}

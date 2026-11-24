@@ -1,0 +1,137 @@
+// The documents a compile reads. A whole document is a Jet file or an unsaved
+// buffer: `path` names the module and `source` is its text. A host document
+// (an HTML page, a Markdown file) is owned by its host, which declares the
+// Jet it holds: `source` is the complete Jet module the host generated, and
+// each mapping pairs an unchanged segment of `source` with the same bytes in
+// the host's text. Jet text outside every mapping is generated and has no
+// place in the host. One position map serves every result: diagnostics,
+// navigation and edits come back in host bytes, and editors count UTF-16
+// units from them.
+use {
+    jet_foundation.[Span, TextEdit, diagnostic_utf8_width]
+}
+
+JetDriverSourceDocument: struct {
+    path: String,
+    source: String,
+    host: JetDriverHostDocument?{None},
+}
+
+// The host's side of a document: who owns it, which revision of it the Jet
+// source was generated from, its text, and the segments the two share in
+// order.
+JetDriverHostDocument: struct {
+    identity: String,
+    revision: Int,
+    text: String,
+    mappings: [JetDriverSourceMapping],
+}
+
+// One unchanged segment: `jet` bytes of the Jet source are `host` bytes of
+// the host text.
+JetDriverSourceMapping: struct {
+    host: Span,
+    jet: Span,
+}
+
+// Where a Jet span sits in the host text: `Mapped` when one mapping holds the
+// whole span, `Generated` when any of it is generated text. A whole document
+// maps every span to itself.
+JetDriverHostSpan: enum {
+    Mapped(Span),
+    Generated,
+}
+
+// Why `document`'s mappings can't be used, or None when they can. Each
+// mapping lies inside both texts with its ends on UTF-8 boundaries, keeps its
+// bytes unchanged, and starts at or after the end of the one before it on
+// both sides.
+jet_driver_source_document_problem: fn(document: JetDriverSourceDocument) -> String? Never! {
+    host: document.host ?? return None
+    host_bytes: host.text.bytes()
+    jet_bytes: document.source.bytes()
+    host_end := 0
+    jet_end := 0
+    loop index in 0..<host.mappings.len() {
+        mapping: host.mappings[index]
+        if mapping.host.end - mapping.host.start != mapping.jet.end - mapping.jet.start {
+            return Val("mapping {index} pairs {mapping.host.end - mapping.host.start} host bytes with {mapping.jet.end - mapping.jet.start} Jet bytes")
+        }
+        if mapping.host.start < host_end || mapping.jet.start < jet_end || mapping.host.start > mapping.host.end {
+            return Val("mapping {index} starts before the mapping ahead of it ends")
+        }
+        if mapping.host.end > host_bytes.len() || mapping.jet.end > jet_bytes.len() {
+            return Val("mapping {index} ends past the end of its text")
+        }
+        if !jet_driver_utf8_boundary(host_bytes, mapping.host.start) || !jet_driver_utf8_boundary(host_bytes, mapping.host.end) {
+            return Val("mapping {index} cuts a UTF-8 character of the host text")
+        }
+        if !jet_driver_utf8_boundary(jet_bytes, mapping.jet.start) || !jet_driver_utf8_boundary(jet_bytes, mapping.jet.end) {
+            return Val("mapping {index} cuts a UTF-8 character of the Jet source")
+        }
+        loop at in 0..<(mapping.jet.end - mapping.jet.start) {
+            if host_bytes[mapping.host.start + at] != jet_bytes[mapping.jet.start + at] {
+                return Val("mapping {index} differs at host byte {mapping.host.start + at}: the Jet source changed a segment it declares unchanged")
+            }
+        }
+        host_end = mapping.host.end
+        jet_end = mapping.jet.end
+    }
+    None
+}
+
+// Byte `offset` of `bytes` starts a character or ends the text.
+jet_driver_utf8_boundary: fn(bytes: [U8], offset: Int) -> Bool Never! {
+    if offset < 0 || offset > bytes.len() -> return false
+    offset == bytes.len() || (Int{bytes[offset]} & 192) != 128
+}
+
+jet_driver_host_span: fn(document: JetDriverSourceDocument, span: Span) -> JetDriverHostSpan Never! {
+    host: document.host ?? return JetDriverHostSpan.Mapped(span)
+    if span.start > span.end -> return JetDriverHostSpan.Generated
+    loop mapping in host.mappings {
+        if mapping.jet.start <= span.start && span.end <= mapping.jet.end {
+            shift: mapping.host.start - mapping.jet.start
+            return JetDriverHostSpan.Mapped(Span{start: span.start + shift, end: span.end + shift})
+        }
+    }
+    JetDriverHostSpan.Generated
+}
+
+// The Jet offset of host byte `offset`, or None outside every mapping. An
+// offset at a mapping's end belongs to it, so a cursor after a segment's last
+// character still reaches the Jet source.
+jet_driver_jet_offset: fn(document: JetDriverSourceDocument, offset: Int) -> Int? Never! {
+    host: document.host ?? return Val(offset)
+    loop mapping in host.mappings {
+        if mapping.host.start <= offset && offset <= mapping.host.end {
+            return Val(offset - mapping.host.start + mapping.jet.start)
+        }
+    }
+    None
+}
+
+// `edit`, written against the Jet source, written against the host text
+// instead. None when its span reaches generated text: the host holds no such
+// text, so the edit is refused rather than applied somewhere else.
+jet_driver_host_edit: fn(document: JetDriverSourceDocument, edit: TextEdit) -> TextEdit? Never! {
+    if jet_driver_host_span(document, edit.span) == {
+        .Mapped(span) -> Val(TextEdit{span: span, new_text: edit.new_text, path: edit.path})
+        .Generated -> None
+    }
+}
+
+// The UTF-16 code units of `text` before byte `offset`: where an editor that
+// counts UTF-16 places the byte. An offset past the end counts the whole
+// text.
+jet_driver_utf16_offset: fn(text: String, offset: Int) -> Int Never! {
+    bytes: text.bytes()
+    count := 0
+    index := 0
+    loop index < offset && index < bytes.len() {
+        width: diagnostic_utf8_width(bytes, index)
+        count += if width == 4 -> 2 else -> 1
+        index += width
+    }
+    count
+}
