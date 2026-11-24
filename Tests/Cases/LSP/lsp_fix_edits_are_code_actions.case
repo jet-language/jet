@@ -1,0 +1,25 @@
+# Every repair `jet check --json` reports in a diagnostic's `fix_edits` is an
+# editor code action with the same span and text: E0942's move above the
+# struct and its move into the body.
+fixture: LSPFixEditsAreCodeActions.fixture
+env: NO_COLOR=1
+step: jet check --json markers.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0942"][0].fix_edits #= 2
+json: stdout doc $.reports[?code="E0942"][0].fix_edits[?new_text in ["#[Codable, Layout(c)]\nPixel: struct {\n    r: Int,\n","Pixel: struct {\n    r: Int,\n    #Codable: true\n    #Layout: c\n"]] #= 2
+json: stdout doc $.reports[?code="E0942"][0].fix_edits[0].span.start = 0
+json: stdout doc $.reports[?code="E0942"][0].fix_edits[0].span.end = 52
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPFixEditsAreCodeActions/0.json
+recv lsp until $.id = 7
+send lsp: Messages/LSPFixEditsAreCodeActions/1.json
+send lsp: Messages/LSPFixEditsAreCodeActions/2.json
+recv lsp until $.id = 8
+json: stdout doc $.result[?kind="quickfix"] #= 2
+json: stdout doc $.result[?kind="quickfix"][0].edit.documentChanges[0].edits[0].newText = "#[Codable, Layout(c)]\nPixel: struct {\n    r: Int,\n"
+json: stdout doc $.result[?kind="quickfix"][1].edit.documentChanges[0].edits[0].newText = "Pixel: struct {\n    r: Int,\n    #Codable: true\n    #Layout: c\n"
+json: stdout doc $.result[?kind="quickfix"][0].edit.documentChanges[0].edits[0].range = {"start":{"line":0,"character":0},"end":{"line":4,"character":0}}
+json: stdout doc $.result[?kind="quickfix"][1].edit.documentChanges[0].edits[0].range = {"start":{"line":0,"character":0},"end":{"line":4,"character":0}}
+send lsp: Messages/LSPFixEditsAreCodeActions/3.json
+recv lsp until $.id = 9
+close lsp
