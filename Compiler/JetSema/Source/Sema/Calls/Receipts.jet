@@ -170,7 +170,10 @@ sema_receipt_try_attach: fn(receiver: Expr, method: String, span: Span, args: [C
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     declared: definition ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    record: core_call("core.prelude", "__receipt_attach") ?? panic("checked receipt attach row is missing")
+    record: core_call("core.prelude", "__receipt_attach") ?? {
+        check.context.incomplete_reasons.push("checked receipt attach row is missing")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     result: Type.Named{name: "Unit"}
     if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, scopes, check.context, environment, program, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}

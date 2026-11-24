@@ -416,8 +416,7 @@ ir_merge_release_part: fn(released: Shared<[IRModule]>) -> Int Never! {
 ir_merge_release_pop: fn(released: Shared<[IRModule]>) -> [IRModule] Never! {
     permit: released.guard_edit()
     part := [IRModule]{}
-    if permit.value.len() > 0 {
-        row := permit.value.pop() ?? panic("a nonempty released part list failed to pop")
+    if permit.value.pop() == .Val(row) {
         part.push(row)
     }
     part

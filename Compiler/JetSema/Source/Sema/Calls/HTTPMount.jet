@@ -616,11 +616,20 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     checked_binding := sema_stmt_check_binding(binding, None, environment, program, scopes, check, diagnostics)
     if checked_binding == .Val(statement) {
         body.push(statement)
-        binding_index: sema_scope_resolve_index(scopes, value_name) ?? panic("mounted value binding is absent")
-        value_ty: scopes.bindings[binding_index].symbol.ty ?? panic("mounted value has no type")
+        binding_index: sema_scope_resolve_index(scopes, value_name) ?? {
+            check.context.incomplete_reasons.push("mounted value binding is absent")
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        value_ty: scopes.bindings[binding_index].symbol.ty ?? {
+            check.context.incomplete_reasons.push("mounted value has no type")
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         if sema_http_route_find_struct(environment, program, value_ty, environment.module_identity) == .Val(definition) {
             if program.registration_graph == .Val(graph) {
-                nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? panic("mount has no nominal row")
+                nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? {
+                    check.context.incomplete_reasons.push("mount has no nominal row")
+                    return SemaMethodSpecialCheck{handled: true, value: None}
+                }
                 method_module: graph.modules[nominal_row.module_index].module_identity
                 // The graph's endpoints are keyed by the service's identity,
                 // the key its Remotes find them by.
@@ -794,8 +803,14 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     address: "{prefix}/{method.name}"
     path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
     limit := sema_app_endpoint_limit(marker, environment, program, scopes, check, diagnostics) ?? return None
-    window: limit.pop() ?? panic("an endpoint limit has no window")
-    calls: limit.pop() ?? panic("an endpoint limit has no count")
+    window: limit.pop() ?? {
+        check.context.incomplete_reasons.push("an endpoint limit has no window")
+        return None
+    }
+    calls: limit.pop() ?? {
+        check.context.incomplete_reasons.push("an endpoint limit has no count")
+        return None
+    }
     member: if access == "SignedIn" -> "__remote_signed_in" else -> "__remote_public"
     on_graph: sema_app_is_graph(mux.ty, environment, program)
     if on_graph && access == "SignedIn" {
@@ -877,8 +892,14 @@ sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, metho
     files: sema_app_mount_callback(files_name, [Stmt]{Stmt.Expr{expr: Expr.Ok{value: run, span: span, id: AST_NODE_GENERATED}}}, sema_app_mux_param_type(mux, "__remote_upload", 5, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
     answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__remote_upload", 6, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
     limit := sema_app_endpoint_limit(marker, environment, program, scopes, check, diagnostics) ?? return None
-    window: limit.pop() ?? panic("an endpoint limit has no window")
-    calls: limit.pop() ?? panic("an endpoint limit has no count")
+    window: limit.pop() ?? {
+        check.context.incomplete_reasons.push("an endpoint limit has no window")
+        return None
+    }
+    calls: limit.pop() ?? {
+        check.context.incomplete_reasons.push("an endpoint limit has no count")
+        return None
+    }
     sema_call_http_mux_source_call(mux, "__remote_upload", [TCallArg]{path, service_arg, at_arg, signed_arg, upload_check, files, answer, calls, window}, span, None, environment, program, scopes, check, diagnostics).value
 }
 

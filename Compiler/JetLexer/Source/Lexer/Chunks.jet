@@ -291,8 +291,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
         }
         run_start := bounds[k]
         run_end_idx := k + 1
-        if !bodies_flags[k] && accepted.len() > 0 {
-            prev := accepted.pop() ?? panic("missing previous chunk")
+        if !bodies_flags[k] && accepted.pop() == .Val(prev) {
             run_start = prev.start
         } else if run_end_idx < chunk_count {
             run_end_idx += 1
@@ -304,8 +303,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
                 k = run_end_idx
                 break
             }
-            if !merged.bodies_local && accepted.len() > 0 {
-                prev := accepted.pop() ?? panic("missing previous chunk")
+            if !merged.bodies_local && accepted.pop() == .Val(prev) {
                 run_start = prev.start
                 next
             }
@@ -313,8 +311,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
                 run_end_idx += 1
                 next
             }
-            if accepted.len() > 0 {
-                prev := accepted.pop() ?? panic("missing previous chunk")
+            if accepted.pop() == .Val(prev) {
                 run_start = prev.start
                 next
             }

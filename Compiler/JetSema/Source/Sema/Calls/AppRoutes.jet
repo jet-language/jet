@@ -280,8 +280,14 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
     open: signed_in ?? Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}
     gated: sema_check_expression(open, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 3, span, environment, program, diagnostics)), environment, program, scopes, check, diagnostics) ?? return rejected
     _: positional.pop()
-    written: positional.pop() ?? panic("`.screen` was checked to have a path")
-    viewed: states.pop() ?? panic("`.screen` was checked to have one state")
+    written: positional.pop() ?? {
+        check.context.incomplete_reasons.push("`.screen` was checked to have a path")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    viewed: states.pop() ?? {
+        check.context.incomplete_reasons.push("`.screen` was checked to have one state")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     registration: [TCallArg]{
         sema_call_http_static_tree_arg(sema_call_http_core_string(path, span), written),
         sema_call_http_static_tree_arg(sema_call_http_core_string(found.key, span), sema_http_mount_arg(sema_app_text(found.key, span), span)),
@@ -290,7 +296,10 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         opener,
     }
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, SEMA_APP_SCREEN, [Type]{}, [Type]{}, span, environment, program, diagnostics)
-    registered: candidates.pop() ?? panic("App.{SEMA_APP_SCREEN} is not registered")
+    registered: candidates.pop() ?? {
+        check.context.incomplete_reasons.push("App.{SEMA_APP_SCREEN} is not registered")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     // `__screen` can't fail (`App Never!`): the call is the graph, as a
     // declared method's call of it is.
     result_type: sema_call_resolved_type(sema_owned_infallible(sema_call_signature_return(registered.signature) ?? panic("App.{SEMA_APP_SCREEN} has no result")), environment, program)
