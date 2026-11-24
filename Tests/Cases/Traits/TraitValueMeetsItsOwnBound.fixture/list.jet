@@ -1,0 +1,19 @@
+// A list of `Describe` values meets `xs: [T]` with `T: Describe`: each item
+// is a `Describe` value, which meets its own trait's bound.
+Describe: trait {
+    describe: fn(self) -> String,
+}
+
+impl Int.Describe {
+    describe: fn(self) -> String { "#{self}" }
+}
+
+describe_list: fn<T: Describe>(xs: [T]) -> String {
+    parts: loop item in xs -> item.describe()
+    "[{parts.join(", ")}]"
+}
+
+run: fn() {
+    xs: [Describe]{1, 2}
+    print(describe_list(xs))
+}
