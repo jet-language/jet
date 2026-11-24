@@ -384,8 +384,11 @@ dev worktree, one commit per landed submission that stages only that
 submission's paths, and merges proven `dev` commits into `master`.
 Every worktree has one named, live owner: the dev worktree (the orchestrator),
 the Lander's trees, and at most one per standing agent within the team cap.
-This is a standing owner order: besides the master checkout, at most six
-worktrees exist at any time, and no work in them is ever lost. Ten worktrees,
+This is a standing owner order: at most five worktrees exist at any time,
+the master checkout and the dev worktree included, and no work in them is
+ever lost. Finished work is merged into `dev` and `master` at once, and its
+worktree is integrated and then removed; no stash or other ref ever holds
+work. Ten worktrees,
 the master checkout included, is a hard cap that the repository's git hooks
 enforce: `post-checkout` removes an eleventh tree as it is added, and
 `reference-transaction` refuses every ref update while more than ten exist.
