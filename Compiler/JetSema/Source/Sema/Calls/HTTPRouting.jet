@@ -28,7 +28,6 @@ use jet_foundation.[
     core_enum_cases,
     core_source_receiver_method,
     diagnostic_registry_row,
-    diagnostic_with_label,
     expr_span,
     type_identity_equal,
     type_name,
@@ -449,16 +448,6 @@ sema_http_route_interpolated_source: fn(expression: Expr) -> String? {
 
 sema_http_route_invalid_diagnostic: fn(pattern: String, reason: String, span: Span) -> Diagnostic {
     sema_error("E2805", span, "invalid HTTP route `{pattern}`: {reason}", "route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree", "use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`")
-}
-
-// Two rows of one route table with one method and address: the later
-// registration is the error and the earlier one is its label. `source` names
-// the file a convention route at `span` comes from ("" when the span is the
-// registering call itself).
-sema_http_route_duplicate: fn(method: String, pattern: String, span: Span, source: String, first: Span, first_label: String) -> Diagnostic {
-    row: diagnostic_registry_row("E2804") ?? panic("E2804 must have a registry row")
-    what: if source == "" -> "Two routes both match `{method} {pattern}`." else -> "Two routes both match `{method} {pattern}`; this one comes from `{source}`."
-    diagnostic_with_label(sema_error("E2804", span, what, row.why, row.fix), first, first_label)
 }
 
 // Router, mux and App route registrations refuse an interpolated or invalid
@@ -1224,17 +1213,6 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             wire = ""
         }
     }
-    // A refused pattern (E2805) registers nothing, so it can't collide with a
-    // valid route as a duplicate (E2804).
-    if !dynamic && !literal.invalid && wire != "" {
-        chained := false
-        if app && program.registration_graph == .Val(graph) {
-            chained = sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
-        }
-        if !chained {
-            sema_http_route_table_record(receiver, wire, pattern, span, scopes, context, diagnostics)
-        }
-    }
     if !literal.invalid {
         path_fields: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
         mux_request := Type?{None}
@@ -1408,19 +1386,6 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         return sema_call_http_mux_source_call(receiver_value, target, route_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     SemaMethodSpecialCheck{handled: true, value: None}
-}
-
-// Two registrations through one binding with one method and address report
-// at the second; the rows of one builder chain are checked along the chain
-// (sema_app_check_route_registrations), and every other pair when it
-// registers.
-sema_http_route_table_record: fn(receiver: Expr, wire: String, pattern: String, span: Span, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) {
-    root: sema_expr_place_root_ident(receiver) ?? return
-    binding_index: sema_scope_resolve_index(scopes, root) ?? return
-    key: "{scopes.bindings[binding_index].key}|{wire}|{sema_app_route_shape(pattern)}"
-    if sema_check_context_http_route_record(context, key, span) == .Val(first) {
-        diagnostics.push(sema_http_route_duplicate(wire, pattern, span, "", first, "first registered here"))
-    }
 }
 
 sema_http_mux_ident: fn(name: String, span: Span) -> Expr Never! {
