@@ -454,6 +454,14 @@ best mitigation. A ratified ballot authorizes the direction, not the claim;
 its build card names the passing review as its first criterion. Public text
 may call a design better only where a passing review backs that exact claim.
 
+This is a standing owner order. A design is the whole mechanism, never a fix
+for the one case that raised it. Before a ballot is drafted, its author finds
+every place the same kind of fact or operation already lives (each record, table,
+maker, reader, tier and tool) and every similar construct that should share
+the mechanism. The design makes one source of truth for all of them, with an
+exact cutover list and the copies it deletes. A ballot that leaves a parallel
+store, a second maker or an untreated sibling case fails its review.
+
 ## Delegation
 
 Use the most specific agent available for each role. Workers do not spawn
@@ -523,7 +531,11 @@ idle while a submission waits (owner order, 2026-11-15):
    a0.0.N release through `Tools/Release/Main.jet` `admit`.
 
 Workers check against the current batch compiler (the seed) before they
-submit, so a cycle finds only what their touched-file checks cannot.
+submit, so a cycle finds only what their touched-file checks cannot. Every patch
+is built on the `dev` tip; a Core half proves on the seed that it compiles and
+lowers; the lander runs the guards and ratchets before each build; and each
+landed batch's proven criteria are met within the hour
+(`.agents/skills/orchestration/references/intake.md`, train rules 21 to 24).
 
 Landing throughput is the measure of progress. These standing owner orders
 keep it high:
