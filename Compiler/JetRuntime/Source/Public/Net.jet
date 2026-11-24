@@ -67,8 +67,8 @@ net: module {
 
     // The TCPListener and TCPStream methods' leaves (Core/Net/Net.jet): an
     // accept, the stream's reads and writes (a `_deadline` form waits at most
-    // `deadline_ns`), a shutdown of `how` (0 read, 1 write, 2 both), a wait
-    // for `interest` (0 read, 1 write, 2 both), its addresses and its close.
+    // `deadline_ns`), a shutdown of `how`, a wait for `interest` (each the
+    // runtime's tag of its enum), its addresses and its close.
     #Import(c) priv tcp_accept_deadline: fn(listener: TCPListener, deadline_ns: Int) -[Net, Time.Wait]> TCPStream NetError! = "jet_net_tcp_accept_deadline"
 
     #Import(c) priv listener_local_addr: fn(listener: TCPListener) -[Net]> String NetError! = "jet_net_listener_local_addr"
@@ -97,9 +97,9 @@ net: module {
 
     #Import(c) priv tcp_write_all_bytes_deadline: fn(stream: TCPStream, data: [U8], deadline_ns: Int) -[Net, Time.Wait]> NetError! = "jet_net_tcp_write_all_bytes_deadline"
 
-    #Import(c) priv tcp_shutdown: fn(stream: TCPStream, how: Int) -[Net]> NetError! = "jet_net_tcp_shutdown"
+    #Import(c) priv tcp_shutdown: fn(stream: TCPStream, how: NetShutdown) -[Net]> NetError! = "jet_net_tcp_shutdown"
 
-    #Import(c) priv tcp_ready: fn(stream: TCPStream, interest: Int, deadline_ns: Int) -[Net, Time.Wait]> NetReady NetError! = "jet_net_tcp_ready_deadline"
+    #Import(c) priv tcp_ready: fn(stream: TCPStream, interest: NetReadyInterest, deadline_ns: Int) -[Net, Time.Wait]> NetReady NetError! = "jet_net_tcp_ready_deadline"
 
     #Import(c) priv tcp_peer_addr: fn(stream: TCPStream) -[Net]> String NetError! = "jet_net_tcp_peer_addr"
 
@@ -125,10 +125,9 @@ net: module {
 
     #Import(c) priv udp_receive: fn(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! = "jet_net_udp_receive"
 
-    // The UDPSocket methods' leaves: a wait for `interest` (0 read, 1 write,
-    // 2 both), the close, and a receive and a send that wait at most
-    // `deadline_ns`.
-    #Import(c) priv udp_ready: fn(socket: UDPSocket, interest: Int, deadline_ns: Int) -[Net, Time.Wait]> NetReady NetError! = "jet_net_udp_ready"
+    // The UDPSocket methods' leaves: a wait for `interest`, the close, and a
+    // receive and a send that wait at most `deadline_ns`.
+    #Import(c) priv udp_ready: fn(socket: UDPSocket, interest: NetReadyInterest, deadline_ns: Int) -[Net, Time.Wait]> NetReady NetError! = "jet_net_udp_ready"
 
     #Import(c) priv udp_close: fn(socket: UDPSocket) -[Net]> NetError! = "jet_net_udp_close"
 
@@ -166,8 +165,8 @@ net: module {
     #Import(c) priv unix_close: fn(stream: UnixStream) -[Net]> NetError! = "jet_net_unix_close"
 
     // The UnixListener and UnixStream methods' leaves: each waits at most
-    // `deadline_ns`; `interest` is 0 read, 1 write, 2 both; the timeout of
-    // the calls without a deadline is `timeout_ns`.
+    // `deadline_ns`; the timeout of the calls without a deadline is
+    // `timeout_ns`.
     #Import(c) priv unix_accept_deadline: fn(listener: UnixListener, deadline_ns: Int) -[Net, Time.Wait]> UnixStream NetError! = "jet_net_unix_accept_deadline"
 
     #Import(c) priv unix_read_bytes_deadline: fn(stream: UnixStream, limit: Int, deadline_ns: Int) -[Net, Time.Wait]> [U8] NetError! = "jet_net_unix_read_bytes_deadline"
@@ -176,7 +175,7 @@ net: module {
 
     #Import(c) priv unix_write_all_bytes_deadline: fn(stream: UnixStream, data: [U8], deadline_ns: Int) -[Net, Time.Wait]> NetError! = "jet_net_unix_write_all_bytes_deadline"
 
-    #Import(c) priv unix_ready: fn(stream: UnixStream, interest: Int, deadline_ns: Int) -[Net, Time.Wait]> NetReady NetError! = "jet_net_unix_ready"
+    #Import(c) priv unix_ready: fn(stream: UnixStream, interest: NetReadyInterest, deadline_ns: Int) -[Net, Time.Wait]> NetReady NetError! = "jet_net_unix_ready"
 
     #Import(c) priv unix_set_timeout: fn(stream: UnixStream, timeout_ns: Int) -[Net]> NetError! = "jet_net_unix_set_timeout"
 
