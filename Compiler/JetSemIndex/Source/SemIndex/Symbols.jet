@@ -462,29 +462,31 @@ semindex_symbol_scope_key: fn(module_path: String, start: Int, end: Int) -> Stri
 semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
     scopes := SemSymbolScopes{enclosing: [String:Int]{}, enclosing_item: [String:Int]{}, first_lexical_child: [String:Int]{}, boundaries: [String:Span]{}, nodes_by_id: [String:SemNode]{}}
     module_paths := [String]{}
-    queries := [String:[Span]]{}
+    // A module path -> its group in `spans_by_module` and `nodes_by_module`.
+    groups := [String:Int]{}
+    spans_by_module := [[Span]]{}
+    nodes_by_module := [[SemNode]]{}
     loop definition in index.definitions {
         def: definition.def
         if def.kind == {
             .Local(_, _) | .Param(_) -> {
-                if queries.get(def.module_path) == None {
+                group := groups.get(def.module_path) ?? -1
+                if group < 0 {
+                    group = module_paths.len()
                     module_paths.push(def.module_path)
-                    queries[def.module_path] = [Span]{}
+                    groups[def.module_path] = group
+                    spans_by_module.push([Span]{})
+                    nodes_by_module.push([SemNode]{})
                 }
-                spans := queries.get(def.module_path) ?? [Span]{}
-                spans.push(def.def_span)
-                queries[def.module_path] = spans
+                spans_by_module[group].push(def.def_span)
             }
             .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
         }
     }
-    module_nodes := [String:[SemNode]]{}
     loop node in index.nodes {
         scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node.copy()
-        if queries.get(node.module_path) == None -> next
-        list := module_nodes.get(node.module_path) ?? [SemNode]{}
-        list.push(node.copy())
-        module_nodes[node.module_path] = list
+        group: groups.get(node.module_path) ?? next
+        nodes_by_module[group].push(node.copy())
         if node.parent == .Val(parent) {
             child_key: "{node.module_path}\n{parent}"
             if semindex_symbol_is_lexical_slot(node.slot) && scopes.first_lexical_child.get(child_key) == None {
@@ -496,50 +498,45 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
         key: "{boundary.module_path}\n{boundary.parent}\n{boundary.slot}"
         if scopes.boundaries.get(key) == None -> scopes.boundaries[key] = boundary.span
     }
-    loop module_path in module_paths {
-        spans := queries.get(module_path) ?? [Span]{}
-        loop index_value in 1..<spans.len() {
-            value: spans[index_value]
-            position := index_value
-            loop position > 0 && (spans[position - 1].start > value.start || (spans[position - 1].start == value.start && spans[position - 1].end > value.end)) {
-                spans[position] = spans[position - 1]
-                position -= 1
-            }
-            spans[position] = value
-        }
-        nodes := module_nodes.get(module_path) ?? [SemNode]{}
-        loop index_value in 1..<nodes.len() {
-            value: nodes[index_value]
-            position := index_value
-            loop position > 0 && nodes[position - 1].span.start > value.span.start {
-                nodes[position] = nodes[position - 1]
-                position -= 1
-            }
-            nodes[position] = value
-        }
-        next_node := 0
-        active := [SemNode]{}
-        loop span in spans {
-            loop next_node < nodes.len() && nodes[next_node].span.start <= span.start {
-                active.push(nodes[next_node])
-                next_node += 1
-            }
-            kept := [SemNode]{}
-            loop node in active {
-                if node.span.end >= span.start -> kept.push(node)
-            }
-            active = kept
-            candidates: if span.end < span.start -> nodes else -> active
-            key: semindex_symbol_scope_key(module_path, span.start, span.end)
-            if semindex_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) {
-                scopes.enclosing[key] = found
-            }
-            if semindex_symbol_smallest(candidates, span.start, span.end, true) == .Val(found) {
-                scopes.enclosing_item[key] = found
-            }
-        }
+    loop (group, module_path) in module_paths {
+        // Stable: equal spans and equal starts keep their index order.
+        spans_by_module[group].sort_by(fn(left: Span, right: Span) { (left.start <=> right.start).then(left.end <=> right.end) })
+        nodes_by_module[group].sort_by(fn(left: SemNode, right: SemNode) { left.span.start <=> right.span.start })
+        semindex_symbol_module_scopes(scopes, module_path, spans_by_module[group], nodes_by_module[group])
     }
     scopes
+}
+
+// The scopes of one module's definition spans (`spans`, in order) among its
+// structural nodes (`nodes`, in start order).
+semindex_symbol_module_scopes: fn(scopes: &SemSymbolScopes, module_path: String, spans: [Span], nodes: [SemNode]) Never! {
+    next_node := 0
+    active := [SemNode]{}
+    loop span in spans {
+        loop next_node < nodes.len() && nodes[next_node].span.start <= span.start {
+            active.push(nodes[next_node])
+            next_node += 1
+        }
+        kept := [SemNode]{}
+        loop node in active {
+            if node.span.end >= span.start -> kept.push(node)
+        }
+        active = kept
+        key: semindex_symbol_scope_key(module_path, span.start, span.end)
+        if {
+            span.end < span.start -> semindex_symbol_enclose(scopes, key, nodes, span)
+            else -> semindex_symbol_enclose(scopes, key, active, span)
+        }
+    }
+}
+
+semindex_symbol_enclose: fn(scopes: &SemSymbolScopes, key: String, candidates: [SemNode], span: Span) Never! {
+    if semindex_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) {
+        scopes.enclosing[key] = found
+    }
+    if semindex_symbol_smallest(candidates, span.start, span.end, true) == .Val(found) {
+        scopes.enclosing_item[key] = found
+    }
 }
 
 // `LexicalScopeIndex.scope`.
@@ -626,21 +623,23 @@ semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSym
 }
 
 // A marker struct and its rule share one name span, so both definitions show
-// the marker signature.
-semindex_symbol_marker_signature: fn(modules: [JetDriverDocModule], def: SemDef) -> String? Never! {
-    loop doc_module in modules {
-        if doc_module.path != def.module_path && doc_module.alias != def.module_path -> next
+// the marker signature: each module's markers by name and span
+// (semindex_symbol_marker_key), the first of each kept.
+semindex_symbol_markers: fn(modules: [JetDriverDocModule]) -> [String:String] Never! {
+    markers := [String:String]{}
+    loop (position, doc_module) in modules {
         loop item in doc_module.items {
             if item == .MarkerDecl(declaration) {
-                if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end {
-                    next
-                }
-                return Val(marker_decl_signature(declaration, doc_module.source))
+                key: semindex_symbol_marker_key(position, declaration.name, declaration.name_span)
+                if markers.get(key) == None -> markers[key] = marker_decl_signature(declaration, doc_module.source)
             }
         }
-        return None
     }
-    None
+    markers
+}
+
+semindex_symbol_marker_key: fn(position: Int, name: String, span: Span) -> String Never! {
+    "{position}\n{name}\n{span.start}:{span.end}"
 }
 
 semindex_symbol_trait_contracts: fn(contracts: [SemTraitContract], declaration: Bool) -> String Never! {
@@ -662,23 +661,31 @@ semindex_symbol_trait_contracts: fn(contracts: [SemTraitContract], declaration: 
 // `source_docs`: the `///` lines directly above the declaration line, as the
 // first non-empty summary and `Example:` lines.
 semindex_symbol_source_docs: fn(source: String, def_start: Int) -> SemDocComment Never! {
-    bytes: source.bytes()
+    semindex_symbol_source_docs_at(source.bytes(), def_start)
+}
+
+// semindex_symbol_source_docs over the source's bytes, read back from the
+// declaration line only.
+semindex_symbol_source_docs_at: fn(bytes: [U8], def_start: Int) -> SemDocComment Never! {
     prefix_end: if def_start < bytes.len() -> def_start else -> bytes.len()
-    before_end := -1
-    loop index in 0..<prefix_end {
-        if bytes[index] == (U8{10}) -> before_end = index
-    }
-    before: if before_end < 0 -> "" else -> semindex_doc_text(bytes, 0, before_end)
-    lines: semindex_doc_lines(before)
+    // The newline that ends the line above the declaration's; the text before
+    // it holds the doc lines.
+    end := prefix_end - 1
+    loop end >= 0 && bytes[end] != (U8{10}) -> end -= 1
+    // A text that ends in a newline has no empty last line (semindex_doc_lines).
+    if end > 0 && bytes[end - 1] == (U8{10}) -> end -= 1
     collected := [String]{}
-    position := lines.len() - 1
-    loop position >= 0 {
-        doc: semindex_doc_strip_prefix(lines[position].trim(), DOC_COMMENT_PREFIX) ?? break
+    loop end > 0 {
+        start := end
+        loop start > 0 && bytes[start - 1] != (U8{10}) -> start -= 1
+        stop := end
+        if stop > start && bytes[stop - 1] == (U8{13}) -> stop -= 1
+        doc: semindex_doc_strip_prefix(semindex_doc_text(bytes, start, stop).trim(), DOC_COMMENT_PREFIX) ?? break
         collected.push(doc.trim())
-        position -= 1
+        end = start - 1
     }
     comment := SemDocComment{summary: "", examples: [String]{}}
-    position = collected.len() - 1
+    position := collected.len() - 1
     loop position >= 0 {
         line: collected[position]
         if semindex_doc_strip_prefix(line, "Example:") == .Val(example) {
@@ -815,9 +822,19 @@ semindex_symbol_collect_inline_imports: fn(index: SemIndex, symbols: &[SemSymbol
     }
 }
 
-semindex_symbol_display: fn(modules: [JetDriverDocModule], module_path: String, name: String) -> String Never! {
-    loop doc_module in modules {
-        if doc_module.path != module_path && doc_module.alias != module_path -> next
+// A definition's module path -> the first module of that path or alias.
+semindex_symbol_module_at: fn(modules: [JetDriverDocModule]) -> [String:Int] Never! {
+    module_at := [String:Int]{}
+    loop (position, doc_module) in modules {
+        if module_at.get(doc_module.path) == None -> module_at[doc_module.path] = position
+        if module_at.get(doc_module.alias) == None -> module_at[doc_module.alias] = position
+    }
+    module_at
+}
+
+semindex_symbol_display: fn(modules: [JetDriverDocModule], module_at: [String:Int], module_path: String, name: String) -> String Never! {
+    if module_at.get(module_path) == .Val(position) {
+        doc_module: modules[position]
         storage: doc_module.name_ledger ?? return name
         permit: storage.guard_read()
         return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
@@ -827,23 +844,21 @@ semindex_symbol_display: fn(modules: [JetDriverDocModule], module_path: String, 
     name.copy()
 }
 
-semindex_symbol_canonical_name: fn(modules: [JetDriverDocModule], module_path: String, name: String, owner: String?, span: Span) -> String Never! {
+semindex_symbol_canonical_name: fn(modules: [JetDriverDocModule], module_at: [String:Int], module_path: String, name: String, owner: String?, span: Span) -> String Never! {
     fallback: if owner == .Val(value) -> "{value}.{name}" else -> name
-    loop doc_module in modules {
-        if doc_module.path != module_path && doc_module.alias != module_path -> next
-        storage: doc_module.name_ledger ?? return fallback
-        permit: storage.guard_read()
-        module_index: doc_module.name_module_index
-        if name_ledger_display_path_at(permit.value, module_index, span, name, owner, Val(module_index)) == .Val(path) {
-            return path
-        }
-        if owner == .Val(value) {
-            path: name_ledger_display_path(permit.value, module_index, value, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, value) ?? value)
-            return "{path}.{name}"
-        }
-        return name_ledger_display_path(permit.value, module_index, name, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, name) ?? name)
+    position: module_at.get(module_path) ?? return fallback
+    doc_module: modules[position]
+    storage: doc_module.name_ledger ?? return fallback
+    permit: storage.guard_read()
+    module_index: doc_module.name_module_index
+    if name_ledger_display_path_at(permit.value, module_index, span, name, owner, Val(module_index)) == .Val(path) {
+        return path
     }
-    fallback
+    if owner == .Val(value) {
+        path: name_ledger_display_path(permit.value, module_index, value, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, value) ?? value)
+        return "{path}.{name}"
+    }
+    name_ledger_display_path(permit.value, module_index, name, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, name) ?? name)
 }
 
 // `build_semantic_symbol_index`: the language catalog plus every definition of
@@ -863,8 +878,18 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
             }
         }
     }
-    sources := [String:String]{}
-    loop doc_module in modules -> sources[doc_module.path] = doc_module.source
+    module_at: semindex_symbol_module_at(modules)
+    markers: semindex_symbol_markers(modules)
+    // A module path -> the last module of that path, whose source the docs
+    // read; and each module's source bytes, read once.
+    source_at := [String:Int]{}
+    path_at := [String:Int]{}
+    sources := [[U8]]{}
+    loop (position, doc_module) in modules {
+        source_at[doc_module.path] = position
+        if path_at.get(doc_module.path) == None -> path_at[doc_module.path] = position
+        sources.push(doc_module.source.bytes())
+    }
     scopes: semindex_symbol_scopes(index)
     loop definition in index.definitions {
         def: definition.def
@@ -877,17 +902,19 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
                 .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .Local(_, _) | .Param(_) -> {}
             }
         }
-        display_name: semindex_symbol_display(modules, def.module_path, def.name)
+        display_name: semindex_symbol_display(modules, module_at, def.module_path, def.name)
         display_owner := owner.copy()
         if owner == .Val(value) {
-            display_owner = Val(semindex_symbol_display(modules, def.module_path, value))
+            display_owner = Val(semindex_symbol_display(modules, module_at, def.module_path, value))
         }
-        qualified_name: semindex_symbol_canonical_name(modules, def.module_path, def.name, owner, def.def_span)
+        qualified_name: semindex_symbol_canonical_name(modules, module_at, def.module_path, def.name, owner, def.def_span)
         shape: semindex_symbol_shape(display_name, def.kind, display_owner)
         signature := shape.signature
-        if semindex_symbol_marker_signature(modules, def) == .Val(marker) -> signature = marker
+        if module_at.get(def.module_path) == .Val(position) {
+            if markers.get(semindex_symbol_marker_key(position, def.name, def.def_span)) == .Val(marker) -> signature = marker
+        }
         if definition.nominal_base == .Val(base) {
-            signature = "type {display_name}: distinct {semindex_symbol_display(modules, def.module_path, base)}"
+            signature = "type {display_name}: distinct {semindex_symbol_display(modules, module_at, def.module_path, base)}"
         }
         if definition.trait_contracts.len() > 0 {
             signature = "{signature}\n{semindex_symbol_trait_contracts(definition.trait_contracts, def.kind == .Trait)}"
@@ -899,8 +926,8 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
         // symbol names and diagnostics spell it.
         signature = semindex_display_text(index, signature)
         docs := SemDocComment{summary: "", examples: [String]{}}
-        if sources.get(def.module_path) == .Val(source) {
-            docs = semindex_symbol_source_docs(source, def.def_span.start)
+        if source_at.get(def.module_path) == .Val(position) {
+            docs = semindex_symbol_source_docs_at(sources[position], def.def_span.start)
         }
         scope := SemSymbolScope?{None}
         if def.kind == {
@@ -914,7 +941,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
                 scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, false)
             }
             .Param(_) -> {
-                if semindex_symbol_alias_shown(modules, def.module_path, def.def_span.start) == .Val(shown) {
+                if semindex_symbol_alias_shown(modules, path_at, def.module_path, def.def_span.start) == .Val(shown) {
                     docs.summary = if docs.summary == "" -> "Type: {shown}" else -> "{docs.summary}\n\nType: {shown}"
                 }
                 scope = semindex_symbol_scope(scopes, def.module_path, def.def_span, true)
@@ -948,10 +975,9 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
 
 // How hover names a parameter whose written type applies a generic alias
 // (JetDriverDocModule.alias_shown): the alias as written plus its one
-// expansion. None for any other parameter.
-semindex_symbol_alias_shown: fn(modules: [JetDriverDocModule], module_path: String, start: Int) -> String? Never! {
-    loop doc_module in modules {
-        if doc_module.path == module_path -> return doc_module.alias_shown.get(start)
-    }
-    None
+// expansion. None for any other parameter. `path_at` holds each module
+// path's first module.
+semindex_symbol_alias_shown: fn(modules: [JetDriverDocModule], path_at: [String:Int], module_path: String, start: Int) -> String? Never! {
+    position: path_at.get(module_path) ?? return None
+    modules[position].alias_shown.get(start)
 }

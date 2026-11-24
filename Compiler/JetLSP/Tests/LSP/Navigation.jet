@@ -95,6 +95,31 @@ near: fn(at: shapes.Point) -> Int {
     assert_eq(lsp_test_range(lsp_test_field(point, "range")), "0:0-0:5")
 }
 
+LSP_TEST_WIDE_URI: "file:///w/wide.jet"
+
+// Two comment lines of two-byte characters put every later byte offset past
+// the same count of characters: `Glyph` is declared on line 2 and written as
+// a type on line 4 at characters 16-21 and 26-31, the second within the
+// document's last 16 bytes.
+LSP_TEST_WIDE: `// cañón ñ
+// ññññññññññññññññññññ
+Glyph: distinct String
+
+keep: fn(value: Glyph) -> Glyph { value }
+`
+
+#Test("a written type after non-ASCII text reaches its declaration, up to the document's last bytes") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_WIDE_URI, LSP_TEST_WIDE)
+    first: lsp_test_result(server, "textDocument/definition", lsp_test_at(LSP_TEST_WIDE_URI, 4, 17))
+    assert_eq(lsp_test_text(first, "uri"), LSP_TEST_WIDE_URI)
+    assert_eq(lsp_test_range(lsp_test_field(first, "range")), "2:0-2:5")
+    last: lsp_test_result(server, "textDocument/definition", lsp_test_at(LSP_TEST_WIDE_URI, 4, 28))
+    assert_eq(lsp_test_range(lsp_test_field(last, "range")), "2:0-2:5")
+    with: "{{{lsp_test_text_document(LSP_TEST_WIDE_URI)},\"position\":{{\"line\":2,\"character\":1}},\"context\":{{\"includeDeclaration\":true}}}}"
+    assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_result(server, "textDocument/references", with))), [String]{"2:0-2:5", "4:16-4:21", "4:26-4:31"})
+}
+
 #Test("rename binds negotiated documentChanges to the checked version and names the renamed identity") {
     server := lsp_test_main_server()
     _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"workspace\":{{\"workspaceEdit\":{{\"documentChanges\":true}}}}}}}}")

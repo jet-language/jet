@@ -1,10 +1,10 @@
 // Document and workspace symbols, folding, selection ranges and import links.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Diagnostic, ImportDecl, Span, foundation_byte_text, foundation_json_quote, interner_empty]
+    jet_foundation.[Diagnostic, ImportDecl, Span, foundation_byte_text, foundation_json_quote]
     jet_parser.[parse_source]
     jet_driver.[JetDriverDocModule, JetDriverSourceDocument]
-    jet_semindex.[SemDef, SemEffectProjection, SemSymbol, semindex_build, semindex_symbol_imported_module]
+    jet_semindex.[SemDef, SemSymbol, semindex_build_outline, semindex_symbol_imported_module]
 }
 
 lsp_symbol_information_json: fn(def: SemDef, location: LSPLocation, kind: Int) -> String Never! {
@@ -167,8 +167,8 @@ lsp_path_below: fn(path: String, root: String) -> Bool Never! {
     path.bytes()[root.count_bytes()] == (U8{47})
 }
 
-// A saved file's declarations, from its text parsed and indexed alone: the
-// module is named by the file's stem.
+// A saved file's declarations, from its text parsed and outlined alone
+// (semindex_build_outline): the module is named by the file's stem.
 lsp_saved_outline: fn(source: &&JetDriverSourceDocument) -> LSPChecked Never! {
     parsed: parse_source(source.source.bytes())
     physical: source.path.move()
@@ -186,7 +186,7 @@ lsp_saved_outline: fn(source: &&JetDriverSourceDocument) -> LSPChecked Never! {
             tables: parsed.program.tables.move(),
         },
     }
-    index: semindex_build(modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+    index: semindex_build_outline(modules)
     LSPChecked{diagnostics: [Diagnostic]{}, modules: modules, index: Val(index), symbols: [SemSymbol]{}}
 }
 
