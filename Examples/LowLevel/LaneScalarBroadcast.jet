@@ -14,6 +14,8 @@ run: fn() {
     doubles: F64x4.new(1.0, 2.0, 4.0, 8.0)
     print((doubles + Float{10.0}).to_array())
     print((Float{16.0} / doubles).to_array())
+    print((Float{1.0} + doubles).to_array())
+    print((Float{1.0} - doubles).to_array())
 
     ints: I32x4.new(I32{2}, I32{4}, I32{6}, I32{8})
     print((ints * I32{3}).to_array())
@@ -23,4 +25,25 @@ run: fn() {
     bytes: U8x16.from_array([U8#16]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
     print((bytes + U8{10}).lane(0))
     print((U8{20} - bytes).lane(15))
+    scalar_first()
+}
+
+// Every integer lane type takes the scalar on the left too: 12 op 6.
+scalar_first: fn() {
+    i8: I8x16.splat(I8{6})
+    print("I8x16: {(I8{12} + i8).lane(0)} {(I8{12} - i8).lane(0)} {(I8{12} * i8).lane(0)} {(I8{12} / i8).lane(0)}")
+    u8: U8x16.splat(U8{6})
+    print("U8x16: {(U8{12} + u8).lane(0)} {(U8{12} - u8).lane(0)} {(U8{12} * u8).lane(0)} {(U8{12} / u8).lane(0)}")
+    i16: I16x8.splat(I16{6})
+    print("I16x8: {(I16{12} + i16).lane(0)} {(I16{12} - i16).lane(0)} {(I16{12} * i16).lane(0)} {(I16{12} / i16).lane(0)}")
+    u16: U16x8.splat(U16{6})
+    print("U16x8: {(U16{12} + u16).lane(0)} {(U16{12} - u16).lane(0)} {(U16{12} * u16).lane(0)} {(U16{12} / u16).lane(0)}")
+    i32: I32x4.splat(I32{6})
+    print("I32x4: {(I32{12} + i32).lane(0)} {(I32{12} - i32).lane(0)} {(I32{12} * i32).lane(0)} {(I32{12} / i32).lane(0)}")
+    u32: U32x4.splat(U32{6})
+    print("U32x4: {(U32{12} + u32).lane(0)} {(U32{12} - u32).lane(0)} {(U32{12} * u32).lane(0)} {(U32{12} / u32).lane(0)}")
+    i64: I64x2.splat(I64{6})
+    print("I64x2: {(I64{12} + i64).lane(0)} {(I64{12} - i64).lane(0)} {(I64{12} * i64).lane(0)} {(I64{12} / i64).lane(0)}")
+    u64: U64x2.splat(U64{6})
+    print("U64x2: {(U64{12} + u64).lane(0)} {(U64{12} - u64).lane(0)} {(U64{12} * u64).lane(0)} {(U64{12} / u64).lane(0)}")
 }

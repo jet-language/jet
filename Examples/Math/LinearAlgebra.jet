@@ -19,6 +19,11 @@ two_by_two: fn() {
     print(turn.determinant())
     back: turn.inverse() ?? Mat2.identity()
     print((turn * back).to_array())
+    // The operators have named twins, and the cells round-trip as an array.
+    print((turn - Mat2.identity()).to_array())
+    print(turn.matmul(turn).to_array() == (turn * turn).to_array())
+    print(turn.transform(Vec2.new(0.0, 1.0)).to_array())
+    print(Mat2.from_array(turn.to_array()).determinant())
 }
 
 three_by_three: fn() {
