@@ -509,6 +509,74 @@ semindex_declaration_ref: fn(name: String, span: Span, ctx: SemWalk, modules: [J
     SemRef{name: name, span: span, module_path: ctx.module_path, scope_identity: Val(semindex_active_scope(ctx)), target: target, fact: None}
 }
 
+// The names the written types of `doc_module` hold that name a declaration
+// (`value: Pattern`, `at: shapes.Point`). Each type node its walk recorded
+// from `first` on is read from its source text: a name the module declares
+// or an unqualified import brings in, and a name after the alias of a module
+// it imports, becomes a reference to that declaration. A name before `:`
+// labels a function type's parameter, and a span already referenced keeps
+// its row.
+semindex_type_refs: fn(db: &SemDB, doc_module: JetDriverDocModule, modules: [JetDriverDocModule], first: Int, scope: String) {
+    bytes: doc_module.source.bytes()
+    taken := [Int:Bool]{}
+    loop reference in db.refs {
+        if reference.module_path == doc_module.path -> taken[reference.span.start] = true
+    }
+    imported := [String:Bool]{}
+    aliases := [String:Bool]{}
+    loop import in doc_module.imports {
+        aliases[import.alias] = true
+        if import.kind == .Unqualified(_, _, items, _, _) {
+            loop item in items -> imported[item.alias ?? item.original] = true
+        }
+    }
+    last: db.nodes.len()
+    loop index in first..<last {
+        node: db.nodes[index]
+        if node.class != "type" -> next
+        end: if node.span.end < bytes.len() -> node.span.end else -> bytes.len()
+        at := node.span.start
+        qualifier := ""
+        loop at < end {
+            if !semindex_type_name_byte(bytes[at]) {
+                if bytes[at] != (U8{46}) -> qualifier = ""
+                at += 1
+                next
+            }
+            start: at
+            loop at < end && semindex_type_name_byte(bytes[at]) -> at += 1
+            following: if at < end -> bytes[at] else -> U8{0}
+            name: doc_module.source.slice(start, at)
+            if following == (U8{46}) {
+                qualifier = name
+                next
+            }
+            owner: qualifier
+            qualifier = ""
+            leading: bytes[start]
+            if following == (U8{58}) || (leading >= (U8{48}) && leading <= (U8{57})) || taken.has_key(start) -> next
+            target := SemAnchor?{None}
+            loop other in modules {
+                visible: if owner == "" -> other.path == doc_module.path || imported.has_key(name) else -> aliases.has_key(owner) && (other.alias == owner || semindex_module_alias(other) == owner)
+                if !visible -> next
+                anchor := semindex_declaration_kind(other.items, name) ?? next
+                anchor.module_path = other.path
+                target = Val(anchor)
+                if other.path == doc_module.path -> break
+            }
+            if target == None -> next
+            taken[start] = true
+            db.refs.push(SemRef{name: name, span: Span{start: start, end: at}, module_path: doc_module.path, scope_identity: Val(scope), target: target, fact: None})
+        }
+    }
+}
+
+// A byte of a name: an ASCII letter, digit or `_`, or a byte of a non-ASCII
+// character.
+semindex_type_name_byte: fn(byte: U8) -> Bool Never! {
+    (byte >= (U8{97}) && byte <= (U8{122})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{95}) || byte >= (U8{128})
+}
+
 semindex_state_marker_path: fn(tables: ASTTables, expr: ExprNode) -> NamedSpan? {
     if ast_expr(tables, expr) == {
         .Ident(name, span, _) -> return Val(NamedSpan{name: name, span: span})
@@ -2868,7 +2936,9 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
             local_types: semindex_local_types(doc_module),
             local_stages: semindex_local_stages(doc_module, summaries, interner),
         }
+        first_node: db.nodes.len()
         loop item in doc_module.items -> semindex_item(item, db, ctx, modules)
+        semindex_type_refs(db, doc_module, modules, first_node, ctx.scope_identity)
         semindex_apply_inferred_rows(db, doc_module, summaries)
     }
     semindex_import_alias_defs(db, modules)
