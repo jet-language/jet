@@ -668,7 +668,7 @@ marker_group_at: fn(source: [U8], start: Int) -> MarkerGroup? {
             index = skip_layout(source, index + 1)
         }
         if !identifier_start_at(source, index) -> return None
-        name_end: identifier_end(source, index)
+        name_end: marker_name_end(source, index)
         is_unsafe: span_text(source, index, name_end) == "Unsafe"
         index = skip_layout(source, name_end)
         reason := String?{None}
@@ -702,23 +702,36 @@ skip_bare_marker: fn(source: [U8], start: Int) -> Int {
     index := skip_layout(source, start + 1)
     if byte_at(source, index) == BANG -> index = skip_layout(source, index + 1)
     if !identifier_start_at(source, index) -> return -1
-    index = skip_layout(source, identifier_end(source, index))
+    index = skip_layout(source, marker_name_end(source, index))
     if byte_at(source, index) != OPEN_PAREN -> return index
     end: skip_balanced(source, index, OPEN_PAREN, CLOSE_PAREN)
     if end > index && byte_at(source, end - 1) == CLOSE_PAREN -> end else -> -1
+}
+
+// The end of the marker name at `index`: an identifier, or a dotted path of
+// them (`#[Builtin.Role(.Copy), Unsafe("…")]`, `#Lib.Fast`).
+marker_name_end: fn(source: [U8], index: Int) -> Int {
+    end := identifier_end(source, index)
+    loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) -> end = identifier_end(source, end + 1)
+    end
 }
 
 fn_keyword_at: fn(source: [U8], index: Int) -> Bool {
     byte_at(source, index) == 102 && byte_at(source, index + 1) == 110 && !identifier_char_at(source, index + 2)
 }
 
-// A `name: fn`, `pub name: fn` or `Owner.name: fn` declaration head at `index`:
-// the offset of its `fn` keyword, or -1.
-colon_fn_at: fn(source: [U8], index: Int) -> Int {
-    start := index
-    if bytes_at(source, start, "pub") && !identifier_char_at(source, start + 3) {
-        start = skip_layout(source, start + 3)
+// `index`, or past a `pub` or `priv` word there and the layout after it.
+past_visibility: fn(source: [U8], index: Int) -> Int {
+    if (bytes_at(source, index, "pub") && !identifier_char_at(source, index + 3)) || (bytes_at(source, index, "priv") && !identifier_char_at(source, index + 4)) {
+        return skip_layout(source, identifier_end(source, index))
     }
+    index
+}
+
+// A `name: fn`, `pub name: fn`, `priv name: fn` or `Owner.name: fn`
+// declaration head at `index`: the offset of its `fn` keyword, or -1.
+colon_fn_at: fn(source: [U8], index: Int) -> Int {
+    start: past_visibility(source, index)
     if !identifier_start_at(source, start) -> return -1
     end := identifier_end(source, start)
     loop byte_at(source, end) == DOT && identifier_start_at(source, end + 1) {
@@ -1383,7 +1396,7 @@ scan_corelib_source: fn(source: [U8], file: String, result: ^CoreLibScan) {
         if !identifier_char_before(code, index) && byte_at(code, index - 1) != DOT && identifier_start_at(code, index) {
             keyword: if fn_keyword_at(code, index) -> -1 else -> colon_fn_at(code, index)
             if keyword >= 0 {
-                name_start: if bytes_at(code, index, "pub") && !identifier_char_at(code, index + 3) -> skip_layout(code, index + 3) else -> index
+                name_start: past_visibility(code, index)
                 has_pending = true
                 pending_name = span_text(code, name_start, identifier_end(code, name_start))
                 pending_unsafe = next_function_unsafe
@@ -1976,9 +1989,9 @@ audited: fn(text: String) -> CoreLibScan {
 }
 
 #Test("blocks and function markers are regions; comments, text and interpolated reasons are not") {
-    source: "// #Unsafe(\"comment\") {{}}\na: fn() {{\n    s: \"#Unsafe(\\\"text\\\") {{}}\"\n    é #Unsafe(\"block \\\"one\\\" {{{{x}}}}\") {{ }}\n}}\n#Unsafe(reason: \"marked\")\n#Inline\nb: fn() {{}}\n#Unsafe(\"x{{y}}\") {{}}\n#[Unsafe(\"grouped\"), Inline] c: fn() {{}}\n#[Unsafe(\"one\"), Unsafe(\"two\")] d: fn() {{}}\n#Unsafe(\"no body\")\nlet x = 1\n"
+    source: "// #Unsafe(\"comment\") {{}}\na: fn() {{\n    s: \"#Unsafe(\\\"text\\\") {{}}\"\n    é #Unsafe(\"block \\\"one\\\" {{{{x}}}}\") {{ }}\n}}\n#Unsafe(reason: \"marked\")\n#Inline\nb: fn() {{}}\n#Unsafe(\"x{{y}}\") {{}}\n#[Unsafe(\"grouped\"), Inline] c: fn() {{}}\n#[Unsafe(\"one\"), Unsafe(\"two\")] d: fn() {{}}\n#[Builtin.Role(.Copy), Unsafe(\"dotted\")] e: fn() {{}}\n#Unsafe(\"no body\")\nlet x = 1\n"
     regions: scanned(source, "a.jet")
-    assert_eq(regions.len(), 3)
+    assert_eq(regions.len(), 4)
     assert_eq(regions[0].line, 4)
     assert_eq(regions[0].column, 7)
     assert_eq(regions[0].reason, "block \"one\" {{x}}")
@@ -1986,6 +1999,8 @@ audited: fn(text: String) -> CoreLibScan {
     assert_eq(regions[1].reason, "marked")
     assert_eq(regions[2].line, 10)
     assert_eq(regions[2].reason, "grouped")
+    assert_eq(regions[3].line, 12)
+    assert_eq(regions[3].reason, "dotted")
 }
 
 #Test("nested block comments and unterminated text end the scan cleanly") {

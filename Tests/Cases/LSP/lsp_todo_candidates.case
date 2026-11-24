@@ -1,0 +1,24 @@
+# A `#Todo` goal lists the same ranked in-scope candidates in `jet check`
+# and in the editor's hover on the goal: locals nearest first, then
+# parameters, then the module's own functions and then imported ones.
+fixture: LSPTodoCandidates.fixture
+step: jet check run.jet
+exit: 0
+stdout: ~ "Expected type: Point" # the last line's goal is the return type, by its name
+stdout: ~ "Candidates: moved, first, start, home(), midpoint(…), origin()" # `count`, `norm` and `shift` do not fit
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.hoverProvider = true
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/geometry.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"Point: struct {\\n    x: Int,\\n    y: Int,\\n}\\n\\norigin: fn() -> Point { Point{x: 0, y: 0} }\\n\\nmidpoint: fn(a: Point, b: Point) -> Point { Point{x: (a.x + b.x) /% 2, y: (a.y + b.y) /% 2} }\\n\\nnorm: fn(p: Point) -> Int { p.x + p.y }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use geometry\\nuse geometry.[Point, midpoint, norm, origin]\\n\\nhome: fn() -> Point { Point{x: 1, y: 1} }\\n\\nshift: fn(start: Point, steps: Int) -> Point {\\n    first: Point{x: start.x + steps, y: start.y}\\n    count: steps * 2\\n    moved: Point{x: first.x, y: count}\\n    if steps > 0 -> return moved\\n    #Todo\\n}\\n\\nrun: fn() {\\n    print(shift(home(), 3).x + norm(midpoint(home(), origin())))\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":10,\"character\":6}}}"
+recv lsp collect until ndjson $[?id=2] #>= 1
+json: stdout ndjson $[?id=2][0].result.contents.value ~ "Goal: `Point`" # the hover names the goal type
+json: stdout ndjson $[?id=2][0].result.contents.value ~ "Candidates: `moved`, `first`, `start`, `home()`, `midpoint(" # the checker's candidates, in its order
+json: stdout ndjson $[?id=2][0].result.contents.value ~ "`, `origin()`" # the imported function comes last
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0

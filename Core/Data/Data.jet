@@ -442,6 +442,10 @@ Query: struct<T> {
         Query<T>{__steps: query_steps(self.__steps, "limit"), __one_shot: self.__one_shot, __limits: self.__limits.copy(), __state: self.__state.copy(), __cell: self.__cell.copy(), __take: Val(most)}
     }
 
+    // The steps the query runs, from its source on (`"scan"`, `"filter"`,
+    // `"sql"`, …).
+    plan: fn(self) -> [String] Never! { self.__steps.copy() }
+
     // Grouped row counts over an `Int` key: runs a single SQL `GROUP BY` query
     // when `column` names a table's field column and the source supports SQL
     // grouping, otherwise reads the query's rows and counts in memory.
@@ -565,6 +569,9 @@ DataGroupedQuery: struct<T, K> {
 
 DataTracked: struct<T, K> {
     snapshot: DataSnapshot<[T]>,
+
+    // A reusable scan of the tracked snapshot rows.
+    query: fn(self) -> Query<T> Never! { __query_tracked<T, K>(self) }
 }
 
 DataWatch: struct<T> {
@@ -1247,8 +1254,6 @@ priv stream_windows_ready: fn<K, T>(keys: [K], pending: ^[PendingWindow<T>], wid
     query_make<T>([String]{"track"}, false, DataLimits.safe(), fn() { Ok(tracked.snapshot.value.copy()) })
 }
 
-#Builtin.Role(.QueryPlan) priv __query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
-
 #Builtin.Role(.QueryCollect) priv __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
     rows: query_rows<T>(query) ?? return Err(err)
     limits: query.__limits.copy()
@@ -1677,7 +1682,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
 #Test("deferred queries filter, sort, map and group rows in key order") {
     rows: __query_test_sales()
     big: __query_filter<QueryTestSale>(query<QueryTestSale>(rows), "", [String]{}, fn(sale) { sale.cents >= 80 })
-    assert_eq(__query_plan<QueryTestSale>(big), [String]{"scan", "filter"})
+    assert_eq(big.plan(), [String]{"scan", "filter"})
     sorted: __query_collect<QueryTestSale>(__query_sort_by<QueryTestSale>(big, fn(sale) { sale.item })) ?? panic("sort_by")
     assert_eq(sorted.len(), 3)
     assert_eq(sorted[0].item, "apps")
@@ -1720,7 +1725,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
     cheap: __query_filter<QueryTestSale>(source, "price < CAST(? AS INTEGER)", [String]{"100"}, fn(sale) { sale.cents < 100 })
     core: __query_filter<QueryTestSale>(cheap, "item = ?", [String]{"core"}, fn(sale) { sale.item == "core" })
     loose: __query_filter<QueryTestSale>(core, "", [String]{}, fn(sale) { sale.cents > 50 })
-    assert_eq(__query_plan<QueryTestSale>(loose), [String]{"table", "filter", "filter", "filter"})
+    assert_eq(loose.plan(), [String]{"table", "filter", "filter", "filter"})
     rows: __query_collect<QueryTestSale>(loose) ?? panic("the narrowed query collects")
     assert_eq(rows.len(), 1)
     assert_eq(rows[0].cents, 90)
@@ -1733,7 +1738,7 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
     rows: __query_test_sales()
     big: __query_filter<QueryTestSale>(query<QueryTestSale>(rows), "", [String]{}, fn(sale) { sale.cents >= 80 })
     first: big.limit(2)
-    assert_eq(__query_plan<QueryTestSale>(first), [String]{"scan", "filter", "limit"})
+    assert_eq(first.plan(), [String]{"scan", "filter", "limit"})
     kept: __query_collect<QueryTestSale>(first) ?? panic("the limited query collects")
     assert_eq(kept.len(), 2)
     assert_eq(kept[0].item, "tools")
@@ -1747,9 +1752,9 @@ priv __query_test_sales: fn() -> [QueryTestSale] Never! {
         seen.value.push("{condition} {values.join(",")}")
         Ok(__query_test_sales())
     })
-    core: __query_filter<QueryTestSale>(source.limit(2), "item = ?", [String]{"core"}, fn(sale) { sale.item == "core" })
-    assert_eq(__query_plan<QueryTestSale>(core), [String]{"table", "limit", "filter"})
-    found: __query_collect<QueryTestSale>(core) ?? panic("a filter after a limit collects")
+    narrowed: __query_filter<QueryTestSale>(source.limit(2), "item = ?", [String]{"core"}, fn(sale) { sale.item == "core" })
+    assert_eq(narrowed.plan(), [String]{"table", "limit", "filter"})
+    found: __query_collect<QueryTestSale>(narrowed) ?? panic("a filter after a limit collects")
     assert_eq(found.len(), 1)
     assert_eq(found[0].cents, 40)
     assert_eq(asked.guard_read().value, [String]{" "})

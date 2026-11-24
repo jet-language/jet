@@ -140,8 +140,8 @@ const web = [
     entry: `query${i}_main`, helpers: [],
     lines: [
       `Query${i}: struct {`, '    table: String,', '    filters: [String],', '    limit: Int,', '    order: String', '}', '',
-      `impl Query${i} {`, '    where_eq: fn(&self, column: String, value: Int) { self.filters.push("{column} = {value}") }', '',
-      '    order_by: fn(&self, column: String) { self.order = column }', '',
+      `impl Query${i} {`, '    where_eq: fn(^self, column: String, value: Int) { self.filters.push("{column} = {value}") }', '',
+      '    order_by: fn(^self, column: String) { self.order = column }', '',
       '    to_sql: fn(self) -> String {', '        clause := ""', '        loop (index, filter) in self.filters {',
       '            clause = if index == 0 -> "WHERE {filter}" else -> "{clause} AND {filter}"', '        }',
       '        "SELECT * FROM {self.table} {clause} ORDER BY {self.order} LIMIT {self.limit}"', '    }', '}', '',
@@ -446,7 +446,7 @@ const embedded = [
     entry: `ring${i}_main`, helpers: [],
     lines: [
       `Ring${i}: struct {`, '    data: [Int#16],', '    head: Int,', '    count: Int', '}', '',
-      `impl Ring${i} {`, '    push: fn(&self, value: Int) {', '        self.data[(self.head + self.count) % 16] = value', '        if self.count < 16 -> self.count += 1 else -> self.head = (self.head + 1) % 16', '    }', '',
+      `impl Ring${i} {`, '    push: fn(^self, value: Int) {', '        self.data[(self.head + self.count) % 16] = value', '        if self.count < 16 -> self.count += 1 else -> self.head = (self.head + 1) % 16', '    }', '',
       '    sum: fn(self) -> Int {', '        total := 0', '        loop k in 0..<self.count -> total += self.data[(self.head + k) % 16]', '        total', '    }', '}', '',
       `ring${i}_main: fn(seed: Int) -> Int {`, `    ring := Ring${i}{data: [Int#16]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, head: 0, count: 0}`,
       `    loop k in 0..<${r.int(10, 30)} -> ring.push((seed + k * ${r.int(3, 11)}) % 256)`, `    (ring.sum() + ${helper('seed')}) % ${M}`, '}',
@@ -678,7 +678,7 @@ const generatedKinds = [
       entry: `accessors${i}_main`, helpers: [],
       lines: [
         `// Generated accessors ${i}; do not edit.`, `Record${i}: struct {`, ...fields.map(f => `    ${f}: Int,`), '}', '',
-        `impl Record${i} {`, ...fields.flatMap(f => [`    get_${f}: fn(self) -> Int { self.${f} }`, `    set_${f}: fn(&self, value: Int) { self.${f} = value }`]), '}', '',
+        `impl Record${i} {`, ...fields.flatMap(f => [`    get_${f}: fn(self) -> Int { self.${f} }`, `    set_${f}: fn(^self, value: Int) { self.${f} = value }`]), '}', '',
         `accessors${i}_main: fn(seed: Int) -> Int {`, `    record := Record${i}{${fields.map((f, k) => `${f}: ${k}`).join(', ')}}`, ...fields.map((f, k) => `    record.set_${f}(seed + ${k})`),
         `    (${fields.map(f => `record.get_${f}()`).join(' + ')} + ${helper('seed')}) % ${M}`, '}',
       ],

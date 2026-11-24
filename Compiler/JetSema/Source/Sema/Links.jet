@@ -127,7 +127,7 @@ sema_link_check_write_access: fn(target_base: Expr, scopes: SemaScopeTable, span
     binding: scopes.bindings[binding_index]
     if binding.mutable || binding.access == AccessConvention.Write -> return true
     why: "read access is transitive across `@T` links, so an immutable binding or unmarked parameter cannot mutate targets reached through it"
-    fix: if binding.symbol.kind == SymbolKind.Parameter -> "mark the parameter writable: `{root_name}: &{type_name(binding.symbol.ty ?? Type.Named{name: "T"})}`" else -> "declare `{root_name}` with `:=` to allow writes through this link"
+    fix: if binding.symbol.kind == SymbolKind.Parameter -> "mark the parameter writable: `{root_name}: ^{type_name(binding.symbol.ty ?? Type.Named{name: "T"})}`" else -> "declare `{root_name}` with `:=` to allow writes through this link"
     diagnostics.push(sema_error("E0205", span, "cannot write through read-only live link `{root_name}`", why, fix))
     false
 }
@@ -248,7 +248,7 @@ Player: struct {
 }
 
 read_hp: fn(p: @Player) -> Int { p.hp + p.get_hp() }
-heal: fn(p: &@Player, n: Int) { p.hp = p.hp + n }
+heal: fn(p: ^@Player, n: Int) { p.hp = p.hp + n }
 
 demo: fn() -> Bool {
     hero := @Player{hp: 10}

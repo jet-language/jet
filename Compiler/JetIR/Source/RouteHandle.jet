@@ -31,39 +31,7 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
             symbol := if is_float -> "jet_duration_from_float" else -> "jet_duration_from_int"
             return Val(ir_handle_h(symbol, [Bool]{false, false}))
         }
-        .FileReaderReadLine -> return Val(ir_handle_h("jet_std_file_reader_read_line", [Bool]{true}))
-        .FileReaderRead(into) -> return Val(if into -> ir_handle_h("jet_std_file_reader_read_into", [Bool]{true, true, false}) else -> ir_handle_h("jet_std_file_reader_read", [Bool]{true, false}))
-        .FileReaderSeek -> return Val(ir_handle_h("jet_std_file_reader_seek", [Bool]{true, false}))
-        .FileReaderPath -> return Val(ir_handle_h("jet_std_file_reader_path", [Bool]{true}))
-        .MappedFileWindow -> return Val(ir_handle_h("jet_std_fs_map_window_view", [Bool]{true, true, true}))
-        .MappedFileWindowLen -> return Val(ir_handle_h("jet_std_fs_map_window_len_view", [Bool]{true, true, true}))
-        .MappedFileLen -> return Val(ir_handle_h("jet_std_fs_map_len", [Bool]{true}))
-        .MappedFileIsEmpty -> return Val(ir_handle_h("jet_std_fs_map_is_empty", [Bool]{true}))
-        .FileWriterWriteLine -> return Val(ir_handle_h("jet_std_file_writer_write_line", [Bool]{true, true}))
-        .FileWriterFlush -> return Val(ir_handle_h("jet_std_file_writer_flush", [Bool]{true}))
-        .FileWriterWriteAll -> return Val(ir_handle_h("jet_std_file_writer_write_all", [Bool]{true, true}))
-        .FileWriterFsync -> return Val(ir_handle_h("jet_std_file_writer_fsync", [Bool]{true}))
-        .FileWriterPath -> return Val(ir_handle_h("jet_std_file_writer_path", [Bool]{true}))
-        .JSONLReaderNext -> return Val(ir_handle_h("jet_enc_jsonl_reader_next", [Bool]{true}))
-        .JSONLWriterWrite -> return Val(ir_handle_h("jet_enc_jsonl_writer_write", [Bool]{true, false}))
-        .JSONLWriterFlush -> return Val(ir_handle_h("jet_enc_jsonl_writer_flush", [Bool]{true}))
-        .JSONLWriterFinish -> return Val(ir_handle_h("jet_enc_jsonl_writer_finish", [Bool]{true}))
         .DataStreamNext -> return Val(ir_handle_h("jet_data_stream_next", [Bool]{true}))
-        .XMLReaderNext -> return Val(ir_handle_h("jet_enc_xml_reader_next", [Bool]{true}))
-        .XMLWriterWrite -> return Val(ir_handle_h("jet_enc_xml_writer_write", [Bool]{true, false}))
-        .XMLWriterFlush -> return Val(ir_handle_h("jet_enc_xml_writer_flush", [Bool]{true}))
-        .XMLWriterFinish -> return Val(ir_handle_h("jet_enc_xml_writer_finish", [Bool]{true}))
-        .StdinReadLine -> return Val(ir_handle_h("jet_std_io_stdin_read_line", [Bool]{true}))
-        .StdoutWrite -> return Val(ir_handle_h("jet_std_io_stdout_write", [Bool]{true, true}))
-        .StdoutWriteLine -> return Val(ir_handle_h("jet_std_io_stdout_write_line", [Bool]{true, true}))
-        .StdoutWriteBytes -> return Val(ir_handle_h("jet_std_io_stdout_write_bytes", [Bool]{true, true}))
-        .StdoutFlush -> return Val(ir_handle_h("jet_std_io_stdout_flush", [Bool]{true}))
-        .StdoutIsTTY -> return Val(ir_handle_h("jet_std_io_stdout_is_tty", [Bool]{true}))
-        .StderrWrite -> return Val(ir_handle_h("jet_std_io_stderr_write", [Bool]{true, true}))
-        .StderrWriteLine -> return Val(ir_handle_h("jet_std_io_stderr_write_line", [Bool]{true, true}))
-        .StderrWriteBytes -> return Val(ir_handle_h("jet_std_io_stderr_write_bytes", [Bool]{true, true}))
-        .StderrFlush -> return Val(ir_handle_h("jet_std_io_stderr_flush", [Bool]{true}))
-        .StderrIsTTY -> return Val(ir_handle_h("jet_std_io_stderr_is_tty", [Bool]{true}))
         .TestSuiteRun -> return Val(ir_handle_h("jet_test_suite_run", [Bool]{true}))
         .TestSetting -> return Val(ir_handle_h("jet_test_setting", [Bool]{true, true, true}))
         .RealtimeNextDeadline -> return Val(ir_handle_h("jet_rt_next_deadline", [Bool]{true}))
@@ -91,16 +59,6 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
         .ProcessStdinWriteAll -> return Val(ir_handle_h("jet_process_stdin_write_all", [Bool]{true, true}))
         .ProcessStdoutRead -> return Val(ir_handle_h("jet_process_stdout_read", [Bool]{true, false}))
         .ProcessStderrRead -> return Val(ir_handle_h("jet_process_stderr_read", [Bool]{true, false}))
-        .PathFrom -> return Val(ir_handle_h("jet_path_from", [Bool]{true}))
-        .PathToString -> return Val(ir_handle_h("jet_path_to_string", [Bool]{true}))
-        .PathHome -> return Val(ir_handle_h("jet_path_home", [Bool]{}))
-        .PathJoin -> return Val(ir_handle_h("jet_path_join", [Bool]{true, true}))
-        .PathParent -> return Val(ir_handle_h("jet_path_parent", [Bool]{true}))
-        .PathExtension -> return Val(ir_handle_h("jet_path_extension", [Bool]{true}))
-        .PathStem -> return Val(ir_handle_h("jet_path_stem", [Bool]{true}))
-        .PathNormalize -> return Val(ir_handle_h("jet_path_normalize", [Bool]{true}))
-        .PathIsWithin -> return Val(ir_handle_h("jet_path_is_within", [Bool]{true, true}))
-        .PathWalk -> return Val(ir_handle_h("jet_path_walk", [Bool]{true}))
         .ReaderOver(owned) -> {
             symbol := if owned -> "jet_reader_over_owned" else -> "jet_reader_over"
             mask := if owned -> [Bool]{false, false} else -> [Bool]{true, false}
@@ -142,6 +100,6 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
         // ir_task_control) and every channel endpoint method
         // (ir_channel_method) before it asks for a route.
         .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .SenderSend | .ChannelClose -> return None
-        .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TaskJoin | .EventMethod(_) | .LayoutMethod(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
+        .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TaskJoin | .EventMethod(_) | .LayoutMethod(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
     }
 }

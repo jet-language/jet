@@ -1373,7 +1373,7 @@ sema_expression_enum_constructor_unmarked: fn(conventions: [AccessConvention], e
 sema_expression_enum_constructor_taken: fn(display: String, label: String, ty: Type, span: Span) -> Diagnostic {
     slot: if label == "" -> "payload" else -> "payload field `{label}`"
     direct: if label == "" -> "{display}(…)" else -> "{display}{{…}}"
-    sema_error("E0227", span, "`{display}` can't be used as a function value here because it takes its {slot} (`&&{type_name(ty)}`)", "`{type_name(ty)}` can't be copied out of a read parameter into the variant, so the constructor takes it, and a function type gives each parameter plain read access unless it marks a take (`fn(^^T)`)", "mark the parameter in the function type (`fn(&&{type_name(ty)})`), or build the case directly with `{direct}`")
+    sema_error("E0227", span, "`{display}` can't be used as a function value here because it takes its {slot} (`^^{type_name(ty)}`)", "`{type_name(ty)}` can't be copied out of a read parameter into the variant, so the constructor takes it, and a function type gives each parameter plain read access unless it marks a take (`fn(^^T)`)", "mark the parameter in the function type (`fn(^^{type_name(ty)})`), or build the case directly with `{direct}`")
 }
 
 // A variant of a Core enum without a loaded declaration: unit variants take no

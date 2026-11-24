@@ -58,7 +58,7 @@ sema_ownership_report_static_write: fn(state: ^SemaOwnershipState, place: SemaOw
         return
     }
     name: sema_ownership_place_name(place)
-    sema_ownership_push_once(sema_error("E0223", span, "A mutable borrow of `{name}` cannot escape its persistent or static storage cell", "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell.", "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{name}` with `&` or using a mutating receiver."), diagnostics)
+    sema_ownership_push_once(sema_error("E0223", span, "A mutable borrow of `{name}` cannot escape its persistent or static storage cell", "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell.", "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{name}` with `^` or using a mutating receiver."), diagnostics)
 }
 
 // Rust `reject_partial_static_move`: an exact move of one projection of a

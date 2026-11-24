@@ -1,9 +1,11 @@
 // A TypeInfo lists the associated constants its traits give, with their
-// values; the generic bindings of a type named with its arguments; and, for
-// a number type, its signedness and width in bits. A marker body, a comptime
-// constant, ordinary code and fn build read them the same way. `Square`
-// gives `sides` and leaves `label` to the trait's default. `Pair` named
-// alone binds nothing, and a type that is not a number has no `numeric`.
+// values; its identity lists the generic bindings of a type named with its
+// arguments and says what kind of type it is: a number's kind holds its
+// signedness and a `bits` binding its width, and a distinct type binds its
+// `base`. A marker body, a comptime constant, ordinary code and fn build
+// read them the same way. `Square` gives `sides` and leaves `label` to the
+// trait's default. `Pair` named alone binds nothing, and a type that is not
+// a number has no numeric form.
 Shape: trait {
     sides: Int,
     label: String{"shape"},
@@ -51,15 +53,27 @@ constants: fn(info: TypeInfo) -> String {
 }
 
 bindings: fn(info: TypeInfo) -> String {
-    if info.generic_bindings.len() == 0 -> return "none"
-    (loop binding in info.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+    if info.identity.generic_bindings.len() == 0 -> return "none"
+    (loop binding in info.identity.generic_bindings -> "{binding.name} = {binding.type.name}").join(", ")
+}
+
+// A number's form, read off its TypeId; a distinct type reads its base's.
+numeric_form: fn(id: TypeId) -> String {
+    if id.kind == .Distinct {
+        loop binding in id.generic_bindings {
+            if binding.name == "base" -> return numeric_form(binding.type)
+        }
+    }
+    if id.kind == .Number(signed, float) {
+        loop binding in id.generic_bindings {
+            if binding.name == "bits" -> return "signed={signed} bits={binding.size ?? 0} float={float}"
+        }
+    }
+    "none"
 }
 
 numeric: fn(info: TypeInfo) -> String {
-    if info.numeric == {
-        Val(form) -> "signed={form.signed} bits={form.bits} float={form.is_float}"
-        None -> "none"
-    }
+    numeric_form(info.identity)
 }
 
 CONSTANTS: #run constants(Square.reflect())

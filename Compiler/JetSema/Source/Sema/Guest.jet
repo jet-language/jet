@@ -393,7 +393,7 @@ sema_guest_runtime_param: fn(convention: AccessConvention, ty: Type) -> Bool Nev
 sema_guest_check_runtime_binding: fn(function: Func, diagnostics: ^[Diagnostic]) -> Bool Never! {
     valid := true
     why: "a jet.runtime function crosses the runtime's route carriers"
-    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those, a View of a scalar, or a written (`&`) handle or List of scalars; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
+    fix: "use Int, a machine integer, Float, Bool, String, a Core type the runtime holds as a handle, or a List of those, a View of a scalar, or a written (`^`) handle or List of scalars; a result may also be an Option of one or of a tuple, a tuple of those and Options of them, or `T E!` with a carried, Option or Unit success and the default Err or a handle error"
     loop param in function.params {
         if !sema_guest_runtime_param(param.convention, param.ty) {
             diagnostics.push(sema_error("E3203", param.ty_span, "`{type_name(param.ty)}` is not a runtime carrier for the parameter `{param.name}` of `{function.name}`", why, fix))

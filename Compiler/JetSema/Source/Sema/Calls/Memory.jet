@@ -673,14 +673,14 @@ sema_call_try_memory_method: fn(receiver: Expr, receiver_value: TExpr, method: S
 // elements (at T's List stride) or `n` bytes on, of the same type. A step
 // can leave the storage `p` names, so it is E3101 outside `#Unsafe`; the
 // sentry checks the new pointer where it is read or written. The method is
-// checked as a call of core.mem's reserved `__ptr_offset<T>` /
-// `__ptr_byte_offset<T>`, which the compiler builds inline.
+// checked as a call of the core.mem function that fills the InlinePtrOffset
+// / InlinePtrByteOffset role, which the compiler builds inline.
 sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
-    member: if method == {
-        "offset" -> "__ptr_offset"
-        "byte_offset" -> "__ptr_byte_offset"
+    role: if method == {
+        "offset" -> "InlinePtrOffset"
+        "byte_offset" -> "InlinePtrByteOffset"
         else -> {
             return unhandled
         }
@@ -696,11 +696,16 @@ sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method
         diagnostics.push(sema_call_arity_diagnostic(method, 1, args.len(), false, span))
         return rejected
     }
-    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? {
+    if sema_call_core_module_identity(environment, program, "core.mem") == None {
         diagnostics.push(sema_error("E3102", span, "`{method}` on a raw pointer is part of the low-level tier", "stepping a `Ptr` needs the discovery gate", "add `use core.mem;`"))
         return rejected
     }
-    target: sema_call_core_source_target(environment, program, identity, member, [Type]{element.copy()}, span, true, diagnostics) ?? return rejected
+    graph: program.registration_graph ?? return rejected
+    filler: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return rejected
+    }
+    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{element.copy()}, span, true, diagnostics) ?? return rejected
     call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     loop argument in args -> call_args.push(argument.copy())
     scopes.ownership_call_depth += 1

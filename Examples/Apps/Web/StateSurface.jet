@@ -28,6 +28,12 @@ Row: struct {
     active: Bool,
 }
 
+// The model of the hand-built typed form in `form_surface`.
+Profile: struct {
+    name: String,
+    note: String,
+}
+
 rows: fn() -> [Row] {
     [Row]{
         Row{id: 1, name: "Ada", active: true},
@@ -176,7 +182,7 @@ form_surface: fn() (Err | WebFormActionError | WebFormError)! {
     _excluded: forms.input_exclude(input0, "name")
     _grouped: forms.input_group(input0, "name", "profile")
     _replaced: forms.input_replace(input0, "name", replacement)
-    typed := forms.typed(input0, "save") ?? panic("typed form")
+    typed := forms.typed<Profile>(input0, "save") ?? panic("typed form")
 
     _set: forms.typed_set(typed, "name", "Ada")
     _blur: forms.typed_blur(typed, "name")

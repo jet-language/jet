@@ -102,6 +102,7 @@ use {
         pipe_value_name,
         checked_symbol_local,
         type_identity_equal,
+        type_identity_unqualified_nominals,
         type_name,
         type_structural_family,
         type_structural_head_names,
@@ -4572,8 +4573,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
         route := sema_call_try_http_router(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if route.handled -> return route
     }
-    web_form := sema_call_try_web_form_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if web_form.handled -> return web_form
     layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if layout.handled -> return layout
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5019,10 +5018,7 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, diagnostics) {
         return None
     }
-    if method == "routes" {
-        _ := sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, environment, program, diagnostics)
-        sema_call_app_route_root(receiver, receiver_value, args, method_span, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
+    if method == "routes" -> sema_call_app_route_root(receiver, receiver_value, args, method_span, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" {
         sema_call_app_browser_feature(receiver_value, method, method_span, environment, program, context.function_name, diagnostics)
     }
@@ -7500,11 +7496,13 @@ sema_expr_has_literal_hook: fn(environment: SemaScopeEnvironment, program: SemaP
 
 // An unconstrained goal continues as Int, but its goal row's card still says
 // "(unknown)". Consumers read the function's checked goal rows, never infer a
-// type from the source spelling. `line` is the goal's source line, which its
-// E3011 stop names.
-sema_expression_todo: fn(expected: Type?, span: Span, line: Int, context: ^SemaCheckContext) -> TExpr? Never! {
-    card: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
-    context.typed_goals.push(TTypedGoal{span: span, expected: card})
+// type from the source spelling. The card writes a nominal by its name, not
+// its module identity. `line` is the goal's source line, which its E3011
+// stop names; `candidates` are the in-scope names that fit the goal
+// (sema_todo_candidates).
+sema_expression_todo: fn(expected: Type?, span: Span, line: Int, candidates: [String], context: ^SemaCheckContext) -> TExpr? Never! {
+    card: if expected == .Val(ty) -> type_name(type_identity_unqualified_nominals(ty)) else -> "(unknown)"
+    context.typed_goals.push(TTypedGoal{span: span, expected: card, candidates: candidates})
     Val(sema_node(context, expected ?? Type.Int, NodeKind.Never{reason: "todo", line: line}, span))
 }
 
@@ -7643,7 +7641,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
         .Try(value, span, conversion, note, try_id) -> sema_expression_try(value, span, conversion, note, try_id, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .If(condition, then_body, then_value, else_body, else_value, span, _) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Lambda(lambda, _) -> sema_expression_lambda(lambda, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Todo(span, _, _) -> sema_expression_todo(expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, context)
+        .Todo(span, _, _) -> sema_expression_todo(expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, sema_todo_candidates(expected, environment, scopes), context)
         .NoElse(span, _) -> Val(sema_node(context, expected ?? Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm", line: 0}, span))
         .RawOf(value, span, _) -> {
             forbidden := context.unsafe_depth == 0
@@ -8311,6 +8309,12 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
         if sema_expr_type_id_written(expr, environment, program) == .Val(found) {
             return sema_check_expression_recorded(expr, sema_expr_expected(found, expected, environment, program, diagnostics), program, context)
         }
+    }
+    // A field selector (`.carrier`) where a `FieldRef<M, T>` is expected
+    // names `M`'s field (sema_field_ref_check).
+    if expected == .Val(.Apply(wanted, _)) && wanted.ends_with("FieldRef") {
+        field_ref: sema_field_ref_check(expr, expected, environment, program, scopes, context, diagnostics)
+        if field_ref.handled -> return sema_check_expression_recorded(expr, field_ref.value, program, context)
     }
     // Only a bare member chain can be handled there; testing that here keeps
     // the chain check's frame off every other expression level.

@@ -37766,9 +37766,9 @@ from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 // ir_core_intrinsics); these bodies are what a compiler without that table
 // runs. Core's bit work (copysign, round_even, exp, ln, sin, cos, pow, ...)
 // stays in I64 through them.
-priv __to_bits_i64: fn(n: Float) -> I64 Never! { I64{to_bits(n)} }
+#Builtin.Role(.InlineFloatBits) priv __to_bits_i64: fn(n: Float) -> I64 Never! { I64{to_bits(n)} }
 
-priv __from_bits_i64: fn(bits: I64) -> Float Never! { from_bits(Int{bits}) }
+#Builtin.Role(.InlineFloatFromBits) priv __from_bits_i64: fn(bits: I64) -> Float Never! { from_bits(Int{bits}) }
 
 // A whole t with |t| < 2^51 as an I64: t + 0x1.8p52 is exact, and its bits
 // are 0x1.8p52's plus t.

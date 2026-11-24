@@ -45,7 +45,6 @@
 // size of the library.
 use {
     jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
-    jet_ir.[IR_CORE_INTRINSICS]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -729,12 +728,13 @@ JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 // `names` holds its CORE_CALLS members (only the `__` ones in a routed
 // module, whose public members are called by their spelling): the compiler
 // may call a registry member by a name the program never spells
-// (`form.validate` runs `typed_validate_field`). It holds too the source
+// (`web.form(Model, …)` runs `core.web.forms.typed`). It holds too the source
 // targets a row names in place of its member, its BUILTIN_METHOD_ROWS
-// CoreSource helpers, its IR_CORE_INTRINSICS rows and its
-// JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route adds, in a module that
-// isn't routed, every `__` name. A routed module's F32-width source is
-// called by its member's spelling (jet_driver_core_f32_member).
+// CoreSource helpers and its JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route
+// adds, in a module that isn't routed, every `__` name. A routed module's
+// F32-width source is called by its member's spelling
+// (jet_driver_core_f32_member). A builder intrinsic needs no route: the role
+// marker it carries keeps it (jet_driver_reach_lazy_func).
 JetDriverCoreRoutes: struct {
     module_name: String,
     routed: Bool,
@@ -763,9 +763,6 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
         if row.lowering == .CoreSource(owner, member) {
             if owner == module_name -> routes.names[member] = true
         }
-    }
-    loop row in IR_CORE_INTRINSICS {
-        if row.module_name == module_name -> routes.names[row.name] = true
     }
     prefix: "{module_name}."
     loop route in JET_DRIVER_SOURCE_ROUTES {

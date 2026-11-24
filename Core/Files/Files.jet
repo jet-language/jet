@@ -78,6 +78,44 @@ impl Path.CheckedText {
     }
 }
 
+// The compiler's `Path`: an opaque runtime handle over a path's bytes. Its
+// math is lexical (no filesystem access) except `walk` and `write_atomic`.
+impl Path {
+    /// The path spelled by `path`.
+    from: fn(path: String) -> Path Never! { rt.path_from(path) }
+
+    /// The current user's home directory, read from HOME.
+    home: fn() -[Env]> Path Never! { rt.path_home() }
+
+    /// `other` joined under this path; an absolute `other` replaces it.
+    join: fn(self, other: String) -> Path Never! { rt.path_join(self, other) }
+
+    /// The path up to its last component; None for an empty path or a root.
+    parent: fn(self) -> Path? Never! { rt.path_parent(self) }
+
+    /// The last component's text after its last dot.
+    extension: fn(self) -> String? Never! { rt.path_extension(self) }
+
+    /// The last component's text before its last dot.
+    stem: fn(self) -> String? Never! { rt.path_stem(self) }
+
+    /// The path with `.` dropped and `..` collapsed lexically.
+    normalize: fn(self) -> Path Never! { rt.path_normalize(self) }
+
+    /// Whether this path lies under `other`, compared lexically.
+    is_within: fn(self, other: Path) -> Bool Never! { rt.path_is_within(self, other) }
+
+    /// The path's text.
+    to_string: fn(self) -> String Never! { rt.path_to_string(self) }
+
+    /// Every entry below this directory, depth first; symlinks are listed but
+    /// never followed, and an unreadable directory is skipped.
+    walk: fn(self) -> [Path] Never! { rt.path_walk(self) }
+
+    /// Replaces the file at this path with `bytes` in one atomic step.
+    write_atomic: fn(self, bytes: [U8]) -[FS.Write]> IOError! { write_atomic(self, bytes) }
+}
+
 path_component_encode: fn(component: String) -> String Never! {
     hex: "0123456789ABCDEF".bytes()
     dots: component == "." || component == ".."
@@ -282,6 +320,48 @@ MappedFile: struct {
     kind: fn(self) -> MapKind Never! {
         MapKind.from_int(rt.map_kind(self)) ?? MapKind.Copy
     }
+
+    /// The number of mapped bytes, and whether there are none.
+    len: fn(self) -> Int Never! { self.bytes.len() }
+
+    is_empty: fn(self) -> Bool Never! { self.bytes.len() == 0 }
+
+    /// The bytes `start..<end` as a view of the map; an IOError when the
+    /// range is not inside it.
+    window: fn(self, start: Int, end: Int) -> View<U8> IOError! from self {
+        if start < 0 || end < start || end > self.bytes.len() -> return Err(map_window_error(self, "{start}..{end}"))
+        Ok(self.bytes[start..<end])
+    }
+
+    /// `count` bytes from `offset` as a view of the map; an IOError when they
+    /// are not all inside it.
+    window_len: fn(self, offset: Int, count: Int) -> View<U8> IOError! from self {
+        total: self.bytes.len()
+        if offset < 0 || count < 0 || offset > total || count > total - offset -> return Err(map_window_error(self, "{offset} length {count}"))
+        Ok(self.bytes[offset..<offset + count])
+    }
+
+    /// Each line as a view of the map. A line ends at LF, which it leaves out
+    /// with a CR before it; a last line with no LF counts, and an empty one
+    /// after the last LF does not.
+    lines: fn(self) -> [View<U8>] Never! from self {
+        found := [View<U8>]{}
+        total: self.bytes.len()
+        start := 0
+        loop start < total {
+            newline := start
+            loop newline < total && self.bytes[newline] != 10 -> newline += 1
+            end: if newline > start && self.bytes[newline - 1] == 13 -> newline - 1 else -> newline
+            found.push(self.bytes[start..<end])
+            start = newline + 1
+        }
+        found
+    }
+}
+
+// The error of a window `range` outside the map's bytes.
+priv map_window_error: fn(map: MappedFile, range: String) -> IOError Never! {
+    IOError.Other(IOContext{operation: .Read, resource: Val(map.path), os_code: None, cause: Val("mapped window {range} is outside file length {map.bytes.len()}")})
 }
 
 #[!Equatable, !Comparable]
@@ -337,13 +417,60 @@ AdvisoryLock: struct {
     }
 }
 
+// A read-only handle (`files.open`) refuses the write methods and a
+// write-only one (`files.create`, `files.append`) the read methods: the call
+// is heard before its method resolves, so it names the direction (E2501).
+ReadOnlyHandle: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            name: call.name.text
+            if name == "write_line" || name == "write_bytes" || name == "flush" || name == "fsync" || name == "set_mode" {
+                reject(HandleDirectionMismatch{method: name, direction: "read-only", opener: "`files.open`", can: "read lines or bytes", remedy: "use `files.create` or `files.append` to get a writable handle"}, at: call.name)
+            }
+        }
+    }
+}
+
+WriteOnlyHandle: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            name: call.name.text
+            if name == "lines" || name == "read_line" || name == "read_bytes" || name == "read_into" {
+                reject(HandleDirectionMismatch{method: name, direction: "write-only", opener: "`files.create`", can: "write lines", remedy: "use `files.open` to get a readable handle"}, at: call.name)
+            }
+        }
+    }
+}
+
+priv HandleDirectionMismatch: struct {
+    method: String,
+    direction: String,
+    opener: String,
+    can: String,
+    remedy: String,
+
+    impl Diagnostic {
+        code: "E2501",
+
+        what: fn(self) -> String { "`{self.method}` is not available on a {self.direction} file handle" }
+
+        why: fn(self) -> String { "{self.opener} returns a {self.direction} handle; it can only {self.can}" }
+
+        fix: fn(self) -> String { self.remedy.copy() }
+    }
+}
+
 /// An open file for reading. `read_line`, `lines`, `read(max)` and
 /// `read_into(buffer, limit)` advance one shared position; `read` returns up
 /// to `max` bytes and an empty list at end of file, and `read_into` appends up
 /// to `limit` bytes to `buffer` and returns the count, 0 at end of file.
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
-#[!Equatable, !Comparable]
+#[ReadOnlyHandle, !Equatable, !Comparable]
 FileReader: struct {
     priv stored_path: String,
     path: String -> stored_path,
@@ -366,6 +493,9 @@ FileReader: struct {
     /// Read up to `max` bytes from the current position; returns an empty list
     /// at end of file.
     read: fn(^self, max: Int) -[Time.Wait]> [U8] IOError! { rt.reader_read(self, max) }
+
+    /// Move the shared position to byte `position` from the start.
+    seek: fn(^self, position: Int) -[Time.Wait]> IOError! { rt.reader_seek(self, position) }
 
     /// Read the remaining bytes in chunks of up to `size` bytes each.
     /// Returns `IOError.InvalidInput` when `size <= 0`.
@@ -396,7 +526,7 @@ FileReader: struct {
 /// `fsync` also makes them durable.
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
-#[!Equatable, !Comparable]
+#[WriteOnlyHandle, !Equatable, !Comparable]
 FileWriter: struct {
     priv stored_path: String,
     path: String -> stored_path,
@@ -418,6 +548,9 @@ FileWriter: struct {
 
     /// Write every byte in `bytes` to the buffered handle.
     write_all: fn(^self, bytes: [U8]) -[Time.Wait]> IOError! { rt.writer_write_all(self, bytes) }
+
+    /// Hand the buffered bytes to the system and wait until they are durable.
+    fsync: fn(^self) -[Time.Wait]> IOError! { rt.writer_fsync(self) }
 
     /// `write_bytes` hands over every byte; the bytes are buffered until
     /// `flush`, `fsync` or close. `write` and `write_line` are the Prelude

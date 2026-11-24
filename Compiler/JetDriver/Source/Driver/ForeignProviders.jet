@@ -875,7 +875,7 @@ jet_driver_foreign_find_generated_module: fn(program: Program, language: String,
 // it takes the handle into the raw close and discards the status, so the
 // handle's `#Close` contract is a function returning nothing.
 jet_driver_foreign_close_adapter_text: fn(handle: String, raw_function: String) -> String Never! {
-    "__jet_ffi_close_{handle}: fn(handle: &&{handle}) {{\n    {raw_function}(handle).drop(\"a native close status is not a Jet failure\")\n}}\n"
+    "__jet_ffi_close_{handle}: fn(handle: ^^{handle}) {{\n    {raw_function}(handle).drop(\"a native close status is not a Jet failure\")\n}}\n"
 }
 
 jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: String, origin_path: String, diagnostics: ^[Diagnostic]) -> Func? {

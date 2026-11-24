@@ -65,6 +65,17 @@ sema_core_role_function: fn(graph: SemaRegistrationGraph, role: String) -> SemaC
     Val(found[0])
 }
 
+// Whether `name` is a top-level function of Core module `module_row` that
+// fills a role (sema_core_role).
+sema_core_role_filler: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, name: String) -> Bool {
+    if !module_is_core(module_row.module_identity) -> return false
+    loop function in module_row.functions {
+        if function.declaration.name != name || function.declaration.markers.len() == 0 -> next
+        return sema_core_role(function.declaration.markers, graph, module_row.module_identity) != ""
+    }
+    false
+}
+
 // Whether callable `row` is a top-level Core function that constructs a
 // declared point (`point`, `hook_point`, `decision_point`), whose call is a
 // module binding's identity: it fills a role whose name ends in `Point`

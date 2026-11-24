@@ -1,0 +1,202 @@
+// A field as a value: the prelude's `FieldRef<Model, T>`. Where one is
+// expected (a parameter, field or result), a bare `.name` is one: `.carrier`
+// names `Model`'s stored field `carrier`, visible where the dot is written,
+// and settles `T` as that field's type. A name `Model` doesn't declare is
+// E0302 at the dot, listing the fields it does; a chain (`.carrier.text`), a
+// call (`.carrier()`) or an upper-case selector (`.Carrier`) names no field.
+// A computed field stores nothing, so it is no `FieldRef` either.
+//
+// Inside a loop with no binding a bare `.name` reads the loop's item (`it`)
+// before any expected type does, so there it is no field reference; the
+// error says so and names `it`.
+//
+// The value is the struct literal of `FieldRef`'s one private field, `name`:
+// the field's declared name. Only the compiler writes that literal; no text
+// becomes a `FieldRef`.
+use jet_foundation.[
+    Diagnostic,
+    Expr,
+    Span,
+    SymbolKind,
+    TextEdit,
+    Type,
+    core_identity_in_module,
+    diagnostic_with_edit,
+    expr_source_start,
+    expr_span,
+    type_name,
+]
+
+// The prelude's `FieldRef<M, T>`, resolved, when `wanted` is one. A resolved
+// Core nominal is spelled `<module>.<leaf>`; only a name ending in the leaf
+// is resolved, which keeps the test off every other type.
+sema_field_ref_type: fn(wanted: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    if wanted == .Apply(written, args) && args.len() == 2 && written.ends_with("FieldRef") {
+        if sema_field_ref_name(written) -> return Val(wanted.copy())
+        resolved: sema_expr_expected_type(wanted, environment, program)
+        if resolved == .Apply(name, _) && sema_field_ref_name(name) -> return Val(resolved)
+    }
+    None
+}
+
+sema_field_ref_name: fn(name: String) -> Bool Never! {
+    name.ends_with(".FieldRef") && core_identity_in_module(name, "core.prelude")
+}
+
+// Whether `expr` is written as a field selector: a bare member chain or a
+// leading-dot upper-case name. Only these meet the `FieldRef` rule; any other
+// argument is an ordinary value of the parameter's type.
+sema_field_ref_selector: fn(expr: Expr) -> Bool Never! {
+    if sema_expr_is_bare_member_chain(expr) -> return true
+    if expr == .EnumLit(type_name, _, _, _, leading_dot, _, _) -> return leading_dot && type_name == ""
+    false
+}
+
+// The type a selector `expr` has where `ref_type` (a resolved `FieldRef<M,
+// T>`) is expected: `FieldRef<M, F>` for `M`'s field of type `F`. None after
+// a diagnostic in `diagnostics` when it names no field of `M`.
+sema_field_ref_probe: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Type? {
+    fact: sema_field_ref_field(expr, ref_type, environment, program, scopes, context, diagnostics) ?? return None
+    Val(sema_field_ref_value_type(ref_type, fact.field_ty))
+}
+
+// `FieldRef<M, field_ty>` from a resolved `FieldRef<M, T>`.
+sema_field_ref_value_type: fn(ref_type: Type, field_ty: Type) -> Type Never! {
+    if ref_type == .Apply(name, args) -> return Type.Apply{name: name, args: [Type]{args[0].copy(), field_ty}}
+    ref_type.copy()
+}
+
+// A selector where a `FieldRef<M, T>` is expected: the field reference it
+// names, checked against `expected`. Unhandled for any other expression or
+// expectation.
+sema_field_ref_check: fn(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDirectSpecialCheck {
+    wanted: expected ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_field_ref_selector(expr) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    ref_type: sema_field_ref_type(wanted, environment, program) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    fact: sema_field_ref_field(expr, ref_type, environment, program, scopes, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    member_span: expr_span(expr)
+    context.name_references.push(sema_name_reference(member_span, fact.symbol.copy(), Val(SymbolKind.Field)))
+    value_type: sema_field_ref_value_type(ref_type, fact.field_ty.copy())
+    value: sema_field_ref_value(value_type, fact.symbol.name, member_span, environment, program, scopes, context) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, environment, program, diagnostics)}
+}
+
+// `M`'s stored field the selector `expr` names, `M` being `ref_type`'s
+// model. None after a diagnostic at the selector.
+sema_field_ref_field: fn(expr: Expr, ref_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaStructFieldFact? {
+    model: sema_field_ref_model(ref_type) ?? return None
+    span: Span{start: expr_source_start(expr), end: expr_span(expr).end}
+    chain: if expr == .EnumLit(_, variant, _, _, _, _, _) -> ".{variant}" else -> sema_expr_bare_member_chain_text(expr)
+    if context.implicit_loop_subject_depth > 0 && sema_expr_is_bare_member_chain(expr) {
+        diagnostics.push(sema_error("E-SUBJECT-CALL", span, "`{chain}` reads the loop's item `it` here, not a field of `{type_name(model)}`", "inside a loop with no binding a bare `.name` is `it{chain}`, a value of the item, before any expected type makes it a field reference", "name the loop's binding (`loop item in …`) so `{chain}` names the field, or write the item's field as `it{chain}`"))
+        return None
+    }
+    owner_name := ""
+    owner_args := [Type]{}
+    if model == .Named(name) {
+        owner_name = name.copy()
+    } else if model == .Apply(name, args) {
+        owner_name = name.copy()
+        owner_args = args.copy()
+    }
+    if owner_name == "" || sema_type_name_is_generic(environment.generic_params, owner_name) {
+        diagnostics.push(sema_field_ref_no_struct(chain, model, span))
+        return None
+    }
+    owner_symbol: sema_expression_type_symbol(scopes, environment, program, owner_name) ?? {
+        diagnostics.push(sema_field_ref_no_struct(chain, model, span))
+        return None
+    }
+    struct_def: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? {
+        diagnostics.push(sema_field_ref_no_struct(chain, model, span))
+        return None
+    }
+    shown: owner_symbol.name.copy()
+    sees_private: sema_expr_sees_private_fields(context)
+    fields := [String]{}
+    loop field in struct_def.fields {
+        if field.computed != None -> next
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) -> next
+        fields.push(field.name.copy())
+    }
+    member := ""
+    if expr == .Field(base, name, _, _) && sema_expr_is_bare_subject(base) {
+        member = name.copy()
+    }
+    if member == "" {
+        sema_field_ref_refused(expr, chain, shown, fields, span, diagnostics)
+        return None
+    }
+    names: loop param in struct_def.type_params -> param.name
+    loop field in struct_def.fields {
+        if field.name != member -> next
+        if field.computed != None {
+            diagnostics.push(sema_error("E0302", span, "`{chain}` is a computed field of `{shown}`", "a field reference names a stored field; a computed field stores nothing to name", "name one of `{shown}`'s stored fields: {sema_field_ref_list(fields)}"))
+            return None
+        }
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sees_private, environment, program) {
+            diagnostics.push(sema_expression_private_field_error(member, expr_span(expr)))
+            return None
+        }
+        return Val(sema_expression_struct_field_fact(field, owner_symbol, names, owner_args, environment, program, context))
+    }
+    suggestion: sema_suggest_field(member, fields)
+    fix: if suggestion == .Val(candidate) -> "did you mean `.{candidate}`?" else -> "name one of `{shown}`'s fields: {sema_field_ref_list(fields)}"
+    diagnostic: sema_error("E0302", span, "`{shown}` has no field `{member}`", "a field reference names a field `{shown}` declares; its fields are {sema_field_ref_list(fields)}", fix)
+    if suggestion == .Val(candidate) {
+        diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(expr), new_text: candidate}))
+    } else { diagnostics.push(diagnostic) }
+    None
+}
+
+// The model `M` of a resolved `FieldRef<M, T>`.
+sema_field_ref_model: fn(ref_type: Type) -> Type? Never! {
+    if ref_type == .Apply(_, args) && args.len() == 2 -> return Val(args[0].copy())
+    None
+}
+
+// A selector whose `FieldRef` names a model this check doesn't know as a
+// struct: a type parameter, or a type that declares no fields.
+sema_field_ref_no_struct: fn(chain: String, model: Type, span: Span) -> Diagnostic Never! {
+    sema_error("E0302", span, "`{chain}` names no field: `{type_name(model)}` is no struct this code knows", "a field reference names a stored field of its `FieldRef`'s model, so the model must be a struct named here, not a type parameter", "take the `FieldRef` as a parameter from a caller that names the struct")
+}
+
+// A selector that names no single field: a chain, a call, or an
+// upper-case or payload-carrying name.
+sema_field_ref_refused: fn(expr: Expr, chain: String, shown: String, fields: [String], span: Span, diagnostics: ^[Diagnostic]) {
+    if expr == .EnumLit(_, variant, _, payload, _, _, _) {
+        lower: variant.lower()
+        written: if payload.len() > 0 -> "`.{variant}(…)`" else -> "`.{variant}`"
+        fix: if fields.contains(lower) -> "write `.{lower}`" else -> "name one of `{shown}`'s fields: {sema_field_ref_list(fields)}"
+        diagnostics.push(sema_error("E0302", span, "{written} names no field of `{shown}`", "a field reference is the field's own lower-case name, with no payload; an upper-case `.Name` is an enum case", fix))
+        return
+    }
+    diagnostics.push(sema_error("E0302", span, "`{chain}` names no field of `{shown}`", "a field reference is one field's name; a longer chain or a call reads a value", "name the field itself, one of {sema_field_ref_list(fields)}"))
+}
+
+sema_field_ref_list: fn(fields: [String]) -> String Never! {
+    if fields.len() == 0 -> return "none is visible here"
+    shown: loop name in fields -> "`{name}`"
+    shown.join(", ")
+}
+
+// The `FieldRef` value naming field `name`, typed `value_type`.
+sema_field_ref_value: fn(value_type: Type, name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext) -> TExpr? {
+    if value_type == .Apply(ref_name, ref_args) {
+        if sema_expression_type_symbol(scopes, environment, program, ref_name) == .Val(owner) {
+            if sema_scope_declaration_struct(environment, program, owner.id) == .Val(shape) {
+                names: loop param in shape.type_params -> param.name
+                loop field in shape.fields {
+                    if field.name != "name" || field.computed != None -> next
+                    text: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, span)
+                    fact: sema_expression_struct_field_fact(field, owner, names, ref_args, environment, program, context)
+                    reference := sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
+                    reference.boxed = fact.boxed
+                    return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference.copy(), value: text, boxed: reference.boxed}}}, span))
+                }
+            }
+        }
+    }
+    sema_check_unsupported(context, "the field `{name}` (at offset {span.start}) has no `FieldRef` value: the prelude `FieldRef` declares no `name` field")
+    None
+}

@@ -1,8 +1,10 @@
 // core-conformance: core.web.forms.typed_validation_cancel
 use api: core.web.forms
 
+JetForm: struct { jet: String }
+
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     validation := api.typed_validate_async(form)
     api.typed_validation_cancel(validation)
     print(validation.pending)

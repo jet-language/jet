@@ -1008,27 +1008,27 @@ sema_expression_context_trace: fn(span: Span, expected: Type?, environment: Sema
 }
 
 // `context.allocator`: the current allocator, as a `mem.Allocator` value,
-// core.mem's `__context_allocator()`. Its allocator, `__ContextAllocator`,
-// holds no state: each of its calls goes to whichever allocator is current
-// then, the innermost `#Context(allocator:)` block's, else the program
-// heap, so the value is the same one wherever it is read, passed or kept.
-// Like every context read it records no effect.
+// the call of the core.mem function that fills the ContextAllocator role.
+// Its allocator holds no state: each of its calls goes to whichever
+// allocator is current then, the innermost `#Context(allocator:)` block's,
+// else the program heap, so the value is the same one wherever it is read,
+// passed or kept. Like every context read it records no effect.
 sema_expression_context_allocator: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.allocator", span, [EffectRowEntry]{}, diagnostics) {
         return None
     }
-    unavailable: sema_error("E0906", span, "the source `core.mem.__context_allocator` declaration for `context.allocator` is unavailable", "`context.allocator` is read through the Core mem source", "restore the `core.mem` source module")
-    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? {
-        diagnostics.push(unavailable)
+    graph: program.registration_graph ?? return None
+    filler: sema_core_role_function(graph, "ContextAllocator") ?? {
+        diagnostics.push(sema_missing_core_role("ContextAllocator", span))
         return None
     }
-    target: sema_call_core_source_target(environment, program, identity, "__context_allocator", [Type]{}, span, true, diagnostics) ?? {
-        diagnostics.push(unavailable)
+    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{}, span, true, diagnostics) ?? {
+        diagnostics.push(sema_error("E0906", span, "the core.mem ContextAllocator function for `context.allocator` is unavailable", "`context.allocator` is read through the Core mem source", "restore the `core.mem` source module"))
         return None
     }
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
-    // `__context_allocator` cannot fail (`Allocator Never!`): the read is its
-    // success value.
+    // The ContextAllocator function cannot fail (`Allocator Never!`): the
+    // read is its success value.
     returned: sema_call_signature_return(target.signature) ?? return None
     allocator: if returned == .Result(ok, _) -> ok.copy() else -> returned
     read: sema_tree_node(allocator, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)

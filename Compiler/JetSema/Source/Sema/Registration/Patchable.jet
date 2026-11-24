@@ -107,8 +107,8 @@ sema_patchable_source: fn(base: String, fields: [Field]) -> String Never! {
     out := [String]{}
     out.push("{SEMA_PATCHABLE_BASE_METHODS}: struct {{\n")
     out.push("    apply: fn(self, patch: {patch}) -> {base} {{\n        return {base}{{\n{applied.join(",\n")}\n        }}\n    }}\n\n")
-    out.push("    diff: fn(new: &&{base}, old: &&{base}) -> {patch} {{\n        return {patch}{{\n{changed.join(",\n")}\n        }}\n    }}\n}}\n\n")
+    out.push("    diff: fn(new: ^^{base}, old: ^^{base}) -> {patch} {{\n        return {patch}{{\n{changed.join(",\n")}\n        }}\n    }}\n}}\n\n")
     out.push("Patch: struct {{\n{rows.join("")}\n")
-    out.push("    merge: fn(self, other: &&{patch}) -> {patch} {{\n        return {patch}{{\n{merged.join(",\n")}\n        }}\n    }}\n}}\n")
+    out.push("    merge: fn(self, other: ^^{patch}) -> {patch} {{\n        return {patch}{{\n{merged.join(",\n")}\n        }}\n    }}\n}}\n")
     out.join("")
 }

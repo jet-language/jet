@@ -67,7 +67,9 @@ virtual: module
 // `/actions/<name>`), handler mounts, single routes (`app.get`, `app.post`,
 // …), marked methods (`app.mount(value)`) and static files each register a
 // row as their call runs, so two rows with one method and address stop with
-// E2804 at the later call. Sema writes each registered page or server
+// E2804 at the later call; the App's StaticRoutes rule reports two whose
+// method and address the build knows while checking. Sema writes each
+// registered page or server
 // function as an adapter over `__AppCall`: the adapter decodes the handler's
 // typed route inputs (path parameters, the search record or field, the
 // loader data) and wraps its result as an `__AppReply`, so the graph stores
@@ -325,7 +327,7 @@ FormActionInputMismatch: struct {
 
 /// One application graph: routes, server functions, mounts and policies.
 /// Copies share the one graph.
-#RouteTable
+#[RouteTable, web_http.StaticRoutes(runtime_methods: true)]
 App: struct {
     __state: Shared<AppState>,
 

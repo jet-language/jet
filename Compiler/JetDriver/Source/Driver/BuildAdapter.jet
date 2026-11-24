@@ -8,7 +8,7 @@ use {
     build_input_url: core.net.url
     jet_parser.[jfmt_escape_str_lit, parse_type_text]
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
-    jet_sema.[sema_comptime_reflection_type_id_of, sema_comptime_reflection_type_id_record]
+    jet_sema.[sema_comptime_reflection_kind, sema_comptime_reflection_type_id_of, sema_comptime_reflection_type_id_record]
 }
 
 JetDriverBuildAdapter: struct {
@@ -591,7 +591,7 @@ jet_driver_compiler_add_struct: fn(session: ^BuildSession, host: JetDriverBuildA
     if reply == .Value(_) {
         // The new struct's `TypeId`: declared as `name` in the generated
         // module `module`, which shares the package's namespace.
-        return JetEvalBuildReply.Value{value: sema_comptime_reflection_type_id_record("{home_module}.{name}", name)}
+        return JetEvalBuildReply.Value{value: sema_comptime_reflection_type_id_record("{home_module}.{name}", name, sema_comptime_reflection_kind("Struct"))}
     }
     jet_driver_session_reply(session, reply, span)
 }

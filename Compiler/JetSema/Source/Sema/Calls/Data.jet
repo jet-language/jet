@@ -412,13 +412,13 @@ sema_data_query_push_argument: fn(argument: CallArg, value: TExpr?, source_args:
 }
 
 sema_data_query_receiver: fn(name: String, parameters: [Type], method: String) -> String Never! {
-    if sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 && (method == "query" || method == "insert" || method == "replace" || method == "remove") {
+    if sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 && (method == "insert" || method == "replace" || method == "remove") {
         return "DataTracked"
     }
     if sema_data_nominal_is(name, "DataWatch") && parameters.len() == 1 && (method == "get" || method == "status" || method == "cancel") {
         return "DataWatch"
     }
-    if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && (method == "filter" || method == "sort_by" || method == "map" || method == "min" || method == "max" || method == "inner_join" || method == "left_join" || method == "collect" || method == "plan" || method == "group_by" || method == "watch") {
+    if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && (method == "filter" || method == "sort_by" || method == "map" || method == "min" || method == "max" || method == "inner_join" || method == "left_join" || method == "collect" || method == "group_by" || method == "watch") {
         return "Query"
     }
     if sema_data_nominal_is(name, "DataGroupedQuery") && parameters.len() == 2 && (method == "count" || method == "sum" || method == "mean") {
@@ -478,24 +478,19 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     sum_value := Type.Int
     if receiver_type == "DataTracked" {
         key: parameters[1]
-        if method == "query" {
-            call_type_args = [Type]{row, key}
-            result_type = Type.Apply{name: query_name, args: [Type]{row}}
-        } else {
-            slots := if method == {
-                "insert" -> [Type]{row}
-                "replace" -> [Type]{key, row}
-                else -> [Type]{key}
-            }
-            loop index in 0..<slots.len() {
-                if index >= args.len() -> break
-                value: sema_data_expect_core_arg(method, index, slots[index], args[index], environment, program, scopes, state, tail_store, context, diagnostics)
-                if !sema_data_query_push_argument(args[index], value, source_args, argument_types, typed) {
-                    complete = false
-                }
-            }
-            result_type = Type.Result{ok: Type.Named{name: "Unit"}, err: data_error}
+        slots := if method == {
+            "insert" -> [Type]{row}
+            "replace" -> [Type]{key, row}
+            else -> [Type]{key}
         }
+        loop index in 0..<slots.len() {
+            if index >= args.len() -> break
+            value: sema_data_expect_core_arg(method, index, slots[index], args[index], environment, program, scopes, state, tail_store, context, diagnostics)
+            if !sema_data_query_push_argument(args[index], value, source_args, argument_types, typed) {
+                complete = false
+            }
+        }
+        result_type = Type.Result{ok: Type.Named{name: "Unit"}, err: data_error}
     }
     if receiver_type == "DataWatch" {
         result_type = if method == {
@@ -576,10 +571,6 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
         if method == "collect" {
             call_type_args = [Type]{row}
             result_type = sema_data_result(Type.List{element: row}, data_error)
-        }
-        if method == "plan" {
-            call_type_args = [Type]{row}
-            result_type = Type.List{element: Type.String}
         }
         if method == "group_by" {
             key := Type.String

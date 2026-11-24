@@ -1,0 +1,34 @@
+// The generated `#CLI` entry names its core.args functions by role. While
+// the compiler builds, each role CLIEntry.jet calls is matched to the function
+// whose `#Builtin.Role(.X)` marker names it, and a role nothing fills stops
+// the build with a refusal that names the role.
+use jet_sema.[sema_cli_role_fillers, sema_cli_roles_called, sema_cli_roles_missing, sema_cli_roles_refusal]
+
+#Test("a role marker names the core.args function that fills it") {
+    fillers: sema_cli_role_fillers("use {{\n    builtin: jet_builtins\n}}\n\n#Builtin.Role(.CLIValue) priv __cli_value: fn(parsed: CLIParsed, name: String) -> String? Never! {{\n    None\n}}\n\n#Builtin.Role(.CLIArgv) __cli_argv: fn() -[Exec.Args]> [String] Never! {{ rt.argv() }}\n\ncli_unmarked: fn() -> Int {{ 1 }}\n")
+    assert_eq(fillers.get("CLIValue") ?? "", "__cli_value")
+    assert_eq(fillers.get("CLIArgv") ?? "", "__cli_argv")
+    assert_eq(fillers.len(), 2)
+}
+
+#Test("the roles a source calls are read once each, in first-call order") {
+    called: sema_cli_roles_called("a: \"x\" b: sema_cli_call(\"CLIValue\") c: sema_cli_call(\"CLIArgv\") d: sema_cli_call(\"CLIValue\")")
+    assert_eq(called.join(","), "CLIValue,CLIArgv")
+}
+
+#Test("every CLI role the generated entry calls has a core.args function") {
+    called: sema_cli_roles_called(embed_file("../Source/Sema/Registration/CLIEntry.jet"))
+    fillers: sema_cli_role_fillers(embed_file("toolchain:Core/Args/Args.jet"))
+    assert_eq(called.len(), 35)
+    assert_eq(sema_cli_roles_missing(called, fillers).join(","), "")
+}
+
+#Test("a called role that no core.args function fills stops the build, naming the role") {
+    called: sema_cli_roles_called("sema_cli_call(\"CLIValue\") sema_cli_call(\"CLIArgv\")")
+    fillers: sema_cli_role_fillers("#Builtin.Role(.CLIValue) priv __cli_value: fn() -> Int {{ 1 }}\n")
+    missing: sema_cli_roles_missing(called, fillers)
+    assert_eq(missing.join(","), "CLIArgv")
+    refusal: sema_cli_roles_refusal(missing)
+    assert(refusal.starts_with("Core/Args/Args.jet has no function for the CLI roles the generated `#CLI` entry calls: CLIArgv."))
+    assert(refusal.contains("`#Builtin.Role(.X)`"))
+}

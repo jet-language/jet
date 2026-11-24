@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     rt: jet.runtime.process
 }
 
@@ -575,7 +576,7 @@ cli_take: fn(cursor: ^CLITableCursor) -> String Never! {
 // one and, for a choice, the number of choices and each choice. Each text
 // field is its decimal byte length, `:` and the bytes. `envs` holds the
 // environment value of each input that names a variable, in table order.
-priv __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, envs: [String?]) -> CLISpec Never! {
+#Builtin.Role(.CLISpec) priv __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, envs: [String?]) -> CLISpec Never! {
     spec := CLISpec{help: help.copy(), version: if has_version -> Val(version.copy()) else -> None, inputs: [CLIInput]{}, commands: [CLICommand]{}}
     cursor := CLITableCursor{table: table.copy(), raw: table.bytes(), at: 0}
     env_index := 0
@@ -742,18 +743,18 @@ cli_ascii_lower: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-priv __cli_is_int: fn(text: String) -> Bool Never! {
+#Builtin.Role(.CLIIsInt) priv __cli_is_int: fn(text: String) -> Bool Never! {
     _ := Int.parse(text) ?? return false
     true
 }
 
-priv __cli_is_float: fn(text: String) -> Bool Never! {
+#Builtin.Role(.CLIIsFloat) priv __cli_is_float: fn(text: String) -> Bool Never! {
     _ := Float.parse(text) ?? return false
     true
 }
 
 // Whether `text` reads as a Bool value: `true` or `false` in any case.
-priv __cli_is_bool: fn(text: String) -> Bool Never! {
+#Builtin.Role(.CLIIsBool) priv __cli_is_bool: fn(text: String) -> Bool Never! {
     lower: cli_ascii_lower(text)
     lower == "true" || lower == "false"
 }
@@ -798,7 +799,7 @@ cli_unknown: fn(name: String, inputs: [CLIInput], help: String) -> String Never!
 
 // The refusal of the unknown option `--name`, with the first of `names`
 // within two edits as a suggestion.
-priv __cli_unknown: fn(name: String, names: [String]) -> String Never! {
+#Builtin.Role(.CLIUnknown) priv __cli_unknown: fn(name: String, names: [String]) -> String Never! {
     loop known in names {
         if cli_edit_distance(known, name) <= 2 {
             return "unknown option `--{name}`\ndid you mean `--{known}`?"
@@ -1040,114 +1041,114 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
     parsed
 }
 
-priv __cli_parse: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
+#Builtin.Role(.CLIParse) priv __cli_parse: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
     cli_parse(spec, argv, fn(text: String) { false })
 }
 
 // The parse of a spec with a Float input.
-priv __cli_parse_float: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
+#Builtin.Role(.CLIParseFloat) priv __cli_parse_float: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
     cli_parse(spec, argv, fn(text: String) { __cli_is_float(text) })
 }
 
-priv __cli_status: fn(parsed: CLIParsed) -> Int Never! { parsed.status }
+#Builtin.Role(.CLIStatus) priv __cli_status: fn(parsed: CLIParsed) -> Int Never! { parsed.status }
 
-priv __cli_message: fn(parsed: CLIParsed) -> String Never! { parsed.message.copy() }
+#Builtin.Role(.CLIMessage) priv __cli_message: fn(parsed: CLIParsed) -> String Never! { parsed.message.copy() }
 
-priv __cli_command_name: fn(parsed: CLIParsed) -> String Never! { parsed.command.copy() }
+#Builtin.Role(.CLICommandName) priv __cli_command_name: fn(parsed: CLIParsed) -> String Never! { parsed.command.copy() }
 
-priv __cli_flag: fn(parsed: CLIParsed, name: String) -> Bool Never! {
+#Builtin.Role(.CLIFlag) priv __cli_flag: fn(parsed: CLIParsed, name: String) -> Bool Never! {
     cli_get_flag(parsed, name) ?? false
 }
 
-priv __cli_explicit: fn(parsed: CLIParsed, name: String) -> Bool Never! {
+#Builtin.Role(.CLIExplicit) priv __cli_explicit: fn(parsed: CLIParsed, name: String) -> Bool Never! {
     parsed.explicit.contains(name)
 }
 
-priv __cli_value: fn(parsed: CLIParsed, name: String) -> String? Never! {
+#Builtin.Role(.CLIValue) priv __cli_value: fn(parsed: CLIParsed, name: String) -> String? Never! {
     cli_lookup(parsed.options, name)
 }
 
 // The decoded value of an input from its text, `value` (None when absent).
-priv __cli_text_of: fn(value: String?) -> String Never! { value.copy() ?? "" }
+#Builtin.Role(.CLITextOf) priv __cli_text_of: fn(value: String?) -> String Never! { value.copy() ?? "" }
 
-priv __cli_int_of: fn(value: String?) -> Int Never! { Int.parse(__cli_text_of(value)) ?? 0 }
+#Builtin.Role(.CLIIntOf) priv __cli_int_of: fn(value: String?) -> Int Never! { Int.parse(__cli_text_of(value)) ?? 0 }
 
-priv __cli_float_of: fn(value: String?) -> Float Never! { Float.parse(__cli_text_of(value)) ?? 0.0 }
+#Builtin.Role(.CLIFloatOf) priv __cli_float_of: fn(value: String?) -> Float Never! { Float.parse(__cli_text_of(value)) ?? 0.0 }
 
-priv __cli_bool_of: fn(value: String?) -> Bool Never! { cli_ascii_lower(__cli_text_of(value)) == "true" }
+#Builtin.Role(.CLIBoolOf) priv __cli_bool_of: fn(value: String?) -> Bool Never! { cli_ascii_lower(__cli_text_of(value)) == "true" }
 
-priv __cli_text_opt_of: fn(value: String?) -> String? Never! { value.copy() }
+#Builtin.Role(.CLITextOptOf) priv __cli_text_opt_of: fn(value: String?) -> String? Never! { value.copy() }
 
-priv __cli_int_opt_of: fn(value: String?) -> Int? Never! {
+#Builtin.Role(.CLIIntOptOf) priv __cli_int_opt_of: fn(value: String?) -> Int? Never! {
     if value == None -> return None
     Val(__cli_int_of(value))
 }
 
-priv __cli_float_opt_of: fn(value: String?) -> Float? Never! {
+#Builtin.Role(.CLIFloatOptOf) priv __cli_float_opt_of: fn(value: String?) -> Float? Never! {
     if value == None -> return None
     Val(__cli_float_of(value))
 }
 
-priv __cli_bool_opt_of: fn(value: String?) -> Bool? Never! {
+#Builtin.Role(.CLIBoolOptOf) priv __cli_bool_opt_of: fn(value: String?) -> Bool? Never! {
     if value == None -> return None
     Val(__cli_bool_of(value))
 }
 
 // The start vector the compiler's generated entry parses: the program name,
 // then the program's words. User code reads `process.args()` instead.
-priv __cli_argv: fn() -[Exec.Args]> [String] Never! { rt.argv() }
+#Builtin.Role(.CLIArgv) priv __cli_argv: fn() -[Exec.Args]> [String] Never! { rt.argv() }
 
 // The pieces of the parser the compiler writes for a `#CLI` struct without
 // commands. `help` is the root help text after the program name.
-priv __cli_usage: fn(argv: [String], help: String) -> String Never! {
+#Builtin.Role(.CLIUsage) priv __cli_usage: fn(argv: [String], help: String) -> String Never! {
     "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}{help}"
 }
 
-priv __cli_with_usage: fn(message: String, argv: [String], help: String) -> String Never! {
+#Builtin.Role(.CLIWithUsage) priv __cli_with_usage: fn(message: String, argv: [String], help: String) -> String Never! {
     "{message}\n\n{__cli_usage(argv, help)}"
 }
 
-priv __cli_long: fn(arg: String) -> Bool Never! { starts(arg, "--") }
+#Builtin.Role(.CLILong) priv __cli_long: fn(arg: String) -> Bool Never! { starts(arg, "--") }
 
-priv __cli_short: fn(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
+#Builtin.Role(.CLIShort) priv __cli_short: fn(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
 
-priv __cli_rest: fn(text: String, start: Int) -> String Never! {
+#Builtin.Role(.CLIRest) priv __cli_rest: fn(text: String, start: Int) -> String Never! {
     slice_str(text, start, text.bytes().len())
 }
 
-priv __cli_slice: fn(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
+#Builtin.Role(.CLISlice) priv __cli_slice: fn(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
 
-priv __cli_eq: fn(text: String) -> Int Never! {
+#Builtin.Role(.CLIEq) priv __cli_eq: fn(text: String) -> Int Never! {
     loop (at, byte) in text.bytes() {
         if byte == (U8{61}) -> return at
     }
     -1
 }
 
-priv __cli_int_refusal: fn(name: String, value: String) -> String Never! {
+#Builtin.Role(.CLIIntRefusal) priv __cli_int_refusal: fn(name: String, value: String) -> String Never! {
     "`--{name}` expects an Int, got `{value}`\n\nfix: pass a whole number to `--{name}`"
 }
 
-priv __cli_float_refusal: fn(name: String, value: String) -> String Never! {
+#Builtin.Role(.CLIFloatRefusal) priv __cli_float_refusal: fn(name: String, value: String) -> String Never! {
     "`--{name}` expects a Float, got `{value}`\n\nfix: pass a number to `--{name}`"
 }
 
-priv __cli_choice_refusal: fn(name: String, value: String, choices: String) -> String Never! {
+#Builtin.Role(.CLIChoiceRefusal) priv __cli_choice_refusal: fn(name: String, value: String, choices: String) -> String Never! {
     "`--{name}` expects one of: {choices}; got `{value}`"
 }
 
-priv __cli_flag_value: fn(name: String, value: String) -> String Never! {
+#Builtin.Role(.CLIFlagValue) priv __cli_flag_value: fn(name: String, value: String) -> String Never! {
     "--{name} is a flag; it takes no value (got `={value}`)"
 }
 
-priv __cli_surplus: fn(positionals: [String], start: Int) -> String Never! {
+#Builtin.Role(.CLISurplus) priv __cli_surplus: fn(positionals: [String], start: Int) -> String Never! {
     surplus := [String]{}
     loop index in start..<positionals.len() -> surplus.push("`{positionals[index]}`")
     plural: if surplus.len() == 1 -> "" else -> "s"
     "unexpected argument{plural}: {surplus.join(", ")}"
 }
 
-priv __cli_missing: fn(names: [String]) -> String Never! {
+#Builtin.Role(.CLIMissing) priv __cli_missing: fn(names: [String]) -> String Never! {
     plural: if names.len() == 1 -> "" else -> "s"
     "missing required argument{plural}: {names.join(", ")}"
 }

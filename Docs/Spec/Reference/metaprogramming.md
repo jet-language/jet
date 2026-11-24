@@ -701,7 +701,8 @@ run: fn() {
 }
 ```
 
-A `TypeInfo` lists what the type implements and binds, and the form of a number:
+A `TypeInfo` lists what the type implements, and its `identity` what it binds
+and what kind of type it is:
 
 - `traits` has one `TraitInfo` per trait the type implements, with its `name`,
   its `associated_types` (`AssociatedTypeInfo` `name` and `type`, a TypeId) and the
@@ -712,8 +713,8 @@ A `TypeInfo` lists what the type implements and binds, and the form of a number:
   `value` as `print` shows it (`None` when the value is not known at
   compile time, which is reported where the implementation gives it). A
   constant the implementation leaves out reads the trait's default.
-- `generic_bindings` pairs each type parameter with the type written for it
-  (a `GenericBindingInfo` `name` and `type`, a TypeId)
+- `identity.generic_bindings` pairs each type parameter with the type written
+  for it (a `GenericBindingInfo` `name` and `type`, a TypeId)
   when the type is named with its arguments: `Pair<Int, String>.reflect()`
   binds `A` to `Int` and `B` to `String`. Naming the generic type alone, or
   reflecting its declaration in a marker body, gives an empty list. A type
@@ -722,19 +723,20 @@ A `TypeInfo` lists what the type implements and binds, and the form of a number:
   `Pair<String, Int>` differ), and its fields, variant payloads and method
   signatures read each argument where the declaration writes its parameter
   (a field `first: A` reads `Int`).
-- `numeric` is the `NumericInfo` of a number type: whether it is `signed`, its
-  width in `bits` and whether it `is_float`. A builtin number reflects too:
-  `I32.reflect().numeric` is `signed: true, bits: 32`, `U8`'s is unsigned
-  with 8 bits and `F32`'s is a 32-bit float. Its `identity` is the number
-  type's `TypeId`, so `F64` and `Float` reflect one identity, and a sized
-  number's (`I32`, `Float`) binds its width as `bits`. A `distinct` type over
-  a number reports its base's form; any other type has `None`.
+- `identity.kind` is a number type's `.Number(signed, float)`: whether it is
+  signed and whether it is a float, with its width as the `bits` binding. A
+  builtin number reflects too: `I32.reflect().identity.kind` is
+  `.Number(signed: true, float: false)` and binds `bits` to 32, `U8`'s is
+  unsigned with 8 bits and `F32`'s is a 32-bit float. Its `identity` is the
+  number type's `TypeId`, so `F64` and `Float` reflect one identity. A
+  `distinct` type's kind is `.Distinct`, and it binds its base type as
+  `base`.
 
 [`TypeFacts`](../../../Examples/Metaprogramming/Reflection/TypeFacts/run.jet)
 reads all three: a marker body, a comptime constant, ordinary code and fn
 build list the same constants and values, `Pair<Int, String>` binds `A` and
-`B` at each rung, and the builtin numbers and a `distinct` one report their
-form.
+`B` at each rung, and the builtin numbers and a `distinct` one's base report
+their form.
 
 A type name is also a value of the prelude's `Type` wherever a `Type` is
 expected: `counts[Position] = 2` keys a map by type, `if t == { Position -> … }`
@@ -942,8 +944,16 @@ function type each parameter by its label (else its position) and then
 `result`, and a quantity `base`. A number argument is a size: its `type`
 is `Int` and its `size` the number, as a fixed list's `length`, the `bits`
 of `I32`, `U8`, `Float` and `F32`, and a ranged int's `lo` and `hi` beside
-its `base`. Any other binding's `size` is `None`. A declared type named
-without arguments, and a builtin scalar, bind nothing. A
+its `base`; a `distinct` type binds its `base`. Any other binding's `size`
+is `None`. Any other declared type named without arguments, and a builtin
+scalar, bind nothing. Its `kind` is a `TypeKind`, the closed Core enum of
+what the type is: `Struct`, `Enum`, `Trait`, `Distinct` or `Builtin` for a
+named type, by its declaration (an enum case type is its `Enum`), and
+`Number(signed, float)`, `List`, `Map`, `Option`, `Result`, `Shared`,
+`Tuple`, `Function`, `FixedList`, `Range`, `Quantity`, `Union` or
+`TraitObject` for a constructed one; a tagged type is its inner type's kind.
+`Bool`, `String` and `Char` are `Builtin`; `Int` and each sized number are a
+`Number`. A
 PreparedValue is a compile-time value with its type kept, one case per case
 of the compile-time value algebra: `.Int(Int)`, `.Float(Float)`,
 `.Bool(Bool)`, `.Char(Char)`, `.String(String)`, `.Enum(PreparedCase)` (the

@@ -1,0 +1,33 @@
+// The ranked in-scope candidates the checker keeps on each `#Todo` goal row
+// (JetSema TodoCandidates.jet), read from a real Doc check of a two-file
+// program: locals nearest first, then parameters, then the module's own
+// functions and then imported ones, each group by name. A name that does not
+// fit the goal type and the function being checked are no candidates. The
+// goal is the function's last line, so its type is the return type, written
+// by its name.
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverCompileMode, jet_driver_compile]
+
+TODO_CANDIDATES_GEOMETRY: "Point: struct {{\n    x: Int,\n    y: Int,\n}}\n\norigin: fn() -> Point {{ Point{{x: 0, y: 0}} }}\n\nmidpoint: fn(a: Point, b: Point) -> Point {{ Point{{x: (a.x + b.x) /% 2, y: (a.y + b.y) /% 2}} }}\n\nnorm: fn(p: Point) -> Int {{ p.x + p.y }}\n"
+
+TODO_CANDIDATES_MAIN: "use geometry\nuse geometry.[Point, midpoint, norm, origin]\n\nhome: fn() -> Point {{ Point{{x: 1, y: 1}} }}\n\nshift: fn(start: Point, steps: Int) -> Point {{\n    first: Point{{x: start.x + steps, y: start.y}}\n    count: steps * 2\n    moved: Point{{x: first.x, y: count}}\n    if steps > 0 -> return moved\n    #Todo\n}}\n\nrun: fn() {{\n    print(shift(home(), 3).x + norm(midpoint(home(), origin())))\n}}\n"
+
+#Test("a #Todo goal lists the in-scope names that fit its type, ranked") {
+    request := seams_request(TODO_CANDIDATES_MAIN, JetDriverCompileMode.Doc)
+    request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: "/seams-fixture/geometry.jet", relative_path: "geometry.jet", identity: "seams-geometry", source: TODO_CANDIDATES_GEOMETRY})
+    result: jet_driver_compile(request)
+    problems := [String]{}
+    loop diagnostic in result.diagnostics -> problems.push("{diagnostic.code}: {diagnostic.what}")
+    wanted: [String]{"moved", "first", "start", "home()", "midpoint(…)", "origin()"}
+    rows := 0
+    loop unit in result.doc_modules {
+        loop function in unit.functions {
+            if function.name != "shift" -> next
+            loop goal in function.typed_goals {
+                rows += 1
+                assert(goal.expected == "Point", "the goal's card says `{goal.expected}`, not `Point`")
+                assert(goal.candidates == wanted, "the goal lists {goal.candidates.join(", ")}, not {wanted.join(", ")}")
+            }
+        }
+    }
+    assert(rows == 1, "`shift` has {rows} goal rows; diagnostics: {problems.join("; ")}")
+}

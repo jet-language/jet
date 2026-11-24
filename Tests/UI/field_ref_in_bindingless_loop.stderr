@@ -1,0 +1,8 @@
+Error: Jet.MemberShorthandAsValue: `.carrier` reads the loop's item `it` here, not a field of `ShipForm`
+  --> Tests/UI/field_ref_in_bindingless_loop.jet:21:41
+    |
+ 21 |     markup: loop ships -> form.validate(.carrier, on: .Blur, with: check).render()
+    |                                         ^^^^^^^^
+ Why: Inside a loop with no binding a bare `.name` is `it.carrier`, a value of the item, before any expected type makes it a field reference
+ Fix: Name the loop's binding (`loop item in …`) so `.carrier` names the field, or write the item's field as `it.carrier`
+More: jet-lang.dev/e/Jet.MemberShorthandAsValue

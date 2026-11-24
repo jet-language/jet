@@ -6134,6 +6134,20 @@ closure path. The shorthand is not valid for operators, literals, unknown or
 non-callable expected types, or callables with more than one parameter; write
 the full lambda in those cases. It adds no token or second member mechanism.
 
+**D-FORM-FIELD1=A — a field reference where a `FieldRef` is expected**
+*(ratified by owner, card #6851)*: the prelude's `FieldRef<Model, T>` names one
+stored field of `Model` whose type is `T`. Where a `FieldRef<M, T>` is
+expected, a bare lower-case `.name` names `M`'s stored field `name` visible at
+the dot and unifies `T` with its type; an unknown name is E0302 at the
+selector, listing `M`'s fields, and a chain, call, payload or upper-case
+selector names no field. This adds a context beside D-SUBJECT-CALL1=A;
+D-LOOP-SUBJECT1=A keeps its order, so inside a loop with no binding `.name`
+still reads the loop's item and a selector there is refused. `web.form(Model,
+action:)` gives a `WebFormTyped<Model>`, whose `set`, `blur`, `focus` and
+`validate` take `FieldRef<Model, T>`; the no-argument `validate()` method is
+gone, and a hand-built form names its model at `forms.typed<Model>`. A library
+reads the name with `field.name()`; only the compiler builds a `FieldRef`.
+
 **D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A — checked runtime
 durations** *(ratified by owner 2026-07-14, cards #558/#575)*: a runtime `Int`
 or `Float` becomes a duration only through the type-owned closed family

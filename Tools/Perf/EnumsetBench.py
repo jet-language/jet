@@ -82,7 +82,7 @@ mk: fn(mask: Int) -> Set<Case> {{
     out := Set.from([Case]{{}})
     i := 0
     loop i < {k} {{
-        if (mask >> i) & 1 == 1 -> &out.add(ALL[i])
+        if (mask >> i) & 1 == 1 -> ^out.add(ALL[i])
         i += 1
     }}
     return out
@@ -90,9 +90,9 @@ mk: fn(mask: Int) -> Set<Case> {{
 
 has: fn(s: Set<Case>, i: Int) -> Bool {{ s.has(ALL[i]) }}
 
-set_bit: fn(s: &Set<Case>, i: Int) {{ &s.add(ALL[i]) }}
+set_bit: fn(s: ^Set<Case>, i: Int) {{ ^s.add(ALL[i]) }}
 
-clear_bit: fn(s: &Set<Case>, i: Int) {{ &s.remove(ALL[i]) }}
+clear_bit: fn(s: ^Set<Case>, i: Int) {{ ^s.remove(ALL[i]) }}
 
 uni: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.union(b) }}
 
@@ -105,7 +105,7 @@ mk: fn(mask: Int) -> Bits {{
     out := Bits.new()
     i := 0
     loop i < {k} {{
-        if (mask >> i) & 1 == 1 -> &out.add(i)
+        if (mask >> i) & 1 == 1 -> ^out.add(i)
         i += 1
     }}
     return out
@@ -113,9 +113,9 @@ mk: fn(mask: Int) -> Bits {{
 
 has: fn(s: Bits, i: Int) -> Bool {{ s.has(i) }}
 
-set_bit: fn(s: &Bits, i: Int) {{ &s.add(i) }}
+set_bit: fn(s: ^Bits, i: Int) {{ ^s.add(i) }}
 
-clear_bit: fn(s: &Bits, i: Int) {{ &s.remove(i) }}
+clear_bit: fn(s: ^Bits, i: Int) {{ ^s.remove(i) }}
 
 combine: fn(a: Bits, b: Bits, op: Int) -> Bits {{
     out := Bits.new()
@@ -126,7 +126,7 @@ combine: fn(a: Bits, b: Bits, op: Int) -> Bits {{
         keep := x && !y
         if op == 0 -> keep = x || y
         if op == 1 -> keep = x && y
-        if keep -> &out.add(i)
+        if keep -> ^out.add(i)
         i += 1
     }}
     return out
@@ -143,9 +143,9 @@ mk: fn(mask: Int) -> Int {{ mask }}
 
 has: fn(s: Int, i: Int) -> Bool {{ (s >> i) & 1 == 1 }}
 
-set_bit: fn(s: &Int, i: Int) {{ s = s | (1 << i) }}
+set_bit: fn(s: ^Int, i: Int) {{ s = s | (1 << i) }}
 
-clear_bit: fn(s: &Int, i: Int) {{ s = s - (s & (1 << i)) }}
+clear_bit: fn(s: ^Int, i: Int) {{ s = s - (s & (1 << i)) }}
 
 uni: fn(a: Int, b: Int) -> Int {{ a | b }}
 
@@ -162,9 +162,9 @@ mk: fn(mask: Int) -> Word {{ Word{{bits: mask}} }}
 
 has: fn(s: Word, i: Int) -> Bool {{ (s.bits >> i) & 1 == 1 }}
 
-set_bit: fn(s: &Word, i: Int) {{ s.bits = s.bits | (1 << i) }}
+set_bit: fn(s: ^Word, i: Int) {{ s.bits = s.bits | (1 << i) }}
 
-clear_bit: fn(s: &Word, i: Int) {{ s.bits = s.bits - (s.bits & (1 << i)) }}
+clear_bit: fn(s: ^Word, i: Int) {{ s.bits = s.bits - (s.bits & (1 << i)) }}
 
 uni: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits | b.bits}} }}
 
@@ -189,7 +189,7 @@ items: fn(s: {ty}) -> [Int] {{
     out := [Int]{{}}
     i := 0
     loop i < {k} {{
-        if has(s, i) -> &out.push(i)
+        if has(s, i) -> ^out.push(i)
         i += 1
     }}
     return out
@@ -217,8 +217,8 @@ run: fn() {{
     s := mk(0)
     r = 0
     loop r < rounds {{
-        set_bit(&s, r % {kbits})
-        if r % 3 == 0 -> clear_bit(&s, (r * 5) % {kbits})
+        set_bit(^s, r % {kbits})
+        if r % 3 == 0 -> clear_bit(^s, (r * 5) % {kbits})
         r += 1
     }}
     check = (check * 31 + to_mask(s)) % 1000000007

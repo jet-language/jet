@@ -1,0 +1,13 @@
+// core-conformance: core.web.forms.WebFormTyped.validate
+use api: core.web.forms
+
+JetForm: struct { jet: String }
+
+checked: fn(form: api.WebFormTyped<JetForm>) -> Bool Never! {
+    form.validate(.jet, on: .Change, with: fn(value) {}) == .Ok(_)
+}
+
+run: fn() {
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    print(checked(form))
+}

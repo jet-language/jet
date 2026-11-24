@@ -1702,11 +1702,11 @@ sema_expression_lambda_block_value_type: fn(statements: [TStmt], fallback: Type)
 // lambda that outlives the access, reported at the lambda.
 sema_expression_lambda_capture_diagnostic: fn(name: String, ty: Type, task_body: Bool, span: Span) -> Diagnostic {
     destination: if task_body -> "a spawned task" else -> "a stored lambda"
-    sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by {destination}", "this function can access the parameter, but it does not own the value; a capture here takes ownership", "make the parameter owned: `{name}: &&{type_name(ty)}`")
+    sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by {destination}", "this function can access the parameter, but it does not own the value; a capture here takes ownership", "make the parameter owned: `{name}: ^^{type_name(ty)}`")
 }
 
 sema_expression_lambda_write_capture_diagnostic: fn(name: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0120", span, "`{name}` was not moved here, so a returned lambda cannot write it", "`{name}` is lent for writing only until this call returns, and the lambda it returns runs after that", "make the parameter owned (`{name}: &&{type_name(ty)}`) and return the result, or write `{name}` inside this call")
+    sema_error("E0120", span, "`{name}` was not moved here, so a returned lambda cannot write it", "`{name}` is lent for writing only until this call returns, and the lambda it returns runs after that", "make the parameter owned (`{name}: ^^{type_name(ty)}`) and return the result, or write `{name}` inside this call")
 }
 
 // A lambda that may run more than once moves its capture: its second run

@@ -2374,7 +2374,7 @@ sema_registration_index_canonical_nominals: fn(graph: ^SemaRegistrationGraph) Ne
 
 sema_registration_is_special_receiver_leaf: fn(leaf: String) -> Bool Never! {
     if leaf == {
-        "Dyn" | "JSON" | "App" | "Group" | "Task" | "Complex" | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "Delivery" | "DeliveryState" | "ServiceRuntime" | "WebFormTyped" | "WebFormValidationChain" | "HTTP" | "Router" | "Request" | "Response" | "Stream" | "Process" | "Command" | "Clock" | "Instant" | "Duration" | "Date" | "Socket" | "Listener" | "TcpStream" | "TcpListener" | "UdpSocket" | "Arena" | "Bump" | "Pool" | "Ptr" | "Guard" | "Signal" | "Cell" | "Shared" | "Channel" | "Receiver" | "Sender" | "TypeInfo" | "FieldInfo" | "CaseInfo" | "Value" | "Expr" | "Item" | "Vec2" | "Vec3" | "Vec4" | "Mat2" | "Mat3" | "Mat4" | "Quat" | "Rect" | "Point" | "Size" | "Color" | "Canvas" | "Sprite" | "World" | "Entity" | "Event" | "Queue" | "JobQueue" | "Set" | "Deque" | "PriorityQueue" | "Seq" | "RingBuffer" | "File" | "Path" | "Dir" | "Reader" | "Writer" | "Lines" | "Bytes" | "Buffer" | "Err" -> true
+        "Dyn" | "JSON" | "App" | "Group" | "Task" | "Complex" | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "Delivery" | "DeliveryState" | "ServiceRuntime" | "HTTP" | "Router" | "Request" | "Response" | "Stream" | "Process" | "Command" | "Clock" | "Instant" | "Duration" | "Date" | "Socket" | "Listener" | "TcpStream" | "TcpListener" | "UdpSocket" | "Arena" | "Bump" | "Pool" | "Ptr" | "Guard" | "Signal" | "Cell" | "Shared" | "Channel" | "Receiver" | "Sender" | "TypeInfo" | "FieldInfo" | "CaseInfo" | "Value" | "Expr" | "Item" | "Vec2" | "Vec3" | "Vec4" | "Mat2" | "Mat3" | "Mat4" | "Quat" | "Rect" | "Point" | "Size" | "Color" | "Canvas" | "Sprite" | "World" | "Entity" | "Event" | "Queue" | "JobQueue" | "Set" | "Deque" | "PriorityQueue" | "Seq" | "RingBuffer" | "File" | "Path" | "Dir" | "Reader" | "Writer" | "Lines" | "Bytes" | "Buffer" | "Err" -> true
         else -> false
     }
 }
@@ -5725,8 +5725,11 @@ sema_registration_direct_symbol: fn(module_row: SemaRegistrationModule, name: St
 // only the names that row lists, or a Core submodule; the rest (a handle
 // struct such as `SqliteDB { raw }`, a host leaf, an internal constant) is
 // Core's own. Core itself reaches every Core item. A dotted member
-// (`use core.[math.abs]`) is checked against its own module's row.
-sema_registration_core_private: fn(module_row: SemaRegistrationModule, name: String, requester_module: ModuleID) -> Bool Never! {
+// (`use core.[math.abs]`) is checked against its own module's row. A
+// function that fills a role (CoreRoles.jet) is reached through that role
+// by the code the compiler generates into any module, so no row lists it;
+// its own visibility still decides who reaches it.
+sema_registration_core_private: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, name: String, requester_module: ModuleID) -> Bool {
     if !module_is_core(module_row.module_identity) || module_is_core(requester_module) {
         return false
     }
@@ -5737,7 +5740,10 @@ sema_registration_core_private: fn(module_row: SemaRegistrationModule, name: Str
         leaf = parts.after.copy()
     }
     if core_module_export(owner) == None -> return false
-    !core_module_has_member(owner, leaf) && !core_module_has_type(owner, leaf) && core_module_export("{owner}.{leaf}") == None
+    if core_module_has_member(owner, leaf) || core_module_has_type(owner, leaf) || core_module_export("{owner}.{leaf}") != None {
+        return false
+    }
+    !sema_core_role_filler(graph, module_row, name)
 }
 
 sema_registration_core_private_error: fn(name: String, module_name: String, span: Span) -> Diagnostic {
@@ -5769,7 +5775,7 @@ sema_registration_core_private_qualified: fn(graph: SemaRegistrationGraph, modul
         }
         target_index: sema_registration_module_index(graph, import.target_module_identity) ?? return None
         target: graph.modules[target_index]
-        if !sema_registration_core_private(target, name, module_identity) -> return None
+        if !sema_registration_core_private(graph, target, name, module_identity) -> return None
         if sema_registration_lookup_name_at(graph, target_index, target.module_identity, name) == None {
             return None
         }
@@ -5840,7 +5846,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
     if module_index < 0 || module_index >= graph.modules.len() -> return None
     module_row: graph.modules[module_index]
     if seen.len() == 0 {
-        if sema_registration_core_private(module_row, name, requester_module) -> return None
+        if sema_registration_core_private(graph, module_row, name, requester_module) -> return None
         direct: sema_registration_direct_symbol(module_row, name)
         if direct == .Val(export) {
             if sema_registration_visible(export.visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) {
@@ -5857,7 +5863,7 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
     }
     next_seen := seen
     next_seen.push(key)
-    if sema_registration_core_private(module_row, name, requester_module) -> return None
+    if sema_registration_core_private(graph, module_row, name, requester_module) -> return None
     direct: sema_registration_direct_symbol(module_row, name)
     if direct == .Val(export) {
         if sema_registration_visible(export.visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) {
@@ -6184,7 +6190,7 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
                                 private_template -> {
                                     sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only public items can be brought into scope with `use`", "remove `priv` from `{item.original}: module` in the defining file"))
                                 }
-                                direct != None && !declared_private && sema_registration_core_private(graph.modules[target_index], item.original, source_identity) -> {
+                                direct != None && !declared_private && sema_registration_core_private(graph, graph.modules[target_index], item.original, source_identity) -> {
                                     sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_core_private_error(item.original, target_name, declaration.span))
                                 }
                                 direct != None -> {

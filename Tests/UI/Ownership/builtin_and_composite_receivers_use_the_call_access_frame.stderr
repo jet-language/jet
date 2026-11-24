@@ -1,7 +1,7 @@
 Error: Jet.UseWhileWriteActive: `values` is being changed in this call, so it can't be used again here
   --> builtin_and_composite_receivers_use_the_call_access_frame.jet:3:30
     |
-  4 |     &values.insert(0, values.remove(0, .Slot))
+  4 |     ^values.insert(0, values.remove(0, .Slot))
     |                              ^^^^^^
  Why: While something is being changed through the write-access marker `^`, nobody else may be looking at it
  Fix: Pass the write-access marker `^` (`^values`) only once, or copy first with `values.copy()`
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/Jet.UseWhileWriteActive
 Error: Jet.MissingReceiverMark: This call writes `values`, but `values` has no `^` mark
   --> builtin_and_composite_receivers_use_the_call_access_frame.jet:3:23
     |
-  4 |     &values.insert(0, values.remove(0, .Slot))
+  4 |     ^values.insert(0, values.remove(0, .Slot))
     |                       ^^^^^^
  Why: The method is declared with `^self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(^buf)` and `consume(^text)` mark arguments
  Fix: Write `^values`
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/Jet.MissingReceiverMark
 Error: Jet.BindingTypeMismatch: Argument 2 to `.insert()` should be Int (a whole number), not Int?
   --> builtin_and_composite_receivers_use_the_call_access_frame.jet:3:30
     |
-  4 |     &values.insert(0, values.remove(0, .Slot))
+  4 |     ^values.insert(0, values.remove(0, .Slot))
     |                              ^^^^^^
  Why: Built-in methods need arguments of the right type
  Fix: Use Int (a whole number) here

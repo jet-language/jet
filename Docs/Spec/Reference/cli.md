@@ -481,9 +481,15 @@ status envelope with the same checked sites and identity evidence.
 
 `fill` reads typed goal facts from the checked program. A goal with no known
 expected type reports `(unknown)`; the checker's continuation type does not
-turn that into an inferred contract. Proposals include matching parameters,
-zero-argument functions and type-appropriate literals, but a proposal is
-listed only after replacing that goal and checking the whole source again.
+turn that into an inferred contract. A `#Todo` on a function's last value line
+is that value's goal, typed by the return type as `return #Todo` is. Each goal
+keeps a ranked, bounded list (at most eight) of the in-scope names that fit
+its type: locals, nearest first; then parameters; then functions whose result
+fits, the module's own before imported ones, written `name()` or `name(…)`.
+`jet check` prints each goal card with that list as is, and the editor's
+hover on the `#Todo` shows the same list. `fill` proposes those names and a
+type-appropriate literal, but a proposal is listed only after replacing that
+goal and checking the whole source again.
 The optional `:line` suffix filters the report, not the checked program.
 
 Structural `diff` and `merge` align checked definitions rather than source

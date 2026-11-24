@@ -1,8 +1,10 @@
 // core-conformance: core.web.forms.typed_validation_render
 use api: core.web.forms
 
+JetForm: struct { jet: String }
+
 run: fn() {
-    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
-    chain: api.typed_validate_field(form, "jet", .Change, fn(value) {})
+    form: api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    chain: api.typed_validate_field(form, "jet", .Change, fn(value) {}) ?? panic("validate")
     print(api.typed_validation_render(chain))
 }

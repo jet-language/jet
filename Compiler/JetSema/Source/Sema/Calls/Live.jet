@@ -3,8 +3,10 @@
 // the source is a named function whose result and error types are Encode and
 // Decode (and, for `live`, that it only reads the database; for `subscribe`,
 // that it declares no effect beyond `DB.Read`, `Net` and `Time`), checks the
-// arguments as a call to it, and lowers the call to the module's `__live_*`
-// helper: each argument is evaluated once into a hidden local, the encoded
+// arguments as a call to it, and lowers the call to the `app` function that
+// fills its role (LiveBind, LivePoll, LivePush, LiveInvalidate or
+// LiveInvalidateAll; LiveArg encodes each argument): each argument is
+// evaluated once into a hidden local, the encoded
 // arguments name the binding, and the closure that re-runs the source owns
 // the locals. A read-only parameter is copied into its local, or, where no
 // closure keeps it, read straight into the key.
@@ -76,6 +78,16 @@ sema_live_string: fn(text: String, span: Span) -> Expr Never! {
 // form both the Core-alias and the source-module routes resolve.
 sema_live_module_call: fn(alias: String, member: String, type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {
     Expr.MethodCall{receiver: Expr.Ident{name: alias, span: span, id: AST_NODE_GENERATED}, method: member, method_span: span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: AST_NODE_GENERATED}
+}
+
+// The `app` function that fills the jet_builtins role `role`, which a
+// lowered call names; E1015 when no Core function fills it.
+sema_live_role_member: fn(graph: SemaRegistrationGraph, role: String, span: Span, diagnostics: ^[Diagnostic]) -> String? Never! {
+    filler: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return None
+    }
+    Val(filler.name)
 }
 
 sema_live_unhandled: fn() -> SemaDirectSpecialCheck Never! {
@@ -164,6 +176,14 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         return sema_live_rejected()
     }
     graph: program.registration_graph ?? return sema_live_rejected()
+    role: if member == {
+        "live" -> "LiveBind"
+        "subscribe" -> "LivePoll"
+        "push" -> "LivePush"
+        else -> if whole_source -> "LiveInvalidateAll" else -> "LiveInvalidate"
+    }
+    lowered_member: sema_live_role_member(graph, role, span, diagnostics) ?? return sema_live_rejected()
+    arg_member: sema_live_role_member(graph, "LiveArg", span, diagnostics) ?? return sema_live_rejected()
     sema_scope_enter(scopes, state, "live:{span.start}")
     body := [TStmt]{}
     keys := [Expr]{}
@@ -180,7 +200,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         given: argument.expr.copy()  // copy: `positional` keeps its argument
         param_ty: source.params[index].copy()  // copy: the source signature keeps its parameter types
         if borrowed && encodes && !keeps_run {
-            keys.push(sema_live_module_call(alias, "__live_arg", [Type]{param_ty}, [CallArg]{sema_live_arg(given, argument.span)}, argument.span))
+            keys.push(sema_live_module_call(alias, arg_member, [Type]{param_ty}, [CallArg]{sema_live_arg(given, argument.span)}, argument.span))
             next
         }
         local_name: "__jet_live_{span.start}_{index}"
@@ -196,7 +216,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
         // An argument with no encoding (a database scope, a handle) does not
         // tell bindings apart.
         if encodes {
-            keys.push(sema_live_module_call(alias, "__live_arg", [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument.span)}, argument.span))
+            keys.push(sema_live_module_call(alias, arg_member, [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument.span)}, argument.span))
         } else { keys.push(sema_live_string("_", argument.span)) }
         reads.push(sema_live_arg(read, argument.span))
         takes.push(NamedSpan{name: "{local_name}", span: argument.span})
@@ -232,10 +252,10 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], type_args: [T
     invocation: if source.receiver == "" -> Expr.Call{call: Call{name: source.name, name_span: span, type_args: [Type]{}, args: reads}, id: AST_NODE_GENERATED} else -> Expr.MethodCall{receiver: Expr.Ident{name: "{source.receiver}", span: source.receiver_span, id: source.receiver_id}, method: "{source.name}", method_span: source.call_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: source.call_id}
     run: Expr.Lambda{lambda: Lambda{take_names: takes, params: [LambdaParam]{}, effects: None, body: LambdaBody.Expr{value: invocation}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
     lowered: if member == {
-        "live" -> sema_live_module_call(alias, "__live_bind", [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(run, span)}, span)
-        "subscribe" -> sema_live_module_call(alias, "__live_poll", [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(every ?? Expr.Absent{span: span, id: AST_NODE_GENERATED}, span), sema_live_arg(run, span)}, span)
-        "push" -> sema_live_module_call(alias, "__live_push", [Type]{source.ok.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed ?? panic("push value was checked above"), span)}, span)
-        else -> if whole_source -> sema_live_module_call(alias, "__live_invalidate_all", [Type]{}, [CallArg]{sema_live_arg(wire, span)}, span) else -> sema_live_module_call(alias, "__live_invalidate", [Type]{}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span)}, span)
+        "live" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(run, span)}, span)
+        "subscribe" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(every ?? Expr.Absent{span: span, id: AST_NODE_GENERATED}, span), sema_live_arg(run, span)}, span)
+        "push" -> sema_live_module_call(alias, lowered_member, [Type]{source.ok.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed ?? panic("push value was checked above"), span)}, span)
+        else -> if whole_source -> sema_live_module_call(alias, lowered_member, [Type]{}, [CallArg]{sema_live_arg(wire, span)}, span) else -> sema_live_module_call(alias, lowered_member, [Type]{}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span)}, span)
     }
     checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
         sema_single_use_leave_scope(scopes, state, diagnostics)

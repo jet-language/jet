@@ -1,5 +1,5 @@
-// Source semantic producers for filesystem, terminal, encoding, binary-reader,
-// cursor, and Path handle operations. The backend owns the fixed ABI routes;
+// Source semantic producers for channel, line-stream, binary-reader and
+// cursor handle operations. The backend owns the fixed ABI routes;
 // this module checks their public types, ownership, and effects.
 use jet_foundation.[
     AccessConvention,
@@ -15,7 +15,6 @@ use jet_foundation.[
     TMethodRef,
     Type,
     core_source_owns_type,
-    AST_EMPTY_CALL_ARG_FLAGS,
     expr_span,
 ]
 
@@ -108,19 +107,12 @@ sema_stream_handle_result: fn(ok: Type, error: Type) -> Type Never! {
     Type.Result{ok: ok, err: error}
 }
 
-sema_stream_handle_io_error: fn() -> Type Never! { Type.Named{name: "IOError"} }
-
-sema_stream_handle_encoding_error: fn() -> Type Never! { Type.Named{name: "EncodingError"} }
-
 // `effect_name` is Rust's exact handle-method row: records only
-// `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and channel
-// methods) for these receivers. Authority is checked where the handle is
-// acquired (`files.open`, `term.stdout`), not on each method.
+// `receiver_effect_leaf` (`Time.Wait` on the blocking channel methods) for
+// these receivers.
 sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
-    io := sema_stream_handle_io_error()
-    encoding := sema_stream_handle_encoding_error()
     u8 := Type.IntN{signed: false, bits: 8}
     bytes := Type.List{element: u8}
     if owner == "Sender" || owner == "Receiver" {
@@ -155,128 +147,6 @@ sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) 
             return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelDelayMs, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         }
         return None
-    }
-    if owner == "MappedFile" {
-        if method == "window" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("start", Type.Int, AccessConvention.Read), sema_stream_handle_param("end", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "window_len" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "lines" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "len" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLen, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "is_empty" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileIsEmpty, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-    }
-    if owner == "FileReader" {
-        if method == "read_line" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "read_bytes" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead{into: false}, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "read_into" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead{into: true}, result_type: sema_stream_handle_result(Type.Int, io), params: [SemaCallParam]{sema_stream_handle_param("buffer", bytes, AccessConvention.Write), sema_stream_handle_param("limit", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "seek" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderSeek, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("position", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-    }
-    if owner == "FileWriter" {
-        if method == "write_line" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "flush" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "write_bytes" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteAll, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "fsync" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFsync, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-    }
-    if owner == "StdinHandle" {
-        if method == "read_line" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.StdinReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-    }
-    if owner == "Stdout" || owner == "Stderr" {
-        stdout := owner == "Stdout"
-        if method == "write" {
-            return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWrite else -> THandleOp.StderrWrite, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "write_line" {
-            return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteLine else -> THandleOp.StderrWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "write_bytes" {
-            return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteBytes else -> THandleOp.StderrWriteBytes, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "flush" {
-            return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutFlush else -> THandleOp.StderrFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
-        }
-        if method == "is_tty" {
-            return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTTY else -> THandleOp.StderrIsTTY, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-    }
-    if owner == "JSONLReader" && method == "next" {
-        return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-    }
-    if owner == "JSONLWriter" {
-        if method == "write" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-        if method == "flush" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-        if method == "finish" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-    }
-    if owner == "XMLReader" && method == "next" {
-        return Val(SemaStreamHandleSpec{operation: THandleOp.XMLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-    }
-    if owner == "XMLWriter" {
-        if method == "write" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-        if method == "flush" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-        if method == "finish" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
-        }
-    }
-    if owner == "Path" {
-        if method == "join" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathJoin, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{sema_stream_handle_param("other", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "parent" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathParent, result_type: Type.Option{inner: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "extension" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathExtension, result_type: Type.Option{inner: string}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "stem" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathStem, result_type: Type.Option{inner: string}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "normalize" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathNormalize, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "is_within" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathIsWithin, result_type: Type.Bool, params: [SemaCallParam]{sema_stream_handle_param("other", Type.Named{name: "Path"}, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "to_string" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathToString, result_type: string, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
-        if method == "walk" {
-            return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        }
     }
     // Rust `text_cursor_method_return` / `binary_reader_method_return`: the
     // cursor and reader methods record no receiver write, so a read binding
@@ -371,19 +241,12 @@ sema_stream_handle_read_spec: fn(operation: THandleOp, result_type: Type, params
     SemaStreamHandleSpec{operation: operation, result_type: result_type, params: params, receiver_convention: AccessConvention.Read, effect_name: ""}
 }
 
-sema_stream_handle_known_wrong_direction: fn(owner: String, method: String) -> Bool Never! {
-    (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_bytes" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read_bytes" || method == "read_into"))
-}
-
-// Rust `file_handle_method_return` (E2-M7) types the methods of these handles
-// without recording a receiver convention, so an unmarked `reader.read_bytes(n)`
-// or `writer.write_bytes(bytes)` needs no `^`, and a written mark has no convention
-// to be checked against. `text_cursor_method_return` and
-// `binary_reader_method_return` record none either, so `c.skip_ws()` and
-// `r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `^self`
-// source methods instead.
+// Rust `text_cursor_method_return` / `binary_reader_method_return` type the
+// methods of these handles without recording a receiver convention, so a
+// written mark has no convention to be checked against; `lines` on the file
+// and stdin readers records none either.
 sema_stream_handle_reports_no_receiver_convention: fn(owner: String) -> Bool Never! {
-    owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
+    owner == "FileReader" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
 }
 
 sema_stream_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) Never! {
@@ -542,24 +405,6 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
             return SemaMethodSpecialCheck{handled: false, value: None}
         }
     }
-    source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else if owner == "Path" && method == "write_atomic" -> "write_atomic" else -> ""
-    if source_member != "" {
-        identity: sema_call_core_module_identity(environment, program, "core.files") ?? {
-            diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/Files/Files.jet", "load the registered Core source module"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        target: sema_call_core_source_target(environment, program, identity, source_member, [Type]{}, span, true, diagnostics) ?? {
-            diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        access: if owner == "FileReader" -> AccessConvention.Write else -> AccessConvention.Read
-        source_args := [CallArg]{CallArg{convention: access, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
-        loop argument in args -> source_args.push(argument.copy())
-        scopes.ownership_call_depth += 1
-        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        scopes.ownership_call_depth -= 1
-        return SemaMethodSpecialCheck{handled: true, value: value}
-    }
     if (owner == "FileReader" && method == "lines") || (owner == "StdinHandle" && method == "lines") {
         if args.len() != 0 {
             sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -571,18 +416,6 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
             sema_receiver_mark_forget(state, receiver)
         }
         return sema_stream_handle_lines_value(receiver_value, owner, span, expected, environment, program, scopes, context, diagnostics)
-    }
-    if sema_stream_handle_known_wrong_direction(owner, method) {
-        sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        if {
-            owner == "FileReader" -> {
-                diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a read-only file handle", "`files.open` returns a read-only handle; it can only read lines or bytes", "use `files.create` or `files.append` to get a writable handle"))
-            }
-            else -> {
-                diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a write-only file handle", "`files.create` returns a write-only handle; it can only write lines", "use `files.open` to get a readable handle"))
-            }
-        }
-        return SemaMethodSpecialCheck{handled: true, value: None}
     }
     spec: sema_stream_handle_spec(owner, method, receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != spec.params.len() {
@@ -596,32 +429,7 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
         sema_receiver_mark_forget(state, receiver)
     }
     typed_args: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    result: sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
-    if result.value != None && sema_stream_handle_yields_view(spec.result_type) {
-        sema_stream_handle_publish_receiver_view(receiver, span, scopes, state, context)
-    }
-    result
-}
-
-// `MappedFile.window`/`window_len` return a `View<U8>` into the mapping the
-// receiver owns: the call publishes the receiver as the view's owner, the
-// same fact a view-returning function call publishes, so a binding of it is
-// a local window on that receiver. A receiver that names no place is a
-// temporary owner the statement drops.
-sema_stream_handle_yields_view: fn(result_type: Type) -> Bool Never! {
-    if result_type == {
-        .Result(value, _) -> sema_stmt_view_access(value) != None
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_stmt_view_access(result_type) != None
-    }
-}
-
-sema_stream_handle_publish_receiver_view: fn(receiver: Expr, span: Span, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) Never! {
-    places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
-    temporaries := [Span]{}
-    if places.len() == 0 -> temporaries.push(expr_span(receiver))
-    facts: [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}, temporaries: temporaries}}
-    sema_ownership_note_call_views(state, span, facts)
-    context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
+    sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }
 
 sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: ^SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -637,32 +445,21 @@ sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: ^SemaSco
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
 sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    known := (owner == "Path" && (method == "from" || method == "home")) || (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
+    known := (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
     if !known || !sema_stream_handle_static_owner_is_canonical(owner, scopes, environment, program) {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    expected_count := if method == "home" -> 0 else -> 1
-    if args.len() != expected_count {
+    if args.len() != 1 {
         sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
+        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 1, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    operation := THandleOp.PathFrom
-    result_type := Type.Named{name: "Path"}
-    effect_name := ""
+    operation := THandleOp.CursorOver
+    result_type := Type.Named{name: "Cursor"}
     params := [SemaCallParam]{}
     ownership_args := args
     shift_argument := -1
-    if owner == "Path" && method == "from" {
-        params.push(sema_stream_handle_param("path", Type.String, AccessConvention.Read))
-    }
-    if owner == "Path" && method == "home" {
-        operation = THandleOp.PathHome
-        effect_name = "Env"
-    }
     if owner == "Cursor" {
-        operation = THandleOp.CursorOver
-        result_type = Type.Named{name: "Cursor"}
         params.push(sema_stream_handle_param("text", Type.String, AccessConvention.Read))
     }
     owned_reader := false
@@ -705,7 +502,7 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
     unit_receiver := sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(environment, program, scopes, context, "{owner}.{method}", span, result_type, effect_name, diagnostics) {
+    if !sema_stream_handle_effect_fact(environment, program, scopes, context, "{owner}.{method}", span, result_type, "", diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}

@@ -1,9 +1,11 @@
 // core-conformance: core.web.forms.WebFormTyped.focus
 use api: core.web.forms
 
-focused: fn(form: ^api.WebFormTyped) -> Bool Never! { form.focus("jet") == .Ok(_) }
+JetForm: struct { jet: String }
+
+focused: fn(form: ^api.WebFormTyped<JetForm>) -> Bool Never! { form.focus(.jet) == .Ok(_) }
 
 run: fn() {
-    form := api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    form := api.typed<JetForm>(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
     print(focused(form))
 }

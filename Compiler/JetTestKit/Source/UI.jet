@@ -7,6 +7,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "check_cli", argv: ["check", "$base"], parent: true, exit: "any", streams: "check", capability: ""},
         {name: "all_diags", argv: ["check", "$file"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "typed_settings_cli", argv: ["check", "$file", "--set", "cli_only=true"], parent: false, exit: "any", streams: "check", capability: ""},
+        // `jet check` of a file with `#Todo` goals: a passing check prints
+        // each goal card on stdout, so the snapshot keeps both streams.
+        {name: "check_goals", argv: ["check", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         // `jet check Core` of a project entry's Core: the repository's Core
         // and compiler prelude staged as a toolchain, under the project's own
         // `Core/` files (a layer table), with the entry's text on top of the

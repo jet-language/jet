@@ -2570,7 +2570,7 @@ sema_ownership_open_write_reference: fn(state: ^SemaOwnershipState, expr: Expr, 
             if read_view {
                 diagnostics.push(sema_error("E0205", span, "cannot take a write window through {sema_type_show(param_ty)} — it has read access only", "a `View<T>` may inspect its owner's elements, but it cannot change them", "take the write window from a `ViewMut<T>` or from the mutable owner instead"))
             } else {
-                diagnostics.push(sema_error("E0205", span, "cannot take a write window into `{places[0].root}`", "an unmarked parameter gives read access only; a write window needs write access", "change the parameter to `{places[0].root}: &{type_name(param_ty)}`"))
+                diagnostics.push(sema_error("E0205", span, "cannot take a write window into `{places[0].root}`", "an unmarked parameter gives read access only; a write window needs write access", "change the parameter to `{places[0].root}: ^{type_name(param_ty)}`"))
             }
         } else {
             diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, span, "a write window can change its owner, so the owner must be mutable (`:=`)"))
@@ -3464,7 +3464,7 @@ sema_ownership_write_capability: fn(state: ^SemaOwnershipState, expr: Expr, acti
                 if info.symbol.kind == SymbolKind.Parameter {
                     param_type: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
                     why: if call_why == "" -> "an unmarked parameter gives read access only; nobody changes it during the call" else -> "{call_why}, but an unmarked parameter gives read access only"
-                    diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", why, "change the parameter to `{places[0].root}: &{param_type}`"))
+                    diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", why, "change the parameter to `{places[0].root}: ^{param_type}`"))
                 } else if call_why != "" && !info.place_alias && info.binding_sigil != None {
                     // A `:` local, or a part of one, passed to a write
                     // parameter: the fix is the binding's sigil.
@@ -3507,7 +3507,7 @@ sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: 
             if root == "self" {
                 diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `self` has read access only", "editing a field requires write access to the owning place", "declare the receiver with the write mark: `^self`"))
             } else if is_param {
-                diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` has read access only", "editing a field requires write access to the owning place", "change the parameter to `{root}: &{param_type}`"))
+                diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` has read access only", "editing a field requires write access to the owning place", "change the parameter to `{root}: ^{param_type}`"))
             } else {
                 diagnostics.push(sema_error("E0205", span, "cannot edit `{member}` — `{root}` has read access only", "editing a field requires write access to the owning place", "declare it with `{root} := ...` to give it write access"))
             }
@@ -3516,7 +3516,7 @@ sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: 
         .Index(_, _, span, _, _) -> {
             what: "cannot write to `{root}` — it has read access only"
             if is_param && info.access == AccessConvention.Read {
-                diagnostics.push(sema_error("E0205", span, what, "an unmarked parameter gives read access only; assigning into it needs write access", "change the parameter to `{root}: &{param_type}`"))
+                diagnostics.push(sema_error("E0205", span, what, "an unmarked parameter gives read access only; assigning into it needs write access", "change the parameter to `{root}: ^{param_type}`"))
             } else {
                 diagnostics.push(sema_ownership_diag_unchangeable(info, root, span, "assigning into a collection edits it, so the binding must be mutable (`:=`)"))
             }
@@ -3533,7 +3533,7 @@ sema_ownership_report_group_loan_change: fn(state: SemaOwnershipState, changed: 
     loop held in state.group_loans {
         if sema_ownership_places_overlap(held.place, changed) {
             changed_name: sema_ownership_place_name(changed)
-            diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it away with `task &&{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
+            diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it away with `task ^^{held.name}`, freeze it with `freeze`, or share it with `Shared{{…}}`"))
             return true
         }
     }
@@ -3719,7 +3719,7 @@ sema_ownership_mark_move_as: fn(state: ^SemaOwnershipState, expr: Expr, scopes: 
         info: binding
         if sema_ownership_binding_is_borrowed_param(info) {
             param_type: type_name(info.symbol.ty ?? Type.Named{name: "T"})
-            diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` is a read or write parameter, so its caller keeps the value; moving it here would copy it", "write `{info.symbol.name}.copy()` when {consumer} should receive a copy, or declare the parameter `{info.symbol.name}: &&{param_type}` so the caller hands the value over"))
+            diagnostics.push(sema_error("E0201", expr_span(expr), "`{info.symbol.name}` cannot be moved from borrowed storage", "`{info.symbol.name}` is a read or write parameter, so its caller keeps the value; moving it here would copy it", "write `{info.symbol.name}.copy()` when {consumer} should receive a copy, or declare the parameter `{info.symbol.name}: ^^{param_type}` so the caller hands the value over"))
             return false
         }
         if info.place_alias {
@@ -3968,7 +3968,7 @@ sema_ownership_diag_expiring_secret_loan_change: fn(name: String, action: String
 // `ty` is the parameter's declared type, when `name` is that parameter.
 sema_ownership_diag_move_from_borrowed: fn(name: String, ty: Type?, span: Span) -> Diagnostic {
     shown: type_name(ty ?? Type.Named{name: "T"})
-    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `{name}.copy()`, or declare the parameter `{name}: &&{shown}` to take ownership")
+    sema_error("E0201", span, "`{name}` cannot be moved from borrowed storage", "read and write parameters and named windows keep ownership with their source", "copy the value with `{name}.copy()`, or declare the parameter `{name}: ^^{shown}` to take ownership")
 }
 
 // `.move()` never lowers to a copy. A call argument `p.move()` or `p.f.move()`
@@ -4678,7 +4678,7 @@ sema_ownership_check_receiver_write: fn(state: ^SemaOwnershipState, receiver: Ex
     why: "{sema_ownership_signature_line(method, Val(AccessConvention.Write), params)} changes the value it's called on"
     diagnostic: if {
         root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `^self`")
-        info.symbol.kind == SymbolKind.Parameter -> sema_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", "change the parameter to `{root}: &{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
+        info.symbol.kind == SymbolKind.Parameter -> sema_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", "change the parameter to `{root}: ^{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
         else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be mutable (`:=`)")
     }
     diagnostics.push(diagnostic)
@@ -4966,7 +4966,7 @@ sema_ownership_check_call_receiver_with_footprint: fn(state: ^SemaOwnershipState
             why: "{sema_ownership_signature_line(method, Val(AccessConvention.Write), params)} changes the value it's called on"
             diagnostic: if {
                 root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `^self`")
-                info.symbol.kind == SymbolKind.Parameter -> sema_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", "change the parameter to `{root}: &{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
+                info.symbol.kind == SymbolKind.Parameter -> sema_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", "change the parameter to `{root}: ^{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
                 else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be mutable (`:=`)")
             }
             diagnostics.push(diagnostic)

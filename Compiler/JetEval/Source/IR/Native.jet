@@ -249,6 +249,12 @@ JetEvalIRState: struct {
     host_layouts: Shared<[IRProgram]>?{None},
     host_adapter: JetEvalBuildHostAdapter?{None},
     host_values: [TComptimeValue]{[TComptimeValue]{}},
+    // The call's type table (JetIR ir_type_handle): the address of the row
+    // the compiler wrote into the child for each distinct TypeId, a column
+    // over the names of the values' keys (JetIR ir_static_literal_key), so
+    // one TypeId is one handle.
+    type_row_keys: NameTable{name_table_sized(16)},
+    type_rows: [Int]{[Int]{}},
     // The address an E3012 stop of the call names no function at (-1:
     // none), named once the call ends (jet_eval_native_overflow_name).
     overflow_at: Int{-1},

@@ -112,7 +112,7 @@ compiler_routes_bytes_drop: fn(data: I64, length: I64) {
     if (jet_files_write_bytes_os(path, bytes, I64{0}, error) != I64{1}) { return I64{30} }
     if (jet_std_files_map(path, output, error) != I64{1}) { return I64{31} }
     empty: rt_text_word(output)
-    if !jet_std_fs_map_is_empty(empty) -> return I64{32}
+    if (rt_text_word(empty + I64{40}) != I64{0}) { return I64{32} }
     if (jet_std_fs_map_kind(empty) != I64{3}) { return I64{36} }
     if (jet_std_files_writer_refusal(path, output) != I64{1}) { return I64{33} }
     jet_rt_handle_drop_io_error(rt_text_word(output))

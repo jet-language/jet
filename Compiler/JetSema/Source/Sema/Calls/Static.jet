@@ -32,6 +32,7 @@ use jet_foundation.[
     builtin_static_is_type_param,
     builtin_static_numeric_row,
     builtin_static_rows,
+    core_bare_source_module,
     core_call,
     core_module_has_member,
     core_module_has_type,
@@ -429,6 +430,41 @@ sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, ow
             target: sema_call_static_function_target(function.symbol, signature, sema_inference_registration_params(function.generic_params), [Type]{}, environment, program, span, diagnostics) ?? next
             reference := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
             targets.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type.copy(), method: reference, target: target, function: Val(function.declaration)})
+        }
+    }
+    targets
+}
+
+// A compiler-owned type's statics that an inherent impl declares
+// (`impl Path { from: fn(path: String) -> Path }`): each visible registered
+// function of that name with no `self`. A runtime handle's impl in the Core
+// module that owns its bare spelling (`Path` in core.files) targets that
+// module, as its instance methods do; any other module's impl is a nominal's.
+sema_call_static_builtin_inherent_targets: fn(graph: SemaRegistrationGraph, owner_name: String, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) -> [SemaStaticMethodTarget] {
+    targets := [SemaStaticMethodTarget]{}
+    owner_module: core_bare_source_module(owner_name)
+    loop impl_row in sema_registration_impl_rows_named(graph, owner_name) {
+        module_row: graph.modules[impl_row.module_index]
+        implementation: module_row.impls[impl_row.row]
+        if implementation.trait_name != None -> next
+        if !module_is_none(implementation.target_module_identity) {
+            if implementation.target_module_identity != module_row.module_identity || !module_is_core(module_row.module_identity) || owner_module != Val(module_row.module_name) {
+                next
+            }
+        }
+        loop function in implementation.methods {
+            if function.symbol.name != method || sema_call_static_has_method(targets, function.symbol.id) {
+                next
+            }
+            if function.declaration.params.len() > 0 && function.declaration.params[0].name == "self" -> next
+            if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, module_row.module_identity, module_row.package_identity) {
+                next
+            }
+            generics: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+            signature: sema_type_resolve_declared_with_generics(graph, function.signature, module_row.module_identity, generics)
+            target: sema_call_static_function_target(function.symbol, signature, sema_inference_registration_params(function.generic_params), [Type]{}, environment, program, span, diagnostics) ?? next
+            reference: TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+            targets.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: Type.Named{name: owner_name}, method: reference, target: target, function: Val(function.declaration)})
         }
     }
     targets
@@ -1407,6 +1443,10 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                     conversions: sema_call_static_builtin_conversion_targets(graph, name, method, environment, program, span, diagnostics)
                     if conversions.len() > 0 {
                         return sema_call_static_selected(name, method, conversions, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                    }
+                    inherent: sema_call_static_builtin_inherent_targets(graph, name, method, environment, program, span, diagnostics)
+                    if inherent.len() > 0 {
+                        return sema_call_static_selected(name, method, inherent, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                     }
                 }
             }

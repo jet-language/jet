@@ -1,0 +1,20 @@
+// E0302: a field selector names a field the form's model declares.
+use web: core.web
+
+#Web.Form
+ShipForm: struct {
+    id: Int,
+    carrier: String,
+    tracking: String,
+}
+
+submit: fn(input: ShipForm) -> String { "shipped {input.id}" }
+
+check: fn(value: String) {
+    if value == "" -> return Err("carrier required")
+}
+
+run: fn() {
+    form: web.form(ShipForm, action: submit)
+    print(form.validate(.carier, on: .Blur, with: check).render())
+}

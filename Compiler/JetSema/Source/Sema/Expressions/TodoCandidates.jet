@@ -1,0 +1,92 @@
+// The names in scope at a `#Todo` that fit its goal type, ranked and bounded.
+// The goal row keeps them (TTypedGoal.candidates), so `jet check`, `jet fill`
+// and the LSP hover list the same names in the same order.
+//
+// Ranked: locals, nearest declaration first; then parameters, in their
+// written order; then functions whose result fits, the module's own before
+// imported ones, each group by name. A function is written as its call:
+// `name()` when it takes no arguments, `name(…)` when the caller still has
+// arguments to supply. A name a nearer binding shadows is out of scope, the
+// function being checked is no candidate for its own body, and
+// compiler-internal names are skipped.
+use jet_foundation.[
+    Type,
+]
+
+SEMA_TODO_CANDIDATE_LIMIT: 8
+
+sema_todo_candidates: fn(expected: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [String] Never! {
+    goal: expected ?? return [String]{}
+    owner: sema_scope_function_owner_key(scopes)
+    // The bindings met so far, nearest first; a later binding of a name met
+    // already is shadowed.
+    met := [Int]{}
+    locals := [Int]{}
+    params := [Int]{}
+    own := [String]{}
+    imported := [String]{}
+    // The frames in scope, nearest first; the module frame is in scope of
+    // every body even where the body's frames do not chain up to it
+    // (sema_scope_resolve_in_positions).
+    frames := [Int]{}
+    frame := scopes.current
+    loop frame >= 0 {
+        frames.push(frame)
+        frame = scopes.frames[frame].parent
+    }
+    if scopes.frames.len() > 0 && !frames.contains(0) -> frames.push(0)
+    loop visible in frames {
+        loop back in 0..<scopes.bindings.len() {
+            index: scopes.bindings.len() - 1 - back
+            binding: scopes.bindings[index]
+            if binding.frame != visible || binding.compiler_builtin -> next
+            name: binding.symbol.name
+            if name == "" || name == "_" || name.starts_with("__") || name.starts_with("@") || sema_todo_candidates_met(scopes, met, name) {
+                next
+            }
+            met.push(index)
+            ty: sema_scope_binding_type(environment, scopes, index) ?? next
+            if binding.symbol.kind == {
+                .Local -> {
+                    if sema_type_assignable(goal, ty) -> locals.push(index)
+                }
+                .Parameter -> {
+                    if sema_type_assignable(goal, ty) -> params.insert(0, index)
+                }
+                .Function | .Import | .Foreign -> {
+                    if binding.key == owner || name == environment.function_name -> next
+                    // A call's value is the function's result, or its success
+                    // type when its failure travels the caller's failure path.
+                    if ty == .Fn(arguments, ret, _, _, _, _) && ret == .Val(result) && (sema_type_assignable(goal, result) || sema_type_assignable(goal, sema_fn_return_success(result))) {
+                        call: if arguments.len() == 0 -> "{name}()" else -> "{name}(…)"
+                        if binding.symbol.module_identity == scopes.module_identity {
+                            own.push(call)
+                        } else { imported.push(call) }
+                    }
+                }
+                .Module | .Type | .Trait | .Impl | .Constant | .Field | .Variant | .Label -> {}
+            }
+        }
+    }
+    ranked := [String]{}
+    loop index in locals.concat(params) {
+        if ranked.len() == SEMA_TODO_CANDIDATE_LIMIT -> return ranked
+        // copy: the goal row keeps the name past the scope table it is read
+        // from.
+        ranked.push(scopes.bindings[index].symbol.name.copy())
+    }
+    own.sort()
+    imported.sort()
+    ranked.extend(own.move())
+    ranked.extend(imported.move())
+    loop ranked.len() > SEMA_TODO_CANDIDATE_LIMIT -> _: ranked.pop()
+    ranked
+}
+
+// Whether a binding met already, so nearer in scope, has this name.
+sema_todo_candidates_met: fn(scopes: SemaScopeTable, met: [Int], name: String) -> Bool Never! {
+    loop index in met {
+        if scopes.bindings[index].symbol.name == name -> return true
+    }
+    false
+}
