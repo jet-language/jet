@@ -1261,7 +1261,7 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
 // bounded by the safe max_depth. The parameter is not spelled `T`:
 // explicit-argument inference binds by name, so a generic caller's
 // `decode<[T]>` would read as `T := [T]`.
-__decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
+priv __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
     decode_typed_from<Target>(text, 1)
 }
 
@@ -1294,7 +1294,7 @@ typed_parse_error: fn(error: EncodingError, first_line: Int) -> [FieldError] Nev
 // both read; blank lines between values are skipped. Every failed value is
 // listed, under the line it starts on, in the one `Err` it fails with
 // (core.encoding.__input_failure).
-__input_json: fn<Row: Decode>(lines: &&Iter<String>) -> [Row] Err! {
+priv __input_json: fn<Row: Decode>(lines: &&Iter<String>) -> [Row] Err! {
     values := [Row]{}
     failures := [FieldError]{}
     pending := ""

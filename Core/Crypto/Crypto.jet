@@ -269,26 +269,26 @@ WrappedKey: struct {
 }
 
 // Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
-__vault_wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
+priv __vault_wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
     #Unsafe("vault key import: validate a serialized wrapped carrier at the typed crypto boundary") {
         wrapped: core.crypto.vault.__wrapped_from_bytes(bytes) ?? return Err(KeyWrapError{reason: err.reason})
         return Ok(wrapped)
     }
 }
 
-__vault_wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! {
+priv __vault_wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! {
     #Unsafe("vault key import: expose the authenticated wrapped carrier, not plaintext key material") {
         return core.crypto.vault.__wrapped_bytes(wrapped)
     }
 }
 
-__vault_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
+priv __vault_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     #Unsafe("vault key import: construct the typed recipient unlock request") {
         return core.crypto.vault.__key_unlock_recipient(identity)
     }
 }
 
-__vault_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
+priv __vault_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
     #Unsafe("vault key import: construct the typed passphrase unlock request") {
         return core.crypto.vault.__key_unlock_passphrase(passphrase)
     }

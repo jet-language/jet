@@ -361,6 +361,12 @@ handle from a made-up word. A helper Core declares `priv` is refused as any
 package's `priv` item is, with the same diagnostic: `csv.csv_row(…)` outside
 Core is **E0605**, like `dep.pad(…)` for a `priv pad` of a dependency.
 
+A Core item whose name starts with `__` is Core's machine space, and Core
+declares every one `priv`: a public one fails the build with **E0645**. User
+source can't spell a `__` name (E0067), so only Core and the code the compiler
+generates into a module (derived codecs, a command's argument reads, an app's
+routes) name one, and that generated code reaches it from any module.
+
 `jet_builtins` (`Core/Builtins/Builtins.jet`) is Core's one door to the
 compiler: the module that declares the operations, storage types and markers
 the compiler provides. A Core module reaches them through

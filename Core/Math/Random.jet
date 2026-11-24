@@ -54,7 +54,7 @@ seeded_bounded: fn(state: &U64, bound: U64) -> U64 Never! {
 
 // The public capability checks its endpoints at the signed-64 boundary.
 // This kernel preserves that domain, including its wrapped inclusive width.
-__seeded_int: fn(state: &U64, low: Int, high: Int) -> Int? Never! {
+priv __seeded_int: fn(state: &U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
     width: U64{(high - low + 1) & 18446744073709551615}
@@ -173,7 +173,7 @@ RNG: struct {
 
 // The world owns synchronization and journaling. Jet owns the transition;
 // compare/exchange keeps concurrent draws on that same serialized stream.
-__word: fn() -[Rand]> Int Never! {
+priv __word: fn() -[Rand]> Int Never! {
     loop {
         previous: rt.rng_state()
         word := Int{previous}

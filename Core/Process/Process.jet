@@ -436,7 +436,7 @@ run_all_canceled: fn() -> IOError Never! {
 // TerminalFact names; a preview fact is any other string key. Every host the
 // runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds
 // the three stable facts whatever the spec asks for.
-__spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
+priv __spec_abilities: fn(_spec: ProcessSpec) -> Set<String> Never! {
     Set.from([String]{"terminal", "resize", "raw"})
 }
 
@@ -897,11 +897,11 @@ priv ProcessChunkCursor: struct {
 
 // The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
 // check to (Sema ProcessHandles).
-__stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+priv __stdout_chunks: fn(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stdout: Val(stream), __size: size}
 }
 
-__stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+priv __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
     ProcessChunks{__stderr: Val(stream), __size: size}
 }
 

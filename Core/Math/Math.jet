@@ -13030,14 +13030,14 @@ priv compound_cr: fn(x: Float, bh: Float, bl: Float, n: Int) -> Float Never! {
 // rounded binary32 result as a Float, which then narrows exactly. The Float
 // result narrows correctly unless it is the midpoint of two binary32 values;
 // then the exact power's side of that midpoint decides.
-__pow_n_f32: fn(x: Float, n: Int) -> Float Never! {
+priv __pow_n_f32: fn(x: Float, n: Int) -> Float Never! {
     r: pow_n(x, n)
     if !f32_midpoint(r) -> return r
     p: float_parts(x)
     f32_step(r, pow_side(p.m, p.e, n, 0, 1, fabs(r)))
 }
 
-__pow_r_f32: fn(x: Float, y: Float) -> Float Never! {
+priv __pow_r_f32: fn(x: Float, y: Float) -> Float Never! {
     r: pow_r(x, y)
     if !f32_midpoint(r) -> return r
     a: float_parts(x)
@@ -13057,7 +13057,7 @@ __pow_r_f32: fn(x: Float, y: Float) -> Float Never! {
     f32_step(r, pow_side(a.m, a.e, yn, b.e, 1, fabs(r)))
 }
 
-__root_n_f32: fn(x: Float, n: Int) -> Float Never! {
+priv __root_n_f32: fn(x: Float, n: Int) -> Float Never! {
     r: root_n(x, n)
     if !f32_midpoint(r) -> return r
     p: float_parts(x)
@@ -13065,7 +13065,7 @@ __root_n_f32: fn(x: Float, n: Int) -> Float Never! {
     f32_step(r, pow_side(p.m, p.e, 1, 0, n, fabs(r)))
 }
 
-__compound_n_f32: fn(x: Float, n: Int) -> Float Never! {
+priv __compound_n_f32: fn(x: Float, n: Int) -> Float Never! {
     r: compound_n(x, n)
     if !f32_midpoint(r) -> return r
     // 1 + x = bm 2^be exactly
@@ -13116,52 +13116,52 @@ priv f32_listed: fn(x: Float, r: Float, sides: [Float]) -> Float Never! {
     r
 }
 
-__exp2_f32: fn(x: Float) -> Float Never! { f32_listed(x, exp2(x), EXP2_F32) }
+priv __exp2_f32: fn(x: Float) -> Float Never! { f32_listed(x, exp2(x), EXP2_F32) }
 
-__ln_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln(x), LN_F32) }
+priv __ln_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln(x), LN_F32) }
 
-__log10_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10(x), LOG10_F32) }
+priv __log10_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10(x), LOG10_F32) }
 
-__ln_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln_1p(x), LN1P_F32) }
+priv __ln_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, ln_1p(x), LN1P_F32) }
 
-__log1p_f32: fn(x: Float) -> Float Never! { __ln_1p_f32(x) }
+priv __log1p_f32: fn(x: Float) -> Float Never! { __ln_1p_f32(x) }
 
-__atan_pi_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan_pi(x), ATANPI_F32) }
+priv __atan_pi_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan_pi(x), ATANPI_F32) }
 
-__exp10_m1_f32: fn(x: Float) -> Float Never! { f32_listed(x, exp10_m1(x), EXP10M1_F32) }
+priv __exp10_m1_f32: fn(x: Float) -> Float Never! { f32_listed(x, exp10_m1(x), EXP10M1_F32) }
 
-__log2_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, log2_1p(x), LOG2P1_F32) }
+priv __log2_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, log2_1p(x), LOG2P1_F32) }
 
-__log10_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10_1p(x), LOG10P1_F32) }
+priv __log10_1p_f32: fn(x: Float) -> Float Never! { f32_listed(x, log10_1p(x), LOG10P1_F32) }
 
-__sin_f32: fn(x: Float) -> Float Never! { f32_listed(x, sin(x), SIN_F32) }
+priv __sin_f32: fn(x: Float) -> Float Never! { f32_listed(x, sin(x), SIN_F32) }
 
-__cos_f32: fn(x: Float) -> Float Never! { f32_listed(x, cos(x), COS_F32) }
+priv __cos_f32: fn(x: Float) -> Float Never! { f32_listed(x, cos(x), COS_F32) }
 
-__acos_f32: fn(x: Float) -> Float Never! { f32_listed(x, acos(x), ACOS_F32) }
+priv __acos_f32: fn(x: Float) -> Float Never! { f32_listed(x, acos(x), ACOS_F32) }
 
-__atan_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan(x), ATAN_F32) }
+priv __atan_f32: fn(x: Float) -> Float Never! { f32_listed(x, atan(x), ATAN_F32) }
 
-__sinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, sinh(x), SINH_F32) }
+priv __sinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, sinh(x), SINH_F32) }
 
-__asinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, asinh(x), ASINH_F32) }
+priv __asinh_f32: fn(x: Float) -> Float Never! { f32_listed(x, asinh(x), ASINH_F32) }
 
-__acosh_f32: fn(x: Float) -> Float Never! { f32_listed(x, acosh(x), ACOSH_F32) }
+priv __acosh_f32: fn(x: Float) -> Float Never! { f32_listed(x, acosh(x), ACOSH_F32) }
 
-__erf_f32: fn(x: Float) -> Float Never! { f32_listed(x, erf(x), ERF_F32) }
+priv __erf_f32: fn(x: Float) -> Float Never! { f32_listed(x, erf(x), ERF_F32) }
 
-__erfc_f32: fn(x: Float) -> Float Never! { f32_listed(x, erfc(x), ERFC_F32) }
+priv __erfc_f32: fn(x: Float) -> Float Never! { f32_listed(x, erfc(x), ERFC_F32) }
 
-__gamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, gamma(x), GAMMA_F32) }
+priv __gamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, gamma(x), GAMMA_F32) }
 
-__lgamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, lgamma(x), LGAMMA_F32) }
+priv __lgamma_f32: fn(x: Float) -> Float Never! { f32_listed(x, lgamma(x), LGAMMA_F32) }
 
 // The F32 form of hypot, CORE-MATH hypotf.c on the widened binary32 a and b:
 // a Float that narrows to the correctly rounded binary32 result. Narrowing
 // hypot(a, b) itself could round twice when that lands on a binary32
 // midpoint, so a result within one binary64 step of a binary32 boundary is
 // recomputed with its error term and moved off the midpoint to its own side.
-__hypot_f32: fn(a: Float, b: Float) -> Float Never! {
+priv __hypot_f32: fn(a: Float, b: Float) -> Float Never! {
     ax: fabs(a)
     bx: fabs(b)
     if !is_finite(ax) || !is_finite(bx) -> return hypot(a, b)
@@ -14513,7 +14513,7 @@ atan2_pi: fn(a: Float, b: Float) -> Float Never! {
 // rational approximation of atan(z)/pi, z = y/x or x/y, and when it lies
 // within 2^-48 relatively of a binary32 value or midpoint, a degree-63
 // double-double series instead.
-__atan2_pi_f32: fn(y: Float, x: Float) -> Float Never! {
+priv __atan2_pi_f32: fn(y: Float, x: Float) -> Float Never! {
     ay: fabs(y)
     ax: fabs(x)
     if !is_finite(y) || !is_finite(x) || (ay == Float{0.0}) || (ax == Float{0.0}) || ay == ax {
@@ -14638,7 +14638,7 @@ priv ATAN2PIF_C: [Float]{
 // own. Otherwise a rational approximation of atan(z), z = y/x or x/y, and
 // when it lies within 2^-48 relatively of a binary32 value or midpoint,
 // z - z^3/3 for a tiny |y/x| or a degree-63 double-double series.
-__atan2_f32: fn(y: Float, x: Float) -> Float Never! {
+priv __atan2_f32: fn(y: Float, x: Float) -> Float Never! {
     if !is_finite(y) || !is_finite(x) || (y == Float{0.0}) || (x == Float{0.0}) {
         return atan2(y, x)
     }
@@ -37395,9 +37395,9 @@ f32_sqrt: fn(x: Float) -> F32 Never! { f32_narrow(sqrt_odd(x)) }
 // The F32 form of fma and muladd (an all-F32 call): the exact a * b + c
 // rounded to odd, which then narrows correctly. Narrowing fma(a, b, c) would
 // round twice.
-__fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
+priv __fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
 
-__muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
+priv __muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { fma_odd(a, b, c) }
 
 // The F32 nearest x, ties to even: a NaN is the F32 NaN, and a magnitude
 // from 2^128 - 2^103 (the midpoint above the largest F32) is the infinity.
@@ -37530,14 +37530,14 @@ fabs: fn(n: Float) -> Float Never! { core.math.fabs(n) }
 
 // The F32 fabs and copysign (an all-F32 call): sign-bit operations on the
 // binary32 bits, which keep a signaling NaN and its payload.
-__fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n) & 0x7FFF_FFFF) }
+priv __fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n) & 0x7FFF_FFFF) }
 
-__copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
+priv __copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
     __from_bits_f32(__to_bits_f32(value) & 0x7FFF_FFFF | __to_bits_f32(sign_value) & 0x8000_0000)
 }
 
 // abs_float is fabs, at F32 width too.
-__abs_float_f32: fn(n: F32) -> F32 Never! { __fabs_f32(n) }
+priv __abs_float_f32: fn(n: F32) -> F32 Never! { __fabs_f32(n) }
 
 #Builtin.Role(.AbsI64) priv abs_i64: fn(n: I64) -> I64 Never! {
     zero: I64{0}
@@ -37558,7 +37558,7 @@ is_inf: fn(n: Float) -> Bool Never! { fabs(n) == INFINITY }
 is_finite: fn(n: Float) -> Bool Never! { fabs(n) < INFINITY }
 
 // #4747: preserve the existing F32 call contract without changing Float policy.
-__is_finite_f32: fn(n: F32) -> Bool Never! { is_finite(Float.from_f32(n)) }
+priv __is_finite_f32: fn(n: F32) -> Bool Never! { is_finite(Float.from_f32(n)) }
 
 isnan: fn(n: Float) -> Bool Never! { is_nan(n) }
 
@@ -37578,12 +37578,12 @@ is_subnormal: fn(n: Float) -> Bool Never! {
 
 // The F32 forms (an all-F32 call): the widening of a binary32 subnormal is a
 // normal Float, so the bound is the binary32 one, 2^-126.
-__is_normal_f32: fn(n: F32) -> Bool Never! {
+priv __is_normal_f32: fn(n: F32) -> Bool Never! {
     magnitude: fabs(Float.from_f32(n))
     magnitude >= 1.1754943508222875e-38 && magnitude < INFINITY
 }
 
-__is_subnormal_f32: fn(n: F32) -> Bool Never! {
+priv __is_subnormal_f32: fn(n: F32) -> Bool Never! {
     magnitude: fabs(Float.from_f32(n))
     magnitude > 0.0 && magnitude < 1.1754943508222875e-38
 }
@@ -37631,17 +37631,17 @@ nextafter: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
 // The F32 forms of next_up, next_down and next_after (an all-F32 call): one
 // step of the binary32 bit pattern, on the exactly widened arguments, as
 // musl's nextafterf steps it.
-__next_up_f32: fn(n: Float) -> Float Never! {
+priv __next_up_f32: fn(n: Float) -> Float Never! {
     if is_nan(n) || n == INFINITY -> return n
     __next_after_f32(n, INFINITY)
 }
 
-__next_down_f32: fn(n: Float) -> Float Never! {
+priv __next_down_f32: fn(n: Float) -> Float Never! {
     if is_nan(n) || n == -INFINITY -> return n
     __next_after_f32(n, -INFINITY)
 }
 
-__next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
+priv __next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
     if is_nan(n) || is_nan(toward) -> return nan_pair(n, toward)
     if n == toward -> return toward
     // The smallest binary32 subnormal signed as `toward`, and from an
@@ -37655,7 +37655,7 @@ __next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
     Float.from_f32(__from_bits_f32(if away -> bits + 1 else -> bits - 1))
 }
 
-__nextafter_f32: fn(n: Float, toward: Float) -> Float Never! { __next_after_f32(n, toward) }
+priv __nextafter_f32: fn(n: Float, toward: Float) -> Float Never! { __next_after_f32(n, toward) }
 
 significand: fn(n: Float) -> Float Never! {
     if n == 0.0 || !is_finite(n) -> return n
@@ -37745,9 +37745,9 @@ to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 // `math.to_bits` on F32: the binary32 bits as an Int in 0..<2^32, and its
 // inverse, the F32 of binary32 `bits` in that range. Both are one bit copy
 // (no conversion), so NaN payloads and signaling NaNs cross unchanged.
-__to_bits_f32: fn(n: F32) -> Int Never! { core.math.__to_bits_f32(n) }
+priv __to_bits_f32: fn(n: F32) -> Int Never! { core.math.__to_bits_f32(n) }
 
-__from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
+priv __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
 
 /// The binary32 bits of `value`, and the F32 whose bits are `word`: one bit
 /// copy each, so NaN payloads, signaling NaNs and the sign of zero cross
@@ -37766,9 +37766,9 @@ from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 // ir_core_intrinsics); these bodies are what a compiler without that table
 // runs. Core's bit work (copysign, round_even, exp, ln, sin, cos, pow, ...)
 // stays in I64 through them.
-__to_bits_i64: fn(n: Float) -> I64 Never! { I64{to_bits(n)} }
+priv __to_bits_i64: fn(n: Float) -> I64 Never! { I64{to_bits(n)} }
 
-__from_bits_i64: fn(bits: I64) -> Float Never! { from_bits(Int{bits}) }
+priv __from_bits_i64: fn(bits: I64) -> Float Never! { from_bits(Int{bits}) }
 
 // A whole t with |t| < 2^51 as an I64: t + 0x1.8p52 is exact, and its bits
 // are 0x1.8p52's plus t.
@@ -37817,7 +37817,7 @@ frexp: fn(n: Float) -> {exp: Int, frac: Float} Never! {
 
 // modff.c from musl 1.2.5: modf's F32 form (an all-F32 call), clearing the
 // fraction bits of the binary32 word, so a NaN keeps its bits.
-__modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
+priv __modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
     bits: __to_bits_f32(n)
     signed_zero: __from_bits_f32(bits & 0x8000_0000)
     e: ((bits >> 23) & 255) - 127
@@ -37835,7 +37835,7 @@ __modf_f32: fn(n: F32) -> {fract: F32, whole: F32} Never! {
 // frexpf.c from musl 1.2.5: frexp's F32 form (an all-F32 call) on the
 // binary32 word; a subnormal scales by 2^64 exactly first, and a zero, an
 // infinity or a NaN is its own frac, bits and all, with exp 0.
-__frexp_f32: fn(n: F32) -> {exp: Int, frac: F32} Never! {
+priv __frexp_f32: fn(n: F32) -> {exp: Int, frac: F32} Never! {
     bits: __to_bits_f32(n)
     biased: (bits >> 23) & 255
     if biased == 0 {
@@ -38017,7 +38017,7 @@ cmp: fn(a: Float, b: Float) -> Int Never! {
     return -1
 }
 
-__cmp_f32: fn(a: F32, b: F32) -> Int Never! { cmp(Float.from_f32(a), Float.from_f32(b)) }
+priv __cmp_f32: fn(a: F32, b: F32) -> Int Never! { cmp(Float.from_f32(a), Float.from_f32(b)) }
 
 abs_diff: fn(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a - b
@@ -38102,7 +38102,7 @@ rem_quo: fn(a: Float, b: Float) -> {rem: Float, quo: Int} Never! {
 
 // rem_quo of two F32s (an all-F32 call): the Float rem_quo of the exactly
 // widened operands, whose remainder an F32 holds exactly; a NaN stays NaN.
-__rem_quo_f32: fn(a: F32, b: F32) -> {rem: F32, quo: Int} Never! {
+priv __rem_quo_f32: fn(a: F32, b: F32) -> {rem: F32, quo: Int} Never! {
     split: rem_quo(Float.from_f32(a), Float.from_f32(b))
     {rem: f32_narrow(split.rem), quo: split.quo}
 }
@@ -38866,12 +38866,12 @@ priv payload_bits: fn(payload: Float) -> Int? Never! {
 // The F32 forms (an all-F32 call) of the bit operations above, on the
 // binary32 bits themselves: widening would quiet a signaling NaN and move a
 // payload 29 bits up.
-__is_signaling_f32: fn(n: F32) -> Bool Never! {
+priv __is_signaling_f32: fn(n: F32) -> Bool Never! {
     bits: __to_bits_f32(n) & 0x7FFF_FFFF
     bits > 0x7F80_0000 && bits < 0x7FC0_0000
 }
 
-__canonicalize_f32: fn(n: F32) -> F32 Never! {
+priv __canonicalize_f32: fn(n: F32) -> F32 Never! {
     if __is_signaling_f32(n) -> return __from_bits_f32(__to_bits_f32(n) | 0x40_0000)
     n
 }
@@ -38885,25 +38885,25 @@ priv total_order_key_f32: fn(n: F32) -> Int Never! {
     bits
 }
 
-__total_order_f32: fn(a: F32, b: F32) -> Bool Never! {
+priv __total_order_f32: fn(a: F32, b: F32) -> Bool Never! {
     total_order_key_f32(a) <= total_order_key_f32(b)
 }
 
-__total_order_mag_f32: fn(a: F32, b: F32) -> Bool Never! {
+priv __total_order_mag_f32: fn(a: F32, b: F32) -> Bool Never! {
     __to_bits_f32(a) & 0x7FFF_FFFF <= __to_bits_f32(b) & 0x7FFF_FFFF
 }
 
-__get_payload_f32: fn(n: F32) -> F32? Never! {
+priv __get_payload_f32: fn(n: F32) -> F32? Never! {
     if n == n -> return None
     Val(F32{Float{__to_bits_f32(n) & 0x3F_FFFF}})
 }
 
-__set_payload_f32: fn(payload: F32) -> F32? Never! {
+priv __set_payload_f32: fn(payload: F32) -> F32? Never! {
     bits: payload_bits_f32(payload) ?? return None
     Val(__from_bits_f32(bits | 0x7FC0_0000))
 }
 
-__set_payload_signaling_f32: fn(payload: F32) -> F32? Never! {
+priv __set_payload_signaling_f32: fn(payload: F32) -> F32? Never! {
     bits: payload_bits_f32(payload) ?? return None
     if bits == 0 -> return None
     Val(__from_bits_f32(bits | 0x7F80_0000))
@@ -40221,7 +40221,7 @@ Fraction: struct {
     }
 }
 
-__fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
+priv __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     if denominator == 0 -> return None
     top := numerator
     bottom := denominator
@@ -40236,36 +40236,36 @@ __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
 // An Int `/` that makes a Fraction, and a Fraction `/`, stop at the operator's
 // own line on a zero divisor: the IR emits that check (FractionIsZero for a
 // Fraction divisor), then runs FractionFromParts or FractionDiv, by role.
-#Builtin.Role(.FractionFromParts) __fraction_from_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
+#Builtin.Role(.FractionFromParts) priv __fraction_from_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
     __fraction_new(numerator, denominator) ?? core.math.__numeric_stop("divided by zero")
 }
 
-__fraction_from_owned_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
+priv __fraction_from_owned_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
     __fraction_from_parts(numerator, denominator)
 }
 
-__fraction_from_int: fn(value: Int) -> Fraction Never! { Fraction{num_value: value, den_value: 1} }
+priv __fraction_from_int: fn(value: Int) -> Fraction Never! { Fraction{num_value: value, den_value: 1} }
 
-__fraction_add: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+priv __fraction_add: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.den_value + right.num_value * left.den_value, left.den_value * right.den_value)
 }
 
-__fraction_sub: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+priv __fraction_sub: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.den_value - right.num_value * left.den_value, left.den_value * right.den_value)
 }
 
-__fraction_mul: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+priv __fraction_mul: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.num_value, left.den_value * right.den_value)
 }
 
-#Builtin.Role(.FractionDiv) __fraction_div: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+#Builtin.Role(.FractionDiv) priv __fraction_div: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     if right.num_value == 0 -> core.math.__numeric_stop("divided by zero")
     __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
 
-__fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
+priv __fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
 
-__fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+priv __fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
 
 // `value` rounded in `mode` to a whole Fraction (denominator 1), exactly. The
 // denominator is positive, so the numerator carries the sign.
@@ -40392,7 +40392,7 @@ exact_power: fn(base: Int, exponent: Int) -> Int Never! {
     result
 }
 
-__decimal_normalized: fn(coefficient: Int, scale: Int) -> Decimal Never! {
+priv __decimal_normalized: fn(coefficient: Int, scale: Int) -> Decimal Never! {
     magnitude := abs(coefficient)
     places := scale
     if magnitude == 0 -> places = 0
@@ -40421,28 +40421,28 @@ priv decimal_try_fraction: fn(value: Fraction) -> Decimal? Never! {
     Val(__decimal_normalized(digits, places))
 }
 
-__fraction_owned_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
+priv __fraction_owned_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
 
-__fraction_owned_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+priv __fraction_owned_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
 
-__fraction_equal: fn(left: Fraction, right: Fraction) -> Bool Never! {
+priv __fraction_equal: fn(left: Fraction, right: Fraction) -> Bool Never! {
     left.num_value == right.num_value && left.den_value == right.den_value
 }
 
-#Builtin.Role(.FractionIsZero) __fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
+#Builtin.Role(.FractionIsZero) priv __fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
 
-__fraction_to_float: fn(value: Fraction) -> Float Never! {
+priv __fraction_to_float: fn(value: Fraction) -> Float Never! {
     Float{value.num_value} / Float{value.den_value}
 }
 
 // `Int{x}` of a Fraction (and `Int.from_fraction`): a whole value converts
 // exactly; any other stops naming the roundings. `checked(Int{x})` is the
 // `try_int` form, None instead of the stop.
-__fraction_to_int: fn(value: Fraction) -> Int Never! {
+priv __fraction_to_int: fn(value: Fraction) -> Int Never! {
     __fraction_try_int(value) ?? core.math.__numeric_stop(int_exact_stop_text("Fraction"))
 }
 
-__fraction_try_int: fn(value: Fraction) -> Int? Never! {
+priv __fraction_try_int: fn(value: Fraction) -> Int? Never! {
     if value.den_value != 1 -> return None
     Val(value.num_value.copy())
 }
@@ -40453,11 +40453,11 @@ priv int_exact_stop_text: fn(source: String) -> String Never! {
     "Int{{x}} needs a whole {source}; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even"
 }
 
-__fraction_to_decimal: fn(value: Fraction) -> Decimal Never! {
+priv __fraction_to_decimal: fn(value: Fraction) -> Decimal Never! {
     decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
 }
 
-__fraction_from_float: fn(value: Float) -> Fraction Never! {
+priv __fraction_from_float: fn(value: Float) -> Fraction Never! {
     if !is_finite(value) -> panic("Float has no word-sized exact Fraction")
     if value == 0.0 -> return __fraction_from_int(0)
     bits: to_bits(value)
@@ -40475,11 +40475,11 @@ __fraction_from_float: fn(value: Float) -> Fraction Never! {
     __fraction_from_parts(top, bottom)
 }
 
-__decimal_from_int: fn(value: Int) -> Decimal Never! {
+priv __decimal_from_int: fn(value: Int) -> Decimal Never! {
     Decimal{negative: value < 0, magnitude: abs(value), scale: 0}
 }
 
-__decimal_from_float: fn(value: Float) -> Decimal Never! {
+priv __decimal_from_float: fn(value: Float) -> Decimal Never! {
     if !is_finite(value) -> panic("Float is not finite")
     decimal_try_fraction(__fraction_from_float(value)) ?? panic("Float is not finite")
 }
@@ -40646,7 +40646,7 @@ priv unit_huge_precision_rounded: fn(ratio: Fraction, mode: Int, digits: Int) ->
 // value only when it is an integer some Float holds exactly, else `failure`.
 // The IR's UnitConvert calls it, by its role, with the conversion's String
 // failure.
-#Builtin.Role(.UnitConversionExact) __unit_conversion_exact: fn<E>(value: Float, scale: String, offset: String, failure: E) -> Float E! {
+#Builtin.Role(.UnitConversionExact) priv __unit_conversion_exact: fn<E>(value: Float, scale: String, offset: String, failure: E) -> Float E! {
     if !is_finite(value) -> return Err(failure)
     converted: unit_converted(value, scale, offset)
     if converted.den_value != 1 -> return Err(failure)
@@ -40658,7 +40658,7 @@ priv unit_huge_precision_rounded: fn(ratio: Fraction, mode: Int, digits: Int) ->
 // the converted value rounded under `mode` to `digits` decimal places, when
 // some Float holds that decimal exactly; else `failure` (`negative_digits`
 // for negative `digits`).
-#Builtin.Role(.UnitConversionRounded) __unit_conversion_rounded: fn<E>(value: Float, scale: String, offset: String, mode: Int, digits: Int, negative_digits: E, failure: E) -> Float E! {
+#Builtin.Role(.UnitConversionRounded) priv __unit_conversion_rounded: fn<E>(value: Float, scale: String, offset: String, mode: Int, digits: Int, negative_digits: E, failure: E) -> Float E! {
     if digits < 0 -> return Err(negative_digits)
     if !is_finite(value) -> return Err(failure)
     converted: unit_converted(value, scale, offset)
@@ -40709,7 +40709,7 @@ priv decimal_signed: fn(value: Decimal) -> Int Never! {
     if value.negative -> -value.magnitude else -> value.magnitude.copy()
 }
 
-__decimal_from_str: fn(text: String) -> Decimal Never! {
+priv __decimal_from_str: fn(text: String) -> Decimal Never! {
     decimal_parse(text) ?? panic("invalid Decimal string")
 }
 
@@ -40791,19 +40791,19 @@ priv decimal_parse: fn(text: String) -> Decimal? Never! {
     Val(Decimal{negative: negative && magnitude != 0, magnitude: magnitude, scale: places})
 }
 
-__decimal_add: fn(left: Decimal, right: Decimal) -> Decimal Never! {
+priv __decimal_add: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     places: max(left.scale, right.scale)
     coefficient: decimal_signed(left) * exact_power(10, places - left.scale) + decimal_signed(right) * exact_power(10, places - right.scale)
     Decimal{negative: coefficient < 0, magnitude: abs(coefficient), scale: places}
 }
 
-__decimal_sub: fn(left: Decimal, right: Decimal) -> Decimal Never! {
+priv __decimal_sub: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     places: max(left.scale, right.scale)
     coefficient: decimal_signed(left) * exact_power(10, places - left.scale) - decimal_signed(right) * exact_power(10, places - right.scale)
     Decimal{negative: coefficient < 0, magnitude: abs(coefficient), scale: places}
 }
 
-__decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
+priv __decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     magnitude := left.magnitude * right.magnitude
     places := left.scale + right.scale
     minimum: max(left.scale, right.scale)
@@ -40815,12 +40815,12 @@ __decimal_mul: fn(left: Decimal, right: Decimal) -> Decimal Never! {
     Decimal{negative: (left.negative != right.negative) && magnitude != 0, magnitude: magnitude, scale: places}
 }
 
-__decimal_div: fn(left: Decimal, right: Decimal) -> Fraction Never! {
+priv __decimal_div: fn(left: Decimal, right: Decimal) -> Fraction Never! {
     if right.magnitude == 0 -> panic("Decimal quotient does not fit Fraction, or divided by zero")
     __fraction_from_parts(decimal_signed(left) * exact_power(10, right.scale), decimal_signed(right) * exact_power(10, left.scale))
 }
 
-__decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
+priv __decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
     places: max(left.scale, right.scale)
     a: decimal_signed(left) * exact_power(10, places - left.scale)
     b: decimal_signed(right) * exact_power(10, places - right.scale)
@@ -40829,7 +40829,7 @@ __decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
     Ordering.Equal
 }
 
-__decimal_equal: fn(left: Decimal, right: Decimal) -> Bool Never! {
+priv __decimal_equal: fn(left: Decimal, right: Decimal) -> Bool Never! {
     __decimal_compare(left, right) == Ordering.Equal
 }
 
@@ -40889,20 +40889,20 @@ priv decimal_rounded: fn(value: Decimal, mode: Rounding) -> Decimal Never! {
     }
 }
 
-__decimal_from_fraction: fn(value: Fraction) -> Decimal Never! {
+priv __decimal_from_fraction: fn(value: Fraction) -> Decimal Never! {
     decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
 }
 
-__decimal_to_fraction: fn(value: Decimal) -> Fraction Never! {
+priv __decimal_to_fraction: fn(value: Decimal) -> Fraction Never! {
     __fraction_from_parts(decimal_signed(value), exact_power(10, value.scale))
 }
 
 // `Int{x}` of a Decimal (and `Int.from_decimal`), as for a Fraction.
-__decimal_to_int: fn(value: Decimal) -> Int Never! {
+priv __decimal_to_int: fn(value: Decimal) -> Int Never! {
     __decimal_try_int(value) ?? core.math.__numeric_stop(int_exact_stop_text("Decimal"))
 }
 
-__decimal_try_int: fn(value: Decimal) -> Int? Never! {
+priv __decimal_try_int: fn(value: Decimal) -> Int? Never! {
     denominator: exact_power(10, value.scale)
     if value.magnitude %% denominator != 0 -> return None
     Val(decimal_signed(value) /% denominator)
@@ -40918,7 +40918,7 @@ exact_bit_length: fn(value: Int) -> Int Never! {
     length
 }
 
-__decimal_to_float: fn(value: Decimal) -> Float Never! {
+priv __decimal_to_float: fn(value: Decimal) -> Float Never! {
     if value.magnitude == 0 -> return 0.0
     // The one Decimal-to-Float conversion (math functions, `to_float`): the
     // nearest Float, ties to even. A magnitude and power of ten that are both
@@ -41241,7 +41241,7 @@ impl F32.Div(Complex32) {
     }
 }
 
-__complex_abs: fn(value: Complex) -> Float Never! { complex_core_abs(complex_to_core(value)) }
+priv __complex_abs: fn(value: Complex) -> Float Never! { complex_core_abs(complex_to_core(value)) }
 
 // How a SIMD lane reduction combines a vector's lanes into one value.
 ReduceOp: enum {
@@ -44729,7 +44729,7 @@ Transform2: struct<T, From, To> {
     assert_eq(to_bits(Float.from_f32(F32{-0.0})), to_bits(-0.0))
 }
 
-__decimal_to_string: fn(value: Decimal) -> String Never! {
+priv __decimal_to_string: fn(value: Decimal) -> String Never! {
     digits: "{value.magnitude}".bytes()
     bytes := [U8]{}
     if value.negative -> bytes.push(U8{45})
@@ -44748,7 +44748,7 @@ __decimal_to_string: fn(value: Decimal) -> String Never! {
     String.from_bytes(bytes) ?? panic("Decimal digits are not UTF-8")
 }
 
-__fraction_to_string: fn(value: Fraction) -> String Never! {
+priv __fraction_to_string: fn(value: Fraction) -> String Never! {
     if decimal_try_fraction(value) == .Val(decimal) -> return __decimal_to_string(decimal)
     "{value.num_value}/{value.den_value}"
 }
@@ -45243,27 +45243,27 @@ priv complex_core_atan: fn<T: ComplexScalar>(z: ComplexCore<T>) -> ComplexCore<T
     ComplexCore<T>{real: w.imaginary, imaginary: w.real.cx_neg()}
 }
 
-__complex_from_parts: fn(real: Float, imaginary: Float) -> Complex Never! {
+priv __complex_from_parts: fn(real: Float, imaginary: Float) -> Complex Never! {
     Complex{real: real, imaginary: imaginary}
 }
 
-__complex_add: fn(left: Complex, right: Complex) -> Complex Never! {
+priv __complex_add: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_add(complex_to_core(left), complex_to_core(right)))
 }
 
-__complex_sub: fn(left: Complex, right: Complex) -> Complex Never! {
+priv __complex_sub: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_sub(complex_to_core(left), complex_to_core(right)))
 }
 
-__complex_mul: fn(left: Complex, right: Complex) -> Complex Never! {
+priv __complex_mul: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_mul(complex_to_core(left), complex_to_core(right)))
 }
 
-__complex_div: fn(left: Complex, right: Complex) -> Complex Never! {
+priv __complex_div: fn(left: Complex, right: Complex) -> Complex Never! {
     complex_from_core(complex_core_div(complex_to_core(left), complex_to_core(right)))
 }
 
-__complex_to_string: fn(value: Complex) -> String Never! {
+priv __complex_to_string: fn(value: Complex) -> String Never! {
     complex_core_to_string(complex_to_core(value))
 }
 

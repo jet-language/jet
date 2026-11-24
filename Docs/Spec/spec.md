@@ -4051,6 +4051,8 @@ module` keeps a module's contents to its enclosing module, and `priv(package)
 module name` keeps them inside the package; a `priv` struct field is usable
 only by its type's module. Reaching a private declaration, module or field from
 outside reports **E0605**, importing a member of a private module **E0609**.
+A Core item named `__…` belongs to Core and the code the compiler generates,
+and is `priv`; a public one is **E0645**.
 These markers are errors whose fix deletes them: an unknown `priv(...)`
 qualifier or `priv(package)` on a top-level declaration other than a module
 (**E0414**), section labels (**E0415**) and `priv(package)` on a field

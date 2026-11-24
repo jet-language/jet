@@ -737,7 +737,7 @@ C_BUILD_INT_MAX: 9223372036854775807
 C_BUILD_READ_BYTES: 8192
 
 #Error
-__BuildHTTPFailure: struct {
+priv __BuildHTTPFailure: struct {
     message: String,
 
     impl Display {
@@ -856,7 +856,7 @@ priv build_connect: fn(addresses: [[U8]], port: Int, end_ns: Int, portable: &Str
     Err(build_fail(failure))
 }
 
-__build_socket: fn(address: [U8], port: Int) -> SocketAddr Never! {
+priv __build_socket: fn(address: [U8], port: Int) -> SocketAddr Never! {
     octets := [U8]{}
     loop byte in address -> octets.push(byte)
     #Unsafe("checked resolver octets and port transferred into the socket carrier") {
@@ -1312,7 +1312,7 @@ priv ClientReply: struct {
     live: LiveBody?{None},
 }
 
-__send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+priv __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if req.__header_error == .Val(error) -> return Err(error)
     phases: client_phases(req) ?? return Err(err)
     limit: req.__redirects ?? C_CLIENT_REDIRECTS
@@ -1901,7 +1901,7 @@ priv live_tls_error: fn(error: IOError) -> HTTPError Never! {
 // it (`live`). Under `jet prove` a capture
 // journals the hop (`hop` redirects in) and a replay answers it from the
 // journal instead of the network.
-__client_once: fn(method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxy: ClientURL?, hop: Int) -[Net, Time.Wait]> ClientReply HTTPError! {
+priv __client_once: fn(method: String, url: ClientURL, fields: [http.Header], body: [U8]?, phases: ClientPhases, proxy: ClientURL?, hop: Int) -[Net, Time.Wait]> ClientReply HTTPError! {
     if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
     prove: build_tls.prove_net_mode()
     if prove == C_CLIENT_PROVE_REPLAY {
@@ -2016,7 +2016,7 @@ priv client_dial: fn(wire: &BuildWire, url: ClientURL, phases: ClientPhases, pro
 // no body and is not recorded by `jet prove`. `timeout_ms` bounds the
 // whole send. A server that breaks HTTP/2, resets the stream or goes away
 // before answering it is Protocol `HTTP/2`.
-__h2_request: fn(method: String, url: String, fields: [http.Header], body: [U8], timeout_ms: Int) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+priv __h2_request: fn(method: String, url: String, fields: [http.Header], body: [U8], timeout_ms: Int) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
     if timeout_ms < 0 -> return Err(.Timeout{phase: "transport"})
     parsed: client_url(url) ?? return Err(err)
@@ -2112,7 +2112,7 @@ priv client_replayed: fn(method: String, url: ClientURL, fields: [http.Header], 
 // numbers, each text or byte string after its u64 length): the hop, method,
 // scheme, host, port, target, the field count and each (name, value), then 1
 // and the body, or 0 for none.
-__client_net_request: fn(hop: Int, method: String, url: ClientURL, fields: [http.Header], body: [U8]?) -> [U8] Never! {
+priv __client_net_request: fn(hop: Int, method: String, url: ClientURL, fields: [http.Header], body: [U8]?) -> [U8] Never! {
     out := [U8]{}
     client_put_u64(out, hop)
     client_put_bytes(out, method.bytes())
@@ -2137,7 +2137,7 @@ __client_net_request: fn(hop: Int, method: String, url: ClientURL, fields: [http
 // header fields of the reply the program saw (0 when it saw none), and the
 // ending: `eof` once the stream ended or the run read no further, else a
 // portable error name (`unmapped` when the failure has none).
-__client_net_tape: fn(hop: Int, method: String, url: ClientURL, fields: [http.Header], body: [U8]?, wire: BuildWire, seen: ClientReply?) -> [U8] Never! {
+priv __client_net_tape: fn(hop: Int, method: String, url: ClientURL, fields: [http.Header], body: [U8]?, wire: BuildWire, seen: ClientReply?) -> [U8] Never! {
     out := __client_net_request(hop, method, url, fields, body)
     client_put_u64(out, wire.stage)
     client_put_u64(out, wire.addresses.len())

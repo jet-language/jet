@@ -466,7 +466,7 @@ priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U
 
 // Adds `notice` to the end of the app's notice list, which the app's
 // window then shows (`app_window_noticed`).
-__keep_notice: fn(notice: Notice) {
+priv __keep_notice: fn(notice: Notice) {
     loop {
         seen: notice_cell_load()
         kept := seen.copy()
@@ -485,7 +485,7 @@ notices: fn() -> [Notice] { notice_decode(notice_cell_load()) }
 
 // Removes the notice at position `at` of the app's notice list; nothing
 // when there is none.
-__dismiss: fn(at: Int) {
+priv __dismiss: fn(at: Int) {
     loop {
         seen: notice_cell_load()
         listed: notice_decode(seen)
@@ -1462,13 +1462,13 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 
 // `live(source, args...)`: `args` are the encoded arguments. The binding
 // runs as this task's caller.
-__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+priv __live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     acting: acting_now(tasks.current_task())
     Live<T, E>{id: live_register(source, live_key(args), acting_tag(acting), 0), run: run, acting: acting}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
-__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
+priv __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -[DB.Read, Net, Time]> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     acting: acting_now(tasks.current_task())
@@ -1479,7 +1479,7 @@ __live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: 
 // registering the binding when nothing has read it yet. Only the binding of
 // this task's caller gets it: a value one caller computed never reaches
 // another's binding.
-__live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
+priv __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
     encoded: live_json.to_string<T>(value) ?? return
     key: live_key(args)
     id: live_register(source, key, acting_tag(acting_now(tasks.current_task())), 0)
@@ -1487,17 +1487,17 @@ __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
 }
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
-__live_invalidate: fn(source: String, args: [String]) Never! {
+priv __live_invalidate: fn(source: String, args: [String]) Never! {
     live_invalidate(Val(source), Val(live_key(args)), None, 0)
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-__live_invalidate_all: fn(source: String) Never! { live_invalidate(Val(source), None, None, 0) }
+priv __live_invalidate_all: fn(source: String) Never! { live_invalidate(Val(source), None, None, 0) }
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
 // doesn't encode, so a job given it fails each run.
-__live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+priv __live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
 
 // A binding's read set, for core.db: while a task runs a binding's source,
 // each table it reads joins that binding's read set, so a write to the table
@@ -1707,7 +1707,7 @@ priv live_present: fn(address: String, asking: String) -> [auth.AccountID] {
 // nowhere (live_left). A server runs this once each upgraded connection's
 // handler returns, and every presence read runs it first, so a closed
 // session is never counted.
-__live_left_settle: fn() Never! { live_left(rt_web.live_left()) }
+priv __live_left_settle: fn() Never! { live_left(rt_web.live_left()) }
 
 // Ends the presence of each binding `topics` names, one hub topic
 // (`live:<id>`, `watch`'s) per line, and re-runs every binding that reads an
@@ -4026,7 +4026,7 @@ priv app_menu_key_names: fn(key: String) -> [String] Never! {
 
 // The most bytes one call's body to the service `service` (its key) may
 // hold, when the app graph's `.api<S>(path, max_upload:)` names it.
-__api_max_upload: fn(service: String) -> Int? Never! {
+priv __api_max_upload: fn(service: String) -> Int? Never! {
     held: APP_GRAPH.guard_read()
     api: held.value.apis.get(service) ?? return None
     Val(api.max_upload)
@@ -8459,7 +8459,7 @@ priv blob_stores: fn() -> [String] Never! {
 // Whether the table `table` of the store `store` wants a blob reader
 // (`__blob_reader`): once a blob store is made, a table that has none yet,
 // or one whose row policy now guards it when its reader was made unguarded.
-__blob_reader_wanted: fn(store: String, table: String, guarded: Bool) -> Bool Never! {
+priv __blob_reader_wanted: fn(store: String, table: String, guarded: Bool) -> Bool Never! {
     held: BLOBS.guard_read()
     if held.value.stores.len() == 0 -> return false
     known: held.value.guarded.get("{store} {table}") ?? return true
@@ -8471,7 +8471,7 @@ __blob_reader_wanted: fn(store: String, table: String, guarded: Bool) -> Bool Ne
 // the row's read policy admits the caller, 0 when rows hold it and none
 // admits the caller, and -1 when no row holds it. The reader of a guarded
 // table is never replaced by one that isn't.
-__blob_reader: fn(store: String, table: String, guarded: Bool, read: &&fn(String) -[DB.Read]> Int Never!) Never! {
+priv __blob_reader: fn(store: String, table: String, guarded: Bool, read: &&fn(String) -[DB.Read]> Int Never!) Never! {
     key: "{store} {table}"
     held := BLOBS.guard_edit()
     if (held.value.guarded.get(key) ?? false) && !guarded {
@@ -8555,7 +8555,7 @@ priv RemoteArgs: struct {
 // arguments and calls the method on a copy of the service. Queued in a call,
 // the job runs once the call commits (`transactions`); queued outside one,
 // it runs at once, on a task of its own.
-__enqueue: fn(name: String, args: [String], retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
+priv __enqueue: fn(name: String, args: [String], retries: Int, run: &&fn(RemoteArgs) -> String [FieldError]!) Never! {
     job: CallJob{name: name, args: "[{args.join(",")}]", retries: retries, run: Shared{CallJobCall{call: run.move()}}}
     call: transactions.current() ?? return job_start(job, "", None, 0)
     transactions.enqueue(call, job)

@@ -330,16 +330,16 @@ client: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
 
 // Checked Core call rows keep the moved-stream and labeled handshake forms
 // of `client`; Sema selects one of these by argument count.
-__client_stream_entry: fn(stream: &&TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
+priv __client_stream_entry: fn(stream: &&TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
     tls := client_connect(stream, server_name, ClientConfig{}, forever()) ?? return Err(net_to_io(err))
     Ok(tls)
 }
 
-__client_deadline_entry: fn(stream: &&TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+priv __client_deadline_entry: fn(stream: &&TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     client_connect(stream, server_name, ClientConfig{}, deadline)
 }
 
-__client_config_deadline_entry: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+priv __client_config_deadline_entry: fn(stream: &&TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     client_connect(stream, server_name, config, deadline)
 }
 
@@ -356,7 +356,7 @@ priv client_connect: fn(stream: &&TCPStream, server_name: String, config: Client
 
 // Internal server handshake for Core's own TLS servers and loopback proofs.
 // The client certificate is not requested, so the stream has no peer identity.
-__server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+priv __server: fn(stream: &&TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     tcp := stream.move()
     end_ns: deadline_end(deadline, "tls accept") ?? return Err(err)
     context := server_tls_context(cert_pem, key_pem) ?? return Err(net_error("tls accept", err.message))
@@ -1120,7 +1120,7 @@ priv byte_range: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
-__has_nul: fn(text: String) -> Bool Never! {
+priv __has_nul: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         if byte == (U8{0}) -> return true
     }
@@ -1199,7 +1199,7 @@ priv send_queued: fn(tls: &TLSState, end_ns: Int, operation: String) -[Net, Time
 
 // Queues what a readable socket holds for the engine: 0, or the socket
 // status that failed the read. An empty read is the end of the stream.
-__take: fn(tls: &TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
+priv __take: fn(tls: &TLSState, end_ns: Int) -[Net, Time.Wait]> Int Never! {
     remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return 0
     slice: Duration{ns: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining}
@@ -1328,7 +1328,7 @@ priv wants_write: fn(interest: NetReadyInterest) -> Bool Never! {
     }
 }
 
-__read: fn(tls: &TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
+priv __read: fn(tls: &TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
     if tls.closed -> return Err(io_error(.Read, "TLS stream is closed"))
     if tls.pending.len() > 0 {
         count: if max_bytes < tls.pending.len() -> max_bytes else -> tls.pending.len()
@@ -1497,7 +1497,7 @@ priv stopped: fn(err: NetError) -> Bool Never! {
 
 // read_text under the stream's lock: the bytes it takes past the text it
 // returns go back in front of `pending`.
-__read_text: fn(tls: &TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
+priv __read_text: fn(tls: &TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {
     bytes := [U8]{}
     loop {
         want: if bytes.len() < max_bytes -> max_bytes - bytes.len() else -> 1
@@ -1867,7 +1867,7 @@ priv deadline_end: fn(deadline: Duration, operation: String) -> Int NetError! {
     Ok(now + deadline.ns)
 }
 
-__state: fn(stream: TLSStream) -> Shared<TLSState>? Never! {
+priv __state: fn(stream: TLSStream) -> Shared<TLSState>? Never! {
     if stream.state == .Val(state) -> return Val(state.copy())
     None
 }
@@ -1989,7 +1989,7 @@ priv mbedtls_known: fn(code: Int) -> String Never! {
     }
 }
 
-__hex: fn(value: Int, width: Int) -> String Never! {
+priv __hex: fn(value: Int, width: Int) -> String Never! {
     digits := [U8]{}
     rest := value
     loop rest > 0 || digits.len() < width {

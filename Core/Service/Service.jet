@@ -151,7 +151,7 @@ task_outcome_show: fn(outcome: TaskOutcome) -> String Never! {
 
 // Byte-exact current token-derived key. This intentionally does not introduce
 // a signing-key registry or strengthen the existing authority proof.
-__authority_signing_key: fn(authority: String) -> [U8] ServiceError! {
+priv __authority_signing_key: fn(authority: String) -> [U8] ServiceError! {
     raw: authority.bytes()
     if raw.len() != 67 || raw[0] != (U8{115}) || raw[1] != (U8{97}) || raw[2] != (U8{45}) {
         return Err(ServiceError.Revoked("service authority proof is malformed"))
@@ -483,7 +483,7 @@ priv upgrade_receipt: fn(tree: ServiceTree) -> ServiceUpgradeReceipt ServiceErro
 }
 
 // The rollback store is omitted from every text view.
-__upgrade_receipt_display: fn(receipt: ServiceUpgradeReceipt) -> String Never! {
+priv __upgrade_receipt_display: fn(receipt: ServiceUpgradeReceipt) -> String Never! {
     "ServiceUpgradeReceipt(from={receipt.from_generation}, to={receipt.to_generation}, migration={receipt.migration}, rollback_available={receipt.rollback_available}, pinned={receipt.pinned_shards.join(",")})"
 }
 
@@ -1541,7 +1541,7 @@ authority_require_registered: fn(endpoint: ServiceEndpoint) ServiceError! {
     }
 }
 
-__authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
+priv __authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
     validate_endpoint_identity(endpoint.authority, endpoint.tree, endpoint.worker, endpoint.generation)
     registry: service_registry().guard_read()
     index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
@@ -1639,7 +1639,7 @@ priv endpoint_receive: fn(endpoint: ServiceEndpoint) -> String ServiceError! {
 // wider mode or half-written; a run that loses that race reads the winner's
 // file. An existing file that is not a regular file owned by this user with
 // no group or other permission bits is refused, never overwritten.
-__active_endpoint: fn(secret_path: String) -[Env, FS, Rand]> ServiceEndpoint ServiceError! {
+priv __active_endpoint: fn(secret_path: String) -[Env, FS, Rand]> ServiceEndpoint ServiceError! {
     authority: package_authority(secret_path) ?? return Err(err)
     endpoint: endpoint_new("jobs", "package", 1, authority) ?? return Err(err)
     authority_register(endpoint, true, None) ?? return Err(err)
@@ -1703,7 +1703,7 @@ package_authority_io: fn(path: String, error: IOError) -> ServiceError Never! {
 
 // The issuing authority token of an endpoint, for Core providers (core.jobs)
 // that bind durable state to the service authority.
-__endpoint_authority: fn(endpoint: ServiceEndpoint) -> String Never! {
+priv __endpoint_authority: fn(endpoint: ServiceEndpoint) -> String Never! {
     endpoint.authority.copy()  // copy: the caller keeps the token past the borrowed endpoint
 }
 

@@ -48,14 +48,14 @@ Stop: struct {
 // The stop handler where no `#Context(on_stop:)` block set one: the stop
 // goes on unchanged. The compiler reads it as `context.on_stop`'s default
 // (Sema ContextKeys.jet sema_context_field_key).
-__stop_ignore: fn(stop: Stop) {}
+priv __stop_ignore: fn(stop: Stop) {}
 
 // `context.trace`'s records (Sema Places.jet sema_expression_context_trace).
 // `frames` is the runtime's frame walk (JetRuntime Fault.jet
 // jet_rt_context_trace): one `function\tfile\tline` line per Jet frame,
 // innermost first. The location table it reads names no column and no
 // module, so `column` is 0 and `module` is "".
-__trace_records: fn(frames: String) -> [SourceLocation] Never! {
+priv __trace_records: fn(frames: String) -> [SourceLocation] Never! {
     records := [SourceLocation]{}
     loop line in frames.lines() {
         parts: line.split("\t").to_list()

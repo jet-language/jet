@@ -9356,6 +9356,31 @@ PointOutsideBinding: struct {
     }
 }
 
+PublicDunderName: struct {
+    name: String,
+
+    impl Diagnostic {
+        code: "E0645",
+        safety_class: .Opinion,
+        safety_reason: "A public `__` item would list Core's machine space on its public surface, where the reference and completion offer a name no user source can spell.",
+        stage: [.Sema],
+        meaning: "A Core item whose `__` name is declared public",
+        fix_next: "Declare the item `priv`.",
+
+        what: fn(self) -> String {
+            "`{self.name}` is a Core machine name, which is `priv`"
+        }
+
+        why: fn(self) -> String {
+            "A `__` name is Core's machine space: user source can't spell one, so only Core and the code the compiler generates reach it, and it never joins Core's public surface"
+        }
+
+        fix: fn(self) -> String {
+            "Declare it `priv {self.name}`, or give a public item a name without the leading `__`."
+        }
+    }
+}
+
 CompileTimeReadsRuntimeValue: struct {
     name: String,
 

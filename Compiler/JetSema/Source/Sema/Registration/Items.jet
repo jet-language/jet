@@ -1440,7 +1440,7 @@ sema_registration_visibility: fn(is_pub: Bool, is_package_pub: Bool) -> Int Neve
 
 // The registered visibility of a declaration named `name` at a module's top
 // level. A Core item named `__…` is Core's machine space and Core declares it
-// `priv`, but user source can't spell a `__` name (E0067): the names that
+// `priv` (E0645), but user source can't spell a `__` name (E0067): the names that
 // reach one are Core's own and the code the compiler generates into any
 // module, which passes visibility. So its symbol is reachable as a public
 // one is, and `priv` keeps it out of Core's listed surface.
@@ -4101,6 +4101,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     // E1137: `#Open` is valid only on public enums (inline module bodies
     // included), checked before inline modules are lowered.
     sema_registration_open_enum_markers(module_row.program.items, true, diagnostics)
+    // E0645: a Core item named `__…` is `priv` (inline module bodies
+    // included); sema_registration_item_visibility registers it.
+    if module_is_core(module_row.module_identity) -> sema_registration_dunder_visibility(module_row.program.items, diagnostics)
     loop facts in owned.foreign_handles {
         if sema_registration_module_has_name(module_row, facts.jet_name) {
             diagnostics.push(sema_defined_twice(facts.jet_name, "module declarations share one namespace", facts.source_span))
@@ -5373,6 +5376,41 @@ sema_registration_open_enum_markers: fn(items: [Item], in_public_module: Bool, d
             .Func(_) | .Impl(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
+}
+
+// E0645 for each public item named `__…` that `items` spell (a function the
+// compiler generates is its own), inline module bodies walked as their own
+// item lists.
+sema_registration_dunder_visibility: fn(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == {
+            .Func(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub && !value.compiler_generated, diagnostics)
+            .Struct(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .Enum(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .Distinct(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .TypeAlias(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .Trait(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .Tag(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .UnitFamily(value) -> sema_registration_dunder_report(value.family, value.family_span, value.is_pub, diagnostics)
+            .Const(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .GenericModule(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .ModuleAlias(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .ProtocolDecl(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .MarkerDecl(value) -> sema_registration_dunder_report(value.name, value.name_span, value.is_pub, diagnostics)
+            .CodeModule(code_module) -> {
+                sema_registration_dunder_report(code_module.name, code_module.name_span, code_module.is_pub, diagnostics)
+                if code_module.body == .Val(body) {
+                    sema_registration_dunder_visibility(body, diagnostics)
+                }
+            }
+            .Module(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .TemplateLoop(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+priv sema_registration_dunder_report: fn(name: String, span: Span, is_pub: Bool, diagnostics: &[Diagnostic]) {
+    if !is_pub || !name.starts_with("__") -> return
+    diagnostics.push(sema_error("E0645", span, "`{name}` is a Core machine name, which is `priv`", "a `__` name is Core's machine space: user source can't spell one, so only Core and the code the compiler generates reach it, and it never joins Core's public surface", "declare it `priv {name}`, or give a public item a name without the leading `__`"))
 }
 
 sema_registration_reject_open_marker: fn(markers: [Marker], kind: String, name: String, is_private_enum: Bool, diagnostics: &[Diagnostic]) {

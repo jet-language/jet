@@ -298,7 +298,7 @@ hex_to_bytes: fn(text: String) -> [U8] HexError! {
 // (csv.__input_csv, json.__input_json): every FieldError of the input, one
 // per line, under a head naming the `format`. They fail with it as an `Err`,
 // so a script's `run: fn()` passes it up as it is.
-__input_failure: fn(format: String, failures: [FieldError]) -> String Never! {
+priv __input_failure: fn(format: String, failures: [FieldError]) -> String Never! {
     shown := "the input is not {format} that decodes as the expected records:"
     loop failure in failures {
         at: if failure.path.is_empty() -> "" else -> "{failure.path}: "
@@ -343,14 +343,14 @@ impl Dyn.Decode {
 // `FieldError.under(segment, inner)`: every error of `inner` framed under
 // `segment`; a success is handed back as is, its carrier and value neither
 // copied nor retained.
-#Builtin.Role(.DecodeUnder) __decode_under: fn<Item>(segment: String, inner: &&Item [FieldError]!) -> Item [FieldError]! {
+#Builtin.Role(.DecodeUnder) priv __decode_under: fn<Item>(segment: String, inner: &&Item [FieldError]!) -> Item [FieldError]! {
     if inner == .Err(errors) -> return Err(loop error in errors -> decode_under(segment, error))
     inner
 }
 
 // A List: each Array item decodes in order; a failing item's errors are
 // framed under `[index]` and every failure fails the List.
-#Builtin.Role(.DecodeList) __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
+#Builtin.Role(.DecodeList) priv __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
     if tree == {
         .Array(items) -> {
             values := [Item]{}
@@ -371,7 +371,7 @@ impl Dyn.Decode {
 }
 
 // A fixed List `[Item#length]`: the List decode of exactly `length` items.
-#Builtin.Role(.DecodeFixedList) __decode_fixed_list: fn<Item: Decode>(tree: Dyn, length: Int) -> [Item] [FieldError]! {
+#Builtin.Role(.DecodeFixedList) priv __decode_fixed_list: fn<Item: Decode>(tree: Dyn, length: Int) -> [Item] [FieldError]! {
     values: tree.decode<[Item]>() ?? return Err(err)
     if values.len() != length {
         return Err([FieldError]{FieldError{path: "", reason: "expected a fixed list of length {length}, found {values.len()}"}})
@@ -381,7 +381,7 @@ impl Dyn.Decode {
 
 // A byte List ([U8]) also takes Dyn.Bytes as is and Text as strict padded
 // standard base64.
-#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
+#Builtin.Role(.DecodeBytes) priv __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
     if tree == {
         .Bytes(bytes) -> Ok(bytes.copy())
         .Text(text) -> {
@@ -394,7 +394,7 @@ impl Dyn.Decode {
 
 // An Option: Null is None; any other value is Some of its decode, whose errors
 // pass through unframed.
-#Builtin.Role(.DecodeOption) __decode_option: fn<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
+#Builtin.Role(.DecodeOption) priv __decode_option: fn<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
     if tree == {
         .Null -> Ok(None)
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
@@ -407,7 +407,7 @@ impl Dyn.Decode {
 // A String-keyed Map: each Object entry decodes in entry order (a repeated key
 // keeps the later value); an entry's errors are framed under its key and every
 // failure fails the Map.
-#Builtin.Role(.DecodeMap) __decode_map: fn<Item: Decode>(tree: Dyn) -> [String:Item] [FieldError]! {
+#Builtin.Role(.DecodeMap) priv __decode_map: fn<Item: Decode>(tree: Dyn) -> [String:Item] [FieldError]! {
     if tree == {
         .Object(entries) -> {
             values := [String:Item]{}
@@ -431,7 +431,7 @@ impl Dyn.Decode {
 // (`__DecodeTree`) and core.encoding.json's text cursor. A generated Decode
 // reads a record's members through it, and `capture` hands one whole value to
 // a type that decodes from a tree. Core-private.
-__DecodeSource: trait {
+priv __DecodeSource: trait {
     // Enters the Object at the cursor; false (nothing read) for any other value.
     begin_object: fn(&self) -> Bool Never!,
     // How many members the Object at the cursor has, read without moving the
@@ -469,7 +469,7 @@ __DecodeSource: trait {
 // this body returns for the same input. The generic parameters are not
 // spelled `T` (see json.__decode_typed).
 #Allow(Jet.StaticOnlyStruct, "JetIR lowers `__Decoding.read` and its siblings by this type name (ir_decoding_read)")
-__Decoding: struct {
+priv __Decoding: struct {
     read: fn<Target: Decode, Source: __DecodeSource>(reader: &Source) -> Target [FieldError]! {
         value: reader.capture().decode<Target>() ?? return Err(err)
         Ok(value)
@@ -550,7 +550,7 @@ __Decoding: struct {
 // of the value there, and a repeated Object key's first value is the
 // member's (`tree.field`). The open containers are a stack of the
 // containers themselves and the position read in each.
-__DecodeTree: struct {
+priv __DecodeTree: struct {
     // The value at the cursor.
     pending: Dyn,
     key: String,
@@ -704,7 +704,7 @@ decode_expected: fn(expected: String, tree: Dyn) -> [FieldError] Never! {
 // vocabulary. Time and Math decodes report through it, and
 // Tools/Agent/RuntimeGenerators.jet generates the runtime's and the web
 // tier's tables from these arms.
-__dyn_kind: fn(tree: Dyn) -> String Never! {
+priv __dyn_kind: fn(tree: Dyn) -> String Never! {
     if tree == {
         .Null -> "Null"
         .Bool(_) -> "Bool"

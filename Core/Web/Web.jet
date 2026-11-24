@@ -84,7 +84,7 @@ page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, 
 
 // One request into a handler adapter: the matched request and the route's
 // encoded loader data ("" when the route has no loader).
-__AppCall: struct {
+priv __AppCall: struct {
     request: HTTPRequest,
     data: String,
 
@@ -121,7 +121,7 @@ __AppCall: struct {
     __failed: fn(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
 }
 
-__AppReply: enum {
+priv __AppReply: enum {
     Page(WebPage),
     JSON(String),
     Rejected(String),
@@ -1037,7 +1037,7 @@ C_APP_DEFAULT_PORT: 8080
 // port, over a `port` the program passes (the platform or `jet dev` that runs
 // the program owns the port); else the program's `port`; else 8080. A
 // `JET_APP_PORT` that holds no port stops with E2809 instead of falling back.
-__app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
+priv __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
     asked: if requested == .Val(port) -> "serve(port: {port})" else -> ""
     raw: core.sys.__env_value("JET_APP_PORT") ?? return AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
     text: String.from_bytes(raw) ?? ""
@@ -1050,7 +1050,7 @@ __app_port: fn(requested: Int?, at: SourceLocation) -> AppPort Never! {
 
 // Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
 // restarts the program on every change, and the served pages reload.
-__app_dev: fn() -> Bool Never! {
+priv __app_dev: fn() -> Bool Never! {
     raw: core.sys.__env_value("JET_DEV") ?? return false
     (String.from_bytes(raw) ?? "") == "1"
 }
@@ -1102,7 +1102,7 @@ C_APP_DEV_PORT_TRIES: 100
 // under `jet dev`). A port another program holds stops `jet run` with E2809
 // at `at`, the serving call; `jet dev` moves on to the next free port and
 // names it in the line.
-__app_listen: fn(mux: HTTPMux, port: Int, dev: Bool, at: SourceLocation) -[Net, IO, Time.Wait]> HTTPServer Never! {
+priv __app_listen: fn(mux: HTTPMux, port: Int, dev: Bool, at: SourceLocation) -[Net, IO, Time.Wait]> HTTPServer Never! {
     if port < 1 || port > 65535 {
         app_stop("E2809", "The web app can't listen on 127.0.0.1:{port}: a TCP port is a number from 1 to 65535.", "", at)
     }
@@ -3429,7 +3429,7 @@ C_APP_TRACE_MAX_QUEUE: 2048
 C_APP_TRACE_BATCH: 512
 
 // The OTEL_* variables the export reads, by name; an unset one is absent.
-__app_trace_env: fn() -> [String:String] Never! {
+priv __app_trace_env: fn() -> [String:String] Never! {
     values := [String:String]{}
     app_trace_env_put(values, "OTEL_SDK_DISABLED")
     app_trace_env_put(values, "OTEL_TRACES_EXPORTER")
@@ -4023,7 +4023,7 @@ priv openapi_route_method: fn(route: OpenAPIRoute) -> String Never! {
 
 // The method part of a derived operation id: the Path Item field of a
 // standard method, or `custom_` and the token, which no standard field is.
-__openapi_operation_method: fn(route: OpenAPIRoute) -> String Never! {
+priv __openapi_operation_method: fn(route: OpenAPIRoute) -> String Never! {
     if route.token != "" -> return "custom_{route.token}"
     openapi_methods()[route.method].copy()
 }

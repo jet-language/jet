@@ -396,12 +396,12 @@ queue_encoded_payload: fn<T: Encode>(job_type: String, payload: T) -> JobPayload
 
 // Checked #Job receiver normalization forwards here, after its payload schema
 // and declared job identity have been checked (no string-selected public job).
-__enqueue: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
+priv __enqueue: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, key: String?{None}) -[DB, Time]> JobQueueReceipt ServiceError! {
     encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
     queue_enqueue_request(queue, EnqueueRequest{job_type: job_type, payload: encoded, idempotency_key: key, request_id: None, delay_ms: 0})
 }
 
-__delay: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
+priv __delay: fn<T: Encode>(queue: JobQueue, job_type: String, payload: T, duration: Duration) -[DB, Time]> JobQueueReceipt ServiceError! {
     encoded: queue_encoded_payload(job_type, payload) ?? return Err(err)
     millis: duration.ns /% 1000000
     if millis < 0 || millis > 9223372036854775807 {

@@ -210,7 +210,7 @@ HTTPHandler: struct {
     }
 }
 
-__handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
+priv __handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) -> HTTPHandler Never! {
     HTTPHandler{__cell: Shared{HTTPHandlerCell{call: call.move()}}}
 }
 
@@ -348,7 +348,7 @@ priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler
 // `spool` piece by piece as it reads it, never holding it whole: the request
 // the handler gets has an empty body, and `__spooled` names the place the
 // spool opened for it.
-__route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, spool: &&HTTPSpool, at: SourceLocation) Never! {
+priv __route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, spool: &&HTTPSpool, at: SourceLocation) Never! {
     route_add(mux, method, pattern, handler, "", at)
     guard := mux.__state.guard_edit()
     guard.value.admits.push(HTTPAdmitRow{method: method, pattern: pattern, cell: Shared{HTTPAdmitCell{check: admit.move(), spool: spool.move()}}})
@@ -756,7 +756,7 @@ priv refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) -[Net, Time]> Never! {
     }
 }
 
-__live: fn(state: Shared<HTTPServerState>) -> Int Never! {
+priv __live: fn(state: Shared<HTTPServerState>) -> Int Never! {
     guard: state.guard_read()
     guard.value.live
 }
@@ -802,7 +802,7 @@ priv mux_new: fn() -> HTTPMux Never! {
 // Has the first server that serves `mux`, by `serve` or `serve_once`, run
 // `start` as it begins, once: a web app's schedules start so, and a table a
 // server is only bound over starts nothing.
-__on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
+priv __on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.starts.push(start.move())
 }
@@ -811,7 +811,7 @@ __on_serve: fn(mux: HTTPMux, start: &&fn() -[Time]> Never!) Never! {
 // it stops serving, after its drain, with the milliseconds left of the
 // drain budget: a web app's jobs wait so long for the jobs that run. A
 // `serve_once` connection runs none, as nothing drains it.
-__on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
+priv __on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.stops.push(stop.move())
 }
@@ -820,7 +820,7 @@ __on_stop: fn(mux: HTTPMux, stop: &&fn(Int) -[Time]> Never!) Never! {
 // request it upgraded to a WebSocket returns, so after the connection that
 // handler held is closed: a web app's live hub so learns which bindings no
 // open connection watches any more.
-__on_upgraded: fn(mux: HTTPMux, ended: &&fn() -[Time]> Never!) Never! {
+priv __on_upgraded: fn(mux: HTTPMux, ended: &&fn() -[Time]> Never!) Never! {
     guard := mux.__state.guard_edit()
     guard.value.upgraded.push(Shared{HTTPUpgradedCell{ended: ended.move()}})
 }
@@ -1153,7 +1153,7 @@ priv dispatch_shielded: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> 
     reply
 }
 
-__dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+priv __dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     tagged: with_request_id(mux, request)
     layers: mux_layers(mux)
     current := __handler(fn(routed: HTTPRequest) { select(mux, routed) })
@@ -1859,7 +1859,7 @@ priv server_answer: fn(server: Shared<HTTPServerState>?, mux: HTTPMux, request: 
     None
 }
 
-__send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
+priv __send: fn(stream: HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
     remaining: end_ns - rt.clock_mono_ns()
     if remaining <= 0 -> return false
     if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
@@ -2522,7 +2522,7 @@ priv range_unsatisfiable: fn(total: Int, fields: Headers) -> HTTPResponse Never!
 // ---------------------------------------------------------------------------
 // Text helpers and the IMF-fixdate clock
 
-__hex: fn(value: Int) -> String Never! {
+priv __hex: fn(value: Int) -> String Never! {
     if value <= 0 -> return "0"
     digits := [U8]{}
     n := value

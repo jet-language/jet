@@ -56,7 +56,7 @@ sleep: fn(duration: Duration) -[Time.Wait]> Never! {
 
 // `task.timeout(duration)` (Sema TaskGroups.jet): moves the task deadline to
 // the earlier of the installed one and now plus `duration`.
-__task_timeout: fn(duration: Duration) -[Time]> Never! { rt.task_timeout(duration.ns) }
+priv __task_timeout: fn(duration: Duration) -[Time]> Never! { rt.task_timeout(duration.ns) }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
@@ -163,7 +163,7 @@ Clock: struct {
     }
 }
 
-__ClockObserver: struct {
+priv __ClockObserver: struct {
     state: Shared<ClockState>,
 
     now: fn(self) -> Int Never! {
@@ -213,7 +213,7 @@ ExpiringValue: struct<T> {
 }
 
 // The two expiry wrappers share the same saturating millisecond policy.
-__expiry_deadline: fn(now_ms: Int, ttl: Duration) -> Int Never! {
+priv __expiry_deadline: fn(now_ms: Int, ttl: Duration) -> Int Never! {
     saturating_add_ns(now_ms, duration_whole_ms(ttl))
 }
 
@@ -1625,7 +1625,7 @@ priv civil_round_instant: fn(value: Int, unit: String, increment: Int, mode: Str
     base + civil_round(value - base, unit, increment, mode)
 }
 
-__datetime_literal: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
+priv __datetime_literal: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
     civil_timestamp(civil_utc(new(year, month, day), local_time(hour, minute, second)), nanosecond, hour == 23 && minute == 59 && second == 60)
 }
 

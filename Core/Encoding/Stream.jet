@@ -55,7 +55,7 @@ budget: fn(limits: EncodingLimits) -> AllocationBudget Never! {
 }
 
 #Error
-__ReserveFailure: enum {
+priv __ReserveFailure: enum {
     Heap,
     Allocation,
 }
@@ -65,7 +65,7 @@ reserve: fn<T>(allocation: &AllocationBudget, values: &[T], additional: Int) -> 
     true
 }
 
-__reserve_checked: fn<T>(allocation: &AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
+priv __reserve_checked: fn<T>(allocation: &AllocationBudget, values: &[T], additional: Int) __ReserveFailure! {
     old: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested: (values.len() + additional) * mem.__type_size<T>()
     if additional == 0 || requested <= old {

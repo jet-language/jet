@@ -728,7 +728,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
 // spec already keeps is IOError.InvalidInput, and a failed duplication is
 // IOError.Other. A kept FileLock's duplicate shares its lock, so the lock
 // stays held while the child (or anything it starts) keeps the descriptor.
-__spec_keep_open: fn(spec: ProcessSpec, handle: &&Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
+priv __spec_keep_open: fn(spec: ProcessSpec, handle: &&Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
     fd: if handle == {
         .FileReader(reader) -> rt.reader_fd(reader) ?? -1
         .FileWriter(writer) -> rt.writer_fd(writer) ?? -1
@@ -3145,7 +3145,7 @@ file_utf8_error: fn(bytes: [U8]) -> String Never! {
 // The Rust original is the exact contract. The existing BufReader owns
 // refill/position and retries Interrupted reads; the source owns the public
 // fault checkpoint, EOF, UTF-8 error and file-specific terminator trimming.
-__reader_read_line: fn(reader: &FileReader) -[FS.Read]> String? IOError! {
+priv __reader_read_line: fn(reader: &FileReader) -[FS.Read]> String? IOError! {
     if rt.fault_should_fail("FS.Read") {
         return Err(
             IOError.Other(

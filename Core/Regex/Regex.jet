@@ -397,12 +397,12 @@ find: fn(pattern: Regex, text: String) -> String? Never! {
 // `text.match(pattern)` compile `pattern` with this engine and run
 // `is_match`/`find`; a pattern that does not compile fails with compile's
 // RegexError.
-__string_matches: fn(text: String, pattern: String) -> Bool RegexError! {
+priv __string_matches: fn(text: String, pattern: String) -> Bool RegexError! {
     compiled: compile_program(pattern, flags(false, false, false), false)
     is_match(compiled, text)
 }
 
-__string_match: fn(text: String, pattern: String) -> String? RegexError! {
+priv __string_match: fn(text: String, pattern: String) -> String? RegexError! {
     compiled: compile_program(pattern, flags(false, false, false), false)
     find(compiled, text)
 }
@@ -410,7 +410,7 @@ __string_match: fn(text: String, pattern: String) -> String? RegexError! {
 // `text.has_line(pattern)`: whether some line of `text` (the `lines()` rule)
 // matches `pattern`, so `^` and `$` anchor at each line. A quoted pattern at
 // the call is a checked `Regex` literal.
-__string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
+priv __string_has_line: fn(text: String, pattern: Regex) -> Bool Never! {
     loop line in text.lines() {
         if is_match(pattern, line) -> return true
     }

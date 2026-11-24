@@ -120,7 +120,7 @@ window: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Never! from owner
 // intrinsic, as the List layout operations below are. Reserved `__` name,
 // never public.
 #Unsafe("`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative")
-__view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Never! from owner {
+priv __view_from_raw: fn<T, O>(owner: O, pointer: *T, count: Int) -> View<T> Never! from owner {
     __view_from_raw<T, O>(owner, pointer, count)
 }
 
@@ -142,11 +142,11 @@ stream_store: fn<T>(dst: &T, value: T) Never! { core.mem.stream_store<T>(dst, va
 // the compiler builds every call inline (JetIR Build.jet IR_CORE_INTRINSICS)
 // and never builds the body, so a body names only the declaration's own
 // operation.
-__type_size: fn<T>() -> Int Never! { __type_size<T>() }
+priv __type_size: fn<T>() -> Int Never! { __type_size<T>() }
 
-__list_capacity: fn<T>(values: [T]) -> Int Never! { __list_capacity<T>(values) }
+priv __list_capacity: fn<T>(values: [T]) -> Int Never! { __list_capacity<T>(values) }
 
-__list_reserve_exact: fn<T>(values: &[T], additional: Int) -> Bool Never! {
+priv __list_reserve_exact: fn<T>(values: &[T], additional: Int) -> Bool Never! {
     __list_reserve_exact<T>(values, additional)
 }
 
@@ -155,10 +155,10 @@ __list_reserve_exact: fn<T>(values: &[T], additional: Int) -> Bool Never! {
 // audit-gated: the compiler checks the method as a call of these, inside
 // `#Unsafe` only. Reserved `__` names, never public.
 #Unsafe("`pointer` and the T `count` elements past it lie in one live allocation")
-__ptr_offset: fn<T>(pointer: *T, count: Int) -> *T Never! { __ptr_offset<T>(pointer, count) }
+priv __ptr_offset: fn<T>(pointer: *T, count: Int) -> *T Never! { __ptr_offset<T>(pointer, count) }
 
 #Unsafe("`pointer` and the address `bytes` past it lie in one live allocation")
-__ptr_byte_offset: fn<T>(pointer: *T, bytes: Int) -> *T Never! {
+priv __ptr_byte_offset: fn<T>(pointer: *T, bytes: Int) -> *T Never! {
     __ptr_byte_offset<T>(pointer, bytes)
 }
 
@@ -168,10 +168,10 @@ __ptr_byte_offset: fn<T>(pointer: *T, bytes: Int) -> *T Never! {
 // unmaps them at the length reserved. Compiler intrinsics as the List layout
 // operations above are. Reserved `__` names, never public.
 #Unsafe("the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved")
-__region_reserve: fn(bytes: Int) -> Int Never! { __region_reserve(bytes) }
+priv __region_reserve: fn(bytes: Int) -> Int Never! { __region_reserve(bytes) }
 
 #Unsafe("`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again")
-__region_release: fn(address: Int, bytes: Int) Never! { __region_release(address, bytes) }
+priv __region_release: fn(address: Int, bytes: Int) Never! { __region_release(address, bytes) }
 
 /// A span of address space that allocators take their blocks from.
 /// `reserve` maps fresh pages, which the system commits on first touch, and
@@ -297,7 +297,7 @@ Allocator: trait {
 // address was taken in this function's frame, which has returned by then.
 // The closure's type has no failure: the runtime takes its result as a bare
 // Int, and `-> Int Never!` here would make it a failure-carrying result.
-__allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int {
+priv __allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int {
     address := 0
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
         address = mem.address_of(allocator)
@@ -326,16 +326,16 @@ __allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int
 // most the block can grow to (0 for a user allocator's block, which only
 // that allocator can resize). Compiler intrinsics as the region operations
 // above are.
-__context_take: fn(size: Int, align: Int) -> Int Never! { __context_take(size, align) }
+priv __context_take: fn(size: Int, align: Int) -> Int Never! { __context_take(size, align) }
 
-__context_give: fn(address: Int, size: Int) Never! { __context_give(address, size) }
+priv __context_give: fn(address: Int, size: Int) Never! { __context_give(address, size) }
 
-__context_room: fn(address: Int) -> Int Never! { __context_room(address) }
+priv __context_room: fn(address: Int) -> Int Never! { __context_room(address) }
 
 // The allocator behind `context.allocator`. It holds no state: each call
 // goes to whichever allocator is current then, the innermost
 // `#Context(allocator:)` block's, else the program heap.
-__ContextAllocator: struct {
+priv __ContextAllocator: struct {
     impl Allocator {
         allocate: fn(&self, size: Int, align: Int) -> Block AllocError! {
             if size <= 0 -> return Err(AllocError{requested_bytes: size, allocator: "context"})
@@ -361,4 +361,4 @@ __ContextAllocator: struct {
 
 // `context.allocator`'s value (JetSema Places.jet
 // sema_expression_context_allocator).
-__context_allocator: fn() -> Allocator Never! { __ContextAllocator{} }
+priv __context_allocator: fn() -> Allocator Never! { __ContextAllocator{} }

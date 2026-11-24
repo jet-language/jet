@@ -247,7 +247,7 @@ render_value: fn(value: DBValue) -> String Never! {
 
 // SQL values use the shortest decimal f64 display spelling, not Jet's debug
 // spelling (which preserves ".0" and may use an exponent).
-__float_text: fn(value: Float) -> String Never! {
+priv __float_text: fn(value: Float) -> String Never! {
     text: "{value}"
     raw: text.bytes()
     exponent_at := -1
@@ -346,7 +346,7 @@ SQL: struct {
     }
 }
 
-__sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {
+priv __sql_literal: fn(literals: [String], values: [DBValue]) -> SQL Never! {
     if literals.len() != values.len() + 1 {
         panic("typed SQL literal pieces do not match its holes")
     }
@@ -4201,14 +4201,14 @@ priv nul_text: fn() -> String Never! {
     String.from_bytes([U8]{0}) ?? panic("NUL is one ASCII byte")
 }
 
-__has_nul: fn(text: String) -> Bool Never! {
+priv __has_nul: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         if byte == (U8{0}) -> return true
     }
     false
 }
 
-__driver_open: fn(path: String) -> DBDriver? Never! {
+priv __driver_open: fn(path: String) -> DBDriver? Never! {
     // sqlite3_open_v2 takes a NUL-terminated filename, so a NUL never opens.
     if __has_nul(path) -> return None
     opened := prep.open_v2(path, 32838)
@@ -4235,7 +4235,7 @@ priv driver_finalize_cache: fn(driver: &DBDriver) Never! {
 
 // Shut a shared connection down in place: later operations see it closed and
 // the driver's own Close then does nothing.
-__driver_shutdown: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_shutdown: fn(driver: &DBDriver) -> Bool Never! {
     if !driver.live -> return false
     driver_finalize_cache(driver)
     _: prep.close_v2(driver.database)
@@ -4247,17 +4247,17 @@ control: fn(driver: &DBDriver, sql: String) -> Bool Never! {
     prep.exec_sql(driver.database, sql.bytes()) == base.OK
 }
 
-__driver_begin: fn(driver: &DBDriver) -> Bool Never! { control(driver, "BEGIN") }
+priv __driver_begin: fn(driver: &DBDriver) -> Bool Never! { control(driver, "BEGIN") }
 
-__driver_begin_immediate: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_begin_immediate: fn(driver: &DBDriver) -> Bool Never! {
     control(driver, "BEGIN IMMEDIATE")
 }
 
-__driver_commit: fn(driver: &DBDriver) -> Bool Never! { control(driver, "COMMIT") }
+priv __driver_commit: fn(driver: &DBDriver) -> Bool Never! { control(driver, "COMMIT") }
 
-__driver_rollback: fn(driver: &DBDriver) -> Bool Never! { control(driver, "ROLLBACK") }
+priv __driver_rollback: fn(driver: &DBDriver) -> Bool Never! { control(driver, "ROLLBACK") }
 
-__driver_reset: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_reset: fn(driver: &DBDriver) -> Bool Never! {
     if prep.get_autocommit(driver.database) -> return true
     __driver_rollback(driver)
 }
@@ -4378,7 +4378,7 @@ bind: fn(driver: &DBDriver, statement: Int, params: [DBValue]) -> DBError? Never
     None
 }
 
-__driver_execute: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> Int DBError! {
+priv __driver_execute: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> Int DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
@@ -4435,7 +4435,7 @@ cell_wire_width: fn(value: DBValue) -> Int Never! {
     tagged_width(payload)
 }
 
-__driver_query: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [[String:DBValue]] DBError! {
+priv __driver_query: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [[String:DBValue]] DBError! {
     statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement.stmt, params) == .Val(failure) {
         release(driver, statement)
@@ -4502,14 +4502,14 @@ __driver_query: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [[Strin
     Ok(rows)
 }
 
-__driver_query_one: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [String:DBValue]? DBError! {
+priv __driver_query_one: fn(driver: &DBDriver, sql: String, params: [DBValue]) -> [String:DBValue]? DBError! {
     rows := __driver_query(driver, sql, params) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     first: rows.remove(0, .Slot) ?? panic("SQLite first row disappeared")
     Ok(Val(first))
 }
 
-__driver_health: fn(driver: &DBDriver) -> Bool Never! {
+priv __driver_health: fn(driver: &DBDriver) -> Bool Never! {
     if __driver_query_one(driver, "SELECT 1", [DBValue]{}) == {
         .Ok(found) -> found != None
         .Err(_) -> false

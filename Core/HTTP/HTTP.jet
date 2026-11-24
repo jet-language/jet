@@ -642,7 +642,7 @@ priv upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
     Val(guard.value.fd)
 }
 
-__request: fn(method: String, url: String) -> HTTPRequest Never! {
+priv __request: fn(method: String, url: String) -> HTTPRequest Never! {
     HTTPRequest{method: method, path: request_target_path(url), body: body_empty(), headers: headers(), __url: url, __cell: Val(Shared{HTTPBodyCell{taken: false}})}
 }
 
@@ -898,7 +898,7 @@ version_parse: fn(token: String) -> Version Never! {
 
 // Why a custom route method token was refused.
 #Error
-__MethodTokenError: struct {
+priv __MethodTokenError: struct {
     reason: String,
 }
 
@@ -908,7 +908,7 @@ __MethodTokenError: struct {
 // registers. Any RFC 9110 token is a method, kept in its exact case; only a
 // token that is exactly a standard method is refused, since that method has
 // its own verb.
-__method_token_check: fn(token: String) -[]> __MethodTokenError! {
+priv __method_token_check: fn(token: String) -[]> __MethodTokenError! {
     if !valid_method(token) {
         return Err(__MethodTokenError{reason: "`{token}` is not an HTTP method token: a method is one or more letters, digits or characters of !#$%&'*+-.^_`|~"})
     }

@@ -85,7 +85,7 @@ StdinHandle: struct {
 // walks `read_line` as a lazy `Iter<String>` (THandleOp.LinesIter). A file
 // that does not open ends the walk with its IOError, as any line source's
 // read error does; one file is open at a time.
-__InputLines: struct {
+priv __InputLines: struct {
     priv paths: [String],
     priv at: Int,
     priv open: [FileReader],
@@ -206,7 +206,7 @@ PrintStyle: struct {
 // The style `context.print` reads where no `#Context(print: …)` block set
 // one, and the key such a block sets (sema ContextKeys.jet
 // sema_context_field_key).
-__print_style: PrintStyle{}
+priv __print_style: PrintStyle{}
 
 print: fn(text: String) -[IO, Time.Wait]> Never! {
     out := stdout()
@@ -269,7 +269,7 @@ read_until: fn(delimiter: String) -[IO, Time.Wait]> String IOError! {
     Ok(result.input)
 }
 
-__take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
+priv __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     if n < 0 -> return Err(terminal_other(.Read, Val("stdin"), "negative take"))
     terminal_read_preflight()
     result: rt.terminal8_take(n)
@@ -323,7 +323,7 @@ stdin: fn() -> StdinHandle Never! { StdinHandle{fd: 0} }
 
 // What the ambient `input` reads (__InputLines): the program's arguments name
 // its files; none means standard input.
-__input_lines: fn() -[Exec.Args]> __InputLines Never! {
+priv __input_lines: fn() -[Exec.Args]> __InputLines Never! {
     __InputLines{paths: core.process.args(), at: 0, open: [FileReader]{}}
 }
 
@@ -335,7 +335,7 @@ __input_lines: fn() -[Exec.Args]> __InputLines Never! {
 // named, the lines of `lines` (standard input) are printed changed. A file
 // that cannot be read or replaced stops the edit with its IOError; the files
 // before it stay edited.
-__input_edit: fn(lines: &&Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
+priv __input_edit: fn(lines: &&Iter<String>, change: fn(String) -> String Never!) -[IO, FS.Read, FS.Write, Exec.Args, Time.Wait]> IOError! {
     paths: core.process.args()
     if paths.len() == 0 {
         loop line in lines -> print(change(line))

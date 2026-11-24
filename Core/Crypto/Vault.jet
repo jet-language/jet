@@ -208,7 +208,7 @@ WrappedVaultKey: struct {
     }
 }
 
-__wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
+priv __wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
     meta: wrapped_metadata(bytes) ?? return Err(err)
     Ok(
         WrappedVaultKey{
@@ -222,7 +222,7 @@ __wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
     )
 }
 
-__wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
+priv __wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
 
 KeyUnlock: struct {
     kind: Int,
@@ -231,12 +231,12 @@ KeyUnlock: struct {
 
 // These retain a read borrow of the real owner's bytes, never a copied secret.
 #Unsafe("vault key import: the caller's unlock request borrows the private key's bytes for the unlock only")
-__key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
+priv __key_unlock_recipient: fn(identity: X25519SecretKey) -> KeyUnlock Never! {
     KeyUnlock{kind: 1, secret: identity.bytes[0..<identity.bytes.len()]}
 }
 
 #Unsafe("vault key import: the caller's unlock request borrows the passphrase's bytes for the unlock only")
-__key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
+priv __key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
     KeyUnlock{kind: 2, secret: passphrase.bytes[0..<passphrase.bytes.len()]}
 }
 

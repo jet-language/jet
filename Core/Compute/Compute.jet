@@ -100,7 +100,7 @@ to_list: fn(tensor: Tensor) -> [Float] Never! { tensor.data.copy() }
 // `data` through the flat range returned here, so the list window keeps the
 // checked range, its bounds check and the caller's source location. A slab
 // of a rank-0 or rank-1 tensor is one element, so its range is unchanged.
-__window: fn(tensor: Tensor, range: Range) -> Range Never! {
+priv __window: fn(tensor: Tensor, range: Range) -> Range Never! {
     if tensor.shape.len() <= 1 -> return range.copy()
     slab: window_slab(tensor.shape)
     end: if range.contains(range.end) -> range.end + 1 else -> range.end
@@ -112,7 +112,7 @@ __window: fn(tensor: Tensor, range: Range) -> Range Never! {
 
 // `tensor[range].copy()`: the window `values` (the `data` slabs `range`
 // selected) as an independent Tensor on the owner's device and profile.
-__window_copy: fn(tensor: Tensor, range: Range, values: [Float]) -> Tensor Never! {
+priv __window_copy: fn(tensor: Tensor, range: Range, values: [Float]) -> Tensor Never! {
     shape := tensor.shape.copy()
     if shape.len() > 0 {
         slab: window_slab(shape)
@@ -1366,12 +1366,12 @@ priv ADTape: struct {
     nodes: [ADNode],
 }
 
-__ad_enter: fn() Never! {
+priv __ad_enter: fn() Never! {
     tape := ad_tape().guard_edit()
     tape.value.depth += 1
 }
 
-__ad_exit: fn() Never! {
+priv __ad_exit: fn() Never! {
     tape := ad_tape().guard_edit()
     tape.value.depth -= 1
     if tape.value.depth <= 0 {
@@ -1383,7 +1383,7 @@ __ad_exit: fn() Never! {
 // `tensor` as a differentiation leaf: a copy with a fresh node. A tensor an
 // outer transform tracks enters as an identity of its node, so the outer
 // transform differentiates through the inner one.
-__ad_leaf: fn(tensor: Tensor) -> Tensor Never! {
+priv __ad_leaf: fn(tensor: Tensor) -> Tensor Never! {
     leaf := tensor.copy()
     tape := ad_tape().guard_edit()
     if tensor.node >= 0 {
@@ -1395,7 +1395,7 @@ __ad_leaf: fn(tensor: Tensor) -> Tensor Never! {
 
 // The transform's value `out`, untracked once the outermost transform
 // returns it.
-__ad_value: fn(out: Tensor) -> Tensor Never! {
+priv __ad_value: fn(out: Tensor) -> Tensor Never! {
     value := out.copy()
     if ad_depth() <= 1 -> value.node = -1
     value
@@ -1403,7 +1403,7 @@ __ad_value: fn(out: Tensor) -> Tensor Never! {
 
 // The gradient of the sum of `out`'s elements with respect to `leaf`: zeros
 // of `leaf`'s shape when `out` does not depend on it.
-__ad_gradient: fn(out: Tensor, leaf: Tensor) -> Tensor Never! {
+priv __ad_gradient: fn(out: Tensor, leaf: Tensor) -> Tensor Never! {
     gradient := ad_backward(out, leaf) ?? panic("compute.gradient: a derivative rule failed")
     if ad_depth() <= 1 -> gradient.node = -1
     gradient
@@ -1411,7 +1411,7 @@ __ad_gradient: fn(out: Tensor, leaf: Tensor) -> Tensor Never! {
 
 // The pullback of `out` to `leaf` under `seed`, the adjoint `out` receives:
 // the `pull` of a `compute.vjp` run. `seed` has `out`'s shape.
-__ad_pull: fn(out: Tensor, leaf: Tensor, seed: Tensor) -> Tensor Never! {
+priv __ad_pull: fn(out: Tensor, leaf: Tensor, seed: Tensor) -> Tensor Never! {
     if seed.shape != out.shape {
         panic("compute.vjp: the seed has shape {seed.shape} but the value has shape {out.shape}")
     }
@@ -1424,7 +1424,7 @@ __ad_pull: fn(out: Tensor, leaf: Tensor, seed: Tensor) -> Tensor Never! {
 // `compute.jvp` transform returns. The pullback of `out` under a tracked seed
 // `u` is linear in `u`, so differentiating each leaf's pullback·tangent with
 // respect to `u` gives that leaf's share of J·t.
-__ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Never! {
+priv __ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Never! {
     seed: __ad_leaf(like(out, out.shape.copy(), ad_fill(out.data.len(), 1.0)))
     tangent := like(out, out.shape.copy(), ad_fill(out.data.len(), 0.0))
     loop (index, leaf) in leaves {
