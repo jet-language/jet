@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113725,
+    "rev": 113750,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52841,11 +52841,11 @@
         {
           "n": 15,
           "text": "Compile-time code's step limit (E0952) counts deterministic steps, as ratified in D-PREP-FUEL1 (a step is a deterministic count, never wall time); it never measures time. Today SessionHost.jet:285-309 bounds the comptime child by the wall-clock wait on the monotonic clock (391-393), so a loaded host, or a debugger pausing the child, turns a working build into E0952, and Docs/Spec/Reference/metaprogramming.md:183 describes the time rule. Found by the D-DEBUG-PREP1 adversarial review, 2026-11-23. Proof: a case runs one compile-time loop just under its step limit and one just over: the first passes and the second stops with E0952 at the same step count under an all-cores load generator, and the spec line states the count rule.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-23T23:20:28.628Z"
+          "evidence": "On a compiler built from landed dev 6ab0b5a5c8 (tip20), run in an export of that commit: cases RuntimeStops/comptime_step_limit_counts_under_load; ui comptime_step_limit_; PASS 1/1; PASS 5/5; metaprogramming.md:183-186 says \"Steps are counted, never timed\"; SessionHost.jet has no clock wait",
+          "at": "2026-11-24T08:32:53.997Z"
         },
         {
           "n": 16,
@@ -52866,7 +52866,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-24T05:36:25.677Z",
+      "updated": "2026-11-24T08:32:53.997Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 16
     },
@@ -57888,11 +57888,11 @@
         {
           "n": 8,
           "text": "One interned, checked derivation relation records how each fact was produced across facts, execution and optimization; producers are authoritative, persistence is lossless, and the CLI and LSP read it. Proof: `jet test Compiler --profile cases --filter Explain/derivation_relation_`. (was #3186 c15)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:41.751Z"
+          "evidence": "jet test Compiler --profile cases --filter Explain/derivation_relation_ (7 pass) on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:20.831Z"
         },
         {
           "n": 9,
@@ -57913,7 +57913,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-24T02:27:25.737Z",
+      "updated": "2026-11-24T06:34:20.831Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
@@ -58195,12 +58195,12 @@
         },
         {
           "n": 4,
-          "text": "The Services.jet and TaskGroups.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for both files prints nothing and `jet test Tests/Guards --filter diagnostics_coverage` passes.",
+          "text": "The Services.jet checkers in Sema/Calls move to Core declarations and the file is deleted, its typed-dispatch parts riding c30 and D-RULE-TYPEARGS1. TaskGroups.jet checks the language's own task-group syntax (`task`, group/all/race/any/timeout, captures and borrows: E1101-E1112), which sema owns (I3): it moves to Sema/Ownership, and every task form is classified through one language-owned TaskForm enum in JetFoundation's AST (task_form_of), so sema_taskgroup_core_key, the byte-built keys and the internal_*_method functions are deleted and no Core name keys task semantics. Every code keeps its UI snapshot. Proof: `git ls-files Compiler/JetSema/Source/Sema/Calls/Services.jet Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet` prints nothing, `git grep -n -e sema_taskgroup_core_key -e sema_taskgroup_internal_ -- Compiler` prints nothing, and `jet test Tests/Guards --filter diagnostics_coverage` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:06:44.555Z"
+          "at": "2026-11-24T07:54:49.658Z"
         },
         {
           "n": 5,
@@ -58213,12 +58213,12 @@
         },
         {
           "n": 6,
-          "text": "The Hardware.jet, Data.jet and Geometry.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for the three files prints nothing and `jet test Tests/Guards --filter diagnostics_coverage` passes.",
+          "text": "The Data.jet and Geometry.jet checkers in Sema/Calls move to Core declarations and are deleted (Geometry's E2521 waits on D-RULE-TYPEARGS1). Hardware.jet's DMA transfer tracking is flow analysis: it comes from resource and typestate facts declared on the Core hardware types (#6852 c1), so a package's own DMA type gets the same tracking, and Hardware.jet is deleted. Every code keeps its UI snapshot. Proof: `git ls-files` for the three files prints nothing and `jet test Tests/Guards --filter diagnostics_coverage` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:06:46.395Z"
+          "at": "2026-11-24T07:15:59.836Z"
         },
         {
           "n": 7,
@@ -58420,6 +58420,84 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T03:55:59.528Z"
+        },
+        {
+          "n": 29,
+          "text": "A marker's expand body can reject at a reflected field: `reject(value, at: field)` reports the diagnostic at that field's span (today Jet.ComptimeConstructNotSupported 'reject with anything but one diagnostic value isn't supported by the current evaluator yet', probe form on tip18), so a Core #Web.Form marker reproduces e2474_form_action_input_mismatch.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:11:46.110Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Metaprogramming/expand_reject_at_field"
+          }
+        },
+        {
+          "n": 30,
+          "text": "A check rule hears a call argument's declared function: CompilerArg.function carries the FunctionInfo (params and types) of a function-valued argument, not the hardcoded None at CheckRules.jet sema_rule_call_arg (probe rule2 on tip18).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:11:47.560Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Metaprogramming/check_rule_hears_argument_function"
+          }
+        },
+        {
+          "n": 31,
+          "text": "A check rule hears a type-name argument as a Type value (`web.form(Checkout, …)` is heard as type `_` with no value today; sema_rule_call_value probes it with no expected type; probe rule2 on tip18).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:11:48.932Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Metaprogramming/check_rule_hears_type_argument"
+          }
+        },
+        {
+          "n": 32,
+          "text": "A check rule hears a module constant (including a constant naming a constant) and a `Path{…}` literal as known values, as sema_rule_known_row's doc comment states; today only plain literal rows are heard (probe rule3 on tip18), so a static-path rule would wrongly reject router.get(CACHE_PATH, …) and router.custom(BAN, …).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:11:50.107Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Metaprogramming/check_rule_hears_constants_and_path_literals"
+          }
+        },
+        {
+          "n": 33,
+          "text": "A check rule's rejection keeps its call's position in the diagnostic order, so a module mixing rule rejections and ordinary errors prints them in source order (today staged type-rule rejections print after the module's other diagnostics: http_route_path_type with the draft StaticRoutes rule).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:11:51.256Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "http_route_path_type"
+          }
+        },
+        {
+          "n": 34,
+          "text": "A check rule can tell an interpolated String literal from a value known only at run time (both are heard as value == None today, probe rule on tip18), through a fact within D-CORE-CHECK1's CompilerCall surface, so a Core static-route rule keeps http_route_invalid_literal's 'brace interpolation is not allowed in route patterns' message. If no ratified surface can carry it, the shape goes on a ballot first.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:11:52.323Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "http_route_invalid_literal"
+          }
         }
       ],
       "refs": [],
@@ -58430,9 +58508,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T04:23:56.540Z",
+      "updated": "2026-11-24T07:54:49.658Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 28
+      "criteriaLastN": 34
     },
     {
       "id": "c0sdz4q0",
@@ -58657,11 +58735,11 @@
         {
           "n": 13,
           "text": "An impl's generic parameter shadows a type of the same name in scope: with a struct named T declared, impl Pair<T: Describe>.Describe still declares describe for Pair, and Pair<T>{a: T{x: 3}}.describe() runs. Today the impl is silently dropped (Jet.UnknownFunction: `Pair` has no method `describe`) on the batch 14 and batch 16 compilers. Probe $JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/review-probes/q15b_param_named_like_type.jet (D-IMPL-COND1 heads; found by the D-IMPL-STRUCTBOUND1 adversarial review).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T04:26:09.459Z",
+          "evidence": "jet test Compiler --profile cases --filter impl_parameter_shadows_a_type_name on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:19.886Z",
           "proof": {
             "profile": "cases",
             "filter": "impl_parameter_shadows_a_type_name"
@@ -58702,7 +58780,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T06:33:07.254Z",
+      "updated": "2026-11-24T06:35:35.853Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -64046,11 +64124,11 @@
         {
           "n": 7,
           "text": "A two-binding loop over a list of 2-tuples (`loop (a, b) in pairs`, which binds index and tuple, not the pair) gets the treatment its ballot chooses (on Main's ballot list (2026-11-15)).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:34:19.618Z",
+          "evidence": "jet test Compiler --profile ui --filter loop_two_bindings_over_pairs on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:22.574Z",
           "proof": {
             "profile": "ui",
             "filter": "loop_two_bindings_over_pairs"
@@ -64096,7 +64174,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-24T04:18:06.588Z",
+      "updated": "2026-11-24T06:34:22.574Z",
       "updatedBy": "Orchestrator"
     },
     {
@@ -64185,11 +64263,11 @@
         {
           "n": 6,
           "text": "A library module's private declaration never enters another module's scope: today Core/Regex's private struct `Compiler` shadows the build `Compiler` type in every program that loads core.regex (Core/Perf/Perf.jet:124 and a user build.jet that uses core.regex both fail to resolve `Compiler.events`; reproduced on batch compiler p326, dev c701f02c42). The private name is invisible outside its module, and the build type resolves. Proof: a ui or cases row whose build.jet loads core.regex and calls `Compiler.events`, passing with Core/Regex's struct still named `Compiler` in a fixture library.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T18:44:51.646Z"
+          "evidence": "jet test Compiler --profile cases --filter BuildEntry/a_library_type_never_stands_in_for_the_build_compiler on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:21.719Z"
         },
         {
           "n": 7,
@@ -64210,7 +64288,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:54.793Z",
-      "updated": "2026-11-24T02:27:27.830Z",
+      "updated": "2026-11-24T06:34:21.719Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
@@ -65160,7 +65238,7 @@
           "at": "2026-11-16T13:11:54.900Z",
           "proof": {
             "profile": "cases",
-            "filter": "LSP/lsp_cancelled_costly_request_returns_32800_and_never_publishes"
+            "filter": "LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes"
           }
         },
         {
@@ -65292,6 +65370,71 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-24T02:27:14.002Z"
+        },
+        {
+          "n": 15,
+          "text": "A message body that reaches the server in several reads is read whole: lsp_read_message keeps taking until Content-Length bytes have arrived, and only a real end of input ends the session. Today core.term.take returns one read (RouteTerm.jet:245-249), and Loop.jet:34-36 takes a short body as the end of input, so a 6,759-byte body sent in two writes 0.2 s apart exits 1 with `input ended inside a message body`, and opening a 3,000-line file kills the server. Proof: `jet test Compiler --profile cases --filter LSP/lsp_body_split_across_writes_is_read_whole` passes (a new case whose body arrives in two writes with a pause between them).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:33:01.642Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "LSP/lsp_body_split_across_writes_is_read_whole"
+          }
+        },
+        {
+          "n": 16,
+          "text": "lsp_canceled_costly_request_returns_32800_and_never_publishes sends its edit, request 50 and $/cancelRequest in one write, so the case doesn't depend on read timing. Today they go as three writes (case lines 11-13), and a read-ahead server passes only when the cancel is already buffered. Proof: the case passes 20 runs out of 20.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:33:03.859Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes"
+          }
+        },
+        {
+          "n": 17,
+          "text": "Every request the VS Code extension sends is one the server answers. Today Tools/Editors/Vscode/extension.js:543 sends workspace/executeCommand `jet.reasoning`, which the Jet server no longer handles (dropped in the rewrite, 590841dff5), so the reasoning panel gets -32601 \"method not found\". The server answers it through a supported command, or the extension stops sending it and the panel is removed with its docs. Proof: a cases test LSP/lsp_execute_command_jet_reasoning_is_answered (or a guard listing the extension's sent methods against the server's handled ones) passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:38:57.885Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "LSP/lsp_execute_command_jet_reasoning_is_answered"
+          }
+        },
+        {
+          "n": 18,
+          "text": "A document whose languageId isn't jet is not checked as Jet: Server.jet lsp_update_document reads the languageId of didOpen, and a non-Jet document gets no Jet diagnostics. Today a didOpen of panel.html as `html` publishes E0001 \"The character 🙂 doesn't mean anything here (yet)\". Proof: `jet test Compiler --profile cases --filter LSP/lsp_non_jet_language_document_is_not_checked` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:38:58.817Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "LSP/lsp_non_jet_language_document_is_not_checked"
+          }
+        },
+        {
+          "n": 19,
+          "text": "A request with a readable id but invalid params is answered under that id: `shutdown` with `\"params\": null` gets its result (shutdown takes no params), and a following `exit` exits 0. Today the server answers -32600 with `\"id\": null`, so the client never sees its shutdown answer, refuses `exit`, and exits 1 at end of input. Proof: `jet test Compiler --profile cases --filter LSP/lsp_shutdown_with_null_params_answers_its_id_and_exits_0` passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T07:38:59.749Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "LSP/lsp_shutdown_with_null_params_answers_its_id_and_exits_0"
+          }
         }
       ],
       "refs": [],
@@ -65302,9 +65445,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-24T06:34:15.936Z",
+      "updated": "2026-11-24T07:41:35.993Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 14
+      "criteriaLastN": 19
     },
     {
       "id": "c01q17ls",
@@ -66712,11 +66855,11 @@
         {
           "n": 7,
           "text": "Every list-position stop site calls one shared message owner. Proof: `git grep -n 'is out of range (length ' -- Compiler` lists only that owner (on dev 104ee83c5a it finds two sites, Dyn.jet:599 and :877).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:06:30.758Z"
+          "evidence": "git grep -n 'is out of range (length ' -- Compiler on dev 568729492f lists one site, Compiler/JetRuntime/Source/Dyn.jet:612, the shared owner",
+          "at": "2026-11-24T06:34:23.449Z"
         },
         {
           "n": 8,
@@ -66767,7 +66910,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:30.758Z",
-      "updated": "2026-11-24T02:27:59.907Z",
+      "updated": "2026-11-24T06:34:23.449Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 11
     },
@@ -67259,11 +67402,11 @@
         {
           "n": 3,
           "text": "Type and implementation navigation and the call and type hierarchy views keep the same declaration relationships as the checked graph, before and after the body-only and signature edits, and no passive label contradicts them. Proof: `jet test Compiler --profile cases --filter LSP/lsp_type_hierarchy_trait_impls` and `--filter semindex/hierarchy_matches_checked_graph`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:39.444Z"
+          "evidence": "jet test Compiler --profile cases --filter LSP/lsp_type_hierarchy_trait_impls on the batch compiler built from dev 568729492f (tip18-chain s1, 1c961ed64b39e1f9): PASS",
+          "at": "2026-11-24T06:34:19.003Z"
         },
         {
           "n": 4,
@@ -67425,7 +67568,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:43.573Z",
-      "updated": "2026-11-24T02:26:36.626Z",
+      "updated": "2026-11-24T06:34:19.003Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 18
     },
@@ -135608,6 +135751,781 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-24T04:29:39.066Z"
+    },
+    {
+      "id": "D-IMPL-CONCRETEHEAD1",
+      "cardId": "c0sdz4q0",
+      "group": "language",
+      "title": "How a byte list keeps its own encoding once list codecs are ordinary impls",
+      "situation": "Core decodes a byte list (`[U8]`) differently from other lists. It takes `Dyn.Bytes` as is, reads text as base64, and encodes back to `Dyn.Bytes`. The encoding spec requires this: a Codable `[U8]` is never an integer array. Today the compiler picks that route by type tests and by helper name. Card #6852 c8 asks that decode bind through public traits, with no Core helper named in CoreReach.jet. Its c9 asks that a user type implementing those traits works at O0, O1 and O2. So list, option and map decode must become ordinary impls such as `impl [T].Decode`. D-BUILTIN-METHOD1 keeps concrete-head specialization and overlapping impls illegal. An `impl [U8].Decode` beside `impl [T].Decode` would be both. This ballot decides how the byte rule survives the move.",
+      "gist": "How should a byte list keep its own encoding once list codecs are ordinary impls, with no hidden compiler route?",
+      "lesson": "The usual way is for the general impl to ask the element type how a list of it looks. Haskell's `Show` and the aeson JSON library work this way. The other way is specialization: a more specific impl wins. Rust has kept that unstable for public use since 2016 and uses it only inside its standard library. Jet's generic instances should each know their exact types, but today a `[T]` instance and a `[T#N]` instance of one function collide, so no option can lean on that yet.",
+      "explainer": "Think of a post office that ships any box of items as a list of parcels. Letters are special: a stack of letters travels in one envelope. The office can keep a special counter just for letter stacks. Or it can ask each item how it ships in bulk, and letters answer 'one envelope'. Or letters can become their own product, a letter pack.",
+      "story": "Ana keeps a thumbnail as `[U8]` in a `#Codable` struct. Its JSON holds base64 text and its CBOR holds a byte string. That works today because the compiler tests for U8 and names `__decode_bytes`. Once list decoding is `impl [T].Decode` in Core, nothing in the language says `[U8]` still decodes that way. Her generic `load<T: Decode>` must also reach the byte rule when `T` is `[U8]`.",
+      "inWild": "// Haskell 2010 Report 6.3.3: `showList` exists for Char, so a String shows in quotes.\n// aeson: ToJSON/FromJSON carry toJSONList/parseJSONList with defaults; ToJSONKey/FromJSONKey handle map keys.\n// binary: `class Binary t` carries `putList` with a default.\n// Go encoding/json: `[]byte` is base64 by a kind test; json v2 also writes `[N]byte` as base64.\n// Rust: std uses min_specialization internally; serde writes Vec<u8> as a sequence unless serde_bytes wraps it.\n// Swift: Data is its own type and JSONEncoder writes it as base64; [UInt8] is a number array; SE-0320 adds a key protocol.\n// C++: partial template specialization; `std::vector<bool>` is the cautionary case.",
+      "detail": "State of #6852 c8. The codec move is unlanded. For the seed it is split into `land/6852-c8-codec-seed-a.patch`, the compiler half on e6e448e550, and `land/6852-c8-codec-seed-b.patch`, the Core half, which lands once a seed carries (a). (b) PROPOSES `Encode` and `Decode` as core.encoding declarations, with `impl F32.Decode` and `impl Dyn.Decode` there. On dev, `__decode_f32` and `__decode_dyn` are still live. Option A's `Decode: trait` presupposes the pair.\n\n`land/6852-c8-decode-lines-r2.patch`, stacked on (b), marks the six remaining decode helpers with jet_builtins roles. That is option D′ below.\n\nSites that carry the byte rule or its container siblings (dev lines). Decode, tree: BuildDyn.jet `ir_dyn_decode` 545-573, `ir_codec_decode_helper` 707-724 (the U8 test at 711), `ir_dyn_fixed_decode` 578, `ir_dyn_union_decode`, `ir_decode_under` 687. Decode, streaming: BuildDyn.jet `ir_decoding_read` 1063-1114, with its own byte exclusion at 1084-1093.\n\nEncode: BuildDyn.jet `ir_serde_encode` 783-850, with the byte test at 804 and an `ir_list_operand` copy for an inline `[U8#N]`. It calls `ir_dyn_array_encode`, `ir_dyn_option_encode`, `ir_dyn_union_encode` and BuildExpr.jet `ir_dyn_object_encode`.\n\nReach: CoreReach.jet `ir_codec_decode_helpers` 106-107, `ir_decoding_reads` 212-213 and `ir_core_decoding_read`. The comptime tier has JetDriver Pipeline.jet `jet_driver_comptime_codec_refs` 1423-1446, and hot-text.list names these functions.\n\nSema: TypeRelations.jet `sema_type_codec_structural_bound` 2807-2848 and Serde.jet `sema_serde_type_is_admissible_in` 278-319. Both say a list is Codable when its element is. They disagree on `[U8: V]`: the first asks that the key be Decode, the second asks for a String key. The trait rows carry `through_elements` (Prelude Traits.jet, OwnedTraitRows.jet).\n\nRuntime: `jet_rt_codec_decode_u8` (DynCodec.jet:530) is one of ten integer adapters over `codec_decode_integer` (452-508), routed by RuntimeRoutes.jet:1175 and RuntimeCExports.jet.\n\nFate per option. Under A, every container decode helper and all three IR byte tests go (BuildDyn.jet 711, 804 and 1084-1093). The list, fixed list, option and map routes become impls, and the streaming list read becomes a hook. The two Sema tables shrink to the impls' bounds, and `through_elements` goes for these heads.\n\nUnder B, the same sites go, and the byte rule is `impl [U8].Decode` plus `impl [U8#N].Decode`. Under C, the byte tests go and `Bytes` gets impls. Under D and D′, the byte tests stay and the other sites follow A. Every option keeps the U8 runtime adapter.\n\nUnder every option, `FieldError.under` keeps its Core helper, found through the role DecodeUnder as decode-lines-r2 does it, so CoreReach.jet names no `__decode_` helper. The union route, `Shared` and the named Dyn, DateTime and format types are outside this ballot. They stay with #6852 c8, which owns the routes this ballot does not settle.\n\nPrerequisites every option shares. Probes p4, p5 and p9 show that one generic function instantiated at both `[U8]` and `[U8#2]` collides today. At O0 it prints `[2, 0]` for `[1, 2]` and then faults with SIGSEGV. At O1 and O2 it is an internal compiler error: an `[U8#2]` argument reaches an `[U8]` parameter. A struct with both field kinds fails in its derived `__read`, also with I16. Every claim below about `[U8#N]` holds only once that collision is fixed. The review reported it to Main.\n\nMap keys. `__decode_map` takes String keys only. D-IMPL-STRUCTBOUND1 Rule 1 refuses a head that names a type, so `impl [String: T].Decode` is not legal in any option. Every option uses a key trait instead, as Swift SE-0320 and aeson's key classes do. PROPOSED: core.encoding declares `MapKey: trait { key_text: fn(self) -> String, from_key_text: fn(text: String) -> Self [FieldError]! }` and `impl String.MapKey`. `from_key_text` needs the same `-> Self` substitution as A's prerequisite two.\n\nThe map impls are `impl [K: V]<K: MapKey, V: Decode>.Decode` and `impl [K: V]<K: MapKey, V: Encode>.Encode`, in D-IMPL-STRUCTBOUND1's spelling. A bound on K is the map-key rule that review's F3 named as new work: today no generic K is a valid map key. That ends the Sema disagreement on `[U8: V]`, and later key types need no overlap. q7's Fix line becomes \"Fix: Decode a map whose key type is `MapKey` (String is), or decode `[String: String]` and convert its keys\".\n\nEach option answers four questions. Which impl does a generic `fn<T: Decode>` reach when `T` is `[U8]`? Must a more specific impl meet the general impl's bounds? Do `[U8#N]` and `U8?` follow? What does the Encode side do?\n\nCases each option must pin at O0, O1 and O2: `[U8]`, `[U8#N]`, and both in one struct and in one generic function (p4, p9). Also `[[U8]]`, `[U8]?`, `[String: [U8]]`, `U8?` and `[I8]`, whose outputs p1 and p3 record today. Also `[Level]` with `Level: distinct U8` (q9), and generic `load<[U8]>` and `load<[U8#2]>`. Also the streaming JSON field path, CBOR major type 2, a CSV text cell for `U8` and for `[U8]`, comptime decode, and every error text.\n\nTooling, owed under every option. q7's Fix line suggests `impl [Int:String].Decode`, a head every option refuses; it takes the text above. q5 answers an overlap attempt with \"`impl Many` takes no type parameters\" and should say that impls may not overlap. q9's Fix names `Level.from_U8`, which does not exist; `from_int` does. q6 reports \"No trait named `Encode` is in scope\" for a type that is simply not Codable.\n\nAny hook the chosen option adds shows in `jet inspect expand --facts derive`, in LSP hover and in the Core docs.",
+      "options": [
+        {
+          "key": "A",
+          "name": "The general impl asks the element: list hooks with defaults",
+          "detail": "Decode gains a list hook with a default body, `decode_list(tree) -> [Self]`. The default decodes an Array item by item, as `__decode_list` does today. `impl [T].Decode` calls `T.decode_list`. `impl [T#N].Decode` calls it, checks the length and builds the fixed list. U8's impl overrides the hook to take `Dyn.Bytes` and base64 text. Encode gains `encode_list: fn(items: [Self]) -> Dyn` the same way, which U8 answers with `Dyn.Bytes`. No two impls overlap, so the ratified clause stands.",
+          "technical": "Dispatch already works. Probe q3 has an element hook and a conditional `impl Many<T: Dec>.Dec` that calls `T.dec_list`, nested. It prints `2 3 4` at O0, O1 and O2. A static default body that does not name `Self` is inherited and overridden correctly (q4).\n\nA needs four things first. One: a default trait body that names `Self` and `[Self]`. Today q1 gives `Jet.UnknownName` for `Self`. q2 gives \"`Self` does not implement `Decode`\" and leaves `[Self]` unsubstituted. Two: `-> Self` substituted in an impl on a builtin, which the codec move notes is missing (its impls write `-> F32` and `-> Dyn`). Three: a source spelling that builds `[T#N]` from a checked `[T]`; the spec has only `[T#N].filled(value)`.\n\nFour: a trait member with its own type parameters, called through a bound. The streaming hook needs it. Today q11 refuses a default body on `dec_many: fn<Source: Src>(source: Source) -> Int` with `Jet.UnknownType`: \"There's no type called `Source`\". Without a default the member is accepted, but q12's `T.dec_many(Text{…})` through a bound is refused: \"`dec_many` wants `Source` for argument 1, but this is `Text`\".\n\nNo card owns these yet. Main files one card for all four on ratification. The work is Sema's `Self` scope in default bodies, method type parameters on trait members and their substitution at bound calls, plus one Core conversion, about two days [INFERENCE].\n\nU8's own decode does not move into source. `impl U8.Decode`'s `decode` is `builtin.codec_decode_u8(tree)`, a jet_builtins host operation. PROPOSED: its Core.rows row is `dispatcher_row adapter jet_builtins codec_decode_u8`, whose CoreCallRecord names `jet_rt_codec_decode_u8`, plus its typed signature in the host signature table. The IR scalar arm (BuildDyn.jet:572) keeps the other nine integer adapters, so both call sites end in the same `codec_decode_integer`.\n\nSo U8 keeps the same Number lexemes and the CSV and environment text-cell scope. It keeps the error text \"expected U8, found out-of-range Int\", as I8 through U64 do. Only `decode_list` and `encode_list` are new source.\n\nStreaming: Decode gains a private, compiler-known member `__read_list<Source: __DecodeSource>`, like the derived `__read`; it waits on prerequisite four. Its default is today's `read_list`. U8 overrides it to capture the value and decode bytes. `impl [T].Decode`'s `__read` calls `T.__read_list`, so no type test remains, and BuildDyn.jet:1084-1093 is deleted.\n\nEncode: `impl [T].Encode` is `T.encode_list(self)`. `impl [T#N].Encode` passes `[T]` from its value, one copy for an inline `[U8#N]`, the same `ir_list_operand` copy as today. `ir_dyn_array_encode`, `ir_dyn_option_encode` and `ir_dyn_object_encode` become the bodies of `impl [T]`, `impl T?` and `impl [K: V]`. `ir_dyn_union_encode` stays with the union route.\n\nOnly a type's owner writes its hooks. `impl U8.Decode` lives in core.encoding, and a user's `impl U8.Decode` gets ImplOnBuiltinType. A distinct type's forwarded codec (D-CODABLE-DISTINCT1) does not forward the hooks. So `[Level]` with `Level: distinct U8` keeps today's `[1,2]` and refuses base64, as q9 shows at every level. Derives never generate the hooks, and hand-written impls inherit the defaults.",
+          "code": "// PROPOSED; the bound spelling on `[T]` follows D-IMPL-STRUCTBOUND1.\nDecode: trait {\n    decode: fn(tree: Dyn) -> Self [FieldError]!,\n    decode_list: fn(tree: Dyn) -> [Self] [FieldError]! { … each Array item as Self … }\n}\nEncode: trait {\n    encode: fn(self) -> Dyn,\n    encode_list: fn(items: [Self]) -> Dyn { … an Array of each item's encode() … }\n}\nimpl [T]<T: Decode>.Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { T.decode_list(tree) }\n}\nimpl [T]<T: Encode>.Encode {\n    encode: fn(self) -> Dyn { T.encode_list(self) }\n}\nimpl U8.Decode {\n    decode: fn(tree: Dyn) -> U8 [FieldError]! { builtin.codec_decode_u8(tree) }\n    decode_list: fn(tree: Dyn) -> [U8] [FieldError]! { … Bytes, base64 text or an Array … }\n}"
+        },
+        {
+          "key": "B",
+          "name": "The most specific impl wins, only in the trait's own module",
+          "detail": "Core writes `impl [U8].Decode` beside `impl [T].Decode`. Two impls may overlap only when both sit in the module that declares the trait and one head is strictly more specific. Each instance of generic code picks the most specific impl for its exact types, so `fn<T: Decode>` at `[U8]` reaches the byte impl. A module that does not declare the trait cannot specialize it. This is Rust std's own model: `min_specialization` is used inside std and closed to other crates.",
+          "technical": "B's gains are real. Decode and Encode gain no public hook members. It needs no `Self` work in default bodies. The byte rule reads as one impl. The specific impl must hold wherever the general one holds for those types (U8 is Decode), so deleting it never makes `[U8]` stop being Decode. A needs only the generic `impl [T#N].Decode` for fixed lists; B needs it and `impl [U8#N].Decode` too. `U8?` could get its own impl; the rule allows it, though Core would not write it.\n\nB also needs the instance collision fixed, since picking per instance is its whole mechanism. Heads match after tags are stripped: the IR's byte tests use `ir_untag` today, so a tagged U8 list takes the byte route [INFERENCE, from BuildDyn.jet]. B would keep that by matching `[U8]` against the untagged element.\n\nThe checker gains a specificity order on heads and an overlap check that admits strict nesting only. Rust's soundness trouble came from lifetimes erased before code generation, which Jet types lack, but the rule still needs its own review. Every trait owner gets the same power over its own traits, so U8 would have both hooks on scalars and specialization on lists.",
+          "code": "// PROPOSED\nimpl [T]<T: Decode>.Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { … each Array item … }\n}\nimpl [U8].Decode {\n    decode: fn(tree: Dyn) -> [U8] [FieldError]! { … Bytes, base64 text or an Array … }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Bytes get their own Codable type",
+          "detail": "`[U8]` becomes an ordinary list in codecs and encodes as an integer array. The existing `Bytes` type carries the byte rule through its own impls. A program that wants a byte string writes `Bytes`. This reverses the encoding spec's rule that a Codable `[U8]` is never an integer array.",
+          "technical": "`Bytes` already exists (spec.md:4936-4965): a growable byte builder with a read cursor. It is not Codable today (q6). C makes that type Codable. Its bytes are the wire value, and its cursor is not encoded; a decoded `Bytes` starts with its cursor at 0. This keeps D-BUILTIN-METHOD1's \"Bytes retains its own type identity\": `Bytes` stays its own type and never becomes a list alias.\n\nNo overlap and no hooks: `impl [T].Decode` covers every list, and `impl Bytes.Decode` takes `Dyn.Bytes` and base64 text. Every Codable `[U8]` field changes on the wire, in Core and in programs. CBOR major type 2 becomes major type 4, and JSON base64 text becomes an array of numbers.\n\nCore declares no `#Codable` struct with a `[U8]` field, but Encode and Decode auto-derive when every field qualifies (spec.md:1063-1065), and Core does not deny `auto_derive`. At least 28 exported Core structs auto-derive both over a `[U8]` field. Examples are core.crypto's Digest256, Digest512, Signature, VerifyKey and X25519PublicKey, core.crypto.vault's WrappedVaultKey, core.net's UDPPacket, core.net.tls's TLSCertificate, core.image's Image and core.jobs' JobPayload.\n\nThe count of 28 comes from `$JET_SCRATCH_ROOT/tmp/g1gen2/r1-u8_core_u8_autoderive.jet`, checked by `$JET_SCRATCH_ROOT/tmp/orch/batch17-chain/s1/jet` with its own Core. It bounds each of the 29 exported structs with a `[U8]` field by `Encode` and by `Decode`. Only Secret, which is `#!Codable`, was refused, and only for Encode. Review probe q13 confirms five on batch16, and q10 shows Digest256 round-tripping as base64 at O0, O1 and O2.\n\nUnder C, each of these 28 changes its JSON from base64 to a number array. Core must rewrite their fields to `Bytes` or keep the old wire by hand-written impls. A migration rewrites program fields to `Bytes`. Swift makes this choice with `Data`.",
+          "code": "// PROPOSED\n#Codable\nThumbnail: struct {\n    pixels: Bytes,\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep the byte route in the compiler, as a written exception",
+          "detail": "The list, option and map helpers become ordinary impls, but `[U8]` keeps its helper and the hardcoded encode. The exception is written down as a carve-out of D-BUILTIN-METHOD1. D′ is its strongest form, from `land/6852-c8-decode-lines-r2.patch`. Core declares `#Builtin.Role(.DecodeBytes) __decode_bytes`, a visible declaration found through the ratified role door. CoreReach.jet then names no helper or Core path, so the card's proof grep passes.",
+          "technical": "The smallest change. Generic code at `[U8]` reaches the byte rule because IR picks the helper before any impl. `[U8#N]` follows `[U8]` as today. Go's encoding/json does this: a kind test makes `[]byte` base64.\n\nThe cost is not visibility, since D′ shows the role in Core. The IR keeps three type tests on U8: BuildDyn.jet:711 (decode), 804 (encode) and 1086-1090 (streaming). The encode stays hardcoded. And D does not meet #6852 c8's \"bind through public traits\" or c9's \"a user type implements each of those traits\": no trait member says how a list of a type encodes.",
+          "code": "// D′, from land/6852-c8-decode-lines-r2.patch\n#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {\n    …\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "`Show` has `showList` with a default, and `Char` overrides it. The Haskell 2010 Report (6.3.3) calls that \"particularly useful for the Char type, where values of type String should be shown in double quotes\". aeson does the same for JSON with `toJSONList` and `parseJSONList`, and binary with `putList`. aeson handles map keys with the separate ToJSONKey and FromJSONKey classes.",
+          "code": "class FromJSON a where\n  parseJSON     :: Value -> Parser a\n  parseJSONList :: Value -> Parser [a]\ninstance FromJSON a => FromJSON [a] where\n  parseJSON = parseJSONList"
+        },
+        {
+          "lang": "Go",
+          "note": "encoding/json writes `[]byte` as base64 by a kind test in the encoder; an element type with its own Marshaler opts out. The json v1 package documentation lists the difference that its `FormatByteArrayAsArray` option controls: \"In v1, a Go byte array is represented as a JSON array of JSON numbers. In contrast, in v2 a Go byte array is represented as a Base64-encoded JSON string.\" The v2 form is Jet's `[U8#N]` rule.",
+          "code": "json.Marshal([]byte{1, 2}) // \"AQI=\""
+        },
+        {
+          "lang": "Rust",
+          "note": "Specialization (RFC 1210) has been unstable for public use since 2016 over soundness, but std uses `min_specialization` internally. Serde cannot, so the serde_bytes README says: \"Without specialization, Rust forces Serde to treat &[u8] just like any other slice and Vec<u8> just like any other vector.\"",
+          "code": "#[serde(with = \"serde_bytes\")]\npixels: Vec<u8>,"
+        },
+        {
+          "lang": "Swift",
+          "note": "`Data` is its own type, and JSONEncoder's `dataEncodingStrategy` defaults to base64, while `[UInt8]` encodes as numbers. Dictionary encoding tests whether its key is String or Int at run time. SE-0320, in Swift 5.6, added the `CodingKeyRepresentable` protocol as a key hook.",
+          "code": "extension Array: Codable where Element: Codable { }"
+        },
+        {
+          "lang": "C++",
+          "note": "Partial specialization lets a template pick a narrower body. `std::vector<bool>` specializes into a packed form that breaks generic code expecting a real `bool&`.",
+          "code": "template <class T> struct Codec { };\ntemplate <> struct Codec<std::vector<uint8_t>> { };"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the ratified rule that impls never overlap, and every generic instance still gets the byte rule. aeson has shipped this mechanism in a JSON codec for over a decade, and Haskell's `Show` before it. Its dispatch already works at every level (q3). It needs no specificity order, and the wire format stays as the spec says.",
+        "gains": [
+          "One impl per type, so a generic call and a direct call always agree.",
+          "`[U8]`, `[U8#N]`, streaming and the Encode side follow one hook, so all three IR byte tests go.",
+          "Decode binds through public traits for list, fixed list, option, map and bytes, which is A's part of #6852 c8 and c9.",
+          "Map keys use the same idea, a key trait, with no overlap."
+        ],
+        "losses": [
+          {
+            "loss": "Decode and Encode each gain a public hook member.",
+            "mitigation": "Defaults mean no hand-written impl changes, and the docs present each hook as the list form of its type."
+          },
+          {
+            "loss": "A needs `Self` in default trait bodies, `-> Self` on builtin impls, a `[T]` to `[T#N]` conversion and trait members with their own type parameters (q11, q12) first.",
+            "mitigation": "One card holds all four, about two days of work; q3 shows the dispatch itself already works."
+          },
+          {
+            "loss": "Fixed byte lists depend on fixing today's `[T]` and `[T#N]` instance collision.",
+            "mitigation": "Every option has the same dependency, and the defect is reported."
+          },
+          {
+            "loss": "A type's owner can change how lists of it encode.",
+            "mitigation": "Only the owner writes hooks, a user impl on a builtin is refused, and distinct types do not inherit them."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It adds a specificity order, an overlap soundness review, and a new power for every trait owner, so U8 would carry both hooks and specialization."
+          },
+          {
+            "key": "C",
+            "reason": "It changes the wire format of every Codable byte list, in Core and in programs."
+          },
+          {
+            "key": "D",
+            "reason": "Even as D′ it keeps three IR type tests and a hardcoded encode, and it fails c8's \"bind through public traits\"."
+          }
+        ],
+        "tradeoff": "Two hook members on public traits and a named language prerequisite, in exchange for no overlap and no compiler byte route."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ConcreteHeadReview. The adversarial review attacked the recommendation. Probes p1-p9 and q1-q13 ran on batch16; findings F1-F16, R1-R8 and R9 are fixed or named, and A holds within its named prerequisites (q1, q2, q11, q12; p4, p5, p9)."
+      },
+      "checkInstructions": "Check the routes in Compiler/JetIR/Source/BuildDyn.jet: `ir_dyn_decode`, `ir_codec_decode_helper`, `ir_serde_encode` and its byte test, and `ir_decoding_read` with its byte exclusion. Check JetIR CoreReach.jet `ir_codec_decode_helpers` and `ir_decoding_reads`, and JetDriver Pipeline.jet `jet_driver_comptime_codec_refs`. Check JetSema TypeRelations.jet `sema_type_codec_structural_bound` and Serde.jet `sema_serde_type_is_admissible_in`.\n\nCheck Core/Encoding/Encoding.jet `__decode_bytes`, `__decode_list`, `__decode_option` and `__decode_map`, and JetRuntime DynCodec.jet `codec_decode_integer`. Check the byte rule in Docs/Spec/encoding-decisions.md, `Bytes` in Docs/Spec/spec.md, and the D-BUILTIN-METHOD1 option A technical text. Probe outputs are in the review's review-probes directory.",
+      "surface": {
+        "gist": "How should a byte list keep its own encoding once list codecs are ordinary impls?",
+        "lesson": "A Codable byte list is a byte string, never a list of numbers. Today the compiler picks that rule by type tests. Ordinary impls must now carry it, and impls may not overlap.",
+        "trio": {
+          "current": {
+            "note": "The compiler tests for U8 and names a Core helper.",
+            "code": "if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {\n    return Val({name: \"__decode_bytes\", type_args: [Type]{}})\n}"
+          },
+          "wild": {
+            "lang": "Haskell",
+            "note": "aeson's list hook lets Char decode a String as text.",
+            "code": "class FromJSON a where\n  parseJSONList :: Value -> Parser [a]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "List hooks with defaults",
+            "gist": "The list impl asks its element how a list of it decodes; U8 answers bytes.",
+            "gains": [
+              "No overlap; generic and direct calls agree.",
+              "Fixed byte lists, streaming and encode follow too."
+            ],
+            "losses": [
+              "Two public hook members.",
+              "Needs `Self` in default bodies and generic trait members first."
+            ],
+            "proposed": {
+              "code": "impl [T]<T: Decode>.Decode {\n    decode: fn(tree: Dyn) -> [T] [FieldError]! { T.decode_list(tree) }\n}\nimpl U8.Decode {\n    decode_list: fn(tree: Dyn) -> [U8] [FieldError]! { … bytes … }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Most specific impl wins",
+            "gist": "A trait's own module may overlap impls; the narrower one wins.",
+            "gains": [
+              "The byte rule reads as its own impl.",
+              "No public hooks."
+            ],
+            "losses": [
+              "A specificity order and a soundness review.",
+              "Every trait owner gains overlap."
+            ],
+            "proposed": {
+              "code": "impl [U8].Decode {\n    decode: fn(tree: Dyn) -> [U8] [FieldError]! { … bytes … }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Codable Bytes type",
+            "gist": "Byte lists become number lists; byte strings use the existing `Bytes`.",
+            "gains": [
+              "No overlap and no hooks."
+            ],
+            "losses": [
+              "Every Codable byte list in Core and in programs changes on the wire."
+            ],
+            "proposed": {
+              "code": "Thumbnail: struct {\n    pixels: Bytes,\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep the compiler route",
+            "gist": "Byte lists keep a helper, at best through a visible role.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "Three IR type tests stay.",
+              "Decode does not bind through traits."
+            ],
+            "proposed": {
+              "code": "#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps impls from overlapping and gives every generic call the byte rule, as aeson does. The wire format stays.",
+          "gains": [
+            "One impl per type.",
+            "Byte lists, streaming and encode share one hook."
+          ],
+          "losses": [
+            {
+              "loss": "Two public hook members.",
+              "mitigation": "Defaults mean no existing impl changes."
+            },
+            {
+              "loss": "Needs `Self` in default bodies and generic trait members first.",
+              "mitigation": "One card; dispatch already works."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Adds overlap, a specificity order and a soundness review."
+            },
+            {
+              "key": "C",
+              "reason": "Changes every byte list on the wire, in Core and in programs."
+            },
+            {
+              "key": "D",
+              "reason": "Keeps three IR byte tests."
+            }
+          ],
+          "tradeoff": "Two hook members and a named prerequisite, for no overlap and no compiler byte route."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "ConcreteHeadReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T06:35:35.853Z"
+    },
+    {
+      "id": "D-LSP-CANCEL1",
+      "cardId": "c0mbiq9g",
+      "group": "tooling",
+      "title": "What `$/cancelRequest` means to `jet self lsp`, and when a cancelled request stops",
+      "situation": "An editor sends `$/cancelRequest` when the answer to a request is no longer needed, for example after the user types again. `jet self lsp` reads one message, answers it, then reads the next. So it reads a cancel only after the request it names has been answered, and it ignores the cancel (Compiler/JetLSP/Source/LSP/Requests.jet: \"Cancellation and tracing need no answer\"). Card #6903 c1 asks that cancelled work return the -32800 response and never later publish a result as current. The card also says no public cancellation semantics may be chosen silently. You are asked when a cancel takes effect. We recommend that the server read every message already waiting before it answers a request, so a cancel for a waiting request answers -32800 and the request never runs. Requests still run one at a time, in arrival order. Every option first needs one fix: today the server stops when a long message reaches it in pieces.",
+      "gist": "When the editor cancels a request, which work does `jet self lsp` drop, and how does it see the cancel in time?",
+      "lesson": "An editor and its language server talk in numbered messages. A request asks for something, such as the outline of a file. A cancel says that one numbered request is no longer wanted. The answer to a cancelled request is error -32800. The question is how early the server notices a cancel. It can notice it only before the work starts, or also while the work runs.",
+      "explainer": "Think of a print shop with one clerk. Customers drop order slips in a tray. Today the clerk takes one slip, finishes the job, then takes the next. A slip that says \"cancel order 50\" is read only after order 50 is printed. Under the recommendation, the clerk reads every slip in the tray before starting a job, so a cancelled order is never printed. Jobs still go in slip order. Stopping a job halfway needs more: a helper who watches the tray.",
+      "story": "Mia opens a 3,000-line file in VS Code and types. Each keystroke sends the whole new text, and the outline pane asks for symbols again, cancelling its last request. Today `jet self lsp` stops with \"input ended inside a message body\" once such an edit reaches it in pieces. With that fixed, it answers every outline request in turn, cancelled ones included. When a check outlasts the gap between keystrokes, answers fall further behind. VS Code drops cancelled answers, so Mia sees a lagging outline, not an old one.",
+      "inWild": "// What the editor sends in one burst (tests/lsp.rs:3477-3550, now\n// Tests/Cases/LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes.case):\n{\"method\":\"textDocument/didChange\", \"params\":{\"textDocument\":{\"version\":2}, ...}}\n{\"id\":50, \"method\":\"textDocument/documentSymbol\", ...}\n{\"method\":\"$/cancelRequest\", \"params\":{\"id\":50}}\n\n// What the case expects back:\n{\"id\":50, \"error\":{\"code\":-32800, \"message\":\"...\"}}\n// and no publishDiagnostics for any version but 2.",
+      "detail": "Current code. Compiler/JetLSP/Source/LSP/Loop.jet `lsp_serve` reads one framed message, handles it, and loops. `lsp_read_message` reads the header with `core.term.read_until` and the body with one `take(length)`. Before each request, `lsp_flush_dirty` checks and publishes the documents edited since their last publication (Loop.jet:96). `$/cancelRequest` falls through `lsp_handle_notification` with no effect. Requests read the stored check (Facts.jet:51), so the costly check before a request is that publishing step.\n\nThe case. Tests/Cases/LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes.case is known-failing (Tests/known-failing.tsv:358, \"answers requests in order and does not honor `$/cancelRequest`\"). Its PENDING-SEAM(read_bytes) header names a need of the test harness, not of the server. It sends the edit, request 50 and the cancel as three separate writes. A read-ahead server passes only when the cancel is already waiting as request 50 is taken. So the case must send the three in one write to be deterministic.\n\nA defect every option fixes first. `take` returns at most one read's worth of bytes (Compiler/JetRuntime/Source/RouteTerm.jet `jet_terminal8_take`: \"One stdin read of up to `n` bytes\"). `lsp_read_message` treats a short body as the end of input (Loop.jet:34-36). So a body that arrives in pieces stops the server with \"input ended inside a message body\".\n\nReview probes p3 and p4 reproduce it with a 6,759-byte body written in two pieces, and with full-text edits of 1,000 to 3,000 lines. The fix reads until the body is complete. Card #6903 owns it.\n\nWhat is missing for A and B. Core has no way to read standard input without waiting. `core.term` offers `read_until`, `read_all_input`, `binread` and the private `__take_bytes`, and each one waits for input. The runtime keeps one 64 KiB stdin buffer (TerminalInput.jet), and a burst usually lands in it in one read. So a check of the file descriptor alone would miss the messages already buffered.\n\nThe shape of the Core call. D-CORE-TERMRAW1=A chose a timed read for keys, `term.read_key_within(wait: Duration) -> Key?`: \"A wait of zero checks without waiting\". It dropped a separate poll-then-read call. D-TERM-INCREMENTAL1=A says every Core stdin reader takes bytes only from the runtime's one buffer. So A's call is a timed byte read in that shape, not a readiness flag.\n\nReplay. Every stdin read is journaled for prove capture and `jet debug` replay (ProveJournal.jet `rt_prove_stdin_read`, RecordReplay.jet `replay_read`). A timed read that finds no bytes is an input event too, so it is journaled the same way. The runtime is the Linux pack today, and other packs get the call with their stdin code.\n\nWhat the LSP specification says. A cancelled request still gets one answer, and an error answer should use -32800 (RequestCancelled). A server may also return a normal result. Servers \"should therefore not decide by themselves to cancel requests simply due to that fact that a state change notification is detected in the queue\" (LSP 3.17, Implementation Considerations).\n\nOrder. So under every option a request is answered on the text that the messages before it left. Edits queued after a request are applied after its answer. The passing case lsp_overlapping_edits_latest_checked_revision_wins pins this: request 2 answers marker_one while edits to versions 11 and 12 wait behind it (review probe p5).\n\nWhat \"never later publishes a result as current\" means here. A cancelled request that never ran publishes nothing. Before a request, the publishing step still checks a document whose newer edit is queued, because the request reads that check, but it does not send those diagnostics. didOpen still publishes at once, as today. An edit that arrives while a check runs is seen at the next read.\n\nCancel matching. A cancel applies to the latest earlier unanswered request with the same id, matched as JSON, so 2 and \"2\" differ. A cancel for an answered id, an unknown id or a notification is ignored. A cancel never applies to `initialize` or `shutdown`, and the not-initialized and shutting-down errors keep precedence. The server sends no partial results and no progress, so neither needs a rule.\n\nWhat each option catches. Review probe p4 types 20 full-text edits into a 100-line, 300-line or 1,000-line file. Each keystroke sends the edit, a cancel of the last outline request if it is unanswered, and a new outline request. When each check finished within the gap, no cancel was sent. At 30 ms between keystrokes, 16 of 19 and 18 of 19 cancels named a waiting request. With 1,000 lines at 300 ms, a check took about 270 ms, and 4 cancels met the running request.\n\nScope. This decides observable LSP behavior and the one Core call A and B need. Requests run one at a time in arrival order under every option, so no option chooses a count of workers that run requests. The card asks that no worker count or scheduling policy be chosen silently, and this ballot states each option's.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Read ahead: a cancel stops waiting requests only",
+          "detail": "Before the server answers a request, it reads every byte already waiting on standard input, without waiting, and parses every complete message. Messages are still handled in arrival order. A `$/cancelRequest` for a queued request makes that request answer -32800 without running. A request that has started runs to the end and gets its normal answer, as the LSP specification allows. Before a request, the publishing step does not send diagnostics for a document whose newer edit is queued. The server stays single-threaded.",
+          "technical": "Core gains one call in D-CORE-TERMRAW1's shape: `core.term.take_within(n: Int, wait: Duration) -[IO, Time.Wait]> [U8]? IOError!`. It returns up to `n` bytes from the runtime's stdin buffer, or from one read if bytes arrive within `wait`. It returns None when no byte arrives in time, and an empty list at the end of input. A wait of zero checks without waiting.\n\nThe call is journaled like every stdin read, its None answers included, so prove capture and `jet debug` replay repeat it.\n\nLoop.jet keeps a byte buffer and a queue of parsed messages. Before taking a request, it calls `take_within(65536, 0ms)` until None and frames every complete message. A partial message stays in the buffer and blocks nothing. When the queue is empty, the loop waits for more bytes. The same buffer fixes the short-body defect.\n\nA queued cancel that matches the taken request, by the rule in the detail, answers `lsp_error_response(id, -32800, \"the request was cancelled\")`. The case lsp_late_cancel_does_not_poison_a_reused_request_id keeps passing, because its cancel for id 2 comes before any request 2.",
+          "code": "// Loop.jet under A (PROPOSED; NOT RUN)\nloop {\n    // take_within(65536, 0ms) until None; frames every complete message\n    lsp_read_waiting(input, queue) ?? return lsp_stop(err.message)\n    if queue.len() == 0 {\n        // waits for bytes; None at the end of input\n        lsp_read_more(input, queue) ?? return lsp_exit_code(server)\n        next\n    }\n    message: queue.remove(0)\n    if lsp_cancelled_later(queue, message) {\n        lsp_write_message(stdout, lsp_error_response(message.id, -32800, \"the request was cancelled\")) ?? return lsp_stop(\"could not write to the client: {err}\")\n        next\n    }\n    // the publishing step skips sending for a document with a queued newer edit\n    lsp_serve_message(server, message, queue, stdout) ?? return lsp_stop(\"could not write to the client: {err}\")\n    if server.exited -> return lsp_exit_code(server)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Read ahead, and cancel a running check",
+          "detail": "Everything in A. In addition, the check before a request runs as a task. While it runs, the loop keeps reading input with A's call. When the request that the check serves is cancelled, the loop cancels the task. The task stops at its next loop or call check (D-CANCELMODEL1=C). The request answers -32800, and nothing from the stopped check is stored or published. The driver needs no change.",
+          "technical": "The A call, plus a `task.group` around the check in `lsp_flush_dirty`. The check task sends its `LSPChecked` on a channel. The loop alternates `take_within(65536, 10ms)` with `try_receive()` on that channel. On a matching cancel it calls `cancel()` on the task.\n\nReview probe p6 shows the language part works today. A computing task, canceled while another task waits on standard input, stops at once at O0, O1 and O2.\n\nThe checker keeps no state between checks (JetCLI LSP.jet `JetCLILSPChecker.check` returns an `LSPChecked`), so a stopped check leaves no server state behind. Whether a driver compile stopped mid-way leaves files or caches half-written is not yet audited.",
+          "code": "// lsp_flush_dirty under B (PROPOSED; NOT RUN)\ntask.group check {\n    { sender: done, receiver: result }: channel<LSPChecked>()\n    running: task { done.send(server.check(doc)) }\n    loop result.try_receive() == None {\n        lsp_read_within(input, queue, 10ms) ?? return Err(err)\n        if lsp_cancelled_later(queue, request) { running.cancel(); return lsp_answer_cancelled(request) }\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "A reader task reads input while work runs",
+          "detail": "A reader task reads and frames messages with today's blocking reads and sends them on a channel. The loop takes them from the channel in arrival order. The check before a request runs as a task, as in B. A cancel for a queued or running request is seen as soon as it arrives. No new Core call is needed. Requests still run one at a time.",
+          "technical": "`lsp_serve` opens a `task.group` with the reader task and runs the loop. The reader uses `read_until` and `take`, with the short-body fix. The loop drains the channel with `try_receive()` before each request. While a check runs, it waits on the channel and the check's result.\n\nReview probe p6 shows the parts work today. A reader task blocked in `read_until` gets its line while another task computes, and the cancel stops the computing task at once at O0, O1 and O2.\n\nCosts: the server becomes concurrent. Replay must also repeat when each message reached the loop relative to the check, which is not yet shown. The reader owns standard input, so nothing else in the process may read it.",
+          "code": "// Loop.jet under C (PROPOSED; NOT RUN)\ntask.group serve {\n    { sender: incoming, receiver: messages }: channel<String>()\n    reader: task lsp_reader(incoming)   // read_until + take, frames only\n    lsp_worker(server, messages, stdout) // as A, with B's cancellable check\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep in-order answers; cancel has no effect",
+          "detail": "Keep today's behavior and record it: each request is answered in arrival order, and `$/cancelRequest` is ignored. The LSP specification allows this. A server \"is free to ignore\" `$/` notifications, and for a \"single threaded synchronous\" server \"there is little a server can do\" with a cancel. The -32800 criterion and its case are retired as not applicable to this server. The short-body defect is still fixed.",
+          "technical": "No new Core call. Requests.jet's comment becomes the documented contract, and the known-failing case is deleted with a reason. Loop.jet reads until a body is complete.",
+          "code": "// Unchanged: Requests.jet\n// Cancellation and tracing need no answer: the loop answers each request in\n// turn, so none is still running when its cancellation arrives."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "gopls cancels a request's context when `$/cancelRequest` arrives, matching integer and string ids separately. A reply sent after the cancel becomes RequestCancelled. Source: golang/tools gopls/internal/protocol/protocol.go, `CancelHandler`.",
+          "code": "if ctx.Err() != nil && err == nil {\n    err = RequestCancelledError // -32800 \"JSON RPC cancelled\"\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "rust-analyzer reads messages on its own thread (lsp-server stdio.rs). A cancel answers -32800 at once for any pending request, and the late result is dropped (lsp-server req_queue.rs). Running queries unwind only when a change is applied to the database, and then answer ContentModified (-32801) or retry (handlers/dispatch.rs).",
+          "code": "pub fn cancel(&mut self, id: RequestId) -> Option<Response> {\n    let _data = self.complete(&id)?;\n    let error = ResponseError { code: ErrorCode::RequestCanceled as i32,\n        message: \"canceled by client\".to_owned(), data: None };\n    Some(Response { id, response_result: Err(error) })\n}"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "tsserver is single-threaded. Its client signals a cancel out of band by creating a named pipe whose existence tsserver checks, and long operations ask between steps. This is B's model without reading the message stream. Source: TypeScript src/tsserver/nodeServer.ts, `createCancellationToken`.",
+          "code": "isCancellationRequested: () => pipeExists(cancellationPipeName)"
+        },
+        {
+          "lang": "C++",
+          "note": "clangd keys running requests by their JSON id, and a cancel for an unknown id is ignored. \"If a client reuses an ID, the last wins and the first cannot be canceled.\" Source: llvm-project clang-tools-extra/clangd/ClangdLSPServer.cpp, `onCancel`.",
+          "code": "auto It = RequestCancelers.find(StrID);\nif (It != RequestCancelers.end())\n    It->second.first(); // Invoke the canceler."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "When the server falls behind, most cancels name a request that is still waiting (review probe p4: 16 of 19 and 18 of 19 at 30 ms). Read-ahead catches those deterministically. It keeps the server single-threaded and needs no driver change, at the cost of one timed Core read in the shape already ratified for keys.",
+        "gains": [
+          "A cancelled request that has not started answers -32800 and never runs, so the known-failing case can pass once it sends its burst in one write.",
+          "Before a request, diagnostics are not sent for a document whose newer edit is already queued.",
+          "Requests keep arrival order, so passing cases such as lsp_overlapping_edits_latest_checked_revision_wins keep passing."
+        ],
+        "losses": [
+          {
+            "loss": "A request that has started still runs to the end, so a slow check is not cut short.",
+            "mitigation": "B or C can be added later. Both stop a running check with task cancel and need no driver change."
+          },
+          {
+            "loss": "Core gains a public timed stdin read, which must be journaled for replay and built for each platform pack.",
+            "mitigation": "It follows the timed-read shape ratified for keys, and it reads only from the runtime's one stdin buffer."
+          },
+          {
+            "loss": "Diagnostics for an edit whose request was cancelled wait for the next request, as they do today after any edit.",
+            "mitigation": "Editors keep sending requests while the user types. A publish when input goes idle can be added later."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It adds a check task and input polling while the check runs, for the cancels that meet a running request (1 to 4 of 19 in probe p4)."
+          },
+          {
+            "key": "C",
+            "reason": "It needs no Core call, but it makes the server concurrent, and its replay is not yet shown. Its gain over A is B's gain."
+          },
+          {
+            "key": "D",
+            "reason": "Under backlog the server keeps checking for requests the editor already dropped (probe p4: answer lag grew from 39 ms to 340 ms), and the -32800 criterion is dropped instead of met."
+          }
+        ],
+        "tradeoff": "A catches the waiting cancels now, with no concurrency. Stopping a running check waits for B or C."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: LspCancelReview. The adversarial review attacked the recommendation. Probes p1-p6 ran on tip18; findings F1-F15 are fixed or named, and A holds within its limits: a short-body fix first (card #6903), a journaled timed read, a one-write case."
+      },
+      "checkInstructions": "Check the claims against Compiler/JetLSP/Source/LSP/Loop.jet (`lsp_serve`, `lsp_read_message` and its short-body error at lines 34-36) and Requests.jet (`lsp_handle_notification` and its cancellation comment). Check that Core/Term/Term.jet has no read that returns without waiting, and that RouteTerm.jet `jet_terminal8_take` does one read. Check D-CORE-TERMRAW1 and D-TERM-INCREMENTAL1 for the timed-read shape and the one stdin buffer.\n\nCheck the expectations in the costly-request, late-cancel and overlapping-edits cases under Tests/Cases/LSP, and the row at Tests/known-failing.tsv:358. Check the RequestCancelled rule in the LSP 3.17 specification, sections \"Cancellation Support\" and \"Implementation Considerations\".",
+      "surface": {
+        "gist": "When the editor cancels a request, which work does `jet self lsp` drop, and how does it see the cancel in time?",
+        "lesson": "An editor and its language server talk in numbered messages. A cancel says one numbered request is no longer wanted, and its answer is error -32800. The question is whether the server notices a cancel only before the work starts, or also while it runs.",
+        "trio": {
+          "current": {
+            "note": "Today the server reads one message, answers it, then reads the next, so every cancel arrives too late and is ignored.",
+            "code": "// Compiler/JetLSP/Source/LSP/Requests.jet\n// Cancellation and tracing need no answer: the loop answers each request in\n// turn, so none is still running when its cancellation arrives."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "rust-analyzer reads messages on its own thread. A cancel answers -32800 at once, and the late result is dropped.",
+            "code": "code: ErrorCode::RequestCanceled as i32,\nmessage: \"canceled by client\".to_owned(),"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Read ahead: a cancel stops waiting requests only",
+            "gist": "Before answering, read every waiting message. A cancelled waiting request answers -32800 and never runs.",
+            "gains": [
+              "Catches most cancels when the server is behind.",
+              "The server stays single-threaded, with no driver change."
+            ],
+            "losses": [
+              "A request already running still finishes.",
+              "Core gains a public timed read of standard input."
+            ],
+            "proposed": {
+              "code": "lsp_read_waiting(input, queue)   // core.term.take_within(65536, 0ms) until None"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Read ahead, and cancel a running check",
+            "gist": "A, plus a running check stops when its request is cancelled.",
+            "gains": [
+              "Also stops a check that is already running.",
+              "Uses the language's task cancel, with no driver change."
+            ],
+            "losses": [
+              "Adds a check task and input polling while it runs.",
+              "Same new Core read as A."
+            ],
+            "proposed": {
+              "code": "running: task { done.send(server.check(doc)) }   // running.cancel() on a matching cancel"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A reader task reads input while work runs",
+            "gist": "A second task reads messages all the time, so a running check can stop too.",
+            "gains": [
+              "Sees a cancel the moment it arrives.",
+              "No new Core call."
+            ],
+            "losses": [
+              "The server becomes concurrent.",
+              "Replay of message timing is not yet shown."
+            ],
+            "proposed": {
+              "code": "task.group serve { reader: task lsp_reader(incoming); lsp_worker(server, messages, stdout) }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep in-order answers; cancel has no effect",
+            "gist": "Record today's behavior, which the LSP specification allows.",
+            "gains": [
+              "No change beyond the short-message fix.",
+              "No new Core API."
+            ],
+            "losses": [
+              "Wasted checks during fast typing.",
+              "The criterion is dropped, not met."
+            ],
+            "proposed": {
+              "code": "// Requests.jet: cancellation needs no answer"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "When the server is behind, most cancels name a request that is still waiting. Read-ahead catches those with one timed read and no concurrency.",
+          "gains": [
+            "Cancelled waiting requests answer -32800 and never run.",
+            "Diagnostics are not sent for a version whose newer edit is already queued.",
+            "Requests keep their arrival order."
+          ],
+          "losses": [
+            {
+              "loss": "A request that has started still runs to the end.",
+              "mitigation": "B or C can be added later with task cancel."
+            },
+            {
+              "loss": "Core gains a public timed read of standard input.",
+              "mitigation": "It has the shape already ratified for reading keys."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It adds a check task and polling for the few cancels that meet a running request."
+            },
+            {
+              "key": "C",
+              "reason": "It makes the server concurrent for the same gain as B."
+            },
+            {
+              "key": "D",
+              "reason": "It keeps wasted checks and drops the criterion."
+            }
+          ],
+          "tradeoff": "A covers the waiting cancels now. Stopping a running check waits."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "LspCancelReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T07:34:10.665Z"
+    },
+    {
+      "id": "D-LSP-HOSTDOC1",
+      "cardId": "c0mbiq9g",
+      "group": "tooling",
+      "title": "How an editor hands the Jet regions of a host document to `jet self lsp`",
+      "situation": "D-EMBED-REGION1=A (ratified) lets a host document, such as an HTML page or a Markdown file, hold Jet. The host supplies the complete Jet source and the segments of it that are unchanged host text. Jet checks that source and maps every result back to the host through one position map. That decision fixed what the host supplies, not how an editor sends it to the language server. JetLSP speaks only standard LSP methods today and answers every `workspace/executeCommand` with MethodNotFound. So any new message here is the first protocol extension editor clients build against. You are asked which wire form carries a host document's Jet modules. We recommend a `jet/hostDocument` notification that follows the standard didOpen or didChange of each host version.",
+      "gist": "What message does an editor send so `jet self lsp` can check the Jet inside an HTML or Markdown file?",
+      "lesson": "An editor tells a language server about a file with standard messages: didOpen gives the whole text, and didChange gives each edit. A host document is a file in another language, such as HTML, with Jet inside it. The editor extension knows where the Jet is and builds complete Jet modules from it. The question is which message carries those modules and their maps of shared text to the server.",
+      "explainer": "Think of a translator working on a bilingual letter. The post office already delivers the letter (didOpen and didChange). Someone must also hand over a slip that says \"lines 3 to 4 are in Jet, and here is the Jet page they belong to\".\n\nThe slip can follow the letter, ride stapled to the envelope, or go by registered mail. Each Jet passage can be cut out and sent alone, or the translator can guess which lines are Jet. A last choice files the letter as a scrapbook whose pages are the Jet passages.",
+      "story": "Lin writes a Svelte-like page with two `<script lang=\"jet\">` blocks. She types in the first block. Once her edit is checked, the editor shows the error in the second block at its new position. A quick fix must edit her page, never the hidden generated Jet module. Her Markdown notes hold ten independent Jet examples, and each is checked on its own.",
+      "inWild": "// The same host document in every option below.\n// file:///w/panel.html, version 7, languageId html, text (UTF-8):\n🙂\n<script lang=\"jet\">\nrun: fn() {pront(1)}\n</script>\n\n// The Jet region is host bytes 25..46 (UTF-16 units 23..44).\n// As an LSP range it is line 2 character 0 to line 3 character 0.\n// The Jet module the extension builds is exactly that region:\n// \"run: fn() {pront(1)}\\n\", Jet bytes 0..21, line 0 character 0 to line 1 character 0.\n// The unknown name `pront` is Jet bytes 11..16, host bytes 36..41, line 2 characters 11..16.\n// `jet check` reports it as E0102 with the safe fix `print` (review probe p2).",
+      "detail": "Ratified ground. D-EMBED-REGION1=A (ratified 2026-09-10, not superseded) says this:\n- Hosts \"supply complete generated Jet source and its unchanged source segments\" and \"retain control of module scope and host syntax\".\n- \"Jet validates UTF-8 boundaries and mappings\".\n- \"Every result carries the external revision\", and \"the same checked maps serve diagnostics, completion, navigation, and edits\".\n- \"Edits across unmapped generated text are rejected\", and \"generated-only locations stay labeled as generated\".\n\nIt also says these:\n- \"Editor conversion uses UTF-16 units, not byte offsets\".\n- \"Use one SourceDocument input for whole and mapped documents\", migrating existing callers.\n- The design pass \"removed host-format parsing from the compiler proposal\", and hosts \"must identify their embedded regions\".\n\nWhat is proposed underneath. The driver side is the unlanded patch land/6903-c4ab.patch (card #6903 items c4a and c4b), based on dev dc046ef3d1. It adds `JetDriverSourceDocument{path, source, host}`, whose host side holds identity, revision, text and ordered `{host, jet}` UTF-8 byte-range mappings. It validates mappings (`jet_driver_source_document_problem`) and maps spans, edits and offsets (`jet_driver_host_span`, `jet_driver_host_edit`, `jet_driver_jet_offset`). On dev, nothing in JetDriver or JetLSP knows a host document yet.\n\nToday's server, probed. It checks every opened document as Jet whatever its languageId, so an HTML page opened as `html` gets a Jet error on its first character. It drops unknown notifications and unknown didOpen members without a trace. It answers `workspace/executeCommand` with MethodNotFound (-32601), including the VS Code extension's own `jet.reasoning` call. After a didChange it publishes only when the next request arrives. It advertises no `experimental` capability and no `positionEncoding`, so positions are UTF-16.\n\nWhat every option shares. Mappings travel as LSP ranges in the session's position encoding, UTF-16 by default. That is the unit of every other position the client sends, and it follows the ratified clause on editor conversion. Byte offsets would make every JavaScript client, VS Code first, convert from its UTF-16 strings. The server converts ranges to bytes with the checked code it already uses for request positions. A range end past its line's end is refused, not clamped.\n\nA host document carries zero or more Jet modules. Markdown examples are usually independent programs, and the host owns module scope, so one module per host would make ten examples collide. Mappings of different modules must not overlap. A host with zero modules has its results withdrawn.\n\nResults for a host document are published on the host URI with the host version, in host ranges. A diagnostic that reaches generated text, or crosses regions, is published on its module URI and labeled generated. A navigation target in generated text is dropped, because no editor can open it. An edit that reaches generated text is refused. A request at a host position outside every mapping answers null.\n\nA module URI must be a `file:` URI that names no file on disk, no open Jet document and no other host's module. Anything else is refused as E2. Its directory decides the package, as for any Jet file. Only documents opened with languageId `jet` are checked as Jet. Any other languageId is a host document, never checked as Jet text.\n\nCutover inventory. These are the sites the recommended option touches:\n- Requests.jet `lsp_handle_notification` and `lsp_initialize_response` take the new message and its capability.\n- Server.jet `lsp_update_document` gains the languageId gate, and host documents join the one document store as a host kind, not a second store.\n- Server.jet `overlays()`, `LSPOverlay` and the three `LSPChecker` methods in Check.jet (`check`, `stage`, `failure_marks`) take host modules as `JetDriverSourceDocument`, the one input item c4c moves every caller to.\n\nMore sites:\n- Diagnostics.jet `lsp_publish_document_diagnostics`, `lsp_document_group_json` and `lsp_close_document` carry the host version, publish on module URIs and clear both.\n- Every request provider converts host positions through the one driver map. The driver's `jet_driver_utf16_offset` must reuse Position.jet's UTF-16 count, not be a second counter.\n- Loop.jet parks host-URI requests (E1), which meets D-LSP-CANCEL1's cancellation.\n- Tools/Editors/Vscode/extension.js gains host languages and middleware, and its dead `jet.reasoning` call is fixed or removed.\n\n`jet check` of host files (item c4c) stays outside this ballot, because the CLI reads files, not editor versions.\n\nEdge cases, answered under each option:\n- E1. An incremental didChange of the host arrives without new Jet modules. The old mappings no longer describe the new host text.\n- E2. Mappings overlap, run out of order, cut a character, or name text that differs between host and Jet, or a module URI breaks the rule above.\n- E3. Jet modules arrive for a URI the editor never opened.\n\nMore edge cases:\n- E4. Jet modules name a host version other than the one the server holds.\n- E5. The host is closed, or closed and reopened with versions starting over.\n- E6. A client sends no Jet modules at all, as Helix, Zed and an unconfigured client do.\n\nBeginner path. Users never type any of this. In VS Code the first-party extension finds the regions and sends the modules. Neovim needs a recipe, which does not exist yet. Emacs eglot runs one server per buffer, so pointing it at an HTML file replaces the HTML server.\n\nZed's extension API cannot send a notification or a request, and Helix has no plugins. So under options A, B, C and F they get nothing in host files. Their path is a host adapter: a separate process that finds regions and speaks option A to `jet self lsp`. It is not built.\n\nExpert path. A tool author whose own host format embeds Jet sends the same message from their own client. They own region finding, Jet generation and the mappings; the server only validates and maps.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A `jet/hostDocument` notification after each host version",
+          "detail": "The host document travels on the standard didOpen and didChange under its own URI and languageId, with incremental sync as usual. After each host version, the client sends one `jet/hostDocument` notification with the host URI, the version and the Jet modules. The server checks each module and publishes on the host URI with that version.\n\nE1: until the matching hostDocument arrives, the server publishes nothing new, and the host's last diagnostics stay on screen. Clients ignore the version on published diagnostics (vscode-languageclient `handleDiagnostics`, Neovim `on_publish_diagnostics`), so for that hop they may sit at the old place. Plain Jet files behave the same today, since publication waits for the next request.\n\nRequests on the host URI are parked until that version's modules arrive, not answered null. Neovim and eglot send pending didChanges before a request, and VS Code middleware runs asynchronously, so a completion can arrive between the two messages. A parked request answers ContentModified (-32801) when a newer didChange or a didClose supersedes it.\n\nParking starts only once the host has had a hostDocument since it was opened. Before that, requests answer null, so a client that never sends modules never waits.\n\nE2: the notification is refused whole, and the server logs the first bad mapping with `window/logMessage` (Warning). The last good results stay but are never republished as current for a newer version. E3: ignored and logged. E4: an older version is dropped; a newer one is held, one per host URI, until that version's text arrives.\n\nE5: didClose drops the host's text, modules, held notification and parked requests. It publishes empty diagnostics on the host URI and every module URI. A reopened host starts a fresh version sequence. E6: the host gets no results, and the server logs once per host URI that no Jet modules arrived.",
+          "technical": "One new client-to-server notification, `jet/hostDocument`, advertised in `initialize` as `capabilities.experimental.jetHostDocument: {version: 1}`. Its params are `textDocument: VersionedTextDocumentIdentifier` and `modules: [{uri: DocumentUri, text: string, mappings: [{host: Range, jet: Range}]}]`. Ranges follow the session's position encoding.\n\nOn receipt, the server converts each mapping to bytes against the held host text and the module text. It then builds one `JetDriverSourceDocument` per module, with the host URI as identity and the version as revision. If the module texts and everything they read are unchanged since the last check, the server reuses that check and only remaps it.\n\n```jet\ndocument: JetDriverSourceDocument{\n    path: \"/w/panel.html.jet\",\n    source: \"run: fn() {{pront(1)}}\\n\",\n    host: Val(JetDriverHostDocument{\n        identity: \"file:///w/panel.html\",\n        revision: 7,\n        text: host_text,\n        mappings: [JetDriverSourceMapping]{JetDriverSourceMapping{host: Span{start: 25, end: 46}, jet: Span{start: 0, end: 21}}},\n    }),\n}\n```\n\nCosts. Every host keystroke, even outside the regions, resends every module's full text. The server must park host-URI requests, which today's strictly ordered loop cannot do. The VS Code extension adds host languages to its document selector, so every open HTML or Markdown file is synced to `jet self lsp`. Until the server advertises the capability, the extension's middleware withholds host documents, because today's server checks them as Jet.",
+          "code": "→ didOpen {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"languageId\":\"html\",\"version\":7,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nrun: fn() {pront(1)}\\n</script>\\n\"}}\n→ jet/hostDocument {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"version\":7},\"modules\":[{\"uri\":\"file:///w/panel.html.jet\",\"text\":\"run: fn() {pront(1)}\\n\",\"mappings\":[{\"host\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":3,\"character\":0}},\"jet\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":1,\"character\":0}}}]}]}\n← publishDiagnostics {\"uri\":\"file:///w/panel.html\",\"version\":7,\"diagnostics\":[{\"range\":{\"start\":{\"line\":2,\"character\":11},\"end\":{\"line\":2,\"character\":16}},\"code\":\"E0102\",\"message\":\"Nothing named `pront` exists here\"}]}\n\n// E1: the user types \"!\" after the emoji, then asks for completion at once\n→ didChange {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"version\":8},\"contentChanges\":[{\"range\":{\"start\":{\"line\":0,\"character\":2},\"end\":{\"line\":0,\"character\":2}},\"text\":\"!\"}]}\n→ completion {\"id\":9,\"textDocument\":{\"uri\":\"file:///w/panel.html\"},\"position\":{\"line\":2,\"character\":13}}\n// parked: version 8 has no modules yet; version 7's diagnostics stay on screen\n→ jet/hostDocument {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"version\":8},\"modules\":[… the same module and line ranges …]}\n← the answer to request 9, then version 8's diagnostics on line 2, characters 11..16\n// The region moved from host bytes 25..46 to 26..47; its line range did not change."
+        },
+        {
+          "key": "B",
+          "name": "A `jet` member inside didOpen and didChange",
+          "detail": "The same modules ride on the standard messages: didOpen and every didChange of a host document carry a `jet: {modules}` member for that version. At its strongest this is atomic. Host text and modules arrive in one message, so E1, E3 and E4 cannot happen, and no request ever waits for modules.\n\nE1: impossible; a didChange without `jet` withdraws the host's results, as zero modules do. E2: the server keeps the host text, refuses the modules and logs why. E3 and E4: impossible. E5 and E6: as in A.",
+          "technical": "No new method. didOpen and didChange params gain an optional `jet` member, which servers that do not know it ignore; today's server does (review probe p3). Clients can add it without rebuilding sync. vscode-languageclient 9 sends every notification, didChange included, through `middleware.sendNotification`. Neovim's `cmd` may be a function that returns a wrapped RPC client. Emacs can advise `jsonrpc-connection-send`.\n\nCosts. Each client wraps its transport instead of following it. vscode-languageclient captures the version before asynchronous middleware runs, and the document may move on meanwhile. So the member can describe newer text than its message, and the server must check it against the held text anyway. A tool that re-encodes typed LSP params may drop the unknown member. Zed and Helix cannot add it.",
+          "code": "→ didOpen {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"languageId\":\"html\",\"version\":7,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nrun: fn() {pront(1)}\\n</script>\\n\"},\"jet\":{\"modules\":[{\"uri\":\"file:///w/panel.html.jet\",\"text\":\"run: fn() {pront(1)}\\n\",\"mappings\":[{\"host\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":3,\"character\":0}},\"jet\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":1,\"character\":0}}}]}]}}\n← publishDiagnostics {\"uri\":\"file:///w/panel.html\",\"version\":7, … line 2 characters 11..16 …}\n→ didChange {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"version\":8},\"contentChanges\":[{\"range\":{\"start\":{\"line\":0,\"character\":2},\"end\":{\"line\":0,\"character\":2}},\"text\":\"!\"}],\"jet\":{\"modules\":[… the same module and line ranges …]}}"
+        },
+        {
+          "key": "C",
+          "name": "A `workspace/executeCommand` named `jet.hostDocument`",
+          "detail": "A's params go through the standard `workspace/executeCommand` request as `jet.hostDocument`. The server lists it in `executeCommandProvider.commands`. typescript-language-server pushes state the same way, with `_typescript.configurePlugin`. Because it is a request, a refused mapping (E2) comes back as an error response, and the client learns when the modules are in place.\n\nThere is no working first-party precedent. The VS Code extension's reasoning panel calls `jet.reasoning` this way (extension.js line 543), but today's server answers every `workspace/executeCommand` with MethodNotFound. E1, E5 and E6 are answered as in A, and E3 and E4 as error responses.",
+          "technical": "No new method name. `arguments: [{textDocument, modules}]`, the shape of A's params. Each host version costs a request and its response. Helix lists every advertised command in its `:lsp-workspace-command` picker, so users there see it with nothing sensible to pass. VS Code shows a server command in its palette only when an extension contributes it.",
+          "code": "→ {\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"workspace/executeCommand\",\"params\":{\"command\":\"jet.hostDocument\",\"arguments\":[{\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"version\":7},\"modules\":[{\"uri\":\"file:///w/panel.html.jet\",\"text\":\"run: fn() {pront(1)}\\n\",\"mappings\":[{\"host\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":3,\"character\":0}},\"jet\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":1,\"character\":0}}}]}]}]}}\n← {\"jsonrpc\":\"2.0\",\"id\":12,\"result\":null}\n← publishDiagnostics {\"uri\":\"file:///w/panel.html\",\"version\":7, …}\n// today: ← {\"jsonrpc\":\"2.0\",\"id\":12,\"error\":{\"code\":-32601,\"message\":\"method not found: workspace/executeCommand\"}}"
+        },
+        {
+          "key": "D",
+          "name": "Virtual Jet documents, mapped by each client",
+          "detail": "The client opens each region, or each module, as its own `jet` document under a virtual URI. It translates every position and edit between host and virtual documents itself. This is the request-forwarding shape of the VS Code embedded-languages guide, and of otter.nvim's hidden buffers. The server sees only ordinary Jet documents.\n\nRuled out by D-EMBED-REGION1=A, which chose \"the same checked maps\" and \"Jet validates UTF-8 boundaries and mappings\" over host-owned mapping, its option B. Each client keeps its own map, and Jet validates nothing. E1 to E6 become each client's own problem.",
+          "technical": "No server change beyond the languageId gate. Every first-party client carries a mapping layer for every feature. A virtual URI must still name a package directory for imports to resolve.",
+          "code": "→ didOpen {\"textDocument\":{\"uri\":\"jet-region:///w/panel.html/0.jet\",\"languageId\":\"jet\",\"version\":7,\"text\":\"run: fn() {pront(1)}\\n\"}}\n← publishDiagnostics {\"uri\":\"jet-region:///w/panel.html/0.jet\", … line 0 characters 11..16 …}\n// the client moves it to panel.html line 2 itself"
+        },
+        {
+          "key": "E",
+          "name": "The server finds the regions itself",
+          "detail": "The server recognizes host languageIds such as `html` and `markdown` and finds `<script lang=\"jet\">` blocks or fenced Jet blocks itself. Clients send only standard messages. At its strongest it is the only option that works in every client with no client code, Zed, Helix and eglot included. Svelte's and Vue's language servers both work this way.\n\nRuled out by D-EMBED-REGION1=A: the design pass \"removed host-format parsing from the compiler proposal\", and hosts must identify their regions. A host adapter outside the compiler that speaks A to `jet self lsp` keeps the no-client-code gain, and A does not preclude it. E1, E2 and E4 cannot happen, and E3 is a plain unopened file.",
+          "technical": "A host-format parser per language inside JetLSP, and a compiler change for every new host format.",
+          "code": "→ didOpen {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"languageId\":\"html\",\"version\":7,\"text\":\"🙂\\n<script lang=\\\"jet\\\">\\nrun: fn() {pront(1)}\\n</script>\\n\"}}\n← publishDiagnostics {\"uri\":\"file:///w/panel.html\",\"version\":7, … line 2 characters 11..16 …}"
+        },
+        {
+          "key": "F",
+          "name": "Notebook sync, one cell per Jet module",
+          "detail": "The client syncs each host as an LSP 3.17 notebook. `notebookDocument/didOpen` and `didChange` carry the host as the notebook and each Jet module as a cell. At its strongest it is standard and atomic. All cells' structure and text change in one message under one notebook version, and several cells fit Markdown's independent examples.\n\nIt does not fit a text host. Cells are documents with their own URIs, and results come back on cell URIs, so the client maps cells to host positions, as in D. vscode-languageclient sends notebook sync only for real VS Code notebooks, and Neovim's client advertises no notebook support. E1, E3 and E4 cannot happen. E2 moves into cell metadata, and E6 is any client without notebook sync.",
+          "technical": "No new method. The server advertises `notebookDocumentSync` for a `notebookType` such as `jet-host`. Each cell's host position would ride in cell metadata, which is a mapping again, kept by the client.",
+          "code": "→ notebookDocument/didOpen {\"notebookDocument\":{\"uri\":\"file:///w/panel.html\",\"notebookType\":\"jet-host\",\"version\":7,\"cells\":[{\"kind\":2,\"document\":\"vscode-notebook-cell:/w/panel.html#0\",\"metadata\":{\"host\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":3,\"character\":0}}}}]},\"cellTextDocuments\":[{\"uri\":\"vscode-notebook-cell:/w/panel.html#0\",\"languageId\":\"jet\",\"version\":1,\"text\":\"run: fn() {pront(1)}\\n\"}]}\n← publishDiagnostics {\"uri\":\"vscode-notebook-cell:/w/panel.html#0\", … line 0 characters 11..16 …}\n// the client moves it to panel.html line 2 itself"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "LSP 3.17 notebooks",
+          "note": "The standard's own answer for one document holding several code parts. Cell structure and text change in one versioned message, and results go to cell URIs. That is option F; A borrows its rule that one version covers all the parts.",
+          "code": "// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notebookDocument_synchronization\nnotebookDocument/didChange { notebookDocument: { version }, change: { cells: { structure, data, textContent } } }"
+        },
+        {
+          "lang": "Vue and Astro (Volar)",
+          "note": "Volar language plugins run inside the language server; @vue/language-server and @astrojs/language-server depend on @volar/language-server. A plugin finds the regions and builds `VirtualCode` whose mappings carry per-feature flags. One server-side layer maps every result. The host format's own server finds the regions, the E shape, and one map serves every feature, as in A.",
+          "code": "// https://raw.githubusercontent.com/volarjs/volar.js/master/packages/language-core/lib/types.ts\nVirtualCode { id: 'script_ts', languageId: 'typescript', snapshot, mappings: CodeMapping[] }\nCodeInformation { verification, completion, semantic, navigation, structure, format }"
+        },
+        {
+          "lang": "Svelte",
+          "note": "svelte-language-server parses `.svelte` files itself and generates TSX with a source map. The host format's own server finds the regions: the E shape.",
+          "code": "svelte2tsx(text) -> { code, map }"
+        },
+        {
+          "lang": "VS Code embedded languages guide",
+          "note": "It describes two shapes: language services inside the server, and request forwarding to `embedded-content://` virtual documents that the client maps. Request forwarding is D. The guide warns that renaming and formatting across regions are hard, and that escaping such as `</` must be handled.",
+          "code": "// https://code.visualstudio.com/api/language-extensions/embedded-languages\nembedded-content://html/<encoded host uri>.css"
+        },
+        {
+          "lang": "otter.nvim",
+          "note": "Quarto's Neovim helper keeps hidden buffers such as `index.md.tmp.py` with every non-code line blanked, so line numbers match the host. That is client-side mapping, the D shape.",
+          "code": "-- https://github.com/jmbuhr/otter.nvim\nrequire('otter').activate({ 'python', 'r' })"
+        },
+        {
+          "lang": "rust-analyzer",
+          "note": "Custom capabilities go under `experimental`, and custom methods take an `experimental/` or `rust-analyzer/` prefix. Client-to-server notifications such as `rust-analyzer/runFlycheck` exist. A follows that convention.",
+          "code": "// https://github.com/rust-lang/rust-analyzer/blob/master/docs/book/src/contributing/lsp-extensions.md\n\"experimental\": { \"serverStatusNotification\": true }"
+        },
+        {
+          "lang": "typescript-language-server",
+          "note": "Client-to-server actions go through `workspace/executeCommand`, including state pushes such as `_typescript.configurePlugin`. Its leading `_` follows VS Code's habit of marking internal commands. That is the C shape.",
+          "code": "// https://github.com/typescript-language-server/typescript-language-server#workspace-commands-workspaceexecutecommand\n{ command: '_typescript.configurePlugin', arguments: [pluginName, configuration] }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps every standard message standard and lets the host own its regions, as D-EMBED-REGION1=A requires. A client adds it after its built-in sync instead of wrapping that sync.",
+        "gains": [
+          "VS Code (middleware after `next`), Neovim (an `LspNotify` handler) and Emacs (after its didChange) send it without touching their document sync.",
+          "Every result goes through the driver's one position map, with the host version attached.",
+          "Servers that take it say so in `experimental`, so clients never send it blind."
+        ],
+        "losses": [
+          {
+            "loss": "Between a didChange and its hostDocument the server holds host text without modules, so requests and diagnostics need rules.",
+            "mitigation": "Host-URI requests are parked until the modules arrive. The old diagnostics stay up for that hop, as they do for plain Jet files today."
+          },
+          {
+            "loss": "Zed and Helix cannot send it, so host documents get nothing there.",
+            "mitigation": "A later host adapter that speaks A to `jet self lsp` can serve them. Only E, which the ratified decision rules out, does better there."
+          },
+          {
+            "loss": "It is the first `jet/` method, a public surface clients build against.",
+            "mitigation": "It is versioned under `experimental.jetHostDocument.version`, so a later shape can sit beside it."
+          },
+          {
+            "loss": "Every host keystroke resends the full text of every module.",
+            "mitigation": "When nothing the modules read has changed, the server reuses the last check and only remaps it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It is atomic, but each client must wrap its transport. VS Code's asynchronous middleware can still pair a member with newer text, and Zed and Helix still cannot send it."
+          },
+          {
+            "key": "C",
+            "reason": "It has no working precedent, each version pays a request round trip, and Helix offers the command in its user picker."
+          },
+          {
+            "key": "D",
+            "reason": "Each client keeps its own map, which D-EMBED-REGION1=A's one checked map rules out."
+          },
+          {
+            "key": "E",
+            "reason": "The compiler would parse host formats, which D-EMBED-REGION1=A removed. A host adapter speaking A keeps its gain."
+          },
+          {
+            "key": "F",
+            "reason": "Cells are separate documents, so the client maps cells to host positions as in D, and only real VS Code notebooks send it."
+          }
+        ],
+        "tradeoff": "A accepts a parked-request window per version and no Zed or Helix support, in exchange for leaving every client's built-in sync untouched."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: HostDocReview. The adversarial review attacked the recommendation. Round 0 failed on a false built state, false Zed and VS Code claims, the request window and missing options; the repaired ballot holds."
+      },
+      "checkInstructions": "Read D-EMBED-REGION1 (`node Tools/Tower/tower.mjs decision show D-EMBED-REGION1`) for the quoted clauses. On dev, check that Compiler/JetLSP/Source/LSP/Requests.jet dispatches no `jet/` method and no `workspace/executeCommand`, and that Server.jet `lsp_update_document` ignores languageId. Read the driver side in land/6903-c4ab.patch, whose tests cover host bytes 25..46 as UTF-16 23..44. The probes in $JET_SCRATCH_ROOT/tmp/orch/ballot/hostdoc/review-probes replay today's server on each wire form. Check the ranges in inWild against the text.",
+      "surface": {
+        "gist": "What message does an editor send so `jet self lsp` can check the Jet inside an HTML or Markdown file?",
+        "lesson": "Editors tell a language server about a file with standard messages. A host document is a file in another language with Jet inside it. The editor extension finds the Jet and builds Jet modules. The question is which message carries those modules to the server.",
+        "trio": {
+          "current": {
+            "note": "Today the server checks an HTML page as if it were Jet and reports an error on its first character.",
+            "code": "→ didOpen {\"textDocument\":{\"uri\":\"file:///w/panel.html\",\"languageId\":\"html\",\"version\":7,…}}\n← publishDiagnostics {\"uri\":\"file:///w/panel.html\",\"version\":7,\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":2}},\"code\":\"E0001\",\"message\":\"The character `🙂` doesn't mean anything here (yet)\"}]}"
+          },
+          "wild": {
+            "lang": "Vue (Volar)",
+            "note": "Vue's language server finds the blocks itself and maps every result through one layer.",
+            "code": "// https://raw.githubusercontent.com/volarjs/volar.js/master/packages/language-core/lib/types.ts\nVirtualCode { id: 'script_ts', languageId: 'typescript', snapshot, mappings: CodeMapping[] }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A `jet/hostDocument` notification after each host version",
+            "gist": "Standard sync for the host, then one notification with its Jet modules.",
+            "gains": [
+              "Leaves every client's built-in sync alone."
+            ],
+            "losses": [
+              "Requests wait briefly for each version's modules.",
+              "Zed and Helix cannot send it."
+            ],
+            "proposed": {
+              "code": "→ jet/hostDocument {\n  \"textDocument\": {\"uri\": \"file:///w/panel.html\", \"version\": 7},\n  \"modules\": [{\n    \"uri\": \"file:///w/panel.html.jet\",\n    \"text\": \"run: fn() {pront(1)}\\n\",\n    \"mappings\": [{\n      \"host\": {\"start\": {\"line\": 2, \"character\": 0}, \"end\": {\"line\": 3, \"character\": 0}},\n      \"jet\": {\"start\": {\"line\": 0, \"character\": 0}, \"end\": {\"line\": 1, \"character\": 0}}\n    }]\n  }]\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A `jet` member inside didOpen and didChange",
+            "gist": "Host text and Jet modules arrive in one message.",
+            "gains": [
+              "Atomic: no waiting window."
+            ],
+            "losses": [
+              "Each client wraps its transport.",
+              "Zed and Helix cannot send it."
+            ],
+            "proposed": {
+              "code": "→ didChange {…, \"jet\": {\"modules\": [{\"uri\": \"file:///w/panel.html.jet\", \"text\": \"…\", \"mappings\": […]}]}}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A `workspace/executeCommand` named `jet.hostDocument`",
+            "gist": "A's data through the standard command request.",
+            "gains": [
+              "Refusals come back as error responses."
+            ],
+            "losses": [
+              "A round trip per version.",
+              "Helix offers it to users by hand."
+            ],
+            "proposed": {
+              "code": "→ workspace/executeCommand {\"command\": \"jet.hostDocument\", \"arguments\": [{…}]}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Virtual Jet documents, mapped by each client",
+            "gist": "Each client opens virtual Jet documents and maps positions itself.",
+            "gains": [
+              "No new message."
+            ],
+            "losses": [
+              "Ruled out: one checked map."
+            ],
+            "proposed": {
+              "code": "→ didOpen {\"textDocument\": {\"uri\": \"jet-region:///w/panel.html/0.jet\", …}}"
+            }
+          },
+          {
+            "key": "E",
+            "name": "The server finds the regions itself",
+            "gist": "The server parses HTML and Markdown to find Jet.",
+            "gains": [
+              "Works in every editor with no client code."
+            ],
+            "losses": [
+              "Ruled out: hosts identify their regions."
+            ],
+            "proposed": {
+              "code": "→ didOpen {\"textDocument\": {\"uri\": \"file:///w/panel.html\", \"languageId\": \"html\", …}}"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Notebook sync, one cell per Jet module",
+            "gist": "The host travels as an LSP notebook whose cells are its Jet modules.",
+            "gains": [
+              "Standard and atomic."
+            ],
+            "losses": [
+              "The client maps cells to the host.",
+              "Only VS Code notebooks send it."
+            ],
+            "proposed": {
+              "code": "→ notebookDocument/didOpen {\"notebookDocument\": {\"notebookType\": \"jet-host\", \"cells\": […]}, …}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Standard messages stay standard, the host owns its regions, and clients add one message after their built-in sync.",
+          "gains": [
+            "One position map, with the host version, for every result.",
+            "Advertised under `experimental`, so clients never send it blind."
+          ],
+          "losses": [
+            {
+              "loss": "Requests wait for each version's modules.",
+              "mitigation": "The wait ends when the modules arrive or a newer edit supersedes it."
+            },
+            {
+              "loss": "Zed and Helix get nothing in host files.",
+              "mitigation": "A later host adapter that speaks this message can serve them."
+            },
+            {
+              "loss": "The first `jet/` method.",
+              "mitigation": "Versioned under `experimental.jetHostDocument.version`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every client must wrap its transport, and atomicity still slips in VS Code."
+            },
+            {
+              "key": "C",
+              "reason": "No working precedent, and a round trip per version."
+            },
+            {
+              "key": "D",
+              "reason": "Ruled out: one checked map."
+            },
+            {
+              "key": "E",
+              "reason": "Ruled out: hosts identify their regions."
+            },
+            {
+              "key": "F",
+              "reason": "Cells are separate documents, so clients map positions again."
+            }
+          ],
+          "tradeoff": "A brief wait per version, in exchange for untouched client sync."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "HostDocReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T07:41:35.993Z"
     }
   ],
   "questions": [
@@ -137954,6 +138872,258 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T08:32:53.997Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-24T07:54:49.658Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#4: TypeIDSlice3 found the task forms are parser-lowered internal names, not Core names; a TaskForm classification removes the Core-keyed lookup, while a new Expr node (138 files) buys no user-visible change; was: The Services.jet checkers in Sema/Calls move to Core declarations and the file is deleted, its typed-dispatch parts riding c30 and D-RULE-TYPEARGS1. TaskGroups.jet checks the language's own task-group"
+    },
+    {
+      "at": "2026-11-24T07:41:35.993Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-LSP-HOSTDOC1",
+      "note": "How an editor hands the Jet regions of a host document to `jet self lsp`"
+    },
+    {
+      "at": "2026-11-24T07:38:59.749Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "18 criteria, soft limit 6: defects found by the D-LSP-HOSTDOC1 review belong on the card that owns the LSP server (owner order: a regression is a criterion on its owning card)"
+    },
+    {
+      "at": "2026-11-24T07:38:59.749Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#19 A request with a readable id but invalid params is answered "
+    },
+    {
+      "at": "2026-11-24T07:38:58.817Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "17 criteria, soft limit 6: defects found by the D-LSP-HOSTDOC1 review belong on the card that owns the LSP server (owner order: a regression is a criterion on its owning card)"
+    },
+    {
+      "at": "2026-11-24T07:38:58.817Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#18 A document whose languageId isn't jet is not checked as Jet:"
+    },
+    {
+      "at": "2026-11-24T07:38:57.885Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "16 criteria, soft limit 6: defects found by the D-LSP-HOSTDOC1 review belong on the card that owns the LSP server (owner order: a regression is a criterion on its owning card)"
+    },
+    {
+      "at": "2026-11-24T07:38:57.885Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#17 Every request the VS Code extension sends is one the server "
+    },
+    {
+      "at": "2026-11-24T07:34:10.665Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-LSP-CANCEL1",
+      "note": "What `$/cancelRequest` means to `jet self lsp`, and when a cancelled request stops"
+    },
+    {
+      "at": "2026-11-24T07:33:03.859Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "15 criteria, soft limit 6: regressions found by the D-LSP-CANCEL1 review belong on the card that owns the LSP read loop (owner order: a regression is a criterion on its owning card)"
+    },
+    {
+      "at": "2026-11-24T07:33:03.859Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#16 lsp_canceled_costly_request_returns_32800_and_never_publishe"
+    },
+    {
+      "at": "2026-11-24T07:33:01.642Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mbiq9g",
+      "note": "14 criteria, soft limit 6: regressions found by the D-LSP-CANCEL1 review belong on the card that owns the LSP read loop (owner order: a regression is a criterion on its owning card)"
+    },
+    {
+      "at": "2026-11-24T07:33:01.642Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mbiq9g",
+      "note": "#15 A message body that reaches the server in several reads is r"
+    },
+    {
+      "at": "2026-11-24T07:15:59.836Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#6: DMA transfer tracking is flow analysis that a per-call check rule cannot express; its declared home is #6852 c1's typestate/resource facts; was: The Hardware.jet, Data.jet and Geometry.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for the three files pr"
+    },
+    {
+      "at": "2026-11-24T07:15:58.687Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0e6znz4",
+      "note": "#4: TaskGroups.jet is ownership flow analysis over language syntax, not a Core domain (TypeIDSlice3 reading of Calls/TaskGroups.jet, verified: state, loans, capture borrows); the criterion misfiled it; was: The Services.jet and TaskGroups.jet checkers in Sema/Calls move to Core declarations and are deleted; every code they raised keeps its UI snapshot. Proof: `git ls-files` for both files prints nothing "
+    },
+    {
+      "at": "2026-11-24T07:11:52.323Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "33 criteria, soft limit 6: one probe sweep's findings share one card (#6851 c3 probes, $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-probes.md)"
+    },
+    {
+      "at": "2026-11-24T07:11:52.323Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#34 A check rule can tell an interpolated String literal from a "
+    },
+    {
+      "at": "2026-11-24T07:11:51.256Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "32 criteria, soft limit 6: one probe sweep's findings share one card (#6851 c3 probes, $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-probes.md)"
+    },
+    {
+      "at": "2026-11-24T07:11:51.256Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#33 A check rule's rejection keeps its call's position in the di"
+    },
+    {
+      "at": "2026-11-24T07:11:50.107Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "31 criteria, soft limit 6: one probe sweep's findings share one card (#6851 c3 probes, $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-probes.md)"
+    },
+    {
+      "at": "2026-11-24T07:11:50.107Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#32 A check rule hears a module constant (including a constant n"
+    },
+    {
+      "at": "2026-11-24T07:11:48.932Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "30 criteria, soft limit 6: one probe sweep's findings share one card (#6851 c3 probes, $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-probes.md)"
+    },
+    {
+      "at": "2026-11-24T07:11:48.932Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#31 A check rule hears a type-name argument as a Type value (`we"
+    },
+    {
+      "at": "2026-11-24T07:11:47.560Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "29 criteria, soft limit 6: one probe sweep's findings share one card (#6851 c3 probes, $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-probes.md)"
+    },
+    {
+      "at": "2026-11-24T07:11:47.560Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#30 A check rule hears a call argument's declared function: Comp"
+    },
+    {
+      "at": "2026-11-24T07:11:46.110Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0e6znz4",
+      "note": "28 criteria, soft limit 6: one probe sweep's findings share one card (#6851 c3 probes, $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-probes.md)"
+    },
+    {
+      "at": "2026-11-24T07:11:46.110Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0e6znz4",
+      "note": "#29 A marker's expand body can reject at a reflected field: `rej"
+    },
+    {
+      "at": "2026-11-24T07:03:23.861Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0mbiq9g",
+      "note": "#1: the case file is spelled lsp_canceled_… (American spelling, per the British-spelling guard); the old filter matched no test; proof: jet test Compiler --profile cases --filter LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes"
+    },
+    {
+      "at": "2026-11-24T06:35:35.853Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-IMPL-CONCRETEHEAD1",
+      "note": "How a byte list keeps its own encoding once list codecs are ordinary impls"
+    },
+    {
+      "at": "2026-11-24T06:34:23.449Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zlqnvv",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T06:34:22.574Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T06:34:21.719Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00gioxt",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T06:34:20.831Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n7zpy3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-24T06:34:19.886Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-24T06:34:19.003Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#3"
+    },
     {
       "at": "2026-11-24T06:34:17.709Z",
       "by": "Orchestrator",
