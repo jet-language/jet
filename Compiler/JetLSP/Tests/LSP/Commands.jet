@@ -1,0 +1,88 @@
+// Code lenses run the file and its tests, and `jet.impact` reports a
+// symbol's references, callers and callees over the checked index.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[foundation_json_quote]
+}
+
+LSP_TEST_LENS_URI: "file:///w/app.jet"
+
+// The `run: fn` entry on line 4 and a `#Test` on line 8; the method `run` on
+// line 13 is no entry.
+LSP_TEST_LENS: `helper: fn() -> Int {
+    1
+}
+
+run: fn() {
+    print(helper())
+}
+
+#Test("smoke") {
+    expect(helper() == 1)
+}
+
+Job: struct {
+    size: Int,
+    run: fn(self) -> Int {
+        self.size
+    }
+}
+`
+
+// Each lens as `range title command arguments`.
+lsp_test_lens_rows: fn(result: Dyn) -> [String] Never! {
+    rows := [String]{}
+    loop lens in lsp_test_rows(result) {
+        command: lsp_test_field(lens, "command")
+        arguments := [String]{}
+        loop argument in lsp_test_rows(lsp_test_field(command, "arguments")) {
+            if argument == .Text(text) -> arguments.push("{text}")
+        }
+        rows.push("{lsp_test_range(lsp_test_field(lens, "range"))} {lsp_test_text(command, "title")} {lsp_test_text(command, "command")} {arguments.join(",")}")
+    }
+    rows
+}
+
+#Test("code lenses run the file on its run entry and its tests on each #Test") {
+    server := lsp_test_server()
+    lsp_test_open(server, LSP_TEST_LENS_URI, LSP_TEST_LENS)
+    result: lsp_test_result(server, "textDocument/codeLens", "{{{lsp_test_text_document(LSP_TEST_LENS_URI)}}}")
+    assert_eq(lsp_test_lens_rows(result), [String]{
+        "4:0-4:11 Run file jet.runFile {LSP_TEST_LENS_URI}",
+        "8:0-8:16 Run test jet.testFile {LSP_TEST_LENS_URI}",
+    })
+}
+
+lsp_test_impact_params: fn(arguments: String) -> String Never! {
+    "{{\"command\":\"jet.impact\",\"arguments\":{arguments}}}"
+}
+
+#Test("jet.impact reports a symbol's call sites, callers and callees over the checked index") {
+    server := lsp_test_main_server()
+    uri: foundation_json_quote(LSP_TEST_MAIN_URI)
+    result: lsp_test_result(server, "workspace/executeCommand", lsp_test_impact_params("[{uri},\"add\",2]"))
+    assert_eq(lsp_test_text(result, "symbol"), "add")
+    assert(lsp_test_field(result, "found") == Dyn.Bool(true), "add is found")
+    assert_eq(lsp_test_int(result, "depth_limit"), 2)
+    assert_eq(lsp_test_text(result, "definition_module"), "/w/main.jet")
+    assert_eq(lsp_test_rows(lsp_test_field(result, "call_sites")).len(), 2)
+    upstream: lsp_test_rows(lsp_test_field(result, "upstream_callers"))
+    assert_eq(upstream.len(), 1)
+    assert_eq(lsp_test_text(upstream[0], "caller"), "run")
+    assert_eq(lsp_test_rows(lsp_test_field(result, "downstream_callees")).len(), 0)
+    callees: lsp_test_result(server, "workspace/executeCommand", lsp_test_impact_params("[{uri},\"run\"]"))
+    assert_eq(lsp_test_int(callees, "depth_limit"), 3)
+    assert_eq(lsp_test_text(lsp_test_rows(lsp_test_field(callees, "downstream_callees"))[0], "callee"), "add")
+    clamped: lsp_test_result(server, "workspace/executeCommand", lsp_test_impact_params("[{uri},\"add\",0]"))
+    assert_eq(lsp_test_int(clamped, "depth_limit"), 1)
+}
+
+#Test("executeCommand refuses an unknown command, malformed arguments and a closed document") {
+    server := lsp_test_main_server()
+    uri: foundation_json_quote(LSP_TEST_MAIN_URI)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", "{{\"command\":\"jet.unknown\",\"arguments\":[]}}"), -32602)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", "{{}}"), -32602)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_impact_params("[{uri}]")), -32602)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_impact_params("[{uri},\"add\",\"deep\"]")), -32602)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_impact_params("[\"file:///w/closed.jet\",\"add\"]")), -32602)
+}

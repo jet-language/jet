@@ -36,6 +36,8 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/foldingRange" -> lsp_folding_range_response(server, params, id)
         "textDocument/selectionRange" -> lsp_selection_range_response(server, params, id)
         "textDocument/documentLink" -> lsp_document_link_response(server, params, id)
+        "textDocument/codeLens" -> lsp_code_lens_response(server, params, id)
+        "workspace/executeCommand" -> lsp_execute_command_response(server, params, id)
         "textDocument/semanticTokens/full" -> lsp_semantic_tokens_response(server, params, id)
         "textDocument/semanticTokens/full/delta" -> lsp_semantic_tokens_delta_response(server, params, id)
         "textDocument/semanticTokens/range" -> lsp_semantic_tokens_range_response(server, params, id)
@@ -101,6 +103,8 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"foldingRangeProvider\":true",
         "\"selectionRangeProvider\":true",
         "\"documentLinkProvider\":{{\"resolveProvider\":false}}",
+        "\"codeLensProvider\":{{\"resolveProvider\":false}}",
+        "\"executeCommandProvider\":{{\"commands\":[\"jet.impact\"]}}",
         "\"semanticTokensProvider\":{{\"legend\":{{\"tokenTypes\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_TYPES)},\"tokenModifiers\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_MODIFIERS)}}},\"full\":{{\"delta\":true}},\"range\":true}}",
         "\"inlayHintProvider\":true",
         "\"typeHierarchyProvider\":true",

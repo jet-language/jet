@@ -51,6 +51,8 @@ LSP_TEST_PROVIDERS: [String]{
     "foldingRangeProvider",
     "selectionRangeProvider",
     "documentLinkProvider",
+    "codeLensProvider",
+    "executeCommandProvider",
     "semanticTokensProvider",
     "inlayHintProvider",
     "typeHierarchyProvider",
@@ -90,6 +92,8 @@ LSP_TEST_PROVIDER_METHODS: [String]{
     "textDocument/foldingRange",
     "textDocument/selectionRange",
     "textDocument/documentLink",
+    "textDocument/codeLens",
+    "workspace/executeCommand",
     "textDocument/semanticTokens/full",
     "textDocument/semanticTokens/full/delta",
     "textDocument/semanticTokens/range",
@@ -118,8 +122,8 @@ LSP_TEST_PROVIDER_METHODS: [String]{
 
 #Test("an unknown method is not found and shutdown is acknowledged") {
     server := lsp_test_server()
-    assert_eq(lsp_test_error_code(server, "textDocument/codeLens", "{{}}"), -32601)
-    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", "{{}}"), -32601)
+    assert_eq(lsp_test_error_code(server, "textDocument/moniker", "{{}}"), -32601)
+    assert_eq(lsp_test_error_code(server, "workspace/willRenameFiles", "{{}}"), -32601)
     assert(!server.shutdown, "no shutdown yet")
     assert(lsp_test_result(server, "shutdown", "{{}}") == .Null, "shutdown answers null")
     assert(server.shutdown, "shutdown is recorded")
