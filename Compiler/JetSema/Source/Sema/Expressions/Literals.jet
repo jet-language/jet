@@ -665,7 +665,10 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     if has_spread {
         element_type: if ty == {
             .List(element) -> element
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked list spread result is not a growable list")
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                check.context.incomplete_reasons.push("checked list spread result is not a growable list")
+                return None
+            }
         }
         if !sema_expression_list_check_clone(element_type, span, environment, program, check.context, diagnostics) {
             return None

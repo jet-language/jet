@@ -254,7 +254,10 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
         route: sema_call_core_resolve_route(environment, program, "core.process", "__spec_abilities", [Type]{}, 1, false, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         target: if route == {
             .Source(source) -> source
-            .Core(_) | .SharedSite(_) -> panic("ProcessSpec.abilities must resolve its canonical Jet source body")
+            .Core(_) | .SharedSite(_) -> {
+                check.context.incomplete_reasons.push("ProcessSpec.abilities must resolve its canonical Jet source body")
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
         }
         callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value)}}, span)
@@ -297,11 +300,17 @@ sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [Ca
     route: sema_call_core_resolve_route(environment, program, "core.files", "__spec_keep_open", [Type]{}, 3, false, span, diagnostics) ?? return rejected
     target: if route == {
         .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> panic("ProcessSpec.keep_open must resolve its canonical Jet source body")
+        .Core(_) | .SharedSite(_) -> {
+            check.context.incomplete_reasons.push("ProcessSpec.keep_open must resolve its canonical Jet source body")
+            return rejected
+        }
     }
     params: if target.signature == {
         .Fn(params, _, _, _, _, _) -> params
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("ProcessSpec.keep_open's source body has a function type")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+            check.context.incomplete_reasons.push("ProcessSpec.keep_open's source body has a function type")
+            return rejected
+        }
     }
     handle_type: sema_call_resolved_type(params[1], environment, program)
     slot_type: sema_call_resolved_type(params[2], environment, program)
@@ -463,7 +472,10 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         route: sema_call_core_resolve_route(environment, program, "core.process", member, [Type]{}, 2, false, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         target: if route == {
             .Source(source) -> source
-            .Core(_) | .SharedSite(_) -> panic("{api} must resolve its canonical Jet source body")
+            .Core(_) | .SharedSite(_) -> {
+                check.context.incomplete_reasons.push("{api} must resolve its canonical Jet source body")
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
         }
         callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         size: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)

@@ -1611,7 +1611,10 @@ sema_call_pack_variadic_arguments: fn(typed: SemaCallTypedArguments, params: [Se
         list_ty: sema_call_resolved_type(params[slot].ty ?? panic("checked variadic parameter has no type"), environment, program)
         element: if list_ty == {
             .List(inner) -> inner
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked variadic parameter is not a List")
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                context.incomplete_reasons.push("checked variadic parameter is not a List")
+                return None
+            }
         }
         tail := [TCallArg]{}
         loop index in 0..<lowered.len() {
