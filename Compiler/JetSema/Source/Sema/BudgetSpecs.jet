@@ -12,6 +12,10 @@ use jet_foundation.[
     ExprField,
     Item,
     ModuleDecl,
+    PERF_BUDGET_METRICS,
+    PERF_BUDGET_PERCENTILES,
+    PERF_BUDGET_TARGET_CLASSES,
+    SCOPE_TEST_MEASURE,
     Span,
     Stmt,
     Type,
@@ -20,35 +24,6 @@ use jet_foundation.[
     foundation_byte_text,
     type_name,
 ]
-
-// The registered performance-budget vocabulary (Syntax PERF_BUDGET_*,
-// SCOPE_TEST_MEASURE and perf_budget_unit_scale).
-BUDGET_METRICS: [String]{
-    "BinarySize",
-    "ArtifactSize",
-    "GeneratedUnsafe",
-    "PublicApiItems",
-    "DependencyCount",
-    "EffectCount",
-    "AllocationCount",
-    "AllocationBytes",
-    "StartupTime",
-    "FrameTime",
-    "Latency",
-    "Throughput",
-    "MemoryHighWater",
-    "BenchTime",
-    "ServiceReadiness",
-    "SceneAssetBytes",
-    "DrawCalls",
-    "CompileTime",
-}
-
-BUDGET_PERCENTILES: [String]{"P50", "P90", "P95", "P99", "P999"}
-
-BUDGET_TARGET_CLASSES: [String]{"Native", "Web", "Freestanding", "Plugin", "OSImage"}
-
-BUDGET_SCOPE_TEST_MEASURE: "measure"
 
 sema_budget_unit_scale: fn(suffix: String) -> Int? Never! {
     if sema_units_catalog_scale("DataSize", suffix) == .Val(scale) -> return Val(scale)
@@ -246,7 +221,7 @@ sema_budget_attachment_catalog: fn(tables: ASTTables, items: [Item]) -> BudgetAt
             .Test(definition) -> {
                 measured := false
                 loop statement in definition.body {
-                    if statement == .ScopeMember(name, _, _, _, _, _, _, _) && name == BUDGET_SCOPE_TEST_MEASURE {
+                    if statement == .ScopeMember(name, _, _, _, _, _, _, _) && name == SCOPE_TEST_MEASURE {
                         measured = true
                     }
                 }
@@ -638,7 +613,7 @@ sema_budget_arg_value: fn(arg: EnumLitArg) -> Expr Never! {
 sema_budget_closed_metric: fn(name: String, expr: Expr) -> BudgetMetricPair BudgetSpecError! {
     if expr == {
         .EnumLit(_, variant, _, args, _, _, _) -> {
-            if !BUDGET_METRICS.contains(variant) {
+            if !PERF_BUDGET_METRICS.contains(variant) {
                 return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` is not a performance metric", "use one metric from the registered performance-budget vocabulary", expr_span(expr))))
             }
             percentile_metric: variant == "FrameTime" || variant == "Latency" || variant == "BenchTime" || variant == "DrawCalls" || variant == "CompileTime"
@@ -648,7 +623,7 @@ sema_budget_closed_metric: fn(name: String, expr: Expr) -> BudgetMetricPair Budg
                 }
                 value: sema_budget_arg_value(args[0])
                 percentile: sema_budget_enum_variant(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` requires a typed percentile", "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr_span(value))))
-                if !BUDGET_PERCENTILES.contains(percentile) || sema_budget_enum_args(value).len() > 0 {
+                if !PERF_BUDGET_PERCENTILES.contains(percentile) || sema_budget_enum_args(value).len() > 0 {
                     return Err(sema_budget_fail(sema_budget_invalid(name, "`.{percentile}` is not a supported percentile", "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr_span(value))))
                 }
                 return Ok(BudgetMetricPair{metric: "{variant}({percentile})", variant: variant})
@@ -869,7 +844,7 @@ sema_budget_target_selector: fn(name: String, expr: Expr) -> String BudgetSpecEr
         if variant == "Class" && args.len() == 1 {
             value: sema_budget_arg_value(args[0])
             class: sema_budget_enum_variant(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", expr_span(value))))
-            if !BUDGET_TARGET_CLASSES.contains(class) || sema_budget_enum_args(value).len() > 0 {
+            if !PERF_BUDGET_TARGET_CLASSES.contains(class) || sema_budget_enum_args(value).len() > 0 {
                 return Err(sema_budget_fail(sema_budget_invalid(name, "`.{class}` is not a target class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", expr_span(value))))
             }
             return Ok("Class({class})")
