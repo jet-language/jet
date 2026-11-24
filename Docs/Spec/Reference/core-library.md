@@ -5347,6 +5347,17 @@ or golden file. The public source is
 | `histories<Command>(seed: Int, cases: Int, strategy: HistoryStrategy<Command>?, model: fn([Command]) -> Dyn, actual: fn([Command]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestComparison Err!` | comparison | Run a typed history campaign (`D-TEST-HISTORY1`, `D-TEST-STRATEGY1`): one `HistoryRNG` seeded by `seed` feeds every `generate`; invalid or out-of-bounds cases are discarded, a mismatch shrinks to a valid reduced case and fails with `history mismatch in case `<id>`: <op> -> <op> …`, whose cause carries the replayable `history-artifact {…}` JSON. Without `strategy`, the compiler derives one from an enum whose payloads are `Int`, `Bool` or `String`; any other command type is `unsupported`. The artifact's source, tool and target identities come from the compiler. `HistoryRNG` is a Core SplitMix64 generator whose copies share one stream; `next_u64()` and `below(bound)` return `Int` (`D-TEST-COUNT1`). A strategy's `generate`, `rebuild` and `valid` slots are pure (`-[]>`): a case draws only from the `HistoryRNG`, so the campaign's effects are those of `model`, `actual` and `observe`, and a target that denies an effect they do not use still runs it. |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
 
+`DeterministicWorld` is a Core struct over the runtime's world handle. Its
+methods call `jet.runtime.testing`, as `core.net`'s handles call
+`jet.runtime.net`:
+
+| Method | Result | Description |
+|---|---|---|
+| `world.now() -> Int` | milliseconds | The world's wall clock, in milliseconds since the Unix epoch. |
+| `world.advance(by: Duration) -> Int` | milliseconds | Move the clock forward by exactly `by`, releasing the timers due on the way in deadline order; the wall clock after the move. |
+| `world.wait_idle()` | — | Wait until every task of the world is blocked or done. |
+| `world.history() -> String` | text | The world's journal: its clock moves, timers and seeded random draws. |
+
 `#Test` is the only test declaration syntax (`D-TESTKIT1`).
 Use `#Test` for test declarations and keep assertions about behavior rather
 than implementation details. The compiler and test runner own test discovery;

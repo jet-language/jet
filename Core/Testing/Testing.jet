@@ -19,6 +19,7 @@ use {
     crypto: core.crypto
     json: core.encoding.json
     rt: jet.runtime.encoding
+    world_rt: jet.runtime.testing
 }
 
 // A second spelling, never a second owner.
@@ -1440,6 +1441,27 @@ testing_history_derived_rebuild: fn<T>(case: HistoryCase, names: [String], kinds
         commands.push(make(choice, ints, bools, texts))
     }
     Val(TypedHistoryCase<T>{case: case.copy(), commands: commands})
+}
+
+/// The deterministic world `world` runs its body in. Only the runtime fills
+/// the `priv handle`, so a literal outside core.testing cannot forge one, and
+/// the world ends with its `world` call.
+#[!Equatable, !Comparable, !Codable]
+DeterministicWorld: struct {
+    priv handle: Int,
+
+    /// The world's wall clock, in milliseconds since the Unix epoch.
+    now: fn(self) -> Int { world_rt.world_now(self) }
+
+    /// Moves the world's clock forward by exactly `by`, releasing the timers
+    /// due on the way in deadline order; the wall clock after the move.
+    advance: fn(self, by: Duration) -> Int { world_rt.world_advance(self, by.ns) }
+
+    /// Waits until every task of the world is blocked or done.
+    wait_idle: fn(self) { world_rt.world_wait_idle(self) }
+
+    /// The world's journal: its clock moves, timers and seeded random draws.
+    history: fn(self) -> String { world_rt.world_history(self) }
 }
 
 // I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
