@@ -279,8 +279,8 @@ parser_layout_grouped_fact: fn(state: &JetParserState, marker: Marker, is_enum: 
 }
 
 // An `align(…)` byte value: a non-negative integer literal, or the build fact
-// `#build.cpu.cache_line`. Jet has no CPU selection, so
-// the fact is the generic cache-line size on every target, as sema reads it.
+// `#build.cpu.cache_line`. The parser runs before a target is selected, so
+// the marker aligns to the generic cache line (COMPILER_BUILD_CPU_CACHE_LINE_GENERIC).
 parser_layout_align_bytes: fn(argument: Expr) -> Int? {
     if argument == .Int(number, _, _, _, _) && number >= 0 -> return Val(number)
     if argument == .Field(base, member, _, _) && member == "cache_line" {

@@ -1,0 +1,20 @@
+# `build: fn` builds one source for the host and on a toolchain for aarch64
+# Linux. Each output's target and CPU facts are folded when it is built and
+# follow its own toolchain's machine, not the machine running the build: the
+# arm output reads aarch64's triple and features (`[neon]`), the native one
+# the x86-64 host's (`[sse2]`). The native backend writes x86-64 images for
+# both, so both run here and print what their build folded.
+fixture: BuildOutputFactsFollowItsToolchain.fixture
+artifact: native_app
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+requires: os-name:linux
+requires: arch:x86_64
+step: jet build run.jet
+exit: 0
+step native: {work}/.jet/build/native_app
+exit: 0
+stdout: = "x86_64-unknown-linux-gnu Linux line 64 cpu [sse2] pointer 64\n"
+step arm: {work}/.jet/build/arm_app
+exit: 0
+stdout: = "aarch64-unknown-linux-gnu Linux line 64 cpu [neon] pointer 64\n" # the arm toolchain's machine, not the host's

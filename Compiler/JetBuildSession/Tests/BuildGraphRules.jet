@@ -199,6 +199,28 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(permit.value.targets.len(), 0)
 }
 
+// An output's `options: {settings: ...}` arrive after the seven target slots,
+// absent ones Unit, as a key and value per setting; the target keeps each
+// value as the setting text the package's settings fold reads, and a key
+// without a value is refused.
+#Test("an_output_keeps_its_own_setting_values_as_setting_text") {
+    a := build_graph_rules_session(89)
+    empty: build_graph_rules_list([String]{})
+    args: [BuildSessionValue]{.Text{value: "lite"}, empty, empty, empty, empty, .Unit, .Unit, .Text{value: "max_particles"}, .Int{value: 500}, .Text{value: "label"}, .Text{value: "say \"hi\""}, .Text{value: "trails"}, .Bool{value: true}, .Text{value: "quality"}, .Enum{variant: "Low"}}
+    assert(build_graph_rules_ok(build_session_call(a, "add_executable", args, None, false, 1, 2)))
+    assert(build_graph_rules_failed(build_session_call(a, "add_executable", [BuildSessionValue]{.Text{value: "odd"}, empty, empty, empty, empty, .Unit, .Unit, .Text{value: "max_particles"}}, None, false, 3, 4)))
+    assert(build_graph_rules_failed(build_session_call(a, "add_executable", [BuildSessionValue]{.Text{value: "listed"}, empty, empty, empty, empty, .Unit, .Unit, .Text{value: "max_particles"}, empty}, None, false, 5, 6)))
+    permit: a.storage.guard_read()
+    assert_eq(permit.value.targets.len(), 1)
+    target: permit.value.targets[0]
+    assert_eq(target.toolchain, 0)
+    assert_eq(target.signing, None)
+    names: loop setting in target.settings -> setting.name
+    values: loop setting in target.settings -> setting.value
+    assert_eq(names, [String]{"max_particles", "label", "trails", "quality"})
+    assert_eq(values, [String]{"500", "\"say \\\"hi\\\"\"", "true", ".Low"})
+}
+
 // `meta.events` reads a `Compiler` value's checked program only after
 // `compiler.live` accepts the value: one of this build's, while it runs.
 #Test("meta_events_read_only_a_live_compiler_value_of_this_build") {

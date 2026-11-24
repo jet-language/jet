@@ -1,7 +1,7 @@
 // Exact compiler-value contract.build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, BUILD_OPTION_HOOK_DEFAULT, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, expr_span, type_name]
+    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, BUILD_OPTION_HOOK_DEFAULT, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ExprField, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, expr_span, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -146,6 +146,13 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     if method == "pin" || build_option_row(method) != None {
         return sema_call_build_option(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, diagnostics)
     }
+    if sema_build_context_target_method(method) {
+        loop argument in args {
+            if argument.label != None {
+                return sema_call_build_output(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+        }
+    }
     contract: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
             if argument.flags.template_items == None {
@@ -220,6 +227,165 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     values.extend(generated.move())
     value: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `b.add_executable(name, sources, steps, deps, probes, toolchain: t,
+// options: {settings: {key: value}})`: an output's labeled controls, after
+// its positional arguments. `toolchain:` is its sixth argument written by
+// name; `options:` gives the output its own values of the settings its
+// package declares, each checked as the setting's declared type (E3541,
+// E3542). The host call takes the argument slots, an unwritten list as
+// empty and an unwritten toolchain or signing identity as `None`, then a
+// (key, value) pair per setting (JetBuildSession build_session_add_target).
+sema_call_build_output: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    positional := 0
+    toolchain_at := -1
+    options_at := -1
+    loop (index, argument) in args {
+        if argument.spread || argument.flags.template_items != None {
+            diagnostics.push(sema_error("E0764", argument.span, "`Build.{method}` takes no spread or template argument", "an output's arguments are its name, sources, steps, dependencies, probes, toolchain and options", "write the argument itself"))
+            return failed
+        }
+        label: argument.label ?? {
+            if toolchain_at >= 0 || options_at >= 0 {
+                diagnostics.push(sema_error("E0764", argument.span, "`Build.{method}` takes its positional arguments before `toolchain:` and `options:`", "an output's labeled controls follow the arguments it takes by position", "move this argument before the labeled ones"))
+                return failed
+            }
+            positional += 1
+            next
+        }
+        if label.name == "toolchain" && toolchain_at < 0 && positional <= 5 {
+            toolchain_at = index
+        } else if label.name == "options" && options_at < 0 {
+            options_at = index
+        } else if label.name == "toolchain" || label.name == "options" {
+            diagnostics.push(sema_error("E0765", label.span, "`Build.{method}` is given its `{label.name}` twice", "an output has one toolchain and one set of options", "keep one `{label.name}`"))
+            return failed
+        } else {
+            diagnostics.push(sema_error("E0764", label.span, "`Build.{method}` has no `{label.name}:` argument", "an output's labeled arguments are `toolchain:` and `options:`", "pass `{label.name}` by position, or drop its label"))
+            return failed
+        }
+    }
+    contract: sema_build_context_method_contract(method, positional) ?? {
+        diagnostics.push(sema_error("E0104", span, "`Build.{method}` expects 3 to {if toolchain_at >= 0 -> 5 else -> 7} arguments before its labeled ones, got {positional}", "build methods have one canonical base shape and typed trailing controls", "pass the arguments accepted by `b.{method}`"))
+        return failed
+    }
+    toolchain_type: Type.Named{name: "BuildToolchain"}
+    values := [TExpr]{}
+    params := [SemaCallParam]{}
+    loop (index, argument) in args {
+        if index == options_at {
+            params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Named{name: "Unit"}), variadic: false})
+            next
+        }
+        required: if index == toolchain_at -> toolchain_type else -> contract.parameters[index]
+        value: sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+        compatible: sema_call_type_assignable(required, value.ty, environment, program) ?? return failed
+        if !compatible {
+            diagnostics.push(sema_type_mismatch(required, value.ty, argument.span, program))
+            return failed
+        }
+        params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
+        if index == toolchain_at {
+            // Dependencies and probes the call leaves out are empty.
+            loop slot in values.len()..<5 {
+                listed: if slot == 3 -> Type.List{element: Type.Named{name: "BuildTarget"}} else -> Type.List{element: Type.Named{name: "BuildProbe"}}
+                values.push(sema_tree_node(listed, TExprKind.CtLit{value: TComptimeValue.List{values: [TComptimeValue]{}}}, span))
+            }
+        }
+        values.push(value)
+    }
+    if options_at >= 0 {
+        loop slot in values.len()..<7 {
+            if slot < 5 {
+                listed: if slot == 3 -> Type.List{element: Type.Named{name: "BuildTarget"}} else -> Type.List{element: Type.Named{name: "BuildProbe"}}
+                values.push(sema_tree_node(listed, TExprKind.CtLit{value: TComptimeValue.List{values: [TComptimeValue]{}}}, span))
+            } else {
+                // The session reads an absent toolchain or signing identity as `()`.
+                absent: Expr.Absent{span: span, id: AST_NODE_GENERATED}
+                held: Type.Named{name: if slot == 5 -> "BuildToolchain" else -> "BuildSigningIdentity"}
+                values.push(sema_check_expression(absent, Val(Type.Option{inner: held}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed)
+            }
+        }
+        settings: sema_build_output_settings(args[options_at].expr, args[options_at].span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+        values.extend(settings.move())
+    }
+    // The ownership check marks each argument's access in place.
+    ordinary := args
+    ownership: sema_ownership_check_method_call(state, "Build.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    value: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// The (key, value) pairs an output's `options: {settings: {key: value}}`
+// gives the settings its package declares: each key one the package
+// declares (E3541), each value checked as that setting's type (E3542).
+sema_build_output_settings: fn(options: Expr, options_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+    shape: "`options:` takes an inferred literal of the output's settings, `{{settings: {{key: value}}}}`"
+    if options == .StructLit(_, _, _, _, option_fields, options_inferred, _, _) {
+        if options_inferred {
+            declared: sema_build_output_declared(environment, program)
+            pairs := [TExpr]{}
+            loop option in option_fields {
+                if option.name == "settings" && option.value == .StructLit(_, _, _, _, setting_fields, settings_inferred, _, _) {
+                    if settings_inferred {
+                        loop field in setting_fields {
+                            pair: sema_build_output_setting(field, declared, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                            pairs.extend(pair.move())
+                        }
+                        next
+                    }
+                }
+                diagnostics.push(sema_error("E0104", option.name_span, shape, "an output's options name the declared settings it gives its own values", "write `options: {{settings: {{key: value}}}}`"))
+                return None
+            }
+            return Val(pairs)
+        }
+    }
+    diagnostics.push(sema_error("E0104", options_span, shape, "an output's options name the declared settings it gives its own values", "write `options: {{settings: {{key: value}}}}`"))
+    None
+}
+
+// One `key: value` of an output's settings: its key and its value checked as
+// the type the package declares for it.
+sema_build_output_setting: fn(field: ExprField, declared: [SemaBuildSetting], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+    found: loop setting in declared {
+        if setting.name == field.name -> break Val(setting.ty.trim())
+    } ?? None
+    ty: found ?? {
+        diagnostics.push(sema_error("E3541", field.name_span, "This output's options set `{field.name}`, which the package does not declare", "an output's `options: {{settings: ...}}` gives its own values to the settings `package.jet` declares, and code reads them as `#build.settings.<key>`", "declare `{field.name}: Type = default` in the `settings: {{ … }}` block of `package.jet`, or drop it from the output's options"))
+        return None
+    }
+    // A scalar setting's value is checked on its own, so a value of another
+    // type reaches E3542 rather than the expected-type mismatch; an enum
+    // setting's `.Case` needs its type to resolve.
+    scalar := Type?{None}
+    if ty == {
+        "Bool" -> scalar = Val(Type.Bool)
+        "Int" -> scalar = Val(Type.Int)
+        "Char" -> scalar = Val(Type.Char)
+        "String" -> scalar = Val(Type.String)
+        else -> {}
+    }
+    required: scalar ?? Type.Named{name: ty}
+    hint: if scalar == None -> Val(required) else -> Type?{None}
+    value: sema_check_expression(field.value, hint, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    compatible: sema_call_type_assignable(required, value.ty, environment, program) ?? return None
+    if !compatible {
+        diagnostics.push(sema_error("E3542", expr_span(field.value), "Setting `{field.name}` is declared `{ty}`, but this output gives it a `{type_name(value.ty)}`", "code reads `#build.settings.{field.name}` as its declared type, whichever output it is built into", "give `{field.name}` a value of type `{ty}`"))
+        return None
+    }
+    key: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: field.name}}}, field.name_span)
+    Val([TExpr]{key, value})
+}
+
+// The settings the checked module's package declares.
+sema_build_output_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaBuildSetting] Never! {
+    graph: program.registration_graph ?? return [SemaBuildSetting]{}
+    row: if sema_registration_module_index(graph, environment.module_identity) == .Val(index) -> graph.modules[index].settings_row else -> -1
+    sema_build_facts_settings_at(graph.build_facts, row)
 }
 
 // `b.generate(name, code)`: the module `name` holds a `Code` value's items

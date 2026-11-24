@@ -54,6 +54,10 @@ ContributionLayer: enum {
     // The root package's own entry for the dependency.
     RootEntry,
     OptimizationBundle,
+    // One build output's own values, which `build: fn` gives the output it
+    // declares (`b.add_executable(..., options: { settings: { ... } })`):
+    // over the selected profile, beneath the build's pins and the flags.
+    Output,
     Workspace,
     Environment,
     System,
@@ -66,6 +70,7 @@ ContributionLayer: enum {
             .DependencyEntry -> "dependency entry"
             .RootEntry -> "root entry"
             .OptimizationBundle -> "optimization bundle"
+            .Output -> "build output"
             .Workspace -> "workspace"
             .Environment -> "environment"
             .System -> "system"
@@ -80,18 +85,19 @@ ContributionLayer: enum {
             .DependencyEntry -> 1
             .RootEntry -> 2
             .OptimizationBundle -> 3
-            .Workspace -> 4
-            .Environment -> 5
-            .System -> 6
-            .Fleet -> 7
-            .CommandLine -> 8
+            .Output -> 4
+            .Workspace -> 5
+            .Environment -> 6
+            .System -> 7
+            .Fleet -> 8
+            .CommandLine -> 9
         }
     }
 
     can_force: fn(self) -> Bool Never! {
         if self == {
             .System | .Fleet -> true
-            .Declaration | .DependencyEntry | .RootEntry | .OptimizationBundle | .Workspace | .Environment | .CommandLine -> false
+            .Declaration | .DependencyEntry | .RootEntry | .OptimizationBundle | .Output | .Workspace | .Environment | .CommandLine -> false
         }
     }
 }

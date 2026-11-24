@@ -210,6 +210,30 @@ pkg_merge_test_entries: fn() -> [FactContribution] {
     assert_eq(ContributionLayer.RootEntry.name(), "root entry")
 }
 
+#Test("an output's own setting decides over the profile and under build contributions and flags") {
+    assert(ContributionLayer.OptimizationBundle.rank() < ContributionLayer.Output.rank())
+    assert(ContributionLayer.Output.rank() < ContributionLayer.Environment.rank())
+    assert(!ContributionLayer.Output.can_force())
+    assert_eq(ContributionLayer.Output.name(), "build output")
+    output: pkg_fact_resolve(
+        FactKey.new("k"),
+        [FactContribution]{
+            pkg_merge_test_writer("k", "default", ContributionLayer.Declaration, "package.jet"),
+            pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
+            pkg_merge_test_writer("k", "lite", ContributionLayer.Output, "build: fn:lite.options.settings.k"),
+        },
+    ) ?? panic("an output's value resolves")
+    assert_eq(output.value, FactValue.Text{value: "lite"})
+    contributed: pkg_fact_resolve(
+        FactKey.new("k"),
+        [FactContribution]{
+            pkg_merge_test_writer("k", "lite", ContributionLayer.Output, "build: fn:lite.options.settings.k"),
+            pkg_merge_test_writer("k", "built", ContributionLayer.Environment, "b.contribute"),
+        },
+    ) ?? panic("a contribution resolves over an output's value")
+    assert_eq(contributed.value, FactValue.Text{value: "built"})
+}
+
 #Test("entry combines packages and resolves settings") {
     first: EntryContribution{packages: [Pkg]{Pkg.new("default", "ripgrep")}, settings: [String:[FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "jetpack", ContributionLayer.Declaration, "package.jet")}}}
     second: EntryContribution{packages: [Pkg]{Pkg.new("default", "fd")}, settings: [String:[FactContribution]]{"prompt": [FactContribution]{pkg_merge_test_writer("prompt", "wordstats", ContributionLayer.OptimizationBundle, "profile")}}}

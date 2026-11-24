@@ -383,6 +383,11 @@ graph operations: `b.add_executable`,
 `b.run(name, tool, caps)` registers a typed step; `b.probe(name, kind, value)`
 registers a typed `find_program`, `find_folder`, `pkg_config` or `header`
 probe; and `b.generate(name) { ... }` registers an additive generated module.
+A target call may end with `toolchain: t` and
+`options: { settings: { key: value } }`, which give that output its own
+values for the package's declared settings and, on its own toolchain, that
+triple's `#build.target.*` and `#build.cpu.*` facts
+([`OutputSettings`](../../../Examples/Metaprogramming/BuildTime/OutputSettings/run.jet)).
 `b.plan()` or `b.default(target)` hands the graph to the driver. The
 [programmable builds](../spec.md#programmable-builds) section of the spec owns
 each operation's rules, including the generated-module diagnostics.

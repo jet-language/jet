@@ -3,7 +3,7 @@
 // <fact>` resolves and prints the whole chain through the one contribution
 // law (pkg_fact_resolve).
 use {
-    jet_foundation.[COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, DerivationMethod, DerivationPayload, DerivationRecord, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span, derivation_identity, derivation_record, derivation_record_with_payload]
+    jet_foundation.[DerivationMethod, DerivationPayload, DerivationRecord, Diagnostic, JET_BUILD_DEFAULT_PROFILE, Span, TargetMachine, derivation_identity, derivation_record, derivation_record_with_payload, jet_target_layout_cache_line]
     jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, SourceScope, pkg_fact_resolve]
     jet_sema.[SemaBuildFacts, SemaBuildSetting, SemaSettingContribution]
 }
@@ -23,9 +23,11 @@ JetDriverSettingWriter: struct {
 // explicit layer: its default; for a dependency's setting, each other
 // package's entry for that dependency (`DependencyEntry`), then the entry
 // package's (`RootEntry`); the value the selected `build:` profile gives it;
-// the values the entry package's `build: fn` contributed (the lock's
-// environment-layer rows); and each `--set`. The entry package writes a
-// dependency's setting by its qualified name (jet_driver_setting_name).
+// for the entry package's own setting, the value the built output's
+// `options: {settings: ...}` gives it (`Output`); the values the entry
+// package's `build: fn` contributed (the lock's environment-layer rows); and
+// each `--set`. The entry package writes a dependency's setting by its
+// qualified name (jet_driver_setting_name).
 jet_driver_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPackageInfo, setting: JetDriverPackageSetting, request: JetDriverCompileRequest) -> [JetDriverSettingWriter] Never! {
     name: jet_driver_setting_name(load, package, setting)
     key: "Build.Settings.{name}"
@@ -42,6 +44,12 @@ jet_driver_setting_writers: fn(load: JetDriverLoadResult, package: JetDriverPack
         loop given in entry.profile_settings {
             if given.profile != request.profile || given.name != name -> next
             writers.push(jet_driver_setting_writer(key, setting.ty, given.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{request.profile}.settings.{name}", None, entry.manifest_path ?? "", given.span))
+        }
+        if package.identity == load.package_identity {
+            loop given in request.output_settings {
+                if given.name != name -> next
+                writers.push(jet_driver_setting_writer(key, setting.ty, given.value, ContributionLayer.Output, SourceScope.Package, "build: fn:{request.output}.options.settings.{name}", None, "", no_site))
+            }
         }
         loop contribution in request.build_contributions {
             if contribution.package != entry.name || contribution.key != key || contribution.layer != "environment" {
@@ -207,12 +215,13 @@ jet_driver_overridden_entry_writers: fn(request: JetDriverCompileRequest) -> [Fa
 
 // The ContributionKind variant of a setting writer's layer
 // (jet_driver_setting_writers): the declaration's default, the selected
-// `build:` profile, the package's `build: fn`, or a `--set`. An entry's
-// value counts as `Declaration`; reflection lists only the entry package's
-// own settings, which no entry writes.
+// `build:` profile, the package's `build: fn` (a built output's own value or
+// a contribution), or a `--set`. An entry's value counts as `Declaration`;
+// reflection lists only the entry package's own settings, which no entry
+// writes.
 jet_driver_setting_contribution_kind: fn(layer: ContributionLayer) -> String Never! {
     if layer == .OptimizationBundle -> return "Profile"
-    if layer == .Environment -> return "Build"
+    if layer == .Output || layer == .Environment -> return "Build"
     if layer == .CommandLine -> return "CommandLine"
     "Declaration"
 }
@@ -389,7 +398,7 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
             undeclared: jet_driver_diagnostic_without_span("E0302", "`#build.settings.{name}` is undeclared", "a setting must be declared with a type and default in the package manifest before it can be read", "add `{name}: Type = default` to the package `settings: {{ … }}` block")
             return JetDriverBuildFactExplanation{derivation: None, diagnostics: [Diagnostic]{undeclared}}
         }
-    } else { contributions = jet_driver_fixed_fact_writers(key, facts, load, package, request) }
+    } else { contributions = jet_driver_fixed_fact_writers(key, facts, target, load, package, request) }
     if pkg_fact_resolve(FactKey.new(key), contributions) == {
         .Ok(resolved) -> {
             derivation: if resolved == .Val(fact) -> Val(jet_driver_build_fact_derivation(fact, request.profile, target.triple)) else -> None
@@ -429,11 +438,11 @@ jet_driver_fact_error_diagnostic: fn(error: FactError) -> Diagnostic Never! {
 // `load.packages`, None for a manifest-less source) names itself in its
 // manifest; a manifest-less source takes its name from the entry file
 // (`<source>`). A fact nobody writes takes the compiler's value
-// (`<default>`); the target machine supplies the OS and cache line
+// (`<default>`); the target machine supplies the OS and its CPU's cache line
 // (`<target>`) and the machine running the build its own OS and architecture
 // (`<host>`); the lock's `[build.stamp]` supplies the stamp; `--profile`
 // is the command-line writer of the profile.
-jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, load: JetDriverLoadResult, package: Int?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
+jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, machine: TargetMachine, load: JetDriverLoadResult, package: Int?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
     manifest: if package == .Val(at) && load.packages[at].manifest_path != None -> Val(jet_driver_manifest_label(load.packages[at])) else -> String?{None}
     declared_version: if package == .Val(at) -> load.packages[at].version else -> String?{None}
     stamped: request.build_stamp != None
@@ -458,7 +467,7 @@ jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, load: JetD
         "Build.Stamp.Dirty" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Bool{value: facts.stamp_dirty}, jet_driver_stamp_source(stamped, "dirty"))}
         "Build.Stamp.Toolchain" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.stamp_toolchain}, jet_driver_stamp_source(stamped, "toolchain"))}
         "Build.Stamp.At" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.stamp_at}, jet_driver_stamp_source(stamped, "at"))}
-        "Build.Cpu.CacheLine" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Int{value: COMPILER_BUILD_CPU_CACHE_LINE_GENERIC}, "<target>")}
+        "Build.Cpu.CacheLine" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Int{value: jet_target_layout_cache_line(machine.triple)}, "<target>")}
         "Build.Host.OS" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.host_os}, "<host>")}
         "Build.Host.Arch" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.host_arch}, "<host>")}
         else -> return [FactContribution]{}

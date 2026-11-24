@@ -7349,8 +7349,10 @@ On x86-64 a value of four or eight bytes is written with `movnti`; narrower
 values and aggregates use an ordinary store. A function that streams fences
 those writes (`sfence`) before each call and at its return, so callers,
 callees and other threads see them in program order. Pad hot fields to the
-cache line with `#Layout(c, align(#build.cpu.cache_line))`; the fact is 64 on
-every target until Jet selects CPUs (D-CACHE-CONTROL1).
+cache line with `#Layout(c, align(#build.cpu.cache_line))`. The fact reads the
+targeted CPU's line, 128 bytes on Apple Arm and 64 elsewhere, while the layout
+marker is folded before a target is selected and aligns to the generic 64-byte
+line (D-CACHE-CONTROL1).
 
 **Regions, blocks and the allocator trait (D-ALLOC-TRAIT1).** A user-written
 allocator implements `mem.Allocator` over memory from a `mem.Region`, with no

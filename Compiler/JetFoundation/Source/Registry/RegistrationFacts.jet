@@ -86,8 +86,8 @@ registration_marker_rules: fn() -> [TAppliedRule] Never! { REGISTRATION_TABLE.ma
 // Every fact plane row, in registration order.
 registration_fact_rows: fn() -> [RegistrationFactRow] Never! { REGISTRATION_TABLE.facts }
 
-// `#build.cpu.cache_line`, the selected CPU's cache-line
-// size in bytes. Jet has no CPU selection, so every target is generic and
-// reads this value: sema for the fact read, the parser for
-// `#Layout(c, align(#build.cpu.cache_line))`.
+// The cache line `#Layout(c, align(#build.cpu.cache_line))` aligns to. The
+// parser folds the marker before any target is selected, so it reads the
+// generic line; the `#build.cpu.cache_line` fact itself reads the targeted
+// CPU's (jet_target_layout_cache_line).
 COMPILER_BUILD_CPU_CACHE_LINE_GENERIC: 64

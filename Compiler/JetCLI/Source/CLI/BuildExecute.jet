@@ -731,6 +731,9 @@ jet_cli_build_target_node: fn(node: JetCLIBuildNode, graph: BuildPlanExecution, 
     host_options := jet_cli_build_options_set(options, "output_dir", host_dir)
     host_options = jet_cli_build_options_set(host_options, "os", "linux")
     host_options = jet_cli_build_options_set(host_options, "min_os", "")
+    // The host copy is the same output, so it keeps the output's settings.
+    host_options.output = row.name
+    host_options.output_settings = row.settings
     if node.kind == .Host {
         return jet_cli_compile_target(source_path, row.name, source, row.sources, generated, color, host_options, threads, invocation, trace_sink)
     }
@@ -796,16 +799,22 @@ jet_cli_build_step_image: fn(image: String, name: String, copies_dir: String) ->
     None
 }
 
-// The options target `row` builds with: a target on its own toolchain
-// (`b.toolchain(name, triple)`) builds for the OS that toolchain's triple
-// names, so its artifact is checked against that machine's row; a target on
-// the host toolchain, or on a triple that names no OS, follows the build.
+// The options output `row` builds with: its own `options: {settings: ...}`
+// values over the build's, and, on its own toolchain (`b.toolchain(name,
+// triple)`), that toolchain's triple, whose machine its target facts read,
+// and the OS the triple names, so its artifact is checked against that
+// machine's row. An output on the host toolchain, or on a triple that names
+// no OS, keeps the build's OS.
 jet_cli_build_toolchain_options: fn(graph: BuildPlanExecution, row: BuildSessionTarget, options: BuildOptions) -> BuildOptions Never! {
-    if row.toolchain < 0 || row.toolchain >= graph.toolchains.len() -> return options.copy()
+    built := options
+    built.output = row.name
+    built.output_settings = row.settings
+    if row.toolchain < 0 || row.toolchain >= graph.toolchains.len() -> return built
     toolchain: graph.toolchains[row.toolchain]
-    if toolchain.role != "target" -> return options.copy()
-    os: jet_target_triple_os(toolchain.target_triple) ?? return options.copy()
-    jet_cli_build_options_set(options, "os", target_os_key(os))
+    if toolchain.role != "target" -> return built
+    built.output_triple = toolchain.target_triple
+    os: jet_target_triple_os(toolchain.target_triple) ?? return built
+    jet_cli_build_options_set(built, "os", target_os_key(os))
 }
 
 // `options` with the resolved value of row `name` replaced by `value`.

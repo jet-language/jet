@@ -1,0 +1,11 @@
+// `arm_app` builds on a toolchain for aarch64 Linux, so its copy of this code
+// reads that machine's facts; `native_app` reads the x86-64 host's.
+build: fn(b: Build) {
+    arm: b.toolchain("arm", "aarch64-unknown-linux-gnu")
+    _: b.add_executable("native_app", ["run.jet"], [])
+    _: b.add_executable("arm_app", ["run.jet"], [], toolchain: arm)
+}
+
+run: fn() {
+    print("{#build.target.triple} {#build.target.os} line {#build.cpu.cache_line} cpu {#build.cpu.features} pointer {#build.target.layout.pointer_bits}")
+}
