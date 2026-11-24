@@ -83,6 +83,7 @@ use jet_foundation.[
     name_find,
     name_index,
     name_intern,
+    name_pair_find_slot,
     name_table_sized,
     name_text,
     TargetHardwareUse,
@@ -172,7 +173,7 @@ sema_local_splice_demand_snapshot: fn(graph: SemaRegistrationGraph) -> SemaLocal
     // copy: the snapshot is recorded into apart from the graph's demand.
     codec_keys := codecs.value.copy()
     codec_keys.capturing = false
-    codec_keys.captured = [String]{}
+    codec_keys.captured = [SemaCodecWant]{}
     SemaLocalSpliceDemand{codecs: Shared{codec_keys.move()}, derived: Shared{SemaDeriveDemand{keys: derived.value.keys.copy()}}}
 }
 
@@ -202,14 +203,14 @@ sema_local_splice_same_demand: fn(before: SemaLocalSpliceDemand, after: SemaLoca
 // Whether two codec demands stand for the same requirements.
 sema_local_splice_same_codecs: fn(before: SemaCodecDemand, after: SemaCodecDemand) -> Bool Never! {
     count := 0
-    loop id in 1..<before.present.len() {
-        if !before.present[id] -> next
+    loop (slot, present) in before.present {
+        if !present -> next
         count += 1
-        name: name_find(after.keys, before.keys.texts[id]) ?? return false
-        if !after.present[name_index(name)] -> return false
+        found: name_pair_find_slot(after.names, before.names.texts[slot >> 32], before.names.texts[slot & 0xffffffff]) ?? return false
+        if !(after.present.get(found) ?? false) -> return false
     }
-    loop id in 1..<after.present.len() {
-        if after.present[id] -> count -= 1
+    loop (_, present) in after.present {
+        if present -> count -= 1
     }
     count == 0
 }

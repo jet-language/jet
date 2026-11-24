@@ -62,7 +62,7 @@ SemaParallelBody: struct {
     // or the Core library's check captured it (CoreBodies.jet); the module
     // pass that takes the packet records it again
     // (sema_check_body_demand_replay).
-    codec_demand: [String]{[String]{}},
+    codec_demand: [SemaCodecWant]{[SemaCodecWant]{}},
     derive_demand: [String]{[String]{}},
 }
 
@@ -267,11 +267,11 @@ SemaStreamOut: struct {
     left: Int,
     ready: Bool,
     failed: Bool,
-    codec_demand: [String]{[String]{}},
+    codec_demand: [SemaCodecWant]{[SemaCodecWant]{}},
     derive_demand: [String]{[String]{}},
     started: [SemaDeclarationCheck]{[SemaDeclarationCheck]{}},
     finished: [SemaGraphModuleResult]{[SemaGraphModuleResult]{}},
-    finish_codec_demand: [String]{[String]{}},
+    finish_codec_demand: [SemaCodecWant]{[SemaCodecWant]{}},
     finish_derive_demand: [String]{[String]{}},
 }
 
@@ -618,11 +618,11 @@ sema_check_body_stream_finish_module: fn(base_environment: SemaScopeEnvironment,
     sema_host_hook_unwant(wanted)
     if apart && program.registration_graph == .Val(graph) -> _ := sema_demand_drain(graph)
     checked := sema_check_registration_module_lent(finish_env, program, Val(SemaHostHookAccess.Withheld{wanted: wanted}), memory_plan, step.module_index, args.values, args.comptime_functions, args.comptime_rows, args.pending_obligations, bodies, "", None)
-    finish_codecs := [String]{}
+    finish_codecs := [SemaCodecWant]{}
     finish_derived := [String]{}
     if apart && program.registration_graph == .Val(graph) {
         demand := sema_demand_drain(graph)
-        finish_codecs = compiler_take_rows<String>(demand.codecs)
+        finish_codecs = compiler_take_rows<SemaCodecWant>(demand.codecs)
         finish_derived = compiler_take_rows<String>(demand.derived)
     }
     if sema_host_hook_was_wanted(wanted) {
@@ -648,7 +648,7 @@ sema_check_body_stream_take_started: fn(cells: SemaStreamCells, stream_module: I
     held.value.started.pop()
 }
 
-sema_check_body_stream_mark_ready: fn(cells: SemaStreamCells, stream_module: Int, finished: ^^SemaGraphModuleResult?, codecs: ^^[String], derived: ^^[String], changed: Condition) {
+sema_check_body_stream_mark_ready: fn(cells: SemaStreamCells, stream_module: Int, finished: ^^SemaGraphModuleResult?, codecs: ^^[SemaCodecWant], derived: ^^[String], changed: Condition) {
     held: cells.outs[stream_module].guard_edit()
     if finished.move() == .Val(module_result) {
         held.value.finished.push(module_result)
@@ -805,7 +805,7 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
         if apart {
             demand := sema_demand_capture_close(graph)
             if part.bodies.len() > packet_at {
-                part.bodies[packet_at].codec_demand = compiler_take_rows<String>(demand.codecs)
+                part.bodies[packet_at].codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
                 part.bodies[packet_at].derive_demand = compiler_take_rows<String>(demand.derived)
             }
         }
@@ -1131,7 +1131,7 @@ sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStre
                 bodies := if !step.can_finish && step.prepared -> sema_check_body_stream_take(cells, step.stream_module, step.tops, step.total, step.prepared) else -> sema_check_prepared_none()
                 bodies.started = sema_check_body_stream_take_started(cells, step.stream_module)
                 checked := sema_check_registration_module_lent(environment, inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], step.module_index, args.values, args.comptime_functions, args.comptime_rows, args.pending_obligations, bodies, phase, None)
-                sema_check_body_stream_mark_ready(cells, step.stream_module, Val(checked.move()), [String]{}, [String]{}, handle.changed)
+                sema_check_body_stream_mark_ready(cells, step.stream_module, Val(checked.move()), [SemaCodecWant]{}, [String]{}, handle.changed)
                 sema_check_body_stream_done_slot(handle, step.stream_module)
                 next
             }
@@ -1959,7 +1959,7 @@ sema_check_body_stream_enter: fn(cell: Shared<SemaStreamEnvironment>, environmen
 
 // Counts a stream module's `total` jobs out before any is claimable, and
 // keeps what its preparation demanded (SemaStreamOut.codec_demand).
-sema_check_body_stream_expect: fn(out: Shared<SemaStreamOut>, total: Int, codecs: ^^[String], derived: ^^[String], changed: Condition, parallel_finish: Bool) {
+sema_check_body_stream_expect: fn(out: Shared<SemaStreamOut>, total: Int, codecs: ^^[SemaCodecWant], derived: ^^[String], changed: Condition, parallel_finish: Bool) {
     held: out.guard_edit()
     held.value.codec_demand = codecs.move()
     held.value.derive_demand = derived.move()
@@ -1979,9 +1979,9 @@ sema_check_body_stream_replay: fn(cells: SemaStreamCells, stream_module: Int, pr
     if held.value.codec_demand.len() == 0 && held.value.derive_demand.len() == 0 && held.value.finish_codec_demand.len() == 0 && held.value.finish_derive_demand.len() == 0 {
         return
     }
-    codecs: compiler_take_rows<String>(held.value.codec_demand)
+    codecs: compiler_take_rows<SemaCodecWant>(held.value.codec_demand)
     derived: compiler_take_rows<String>(held.value.derive_demand)
-    finish_codecs: compiler_take_rows<String>(held.value.finish_codec_demand)
+    finish_codecs: compiler_take_rows<SemaCodecWant>(held.value.finish_codec_demand)
     finish_derived: compiler_take_rows<String>(held.value.finish_derive_demand)
     if program.registration_graph == .Val(graph) {
         if codecs.len() > 0 || derived.len() > 0 {
@@ -2007,7 +2007,7 @@ SemaStreamModulePrep: struct {
     weights: [Int],
     summary_checked: Int,
     wanted_hooks: Bool,
-    codec_demand: [String]{[String]{}},
+    codec_demand: [SemaCodecWant]{[SemaCodecWant]{}},
     derive_demand: [String]{[String]{}},
 }
 
@@ -2047,7 +2047,7 @@ sema_check_stream_module_prep: fn(environment: SemaScopeEnvironment, program: Se
     prep := SemaStreamModulePrep{environments: held.move(), method_jobs: method_jobs.move(), weights: weights.move(), summary_checked: summary_checked, wanted_hooks: false}
     if apart && program.registration_graph == .Val(graph) {
         demand := sema_demand_capture_close(graph)
-        prep.codec_demand = compiler_take_rows<String>(demand.codecs)
+        prep.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
         prep.derive_demand = compiler_take_rows<String>(demand.derived)
     }
     prep
