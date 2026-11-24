@@ -1,0 +1,91 @@
+// A rule hears the value of each argument the build knows: the Dyn its
+// `encode()` returns. A byte list, a type whose wire form a marker reshapes,
+// a generic type and a value the run computes are heard as None.
+Unheard: struct {
+    index: Int,
+
+    impl Diagnostic {
+        code: "values.Unheard",
+
+        what: fn(self) -> String { "argument {self.index} is not heard as it encodes" }
+
+        why: fn(self) -> String { "a heard argument's value is the Dyn its `encode()` returns" }
+
+        fix: fn(self) -> String { "hear the value Encode writes" }
+    }
+}
+
+#Codable
+Point: struct {
+    x: Int,
+    small: I32,
+    ratio: F32,
+    weight: Float,
+    tags: [String],
+}
+
+#Codable
+Color: enum {
+    Red,
+    Shade(Int),
+}
+
+#[Codable, Rename(.Camel)]
+Account: struct {
+    user_name: String,
+}
+
+Holder: struct<T> {
+    item: T,
+}
+
+Encoded: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            heard: [Dyn?]{
+                Val(true.encode()),
+                Val(7.encode()),
+                Val(I32{-5}.encode()),
+                Val('z'.encode()),
+                Val("hi".encode()),
+                Val([Int]{1, 2, 3}.encode()),
+                Val(Point{x: 1, small: 5, ratio: 0.1, weight: 2.5, tags: [String]{"a"}}.encode()),
+                Val(Color.Red.encode()),
+                Val(Color.Shade(4).encode()),
+                None,
+                None,
+                None,
+            }
+            loop (index, argument) in call.args {
+                if argument.value != heard[index] -> reject(Unheard{index: index}, at: argument)
+            }
+            if call.args[4].value != Val(Dyn.Text("hi")) -> reject(Unheard{index: 4}, at: call.args[4])
+            if call.args[1].value != Val(Dyn.Int(7)) -> reject(Unheard{index: 1}, at: call.args[1])
+        }
+    }
+}
+
+Computed: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.args[0].value != None -> reject(Unheard{index: 0}, at: call.args[0])
+        }
+    }
+}
+
+#Encoded sample: fn(flag: Bool, count: Int, small: I32, letter: Char, name: String, counts: [Int], point: Point, red: Color, shade: Color, bytes: [U8], account: Account, holder: Holder<Int>) -> Int {
+    count + counts.len()
+}
+
+#Computed later: fn(count: Int) -> Int { count * 2 }
+
+twice: fn(count: Int) -> Int { later(count) }
+
+run: fn() {
+    total: sample(true, 7, I32{-5}, 'z', "hi", [Int]{1, 2, 3}, Point{x: 1, small: 5, ratio: 0.1, weight: 2.5, tags: [String]{"a"}}, Color.Red, Color.Shade(4), [U8]{1, 2}, Account{user_name: "ann"}, Holder<Int>{item: 3})
+    print("{total} {twice(total)}")
+}

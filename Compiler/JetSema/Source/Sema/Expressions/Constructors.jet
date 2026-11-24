@@ -48,6 +48,7 @@ use {
         core_enum_variant_payload,
         core_module_enum_cases,
         core_module_type_leaf,
+        core_record_field,
         core_record_literal_fields,
         core_record_literal_is_core_only,
         core_identity_is,
@@ -661,6 +662,21 @@ sema_expression_vjp_run_literal: fn(type_args: [Type], fields: [ExprField], span
         values.push(checked)
     }
     value: sema_tree_node(Type.Apply{name: "VJPRun", args: [Type]{gradient}}, TExprKind.StructLit{fields: values}, span)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
+// The `CompilerRejection` a marker rule's `reject` returns
+// (sema_call_check_marker_reject). Only the compiler writes one: the record
+// has no source literal, so the generated node is checked here, field by
+// field against its Core record rows.
+sema_expression_compiler_rejection_literal: fn(fields: [ExprField], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    values := [TStructFieldValue]{}
+    loop source in fields {
+        ty: core_record_field("CompilerRejection", source.name) ?? return None
+        checked: sema_expression_core_record_field_value("CompilerRejection", TypeTupleField{name: source.name, ty: sema_expr_core_row_type(ty, environment, program)}, source.value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        values.push(checked)
+    }
+    value: sema_tree_node(Type.Named{name: "CompilerRejection"}, TExprKind.StructLit{fields: values}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 

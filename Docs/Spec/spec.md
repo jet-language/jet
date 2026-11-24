@@ -128,9 +128,17 @@ vocabulary](vocabulary.md).
   carries it, a call of a member the type lacks included. `call` is a
   CompilerCall: its written `name` (a CompilerName), its `args` in written
   order and its `receiver`, each a CompilerArg with its `label`, `type` (a
-  TypeId; `_` when the argument's own check fails), `value` and the
-  `function` it names (both None: the rule hears the call's shape) and its
-  `span`; the call's `span` runs from its name to its last argument.
+  TypeId; `_` when the argument's own check fails), `value`, the
+  `function` it names (None) and its `span`. `value` is the Dyn the
+  argument's `encode()` returns when the build knows the argument (a
+  literal or a constant, a struct, enum case or list literal of known
+  parts): a Bool, an Int or fixed-width integer, a Float or F32, a Char or
+  a String, a list of these, and a struct or enum whose Encode is the
+  derived one with no codec option, its fields plain values and its cases
+  without payload or with one value. Any other argument's `value` is None
+  (an optional field, a byte list, a generic type, a written codec, a
+  value only the run knows). The call's `span` runs from its name to its
+  last argument.
   `reject(finding, at: part)` ends the rule
   with a value whose type implements `Diagnostic`, raised at `part`'s span:
   the call, `call.name` or one argument, the call when `at:` is not written.

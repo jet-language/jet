@@ -1027,7 +1027,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     rules := [SemaCallRule]{}
     if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_callee(graph, candidate.method.symbol)
     if rules.len() == 0 -> return sema_call_method_checked_visible(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
-    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, Val(receiver_value.ty), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, Val(receiver_value.ty), sema_rule_known(receiver_value, program, context), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
     if hearing.rejected -> return None
     if !hearing.staged -> return sema_call_method_checked_visible(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
     held := [Diagnostic]{}

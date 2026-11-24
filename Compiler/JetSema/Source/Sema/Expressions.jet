@@ -4832,7 +4832,7 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     rules := [SemaCallRule]{}
     if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
     if rules.len() == 0 -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver_value.ty), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver_value.ty), sema_rule_known(receiver_value, program, context), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
     if hearing.rejected -> return None
     if !hearing.staged -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     held := [Diagnostic]{}
@@ -7491,7 +7491,11 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Field(base, member, span, _) -> sema_expression_field(expr, base, member, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Place(value, access, span, _) -> sema_expr_check_place_expr(expr, value, access, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .TypedLit(head, body, span, _) -> sema_expression_typed_literal(head, body, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if {
+            id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            id == AST_NODE_GENERATED && type_name == "CompilerRejection" -> sema_expression_compiler_rejection_literal(fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Ok(value, span, _) -> sema_expression_result_payload(value, true, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Err(value, span, _) -> sema_expr_check_err_literal(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -7566,7 +7570,11 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             sema_expression_place(value, access, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
         .TypedLit(head, body, span, _) -> sema_expression_typed_literal(head, body, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if {
+            id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            id == AST_NODE_GENERATED && type_name == "CompilerRejection" -> sema_expression_compiler_rejection_literal(fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Present(value, span, _) -> sema_expression_present(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Ok(value, span, _) -> sema_expression_result_payload(value, true, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

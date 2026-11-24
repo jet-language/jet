@@ -3,8 +3,8 @@
 # their receiver, and every method call on a marked type's values. An
 # `.Error` rejection replaces the call's own errors; a call the rule lets
 # through keeps them; a `.Tidy` rejection is a lint. The rule's reads of the
-# call's spans and argument types answer alike under check, run and build at
-# every tier (I9).
+# call's spans, argument types and argument values answer alike under check,
+# run and build at every tier (I9).
 fixture: MarkerCheckRulesHearCalls.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -69,3 +69,19 @@ step: jet build -O1 tiers_rejected/main.jet
 exit: 1
 stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
 stderr: count "Error: " = 1
+step: jet check values/main.jet
+exit: 0 # each known argument is heard as the Dyn its `encode()` returns
+step: jet run -O0 values/main.jet
+exit: 0
+stdout: = "10 20\n"
+step: jet run -O1 values/main.jet
+exit: 0
+stdout: = "10 20\n"
+step: jet run -O2 values/main.jet
+exit: 0
+stdout: = "10 20\n"
+step: jet build -O2 values/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "10 20\n"
