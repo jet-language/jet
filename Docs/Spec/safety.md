@@ -1945,7 +1945,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2693,
+      "line": 2697,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -6257,21 +6257,21 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/DB/Query.jet",
-      "line": 172,
+      "line": 173,
       "column": 5,
       "reason": "the exact owned query bytes passed the shared strict UTF-8 validator"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3388,
+      "line": 3395,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3772,
+      "line": 3779,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -6327,14 +6327,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/JSON.jet",
-      "line": 1360,
+      "line": 1361,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/JSON.jet",
-      "line": 1365,
+      "line": 1366,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -6446,7 +6446,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Encoding/YAML.jet",
-      "line": 589,
+      "line": 590,
       "column": 5,
       "reason": "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged"
     },
@@ -6460,14 +6460,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 666,
+      "line": 799,
       "column": 1,
       "reason": "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor"
     },
     {
       "package": "Core",
       "file": "Core/Files/Files.jet",
-      "line": 759,
+      "line": 892,
       "column": 9,
       "reason": "this test owns both held directories and child descriptor slots 198 and 199 until the child runs"
     },
@@ -6488,189 +6488,189 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 281,
+      "line": 282,
       "column": 13,
       "reason": "match the queue's existing raw wall-clock wait without advancing controlled scheduler time"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 602,
+      "line": 603,
       "column": 5,
       "reason": "publish already committed queue observations through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
       "file": "Core/Jobs/Jobs.jet",
-      "line": 620,
+      "line": 621,
       "column": 5,
       "reason": "publish source-projected queue status through the existing validated Devtools event/sink boundary"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 41,
+      "line": 42,
       "column": 1,
       "reason": "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 44,
+      "line": 45,
       "column": 1,
       "reason": "`pointer` names a live, aligned, readable `T` for the whole access"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 47,
+      "line": 48,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 53,
+      "line": 54,
       "column": 1,
       "reason": "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 58,
+      "line": 59,
       "column": 1,
       "reason": "`to` names `count` live, aligned, writable `T`s that hold no value to drop"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 67,
+      "line": 68,
       "column": 1,
       "reason": "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 76,
+      "line": 77,
       "column": 1,
       "reason": "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 85,
+      "line": 86,
       "column": 1,
       "reason": "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 90,
+      "line": 91,
       "column": 1,
       "reason": "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 101,
+      "line": 102,
       "column": 1,
       "reason": "`address` starts a mapping of `bytes` that the caller just made and alone owns"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 104,
+      "line": 105,
       "column": 1,
       "reason": "`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 114,
+      "line": 115,
       "column": 1,
       "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 122,
+      "line": 123,
       "column": 1,
       "reason": "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 157,
+      "line": 158,
       "column": 1,
       "reason": "`pointer` and the T `count` elements past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 160,
+      "line": 161,
       "column": 1,
       "reason": "`pointer` and the address `bytes` past it lie in one live allocation"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 170,
+      "line": 171,
       "column": 1,
       "reason": "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 173,
+      "line": 174,
       "column": 1,
       "reason": "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 192,
+      "line": 193,
       "column": 9,
       "reason": "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 201,
+      "line": 202,
       "column": 5,
       "reason": "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 235,
+      "line": 236,
       "column": 13,
       "reason": "the region mapped these pages at reserve, and no block of it is used after close"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 273,
+      "line": 274,
       "column": 9,
       "reason": "`next`'s bytes now belong to this block, so its release duty is this block's"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 302,
+      "line": 303,
       "column": 5,
       "reason": "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 307,
+      "line": 308,
       "column": 9,
       "reason": "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else"
     },
     {
       "package": "Core",
       "file": "Core/Mem/Mem.jet",
-      "line": 349,
+      "line": 350,
       "column": 13,
       "reason": "the block's bytes went back to the allocator that served them"
     },
@@ -6873,14 +6873,14 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 238,
+      "line": 239,
       "column": 5,
       "reason": "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length"
     },
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 344,
+      "line": 345,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -7083,7 +7083,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Testing/Testing.jet",
-      "line": 1513,
+      "line": 1535,
       "column": 5,
       "reason": "all appended bytes came from complete UTF-8 strings or ASCII"
     },
@@ -12019,7 +12019,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2779:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2789:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2891:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2693:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2697:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 213:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 245:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12635,9 +12635,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Crypto/Vault.jet | 382:5 | "vault typed revocation commit provider boundary" |
 | Core | Core/Crypto/Vault.jet | 388:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 397:5 | "vault recipient export provider boundary" |
-| Core | Core/DB/Query.jet | 172:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
-| Core | Core/Data/Data.jet | 3388:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3772:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/DB/Query.jet | 173:5 | "the exact owned query bytes passed the shared strict UTF-8 validator" |
+| Core | Core/Data/Data.jet | 3395:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3779:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Encoding/CBOR.jet | 110:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/CBOR.jet | 178:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CBORStream.jet | 248:9 | "the retained key copies exactly the already validated text bytes" |
@@ -12645,8 +12645,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/CSV.jet | 1142:9 | "each completed UTF-8 scalar was validated before its original bytes entered this field" |
 | Core | Core/Encoding/CSV.jet | 1306:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 617:9 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/JSON.jet | 1360:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/JSON.jet | 1365:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/JSON.jet | 1361:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/JSON.jet | 1366:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 24:5 | "the shared parser validated this exact numeric lexeme" |
 | Core | Core/Encoding/Stream.jet | 462:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
 | Core | Core/Encoding/Stream.jet | 617:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
@@ -12662,39 +12662,39 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Encoding/Stream.jet | 2339:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
 | Core | Core/Encoding/XMLEngine.jet | 279:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XMLEngine.jet | 3432:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
-| Core | Core/Encoding/YAML.jet | 589:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
+| Core | Core/Encoding/YAML.jet | 590:5 | "inspect compiler-private Bytes and typed carriers; public Dyn variants are unchanged" |
 | Core | Core/Files/Data.jet | 277:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Files/Files.jet | 666:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
-| Core | Core/Files/Files.jet | 759:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
+| Core | Core/Files/Files.jet | 799:1 | "compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor" |
+| Core | Core/Files/Files.jet | 892:9 | "this test owns both held directories and child descriptor slots 198 and 199 until the child runs" |
 | Core | Core/Files/Sealed.jet | 162:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/HTTP/Client.jet | 862:5 | "checked resolver octets and port transferred into the socket carrier" |
-| Core | Core/Jobs/Jobs.jet | 281:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
-| Core | Core/Jobs/Jobs.jet | 602:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
-| Core | Core/Jobs/Jobs.jet | 620:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
-| Core | Core/Mem/Mem.jet | 41:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
-| Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
-| Core | Core/Mem/Mem.jet | 47:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
-| Core | Core/Mem/Mem.jet | 53:1 | "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy" |
-| Core | Core/Mem/Mem.jet | 58:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop" |
-| Core | Core/Mem/Mem.jet | 67:1 | "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append" |
-| Core | Core/Mem/Mem.jet | 76:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy" |
-| Core | Core/Mem/Mem.jet | 85:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
-| Core | Core/Mem/Mem.jet | 90:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
-| Core | Core/Mem/Mem.jet | 101:1 | "`address` starts a mapping of `bytes` that the caller just made and alone owns" |
-| Core | Core/Mem/Mem.jet | 104:1 | "`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after" |
-| Core | Core/Mem/Mem.jet | 114:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
-| Core | Core/Mem/Mem.jet | 122:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
-| Core | Core/Mem/Mem.jet | 157:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 160:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
-| Core | Core/Mem/Mem.jet | 170:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
-| Core | Core/Mem/Mem.jet | 173:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
-| Core | Core/Mem/Mem.jet | 192:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
-| Core | Core/Mem/Mem.jet | 201:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
-| Core | Core/Mem/Mem.jet | 235:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
-| Core | Core/Mem/Mem.jet | 273:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
-| Core | Core/Mem/Mem.jet | 302:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
-| Core | Core/Mem/Mem.jet | 307:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
-| Core | Core/Mem/Mem.jet | 349:13 | "the block's bytes went back to the allocator that served them" |
+| Core | Core/Jobs/Jobs.jet | 282:13 | "match the queue's existing raw wall-clock wait without advancing controlled scheduler time" |
+| Core | Core/Jobs/Jobs.jet | 603:5 | "publish already committed queue observations through the existing validated Devtools event/sink boundary" |
+| Core | Core/Jobs/Jobs.jet | 621:5 | "publish source-projected queue status through the existing validated Devtools event/sink boundary" |
+| Core | Core/Mem/Mem.jet | 42:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
+| Core | Core/Mem/Mem.jet | 45:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
+| Core | Core/Mem/Mem.jet | 48:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
+| Core | Core/Mem/Mem.jet | 54:1 | "`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy" |
+| Core | Core/Mem/Mem.jet | 59:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop" |
+| Core | Core/Mem/Mem.jet | 68:1 | "`from` names `count` live, aligned `T`s, and a T that owns a resource has one owner after the append" |
+| Core | Core/Mem/Mem.jet | 77:1 | "`to` names `count` live, aligned, writable `T`s that hold no value to drop, and a T that owns a resource has one owner after the copy" |
+| Core | Core/Mem/Mem.jet | 86:1 | "the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once" |
+| Core | Core/Mem/Mem.jet | 91:1 | "`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after" |
+| Core | Core/Mem/Mem.jet | 102:1 | "`address` starts a mapping of `bytes` that the caller just made and alone owns" |
+| Core | Core/Mem/Mem.jet | 105:1 | "`address` and `bytes` name pages of a mapping the caller owns, which it unmaps next, so nothing reads or writes them after" |
+| Core | Core/Mem/Mem.jet | 115:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive and unchanged by anything else while the View lives" |
+| Core | Core/Mem/Mem.jet | 123:1 | "`pointer` names `count` live, aligned Ts that `owner` keeps alive, and `count` is not negative" |
+| Core | Core/Mem/Mem.jet | 158:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 161:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 171:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
+| Core | Core/Mem/Mem.jet | 174:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
+| Core | Core/Mem/Mem.jet | 193:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
+| Core | Core/Mem/Mem.jet | 202:5 | "`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live" |
+| Core | Core/Mem/Mem.jet | 236:13 | "the region mapped these pages at reserve, and no block of it is used after close" |
+| Core | Core/Mem/Mem.jet | 274:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
+| Core | Core/Mem/Mem.jet | 303:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
+| Core | Core/Mem/Mem.jet | 308:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
+| Core | Core/Mem/Mem.jet | 350:13 | "the block's bytes went back to the allocator that served them" |
 | Core | Core/Net/Net.jet | 322:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
 | Core | Core/Net/Net.jet | 393:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3653:1 | "`key` and `iv` are a vector record's, used for that record only" |
@@ -12723,8 +12723,8 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Net/SSL/TLS.jet | 4625:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4628:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4658:5 | "test keys and nonces, each used for this run only" |
-| Core | Core/Process/Process.jet | 238:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 344:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 239:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
+| Core | Core/Process/Process.jet | 345:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Sys/Sys.jet | 1020:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 1223:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
 | Core | Core/Sys/Sys.jet | 1354:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |
@@ -12753,7 +12753,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Sys/Sys.jet | 2093:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/TUI/TUI.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tasks/Tasks.jet | 116:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
-| Core | Core/Testing/Testing.jet | 1513:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
+| Core | Core/Testing/Testing.jet | 1535:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm.jet | 25:5 | "call the audited register-only assembly contract" |
 | Docs | Docs/Audits/G15202611/Probes/c4599_28_comptime_asm_reach.jet | 10:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
