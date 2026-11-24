@@ -1,0 +1,21 @@
+# `keep(x)` holds benchmarked work on every tier: a measured loop whose result
+# passes only through `keep` is kept, so its timing scales with its step count
+# at O0, O1 and O2, and in the O2 release binary.
+fixture: KeepSinkSurvivesO2.fixture
+artifact: run
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step o0: jet run -O0 run.jet 1000000
+exit: 0
+stdout: = "the kept loop ran and scaled with its step count\n"
+step o1: jet run -O1 run.jet 1000000
+exit: 0
+stdout: = "the kept loop ran and scaled with its step count\n"
+step o2: jet run -O2 run.jet 1000000
+exit: 0
+stdout: = "the kept loop ran and scaled with its step count\n"
+step release: jet build --release run.jet
+exit: 0
+step release_run: built 1000000
+exit: 0
+stdout: = "the kept loop ran and scaled with its step count\n"

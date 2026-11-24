@@ -1,0 +1,38 @@
+// A measured loop whose result leaves only through `keep(x)`. The program
+// times the loop at `n` and at 16 times `n` steps: if the loop body were gone,
+// both would take next to nothing. It prints one fixed line when the larger
+// loop took at least a nanosecond per step and at least four times as long as
+// the smaller one, and stops naming both timings otherwise.
+use {
+    process: core.process
+    time: core.time
+}
+
+// Park-Miller steps: each depends on the last, and no closed form lets an
+// optimizer replace the loop.
+steps: fn(n: Int) -> Int {
+    x := 1
+    loop _ in 0..<n -> x = x * 48271 % 2147483647
+    x
+}
+
+// The nanoseconds `n` steps take; their result reaches only `keep`.
+timed: fn(n: Int) -> Int {
+    watch: time.start()
+    kept: keep(steps(n))
+    took: time.elapsed(watch).ns
+    kept.drop("the loop is measured; keep is its only reader")
+    took
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 1 -> panic("usage: run.jet <steps>")
+    n: Int.parse(args[0]) ?? panic("not a step count: {args[0]}")
+    small: timed(n)
+    large: timed(n * 16)
+    if large < n * 16 || large < small * 4 {
+        panic("the kept loop did not scale: {n} steps took {small} ns, {n * 16} steps took {large} ns")
+    }
+    print("the kept loop ran and scaled with its step count")
+}
