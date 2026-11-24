@@ -232,6 +232,32 @@ CasePayload: enum {
     Named([FieldInfo]),
 }
 
+// What a type is, as its TypeId reads it (`T.reflect().identity.kind`): a
+// named type's declaration kind, or the shape of a constructed one. A
+// number's kind says whether it is signed and whether it is a float; its
+// width is its `bits` generic binding. It lives in the prelude because every
+// program can reach it without naming it: each reflected TypeId holds one.
+TypeKind: enum {
+    Struct,
+    Enum,
+    Trait,
+    Distinct,
+    Builtin,
+    Number(signed: Bool, float: Bool),
+    List,
+    Map,
+    Option,
+    Result,
+    Shared,
+    Tuple,
+    Function,
+    FixedList,
+    Range,
+    Quantity,
+    Union,
+    TraitObject,
+}
+
 // A finding the compiler or a package reports, and the only carrier of one.
 // An error type is a struct whose fields are the holes of its texts; its impl
 // gives each text as one string literal that reads only `self` fields, so
