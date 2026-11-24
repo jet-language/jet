@@ -2,12 +2,9 @@
 // the caller, not a String view or a terminal/environment probe. The process
 // boundary owns their real projection. Width is the canonical x64 usize domain
 // (U64).
-use jet_foundation.[foundation_read_bytes_scalar_at]
-
-JetCLIColorRequest: enum {
-    Auto,
-    Always,
-    Never,
+use {
+    jet_foundation.[foundation_read_bytes_scalar_at]
+    jetpack_foundation.[ColorChoice]
 }
 
 JetCLIOutputFacts: struct {
@@ -15,7 +12,7 @@ JetCLIOutputFacts: struct {
     term: [U8]?,
     no_color: Bool,
     force_color: Bool,
-    requested_color: JetCLIColorRequest,
+    requested_color: ColorChoice,
     json: Bool,
     width: U64?,
     unicode: Bool,
@@ -64,7 +61,7 @@ JET_CLI_COLOR_NEVER_BYTES: [U8]{110, 101, 118, 101, 114}
 
 JET_CLI_TERM_DUMB_BYTES: [U8]{100, 117, 109, 98}
 
-jet_cli_color_request: fn(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileError! {
+jet_cli_color_request: fn(value: [U8]) -> ColorChoice JetCLIOutputProfileError! {
     if value == JET_CLI_COLOR_AUTO_BYTES -> return Ok(.Auto)
     if value == JET_CLI_COLOR_ALWAYS_BYTES -> return Ok(.Always)
     if value == JET_CLI_COLOR_NEVER_BYTES -> return Ok(.Never)

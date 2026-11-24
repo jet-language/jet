@@ -2,38 +2,40 @@
 // registered Foundation/Text/Read + diagnostics wrappers and the three CLI
 // providers with this run entry. Input .bytes() calls construct owned test
 // facts; they are not proof of a zero-copy String/native/host invocation.
-use jet_cli.[
-    JetCLIAdaptiveTable,
-    JetCLIColorRequest,
-    JetCLIOutputFacts,
-    JetCLIOutputKind,
-    JetCLIOutputProfile,
-    JetCLITableAlignment,
-    JetCLITableCell,
-    JetCLITableColumn,
-    JetCLITableRow,
-    jet_cli_color_request,
-    jet_cli_output_channel,
-    jet_cli_output_profile,
-    jet_cli_table,
-    jet_cli_table_append_pad,
-    jet_cli_table_bound_text,
-    jet_cli_table_cell_kind,
-    jet_cli_table_cell_lines,
-    jet_cli_table_cell_text,
-    jet_cli_table_cell_width,
-    jet_cli_table_clip,
-    jet_cli_table_column,
-    jet_cli_table_extend,
-    jet_cli_table_fit_widths,
-    jet_cli_table_layout,
-    jet_cli_table_render,
-    jet_cli_table_row,
-    jet_cli_table_structured,
-    jet_cli_table_text_width,
-    jet_cli_table_wide,
-    jet_cli_table_wrap,
-]
+use {
+    jet_cli.[
+        JetCLIAdaptiveTable,
+        JetCLIOutputFacts,
+        JetCLIOutputKind,
+        JetCLIOutputProfile,
+        JetCLITableAlignment,
+        JetCLITableCell,
+        JetCLITableColumn,
+        JetCLITableRow,
+        jet_cli_color_request,
+        jet_cli_output_channel,
+        jet_cli_output_profile,
+        jet_cli_table,
+        jet_cli_table_append_pad,
+        jet_cli_table_bound_text,
+        jet_cli_table_cell_kind,
+        jet_cli_table_cell_lines,
+        jet_cli_table_cell_text,
+        jet_cli_table_cell_width,
+        jet_cli_table_clip,
+        jet_cli_table_column,
+        jet_cli_table_extend,
+        jet_cli_table_fit_widths,
+        jet_cli_table_layout,
+        jet_cli_table_render,
+        jet_cli_table_row,
+        jet_cli_table_structured,
+        jet_cli_table_text_width,
+        jet_cli_table_wide,
+        jet_cli_table_wrap,
+    ]
+    jetpack_foundation.[ColorChoice]
+}
 
 shared_output_require: fn(ok: Bool, name: String) Never! {
     if !ok -> panic("shared output: {name}")
@@ -149,7 +151,7 @@ shared_output_profiles: fn() Never! {
     second: shared_output_profile(facts)
     shared_output_require(first.width == second.width && first._ansi_enabled == second._ansi_enabled && first.unicode_enabled == second.unicode_enabled && first._progress_enabled == second._progress_enabled && first.human_enabled == second.human_enabled && first.machine_enabled == second.machine_enabled, "Rust deterministic selection")
     spellings: [String]{"auto", "always", "never"}
-    loop (index, color) in ([JetCLIColorRequest]{.Auto, .Always, .Never}) {
+    loop (index, color) in ([ColorChoice]{.Auto, .Always, .Never}) {
         shared_output_require((jet_cli_color_request(spellings[index].bytes()) ?? panic("valid color refused")) == color, "exact color spellings")
     }
     bad: "sometimes".bytes()
