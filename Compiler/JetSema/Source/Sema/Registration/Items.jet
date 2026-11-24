@@ -3344,9 +3344,12 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
 // The registration rules of the Rust
 // reference's `register_distinct` and `register_type_alias`. A distinct
 // built on a distinct declared earlier (E0129) and an alias without type
-// parameters (E0324) are not registered, unless the alias names a record
-// type (`Bounds: {min: Int, max: Int}`); a range constraint on a base other
-// than `Int` is reported and the type still registers.
+// parameters over a plain type (E0324) are not registered. An alias without
+// type parameters stands when it names a record type (`Bounds: {min: Int,
+// max: Int}`) or one application of a generic type (`Names: Set<String>`,
+// `Scores: [String: Int]`): it still only shortens a generic spelling. A
+// range constraint on a base other than `Int` is reported and the type still
+// registers.
 sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item: Item, diagnostics: &[Diagnostic]) -> Bool {
     if item == {
         .Distinct(definition) -> {
@@ -3365,12 +3368,12 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
             }
         }
         .TypeAlias(definition) -> {
-            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) {
+            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) && !sema_registration_generic_application(definition.target) {
                 if sema_casing_alias_number_zero(definition) == .Val(zero) {
                     diagnostics.push(sema_casing_alias_number_diagnostic(definition, zero))
                     return false
                 }
-                diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `Name<T>: …`", "a transparent type alias is only for shortening generic spellings", "for a distinct type name over a primitive, use `Name: distinct BaseType` instead"))
+                diagnostics.push(sema_error("E0324", definition.name_span, "a type alias of a plain type needs type parameters — write `Name<T>: …`", "a transparent type alias is only for shortening generic spellings, so one without type parameters names a generic application such as `Set<String>`", "for a distinct type name over a primitive, use `Name: distinct BaseType` instead"))
                 return false
             }
         }
@@ -3390,6 +3393,16 @@ sema_registration_record_type: fn(target: Type) -> Bool Never! {
         return true
     }
     false
+}
+
+// Whether `target` applies a generic type to its arguments: `Box<Int>`,
+// `Set<String>`, `Int?`, `T E!`, `[T]`, `[T#4]`, `[K: V]` or `@T`.
+sema_registration_generic_application: fn(target: Type) -> Bool Never! {
+    if target == {
+        .Apply(_, args) -> args.len() > 0
+        .Option(_) | .Result(_, _) | .Shared(_) | .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
 }
 
 // Indexed reads keep each candidate row in place; a two-name walk over the

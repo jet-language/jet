@@ -2053,6 +2053,17 @@ with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
 unchanged. Core's former `Date: LocalDate` is the prelude rename
 `Date: core.time.LocalDate`.
 
+**Ruling 2026-11-23 (#6846 c12; amends D-TYPEALIAS1)**: an alias with no
+type parameters stands when its target applies a generic type to its
+arguments, written `Name<…>` or with a collection's brackets (`Ints:
+Pair<Int>`, `Scores: [String: Int]`, `Names: [String]`): it still only
+shortens a generic spelling. This holds in every package, Core included, and
+lets Core name a number family's sizes as aliases (`U8: Unsigned<8>`,
+D-CORE-NUMFAMILY1). An alias with no type parameters over a plain type
+(`Meters: Float`, `Pick: fn(Int) -> Int`) stays E0324. The snapshots are
+`Tests/UI/type_alias_of_a_generic_application` and
+`Tests/UI/type_alias_no_params`.
+
 **D-COMPUTED-ALIAS1=A — Bounded computed aliases** *(ratified 2026-11-11,
 card #3505; amends D-TYPEALIAS1)*: an alias with number parameters may choose its
 type while building: `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N>

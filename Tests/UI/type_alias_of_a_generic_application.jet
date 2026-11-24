@@ -1,0 +1,30 @@
+// An alias without type parameters may name one application of a generic
+// type, written `Name<…>` or with a collection's brackets: it still only
+// shortens a generic spelling. One over a plain type is E0324
+// (type_alias_no_params).
+Pair: struct<T> {
+    left: T,
+    right: T,
+}
+
+Ints: Pair<Int>
+
+Scores: [String:Int]
+
+Names: [String]
+
+total: fn(pair: Ints) -> Int { pair.left + pair.right }
+
+best: fn(scores: Scores, names: Names) -> Int {
+    best := 0
+    loop name in names {
+        score: scores.get(name) ?? 0
+        if score > best -> best = score
+    }
+    best
+}
+
+run: fn() {
+    print(total(Ints{left: 2, right: 3}))
+    print(best(["ada": 7, "bo": 4], ["ada", "bo"]))
+}
