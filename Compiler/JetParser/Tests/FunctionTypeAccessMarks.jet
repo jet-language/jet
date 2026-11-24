@@ -1,6 +1,6 @@
 // A function type's parameter marks a written `^` or taken `^^` input, and a
 // lambda parameter marks its access the same way; the formatter prints every
-// mark in that spelling, and reads the older `&` and `&&` as the same marks.
+// mark in that spelling, and the retired `&` and `&&` marks no longer parse.
 use jet_parser.[jet_format_source]
 
 access_marks_require: fn(ok: Bool, name: String) Never! {
@@ -12,9 +12,7 @@ access_marks_require: fn(ok: Bool, name: String) Never! {
     formatted: jet_format_source(source, false)
     access_marks_require(formatted.ok, "the marked source parses and formats")
     access_marks_require(formatted.text == source, "every mark prints back as written:\n{formatted.text}")
-    older: "Words: struct {{\n    names: [String],\n}}\n\nWrapper: struct {{\n    edit: fn(&[Int]),\n    take: fn(&&Words) -> Int,\n}}\n\nthrough: fn(f: fn(&[Int]), buf: &[Int]) {{ f(buf) }}\n\nrun: fn() {{\n    values := [Int]{{}}\n    through(fn(buf: &[Int]) {{ buf.push(1) }}, values)\n    wrapper: Wrapper{{edit: fn(buf: &[Int]) {{ buf.push(2) }}, take: fn(words: &&Words) {{ words.names.len() }}}}\n    wrapper.edit(values)\n}}\n"
-    respelled: jet_format_source(older, false)
-    access_marks_require(respelled.ok, "the older spelling parses and formats")
-    access_marks_require(respelled.text == source, "the older spelling prints as carets:\n{respelled.text}")
+    retired: jet_format_source(source.replace("^", "&"), false)
+    access_marks_require(!retired.ok, "the retired `&` and `&&` marks do not parse")
     print("function type access marks: passed")
 }

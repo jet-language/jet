@@ -224,7 +224,7 @@ seed_state: fn(key: String) -> Int Never! {
 imul: fn(a: Int, b: Int) -> Int Never! { (a * b) & MASK }
 
 // The next 32-bit draw; a draw `u` stands for the double u / 2^32.
-draw: fn(g: &Gen) -> Int Never! {
+draw: fn(g: ^Gen) -> Int Never! {
     g.state = (g.state + 1831565813) & MASK
     t := g.state
     t = imul(t ~ t >> 15, t | 1)
@@ -233,11 +233,11 @@ draw: fn(g: &Gen) -> Int Never! {
 }
 
 // floor(r * n): the product of a 32-bit draw and a small n is exact.
-rand_int: fn(g: &Gen, n: Int) -> Int Never! { (draw(g) * n) /% WORD }
+rand_int: fn(g: ^Gen, n: Int) -> Int Never! { (draw(g) * n) /% WORD }
 
-real: fn(g: &Gen) -> Float Never! { Float{draw(g)} / 4294967296.0 }
+real: fn(g: ^Gen) -> Float Never! { Float{draw(g)} / 4294967296.0 }
 
-chance: fn(g: &Gen, p: Float) -> Bool Never! { real(g) < p }
+chance: fn(g: ^Gen, p: Float) -> Bool Never! { real(g) < p }
 
 choice: fn(name: String, weight: Float) -> Choice Never! {
     Choice{name: name.copy(), weight: weight}
@@ -246,7 +246,7 @@ choice: fn(name: String, weight: Float) -> Choice Never! {
 // `weight` when there are `count` candidates, else no weight.
 live: fn(count: Int, weight: Float) -> Float Never! { if count > 0 -> weight else -> 0.0 }
 
-weighted: fn(g: &Gen, pairs: [Choice]) -> String Never! {
+weighted: fn(g: ^Gen, pairs: [Choice]) -> String Never! {
     total := Float{0.0}
     loop pair in pairs {
         if pair.weight > 0.0 -> total += pair.weight
@@ -262,27 +262,27 @@ weighted: fn(g: &Gen, pairs: [Choice]) -> String Never! {
     last
 }
 
-pick_index: fn(g: &Gen, items: [Int]) -> Int Never! { items[rand_int(g, items.len())] }
+pick_index: fn(g: ^Gen, items: [Int]) -> Int Never! { items[rand_int(g, items.len())] }
 
-pick_text: fn(g: &Gen, items: [String]) -> String Never! { items[rand_int(g, items.len())].copy() }
+pick_text: fn(g: ^Gen, items: [String]) -> String Never! { items[rand_int(g, items.len())].copy() }
 
-pick_name: fn(g: &Gen, items: [Int]) -> String Never! {
+pick_name: fn(g: ^Gen, items: [Int]) -> String Never! {
     at: pick_index(g, items)
     g.vars[at].name.copy()
 }
 
-pick_field: fn(g: &Gen) -> String Never! {
+pick_field: fn(g: ^Gen) -> String Never! {
     fields: g.fields.copy()
     pick_text(g, fields)
 }
 
 // A `k` node ("var", "len" or "copy") naming one of `items`.
-var_ref: fn(g: &Gen, k: String, items: [Int]) -> Int Never! {
+var_ref: fn(g: ^Gen, k: String, items: [Int]) -> Int Never! {
     name: pick_name(g, items)
     named_node(g, k, name)
 }
 
-fresh: fn(g: &Gen, prefix: String) -> String Never! {
+fresh: fn(g: ^Gen, prefix: String) -> String Never! {
     name: "{prefix}{g.n}"
     g.n += 1
     name
@@ -314,46 +314,46 @@ fixed_var: fn(name: String, ty: String) -> Var Never! {
     Var{name: name.copy(), ty: ty.copy(), mutable: false, mutated: false, moved: false, frozen: 0, loops: 0}
 }
 
-add_var: fn(g: &Gen, v: Var) -> Int Never! {
+add_var: fn(g: ^Gen, v: Var) -> Int Never! {
     g.vars.push(v.copy())
     g.vars.len() - 1
 }
 
-declare: fn(g: &Gen, at: Int) -> Int Never! {
+declare: fn(g: ^Gen, at: Int) -> Int Never! {
     g.scopes[g.scopes.len() - 1].push(at)
     at
 }
 
-drop_scope: fn(g: &Gen) -> () { g.scopes = g.scopes[0..<g.scopes.len() - 1] }
+drop_scope: fn(g: ^Gen) -> () { g.scopes = g.scopes[0..<g.scopes.len() - 1] }
 
 blank_expr: fn(k: String) -> Expr Never! {
     Expr{k: k.copy(), v: 0, b: false, s: "", op: "", l: -1, r: -1, args: [Int]{}, conds: [Int]{}, vals: [Int]{}}
 }
 
-add_expr: fn(g: &Gen, e: Expr) -> Int Never! {
+add_expr: fn(g: ^Gen, e: Expr) -> Int Never! {
     g.exprs.push(e.copy())
     g.exprs.len() - 1
 }
 
 // `l op k` for a literal `k`.
-bin_int: fn(g: &Gen, op: String, l: Int, k: Int) -> Int Never! {
+bin_int: fn(g: ^Gen, op: String, l: Int, k: Int) -> Int Never! {
     r: int_node(g, k)
     bin(g, op, l, r)
 }
 
-int_node: fn(g: &Gen, v: Int) -> Int Never! {
+int_node: fn(g: ^Gen, v: Int) -> Int Never! {
     e := blank_expr("int")
     e.v = v
     add_expr(g, e)
 }
 
-named_node: fn(g: &Gen, k: String, s: String) -> Int Never! {
+named_node: fn(g: ^Gen, k: String, s: String) -> Int Never! {
     e := blank_expr(k)
     e.s = s.copy()
     add_expr(g, e)
 }
 
-bin: fn(g: &Gen, op: String, l: Int, r: Int) -> Int Never! {
+bin: fn(g: ^Gen, op: String, l: Int, r: Int) -> Int Never! {
     e := blank_expr("bin")
     e.op = op.copy()
     e.l = l
@@ -361,20 +361,20 @@ bin: fn(g: &Gen, op: String, l: Int, r: Int) -> Int Never! {
     add_expr(g, e)
 }
 
-unary: fn(g: &Gen, k: String, inner: Int) -> Int Never! {
+unary: fn(g: ^Gen, k: String, inner: Int) -> Int Never! {
     e := blank_expr(k)
     e.l = inner
     add_expr(g, e)
 }
 
-field_node: fn(g: &Gen, base: String, f: String) -> Int Never! {
+field_node: fn(g: ^Gen, base: String, f: String) -> Int Never! {
     e := blank_expr("field")
     e.s = base.copy()
     e.op = f.copy()
     add_expr(g, e)
 }
 
-literal: fn(g: &Gen) -> Int Never! {
+literal: fn(g: ^Gen) -> Int Never! {
     kind: weighted(g, [Choice]{choice("small", 6.0), choice("negative", 2.0), choice("medium", 1.0), choice("large", 1.0), choice("extreme", 0.3)})
     value: if kind == {
         "small" -> rand_int(g, 21)
@@ -386,19 +386,19 @@ literal: fn(g: &Gen) -> Int Never! {
     int_node(g, value)
 }
 
-large_literal: fn(g: &Gen) -> Int Never! {
+large_literal: fn(g: ^Gen) -> Int Never! {
     sign: if rand_int(g, 2) == 0 -> -1 else -> 1
     shift: 20 + rand_int(g, 42)
     extra: rand_int(g, 1000)
     sign * ((1 << shift) + extra)
 }
 
-int_leaf: fn(g: &Gen) -> Int Never! { leaf(g, 2.0) }
+int_leaf: fn(g: ^Gen) -> Int Never! { leaf(g, 2.0) }
 
 // A leaf with no list index: index expressions use these.
-plain_leaf: fn(g: &Gen) -> Int Never! { leaf(g, 0.0) }
+plain_leaf: fn(g: ^Gen) -> Int Never! { leaf(g, 0.0) }
 
-leaf: fn(g: &Gen, index_weight: Float) -> Int Never! {
+leaf: fn(g: ^Gen, index_weight: Float) -> Int Never! {
     ints: vars_of(g, "Int")
     lists: vars_of(g, "List")
     structs: vars_of(g, "Struct")
@@ -433,7 +433,7 @@ leaf: fn(g: &Gen, index_weight: Float) -> Int Never! {
 }
 
 // `xs[0]` or `xs[e % xs.len()]`, so the index is always in range.
-index_node: fn(g: &Gen, list: String) -> Int Never! {
+index_node: fn(g: ^Gen, list: String) -> Int Never! {
     idx: list_index(g, list)
     e := blank_expr("index")
     e.s = list.copy()
@@ -441,14 +441,14 @@ index_node: fn(g: &Gen, list: String) -> Int Never! {
     add_expr(g, e)
 }
 
-list_index: fn(g: &Gen, list: String) -> Int Never! {
+list_index: fn(g: ^Gen, list: String) -> Int Never! {
     if chance(g, 0.25) -> return int_node(g, 0)
     inner: plain_leaf(g)
     size: named_node(g, "len", list)
     bin(g, "%", inner, size)
 }
 
-divisor: fn(g: &Gen, depth: Int) -> Int Never! {
+divisor: fn(g: ^Gen, depth: Int) -> Int Never! {
     inner: int_expr(g, depth)
     k: 2 + rand_int(g, 8)
     modulo: bin_int(g, "%", inner, k)
@@ -465,7 +465,7 @@ callable: fn(g: Gen) -> [Int] Never! {
     out
 }
 
-call: fn(g: &Gen, f: Int, depth: Int) -> Int Never! {
+call: fn(g: ^Gen, f: Int, depth: Int) -> Int Never! {
     params: g.fns[f].params.copy()
     guard: g.fns[f].guard
     args := [Int]{}
@@ -491,7 +491,7 @@ call: fn(g: &Gen, f: Int, depth: Int) -> Int Never! {
     add_expr(g, e)
 }
 
-int_expr: fn(g: &Gen, depth: Int) -> Int Never! {
+int_expr: fn(g: ^Gen, depth: Int) -> Int Never! {
     if depth <= 0 || chance(g, 0.25) -> return int_leaf(g)
     reachable: callable(g)
     kind: weighted(g, [Choice]{choice("arith", 8.0), choice("div", 2.0), choice("bit", 2.0), choice("shift", 1.0), choice("neg", 1.0), choice("call", live(reachable.len(), 2.0))})
@@ -527,13 +527,13 @@ int_expr: fn(g: &Gen, depth: Int) -> Int Never! {
     call(g, f, d)
 }
 
-pair: fn(g: &Gen, op: String, d: Int) -> Int Never! {
+pair: fn(g: ^Gen, op: String, d: Int) -> Int Never! {
     left: int_expr(g, d)
     right: int_expr(g, d)
     bin(g, op, left, right)
 }
 
-bool_expr: fn(g: &Gen, depth: Int) -> Int Never! {
+bool_expr: fn(g: ^Gen, depth: Int) -> Int Never! {
     bools: vars_of(g, "Bool")
     strs: vars_of(g, "Str")
     if depth <= 0 || chance(g, 0.2) -> return bool_leaf(g, bools, strs)
@@ -558,7 +558,7 @@ bool_expr: fn(g: &Gen, depth: Int) -> Int Never! {
     bin(g, op, left, right)
 }
 
-bool_leaf: fn(g: &Gen, bools: [Int], strs: [Int]) -> Int Never! {
+bool_leaf: fn(g: ^Gen, bools: [Int], strs: [Int]) -> Int Never! {
     kind: weighted(g, [Choice]{choice("lit", 1.0), choice("var", live(bools.len(), 3.0)), choice("cmp", 4.0), choice("scmp", live(strs.len(), 1.0))})
     if kind == {
         "lit" -> {
@@ -581,7 +581,7 @@ bool_leaf: fn(g: &Gen, bools: [Int], strs: [Int]) -> Int Never! {
     bin(g, op, left, right)
 }
 
-if_value: fn(g: &Gen) -> Int Never! {
+if_value: fn(g: ^Gen) -> Int Never! {
     e := blank_expr("ifx")
     count: 1 + rand_int(g, 3)
     loop _ in 0..<count {
@@ -594,27 +594,27 @@ if_value: fn(g: &Gen) -> Int Never! {
 
 // String values: literals, interpolations of the bindings in scope, and
 // explicit copies (`s.copy()`). Moves (`t: s`) are generated as bindings.
-text: fn(g: &Gen) -> String Never! {
+text: fn(g: ^Gen) -> String Never! {
     count: rand_int(g, 6)
     out := ""
     loop _ in 0..<count -> out = "{out}{LETTERS[rand_int(g, LETTERS.len())]}"
     out
 }
 
-text_node: fn(g: &Gen) -> Int Never! { text_part(g, "str") }
+text_node: fn(g: ^Gen) -> Int Never! { text_part(g, "str") }
 
 // A literal node of `k` ("str" or "text") with fresh text.
-text_part: fn(g: &Gen, k: String) -> Int Never! {
+text_part: fn(g: ^Gen, k: String) -> Int Never! {
     value: text(g)
     named_node(g, k, value)
 }
 
-hole_node: fn(g: &Gen, hole: Hole) -> Int Never! {
+hole_node: fn(g: ^Gen, hole: Hole) -> Int Never! {
     if hole.k == "field" -> return field_node(g, hole.name, hole.f)
     named_node(g, hole.k, hole.name)
 }
 
-str_expr: fn(g: &Gen) -> Int Never! {
+str_expr: fn(g: ^Gen) -> Int Never! {
     strs: vars_of(g, "Str")
     holes := [Hole]{}
     loop at in vars_of(g, "Int") -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
@@ -661,19 +661,19 @@ blank_stmt: fn(k: String) -> Stmt Never! {
     }
 }
 
-add_stmt: fn(g: &Gen, s: Stmt) -> [Int] Never! {
+add_stmt: fn(g: ^Gen, s: Stmt) -> [Int] Never! {
     g.stmts.push(s.copy())
     [Int]{g.stmts.len() - 1}
 }
 
-decl: fn(g: &Gen, at: Int, init: Int) -> [Int] Never! {
+decl: fn(g: ^Gen, at: Int, init: Int) -> [Int] Never! {
     s := blank_stmt("decl")
     s.binding = at
     s.e = init
     add_stmt(g, s)
 }
 
-assign: fn(g: &Gen, name: String, op: String, e: Int) -> [Int] Never! {
+assign: fn(g: ^Gen, name: String, op: String, e: Int) -> [Int] Never! {
     s := blank_stmt("assign")
     s.name = name.copy()
     s.op = op.copy()
@@ -682,14 +682,14 @@ assign: fn(g: &Gen, name: String, op: String, e: Int) -> [Int] Never! {
 }
 
 // `if cond -> <one statement>`.
-guarded: fn(g: &Gen, cond: Int, body: [Int]) -> [Int] Never! {
+guarded: fn(g: ^Gen, cond: Int, body: [Int]) -> [Int] Never! {
     s := blank_stmt("if")
     s.conds.push(cond)
     s.bodies.push(body.copy())
     add_stmt(g, s)
 }
 
-block: fn(g: &Gen, count: Int, ctx: Ctx) -> [Int] Never! {
+block: fn(g: ^Gen, count: Int, ctx: Ctx) -> [Int] Never! {
     g.scopes.push([Int]{})
     out := [Int]{}
     loop _ in 0..<count -> out.extend(stmt(g, ctx))
@@ -705,7 +705,7 @@ loop_ctx: fn(ctx: Ctx) -> Ctx Never! {
     Ctx{loops: ctx.loops + 1, in_loop: true, in_fn: ctx.in_fn, prints: ctx.prints, nest: ctx.nest + 1}
 }
 
-stmt: fn(g: &Gen, ctx: Ctx) -> [Int] Never! {
+stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
     ints: mutable_of(g, "Int")
     bools: mutable_of(g, "Bool")
     lists: vars_of(g, "List")
@@ -860,20 +860,20 @@ stmt: fn(g: &Gen, ctx: Ctx) -> [Int] Never! {
 }
 
 // A new binding in the innermost scope, declared from `init`.
-declare_new: fn(g: &Gen, v: Var, init: Int) -> [Int] Never! {
+declare_new: fn(g: ^Gen, v: Var, init: Int) -> [Int] Never! {
     at: add_var(g, v)
     placed: declare(g, at)
     decl(g, placed, init)
 }
 
 // One of `items`, now mutated; its name.
-mark_mutated: fn(g: &Gen, items: [Int]) -> String Never! {
+mark_mutated: fn(g: ^Gen, items: [Int]) -> String Never! {
     at: pick_index(g, items)
     g.vars[at].mutated = true
     g.vars[at].name.copy()
 }
 
-while_stmt: fn(g: &Gen, ctx: Ctx) -> [Int] Never! {
+while_stmt: fn(g: ^Gen, ctx: Ctx) -> [Int] Never! {
     name: fresh(g, "c")
     c := fixed_var(name, "Int")
     c.mutated = true
@@ -891,7 +891,7 @@ while_stmt: fn(g: &Gen, ctx: Ctx) -> [Int] Never! {
     out
 }
 
-if_stmt: fn(g: &Gen, inner: Ctx) -> [Int] Never! {
+if_stmt: fn(g: ^Gen, inner: Ctx) -> [Int] Never! {
     s := blank_stmt("if")
     count: 1 + rand_int(g, 3)
     loop _ in 0..<count {
@@ -907,7 +907,7 @@ if_stmt: fn(g: &Gen, inner: Ctx) -> [Int] Never! {
     add_stmt(g, s)
 }
 
-range_stmt: fn(g: &Gen, inner: Ctx) -> [Int] Never! {
+range_stmt: fn(g: ^Gen, inner: Ctx) -> [Int] Never! {
     s := blank_stmt("range")
     s.lo = if chance(g, 0.7) -> int_node(g, 0) else -> random_node(g, 4)
     s.hi = if chance(g, 0.6) -> random_node(g, 6) else -> range_bound(g)
@@ -922,18 +922,18 @@ range_stmt: fn(g: &Gen, inner: Ctx) -> [Int] Never! {
 }
 
 // A literal below `n`.
-random_node: fn(g: &Gen, n: Int) -> Int Never! {
+random_node: fn(g: ^Gen, n: Int) -> Int Never! {
     value: rand_int(g, n)
     int_node(g, value)
 }
 
-range_bound: fn(g: &Gen) -> Int Never! {
+range_bound: fn(g: ^Gen) -> Int Never! {
     inner: int_expr(g, 1)
     k: 2 + rand_int(g, 5)
     bin_int(g, "%", inner, k)
 }
 
-foreach_stmt: fn(g: &Gen, lists: [Int], ctx: Ctx) -> [Int] Never! {
+foreach_stmt: fn(g: ^Gen, lists: [Int], ctx: Ctx) -> [Int] Never! {
     list: pick_index(g, lists)
     s := blank_stmt("foreach")
     s.name = g.vars[list].name.copy()
@@ -953,7 +953,7 @@ foreach_stmt: fn(g: &Gen, lists: [Int], ctx: Ctx) -> [Int] Never! {
     add_stmt(g, s)
 }
 
-print_stmt: fn(g: &Gen) -> [Int] Never! {
+print_stmt: fn(g: ^Gen) -> [Int] Never! {
     ints: vars_of(g, "Int")
     bools: vars_of(g, "Bool")
     lists: vars_of(g, "List")
@@ -972,7 +972,7 @@ print_stmt: fn(g: &Gen) -> [Int] Never! {
     add_stmt(g, s)
 }
 
-interp_stmt: fn(g: &Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int]) -> Stmt Never! {
+interp_stmt: fn(g: ^Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int]) -> Stmt Never! {
     holes := [Hole]{}
     loop at in ints -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
     loop at in bools -> holes.push(Hole{k: "var", name: g.vars[at].name.copy(), f: ""})
@@ -994,7 +994,7 @@ interp_stmt: fn(g: &Gen, ints: [Int], bools: [Int], strs: [Int], structs: [Int])
     s
 }
 
-helper: fn(g: &Gen, index: Int) -> Fun Never! {
+helper: fn(g: ^Gen, index: Int) -> Fun Never! {
     types := [String]{"Int", "Int", "Int", "Int", "List", "Str"}
     if g.has_struct -> types.push("Struct")
     count: 1 + rand_int(g, 3)
@@ -1014,7 +1014,7 @@ helper: fn(g: &Gen, index: Int) -> Fun Never! {
     Fun{name: "h{index}", params: params, guard: 0, body: body}
 }
 
-recursive: fn(g: &Gen, index: Int) -> Fun Never! {
+recursive: fn(g: ^Gen, index: Int) -> Fun Never! {
     n: add_var(g, fixed_var("n", "Int"))
     acc: add_var(g, fixed_var("acc", "Int"))
     name: "r{index}"
@@ -1041,13 +1041,13 @@ recursive: fn(g: &Gen, index: Int) -> Fun Never! {
     Fun{name: name, params: [Int]{n, acc}, guard: 12, body: body}
 }
 
-recursive_tail: fn(g: &Gen, stepped: Int) -> Int Never! {
+recursive_tail: fn(g: ^Gen, stepped: Int) -> Int Never! {
     op: pick_text(g, [String]{"+", "-", "~"})
     right: int_expr(g, 1)
     bin(g, op, stepped, right)
 }
 
-program: fn(g: &Gen) -> () {
+program: fn(g: ^Gen) -> () {
     if chance(g, 0.6) {
         all: [String]{"x", "y", "z", "w"}
         count: 2 + rand_int(g, 3)
@@ -1161,7 +1161,7 @@ simple: fn(g: Gen, at: Int) -> String? Never! {
         "assign" -> Val("{s.name} {s.op} {expr(g, s.e)}")
         "print" -> Val("print({expr(g, s.e)})")
         "interp" -> Val("print(\"{parts_text(g, s.parts)}\")")
-        "push" -> Val("&{s.name}.push({expr(g, s.e)})")
+        "push" -> Val("^{s.name}.push({expr(g, s.e)})")
         "setidx" -> Val("{s.name}[{expr(g, s.idx)}] {s.op} {expr(g, s.e)}")
         "setfield" -> Val("{s.name}.{s.f} {s.op} {expr(g, s.e)}")
         "break" -> Val("break")
@@ -1420,33 +1420,33 @@ slot: fn(m: Machine, name: String) -> Int Never! {
 
 lookup: fn(m: Machine, name: String) -> Value Never! { m.values[slot(m, name)].copy() }
 
-define: fn(m: &Machine, name: String, v: Value) -> () {
+define: fn(m: ^Machine, name: String, v: Value) -> () {
     m.names.push(name.copy())
     m.values.push(v.copy())
 }
 
-open_scope: fn(m: &Machine) -> () { m.marks.push(m.names.len()) }
+open_scope: fn(m: ^Machine) -> () { m.marks.push(m.names.len()) }
 
-close_scope: fn(m: &Machine) -> () {
+close_scope: fn(m: ^Machine) -> () {
     mark: m.marks[m.marks.len() - 1]
     m.marks = m.marks[0..<m.marks.len() - 1]
     m.names = m.names[0..<mark]
     m.values = m.values[0..<mark]
 }
 
-tick: fn(m: &Machine) Reject! {
+tick: fn(m: ^Machine) Reject! {
     m.steps += 1
     if m.steps > STEP_LIMIT -> return Err(reject("steps"))
     Ok()
 }
 
-emit: fn(m: &Machine, line: String) Reject! {
+emit: fn(m: ^Machine, line: String) Reject! {
     m.out.push(line.copy())
     if m.out.len() > OUTPUT_LIMIT -> return Err(reject("output"))
     Ok()
 }
 
-eval: fn(m: &Machine, g: Gen, at: Int) -> Value Reject! {
+eval: fn(m: ^Machine, g: Gen, at: Int) -> Value Reject! {
     e: g.exprs[at]
     if e.k == {
         "int" -> Ok(int_value(e.v))
@@ -1481,7 +1481,7 @@ eval: fn(m: &Machine, g: Gen, at: Int) -> Value Reject! {
     }
 }
 
-eval_bin: fn(m: &Machine, g: Gen, e: Expr) -> Value Reject! {
+eval_bin: fn(m: ^Machine, g: Gen, e: Expr) -> Value Reject! {
     left: eval(m, g, e.l) ?? return Err(err)
     if e.op == "&&" && !left.b -> return Ok(left)
     if e.op == "||" && left.b -> return Ok(left)
@@ -1490,13 +1490,13 @@ eval_bin: fn(m: &Machine, g: Gen, e: Expr) -> Value Reject! {
     arith(e.op, left, right)
 }
 
-eval_all: fn(m: &Machine, g: Gen, args: [Int]) -> [Int] Reject! {
+eval_all: fn(m: ^Machine, g: Gen, args: [Int]) -> [Int] Reject! {
     out := [Int]{}
     loop arg in args -> out.push((eval(m, g, arg) ?? return Err(err)).i)
     Ok(out)
 }
 
-format: fn(m: &Machine, g: Gen, parts: [Int]) -> String Reject! {
+format: fn(m: ^Machine, g: Gen, parts: [Int]) -> String Reject! {
     out := ""
     loop part in parts {
         if g.exprs[part].k == "text" {
@@ -1516,7 +1516,7 @@ field_index: fn(g: Gen, f: String) -> Int Never! {
     panic("model: no field {f}")
 }
 
-call_fn: fn(m: &Machine, g: Gen, e: Expr) -> Value Reject! {
+call_fn: fn(m: ^Machine, g: Gen, e: Expr) -> Value Reject! {
     found := -1
     loop i in 0..<g.fns.len() {
         if g.fns[i].name == e.s -> found = i
@@ -1544,7 +1544,7 @@ update: fn(op: String, current: Value, value: Value) -> Value Reject! {
     arith(op[0..<op.len() - 1], current, value)
 }
 
-exec: fn(m: &Machine, g: Gen, stmts: [Int]) -> Signal Reject! {
+exec: fn(m: ^Machine, g: Gen, stmts: [Int]) -> Signal Reject! {
     loop at in stmts {
         signal: run_stmt(m, g, at) ?? return Err(err)
         if signal.k != "" -> return Ok(signal)
@@ -1553,14 +1553,14 @@ exec: fn(m: &Machine, g: Gen, stmts: [Int]) -> Signal Reject! {
 }
 
 // A body in its own scope; `next` ends only this iteration.
-scoped: fn(m: &Machine, g: Gen, stmts: [Int]) -> Signal Reject! {
+scoped: fn(m: ^Machine, g: Gen, stmts: [Int]) -> Signal Reject! {
     open_scope(m)
     signal: exec(m, g, stmts) ?? return Err(err)
     close_scope(m)
     Ok(signal)
 }
 
-run_stmt: fn(m: &Machine, g: Gen, at: Int) -> Signal Reject! {
+run_stmt: fn(m: ^Machine, g: Gen, at: Int) -> Signal Reject! {
     tick(m) ?? return Err(err)
     s: g.stmts[at]
     if s.k == {
@@ -1620,7 +1620,7 @@ run_stmt: fn(m: &Machine, g: Gen, at: Int) -> Signal Reject! {
 }
 
 // An interpolated print: its text has no String bound.
-format_unchecked: fn(m: &Machine, g: Gen, parts: [Int]) -> String Reject! { format(m, g, parts) }
+format_unchecked: fn(m: ^Machine, g: Gen, parts: [Int]) -> String Reject! { format(m, g, parts) }
 
 // What one loop iteration's signal does: "" continues, "break" stops the
 // loop, anything else leaves the loop with that signal.
@@ -1629,7 +1629,7 @@ iteration: fn(signal: Signal) -> String Never! {
     signal.k.copy()
 }
 
-run_range: fn(m: &Machine, g: Gen, s: Stmt) -> Signal Reject! {
+run_range: fn(m: ^Machine, g: Gen, s: Stmt) -> Signal Reject! {
     lo: (eval(m, g, s.lo) ?? return Err(err)).i
     top: (eval(m, g, s.hi) ?? return Err(err)).i
     hi: if s.inclusive -> top + 1 else -> top
@@ -1650,7 +1650,7 @@ run_range: fn(m: &Machine, g: Gen, s: Stmt) -> Signal Reject! {
     Ok(no_signal())
 }
 
-run_while: fn(m: &Machine, g: Gen, s: Stmt) -> Signal Reject! {
+run_while: fn(m: ^Machine, g: Gen, s: Stmt) -> Signal Reject! {
     where: slot(m, s.name)
     loop m.values[where].i < s.limit {
         tick(m) ?? return Err(err)
@@ -1665,7 +1665,7 @@ run_while: fn(m: &Machine, g: Gen, s: Stmt) -> Signal Reject! {
     Ok(no_signal())
 }
 
-run_foreach: fn(m: &Machine, g: Gen, s: Stmt) -> Signal Reject! {
+run_foreach: fn(m: ^Machine, g: Gen, s: Stmt) -> Signal Reject! {
     items: lookup(m, s.name).items
     loop i in 0..<items.len() {
         tick(m) ?? return Err(err)
@@ -1723,7 +1723,7 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
         if step % 4 == {
             0 -> {
                 statements.push("m[\"{key}\"] = {value}")
-                statements.push("&xs.push({value})")
+                statements.push("^xs.push({value})")
                 map[key] = value
                 list.push(value)
             }
@@ -1734,14 +1734,14 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
                 output.push("{list.len()}")
             }
             2 -> {
-                statements.push("print((&m.pop(\"{key}\")) ?? -1)")
-                statements.push("print((&xs.pop()) ?? -1)")
+                statements.push("print((^m.pop(\"{key}\")) ?? -1)")
+                statements.push("print((^xs.pop()) ?? -1)")
                 output.push("{map.pop(key) ?? -1}")
                 output.push("{list.pop() ?? -1}")
             }
             else -> {
                 statements.push("saved{step}: xs.copy()")
-                statements.push("&xs.push({value})")
+                statements.push("^xs.push({value})")
                 statements.push("print(saved{step}.len())")
                 statements.push("print(xs.len())")
                 output.push("{list.len()}")
@@ -1853,7 +1853,7 @@ collect_golden_entries: fn(examples: String) -[FS]> [Entry] Never! {
     entries
 }
 
-visit: fn(root: String, dir: String, entries: &[Entry]) -[FS]> () {
+visit: fn(root: String, dir: String, entries: ^[Entry]) -[FS]> () {
     children := files.list_dir(dir) ?? return
     children.sort_by(fn(left: DirEntry, right: DirEntry) { left.name <=> right.name })
     loop child in children {
@@ -1978,7 +1978,7 @@ Gate: struct {
     gaps: [String],
 }
 
-add: fn(gate: &Gate, name: String, verdict: String, detail: String) -> () {
+add: fn(gate: ^Gate, name: String, verdict: String, detail: String) -> () {
     gate.checks.push(Check{name: name.copy(), verdict: verdict.copy(), detail: detail.copy()})
 }
 
@@ -2010,7 +2010,7 @@ occurrences: fn(haystack: String, needle: String) -> Int Never! {
 
 // The two unsafe-wrapper fixtures must each report exactly their
 // Jet.UnsafeCallOutsideUnsafe diagnostics and exit 1.
-wrapper_fixtures: fn(gate: &Gate, jet: String, checker_head: String, head: String) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
+wrapper_fixtures: fn(gate: ^Gate, jet: String, checker_head: String, head: String) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
     loop i in 0..<WRAPPER_FIXTURES.len() {
         fixture: WRAPPER_FIXTURES[i]
         expected: WRAPPER_DIAGNOSTICS[i]
@@ -2190,7 +2190,7 @@ check_tree: fn(c: Check) -> Dyn Never! {
 }
 
 // One admitted native tier output for one case family.
-native_tier: fn(gate: &Gate, head: String, seed: Int, count: Int, tier: String, kind: String, input: Dyn, cases: [Case], digest: String) -[FS]> () {
+native_tier: fn(gate: ^Gate, head: String, seed: Int, count: Int, tier: String, kind: String, input: Dyn, cases: [Case], digest: String) -[FS]> () {
     name: "{tier}-{kind}"
     directory: text_field(input, "directory")
     if directory == "" -> return add(gate, name, "gap", "no admitted native producer output")

@@ -5,7 +5,7 @@ use {
     jet_semindex.[SemIndex]
 }
 
-project_stmt_block: fn(g: &GraphBuilder, index: SemIndex, src: String, stmts: [StmtNode], base: Int, x: Int, y: Int) {
+project_stmt_block: fn(g: ^GraphBuilder, index: SemIndex, src: String, stmts: [StmtNode], base: Int, x: Int, y: Int) {
     cursor_y := y
     loop (i, stmt) in stmts {
         project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y)
@@ -30,7 +30,7 @@ multi_input_item_count: fn(tables: ASTTables, expr: ExprNode) -> Int Never! {
     0
 }
 
-project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: StmtNode, ordinal: Int, x: Int, y: Int) {
+project_stmt: fn(g: ^GraphBuilder, index: SemIndex, src: String, stmt: StmtNode, ordinal: Int, x: Int, y: Int) {
     if ast_stmt(g.tables, stmt) == {
         .Val(b) -> {
             node_id: "{g.graph_id}:stmt:{ordinal}:binding"
@@ -51,7 +51,7 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: StmtNode,
             ty: lvalue_type(g, target)
             add_node(g, node_id, "assignment", assignment_title(target, op), lvalue_span(target), x, y, [String]{"write"}, [String]{"edit_inline_expr", "source_jump"})
             input: add_pin(g, node_id, "value", "input", ty, "", false)
-            output: add_pin(g, node_id, "target", "output", ty, "&", false)
+            output: add_pin(g, node_id, "target", "output", ty, "^", false)
             connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
             if target == .Local(name, _) {
                 g.local_pins[name] = output
@@ -252,7 +252,7 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: StmtNode,
     }
 }
 
-set_node_meta: fn(g: &GraphBuilder, node_id: String, meta_json: String?) {
+set_node_meta: fn(g: ^GraphBuilder, node_id: String, meta_json: String?) {
     loop i in 0..<g.nodes.len() {
         if g.nodes[i].id == node_id {
             g.nodes[i].meta_json = meta_json
@@ -269,7 +269,7 @@ SwitchStmt: struct {
     span: Span,
 }
 
-project_switch: fn(g: &GraphBuilder, index: SemIndex, src: String, switch: SwitchStmt, ordinal: Int, x: Int, y: Int) {
+project_switch: fn(g: ^GraphBuilder, index: SemIndex, src: String, switch: SwitchStmt, ordinal: Int, x: Int, y: Int) {
     subjectless: jfmt_is_subjectless_guard(switch.subject, switch.span)
     if subjectless && switch_was_classic_if(g.tables, src, switch.arms, switch.span) {
         arm: switch.arms[0]
@@ -324,7 +324,7 @@ project_switch: fn(g: &GraphBuilder, index: SemIndex, src: String, switch: Switc
 
 // An `else if` chain: a lone classic `if` in the else body projects as the
 // next branch rather than as a nested block.
-project_classic_switch_else: fn(g: &GraphBuilder, index: SemIndex, src: String, body: [StmtNode], ordinal: Int, x: Int, y: Int) {
+project_classic_switch_else: fn(g: ^GraphBuilder, index: SemIndex, src: String, body: [StmtNode], ordinal: Int, x: Int, y: Int) {
     if body.len() == 1 {
         if ast_stmt(g.tables, body[0]) == .Switch(subject, arms, _, span) {
             if jfmt_is_subjectless_guard(subject, span) && switch_was_classic_if(g.tables, src, arms, span) {
@@ -353,7 +353,7 @@ pattern_subject_type: fn(g: GraphBuilder, index: SemIndex, cond: ExprNode) -> St
     None
 }
 
-set_pattern_node_type: fn(g: &GraphBuilder, node_id: String, pattern_type: String) {
+set_pattern_node_type: fn(g: ^GraphBuilder, node_id: String, pattern_type: String) {
     set_node_meta(g, node_id, Val("{{\"pattern_type\":{json_str(pattern_type)}}}"))
 }
 

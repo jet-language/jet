@@ -121,7 +121,7 @@ rank_value: fn(line: String) -> Int? Never! {
 }
 
 // `        name: "word",` -> the word, or `        name: CONSTANT,` -> the
-// constant's `pub const CONSTANT: &str = "word";` value in `source`.
+// constant's `pub const CONSTANT: ^str = "word";` value in `source`.
 row_name: fn(line: String, source: String) -> String? Never! {
     prefix: "        name: "
     if !line.starts_with(prefix) || !line.ends_with(",") -> return None
@@ -137,7 +137,7 @@ row_name: fn(line: String, source: String) -> String? Never! {
         code: Int{byte}
         if !is_upper(code) && !is_digit(code) && code != 95 -> return None
     }
-    constant: "pub const {value}: &str = \""
+    constant: "pub const {value}: ^str = \""
     loop span in line_spans(source) {
         candidate: byte_slice(source, span.start, span.end)
         if candidate.starts_with(constant) && candidate.ends_with("\";") {
@@ -376,7 +376,7 @@ rows_of: fn(source: String) -> [CommandRow] Never! {
 }
 
 #Test("rows are read from opener to closer, a constant name through its value") {
-    rows: rows_of("pub const JOBS: &str = \"jobs\";\nT: [\n    CommandSpec {{\n        name: \"run\",\n        summary: \"Run\",\n        nested: {{\n        }},\n        frequency_rank: 2,\n    }},\n    CommandSpec {{\n        name: JOBS,\n        summary: \"Jobs\",\n        frequency_rank: 1,\n    }}\n];\n")
+    rows: rows_of("pub const JOBS: ^str = \"jobs\";\nT: [\n    CommandSpec {{\n        name: \"run\",\n        summary: \"Run\",\n        nested: {{\n        }},\n        frequency_rank: 2,\n    }},\n    CommandSpec {{\n        name: JOBS,\n        summary: \"Jobs\",\n        frequency_rank: 1,\n    }}\n];\n")
     assert_eq(rows.len(), 2)
     assert_eq(rows[0].name, "run")
     assert_eq(rows[0].rank, 2)

@@ -16,7 +16,7 @@ ArtifactActionPublication: struct {
     bytes: [U8],
 }
 
-// One journal line to append (Rust `(&str, &EntryKey, u64)`).
+// One journal line to append (Rust `(^str, ^EntryKey, u64)`).
 ArtifactJournalAppend: struct {
     operation: String,
     key: ArtifactEntryKey,
@@ -1188,7 +1188,7 @@ ArtifactStore: struct {
 }
 
 // Append the regular, digest-named files of one namespace directory.
-store_artifact_scan_flat_namespace: fn(directory: String, kind: ArtifactEntryKind, namespace: String?, output: &[ArtifactStoredEntry]) -[FS]> ArtifactStoreError! {
+store_artifact_scan_flat_namespace: fn(directory: String, kind: ArtifactEntryKind, namespace: String?, output: ^[ArtifactStoredEntry]) -[FS]> ArtifactStoreError! {
     loop path in store_artifact_sorted_children(directory) {
         metadata: if files.stat(path) == {
             .Ok(info) -> info

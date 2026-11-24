@@ -288,13 +288,14 @@ arm_name_end: fn(facts: [Int], index: Int) -> Int Never! {
     -1
 }
 
-// `&name` / `&&name` / `name.move()` written together at line start marks
+// `^name` / `^^name` / `name.move()` written together at line start marks
 // the place a call writes or takes, so it begins a statement, and so does a
-// complement `~name` written together. A continued bitwise-and, exclusive-or,
-// logical-and or power line keeps a space after its operator.
+// complement `~name` written together. A continued exclusive-or or power
+// line keeps a space after its operator; a line that starts with `&` or `&&`
+// always continues the one above.
 place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     mark: kind_at(facts, index)
-    if mark != TOKEN_AMP && mark != TOKEN_AND_AND && mark != TOKEN_CARET && mark != TOKEN_TILDE -> return false
+    if mark != TOKEN_CARET && mark != TOKEN_TILDE -> return false
     name: kind_at(facts, index + 1)
     if name != TOKEN_IDENT && name != TOKEN_SELF -> return false
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
@@ -423,7 +424,7 @@ split_spelling: fn(kind: Int) -> String Never! {
 // Applies the events of `events[event_index..]` at fact `raw_index` before
 // that fact's token lands: a `;` token, or the E0986 diagnostic of a split
 // header. Returns the index of the first later event.
-terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_index: Int, tokens: &[Token], diagnostics: &[Diagnostic]) -> Int {
+terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_index: Int, tokens: ^[Token], diagnostics: ^[Diagnostic]) -> Int {
     at_event := event_index
     event_count: events.len() /% 3
     loop at_event < event_count && events[at_event * 3 + 1] == raw_index {

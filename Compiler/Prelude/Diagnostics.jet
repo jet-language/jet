@@ -967,7 +967,7 @@ RetiredViewReturn: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (was: `view` return keyword teaching → the write-access marker `&`; raw-reference return spelling `-> &T` no longer exists to point at)"
+            "*Retired* (was: `view` return keyword teaching → the write-access marker `^`; raw-reference return spelling `-> ^T` no longer exists to point at)"
         }
 
         why: fn(self) -> String {
@@ -2081,7 +2081,7 @@ ImmutableAssignment: struct {
 
         what: fn(self) -> String { "This name was made with `:`, so it can't change" }
 
-        why: fn(self) -> String { "Only `:=` bindings (and `&` parameters) can be changed" }
+        why: fn(self) -> String { "Only `:=` bindings (and `^` parameters) can be changed" }
 
         fix: fn(self) -> String { "Declare the name with `:=` instead of `:`" }
     }
@@ -2351,7 +2351,7 @@ ReadOnlyValueNotOwned: struct {
         }
 
         fix: fn(self) -> String {
-            "Write `name.copy()` for an owning copy, declare the parameter `name: &&T` when it should take ownership, or return borrowed data as `-> View<T> from name` with a view derived from `name`"
+            "Write `name.copy()` for an owning copy, declare the parameter `name: ^^T` when it should take ownership, or return borrowed data as `-> View<T> from name` with a view derived from `name`"
         }
     }
 }
@@ -3172,7 +3172,7 @@ CompoundAssignNotPlace: struct {
         what: fn(self) -> String { "Compound assignment needs a mutable place." }
 
         why: fn(self) -> String {
-            "Updates are allowed only on a mutable name or an `&` parameter; a computed value has no place to update."
+            "Updates are allowed only on a mutable name or an `^` parameter; a computed value has no place to update."
         }
 
         fix: fn(self) -> String { "Bind the value with `:=`, then write `name {self.op} value`" }
@@ -3847,7 +3847,7 @@ MissingMoveMarker: struct {
         }
 
         fix: fn(self) -> String {
-            "Declare the parameter or receiver with the take mark `&&`, or call `.move()` where the value is given away."
+            "Declare the parameter or receiver with the take mark `^^`, or call `.move()` where the value is given away."
         }
     }
 }
@@ -3885,7 +3885,7 @@ FieldWriteWithoutMarker: struct {
         }
 
         fix: fn(self) -> String {
-            "Write the receiver as `&self` before assigning to `self.field`."
+            "Write the receiver as `^self` before assigning to `self.field`."
         }
     }
 }
@@ -3897,7 +3897,7 @@ RetiredViewReturnTarget: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (was: `view` return can't point at this value; raw-reference return spelling `-> &T` no longer exists)"
+            "*Retired* (was: `view` return can't point at this value; raw-reference return spelling `-> ^T` no longer exists)"
         }
 
         why: fn(self) -> String {
@@ -3915,7 +3915,7 @@ RetiredRefFieldOwner: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (was: a stored raw-reference spelling `&T` field's owner ambiguous; stored-ref fields no longer exist)"
+            "*Retired* (was: a stored raw-reference spelling `^T` field's owner ambiguous; stored-ref fields no longer exist)"
         }
 
         why: fn(self) -> String {
@@ -4274,7 +4274,7 @@ PersistentMutableBorrow: struct {
         }
 
         fix: fn(self) -> String {
-            "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{self.name}` to a `&` parameter or using a mutating receiver."
+            "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{self.name}` to a `^` parameter or using a mutating receiver."
         }
     }
 }
@@ -4296,7 +4296,7 @@ UnusedPlaceMark: struct {
         }
 
         why: fn(self) -> String {
-            "A mark belongs only on a write window bound to a name, a match that writes into its subject, and `task &&name`, and `x.move()` takes a name or one of its fields. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection."
+            "A mark belongs only on a write window bound to a name, a match that writes into its subject, and `task ^^name`, and `x.move()` takes a name or one of its fields. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection."
         }
 
         fix: fn(self) -> String { "Remove the mark." }
@@ -4309,20 +4309,20 @@ MarkedFunctionValue: struct {
         safety_class: .Soundness,
         safety_reason: "A call through the plain function type passes a read, while the function writes or takes its argument.",
         expert_path: "none: a function type with the same marks reaches the program",
-        meaning: "A function value's `&` or `&&` parameter access doesn't match the parameter access the expected function type marks",
+        meaning: "A function value's `^` or `^^` parameter access doesn't match the parameter access the expected function type marks",
         detail: true,
         no_fix: .Ambiguous,
 
         what: fn(self) -> String {
-            "A function whose parameter is marked `&` or `&&` is used as a value where the expected function type doesn't mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes)."
+            "A function whose parameter is marked `^` or `^^` is used as a value where the expected function type doesn't mark that parameter the same way, or a function value writes a parameter its slot reads (or reads one the slot writes)."
         }
 
         why: fn(self) -> String {
-            "A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), and a call through it passes each argument that way, so a value whose parameter access differs would lose or invent the write or take its parameter declares."
+            "A function type gives each parameter plain read access unless it marks a write (`fn(^T)`) or a take (`fn(^^T)`), and a call through it passes each argument that way, so a value whose parameter access differs would lose or invent the write or take its parameter declares."
         }
 
         fix: fn(self) -> String {
-            "Call the function directly, mark the parameter in the function type the way the function does (`fn(&T)`, `fn(&&T)`), or pass a lambda that makes that call."
+            "Call the function directly, mark the parameter in the function type the way the function does (`fn(^T)`, `fn(^^T)`), or pass a lambda that makes that call."
         }
     }
 }
@@ -4332,22 +4332,22 @@ CallMarkRequired: struct {
         code: "E0228",
         safety_class: .Opinion,
         safety_reason: "The call runs the same with or without the mark, and the program's own policy asks for it written.",
-        meaning: "Under `#Policy(writes: .Explicit)`, a call's `&` or `&&` mark doesn't match what its signature does to the named value",
+        meaning: "Under `#Policy(writes: .Explicit)`, a call's `^` or `^^` mark doesn't match what its signature does to the named value",
         detail: true,
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .BehaviorPreserving,
 
         what: fn(self) -> String {
-            "A call under `#Policy(writes: .Explicit)` is missing the `&` or `&&` mark its callee's signature implies for a named argument or receiver, or writes a mark the signature doesn't imply."
+            "A call under `#Policy(writes: .Explicit)` is missing the `^` or `^^` mark its callee's signature implies for a named argument or receiver, or writes a mark the signature doesn't imply."
         }
 
         why: fn(self) -> String {
-            "Calls are written plain and the signature decides what each one does. The policy asks that every call that changes a named value write `&` before it and every call that takes one write `&&`, so the text shows each write and take; a mark that disagrees with the signature would tell the reader something false."
+            "Calls are written plain and the signature decides what each one does. The policy asks that every call that changes a named value write `^` before it and every call that takes one write `^^`, so the text shows each write and take; a mark that disagrees with the signature would tell the reader something false."
         }
 
         fix: fn(self) -> String {
-            "Write the mark the quoted signature implies: `&` for a `&` parameter or `&self` method, `&&` for a `&&` parameter or `&&self` method, and no mark for a read."
+            "Write the mark the quoted signature implies: `^` for a `^` parameter or `^self` method, `^^` for a `^^` parameter or `^^self` method, and no mark for a read."
         }
     }
 }
@@ -4362,7 +4362,7 @@ InvalidReceiverFootprint: struct {
         detail: true,
 
         what: fn(self) -> String {
-            "A method's stated receiver footprint (`&self.log`, `&self.[log, hits]`) names no field of its record, or its body reads or changes a field outside it."
+            "A method's stated receiver footprint (`^self.log`, `^self.[log, hits]`) names no field of its record, or its body reads or changes a field outside it."
         }
 
         why: fn(self) -> String {
@@ -4710,7 +4710,7 @@ MethodReadWithoutCall: struct {
     impl Diagnostic {
         code: "E0924",
         safety_class: .Soundness,
-        safety_reason: "A method read without parentheses that is no function value is almost always a forgotten call, and a bound `&self` method over a copy of its receiver would change the copy, so neither quietly compiles.",
+        safety_reason: "A method read without parentheses that is no function value is almost always a forgotten call, and a bound `^self` method over a copy of its receiver would change the copy, so neither quietly compiles.",
         expert_path: "pass the method where a function type is expected, or write the closure that calls it",
         meaning: "A method read without parentheses that is no function value here",
         structured_fix: .SuggestedSourceEdit,
@@ -4722,7 +4722,7 @@ MethodReadWithoutCall: struct {
         }
 
         why: fn(self) -> String {
-            "A method read without parentheses is a function value only where a function type is expected, and only while its receiver is kept: a `&self` method's changes must reach the receiver, and a `&&self` method never binds. Anywhere else the read is a forgotten call."
+            "A method read without parentheses is a function value only where a function type is expected, and only while its receiver is kept: a `^self` method's changes must reach the receiver, and a `^^self` method never binds. Anywhere else the read is a forgotten call."
         }
 
         fix: fn(self) -> String { "Call the method, or write a closure that calls it." }
@@ -7399,7 +7399,7 @@ RetiredRefField: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (was: teaching retired `#Ref(owner) name: T` field form → raw-reference spelling `name: &T`; stored-ref fields no longer exist)"
+            "*Retired* (was: teaching retired `#Ref(owner) name: T` field form → raw-reference spelling `name: ^T`; stored-ref fields no longer exist)"
         }
 
         why: fn(self) -> String {
@@ -8098,7 +8098,7 @@ ValueThrownAway: struct {
         what: fn(self) -> String { "The result of `{self.call}` is thrown away" }
 
         why: fn(self) -> String {
-            "A pure call (no effects, nothing passed with `&`) does nothing when its result is dropped; a function with no return type loses the value of its last line"
+            "A pure call (no effects, nothing passed with `^`) does nothing when its result is dropped; a function with no return type loses the value of its last line"
         }
 
         fix: fn(self) -> String {
@@ -11688,7 +11688,7 @@ RetiredAllocatorUseAfterFree: struct {
         what: fn(self) -> String { "Retired allocator-specific use-after-free diagnostic." }
 
         why: fn(self) -> String {
-            "Terminal release now uses the ordinary consuming `close(allocator)`, whose parameter takes the allocator with `&&`."
+            "Terminal release now uses the ordinary consuming `close(allocator)`, whose parameter takes the allocator with `^^`."
         }
 
         fix: fn(self) -> String {
@@ -17467,7 +17467,7 @@ RetiredRefReturn: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (raw-reference return spelling `-> &T` remains absent; invalid named-view returns use Jet.ViewOutlivesOwner/Jet.StringViewOutlivesOwner)"
+            "*Retired* (raw-reference return spelling `-> ^T` remains absent; invalid named-view returns use Jet.ViewOutlivesOwner/Jet.StringViewOutlivesOwner)"
         }
 
         why: fn(self) -> String {
@@ -17485,7 +17485,7 @@ RetiredRefFieldSpelling: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (raw-reference field spelling `&T`/`#Ref` remains absent; named view fields follow the view-return rules)"
+            "*Retired* (raw-reference field spelling `^T`/`#Ref` remains absent; named view fields follow the view-return rules)"
         }
 
         why: fn(self) -> String {
@@ -17555,7 +17555,7 @@ ViewOutlivesOwner: struct {
         }
 
         fix: fn(self) -> String {
-            "Keep every possible owner alive (take a returned view's source as a read or `&` parameter, not `&&`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended."
+            "Keep every possible owner alive (take a returned view's source as a read or `^` parameter, not `^^`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended."
         }
     }
 }
@@ -17567,7 +17567,7 @@ RetiredRefLabel: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (was: `#Ref(label)` on a raw-reference `&T` field names no in-scope value of the referent type; stored-ref fields no longer exist)"
+            "*Retired* (was: `#Ref(label)` on a raw-reference `^T` field names no in-scope value of the referent type; stored-ref fields no longer exist)"
         }
 
         why: fn(self) -> String {
@@ -24506,7 +24506,7 @@ FreezeNotSnapshotable: struct {
         }
 
         fix: fn(self) -> String {
-            "Give the owned value to the task with `task &&name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value"
+            "Give the owned value to the task with `task ^^name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value"
         }
     }
 }

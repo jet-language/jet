@@ -1,5 +1,5 @@
 // Retired `#State` markers. State types carry what `#State(S)` and
-// `#State(A -> B)` said: `self: &&Owner.A` requires `A`, `-> Owner.B` moves
+// `#State(A -> B)` said: `self: ^^Owner.A` requires `A`, `-> Owner.B` moves
 // the value to `B`, and the owner's state list names the move `A -> B`. After
 // a file parses, the markers on each owner are reported once (E0175) with one
 // edit that rewrites the owner's state list and every marked signature; a
@@ -49,13 +49,13 @@ StateMarkerSite: struct {
     paths: [String],
 }
 
-parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: &[Diagnostic]) Never! {
+parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: ^[Diagnostic]) Never! {
     sites := [StateMarkerSite]{}
     parser_state_marker_sites(program.items, sites)
     parser_state_marker_migration_from_sites(program, sites.move(), source, diagnostics)
 }
 
-parser_state_marker_migration_from_sites: fn(program: Program, sites_input: &&[StateMarkerSite], source: [U8], diagnostics: &[Diagnostic]) Never! {
+parser_state_marker_migration_from_sites: fn(program: Program, sites_input: ^^[StateMarkerSite], source: [U8], diagnostics: ^[Diagnostic]) Never! {
     sites := sites_input.move()
     if sites.len() == 0 {
         return
@@ -82,7 +82,7 @@ parser_state_marker_migration_from_sites: fn(program: Program, sites_input: &&[S
     }
 }
 
-parser_state_marker_sites: fn(items: [Item], sites: &[StateMarkerSite]) Never! {
+parser_state_marker_sites: fn(items: [Item], sites: ^[StateMarkerSite]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { parser_state_marker_function_sites(function, "", true, sites) }
@@ -120,7 +120,7 @@ parser_state_marker_sites: fn(items: [Item], sites: &[StateMarkerSite]) Never! {
     }
 }
 
-parser_state_marker_function_sites: fn(function: Func, owner: String, free: Bool, sites: &[StateMarkerSite]) Never! {
+parser_state_marker_function_sites: fn(function: Func, owner: String, free: Bool, sites: ^[StateMarkerSite]) Never! {
     loop marker in function.markers {
         if marker.name != MARKER_STATE || marker.declaration_module != None -> next
         paths: parser_state_marker_paths(marker) ?? next
@@ -128,7 +128,7 @@ parser_state_marker_function_sites: fn(function: Func, owner: String, free: Bool
     }
 }
 
-parser_state_marker_owners: fn(items: [Item], owners: &StateMarkerOwners) Never! {
+parser_state_marker_owners: fn(items: [Item], owners: ^StateMarkerOwners) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
@@ -148,7 +148,7 @@ parser_state_marker_owners: fn(items: [Item], owners: &StateMarkerOwners) Never!
 
 // Records `row` as the owner named `name`; a later declaration of the name
 // replaces an earlier one.
-parser_state_marker_owner_add: fn(owners: &StateMarkerOwners, name: String, row: StateMarkerOwner) Never! {
+parser_state_marker_owner_add: fn(owners: ^StateMarkerOwners, name: String, row: StateMarkerOwner) Never! {
     at: name_index(name_intern(owners.names, name))
     loop owners.rows.len() <= at -> owners.rows.push(None)
     owners.rows[at] = Val(row)
@@ -242,8 +242,8 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
     parser_state_marker_combine(edits, source)
 }
 
-// The first parameter takes the state: a bare `self` or `&&self` is written
-// out as `self: &&Owner.A`, and a parameter typed by the owner's name or
+// The first parameter takes the state: a bare `self` or `^^self` is written
+// out as `self: ^^Owner.A`, and a parameter typed by the owner's name or
 // `Self` takes `Owner.A`.
 parser_state_marker_param_edit: fn(function: Func, owner: String, state: String, source: [U8]) -> TextEdit? Never! {
     if function.params.len() == 0 -> return None
@@ -268,10 +268,10 @@ parser_state_marker_param_edit: fn(function: Func, owner: String, state: String,
     Val(TextEdit{span: Span{start: start, end: param.ty_span.end}, new_text: "{owner}.{state}"})
 }
 
-// A byte of a written mark: `^` or `^^`, or the older `&` or `&&`.
+// A byte of a written mark: `^` or `^^`.
 parser_state_marker_mark_byte: fn(byte: U8) -> Bool Never! {
     code: Int{byte}
-    code == 94 || code == 38
+    code == 94
 }
 
 // The result names the state it moves to: a result written from the owner's

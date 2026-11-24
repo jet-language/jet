@@ -5,8 +5,8 @@
 // one branch per member, so the compiler and its emitted code stay linear in
 // the table size. One row per line: `module member[|member…] params return
 // [type_parameter|…]`, fields separated by one space. `params` is `-` (none)
-// or a comma list of positional parameter types, each optionally prefixed `&&`
-// (taken) or `&` (written); `return` is `-` (none) or a type; the optional
+// or a comma list of positional parameter types, each optionally prefixed `^^`
+// (taken) or `^` (written); `return` is `-` (none) or a type; the optional
 // fifth field names the signature's unconstrained type parameters. Types:
 // `String` `Int` `Float` `Bool` `Char`; `u8` / `i32` / `U16` / `I64` (IntN); `[T]` list;
 // `[K:V]` map; `T?` option; `Result<T,E>`; `Union<A,B,…>`; `Name<T,…>`
@@ -41,10 +41,10 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
                 bytes: text.bytes()
                 access := AccessConvention.Read
                 start := 0
-                if core_sig_row_code(bytes, 0) == 38 && core_sig_row_code(bytes, 1) == 38 {
+                if core_sig_row_code(bytes, 0) == 94 && core_sig_row_code(bytes, 1) == 94 {
                     access = AccessConvention.Move
                     start = 2
-                } else if core_sig_row_code(bytes, 0) == 38 {
+                } else if core_sig_row_code(bytes, 0) == 94 {
                     access = AccessConvention.Write
                     start = 1
                 }
@@ -268,11 +268,11 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     jet_builtins lock_fd_identity Int LockIdentity
     jet_builtins lock_path_identity String LockIdentity
     jet_builtins lock_owner &&String,Int FileLock
-    core.files __walk_parallel_raw String,&&String? Result<[WalkEntry],IOError>
+    core.files __walk_parallel_raw String,^^String? Result<[WalkEntry],IOError>
     core.browser __ws_set_timeout WsConn,Int Result<(),WsError>
 
 
-    core.devtools __publish_payload &&String,&&String,&&String,&&String,&&T - T
+    core.devtools __publish_payload &&String,^^String,^^String,^^String,^^T - T
     core.crypto sha256 Union<[u8],String> Digest256
     core.crypto sha1|sha224|sha384|sha3_224|sha3_256|sha3_384|sha3_512 [u8] String
     core.crypto hmac_sha256 [u8],[u8] [u8]
@@ -308,10 +308,10 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.crypto.expert signing_key_bytes SigningKey [u8]
     core.crypto.expert x25519_secret_bytes X25519SecretKey [u8]
     core.crypto.expert shared_secret_bytes SharedSecret [u8]
-    core.crypto.vault prepare_import_signing String,&&[u8] Result<MutationPlan<SigningKey>,VaultError>
-    core.crypto.vault prepare_import_x25519 String,&&[u8] Result<MutationPlan<X25519SecretKey>,VaultError>
-    core.crypto.vault commit_import_signing &&VaultWrite<SigningKey>,&&MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
-    core.crypto.vault commit_import_x25519 &&VaultWrite<X25519SecretKey>,&&MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
+    core.crypto.vault prepare_import_signing String,^^[u8] Result<MutationPlan<SigningKey>,VaultError>
+    core.crypto.vault prepare_import_x25519 String,^^[u8] Result<MutationPlan<X25519SecretKey>,VaultError>
+    core.crypto.vault commit_import_signing &&VaultWrite<SigningKey>,^^MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
+    core.crypto.vault commit_import_x25519 &&VaultWrite<X25519SecretKey>,^^MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
     core.net gethostname - String
     core.net tcp_listen String Result<TCPListener,NetError>
     core.net ip_addr String Result<IPAddr,NetError>
@@ -512,7 +512,7 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.tui resize_event Float,Float TUIEvent
     core.tui capabilities - TUICapabilities
     core.tui key_event_modifiers|timer_event String,Int TUIEvent
-    core.tui io_event String,&&[u8] TUIEvent
+    core.tui io_event String,^^[u8] TUIEvent
     core.tui focus_event Bool TUIEvent
     core.tui interrupt_event|close_event - TUIEvent
     core.tui color_ansi16|color_ansi256 Int TUIColor
@@ -525,8 +525,8 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.tui display_width String Int
     core.tui length|min|max|percent|fill Float TUIConstraint
     core.tui horizontal|vertical - TUIDirection
-    core.tui layout Rect,TUIDirection,&&[TUIConstraint] [Rect]
-    core.tui table &&[String],&&[[String]] UINode
+    core.tui layout Rect,TUIDirection,^^[TUIConstraint] [Rect]
+    core.tui table &&[String],^^[[String]] UINode
     core.tui list_state - TUIListState
     core.tui list_state_select|list_state_offset &&TUIListState,Int TUIListState
     core.tui list_state_selected TUIListState Int
@@ -550,7 +550,7 @@ core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTy
     core.ui.host.shortcuts poll - Result<UIShortcutDispatch?,UIHostError>
     core.ui.host.accessibility attach UINode,UIAccessibility Result<UINode,UIHostError>
     core.ui.host.accessibility project UINode,UINodeID Result<UIAccessibilityProjection?,UIHostError>
-    core.browser.host on String,String,&&fn(WebEvent) -
+    core.browser.host on String,String,^^fn(WebEvent) -
     core.browser.host value String String
     core.web app - App
     core.web page String,String WebPage

@@ -25,7 +25,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [AuthorityPackageGrant](Effects/AuthorityPackageGrant.jet) — Application authority, written grant: a leading package block adds rights under `authority`.
 - [AuthorityPartial](Effects/AuthorityPartial.jet) — Application authority, partial declaration: the written row lists Env, but the program also reads the clock.
 - [AuthorityUndeclared](Effects/AuthorityUndeclared.jet) — Application authority, no declaration: a file with no package block may use every effect nothing denies.
-- [CapabilitySigils](Effects/CapabilitySigils.jet) — Access sigils: the access marker rides the type — `&T` write, `&&T` move/take — and the call site mirrors it.
+- [CapabilitySigils](Effects/CapabilitySigils.jet) — Access sigils: the access marker rides the type — `^T` write, `^^T` move/take — and the call site mirrors it.
 - [DependencyUpgrade](Effects/DependencyUpgrade/) — A dependency upgrade that does more: the package writes no effect rows, `.jet/lock` records each dependency's row, and `jet build --locked` refuses an upgrade that reads files, naming the call path.
 - [Determinism](Effects/Determinism.jet)
 - [EffectAuthority](Effects/EffectAuthority.jet) — `#FX(…) { … }` restricts a block to a fixed authority set: only those listed may be used inside, directly or through any call it reaches.
@@ -41,12 +41,12 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 - [FileScope](Effects/FileScope.jet)
 - [GenericRow](Effects/GenericRow.jet) — A generic type's row belongs to each instance: what `Traced` does through its type parameter is charged to the caller that writes `Traced<Parser>`.
 - [LibraryEffect](Effects/LibraryEffect.jet) — A library effect written as a type: `SQL` implements `Effect`, and the `#FX(…)` above it names the kernel effects a row that names `SQL` may do.
-- [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — &self (write), &&self (consume), self (read).
+- [MethodReceivers](Effects/MethodReceivers.jet) — Method receivers — ^self (write), ^^self (consume), self (read).
 - [ModuleCap](Effects/ModuleCap.jet) — A module cap: `#FX(…)` on a module bounds every function inside it, the function-row rule applied to a whole module; a deterministic offline module denies `Net`, `FS`, `Exec`, `Time` and `Rand`.
 - [PackageEffectKinds](Effects/PackageEffectKinds.jet) — A package effect is a kind of an open effect: `Audit` names `Log` as its parent, a caller that denies `Log` denies `Audit`, and a row naming `Audit` allows no other kind of `Log`.
 - [Pure](Effects/Pure.jet)
 - [ScopedEffects](Effects/ScopedEffects.jet) — An effect argument names a scope: `-[FS.Read("ScopedEffects.jet")]>` reads that one file, a folder scope covers the files below it, and a scoped denial refuses only its folder.
-- [SelfMutation](Effects/SelfMutation.jet) — Self-mutation in `&self` methods.
+- [SelfMutation](Effects/SelfMutation.jet) — Self-mutation in `^self` methods.
 - [SingleUse](Effects/SingleUse.jet) — Single-use (must-consume) values.
 - [SmartContext](Effects/SmartContext.jet) — Smart Context — `#Context(field: value) { … }`.
 - [Taint](Effects/Taint.jet) — External values carry origin facts until a typed decode or an explicit #Scrub gate clears them.

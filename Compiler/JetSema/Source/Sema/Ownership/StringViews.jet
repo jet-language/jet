@@ -1,6 +1,6 @@
 // This rule stage S5 string views. `x: s.trim()`,
 // `x: s.after(sep)` and `x: s.before(sep)` on a local or parameter
-// `String` bind a zero-copy `&str` window into `s`. `String` stays one type,
+// `String` bind a zero-copy `^str` window into `s`. `String` stays one type,
 // so the view-ness lives on the binding (SemaScopeBinding.string_view) and on
 // its read view fact over `s`; the let lowers through TLetTy.StrView and the
 // borrowed TrimView/AfterView/BeforeView operations. An owning destination
@@ -63,7 +63,7 @@ sema_string_view_copies_marker: fn(marker: Marker) -> Bool Never! {
 
 // Rust `copies_explicit`: a package or module `copies: .Explicit` declaration,
 // or the function's own `#Policy(copies: .Explicit)` marker.
-sema_string_view_apply_copies_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
+sema_string_view_apply_copies_policy: fn(table: ^SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
     position: sema_scope_module_policy(table, graph, module_identity)
     table.copies_explicit = table.policy_rows[position].copies_explicit
     loop marker in markers {
@@ -73,7 +73,7 @@ sema_string_view_apply_copies_policy: fn(table: &SemaScopeTable, graph: SemaRegi
 
 // A block `#Policy(copies: .Explicit) { … }` turns the explicit-copy ladder
 // on for its body. Returns the enclosing setting for the matching pop.
-sema_string_view_push_copies_policy: fn(table: &SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
+sema_string_view_push_copies_policy: fn(table: ^SemaScopeTable, declarations: [PolicyDeclaration]) -> Bool Never! {
     previous: table.copies_explicit
     loop declaration in declarations {
         if sema_string_view_copies_declaration(declaration) -> table.copies_explicit = true
@@ -84,7 +84,7 @@ sema_string_view_push_copies_policy: fn(table: &SemaScopeTable, declarations: [P
 // Rust `string_view_call_source`: the owner places of a `trim`/`after`/
 // `before`/`slice` call on a plain local or parameter `String` name; empty
 // for any other initializer.
-sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> [SemaOwnershipPlace] {
+sema_string_view_call_sources: fn(init: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
@@ -112,7 +112,7 @@ sema_string_view_is_slice_call: fn(init: Expr) -> Bool Never! {
 }
 
 // Rust `lower_string_view_init`: the borrowed sibling of the owned String
-// operation, carried as `View<str>` so the place keeps the `&str` shape. A
+// operation, carried as `View<str>` so the place keeps the `^str` shape. A
 // `slice` keeps its operation: only its type becomes the view.
 sema_string_view_lower_init: fn(init: TExpr) -> TExpr? {
     view_type: Type.Apply{name: "View", args: [Type]{Type.Named{name: "str"}}}
@@ -142,7 +142,7 @@ sema_string_view_lower_init: fn(init: TExpr) -> TExpr? {
 }
 
 // Rust `record_string_view`: a read view fact from the binding into its owner.
-sema_string_view_record_binding: fn(state: &SemaOwnershipState, name: String, name_span: Span, places: [SemaOwnershipPlace], scopes: SemaScopeTable) -> Bool Never! {
+sema_string_view_record_binding: fn(state: ^SemaOwnershipState, name: String, name_span: Span, places: [SemaOwnershipPlace], scopes: SemaScopeTable) -> Bool Never! {
     fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: AccessConvention.Read, places: places}
     sema_ownership_record_call_view_batch(state, name, name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
 }
@@ -153,7 +153,7 @@ sema_string_view_binding: fn(scopes: SemaScopeTable, name: String) -> Bool Never
 }
 
 // `.trim()`/`.trim_start()`/`.trim_end()`/`.after()`/`.before()` take the view
-// as the `&str` it is, and a scalar read (sema_string_view_read_method) reads
+// as the `^str` it is, and a scalar read (sema_string_view_read_method) reads
 // it in place.
 sema_string_view_exempt_receiver: fn(receiver: Expr, method: String, argument_count: Int, scopes: SemaScopeTable) -> Bool Never! {
     if method != "trim" && method != "trim_start" && method != "trim_end" && method != "after" && method != "before" && !sema_string_view_read_method(method, argument_count) {
@@ -201,7 +201,7 @@ sema_string_view_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, na
 }
 
 // Rust `report_string_view_unsupported_use`.
-sema_string_view_unsupported_use: fn(name: String, what: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+sema_string_view_unsupported_use: fn(name: String, what: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     owner: sema_string_view_owner(scopes, state, name)
     diagnostic: sema_error("E2307", span, "`{name}` cannot {what} without an owning copy", "`{name}` is a zero-copy view into `{owner}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled", "write `{name}.copy()` first, or remove `copies: .Explicit` to use the default owning copy")
     diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
@@ -210,7 +210,7 @@ sema_string_view_unsupported_use: fn(name: String, what: String, span: Span, sco
 // Under `copies: .Explicit`, a bare string-view read outside the positions
 // that take a view (`.copy()`, interpolation, a view method receiver, an implicit
 // owning copy) is the one refusal for every owning destination.
-sema_string_view_check_read: fn(name: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_string_view_check_read: fn(name: String, span: Span, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
     if !scopes.copies_explicit || context.allow_string_view_read || !sema_string_view_binding(scopes, name) {
         return
     }
@@ -219,7 +219,7 @@ sema_string_view_check_read: fn(name: String, span: Span, scopes: SemaScopeTable
 
 // A string view, or a read view local, read at an owning
 // destination is materialized into an owned copy (Rust `insert_implicit_copy`).
-sema_string_view_materialize: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_string_view_materialize: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx
     previous_read := context.allow_string_view_read
     context.borrow_ctx = true
@@ -275,7 +275,7 @@ sema_string_view_stable_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipSt
 // #1163/#1164: a declared `View<str>` struct field takes a live string view
 // with a stable owner, or a `trim`/`after`/`before` call on a `String` name.
 // An owned `String` is not a view (Rust `report_owned_string_as_view_str`).
-sema_string_view_check_field: fn(value: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_string_view_check_field: fn(value: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     previous_read := context.allow_string_view_read
     context.allow_string_view_read = true
     checked_value := sema_check_expression_with_lambda_escapes(value, None, environment, program, scopes, state, tail_store, context, Val(true), diagnostics)
@@ -304,21 +304,21 @@ sema_string_view_check_field: fn(value: Expr, field_ty: Type, environment: SemaS
     None
 }
 
-sema_string_view_return_boundary: fn(span: Span, diagnostics: &[Diagnostic]) {
+sema_string_view_return_boundary: fn(span: Span, diagnostics: ^[Diagnostic]) {
     diagnostics.push(sema_error("E2307", span, "returned string views need a stable owner relationship", "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `.copy()`"))
 }
 
 // Rust `string_view_return`: a `View<str>` return reads a string-view
 // binding, or a `trim`/`after`/`before` call on a `String` name, as the
 // view itself.
-sema_string_view_return_source: fn(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
+sema_string_view_return_source: fn(value: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
     if value == .Ident(name, _, _) {
         if sema_string_view_binding(scopes, name) -> return true
     }
     sema_string_view_call_sources(value, scopes, state).len() > 0
 }
 
-sema_string_view_return_value: fn(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_string_view_return_value: fn(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     previous_read := context.allow_string_view_read
     context.allow_string_view_read = true
     checked_value := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -335,7 +335,7 @@ sema_string_view_return_value: fn(value: Expr, success: Type, environment: SemaS
 // Rust `check_named_string_view_binding_return` and the `View<str>` arm of
 // the return check: every source of the returned view must be a parameter
 // (the receiver included); the sources join the return provenance.
-sema_string_view_record_return: fn(value: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_string_view_record_return: fn(value: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     span: expr_span(value)
     places := [SemaOwnershipPlace]{}
     if value == .Ident(name, name_span, _) {

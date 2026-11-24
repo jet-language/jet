@@ -1,7 +1,7 @@
 // The sigil meaning table: every sigil the lexer reads has a row for each
 // place it stands in, and a sigil has one meaning in each place. `^` marks a
-// written value and `^^` a taken one; `&` and `&&` still read as those marks
-// beside their operator meanings. Power and exclusive-or left `^`, so `^=` is
+// written value and `^^` a taken one; `&` and `&&` are only operators.
+// Power and exclusive-or left `^`, so `^=` is
 // free; the integer bits are `&`, `|`, `~` and `&~`, with `~` before a value
 // its complement. The tests check the lexer against the table:
 // each row's spelling lexes as its one token, and each token the lexer makes
@@ -162,12 +162,8 @@ SIGIL_MEANINGS: [SigilMeaning]{
     {spelling: ">>", kind: TOKEN_SHR, place: .Infix, meaning: "shifts an integer's bits right"},
     {spelling: ">>", kind: TOKEN_SHR, place: .Type, meaning: "closes two lists of type arguments at once"},
     {spelling: "&&", kind: TOKEN_AND_AND, place: .Infix, meaning: "true when both conditions are; the right one runs only when the left is true"},
-    {spelling: "&&", kind: TOKEN_AND_AND, place: .Type, meaning: "the older spelling of `^^T` and `^^self`"},
-    {spelling: "&&", kind: TOKEN_AND_AND, place: .Prefix, meaning: "the older spelling of a `^^` take mark"},
     {spelling: "||", kind: TOKEN_OR_OR, place: .Infix, meaning: "true when either condition is; the right one runs only when the left is false"},
     {spelling: "&", kind: TOKEN_AMP, place: .Infix, meaning: "bitwise and of two integers"},
-    {spelling: "&", kind: TOKEN_AMP, place: .Type, meaning: "the older spelling of `^T` and `^self`"},
-    {spelling: "&", kind: TOKEN_AMP, place: .Prefix, meaning: "the older spelling of a `^` write mark"},
     {spelling: "|", kind: TOKEN_PIPE, place: .Infix, meaning: "bitwise or of two integers"},
     {spelling: "|", kind: TOKEN_PIPE, place: .Type, meaning: "either alternative type"},
     {spelling: "|", kind: TOKEN_PIPE, place: .Pattern, meaning: "either alternative matches"},

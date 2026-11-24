@@ -1,27 +1,27 @@
-// Mark the value, not the call. `&` or `^` sits on the
+// Mark the value, not the call. `^` or `^^` sits on the
 // named place a call writes or takes, receiver or argument alike.
 Buffer: struct {
     text: String,
 
-    append: fn(&self, chunk: String) { self.text = "{self.text}{chunk}" }
+    append: fn(^self, chunk: String) { self.text = "{self.text}{chunk}" }
 
-    grow: fn(&self) -> Buffer {
+    grow: fn(^self) -> Buffer {
         self.text = "{self.text}!"
         return Buffer{text: self.text.copy()}
     }
 
-    clear: fn(&self) { self = Buffer{text: "cleared"} }
+    clear: fn(^self) { self = Buffer{text: "cleared"} }
 
     len: fn(self) -> Int { return self.text.len() }
 
-    seal: fn(&&self) { print(self.text) }
+    seal: fn(^^self) { print(self.text) }
 }
 
 make_buffer: fn() -> Buffer { return Buffer{text: "fresh"} }
 
 inspect: fn(buffer: Buffer) { print("inspect {buffer.text}") }
 
-edit: fn(buffer: &Buffer) { buffer.append(" edited") }
+edit: fn(buffer: ^Buffer) { buffer.append(" edited") }
 
 run: fn() {
     buf := Buffer{text: "hello"}
