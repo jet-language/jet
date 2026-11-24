@@ -1,0 +1,34 @@
+// A destructuring loop head (`loop {a, b} in rows`, `loop Row{a, ..} in
+// rows`) parses to a loop over a hidden row whose body opens with the head's
+// pattern binding; the formatter prints the head back as written, never the
+// hidden row, and `loop {` with a body stays the infinite loop.
+use jet_parser.[jet_format_source]
+
+LOOP_HEADS_SOURCE: `Dep: struct {
+    package: String,
+    name: String,
+}
+
+run: fn(rows: [{package: String, name: String}], deps: [Dep]) {
+    loop {package, name} in rows {
+        print(package)
+        print(name)
+    }
+    loop { package: from, name: called } in rows { print("{from} {called}") }
+    loop Dep{name, ..} in deps { print(name) }
+    loop (index, row) in rows { print("{index} {row.name}") }
+    sizes: loop {package, name} in rows -> package.len() + name.len()
+    print(sizes)
+    count := 0
+    loop {
+        count += 1
+        if count == 3 -> break
+    }
+}
+`
+
+#Test("loop destructuring heads print back as written") {
+    formatted: jet_format_source(LOOP_HEADS_SOURCE, false)
+    assert(formatted.ok)
+    assert_eq(formatted.text, LOOP_HEADS_SOURCE)
+}

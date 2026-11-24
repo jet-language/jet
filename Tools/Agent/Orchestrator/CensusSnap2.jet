@@ -205,7 +205,7 @@ run: fn() {
     // Self-check pass: the compiler just built checks the compiler packages, then every Core body, with
     // keep-going, as chain s2 does.
     if ["", "1"].contains(process.env_get_or("CENSUS_SELFCHECK", "")) {
-        loop (package, name) in
+        loop {package, name} in
             [{package: "Compiler/JetCLI", name: "selfcheck"}, {package: "Core", name: "selfcheck-core"}] {
             tsv: "{at}/{name}-keep-going.tsv"
             code: pass(jetenv(g, self_jet, Sh{"check --keep-going {"--keep-going-report={tsv}"} --threads 12 {package}"}).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".").timeout(time.duration_seconds(1200)), "{at}/{name}.out", "{at}/{name}.err")

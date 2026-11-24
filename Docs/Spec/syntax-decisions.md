@@ -1392,7 +1392,10 @@ destructure structs, tuples, and lists:
 A tuple record pattern binds only member names, never positions. A name that is not
 a member (including `_`) is an error; use a dotless `{ member: local }` pattern
 to rename. A partial tuple record pattern requires `..` (E0326). Two-binding
-loops, such as `loop (i, item) in xs`, are unchanged.
+loops, such as `loop (i, item) in xs`, are unchanged: they bind the index and
+the item. A loop head takes each item apart with the same brace or struct
+pattern, `loop {a, b} in rows` or `loop Row{a, ..} in rows`, and a paren head
+whose first name is a member of the items is E0182 (D-LOOP-PAIRS1=A).
 
 Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
 statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
