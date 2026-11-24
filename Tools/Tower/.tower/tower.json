@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6999,
-    "rev": 113900,
+    "rev": 113904,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58881,8 +58881,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T13:45:28.377Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T14:27:46.327Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
     {
@@ -76226,35 +76226,6 @@
       "updated": "2026-11-23T13:58:31.422Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
-    },
-    {
-      "id": "c08rzqfr",
-      "num": 6997,
-      "title": "Ballot D-MAP-ENTRY1: how a map writes its key-value entries now that `:` binds a name",
-      "body": "The owner asked to reconsider map syntax because `:` is now the binding spelling. Today a map entry, a map loop item and a map type all use `:` (`[\"apple\": 3]`, `-> n: n * n`, `[String: Int]`), and three clashes follow: `[key: 1]` reads as a field, a map loop item reads as a binding, and `[T: Describe]` is a map, which leaves D-IMPL-STRUCTBOUND1 without a natural bound spelling. The ballot offers `=>` (recommended), `to`, keep `:`, `->`, `=>` in entries only, and keep `:` with computed keys written `[(key): 1]`. Its adversarial review is Docs/Audits/2026-11-24-map-entry-syntax-review.md. Once ratified, this card owns the cutover.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "G1",
-      "milestoneId": null,
-      "phase": "planning",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
-      "tags": [
-        "ballot"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-24T12:52:06.999Z",
-      "updated": "2026-11-24T14:26:25.188Z",
-      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0jjynlr",
@@ -135898,59 +135869,52 @@
       "cardId": "c0sdz4q0",
       "group": "language",
       "title": "Where an impl for a built-in shape writes the bounds on its item types",
-      "situation": "An impl gives a type the methods a trait asks for. Jet now has impls for built-in shapes: every list `[T]`, every fixed array `[T#N]`, every optional `T?` and every map `[K: V]`, all of them unbounded today. Some of these impls only make sense when the items qualify: a list can describe itself only when each of its items can. For a struct, Jet writes this condition in place, `impl Pair<T: Describe>.Describe`. The last draft recommended `impl [T]<T: Describe>.Describe`. You asked why that looks so odd and repetitive, and whether there is a better way. There is: write each name once, with its bound where the name stands. Under today's map syntax the bound needs angle brackets, `impl [<T: Describe>].Describe`, because `[T: Describe]` is a map. If D-MAP-ENTRY1 moves maps to `=>`, the brackets go and the head is `impl [T: Describe].Describe`.",
+      "situation": "An impl gives a type the methods a trait asks for. Jet now has impls for built-in shapes: every list `[T]`, every fixed array `[T#N]`, every optional `T?` and every map `[K: V]`, all of them unbounded today. Some of these impls only make sense when the items qualify: a list can describe itself only when each of its items can. For a struct, Jet writes this condition in place, `impl Pair<T: Describe>.Describe`. The last draft recommended `impl [T]<T: Describe>.Describe`. You asked why that looks so odd and repetitive, and whether there is a better way. There is: write each name once, with its bound where the name stands. Under today's map syntax the bound needs angle brackets, `impl [<T: Describe>].Describe`, because `[T: Describe]` is a map.",
       "gist": "How does an impl for every list, array, optional or map say what its item types must support, writing each name once?",
       "lesson": "A trait names an ability, such as Describe. An impl gives one type that ability. A bound is a requirement on a type parameter, written `T: Describe`: only types with Describe meet it. A conditional impl applies only where its bounds hold, so `Pair<Int>` can describe itself while `Pair<String>` is refused. Every Jet bound is written where its name is declared: `fn<T: Describe>`, `impl Pair<T: Describe>`.",
       "explainer": "Think of a shop sign: \"gift wrapping for any box, if what is inside is not fragile\". The condition belongs next to the thing it is about. For a struct, Jet writes it inside the struct's own brackets, `Pair<T: Describe>`. For a list, the recommendation writes it inside the list's brackets, in its own small brackets so it is never mistaken for a map: `[<T: Describe>]`. If maps stop using `:`, those small brackets can go: `[T: Describe]`.",
       "story": "Ana writes a Describe trait for her report tool and implements it for Int. She wants `[1, 2].describe()` to print `[#1, #2]`, and `[\"x\"].describe()` to be refused because String has no Describe. She writes `impl [T].Describe` and calls `item.describe()` inside it. The checker refuses the call with Jet.MissingGenericBound, and its edit rewrites the head to `impl [<T: Describe>].Describe`. Later she adds maps the same way: `impl [K: <V: Describe>].Describe`.",
       "inWild": "// Rust: a list after `impl`; const N declares its kind.\nimpl<T: Describe> Describe for Vec<T> { … }\nimpl<T: Describe, const N: usize> Describe for [T; N] { … }\n// Swift: a `where` clause over the library's declared names; `some` bounds a slot anonymously.\nextension Array: Describe where Element: Describe { … }\nfunc describeAll(_ items: [some Describe]) -> String { … }\n// Haskell: a context before the head; lower-case variables are fresh.\ninstance Describe a => Describe [a] where …\n// Scala 3: a given with a context bound on the declared name.\ngiven [T: Describe]: Describe[List[T]] with …\n// Kotlin: an extension declares its parameter before the receiver.\nfun <T : Describe> List<T>.describe(): String = …",
-      "detail": "Today. Checked on the tip23 compiler (jet a0.0.46-dev, dev 45bbcdbd34). The probes are in `$JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/owner-r1-probes` (p1-p5, q01-q21, r01-r13), with outputs in `outputs-tip23.txt`. The unbounded heads have landed. The spec documents them (\"The head carries no bounds\"), and r01 prints `list of 2`, `array of 2`, `some` and `map of 1`.\n\nA body that calls the trait on an item is refused with Jet.MissingGenericBound (r02). Its fix says \"Add `<T: Describe>` to the generic parameter list\". A structural head has no such list, and the fix carries no edit.\n\nWhat each spelling does today:\n\n- `impl [T]<T: Describe>.Describe`, the last draft's A, stops at `<` with \"Expected `.` and the trait after a structural `impl` head\" (r09).\n\n- `impl<T: Describe> [T].Describe` stops at `<` with \"Expected a name after `impl`\" (p2).\n\n- `impl [T: Describe].Describe` is read as a map head whose value names a type. It is refused with \"`impl [T: Describe]` names the type `Describe` in its head\" (r10). As a type, `[String: Describe]{\"a\": 1}` is a valid map of trait values (p4).\n\n- `[<T: Describe>]` is refused at `<` as a head and as a type: \"Expected a type, found `<`\" (r03, r04). `impl <T: Describe>?.Describe` and `impl [K: <V: Describe>].Describe` stop at the same `<` (r12, r13). So the slot form means nothing today.\n\n- `(T: Int)` in a type position is not a named tuple. It is refused with \"Expected `,` between tuple type members\" (r08), so `(T: Describe)?` is free too.\n\n- `impl Option<T: Describe>.Describe` is Jet.ImplOnBuiltinType (q19), though `Option<Int>` is the same type as `Int?` (q18). `List<Int>` is not a type (r05). `Map<String, Int>` is not the map type either (r05).\n\nWhat changed since the last draft. The trait-value path now works: `Pair<Describe>{a: 1}.describe()` prints `pair #1` (q10). `[Describe]{1, 2}` passed to `fn<T: Describe>(xs: [T])` prints `[#1, #2]` (q13). A struct named `T` in scope no longer captures `impl Pair<T: Describe>`; both calls print (q15b).\n\nRule 1 is live: a head name that resolves to a type is refused with \"`impl [T]` names the type `T` in its head\" (r06). Its fix, \"Rename the parameter, as in `T` or `Item`\", suggests the very name it refused.\n\nThe one rule. Every bound in Jet is `Name: Bound`, written where the name is declared: `fn<T: Describe>`, `x: Int` and `impl Pair<T: Priced>`. In the last one, the bracket list belongs to Pair. A built-in shape has no bracket list of its own, so its slot needs one while `:` also spells a map. Once D-MAP-ENTRY1 takes `:` out of maps, `:` inside `[…]` is never a map, and the slot takes the bound bare. Options A and B are this one rule, before and after that change.\n\nDependency on D-MAP-ENTRY1 (open). B needs an outcome there that takes `:` out of the map type: its A (`=>`), B (`to`) or D (`->`). Then B is clean, A's brackets are noise, and `jet fix` rewrites every A head to B. Under its C, E or F, `[T: Describe]` stays a map type (p4, r10), B is impossible, and A is the clean form.\n\nNew work under every option:\n\n(a) Map keys. No generic `K` is a map key today: q09 and q09b give Jet.InvalidMapKeyType whatever its bound. Inside a `[K: V]` impl, `K` gets an implied key rule, as Swift implies `Key: Hashable`. The same rule extends to `fn<K, V>(m: [K: V])`.\n\n(b) Fix edits. The MissingGenericBound fix (r02) carries an edit that writes the chosen bounded head. Rule 1's fix (r06) proposes a name that is not a type in scope. The r10 refusal of `[T: Describe]`, when `Describe` is a trait, offers the bounded head.\n\n(c) The conformance table `sema_type_builtin_bound_satisfied` (TypeRelations.jet:2720). Its List, Option, FixedList and Map rows make `[1, 2]` Printable and `[[1]]` Equatable with no written bound (r11). They move to Core source impls in the chosen spelling, and the rows are deleted. Tuple rows stay; Result moves with its nominal head.\n\n(d) Tooling. The chosen head reaches the tree-sitter `impl_block`, the VS Code and Zed grammars, the editor-grammar guard case and the formatter's head printer. It also reaches LSP hover and definition, `sema_type_conditional_impl_head` and the Spellings ledger.\n\nStill open, owed on their own cards: `T` is not inferred from a `[Int#2]` argument to `fn<T, N: Int>(xs: [T#N])` (q02b). A `[T]` impl's methods do not reach a `[T#N]` value.\n\nConsidered and not offered:\n\n- Nominal family names (`impl List<T: Describe>`) would add a second written name for every shape (r05). D-BUILTIN-METHOD1 chose the sigil heads.\n\n- A trailing `where` clause is the shape you rejected for struct impls in D-IMPL-COND1.\n\n- An anonymous slot bound, as in Swift's `[some Describe]`, leaves the body no name for the item type and adds a keyword.\n\nEvery option shows the same program: a Describe trait, an Int impl and bounded impls for all four shapes. Five calls follow, with the same results in each option. A sixth, refused call is a comment.",
+      "detail": "Today. Checked on the tip23 compiler (jet a0.0.46-dev, dev 45bbcdbd34). The probes are in `$JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/owner-r1-probes` (p1-p5, q01-q21, r01-r13), with outputs in `outputs-tip23.txt`. The unbounded heads have landed. The spec documents them (\"The head carries no bounds\"), and r01 prints `list of 2`, `array of 2`, `some` and `map of 1`.\n\nA body that calls the trait on an item is refused with Jet.MissingGenericBound (r02). Its fix says \"Add `<T: Describe>` to the generic parameter list\". A structural head has no such list, and the fix carries no edit.\n\nWhat each spelling does today:\n\n- `impl [T]<T: Describe>.Describe`, the last draft's A, stops at `<` with \"Expected `.` and the trait after a structural `impl` head\" (r09).\n\n- `impl<T: Describe> [T].Describe` stops at `<` with \"Expected a name after `impl`\" (p2).\n\n- `impl [T: Describe].Describe` is read as a map head whose value names a type. It is refused with \"`impl [T: Describe]` names the type `Describe` in its head\" (r10). As a type, `[String: Describe]{\"a\": 1}` is a valid map of trait values (p4).\n\n- `[<T: Describe>]` is refused at `<` as a head and as a type: \"Expected a type, found `<`\" (r03, r04). `impl <T: Describe>?.Describe` and `impl [K: <V: Describe>].Describe` stop at the same `<` (r12, r13). So the slot form means nothing today.\n\n- `(T: Int)` in a type position is not a named tuple. It is refused with \"Expected `,` between tuple type members\" (r08), so `(T: Describe)?` is free too.\n\n- `impl Option<T: Describe>.Describe` is Jet.ImplOnBuiltinType (q19), though `Option<Int>` is the same type as `Int?` (q18). `List<Int>` is not a type (r05). `Map<String, Int>` is not the map type either (r05).\n\nWhat changed since the last draft. The trait-value path now works: `Pair<Describe>{a: 1}.describe()` prints `pair #1` (q10). `[Describe]{1, 2}` passed to `fn<T: Describe>(xs: [T])` prints `[#1, #2]` (q13). A struct named `T` in scope no longer captures `impl Pair<T: Describe>`; both calls print (q15b).\n\nRule 1 is live: a head name that resolves to a type is refused with \"`impl [T]` names the type `T` in its head\" (r06). Its fix, \"Rename the parameter, as in `T` or `Item`\", suggests the very name it refused.\n\nThe one rule. Every bound in Jet is `Name: Bound`, written where the name is declared: `fn<T: Describe>`, `x: Int` and `impl Pair<T: Priced>`. In the last one, the bracket list belongs to Pair. A built-in shape has no bracket list of its own, so its slot needs one while `:` also spells a map.\n\nNew work under every option:\n\n(a) Map keys. No generic `K` is a map key today: q09 and q09b give Jet.InvalidMapKeyType whatever its bound. Inside a `[K: V]` impl, `K` gets an implied key rule, as Swift implies `Key: Hashable`. The same rule extends to `fn<K, V>(m: [K: V])`.\n\n(b) Fix edits. The MissingGenericBound fix (r02) carries an edit that writes the chosen bounded head. Rule 1's fix (r06) proposes a name that is not a type in scope. The r10 refusal of `[T: Describe]`, when `Describe` is a trait, offers the bounded head.\n\n(c) The conformance table `sema_type_builtin_bound_satisfied` (TypeRelations.jet:2720). Its List, Option, FixedList and Map rows make `[1, 2]` Printable and `[[1]]` Equatable with no written bound (r11). They move to Core source impls in the chosen spelling, and the rows are deleted. Tuple rows stay; Result moves with its nominal head.\n\n(d) Tooling. The chosen head reaches the tree-sitter `impl_block`, the VS Code and Zed grammars, the editor-grammar guard case and the formatter's head printer. It also reaches LSP hover and definition, `sema_type_conditional_impl_head` and the Spellings ledger.\n\nStill open, owed on their own cards: `T` is not inferred from a `[Int#2]` argument to `fn<T, N: Int>(xs: [T#N])` (q02b). A `[T]` impl's methods do not reach a `[T#N]` value.\n\nConsidered and not offered:\n\n- Nominal family names (`impl List<T: Describe>`) would add a second written name for every shape (r05). D-BUILTIN-METHOD1 chose the sigil heads.\n\n- A trailing `where` clause is the shape you rejected for struct impls in D-IMPL-COND1.\n\n- An anonymous slot bound, as in Swift's `[some Describe]`, leaves the body no name for the item type and adds a keyword.\n\nEvery option shows the same program: a Describe trait, an Int impl and bounded impls for all four shapes. Five calls follow, with the same results in each option. A sixth, refused call is a comment.",
       "options": [
         {
           "key": "A",
           "name": "Bound in the slot, in angle brackets",
           "detail": "Each name is written once. A bounded parameter is declared in its own slot, in angle brackets: `impl [<T: Describe>].Describe`. A parameter without a bound stays bare, so `impl [T].Describe` is unchanged, and so is `impl Pair<T: Priced>.Describe`.\n\nThe rule is the one every Jet bound already follows: `Name: Bound` inside `<…>`, where the name is declared. A struct's slot is already inside `Pair<…>`. A list's slot is inside `[…]`, where `[T: Describe]` is a map, so the slot gets its own brackets. Nothing in the head can be read as a map, because `<` cannot start a type (r03, r04).",
-          "technical": "Grammar. Inside a structural head, a slot is a bare name or a bounded slot `<Name: Bounds>`. Bounds are read by the reader `fn<…>` uses. Several bounds are `<T: [Describe, Encode]>`, and a parameterized trait closes with the existing `>>` splitter (`<T: Holds<Int>>`).\n\nOn an optional, a parameterized bound closes with `>>?.`, as in `impl <T: Holds<Int>>?.Describe`. The head parser splits it as it splits `?.` in the unbounded `impl T?.X` (r01). The four heads are `[<T: B>]`, `[<T: B>#N]`, `<T: B>?` and `[<K: B>: <V: B>]`, with either map slot bare. N is never bounded; it is a number by its `#` position, as in the unbounded head.\n\nThe optional's `<T: B>?.Describe` lexes as `>` followed by the optional-chain token `?.`, which the head parser already splits (Rule 2). It begins with `impl <`, the start of Rust's leading list. So the parser reads the token after the closing `>`: `?` makes it this slot form, and anything else is the D habit, refused with an edit.\n\nBinding. A bounded slot declares its name, as `fn<T: …>` does. So a type named `T` in scope never turns `[<T: Describe>]` into a concrete head; inside the impl the parameter shadows it (q15b is the nominal analogue). Bare slots keep Rule 1.\n\nMechanism. The parser stores each slot's bounds in ImplDef.type_params, in head order, as it does for `Pair<T: …>`. Registration copies them onto the impl's conditions, and the checker reads them as it reads nominal conditions. Nothing new runs at run time, and each element type gets its own instance.\n\nRefusals, each one error with an edit and no cascade:\n\n- `[<T: Describe>]` outside an impl head gets the generic-function form `fn<T: Describe>(xs: [T])`.\n\n- `impl [T]<T: Describe>.Describe` (E) and `impl<T: Describe> [T].Describe` (D) get `impl [<T: Describe>].Describe`.\n\n- `impl Option<T: Describe>.Describe` gets `impl <T: Describe>?.Describe`.\n\n- `impl [T: Describe].Describe`, when Describe is a trait, gets `impl [<T: Describe>].Describe` in place of r10's rename fix.\n\n- A body that calls a trait method on a bare parameter is Jet.MissingGenericBound, whose edit rewrites that slot.\n\n- `impl [T].Describe` beside `impl [<T: Describe>].Describe` is Jet.DuplicateTraitImpl, conditions or not.\n\n- A nested head is Rule 3's refusal. `[[<T: Describe>]]` gets `[<T: Describe>]`, because the inner list then qualifies through the same impl.\n\nEdge cases. `[[7]]` meets `T: Describe` because `[Int]` has Describe. Inside `fn<U: Describe>(items: [U])`, `items.describe()` meets the condition through U's declared bound. `[Describe]{1, 2}.describe()` qualifies, because a trait value has its trait (q13 is the generic-function analogue). An empty value still calls the impl, because the bound is checked on the type.\n\nBeginner path: write `impl [T].Describe`, call `item.describe()` and accept the edit, which writes `[<T: Describe>]`. Expert path: several bounds, bounds on K and V, generic callers, and `[<T: Holds<Int>>#N]`.",
+          "technical": "Grammar. Inside a structural head, a slot is a bare name or a bounded slot `<Name: Bounds>`. Bounds are read by the reader `fn<…>` uses. Several bounds are `<T: [Describe, Encode]>`, and a parameterized trait closes with the existing `>>` splitter (`<T: Holds<Int>>`).\n\nOn an optional, a parameterized bound closes with `>>?.`, as in `impl <T: Holds<Int>>?.Describe`. The head parser splits it as it splits `?.` in the unbounded `impl T?.X` (r01). The four heads are `[<T: B>]`, `[<T: B>#N]`, `<T: B>?` and `[<K: B>: <V: B>]`, with either map slot bare. N is never bounded; it is a number by its `#` position, as in the unbounded head.\n\nThe optional's `<T: B>?.Describe` lexes as `>` followed by the optional-chain token `?.`, which the head parser already splits (Rule 2). It begins with `impl <`, the start of Rust's leading list. So the parser reads the token after the closing `>`: `?` makes it this slot form, and anything else is the C habit, refused with an edit.\n\nBinding. A bounded slot declares its name, as `fn<T: …>` does. So a type named `T` in scope never turns `[<T: Describe>]` into a concrete head; inside the impl the parameter shadows it (q15b is the nominal analogue). Bare slots keep Rule 1.\n\nMechanism. The parser stores each slot's bounds in ImplDef.type_params, in head order, as it does for `Pair<T: …>`. Registration copies them onto the impl's conditions, and the checker reads them as it reads nominal conditions. Nothing new runs at run time, and each element type gets its own instance.\n\nRefusals, each one error with an edit and no cascade:\n\n- `[<T: Describe>]` outside an impl head gets the generic-function form `fn<T: Describe>(xs: [T])`.\n\n- `impl [T]<T: Describe>.Describe` (D) and `impl<T: Describe> [T].Describe` (C) get `impl [<T: Describe>].Describe`.\n\n- `impl Option<T: Describe>.Describe` gets `impl <T: Describe>?.Describe`.\n\n- `impl [T: Describe].Describe`, when Describe is a trait, gets `impl [<T: Describe>].Describe` in place of r10's rename fix.\n\n- A body that calls a trait method on a bare parameter is Jet.MissingGenericBound, whose edit rewrites that slot.\n\n- `impl [T].Describe` beside `impl [<T: Describe>].Describe` is Jet.DuplicateTraitImpl, conditions or not.\n\n- A nested head is Rule 3's refusal. `[[<T: Describe>]]` gets `[<T: Describe>]`, because the inner list then qualifies through the same impl.\n\nEdge cases. `[[7]]` meets `T: Describe` because `[Int]` has Describe. Inside `fn<U: Describe>(items: [U])`, `items.describe()` meets the condition through U's declared bound. `[Describe]{1, 2}.describe()` qualifies, because a trait value has its trait (q13 is the generic-function analogue). An empty value still calls the impl, because the bound is checked on the type.\n\nBeginner path: write `impl [T].Describe`, call `item.describe()` and accept the edit, which writes `[<T: Describe>]`. Expert path: several bounds, bounds on K and V, generic callers, and `[<T: Holds<Int>>#N]`.",
           "code": "// PROPOSED (A): each bounded name is declared once, in its own slot, in angle brackets.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [<T: Describe>].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [<T: Describe>#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl <T: Describe>?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: <V: Describe>].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
         },
         {
           "key": "B",
-          "name": "Bare bound in the slot, after D-MAP-ENTRY1 frees `:`",
-          "detail": "This is A's rule without the brackets, and it only becomes possible once D-MAP-ENTRY1 takes `:` out of maps (its A, B or D). Shown with `=>`. The bound is written bare where the name stands, `impl [T: Describe].Describe`, exactly as `fn<T: Describe>`, `x: Int` and `impl Pair<T: Priced>` write theirs. A fixed array writes `[T: Describe#N]`, an optional `(T: Describe)?`, and a map `[K => V: Describe]`. Under today's map syntax `[T: Describe]` is a map type (p4), so B cannot be chosen alone.",
-          "technical": "B needs D-MAP-ENTRY1 ratified with `=>`, `to` or `->` for maps; the text shows `=>`. After that, `:` always has a name on its left, and a bracket with `Name:` inside is never a map. Without it, a head's meaning would depend on whether the name after `:` is a trait.\n\nGrammar. A slot is `Name` or `Name: Bounds`. The fixed array's `#N` follows the bounds (`[T: Describe#N]`); a bound never takes `#`, so the bound reader stops there. The optional needs parentheses, `(T: Describe)?`, because `T: Describe?` would read `Describe?` as the bound. `(T: Int)` is no type today (r08), so the parentheses are free.\n\nThey reuse the existing type grouping, as in `(Int | String)?` (q20), rather than a new form. The map value is `[K => V: Describe]`, and the key `[K: Describe => V]`. The bound reader stops at `=>`, as it stops at `#`.\n\nBinding and mechanism are as in A: a bounded slot declares its name, bare slots keep Rule 1, and the bounds go to ImplDef.type_params.\n\nMigration from A, if A ships first, is a `jet fix` rewrite that only moves brackets. It turns `[<T: B>]` into `[T: B]` and `[<T: B>#N]` into `[T: B#N]`. It turns `<T: B>?` into `(T: B)?` and `[K: <V: B>]` into `[K => V: B]`. A bounded key moves the same way: `[<K: B>: V]` becomes `[K: B => V]`, and `[<K: B1>: <V: B2>]` becomes `[K: B1 => V: B2]`.\n\nRefusals. `[T: Describe]` outside an impl head gets `fn<T: Describe>(xs: [T])`.\n\nOne token separates `[T: Describe]`, a list whose items need Describe, from `[T => Describe]`, a map to Describe values. In an impl head the map reading is Rule 1's refusal, as r10 refuses it today, and its edit offers `[T: Describe]`. So a slip is an error at the slip, never a silent second meaning.\n\nIn a head, a bound that names no trait, such as a stale `impl [K: V]`, is refused as a map written the old way, with the edit `[K => V]`. D-MAP-ENTRY1's `jet fix` rewrites every `impl [K: V]` head before B reads heads this way. The D and E habits and `impl Option<T: Describe>` get the B head as their edit. The rest are as in A.\n\nCosts. Several bounds read `[T: [Describe, Encode]]`, which looks like a list of traits, and `[T: [Describe, Encode]#N]` like a fixed list of them. The optional is the one shape that needs parentheses.\n\nBeginner path: as in A, and the head reads like a function parameter. Expert path: as in A.",
-          "code": "// PROPOSED (B), only after D-MAP-ENTRY1 frees `:`, shown with its `=>`: the bound is bare where the name stands.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T: Describe].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T: Describe#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl (T: Describe)?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K => V: Describe].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                  // [#1, #2]\n    print([Int#2]{3, 4}.describe())           // 2 items: #3, #4\n    print(Int?{5}.describe())                 // some #5\n    print([String => Int]{\"a\" => 6}.describe()) // {#6}\n    print([[7]].describe())                   // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
+          "name": "Bounds inferred from the impl bodies",
+          "detail": "Nothing is written: `impl [T].Describe` whose body calls `item.describe()` applies only to lists whose items have Describe. The checker reads the bounds off the bodies. It is the shortest form, but whether a list type has a trait then depends on what the impl's code happens to call, and Jet does not infer bounds anywhere else (r02).",
+          "technical": "Mechanism. Checking an impl's bodies collects every trait member called on a head parameter, including through generic helpers the body calls, and makes those traits the impl's conditions. A call site then checks them as it checks written conditions.\n\nCosts that a redesign cannot remove:\n- A body edit changes public conformance. Deleting the last `item.describe()` widens the impl to every list. Adding a call to `item.encode()` narrows it. Then code far away that passed a `[Opaque]` stops compiling, at a head that names no condition.\n\n- Signatures depend on bodies. A module's interface (which list types have Describe) is known only after its impl bodies are checked. Every reader of interfaces needs them first: the semantic index, LSP hover, incremental rebuilds and separately checked packages.\n\n- It reverses the ratified unbounded heads. The spec says \"The head carries no bounds, so the methods ask nothing of `T` that every type does not offer\". Under B, `impl [T].SequenceTools` would silently gain conditions from its bodies.\n\n- Two rules. A generic function never infers its bounds: q06 and r02 refuse the call with Jet.MissingGenericBound. Under B, an impl infers and a function does not.\n\n- Inference through helpers is transitive. A bound reached through `helper(item)` needs the helper's bounds, so a change to a helper in another module changes this impl's conformance.\n\nMitigation, kept under every other option: the refusal of `item.describe()` in an unbounded impl carries an edit that writes the bound. The edit gives B's convenience at writing time, and the head still states the condition.\n\nPrior art. Haskell infers a function's context but requires an instance's context to be written, except `deriving`. Jet's derive rule (\"derive when every field qualifies\") is that exception, and it stays. Before C++20, a template's requirements were implicit in its body. Its errors surfaced deep inside instantiations, and C++20 added concepts so that a condition could be written in the head.\n\nBeginner path: write the body and nothing else. Expert path: none, since conditions cannot be stated or narrowed beyond what the body calls.",
+          "code": "// PROPOSED (B): no bound is written; each impl's conditions are read off its bodies.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe, because the body calls item.describe().\nimpl [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing, since no body touches them.\nimpl [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so the list impl's inferred condition fails.\n}"
         },
         {
           "key": "C",
-          "name": "Bounds inferred from the impl bodies",
-          "detail": "Nothing is written: `impl [T].Describe` whose body calls `item.describe()` applies only to lists whose items have Describe. The checker reads the bounds off the bodies. It is the shortest form, but whether a list type has a trait then depends on what the impl's code happens to call, and Jet does not infer bounds anywhere else (r02).",
-          "technical": "Mechanism. Checking an impl's bodies collects every trait member called on a head parameter, including through generic helpers the body calls, and makes those traits the impl's conditions. A call site then checks them as it checks written conditions.\n\nCosts that a redesign cannot remove:\n- A body edit changes public conformance. Deleting the last `item.describe()` widens the impl to every list. Adding a call to `item.encode()` narrows it. Then code far away that passed a `[Opaque]` stops compiling, at a head that names no condition.\n\n- Signatures depend on bodies. A module's interface (which list types have Describe) is known only after its impl bodies are checked. Every reader of interfaces needs them first: the semantic index, LSP hover, incremental rebuilds and separately checked packages.\n\n- It reverses the ratified unbounded heads. The spec says \"The head carries no bounds, so the methods ask nothing of `T` that every type does not offer\". Under C, `impl [T].SequenceTools` would silently gain conditions from its bodies.\n\n- Two rules. A generic function never infers its bounds: q06 and r02 refuse the call with Jet.MissingGenericBound. Under C, an impl infers and a function does not.\n\n- Inference through helpers is transitive. A bound reached through `helper(item)` needs the helper's bounds, so a change to a helper in another module changes this impl's conformance.\n\nMitigation, kept under every other option: the refusal of `item.describe()` in an unbounded impl carries an edit that writes the bound. The edit gives C's convenience at writing time, and the head still states the condition.\n\nPrior art. Haskell infers a function's context but requires an instance's context to be written, except `deriving`. Jet's derive rule (\"derive when every field qualifies\") is that exception, and it stays. Before C++20, a template's requirements were implicit in its body. Its errors surfaced deep inside instantiations, and C++20 added concepts so that a condition could be written in the head.\n\nBeginner path: write the body and nothing else. Expert path: none, since conditions cannot be stated or narrowed beyond what the body calls.",
-          "code": "// PROPOSED (C): no bound is written; each impl's conditions are read off its bodies.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe, because the body calls item.describe().\nimpl [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing, since no body touches them.\nimpl [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so the list impl's inferred condition fails.\n}"
-        },
-        {
-          "key": "D",
           "name": "A bound list right after `impl`",
           "detail": "The parameters are declared with their bounds right after `impl`, as Rust and Scala do: `impl<T: Describe> [T].Describe`. The bound is written once, but the name still appears twice, in the list and in the shape. Struct impls keep `impl Pair<T: Priced>` unless D-IMPL-COND1 is reopened, and reopening it turns them into `impl<T: Priced> Pair<T>.Describe`, which repeats the name too.",
           "technical": "Grammar: `impl` List? Head `.` Trait, with the list read by the `fn<…>` reader (N written `N: Int`). The list declares the head's parameters, so a type named `T` in scope never collides with a bounded head.\n\nTwo ways to resolve the clash with struct impls, and the cost of each:\n- Keep `impl Pair<T: Priced>.Describe` for structs. A bounded impl then has two places for its list, chosen by the head's kind.\n- Make the prefix the only place. That reopens the ratified D-IMPL-COND1 and rewrites its seven test sites and spec paragraph. Every struct impl then reads `impl<T: Priced> Pair<T>.Describe`, naming T twice where it names it once today.\n\nEither way, the repetition the owner asked about remains: the list names T, and the shape names it again.\n\nRefusals: `impl [T]<T: Describe>.Describe`, `impl [<T: Describe>].Describe` and `impl [T: Describe].Describe` (when Describe is a trait) each get the prefix list as their edit. The tree-sitter impl block already admits a prefix type-parameter list.\n\nBeginner path: as in A, with the edit writing the prefix. Expert path: as in A.",
-          "code": "// PROPOSED (D): the bound list follows `impl`, as `fn<T: Describe>` follows `fn`.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl<T: Describe> [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl<T: Describe, N: Int> [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl<T: Describe> T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl<K, V: Describe> [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
+          "code": "// PROPOSED (C): the bound list follows `impl`, as `fn<T: Describe>` follows `fn`.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl<T: Describe> [T].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl<T: Describe, N: Int> [T#N].Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl<T: Describe> T?.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl<K, V: Describe> [K: V].Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}"
         },
         {
-          "key": "E",
+          "key": "D",
           "name": "A bound list after the shape (the last draft)",
           "detail": "The last draft's recommendation, kept for comparison. The shape declares the names, then a list repeats them with their bounds, where `impl Pair<T: Priced>` puts its list: `impl [T]<T: Describe>.Describe`. Every name appears twice, and no other language does this. Today it stops at the `<` (r09).",
-          "technical": "Grammar: `impl` Head List? `.` Trait. The list names every head parameter in head order, T then `N: Int` for `[T#N]` and K then V for `[K: V]`, and each may carry bounds. Head and list are checked against each other, with an edit for a wrong name, order or count.\n\nWhy it was drafted: it puts the list after the type, where struct impls put theirs. But for `Pair` that list is the type's own argument list, so each name appears once. For a shape, the list is an extra list after the shape, so each name appears twice. A's slot form keeps the struct rule (the bound sits where the name is) without the repeat.\n\nRefusals: the D habit and `impl Option<T: Describe>` get the E head as their edit. Beginner and expert paths are as in A, with longer heads.",
-          "code": "// PROPOSED (E), the last draft's A: a bound list follows the shape and repeats its names.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T]<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N]<T: Describe, N: Int>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V]<K, V: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
+          "technical": "Grammar: `impl` Head List? `.` Trait. The list names every head parameter in head order, T then `N: Int` for `[T#N]` and K then V for `[K: V]`, and each may carry bounds. Head and list are checked against each other, with an edit for a wrong name, order or count.\n\nWhy it was drafted: it puts the list after the type, where struct impls put theirs. But for `Pair` that list is the type's own argument list, so each name appears once. For a shape, the list is an extra list after the shape, so each name appears twice. A's slot form keeps the struct rule (the bound sits where the name is) without the repeat.\n\nRefusals: the C habit and `impl Option<T: Describe>` get the D head as their edit. Beginner and expert paths are as in A, with longer heads.",
+          "code": "// PROPOSED (D), the last draft's A: a bound list follows the shape and repeats its names.\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl Int.Describe {\n    describe: fn(self) -> String { \"#{self}\" }\n}\n\n// Every list whose items have Describe.\nimpl [T]<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"[{parts.join(\", \")}]\"\n    }\n}\n\n// Every fixed array whose items have Describe; N is its length, an Int.\nimpl [T#N]<T: Describe, N: Int>.Describe {\n    describe: fn(self) -> String {\n        parts: loop item in self -> item.describe()\n        \"{N} items: {parts.join(\", \")}\"\n    }\n}\n\n// Every optional whose value has Describe.\nimpl T?<T: Describe>.Describe {\n    describe: fn(self) -> String {\n        value: self ?? return \"none\"\n        \"some {value.describe()}\"\n    }\n}\n\n// Every map whose values have Describe; keys need nothing here.\nimpl [K: V]<K, V: Describe>.Describe {\n    describe: fn(self) -> String {\n        parts: loop value in self.values() -> value.describe()\n        \"{{{parts.join(\", \")}}}\"\n    }\n}\n\nrun: fn() {\n    print([1, 2].describe())                // [#1, #2]\n    print([Int#2]{3, 4}.describe())         // 2 items: #3, #4\n    print(Int?{5}.describe())               // some #5\n    print([String: Int]{\"a\": 6}.describe()) // {#6}\n    print([[7]].describe())                 // [[#7]]: the inner list qualifies too\n    // [\"x\"].describe() is refused with Jet.TraitNotImplemented:\n    // String has no Describe, so no list impl applies.\n}\n"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Parameters are declared in a list after `impl`, before use, so a head name is never a type in scope; `const N: usize` declares a number's kind. Each name appears twice, in the list and in the type, as in D. Rust also has `where`. Source: Rust Reference, Implementations and Generics (doc.rust-lang.org/reference/items/implementations.html).",
+          "note": "Parameters are declared in a list after `impl`, before use, so a head name is never a type in scope; `const N: usize` declares a number's kind. Each name appears twice, in the list and in the type, as in C. Rust also has `where`. Source: Rust Reference, Implementations and Generics (doc.rust-lang.org/reference/items/implementations.html).",
           "code": "impl<T: Describe> Describe for Vec<T> { … }\nimpl<T: Describe, const N: usize> Describe for [T; N] { … }"
         },
         {
           "lang": "Swift",
-          "note": "Extensions name the library's declared parameters (Element, Wrapped, Key, Value) in a `where` clause, so nothing repeats, but the names are fixed by the library. Requirements the type states (`Key: Hashable`) are implied, the rule this ballot adopts for map keys. SE-0341 lets a parameter bound its slot anonymously, `[some Describe]`: the bound at the slot, as in A and B, but with no name for the body. Sources: SE-0143 Conditional conformances; SE-0341 Opaque parameter declarations.",
+          "note": "Extensions name the library's declared parameters (Element, Wrapped, Key, Value) in a `where` clause, so nothing repeats, but the names are fixed by the library. Requirements the type states (`Key: Hashable`) are implied, the rule this ballot adopts for map keys. SE-0341 lets a parameter bound its slot anonymously, `[some Describe]`: the bound at the slot, as in A, but with no name for the body. Sources: SE-0143 Conditional conformances; SE-0341 Opaque parameter declarations.",
           "code": "extension Array: Describe where Element: Describe { … }\nfunc describeAll(_ items: [some Describe]) -> String { … }"
         },
         {
@@ -135960,30 +135924,29 @@
         },
         {
           "lang": "Scala 3",
-          "note": "A context bound sits on the declared name, `[T: Describe]`, once, the shape B takes; Scala's maps never use `:`, so no clash arises. Source: Scala 3 Reference, Context Bounds (docs.scala-lang.org/scala3/reference/contextual/context-bounds.html).",
+          "note": "A context bound sits on the declared name, `[T: Describe]`, once; Scala's maps never use `:`, so no clash arises. Source: Scala 3 Reference, Context Bounds (docs.scala-lang.org/scala3/reference/contextual/context-bounds.html).",
           "code": "given [T: Describe]: Describe[List[T]] with …"
         },
         {
           "lang": "C++20",
-          "note": "Before concepts, a template's requirements were implicit in its body, close to C's model, and errors surfaced deep inside instantiations; concepts let the head state them. A constrained placeholder bounds a parameter at its slot (`Describe auto x`). Source: cppreference, Constraints and concepts.",
+          "note": "Before concepts, a template's requirements were implicit in its body, close to B's model, and errors surfaced deep inside instantiations; concepts let the head state them. A constrained placeholder bounds a parameter at its slot (`Describe auto x`). Source: cppreference, Constraints and concepts.",
           "code": "template <Describe T> std::string describe(const std::vector<T>& items);\nstd::string one(Describe auto x);"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A writes each name once, with its bound where the name is declared, the rule `fn<T: Describe>` and `impl Pair<T: Priced>` already follow. The small brackets are what today's map syntax costs: `[T: Describe]` is a map, and `<` cannot start a type. If D-MAP-ENTRY1 is ratified with `=>`, `to` or `->` for maps, choose B: the same rule without the brackets, reached from A by `jet fix`. C would let a body edit change which types qualify. D and E still name each parameter twice.",
+        "why": "A writes each name once, with its bound where the name is declared, the rule `fn<T: Describe>` and `impl Pair<T: Priced>` already follow. The small brackets are what today's map syntax costs: `[T: Describe]` is a map, and `<` cannot start a type. B would let a body edit change which types qualify. C and D still name each parameter twice.",
         "tradeoff": "Each name once and one bound rule for every impl, for a pair of brackets in each bounded slot while maps keep `:`.",
         "gains": [
           "Each parameter name is written once, at its place in the shape.",
           "One rule for every bound: `Name: Bound` inside `<…>` where the name is declared, as in `fn<T: …>` and `Pair<T: …>`.",
           "No reading as a map: `<` cannot start a type, so the slot form means nothing else today (r03, r04, r12, r13).",
-          "A bounded slot declares its name, so a type named `T` in scope never turns the head into a concrete one.",
-          "If D-MAP-ENTRY1 takes `:` out of maps (its A, B or D), B is the same rule, and `jet fix` drops the brackets."
+          "A bounded slot declares its name, so a type named `T` in scope never turns the head into a concrete one."
         ],
         "losses": [
           {
             "loss": "Brackets inside brackets: `[<T: Describe>]` and `[K: <V: Describe>]` look busy.",
-            "mitigation": "Only bounded slots carry them, and unbounded heads stay `[T]`. Once D-MAP-ENTRY1 frees `:` they go entirely (option B)."
+            "mitigation": "Only bounded slots carry them, and unbounded heads stay `[T]`."
           },
           {
             "loss": "A bracketed slot is legal only in an impl head; `fn(xs: [<T: Describe>])` stays refused.",
@@ -135997,18 +135960,14 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "Only possible once D-MAP-ENTRY1 takes `:` out of maps (its A, B or D); until then `[T: Describe]` is a map type (p4, r10). Choose it if that ballot does."
-          },
-          {
-            "key": "C",
             "reason": "Conformance would follow body edits, interfaces would need bodies, and it reverses the ratified unbounded heads; Jet infers no bounds anywhere else."
           },
           {
-            "key": "D",
+            "key": "C",
             "reason": "The name still appears twice, and one rule needs D-IMPL-COND1 reopened, which makes struct impls repeat too."
           },
           {
-            "key": "E",
+            "key": "D",
             "reason": "The repetition you asked about: every name appears twice."
           }
         ]
@@ -136018,9 +135977,9 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Generation-2. Not the author, TypeIDSlice3-3. Sent back for text only: the near pair, the stale-head refusal, every D-MAP-ENTRY1 option, a neutral key example and migration rows, all added in r2."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Generation-2. Not the author, TypeIDSlice3-3. Sent back for text only: the near pair, the stale-head refusal, a neutral key example and migration rows, all added in r2."
       },
-      "checkInstructions": "Run the probes in $JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/owner-r1-probes with the current batch compiler; the detail quotes their output (outputs-tip23.txt). Attack A first: the `impl <T: …>?` start that Rust's leading list shares, `>>` and `>?.` lexing, bounded slots declaring names over a type in scope, and nested heads. Then check B's dependency on D-MAP-ENTRY1 and C's cost list against the spec's unbounded-head paragraph.",
+      "checkInstructions": "Run the probes in $JET_SCRATCH_ROOT/tmp/orch/ballot/structbound/owner-r1-probes with the current batch compiler; the detail quotes their output (outputs-tip23.txt). Attack A first: the `impl <T: …>?` start that Rust's leading list shares, `>>` and `>?.` lexing, bounded slots declaring names over a type in scope, and nested heads.",
       "surface": {
         "gist": "How does an impl for every list, array, optional or map say what its items must support, writing each name once?",
         "lesson": "A bound like `T: Describe` lets only types with Describe in. Jet writes it where the name is declared: `fn<T: Describe>`, `impl Pair<T: Describe>`. In a list head the same place is the slot, but `[T: Describe]` means a map while maps use `:`.",
@@ -136037,7 +135996,7 @@
         },
         "recommendation": {
           "rec": "A",
-          "why": "Each name once, with its bound where the name stands, as `Pair<T: Describe>` does. The small brackets keep it from reading as a map; if maps move to `=>`, choose B and they go.",
+          "why": "Each name once, with its bound where the name stands, as `Pair<T: Describe>` does.",
           "gains": [
             "Each name written once.",
             "One bound rule for structs, functions and shapes.",
@@ -136046,24 +136005,20 @@
           "losses": [
             {
               "loss": "Brackets inside brackets: `[<T: Describe>]`.",
-              "mitigation": "Only bounded slots; gone under B once maps leave `:`."
+              "mitigation": "Only bounded slots carry them; unbounded heads stay `[T]`."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Needs maps to leave `:` first."
-            },
-            {
-              "key": "C",
               "reason": "Body edits would change which types qualify."
             },
             {
-              "key": "D",
+              "key": "C",
               "reason": "Names each parameter twice."
             },
             {
-              "key": "E",
+              "key": "D",
               "reason": "Names each parameter twice."
             }
           ],
@@ -136088,23 +136043,6 @@
           },
           {
             "key": "B",
-            "name": "Bare bound in the slot (needs maps off `:`)",
-            "gist": "Once maps leave `:` (shown with `=>`), write the bound bare: `[T: Describe]`.",
-            "gains": [
-              "Each name once, no extra brackets.",
-              "Reads like a function parameter."
-            ],
-            "losses": [
-              "Possible only if maps leave `:`.",
-              "Optionals need parentheses.",
-              "One token apart: `[T: Describe]` vs `[T => Describe]`."
-            ],
-            "proposed": {
-              "code": "impl [T: Describe].Describe { … }\nimpl [T: Describe#N].Describe { … }\nimpl (T: Describe)?.Describe { … }\nimpl [K => V: Describe].Describe { … }"
-            }
-          },
-          {
-            "key": "C",
             "name": "Bounds inferred from the bodies",
             "gist": "Write nothing; the body's calls decide.",
             "gains": [
@@ -136119,7 +136057,7 @@
             }
           },
           {
-            "key": "D",
+            "key": "C",
             "name": "Bound list after `impl`",
             "gist": "Declare the parameters in front of the shape, as Rust does.",
             "gains": [
@@ -136134,7 +136072,7 @@
             }
           },
           {
-            "key": "E",
+            "key": "D",
             "name": "Bound list after the shape (last draft)",
             "gist": "Repeat the shape's parameters in a list after it.",
             "gains": [
@@ -138215,307 +138153,6 @@
       "ratifiedAt": "2026-11-24"
     },
     {
-      "id": "D-MAP-ENTRY1",
-      "cardId": "c08rzqfr",
-      "group": "language",
-      "title": "How a map separates a key from its value, now that `name: value` is a binding",
-      "situation": "Jet spells a map with the colon: the type `[String: Int]`, the literal `[\"apple\": 3]`, a map-yielding loop `loop n in xs -> n: n * n` and the pattern `[\"apple\": a, ..]`. Since D-BIND-BARE1, `name: value` is also how every binding is written, and the colon also writes field types, record entries, call labels and generic bounds. Three readings now clash. `[key: 1]` puts the value of `key` in the map (`key: \"fig\"` gives `[fig: 1]`), while `{key: 1}` is a record with a field named `key`. A map loop's item `n: n * n` looks exactly like a binding. And `[T: Describe]` is a map type, so a bound on a list's item type has no natural spelling (the open D-IMPL-STRUCTBOUND1).",
-      "gist": "What goes between a map's key and its value, in its type, its literals, its loops and its patterns?",
-      "lesson": "Swift and Python write `x: Int` and still use `:` for map entries, because neither binds with a bare `name: value`. Odin, which declares with colons (`x :: 1`, `x := 1`), moved entries off the colon (`{\"apple\" = 3}`). Languages that keep the colon for other jobs write entries with `=>` (PHP, Ruby, Perl, Elixir), `->` (Scala) or `to` (Kotlin).",
-      "explainer": "Think of a label maker. Jet prints labels as `name: thing` everywhere: on boxes (bindings), on shelves (fields) and on parcels (call labels). A map is a phone book: each line pairs a name with a number. Today the phone book uses the same label shape, so a reader can't tell a label from a phone-book line at a glance. When the name is a variable, the line means something else entirely. Option A gives phone-book lines their own mark, `=>`, so a label is always a label.",
-      "story": "Kai builds a word counter. He writes `counts: [String: Int]{}` and later `seen: [word: 1]`. He expects a field named `word`, as `{word: 1}` gives him, but gets the word's text as the key.\n\nIn a report he writes `squares: [Int: Int]{loop n in 1..<4 -> n: n * n}`, and a reviewer asks where `n` was rebound. Later he wants an impl for lists whose items can describe themselves, and finds `[T: Describe]` already means a map.\n\nWith A he writes `[String => Int]`, `[word => 1]` and `n => n * n`, and `[T: Describe]` is free to mean a bound.",
-      "inWild": "// Swift: binding is `let x = 1`, so `:` is free for maps.\nlet prices: [String: Int] = [\"apple\": 3]\n// PHP / Ruby / Elixir: `=>` pairs a key with a value.\n$prices = [\"apple\" => 3];            // PHP\nprices = { \"apple\" => 3 }            # Ruby\nprices = %{\"apple\" => 3}             # Elixir\n// Scala: `->` builds a pair.\nval prices = Map(\"apple\" -> 3)\n// Kotlin: the infix word `to` builds a pair.\nval prices = mapOf(\"apple\" to 3)",
-      "detail": "Facts read on tip22 (the compiler built from dev e271dd7f56). The probes are reproduced in the review audit.\n\nToday's map forms:\n\n- The type `[K: V]` (D-MAPSPACE1=A, D-LISTMAP-CANON1=A), the literal `[\"key\": value]` (S38) and the empty `[]` (D-EMPTYLIT1).\n- The typed head `[String: Int]{\"a\": 1}` and braces where a map is expected (`Dyn.Object({\"name\": v})`).\n- The pattern `[key: pattern, ..]` (Spellings.jet:86), the loop item `key: value` (:79) and the head `impl [K: V].Trait` (:90).\n\nWhat a reader sees:\n\n- `key: \"fig\"` then `[key: 1]` prints `[fig: 1]`: the key is the variable's value. `{key: 1}` is a record with field `key` (Spellings.jet:78).\n- `print` shows a map as `[fig: 1, pear: 2]`, and `debug` shows `[\"fig\": 1, \"pear\": 2]`. An empty map prints `[:]`.\n- Two more pattern spellings: the empty pattern `[:]` (Patterns.jet:901) and the optional key `\"pear\"?: p` (Patterns.jet:947).\n- A destructuring binding puts a pattern before `:` (`[a, b]: xs`, `{min, max}: r`).\nWhat the colon and the arrow do elsewhere:\n\n- `=>` is not registered. Parser/Habits.jet:270-283 already turns JavaScript's `n => n * 2` into the error \"`=>` is not how Jet writes a lambda\", with a `fn(n) { … }` fix.\n- Diagnostics print a map type without a space, `[Int:Bool]`.\n\nSize of a change: about 6,800 map types and about 1,000 lines of string-keyed entries, plus int, name and enum keys. They sit in about 1,300 tracked files. A map also shows in 15 UI snapshots, 13 golden outputs and 13 .case files. The rewrite tool's dry run gives the exact count.\n\nEvery option keeps the empty map `[]`, the slot `m[k, or: start]`, map methods and `loop (k, v) in m`. Records, struct literals, labels and bindings keep `:` in every option.",
-      "options": [
-        {
-          "key": "A",
-          "name": "`=>` separates every key from its value, in types, literals, patterns and loops",
-          "detail": "A map type is `[String => Int]` and a literal is `[\"apple\" => 3]`. A typed head is `[String => Int]{\"fig\" => 7}`, and braces where a map is expected are `Dyn.Object({\"name\" => v})`. A map loop yields `n => n * n`, a pattern is `[\"apple\" => a, \"pear\"? => p, ..]` and a structural head is `impl [K => V].Describe`.\n\nThe empty map stays `[]` (D-EMPTYLIT1). In a pattern, `[]` matches an empty map, so the pattern `[:]` is retired. `print` shows `[1 => 1, 2 => 4]`, `debug` shows `[\"fig\" => 1]`, an empty map prints `[]` and diagnostics print `[Int => Bool]`.\n\nAfter the change, `:` never separates a key from its value. Its left side is a name, except in a destructuring binding and a string's format selector (`{value:Fixed(2)}`). `=>` appears nowhere else in Jet. Outside a map it stays the error that teaches the lambda form. Inside brackets, an entry like `[x => x * 2]`, whose key is an unbound name used in its value, gets the same lambda teaching.",
-          "technical": "Registry and lexer: `=>` becomes a registered spelling and one token. Lex/Scan.jet:949-968 munches `>=` today. A type argument list closing right before `=>` needs a space (`[Option<Int> => Int]`), which `jet fmt` always writes. `>=>` there is E0003 with that fix.\n\nParser: Types.jet:644 (map type), Expressions.jet:1858-1880 (literal), Patterns.jet:416 (brace keys), :901 (empty pattern, retired) and :940-959 (entries, optional key). Habits.jet:273 tests the new token, and the entry check adds the lambda teaching. Formatter: Formatter/Expressions.jet:748 and :2417-2419, and Parser/Items.jet:3144.\n\nType text: Types.jet:1504 type_name prints `[K => V]`. It feeds receipt schema digests (Calls/Receipts.jet:101-109) and store schema names (Calls/Data.jet:1842). Both change once, as one schema change. The internal keys type_carrier_identity and type_structural_family keep their spelling. The type-text tables the type parser reads move with it. MathLayout.jet:264's doc comment names `[K => V]`.\n\nRuntime and tools: JetIR BuildMaps.jet:2041-2069 prints ` => ` and an empty `[]` on every tier. The debugger renders `k => v` and recognizes maps by the new type text (Native.jet:7970, :8003-8011). `jet find` accepts `=>` inside a map type (Find.jet:531-538).\n\nEditors: the tree-sitter grammar (grammar.js:359-361) with its corpus, the prebuilt Zed parser, the VS Code and TextMate grammars, and their generator EditorGrammars.jet.\n\nMigration: one LanguageRewrite row rewrites parsed types, entries, loop items and patterns. Map type text inside strings moves by a census of string literals. Ratchet and schema data files, docs, snapshots, goldens, .case expectations and site pages move in the same cutover.",
-          "code": "// PROPOSED (A): `=>` between a key and its value everywhere a map is written.\nFruit: enum { Apple, Pear }\n\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl [K => V].Describe {\n    describe: fn(self) -> String { \"{self.len()} entries\" }\n}\n\nrun: fn() {\n    prices: [\"apple\" => 3, \"pear\" => 5]\n    stock: [String => Int]{\"fig\" => 7}\n    counts := [Fruit => Int]{}\n    counts[.Apple, or: 0] += 1\n    squares: [Int => Int]{loop n in 1..<4 -> n => n * n}\n    key: \"fig\"\n    by_name: [key => 1]          // the key is the value of `key`: \"fig\"\n    point: {x: 1, y: 2}          // a record: a field named x\n    if prices == {\n        [\"apple\" => a, ..] -> print(\"apple {a}\")\n        else -> print(\"no apple\")\n    }\n    print(squares)               // [1 => 1, 2 => 4, 3 => 9]\n}\n"
-        },
-        {
-          "key": "B",
-          "name": "The word `to` separates a key from its value",
-          "detail": "`[String to Int]`, `[\"apple\" to 3]`, `loop n in 1..<4 -> n to n * n` and `[\"apple\" to a, ..]`, as Kotlin builds pairs (`\"apple\" to 3`). It reads aloud well. But Scala and BASIC readers know `1 to 4` as a range; in Kotlin `to` builds a Pair anywhere. Jet's ranges are `1..4`. `to` becomes a keyword only between two expressions inside brackets, while `to:` stays an ordinary label (`copy(from:, to:)`).",
-          "technical": "A contextual word: the parser reads `to` as the entry separator only after a complete key expression directly inside a map's brackets or typed head, so a name `to` elsewhere is unaffected. Same parser, formatter, printing and migration sites as A.",
-          "code": "// PROPOSED (B): the word `to` between a key and its value.\nFruit: enum { Apple, Pear }\n\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl [K to V].Describe {\n    describe: fn(self) -> String { \"{self.len()} entries\" }\n}\n\nrun: fn() {\n    prices: [\"apple\" to 3, \"pear\" to 5]\n    stock: [String to Int]{\"fig\" to 7}\n    counts := [Fruit to Int]{}\n    counts[.Apple, or: 0] += 1\n    squares: [Int to Int]{loop n in 1..<4 -> n to n * n}\n    key: \"fig\"\n    by_name: [key to 1]          // the key is the value of `key`: \"fig\"\n    point: {x: 1, y: 2}          // a record: a field named x\n    if prices == {\n        [\"apple\" to a, ..] -> print(\"apple {a}\")\n        else -> print(\"no apple\")\n    }\n    print(squares)               // [1 to 1, 2 to 4, 3 to 9]\n}\n"
-        },
-        {
-          "key": "C",
-          "name": "Keep `:` (today's spelling)",
-          "detail": "`[String: Int]`, `[\"apple\": 3]`, `n: n * n` and `[\"apple\": a, ..]` stay. This is Swift's spelling and costs no migration. Three readings stay ambiguous. `[key: 1]` uses the value of `key`, while `{key: 1}` names a field `key`. `loop n in xs -> n: n * n` reads like a binding of `n`. `[T: Describe]` can never mean a list whose items have Describe, so D-IMPL-STRUCTBOUND1 needs a second place for bounds.",
-          "technical": "No change.",
-          "code": "// CURRENT (C): `:` between a key and its value, as today.\nFruit: enum { Apple, Pear }\n\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl [K: V].Describe {\n    describe: fn(self) -> String { \"{self.len()} entries\" }\n}\n\nrun: fn() {\n    prices: [\"apple\": 3, \"pear\": 5]\n    stock: [String: Int]{\"fig\": 7}\n    counts := [Fruit: Int]{}\n    counts[.Apple, or: 0] += 1\n    squares: [Int: Int]{loop n in 1..<4 -> n: n * n}\n    key: \"fig\"\n    by_name: [key: 1]          // the key is the value of `key`: \"fig\"\n    point: {x: 1, y: 2}          // a record: a field named x\n    if prices == {\n        [\"apple\": a, ..] -> print(\"apple {a}\")\n        else -> print(\"no apple\")\n    }\n    print(squares)               // [1: 1, 2: 4, 3: 9]\n}\n"
-        },
-        {
-          "key": "D",
-          "name": "`->` separates a key from its value",
-          "detail": "`[String -> Int]`, `[\"apple\" -> 3]` and `[\"apple\" -> a, ..]` reuse a token Jet already has, as Scala writes `\"apple\" -> 3`. But `->` already ends a signature (`fn(Int) -> Int`), starts every arm and yields a loop item. So a map-yielding loop reads `loop n in 1..<4 -> n -> n * n`, and a map pattern in an `if` table reads `[\"apple\" -> a, ..] -> print(…)`.",
-          "technical": "No new token. The parser must tell an entry arrow from an arm or yield arrow by bracket depth. A type `[Int -> Int]` sits one keyword away from a list of functions `[fn(Int) -> Int]`. Same printing and migration sites as A.",
-          "code": "// PROPOSED (D): `->` between a key and its value.\nFruit: enum { Apple, Pear }\n\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl [K -> V].Describe {\n    describe: fn(self) -> String { \"{self.len()} entries\" }\n}\n\nrun: fn() {\n    prices: [\"apple\" -> 3, \"pear\" -> 5]\n    stock: [String -> Int]{\"fig\" -> 7}\n    counts := [Fruit -> Int]{}\n    counts[.Apple, or: 0] += 1\n    squares: [Int -> Int]{loop n in 1..<4 -> n -> n * n}\n    key: \"fig\"\n    by_name: [key -> 1]          // the key is the value of `key`: \"fig\"\n    point: {x: 1, y: 2}          // a record: a field named x\n    if prices == {\n        [\"apple\" -> a, ..] -> print(\"apple {a}\")\n        else -> print(\"no apple\")\n    }\n    print(squares)               // [1 -> 1, 2 -> 4, 3 -> 9]\n}\n"
-        },
-        {
-          "key": "E",
-          "name": "`=>` in entries only; the type keeps `[K: V]`",
-          "detail": "Literals, loops and patterns write `\"apple\" => 3`, as PHP and Ruby do, while the type stays `[String: Int]`. It migrates the entries (about 1,000 lines of string-keyed entries plus int, name and enum keys) instead of every map type as well, and keeps Swift's type spelling. But `[T: Describe]` still means a map, so the bound question stays open, and a reader meets two separators for one idea: `[String: Int]{\"fig\" => 7}`.",
-          "technical": "A's entry changes without the type change; the type printer and MathLayout stay as they are.",
-          "code": "// PROPOSED (E): `=>` in entries, `:` in the type.\nFruit: enum { Apple, Pear }\n\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl [K: V].Describe {\n    describe: fn(self) -> String { \"{self.len()} entries\" }\n}\n\nrun: fn() {\n    prices: [\"apple\" => 3, \"pear\" => 5]\n    stock: [String: Int]{\"fig\" => 7}\n    counts := [Fruit: Int]{}\n    counts[.Apple, or: 0] += 1\n    squares: [Int: Int]{loop n in 1..<4 -> n => n * n}\n    key: \"fig\"\n    by_name: [key => 1]          // the key is the value of `key`: \"fig\"\n    point: {x: 1, y: 2}          // a record: a field named x\n    if prices == {\n        [\"apple\" => a, ..] -> print(\"apple {a}\")\n        else -> print(\"no apple\")\n    }\n    print(squares)               // [1 => 1, 2 => 4, 3 => 9]\n}\n"
-        },
-        {
-          "key": "F",
-          "name": "Keep `:`; a key taken from a name is written `[(key): 1]`",
-          "detail": "The smallest fix, for the first clash only. `[\"apple\": 3]` and `[String: Int]` stay. A bare name before `:` inside brackets (`[key: 1]`) becomes E0003, with a `jet fix` edit to `[(key): 1]`. So a reader never mistakes a computed key for a field name, as JavaScript writes `{[key]: 1}`. The loop item `n: n * n` still reads as a binding, and `[T: Describe]` stays a map, so the other two clashes remain.",
-          "technical": "The check runs in sema, not the parser. A bare-name key that resolves to a value is E0003 with the `[(key): 1]` edit. A name that resolves to a type keeps `[String: Int]` a map type, including where a Type is expected. A parenthesized key is an ordinary expression and already runs today. Migration touches only name-keyed entries.",
-          "code": "// PROPOSED (F): keep `:`; a key taken from a name is written in parentheses.\nFruit: enum { Apple, Pear }\n\nDescribe: trait {\n    describe: fn(self) -> String,\n}\n\nimpl [K: V].Describe {\n    describe: fn(self) -> String { \"{self.len()} entries\" }\n}\n\nrun: fn() {\n    prices: [\"apple\": 3, \"pear\": 5]\n    stock: [String: Int]{\"fig\": 7}\n    counts := [Fruit: Int]{}\n    counts[.Apple, or: 0] += 1\n    squares: [Int: Int]{loop n in 1..<4 -> n: n * n}\n    key: \"fig\"\n    by_name: [(key): 1]        // `[key: 1]` is E0003 with a fix to `[(key): 1]`\n    point: {x: 1, y: 2}          // a record: a field named x\n    if prices == {\n        [\"apple\": a, ..] -> print(\"apple {a}\")\n        else -> print(\"no apple\")\n    }\n    print(squares)               // [1: 1, 2: 4, 3: 9]\n}\n"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Swift",
-          "note": "Swift's `[K: V]` and `[\"a\": 1]` are Jet's current spelling. Swift binds with `let x = 1`, so its colon never means a binding, and Swift writes bounds in `<T: P>` or `where`, never inside a collection type.",
-          "code": "let prices: [String: Int] = [\"apple\": 3]\nextension Array: Describe where Element: Describe { }"
-        },
-        {
-          "lang": "Odin",
-          "note": "Odin declares with colons (`x : int = 1`, `x :: 1`, `x := 1`), as Jet does, and writes map and struct entries with `=`. That is the strongest prior art for moving entries off the colon. `=` is not open to Jet: it reassigns an existing `:=` binding, so `[n = n * n]` would collide with reassignment as `n: n * n` collides with binding today.",
-          "code": "prices := map[string]int{\"apple\" = 3}"
-        },
-        {
-          "lang": "PHP / Ruby / Elixir",
-          "note": "`=>` pairs a key with a value, in literals and in patterns (Elixir `%{\"apple\" => a} = prices`). Elixir also keeps `key: value` for atom keys, a second spelling A avoids.",
-          "code": "%{\"apple\" => a} = prices        # Elixir pattern\n$prices = [\"apple\" => 3];       // PHP"
-        },
-        {
-          "lang": "Scala",
-          "note": "`->` builds a pair (`\"apple\" -> 3`), and Scala also uses `=>` for function types and case arms, the overload D avoids for `->`.",
-          "code": "val prices = Map(\"apple\" -> 3)\nprices.map { case (k, v) => k -> v * 2 }"
-        },
-        {
-          "lang": "Kotlin",
-          "note": "`to` is an infix function that builds a Pair, so `\"apple\" to 3` works anywhere, not only in a map.",
-          "code": "val prices = mapOf(\"apple\" to 3)"
-        },
-        {
-          "lang": "Rust",
-          "note": "No map literal; a map is built from tuples. `=>` is Rust's match-arm arrow.",
-          "code": "let prices = HashMap::from([(\"apple\", 3)]);"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A takes the colon out of every map. Map entries are where all three clashes come from: the one colon whose left side is any expression. With `=>`, a map line no longer looks like a binding or a field, and `[T: Describe]` becomes available for D-IMPL-STRUCTBOUND1.",
-        "gains": [
-          "`:` never separates a key from a value.",
-          "`[key => 1]` can't be read as a field.",
-          "A map loop item no longer looks like a binding.",
-          "`[T: Describe]` becomes available, pending D-IMPL-STRUCTBOUND1, which must weigh the near pair `[T: Describe]` (bound) and `[T => Describe]` (map of trait objects)."
-        ],
-        "losses": [
-          {
-            "loss": "A new two-character token.",
-            "mitigation": "It is already lexed for the lambda habit, and it means one thing in Jet."
-          },
-          {
-            "loss": "One large cutover across types, entries, patterns, type text in strings, receipt digests, the debugger, `jet find`, editor grammars and regenerated outputs.",
-            "mitigation": "One LanguageRewrite row and one string census do the rewrite, and the inventory is named site by site."
-          },
-          {
-            "loss": "A `>=`/`=>` typo builds a map where no type is expected.",
-            "mitigation": "An expected type catches it, and the map's printed form shows the mistake."
-          },
-          {
-            "loss": "A JavaScript reader may read `n => n * n` in a map loop as a lambda.",
-            "mitigation": "The map type is the cue, and a real lambda in brackets gets the lambda teaching."
-          },
-          {
-            "loss": "Swift's spelling, which some readers know, is gone.",
-            "mitigation": "PHP, Ruby, Perl and Elixir readers know `=>` as an entry, and the habit table can teach Swift's `:`."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It makes `to` a context word and reminds Scala readers of ranges."
-          },
-          {
-            "key": "C",
-            "reason": "It keeps all three clashes and leaves D-IMPL-STRUCTBOUND1 without a natural spelling."
-          },
-          {
-            "key": "D",
-            "reason": "It puts a third meaning on `->`, so a map loop repeats one arrow (`-> n -> n * n`). A's two arrows there are different tokens."
-          },
-          {
-            "key": "E",
-            "reason": "It fixes entries but keeps `[T: Describe]` a map, and it mixes two separators in one line."
-          },
-          {
-            "key": "F",
-            "reason": "It fixes only the computed-key clash. Odin's `=` is not offered either, because `=` reassigns a `:=` binding."
-          }
-        ],
-        "tradeoff": "A pays one large cutover for a `:` that never separates a key from a value."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Generation-2. The adversarial review attacked the recommendation. The first pass sent it back over the colon claim, the inventory and the comparisons; revision 1 answered every finding and added F, and the confirm pass returned PASS."
-      },
-      "checkInstructions": "Check Spellings.jet:12, :78, :79, :86 and :90, and MathLayout.jet:263-265. Check Parser/Types.jet:644, Parser/Expressions.jet:1858-1880, Parser/Patterns.jet:416, :901 and :940-959, and Parser/Habits.jet:270-283. Check Types.jet:1504, Calls/Receipts.jet:101-109, JetIR BuildMaps.jet:2041-2069, JetDebug Native.jet:7970 and JetCLI Find.jet:531-538.\n\nRun option C's program on a current compiler. It prints `apple 3` and `[1: 1, 2: 4, 3: 9]`; add `print(by_name)` to see `[fig: 1]`. Check spec.md S38 and S64, D-EMPTYLIT1 and D-BIND-BARE1. The review audit is Docs/Audits/2026-11-24-map-entry-syntax-review.md.",
-      "surface": {
-        "gist": "What goes between a map's key and its value?",
-        "lesson": "Once `name: value` binds, a map line needs its own mark.",
-        "trio": {
-          "current": {
-            "note": "`[key: 1]` uses key's value; `{key: 1}` names a field.",
-            "code": "key: \"fig\"\nby_name: [key: 1]      // [fig: 1]\npoint: {key: 1}        // a field named key"
-          },
-          "wild": {
-            "lang": "PHP",
-            "note": "`=>` pairs a key with a value.",
-            "code": "$prices = [\"apple\" => 3];"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "`=>` everywhere",
-            "gist": "`[String => Int]`, `[\"apple\" => 3]`.",
-            "gains": [
-              "`:` never separates a key from a value.",
-              "Frees `[T: Describe]`."
-            ],
-            "losses": [
-              "New token; one large cutover."
-            ],
-            "proposed": {
-              "code": "squares: [Int => Int]{loop n in 1..<4 -> n => n * n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "The word `to`",
-            "gist": "`[String to Int]`, `[\"apple\" to 3]`.",
-            "gains": [
-              "Reads aloud."
-            ],
-            "losses": [
-              "A context word; looks like a range."
-            ],
-            "proposed": {
-              "code": "squares: [Int to Int]{loop n in 1..<4 -> n to n * n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep `:`",
-            "gist": "Today's Swift spelling.",
-            "gains": [
-              "No migration."
-            ],
-            "losses": [
-              "All three clashes stay."
-            ],
-            "proposed": {
-              "code": "squares: [Int: Int]{loop n in 1..<4 -> n: n * n}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "`->`",
-            "gist": "`[String -> Int]`, `[\"apple\" -> 3]`.",
-            "gains": [
-              "No new token."
-            ],
-            "losses": [
-              "Two arrows in a map loop."
-            ],
-            "proposed": {
-              "code": "squares: [Int -> Int]{loop n in 1..<4 -> n -> n * n}"
-            }
-          },
-          {
-            "key": "E",
-            "name": "`=>` in entries only",
-            "gist": "Type keeps `[K: V]`.",
-            "gains": [
-              "Smaller rewrite."
-            ],
-            "losses": [
-              "`[T: Describe]` stays a map; two separators."
-            ],
-            "proposed": {
-              "code": "squares: [Int: Int]{loop n in 1..<4 -> n => n * n}"
-            }
-          },
-          {
-            "key": "F",
-            "name": "Keep `:`, mark computed keys",
-            "gist": "`[(key): 1]`; bare `[key: 1]` is E0003.",
-            "gains": [
-              "Tiny migration."
-            ],
-            "losses": [
-              "Loop item and `[T: Describe]` clashes stay."
-            ],
-            "proposed": {
-              "code": "by_name: [(key): 1]"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Map entries are where every clash comes from. `=>` gives them their own mark.",
-          "gains": [
-            "`:` never separates a key from a value.",
-            "`[key => 1]` can't be read as a field.",
-            "`[T: Describe]` becomes available."
-          ],
-          "losses": [
-            {
-              "loss": "A new token.",
-              "mitigation": "It means one thing."
-            },
-            {
-              "loss": "One large cutover.",
-              "mitigation": "One rewrite row and one string census."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "It makes `to` a context word and reminds Scala readers of ranges."
-            },
-            {
-              "key": "C",
-              "reason": "It keeps all three clashes and leaves D-IMPL-STRUCTBOUND1 without a natural spelling."
-            },
-            {
-              "key": "D",
-              "reason": "It puts a third meaning on `->`, so a map loop repeats one arrow (`-> n -> n * n`)."
-            },
-            {
-              "key": "E",
-              "reason": "It fixes entries but keeps `[T: Describe]` a map, and it mixes two separators in one line."
-            },
-            {
-              "key": "F",
-              "reason": "It fixes only the computed-key clash."
-            }
-          ],
-          "tradeoff": "One large cutover buys a colon that only ever follows a name."
-        }
-      },
-      "draftedBy": null,
-      "reviewedBy": "G1Generation-2",
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-24T12:53:55.434Z"
-    },
-    {
       "id": "D-MARK-CARET1",
       "cardId": "c0jjynlr",
       "group": "syntax",
@@ -140105,7 +139742,7 @@
       "kind": "question",
       "text": "Why does this syntax look so odd and repetitive? Is there a better way to do this?",
       "status": "answered",
-      "answer": "The old draft wrote each name twice: `impl [T]<T: Describe>`. The rework writes each name once, with its bound where the name is declared, the rule `fn<T: Describe>` and `Pair<T: Describe>` already follow: `impl [<T: Describe>].Describe`. The small angle brackets are there only because `[T: Describe]` means a map type today. If D-MAP-ENTRY1 moves maps to `=>`, option B drops them, `impl [T: Describe].Describe`, and `jet fix` rewrites every A head. Inferred bounds (C) were weighed and rejected: a body edit would change which types qualify. A Rust-style list after `impl` (D) still names each parameter twice. A fresh review (G1Generation-2) passed r2.",
+      "answer": "The old draft wrote each name twice: `impl [T]<T: Describe>`. The rework writes each name once, with its bound where the name is declared, the rule `fn<T: Describe>` and `Pair<T: Describe>` already follow: `impl [<T: Describe>].Describe`. The small angle brackets are there only because `[T: Describe]` means a map type today. Inferred bounds (B) were weighed and rejected: a body edit would change which types qualify. A Rust-style list after `impl` (C) still names each parameter twice. A fresh review (G1Generation-2) passed r2.",
       "created": "2026-11-24T12:22:39.554Z",
       "answeredAt": "2026-11-24",
       "answeredBy": "Orchestrator"
@@ -140941,6 +140578,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T14:27:46.327Z",
+      "by": "Orchestrator",
+      "action": "question.answer",
+      "ref": "q3agycng",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T14:27:27.758Z",
+      "by": "Orchestrator",
+      "action": "decision.update",
+      "ref": "D-IMPL-STRUCTBOUND1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-24T14:26:27.873Z",
+      "by": "Orchestrator",
+      "action": "card.delete",
+      "ref": "c08rzqfr",
+      "note": "Ballot D-MAP-ENTRY1: how a map writes its key-value entries now that `:` binds a name"
+    },
+    {
+      "at": "2026-11-24T14:26:26.854Z",
+      "by": "Orchestrator",
+      "action": "decision.delete",
+      "ref": "D-MAP-ENTRY1",
+      "note": "How a map separates a key from its value, now that `name: value` is a binding"
+    },
     {
       "at": "2026-11-24T14:26:25.188Z",
       "by": "Orchestrator",
