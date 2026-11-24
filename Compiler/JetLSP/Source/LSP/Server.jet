@@ -30,6 +30,13 @@ LSPServer: struct {
     // files below them.
     workspace_named: Bool{false},
     workspace_roots: [String]{[String]{}},
+    // The client resolves a code action's edit
+    // (`textDocument.codeAction.resolveSupport` lists `edit`), so the action
+    // list leaves the edits out.
+    code_action_resolve: Bool{false},
+    // The client pulls diagnostics (`textDocument.diagnostic`), so none is
+    // pushed: each document's are answered when the client asks.
+    pull_diagnostics: Bool{false},
 
     // Every open document is overlaid, so a check sees unsaved imports too.
     check: fn(self, doc: LSPDocument) -> LSPChecked {

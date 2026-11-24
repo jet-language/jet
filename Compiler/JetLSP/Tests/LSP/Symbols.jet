@@ -4,7 +4,7 @@ use {
     core.encoding.[Dyn]
     jet_foundation.[Span, TextEdit, foundation_json_integer, jet_error_json_encode_value]
     jet_parser.[parser_marker_placement_edits]
-    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member]
+    jet_lsp.[LSPServer, lsp_change_workspace_folders, lsp_member, lsp_update_document]
 }
 
 LSP_TEST_SHAPES_URI: "file:///w/shapes.jet"
@@ -369,6 +369,29 @@ Pixel: struct {
         assert(lsp_member(edit, "documentChanges") == None, "no documentChanges without the capability")
         assert(lsp_test_rows(lsp_test_field(lsp_test_field(edit, "changes"), uri)).len() == 1, "each action is one edit")
     }
+}
+
+#Test("a client that resolves code actions gets each one's edit from codeAction/resolve") {
+    plain := lsp_test_server()
+    uri: "file:///w/markers.jet"
+    lsp_test_open(plain, uri, LSP_TEST_MARKERS)
+    expected := [String]{}
+    loop action in lsp_test_action_rows(plain, uri, 3) -> expected.push(jet_error_json_encode_value(action))
+    server := lsp_test_server()
+    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"textDocument\":{{\"codeAction\":{{\"resolveSupport\":{{\"properties\":[\"edit\"]}}}}}}}}}}")
+    lsp_test_open(server, uri, LSP_TEST_MARKERS)
+    offered: lsp_test_action_rows(server, uri, 3)
+    assert(offered.len() > 0, "the markers line offers actions")
+    resolved := [String]{}
+    loop action in offered {
+        assert(lsp_member(action, "edit") == None, "the list leaves each edit out")
+        resolved.push(jet_error_json_encode_value(lsp_test_result(server, "codeAction/resolve", jet_error_json_encode_value(action))))
+    }
+    // Each resolved action is the one a client that does not resolve gets.
+    assert_eq(resolved, expected)
+    // Once the document moves on, an action offered before is refused.
+    _ := lsp_update_document(server.diagnostic_state, Val(lsp_test_json("{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[]}}")), is_open: false)
+    assert_eq(lsp_test_error_code(server, "codeAction/resolve", jet_error_json_encode_value(offered[0])), -32801)
 }
 
 // The byte offset of an LSP position in ASCII `text`.

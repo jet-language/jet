@@ -79,16 +79,7 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
     groups := [String:[Int]]{}
     groups[uri] = [Int]{}
     loop (index, diagnostic) in checked.diagnostics {
-        target := uri
-        if diagnostic.origin == .Val(origin) {
-            target = lsp_path_to_uri(origin.path)
-            loop (open_uri, open) in state.docs {
-                if lsp_source_paths_equal(open.path, origin.path) {
-                    target = open_uri
-                    break
-                }
-            }
-        }
+        target: lsp_diagnostic_target(state, uri, diagnostic)
         if !groups.has_key(target) -> groups[target] = [Int]{}
         groups[target].push(index)
     }
@@ -106,14 +97,28 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
     groups
 }
 
+// The URI a diagnostic of `uri`'s check lands on: the open document holding
+// the file the driver placed it in, else that file, else `uri` itself.
+lsp_diagnostic_target: fn(state: LSPDiagnosticState, uri: String, diagnostic: Diagnostic) -> String Never! {
+    origin: diagnostic.origin ?? return uri.copy()
+    loop (open_uri, open) in state.docs {
+        if lsp_source_paths_equal(open.path, origin.path) -> return open_uri.copy()
+    }
+    lsp_path_to_uri(origin.path)
+}
+
 lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics: [Diagnostic], reports: [String], indices: [Int]) -> String Never! {
+    version_json: if version == .Val(value) -> ",\"version\":{value}" else -> ""
+    "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":{lsp_diagnostic_items_json(uri, src, diagnostics, reports, indices)}}}}}"
+}
+
+lsp_diagnostic_items_json: fn(uri: String, src: String, diagnostics: [Diagnostic], reports: [String], indices: [Int]) -> String Never! {
     items := [String]{}
     loop index in indices {
         report: if index < reports.len() -> reports[index] else -> ""
         items.push(lsp_diagnostic_json(diagnostics[index], src, uri, diagnostics, report))
     }
-    version_json: if version == .Val(value) -> ",\"version\":{value}" else -> ""
-    "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":[{items.join(",")}]}}}}"
+    "[{items.join(",")}]"
 }
 
 // The protocol diagnostic converts the one record (DiagnosticRecord) at the
@@ -225,30 +230,87 @@ lsp_publish_document_diagnostics: fn(server: &LSPServer, uri: String, stdout: &l
     ordered := [String]{}
     loop (target, _) in groups -> ordered.push(target)
     ordered.sort()
-    loop target in ordered {
-        lsp_write_message(stdout, lsp_document_group_json(server.diagnostic_state, target, checked, groups[target])) ?? return Err(err)
+    // A client that pulls diagnostics asks for them; the publication is
+    // still recorded, as the dirty documents and the clears read it.
+    if !server.pull_diagnostics {
+        loop target in ordered {
+            lsp_write_message(stdout, lsp_document_group_json(server.diagnostic_state, target, checked, groups[target])) ?? return Err(err)
+        }
     }
     server.diagnostic_state.diagnostic_targets[uri] = targets
     server.diagnostic_state.checked_modules[uri] = lsp_checked_module_paths(checked)
     server.published[uri] = checked
 }
 
-// A group publishes the document's version only when the open text's digest
-// is the one its diagnostics' origin holds.
-lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> String Never! {
+// The text a group's ranges are measured in and the document version it is
+// bound to: the text its diagnostics' origin read, bound to the open
+// document only when the open text's digest is that origin's; else the open
+// document's text; else none.
+LSPGroupText: struct {
+    source: String,
+    version: Int?,
+}
+
+lsp_group_text: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> LSPGroupText Never! {
     loop index in indices {
         if checked.diagnostics[index].origin == .Val(origin) {
             version := Int?{None}
             if state.docs.get(target) == .Val(open) {
                 if sha256_hex(open.text) == origin.revision -> version = Val(open.version)
             }
-            return lsp_publish_diagnostics(target, origin.source, version, checked.diagnostics, checked.reports, indices)
+            return LSPGroupText{source: origin.source.copy(), version: version}
         }
     }
-    if state.docs.get(target) == .Val(open) {
-        return lsp_publish_diagnostics(target, open.text, Val(open.version), checked.diagnostics, checked.reports, indices)
+    if state.docs.get(target) == .Val(open) -> return LSPGroupText{source: open.text.copy(), version: Val(open.version)}
+    LSPGroupText{source: "", version: None}
+}
+
+lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> String Never! {
+    text: lsp_group_text(state, target, checked, indices)
+    lsp_publish_diagnostics(target, text.source, text.version, checked.diagnostics, checked.reports, indices)
+}
+
+// A pulled report of the open document `uri`, from its own check: the
+// diagnostics that land on it. Its result id is the digest of its items, so
+// a client naming that id as its previous one is told it is unchanged, and
+// no earlier answer needs keeping. The report's members, without braces.
+lsp_pull_report: fn(server: LSPServer, uri: String, previous: String?) -> String {
+    view: lsp_view_of(server, uri) ?? return "\"kind\":\"full\",\"resultId\":\"{sha256_hex("[]")}\",\"items\":[]"
+    indices := [Int]{}
+    loop (index, diagnostic) in view.checked.diagnostics {
+        if lsp_diagnostic_target(server.diagnostic_state, uri, diagnostic) == uri -> indices.push(index)
     }
-    lsp_publish_diagnostics(target, "", None, checked.diagnostics, checked.reports, indices)
+    text: lsp_group_text(server.diagnostic_state, uri, view.checked, indices)
+    items: lsp_diagnostic_items_json(uri, text.source, view.checked.diagnostics, view.checked.reports, indices)
+    result_id: sha256_hex(items)
+    if previous == .Val(seen) && seen == result_id -> return "\"kind\":\"unchanged\",\"resultId\":\"{result_id}\""
+    "\"kind\":\"full\",\"resultId\":\"{result_id}\",\"items\":{items}"
+}
+
+// `textDocument/diagnostic`: the document's pulled report.
+lsp_document_diagnostic_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    uri: lsp_params_uri(params) ?? return lsp_error_response(id, -32602, "textDocument/diagnostic needs a textDocument")
+    lsp_response(id, "{{{lsp_pull_report(server, uri, lsp_text_member(params ?? Dyn.Null, "previousResultId"))}}}")
+}
+
+// `workspace/diagnostic`: the pulled report of every open document, each
+// with its URI and version, in URI order. A file no editor holds is not
+// checked by the server, so it has no report.
+lsp_workspace_diagnostic_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    previous := [String:String]{}
+    loop row in lsp_member_rows(params ?? Dyn.Null, "previousResultIds") {
+        uri: lsp_text_member(row, "uri") ?? next
+        previous[uri] = lsp_text_member(row, "value") ?? next
+    }
+    uris := [String]{}
+    loop (uri, _) in server.diagnostic_state.docs -> uris.push(uri.copy())
+    uris.sort()
+    reports := [String]{}
+    loop uri in uris {
+        doc: server.diagnostic_state.docs.get(uri) ?? next
+        reports.push("{{\"uri\":{foundation_json_quote(uri)},\"version\":{doc.version},{lsp_pull_report(server, uri, previous.get(uri))}}}")
+    }
+    lsp_response(id, "{{\"items\":[{reports.join(",")}]}}")
 }
 
 // didClose drops the document and its kept semantic tokens and marks the

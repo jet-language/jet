@@ -2,11 +2,65 @@
 // import repairs of each name in it the check could not resolve, then the
 // marker-placement rewrites of the declaration under the cursor, and
 // organize-imports over the whole document. A request whose `context.only`
-// names kinds gets the actions of those kinds alone.
+// names kinds gets the actions of those kinds alone. A client that resolves
+// an action's edit gets the list without edits, and `codeAction/resolve`
+// computes the edit of the one action picked.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Diagnostic, TextEdit, DiagnosticFixApplicability, foundation_json_quote]
+    jet_foundation.[Diagnostic, TextEdit, DiagnosticFixApplicability, foundation_json_integer, foundation_json_quote, jet_error_json_encode_value]
     jet_parser.[parser_marker_placement_edit_at]
+}
+
+// One offered action and the edits it makes.
+LSPCodeAction: struct {
+    title: String,
+    kind: String,
+    preferred: Bool,
+    edits: [TextEdit],
+}
+
+// The actions for the bytes `start` to `end` of the document `view` reads,
+// of the kinds `only` names (`context.only`; every kind when absent).
+lsp_code_actions: fn(view: LSPView, start: Int, end: Int, only: Dyn?) -> [LSPCodeAction] Never! {
+    document: lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text)
+    // Organize-imports reads every diagnostic of the document, so it runs
+    // before the ones in the range move into their fixes.
+    organized: if lsp_code_action_wanted(only, "source.organizeImports") -> lsp_organize_imports_edits(view, document) else -> [TextEdit]{}
+    diagnostics := [Diagnostic]{}
+    loop diagnostic in document.move() {
+        span: diagnostic.span ?? next
+        if span.start <= end && start <= span.end -> diagnostics.push(diagnostic)
+    }
+    actions := [LSPCodeAction]{}
+    if lsp_code_action_wanted(only, "quickfix") {
+        loop diagnostic in diagnostics {
+            repairs: lsp_import_actions(view, diagnostic)
+            single: repairs.len() == 1
+            loop repair in repairs.move() {
+                actions.push(LSPCodeAction{title: repair.title.move(), kind: "quickfix", preferred: single, edits: repair.edits.move()})
+            }
+        }
+        fixes: lsp_fixes_from_diagnostics(diagnostics.move())
+        loop fix in fixes.move() {
+            preferred: fix.applicability == DiagnosticFixApplicability.Safe
+            whole := [TextEdit]{fix.edit.move()}
+            whole.extend(fix.edits.move())
+            actions.push(LSPCodeAction{title: fix.title.move(), kind: "quickfix", preferred: preferred, edits: whole.move()})
+        }
+    }
+    if lsp_code_action_wanted(only, "refactor.rewrite") {
+        bytes: view.doc.text.bytes()
+        if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {
+            actions.push(LSPCodeAction{title: "Write the markers above the declaration", kind: "refactor.rewrite", preferred: false, edits: [TextEdit]{edit}})
+        }
+        if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
+            actions.push(LSPCodeAction{title: "Write the markers inside the declaration's body", kind: "refactor.rewrite", preferred: false, edits: [TextEdit]{edit}})
+        }
+    }
+    if organized.len() > 0 {
+        actions.push(LSPCodeAction{title: "Organize imports", kind: "source.organizeImports", preferred: false, edits: organized})
+    }
+    actions
 }
 
 lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
@@ -17,52 +71,55 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
     // A range past the document's end covers the rest of the document.
     start: lsp_clamped_offset_bytes(table, bytes, range.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
     end: lsp_clamped_offset_bytes(table, bytes, range.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
-    document: lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text)
-    // Organize-imports reads every diagnostic of the document, so it runs
-    // before the ones in the range move into their fixes.
-    organized: if lsp_code_action_wanted(params, "source.organizeImports") -> lsp_organize_imports_edits(view, document) else -> [TextEdit]{}
-    diagnostics := [Diagnostic]{}
-    loop diagnostic in document.move() {
-        span: diagnostic.span ?? next
-        if span.start <= end && start <= span.end -> diagnostics.push(diagnostic)
+    only: lsp_member(lsp_param(params, "context") ?? Dyn.Null, "only")
+    rows := [String]{}
+    loop (index, action) in lsp_code_actions(view, start, end, only) {
+        rows.push(if server.code_action_resolve -> lsp_action_stub_json(view, action, start, end, only, index) else -> lsp_action_json(view, action, document_changes: server.document_changes))
     }
-    actions := [String]{}
-    if lsp_code_action_wanted(params, "quickfix") {
-        loop diagnostic in diagnostics {
-            repairs: lsp_import_actions(view, diagnostic)
-            loop repair in repairs {
-                actions.push(lsp_action_json(view, repair.title, "quickfix", repair.edits, document_changes: server.document_changes, preferred: repairs.len() == 1))
-            }
-        }
-        fixes := lsp_fixes_from_diagnostics(diagnostics.move())
-        loop fix in fixes.move() {
-            preferred: fix.applicability == DiagnosticFixApplicability.Safe
-            whole := [TextEdit]{fix.edit.move()}
-            whole.extend(fix.edits.move())
-            actions.push(lsp_action_json(view, fix.title, "quickfix", whole, document_changes: server.document_changes, preferred: preferred))
-        }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// An action offered without its edit: `data` finds it again by the document
+// version, the byte range, the kinds asked for and its place in the list.
+lsp_action_stub_json: fn(view: LSPView, action: LSPCodeAction, start: Int, end: Int, only: Dyn?, index: Int) -> String Never! {
+    kinds: if only == .Val(value) -> ",\"only\":{jet_error_json_encode_value(value)}" else -> ""
+    data: "{{\"uri\":{foundation_json_quote(view.uri)},\"version\":{view.doc.version},\"start\":{start},\"end\":{end}{kinds},\"index\":{index}}}"
+    "{{\"title\":{foundation_json_quote(action.title)},\"kind\":{foundation_json_quote(action.kind)}{lsp_action_preference(action)},\"data\":{data}}}"
+}
+
+// `codeAction/resolve`: the edit of an action the list offered without one,
+// computed again for the document version the list was computed for. Once
+// the document has moved on, the action is refused as ContentModified.
+lsp_code_action_resolve_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    item: params ?? return lsp_error_response(id, -32602, "codeAction/resolve needs a code action")
+    title: lsp_text_member(item, "title") ?? return lsp_error_response(id, -32602, "a code action needs a title")
+    data: lsp_member(item, "data") ?? return lsp_error_response(id, -32602, "the code action was not offered for resolving")
+    uri: lsp_text_member(data, "uri") ?? return lsp_error_response(id, -32602, "the code action's data names no document")
+    version: foundation_json_integer(lsp_member(data, "version") ?? Dyn.Null) ?? return lsp_error_response(id, -32602, "the code action's data names no version")
+    start: foundation_json_integer(lsp_member(data, "start") ?? Dyn.Null) ?? return lsp_error_response(id, -32602, "the code action's data names no range")
+    end: foundation_json_integer(lsp_member(data, "end") ?? Dyn.Null) ?? return lsp_error_response(id, -32602, "the code action's data names no range")
+    index: foundation_json_integer(lsp_member(data, "index") ?? Dyn.Null) ?? return lsp_error_response(id, -32602, "the code action's data names no action")
+    view: lsp_view_of(server, uri) ?? return lsp_error_response(id, -32801, "the document is no longer open")
+    if view.doc.version != version || start < 0 || end < start || end > view.doc.text.count_bytes() {
+        return lsp_error_response(id, -32801, "the document changed after the action was offered")
     }
-    if lsp_code_action_wanted(params, "refactor.rewrite") {
-        if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {
-            actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
-        }
-        if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
-            actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
-        }
+    actions: lsp_code_actions(view, start, end, lsp_member(data, "only"))
+    if index < 0 || index >= actions.len() || actions[index].title != title {
+        return lsp_error_response(id, -32801, "the document changed after the action was offered")
     }
-    if organized.len() > 0 {
-        actions.push(lsp_action_json(view, "Organize imports", "source.organizeImports", organized, document_changes: server.document_changes, preferred: false))
-    }
-    lsp_response(id, "[{actions.join(",")}]")
+    lsp_response(id, lsp_action_json(view, actions[index], document_changes: server.document_changes))
+}
+
+lsp_action_preference: fn(action: LSPCodeAction) -> String Never! {
+    if action.preferred -> ",\"isPreferred\":true" else -> ""
 }
 
 // A client that negotiated `documentChanges` gets an edit naming the document
 // version it was computed for, so it drops the edit once the text has moved
 // on; any other client gets the plain `changes` map.
-lsp_action_json: fn(view: LSPView, title: String, kind: String, edits: [TextEdit], document_changes: Bool{false}, preferred: Bool{false}) -> String Never! {
-    preference: if preferred -> ",\"isPreferred\":true" else -> ""
+lsp_action_json: fn(view: LSPView, action: LSPCodeAction, document_changes: Bool{false}) -> String Never! {
     uri: foundation_json_quote(view.uri)
-    text_edits: lsp_text_edits_json(view.doc.text, edits)
+    text_edits: lsp_text_edits_json(view.doc.text, action.edits)
     edit: if document_changes -> "{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{uri},\"version\":{view.doc.version}}},\"edits\":{text_edits}}}]}}" else -> "{{\"changes\":{{{uri}:{text_edits}}}}}"
-    "{{\"title\":{foundation_json_quote(title)},\"kind\":{foundation_json_quote(kind)}{preference},\"edit\":{edit}}}"
+    "{{\"title\":{foundation_json_quote(action.title)},\"kind\":{foundation_json_quote(action.kind)}{lsp_action_preference(action)},\"edit\":{edit}}}"
 }

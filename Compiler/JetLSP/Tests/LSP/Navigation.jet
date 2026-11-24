@@ -6,6 +6,7 @@
 use {
     core.encoding.[Dyn]
     jet_lsp.[LSPServer, lsp_member]
+    jet_semindex.[SemAnchor]
 }
 
 lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
@@ -47,6 +48,52 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
     }
     kinds.sort()
     assert_eq(kinds, [String]{"0:0-0:3=3", "5:11-5:14=2", "5:4-5:7=2"})
+}
+
+// Publishes the check of `uri` with each unresolved read of a local or a
+// parameter pointed at the one declaration of its name there. The fixture
+// checks without sema, which is what resolves the names a body reads.
+lsp_test_publish_resolved_locals: fn(server: &LSPServer, uri: String) Never! {
+    doc: server.diagnostic_state.docs.get(uri) ?? panic("{uri} is open")
+    checked := server.check(doc)
+    index := checked.index ?? panic("the fixture builds an index")
+    loop slot in 0..<index.references.len() {
+        reference: index.references[slot]
+        if reference.target != None -> next
+        loop definition in index.definitions {
+            def: definition.def
+            if def.module_path != reference.module_path || def.name != reference.name -> next
+            kind: if def.kind == {
+                .Local(_, _) -> "local"
+                .Param(_) -> "param"
+                .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> next
+            }
+            index.references[slot].target = Val(SemAnchor{module_path: def.module_path, kind: kind, def_span: def.def_span, semantic_identity: None})
+        }
+    }
+    checked.index = Val(index.move())
+    server.published[uri] = checked.move()
+}
+
+// The sorted linked ranges at a position, or "null".
+lsp_test_linked: fn(server: &LSPServer, uri: String, line: Int, character: Int) -> [String] {
+    result: lsp_test_result(server, "textDocument/linkedEditingRange", lsp_test_at(uri, line, character))
+    if result == .Null -> return [String]{"null"}
+    ranges := [String]{}
+    loop row in lsp_test_rows(lsp_test_field(result, "ranges")) -> ranges.push(lsp_test_range(row))
+    ranges.sort()
+    ranges
+}
+
+#Test("linked editing edits a local's and a parameter's declaration and uses together, and nothing else") {
+    server := lsp_test_server()
+    uri: "file:///w/linked.jet"
+    lsp_test_open(server, uri, "run: fn(count: Int) -> Int {{\n    total: count + 1\n    total + count\n}}\n")
+    lsp_test_publish_resolved_locals(server, uri)
+    assert_eq(lsp_test_linked(server, uri, 2, 5), [String]{"1:4-1:9", "2:4-2:9"})
+    assert_eq(lsp_test_linked(server, uri, 0, 9), [String]{"0:8-0:13", "1:11-1:16", "2:12-2:17"})
+    // A function may be called from other files, which linked ranges do not reach.
+    assert_eq(lsp_test_linked(server, uri, 0, 1), [String]{"null"})
 }
 
 #Test("rename edits the declaration and every call") {

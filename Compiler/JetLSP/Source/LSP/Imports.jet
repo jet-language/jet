@@ -393,11 +393,10 @@ lsp_organize_imports_edits: fn(view: LSPView, diagnostics: [Diagnostic]) -> [Tex
 // Whether an action of `kind` answers a code action request. A request
 // whose `context.only` names kinds asks for those alone, and a kind answers
 // its own request and each of its parents' (`source` asks for
-// `source.organizeImports`).
-lsp_code_action_wanted: fn(params: Dyn?, kind: String) -> Bool Never! {
-    context: lsp_param(params, "context") ?? return true
-    only: lsp_member(context, "only") ?? return true
-    if only == .Array(rows) {
+// `source.organizeImports`). `only` is that member, absent when unnamed.
+lsp_code_action_wanted: fn(only: Dyn?, kind: String) -> Bool Never! {
+    asked: only ?? return true
+    if asked == .Array(rows) {
         loop row in rows {
             if row == .Text(parent) && (kind == parent || kind.starts_with("{parent}.")) {
                 return true
