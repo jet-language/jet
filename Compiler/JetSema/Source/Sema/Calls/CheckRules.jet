@@ -13,6 +13,7 @@ use {
     jet_foundation.[
         AST_NODE_GENERATED,
         BodyEnumPayload,
+        Binding,
         CallArg,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -38,6 +39,8 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
+        diagnostic_with_label,
+        expr_span,
         name_column_table,
         name_index,
         name_intern,
@@ -61,12 +64,15 @@ SEMA_CALL_RULE_RECORDS: [String]{"CompilerCall", "CompilerName", "CompilerArg", 
 
 // One rule a call hears: the `check` of the marker `marker`, declared in
 // `module_identity` at `span` (its `check` name), with the marker's value
-// where it is written.
+// where it is written. `paired`: the marker declares a `row`, so the rule
+// hears each call with the first earlier call of its table that has the
+// same row (sema_call_rule_batch_expression).
 SemaCallRule: struct {
     module_identity: ModuleID,
     marker: String,
     span: Span,
     value: TComptimeValue,
+    paired: Bool{false},
 }
 
 // What hearing a call's rules decided. `rejected`: a landed `.Error`
@@ -91,7 +97,7 @@ sema_call_rules: fn(graph: SemaRegistrationGraph, markers: [Marker], written_in:
         declaration: resolved.declaration ?? next
         span: declaration.check ?? next
         value: sema_checked_comptime(sema_user_rule_receiver(declaration, marker)) ?? next
-        rules.push(SemaCallRule{module_identity: resolved.declaring_module_identity, marker: declaration.name, span: span, value: value})
+        rules.push(SemaCallRule{module_identity: resolved.declaring_module_identity, marker: declaration.name, span: span, value: value, paired: declaration.pairs != None})
     }
     rules
 }
@@ -126,18 +132,26 @@ sema_call_rules_heard_here: fn(scopes: SemaScopeTable) -> Bool Never! {
 }
 
 // Hears `rules` at the call of `callee` written `name` at `name_span` with
-// `args`, and, for a method call, the receiver of type `receiver_type`
-// written at `receiver_span`, whose value the build knows as
-// `receiver_known` (None when only the run knows it).
+// `args` in the block `frame`, and, for a method call, the receiver
+// `receiver` of type `receiver_type` written at `receiver_span`, whose
+// value the build knows as `receiver_known` (None when only the run knows
+// it). A stand-in call, which a registering call makes in place of a call
+// the program does not write (sema_call_rules_hear_stand_in), is told from
+// the others at one name by its `site`, and names the file it stands for as
+// its `source`.
 sema_call_rules_hear: fn(
     rules: [SemaCallRule],
     callee: SymbolID?,
     name: String,
     name_span: Span,
     args: [CallArg],
+    receiver: Expr?,
     receiver_type: Type?,
     receiver_known: TComptimeValue?,
     receiver_span: Span,
+    source: String?,
+    site: String,
+    frame: Int,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
     scopes: ^SemaScopeTable,
@@ -148,12 +162,18 @@ sema_call_rules_hear: fn(
 ) -> SemaCallRuleHearing {
     hearing := SemaCallRuleHearing{from: context.comptime_body_sources.len()}
     owner: sema_scope_function_owner_key(scopes)
+    site_owner: if site == "" -> "{owner}" else -> "{owner}.{site}"
+    table: if receiver == .Val(written) -> sema_rule_table(written, owner, scopes, context) else -> "{owner}"
+    if receiver != None && site == "" {
+        context.rule_tables.calls_at.push(name_span.start)
+        context.rule_tables.call_tables.push("{table}")
+    }
     end := name_span.end
     loop argument in args -> end = argument.span.end
     span: Span{start: name_span.start, end: end}
     waiting := [Int]{}
     loop index in 0..<rules.len() {
-        if sema_comptime_body_value_find(context, environment.module_identity, owner, rules[index].span, name_span) == .Val(landed) {
+        if sema_comptime_body_value_find(context, environment.module_identity, site_owner, rules[index].span, name_span) == .Val(landed) {
             if sema_call_rule_rejects(landed.value, span, diagnostics) {
                 hearing.rejected = true
                 return hearing
@@ -166,12 +186,152 @@ sema_call_rules_hear: fn(
     // A check without the registration graph (a compile-time run's own
     // program) hears no rule; the compile's own check of the same call does.
     graph: program.registration_graph ?? return hearing
-    call: sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, owner, environment, program, scopes, state, tail_store, context)
+    call := sema_rule_call_value(graph, callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, source, sema_rule_table_keys(table, frame, scopes), owner, environment, program, scopes, state, tail_store, context)
     loop index in waiting {
-        sema_call_rule_stage(context, environment, owner, rules[index], call, name_span)
+        call.words[SEMA_CALL_RULE_PAIRED_WORD] = if rules[index].paired -> 1 else -> 0
+        sema_call_rule_stage(context, environment, owner, site_owner, rules[index], call, name_span)
     }
     hearing.staged = true
     hearing
+}
+
+// Hears the rules of the type of `receiver_value` (written `receiver`) at
+// a stand-in call: one a registering call makes in place of each call it
+// stands for, which the program does not write, such as one marked method
+// of `app.mount(value)` or one convention page of `.routes(from:)`. It is
+// the call `name` at `name_span` with `args` in the registering call's
+// block `frame`, told from its other stand-ins by `site`, and `source`
+// names the file it stands for. True when a rule rejects it.
+sema_call_rules_hear_stand_in: fn(
+    receiver: Expr,
+    receiver_value: TExpr,
+    name: String,
+    name_span: Span,
+    args: [CallArg],
+    source: String?,
+    site: String,
+    frame: Int,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: ^SemaScopeTable,
+    state: ^SemaOwnershipState,
+    tail_store: ^SemaStatementTailStore,
+    context: ^SemaCheckContext,
+    diagnostics: ^[Diagnostic],
+) -> Bool {
+    if !sema_call_rules_heard_here(scopes) -> return false
+    if program.registration_graph == .Val(graph) {
+        rules: sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
+        if rules.len() == 0 -> return false
+        return sema_call_rules_hear(rules, None, name, name_span, args, Val(receiver), Val(receiver_value.ty), None, receiver_value.span, source, site, frame, environment, program, scopes, state, tail_store, context, diagnostics).rejected
+    }
+    false
+}
+
+// The tables heard calls add rows to (SemaCheckContext.rule_tables). A
+// table is a place: a binding, as each assignment to it leaves it, with a
+// field path, or one builder chain. `heard`: the bindings a heard call's
+// receiver names; `assigned` and `assigned_at`: each assignment to one of
+// them and where it is written; `joined` and `joined_tables`: each binding
+// made from a chain and that chain's table; `calls_at` and `call_tables`:
+// each heard method call's name and its receiver's table, which a call
+// chained on it adds to.
+SemaRuleTables: struct {
+    heard: [String]{[String]{}},
+    assigned: [String]{[String]{}},
+    assigned_at: [Int]{[Int]{}},
+    joined: [String]{[String]{}},
+    joined_tables: [String]{[String]{}},
+    calls_at: [Int]{[Int]{}},
+    call_tables: [String]{[String]{}},
+}
+
+// The table a heard call's `receiver` names, in the body keyed `owner`. A
+// binding is its own table (or the chain it was made from) until it is
+// assigned again; a field adds its name to its base's; a call on a heard
+// call adds to that call's receiver's table; any other value is a table of
+// its own.
+sema_rule_table: fn(receiver: Expr, owner: String, scopes: SemaScopeTable, context: ^SemaCheckContext) -> String {
+    if receiver == .Paren(inner, _, _) -> return sema_rule_table(inner, owner, scopes, context)
+    if receiver == .Field(base, member, _, _) -> return "{sema_rule_table(base, owner, scopes, context)}.{member}"
+    if receiver == .MethodCall(_, _, method_span, _, _, _, _) {
+        loop (index, at) in context.rule_tables.calls_at {
+            if at == method_span.start -> return "{context.rule_tables.call_tables[index]}"
+        }
+    }
+    if receiver == .Ident(name, span, _) && sema_scope_resolve_index(scopes, name) == .Val(binding) {
+        key: "{owner}:{scopes.bindings[binding].key}"
+        heard := false
+        loop written in context.rule_tables.heard {
+            if written == key -> heard = true
+        }
+        if !heard -> context.rule_tables.heard.push("{key}")
+        base := "{key}"
+        loop (index, joined) in context.rule_tables.joined {
+            if joined == key -> base = "{context.rule_tables.joined_tables[index]}"
+        }
+        generation := 0
+        loop (index, assigned) in context.rule_tables.assigned {
+            if assigned == key && context.rule_tables.assigned_at[index] < span.start -> generation += 1
+        }
+        return "{base}#{generation}"
+    }
+    "{owner}@{expr_span(receiver).start}"
+}
+
+// After the binding `binding` checks: a binding made from a heard call
+// (`app: web.app().get(…)`) joins that call's table.
+sema_rule_table_join: fn(binding: Binding, scopes: SemaScopeTable, context: ^SemaCheckContext) Never! {
+    if context.rule_tables.calls_at.len() == 0 || binding.pattern != None -> return
+    if binding.init == .MethodCall(_, _, method_span, _, _, _, _) && sema_scope_resolve_index(scopes, binding.name) == .Val(index) {
+        loop (call, at) in context.rule_tables.calls_at {
+            if at == method_span.start {
+                context.rule_tables.joined.push("{sema_scope_function_owner_key(scopes)}:{scopes.bindings[index].key}")
+                context.rule_tables.joined_tables.push("{context.rule_tables.call_tables[call]}")
+                return
+            }
+        }
+    }
+}
+
+// After an assignment to the place rooted at `root`, written at `at`: when
+// a heard call named that binding, the assignment starts a new table.
+sema_rule_table_assigned: fn(root: String, at: Span, scopes: SemaScopeTable, context: ^SemaCheckContext) Never! {
+    if context.rule_tables.heard.len() == 0 -> return
+    index: sema_scope_resolve_index(scopes, root) ?? return
+    key: "{sema_scope_function_owner_key(scopes)}:{scopes.bindings[index].key}"
+    loop written in context.rule_tables.heard {
+        if written == key {
+            loop (row, assigned) in context.rule_tables.assigned {
+                if assigned == key && context.rule_tables.assigned_at[row] == at.start -> return
+            }
+            context.rule_tables.assigned.push(key)
+            context.rule_tables.assigned_at.push(at.start)
+            return
+        }
+    }
+}
+
+// The keys a call of `table` written in the block `written_in` is found
+// under: the table in each block from the body's outermost to that one, so
+// a call finds an earlier call of its table written in its own block or one
+// around it, which always ran before it. The last is the call's own.
+sema_rule_table_keys: fn(table: String, written_in: Int, scopes: SemaScopeTable) -> [String] {
+    frames := [Int]{}
+    at := written_in
+    loop at >= 0 {
+        frames.push(at)
+        at = scopes.frames[at].parent
+    }
+    frames.reverse()
+    keys := [String]{}
+    path := "{table}@"
+    loop frame in frames {
+        path = "{path}.{frame}"
+        keys.push("{path}")
+    }
+    if keys.len() == 0 -> keys.push(path)
+    keys
 }
 
 // After a staged call's ordinary checks wrote `held`: true when they failed,
@@ -191,8 +351,9 @@ sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: ^^[Diagnostic], con
 
 // Stages one rule's site at a call: the rule's marker value and the call's
 // row, which the driver's batch of the rule hears (sema_call_rule_batches).
-sema_call_rule_stage: fn(context: ^SemaCheckContext, environment: SemaScopeEnvironment, owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
-    destination_key: sema_comptime_body_destination_key(owner, rule.span, site_span)
+// The site is keyed by `site_owner`, the body's key or a stand-in's.
+sema_call_rule_stage: fn(context: ^SemaCheckContext, environment: SemaScopeEnvironment, owner: String, site_owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
+    destination_key: sema_comptime_body_destination_key(site_owner, rule.span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
     if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
         if sema_comptime_key_row(context.comptime_body_source_rows[slot], key) != None -> return
@@ -215,12 +376,14 @@ sema_call_rule_stage: fn(context: ^SemaCheckContext, environment: SemaScopeEnvir
 
 // The row of the CompilerCall a rule hears (SemaCallRuleHeard): its caller
 // and callee identities, module and span (from the name to the last
-// argument), the `name` it was written with, its `receiver` and its `args`
-// in written order. An argument's `type` is the type its own check gives it
-// (`_` when that check fails), and its `value` the Dyn its value encodes to
-// when the build knows that value (sema_rule_value_dyn). A type name, which
-// checks only where a `Type` is expected, is heard as that `Type` value
-// (sema_rule_probe). The `function` an argument names is its FunctionInfo
+// argument), the `name` it was written with, the file a stand-in call
+// stands for (`source`), its `receiver` and its `args` in written order,
+// then the keys of its table (sema_rule_table_keys). An argument's `type`
+// is the type its own check gives it (`_` when that check fails), and its
+// `value` the Dyn its value encodes to when the build knows that value
+// (sema_rule_value_dyn). A type name, which checks only where a `Type` is
+// expected, is heard as that `Type` value (sema_rule_probe). The
+// `function` an argument names is its FunctionInfo
 // (sema_rule_function_named).
 sema_rule_call_value: fn(
     graph: SemaRegistrationGraph,
@@ -232,6 +395,8 @@ sema_rule_call_value: fn(
     receiver_type: Type?,
     receiver_known: TComptimeValue?,
     receiver_span: Span,
+    source: String?,
+    tables: [String],
     owner: String,
     environment: SemaScopeEnvironment,
     program: SemaProgramTables,
@@ -248,11 +413,15 @@ sema_rule_call_value: fn(
         callee_identity = sema_rule_identity(graph, callee_key, context.rule_identities)
     }
     heard := SemaCallRuleHeard{
-        words: [Int]{0, 0, 1, 2, 3, span.start, span.end, 4, name_span.start, name_span.end, args.len(), 0},
+        words: [Int]{0, 0, 1, 2, 3, span.start, span.end, 4, name_span.start, name_span.end, args.len(), 0, 0, 0},
         texts: [String]{caller, callee_identity, "{environment.module_name}", file, "{name}"},
         types: [TComptimeValue]{},
         values: [TComptimeValue]{},
         functions: [TComptimeValue]{},
+    }
+    if source == .Val(text) {
+        heard.texts.push("{text}")
+        heard.words[SEMA_CALL_RULE_SOURCE_WORD] = heard.texts.len()
     }
     if {
         receiver_type == .Val(ty) -> {
@@ -271,6 +440,11 @@ sema_rule_call_value: fn(
         label := String?{None}
         if argument.label == .Val(written) -> label = Val("{written.name}")
         sema_rule_call_arg(heard, label, ty, known, sema_rule_function_named(argument.expr, argument.span, environment, program, scopes), argument.span, graph, environment)
+    }
+    heard.words.push(tables.len())
+    loop table in tables {
+        heard.words.push(heard.texts.len())
+        heard.texts.push("{table}")
     }
     heard
 }
@@ -747,8 +921,11 @@ sema_rule_dyn_entry: fn(key: String, tree: TComptimeValue) -> TComptimeValue Nev
 // pushed at its span (`fallback`, the call's, when it holds none): an
 // `.Error` one rejects the call and the result is true; a `.Tidy` one is a
 // lint and a `.Report` one no diagnostic, and neither replaces the call's
-// checks. A finding whose code is the compiler's own takes its registry row,
-// a package's code is reported as written (jet_driver_build_findings).
+// checks. A clash, a finding that also names another call's span
+// (`reject(…, also: other, label: text)`), carries that span with its label
+// and is reported beside the call's own checks: each of the two calls is
+// fine alone. A finding whose code is the compiler's own takes its registry
+// row, a package's code is reported as written (jet_driver_build_findings).
 sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if answer == .Present(inner) -> return sema_call_rule_rejects(inner, fallback, diagnostics)
     if answer == .Struct(type_name, fields) {
@@ -758,10 +935,16 @@ sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: 
         what := ""
         why := ""
         fix := ""
+        label := ""
         span := fallback
+        also := Span?{None}
         loop field in fields {
             if field.name == "span" {
                 if sema_comptime_reflection_span_of(field.value) == .Val(at) -> span = at
+                next
+            }
+            if field.name == "also" {
+                if field.value == .Present(other) -> also = sema_comptime_reflection_span_of(other)
                 next
             }
             if field.value == .String(text) {
@@ -771,15 +954,17 @@ sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: 
                     field.name == "what" -> what = "{text}"
                     field.name == "why" -> why = "{text}"
                     field.name == "fix" -> fix = "{text}"
+                    field.name == "label" -> label = "{text}"
                     else -> {}
                 }
             }
         }
         if tier == "Report" -> return false
         report := if diagnostic_registry_row(code) != None -> diagnostic_from_registry(code, Val(span), what, why, fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: code, span: Val(span), what: diagnostic_sentence_case_line(what), why: diagnostic_sentence_case_line(why), fix: diagnostic_sentence_case_line(fix)}
-        rejected: tier == "Error"
-        report.severity = if rejected -> DIAGNOSTIC_ERROR else -> DIAGNOSTIC_LINT
-        diagnostics.push(report)
+        rejected: tier == "Error" && also == None
+        report.severity = if tier == "Error" -> DIAGNOSTIC_ERROR else -> DIAGNOSTIC_LINT
+        if also == .Val(other) -> report = diagnostic_with_label(report.move(), other, label)
+        diagnostics.push(report.move())
         return rejected
     }
     false
@@ -789,12 +974,14 @@ sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: 
 // `module_identity`, heard at once by the batch item keyed `key`
 // (sema_call_rule_batch_source), whose value answers each call in order;
 // `sites` are those calls' own sources, in that order, at their `rows` of
-// the pending sources.
+// the pending sources. `paired`: the rule hears each call with the first
+// earlier call of its table that has its row (SemaCallRule.paired).
 SemaCallRuleBatch: struct {
     module_identity: ModuleID,
     marker: String,
     span: Span,
     key: String,
+    paired: Bool,
     sites: [SemaCallRuleBatchSite],
     rows: [Int],
 }
@@ -817,7 +1004,7 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptime
         row := 0
         loop row < batches.len() && (batches[row].module_identity != site.module_identity || batches[row].marker != site.marker) -> row += 1
         if row == batches.len() {
-            batches.push(SemaCallRuleBatch{module_identity: site.module_identity, marker: "{site.marker}", span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
+            batches.push(SemaCallRuleBatch{module_identity: site.module_identity, marker: "{site.marker}", span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", paired: site.call.words[SEMA_CALL_RULE_PAIRED_WORD] == 1, sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
         }
         batches[row].rows.push(index)
         batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key})
@@ -849,17 +1036,21 @@ SemaCallRuleColumns: struct {
 }
 
 // A row's words: its rule, caller, callee, module, file, span start and
-// end, name text, name start and end, argument count and whether it has a
-// receiver, then its receiver's argument words (zeros when it has none) and
-// each argument's. An argument's words are its label (0 when it has none,
-// else its text's index plus one), type, known value (0 when the build does
-// not know it, else its index plus one), named function (0 when it names
-// none, else its FunctionInfo's index plus one), and span start and end;
-// its span's file is the call's.
+// end, name text, name start and end, argument count, whether it has a
+// receiver, its source (0 when it has none, else its text's index plus
+// one) and whether its rule is paired, then its receiver's argument words
+// (zeros when it has none) and each argument's, then the count of its
+// table's keys and each key's text. An argument's words are its label (0
+// when it has none, else its text's index plus one), type, known value (0
+// when the build does not know it, else its index plus one), named
+// function (0 when it names none, else its FunctionInfo's index plus one),
+// and span start and end; its span's file is the call's.
 SEMA_CALL_RULE_COUNT_WORD: 10
 SEMA_CALL_RULE_HAS_RECEIVER_WORD: 11
-SEMA_CALL_RULE_RECEIVER_WORD: 12
-SEMA_CALL_RULE_ARGS_WORD: 18
+SEMA_CALL_RULE_SOURCE_WORD: 12
+SEMA_CALL_RULE_PAIRED_WORD: 13
+SEMA_CALL_RULE_RECEIVER_WORD: 14
+SEMA_CALL_RULE_ARGS_WORD: 20
 SEMA_CALL_RULE_ARG_WORDS: 6
 
 // The words that name a text: caller, callee, module, file and name.
@@ -889,8 +1080,11 @@ sema_call_rule_columns_add: fn(columns: ^SemaCallRuleColumns, staged: ^^SemaComp
     words := call.words.move()
     words[0] = rule
     loop at in SEMA_CALL_RULE_TEXT_WORDS -> words[at] = texts[words[at]]
+    if words[SEMA_CALL_RULE_SOURCE_WORD] > 0 -> words[SEMA_CALL_RULE_SOURCE_WORD] = texts[words[SEMA_CALL_RULE_SOURCE_WORD] - 1] + 1
     if words[SEMA_CALL_RULE_HAS_RECEIVER_WORD] == 1 -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_RECEIVER_WORD, texts, types, values, functions)
     loop arg in 0..<words[SEMA_CALL_RULE_COUNT_WORD] -> sema_call_rule_columns_arg(words, SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * arg, texts, types, values, functions)
+    keys: SEMA_CALL_RULE_ARGS_WORD + SEMA_CALL_RULE_ARG_WORDS * words[SEMA_CALL_RULE_COUNT_WORD]
+    loop key in keys + 1..<keys + 1 + words[keys] -> words[key] = texts[words[key]]
     columns.rows.push(columns.words.len())
     columns.words.extend(words.move())
 }
@@ -931,7 +1125,7 @@ sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRul
         name: "{batch.marker}.check",
         source_file: file,
         kind: SemaComptimeItemKind.BodyExpression,
-        expression: sema_call_rule_batch_expression(),
+        expression: sema_call_rule_batch_expression(batch),
         expected_type: Val(Type.List{element: sema_call_rule_answer_type()}),
         span: batch.span,
         dependencies: [String]{},
@@ -958,16 +1152,16 @@ sema_call_rule_batch_item: fn(source: SemaComptimeItemSource) -> Bool Never! {
 // one ordered arm table so the text raises no lint. It reads each prepared
 // column once, into a local: a read of a prepared local carries its whole
 // value into the checked body and the IR. Each call's CompilerCall is built
-// from its row of words. Only an error stops it; a lint never does.
-sema_call_rule_batch_expression: fn() -> Expr {
+// from its row of words. The batch of a paired rule first finds each call's
+// row (its marker's `row`) and the first earlier call with that row under
+// one of its table's keys, then checks each call with that call, or None.
+// Only an error stops it; a lint never does.
+sema_call_rule_batch_expression: fn(batch: SemaCallRuleBatch) -> Expr {
     w: "__jet_w"
     t: "__jet_t"
-    span: sema_call_rule_span_text("row + 5")
-    name_span: sema_call_rule_span_text("row + 8")
-    receiver: sema_call_rule_arg_text("row + {SEMA_CALL_RULE_RECEIVER_WORD}")
-    argument: sema_call_rule_arg_text("row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * arg")
-    call: "CompilerCall{{caller: {t}[{w}[row + 1]], callee: {t}[{w}[row + 2]], module: {t}[{w}[row + 3]], span: {span}, name: CompilerName{{text: {t}[{w}[row + 7]], span: {name_span}}}, args: loop arg in 0..<{w}[row + 10] -> {argument}, receiver: if {w}[row + 11] == 0 -> None else -> Val({receiver})}}"
-    text: "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_rows: {SEMA_CALL_RULE_ROWS_LOCAL}\n        {w}: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
+    call: sema_call_rule_call_text("row")
+    checks: if batch.paired -> "        __jet_first := [Int]{{}}\n        __jet_seen := [String: Int]{{}}\n        loop row in __jet_rows {{\n            first := -1\n            if __jet_r[{w}[row]].row({call}) == .Val(key) {{\n                at: row + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * {w}[row + {SEMA_CALL_RULE_COUNT_WORD}]\n                loop k in 1..<{w}[at] + 1 {{\n                    if __jet_seen.get(\"{{{t}[{w}[at + k]]}}|{{key}}\") == .Val(earlier) && (first < 0 || earlier < first) -> first = earlier\n                }}\n                own: \"{{{t}[{w}[at + {w}[at]]]}}|{{key}}\"\n                if __jet_seen.get(own) == None -> __jet_seen[own] = row\n            }}\n            __jet_first.push(first)\n        }}\n        loop (at, row) in __jet_rows -> __jet_r[{w}[row]].check({call}, if __jet_first[at] < 0 -> None else -> Val({sema_call_rule_call_text("__jet_first[at]")}))\n" else -> "        loop row in __jet_rows -> __jet_r[{w}[row]].check({call})\n"
+    text: "RULE_BATCH: if {{\n    true -> {{\n        __jet_r: {SEMA_CALL_RULE_RULES_LOCAL}\n        __jet_rows: {SEMA_CALL_RULE_ROWS_LOCAL}\n        {w}: {SEMA_CALL_RULE_WORDS_LOCAL}\n        {t}: {SEMA_CALL_RULE_TEXTS_LOCAL}\n        __jet_y: {SEMA_CALL_RULE_TYPES_LOCAL}\n        __jet_v: {SEMA_CALL_RULE_VALUES_LOCAL}\n        __jet_f: {SEMA_CALL_RULE_FUNCTIONS_LOCAL}\n{checks}    }}\n    else -> [CompilerRejection?]{{}}\n}}\n"
     parsed: parse_generated_source(text.bytes())
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("the rule batch loop does not parse: {diagnostic.code} {diagnostic.what}")
@@ -978,15 +1172,28 @@ sema_call_rule_batch_expression: fn() -> Expr {
     panic("the rule batch loop does not parse")
 }
 
-// The SourceSpan in the call's file whose start and end are the words at
-// `at` and after it.
-sema_call_rule_span_text: fn(at: String) -> String Never! {
-    "SourceSpan{{file: __jet_t[__jet_w[row + 4]], start: __jet_w[{at}], end: __jet_w[{at} + 1]}}"
+// The CompilerCall whose row starts at the word `row`.
+sema_call_rule_call_text: fn(row: String) -> String Never! {
+    w: "__jet_w"
+    t: "__jet_t"
+    span: sema_call_rule_span_text(row, "{row} + 5")
+    name_span: sema_call_rule_span_text(row, "{row} + 8")
+    receiver: sema_call_rule_arg_text(row, "{row} + {SEMA_CALL_RULE_RECEIVER_WORD}")
+    argument: sema_call_rule_arg_text(row, "{row} + {SEMA_CALL_RULE_ARGS_WORD} + {SEMA_CALL_RULE_ARG_WORDS} * arg")
+    source: "{w}[{row} + {SEMA_CALL_RULE_SOURCE_WORD}]"
+    "CompilerCall{{caller: {t}[{w}[{row} + 1]], callee: {t}[{w}[{row} + 2]], module: {t}[{w}[{row} + 3]], span: {span}, name: CompilerName{{text: {t}[{w}[{row} + 7]], span: {name_span}}}, args: loop arg in 0..<{w}[{row} + {SEMA_CALL_RULE_COUNT_WORD}] -> {argument}, receiver: if {w}[{row} + {SEMA_CALL_RULE_HAS_RECEIVER_WORD}] == 0 -> None else -> Val({receiver}), source: if {source} == 0 -> None else -> Val({t}[{source} - 1])}}"
 }
 
-// The CompilerArg whose words start at `at`.
-sema_call_rule_arg_text: fn(at: String) -> String Never! {
-    "CompilerArg{{label: if __jet_w[{at}] == 0 -> None else -> Val(__jet_t[__jet_w[{at}] - 1]), type: __jet_y[__jet_w[{at} + 1]], value: if __jet_w[{at} + 2] == 0 -> None else -> Val(__jet_v[__jet_w[{at} + 2] - 1]), function: if __jet_w[{at} + 3] == 0 -> None else -> Val(__jet_f[__jet_w[{at} + 3] - 1]), span: {sema_call_rule_span_text("{at} + 4")}}}"
+// The SourceSpan in the file of the call whose row starts at the word
+// `row`, whose start and end are the words at `at` and after it.
+sema_call_rule_span_text: fn(row: String, at: String) -> String Never! {
+    "SourceSpan{{file: __jet_t[__jet_w[{row} + 4]], start: __jet_w[{at}], end: __jet_w[{at} + 1]}}"
+}
+
+// The CompilerArg of the call whose row starts at the word `row`, whose
+// words start at `at`.
+sema_call_rule_arg_text: fn(row: String, at: String) -> String Never! {
+    "CompilerArg{{label: if __jet_w[{at}] == 0 -> None else -> Val(__jet_t[__jet_w[{at}] - 1]), type: __jet_y[__jet_w[{at} + 1]], value: if __jet_w[{at} + 2] == 0 -> None else -> Val(__jet_v[__jet_w[{at} + 2] - 1]), function: if __jet_w[{at} + 3] == 0 -> None else -> Val(__jet_f[__jet_w[{at} + 3] - 1]), span: {sema_call_rule_span_text(row, "{at} + 4")}}}"
 }
 
 // Lands each batched call's answer under its own site's key, in place of the

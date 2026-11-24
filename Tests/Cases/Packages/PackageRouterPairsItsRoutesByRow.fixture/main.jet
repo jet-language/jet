@@ -1,0 +1,15 @@
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet", "router.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    jokes: Router{name: "jokes"}
+    jokes.get("/jokes")
+    jokes.post("/jokes")
+    admin: Router{name: "admin"}
+    admin.get("/jokes")
+    if jokes.name != "" {
+        jokes.get("/jokes")
+    }
+}

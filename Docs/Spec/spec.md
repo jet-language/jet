@@ -168,6 +168,23 @@ vocabulary](vocabulary.md).
   call. Rules run with one meaning under `jet check`, `jet run` and
   `jet build` at every tier. A `check`
   whose signature differs is E0907, a second one E0105.
+  A rule that pairs calls (D-RULE-ACROSS1=A) also declares
+  `row: fn(self, call: CompilerCall) -> String? { … }` and takes the
+  earlier call as `check: fn(self, call: CompilerCall, first:
+  CompilerCall?)`. `row` names what a call adds to its table, or None for a
+  call that adds nothing the build knows. A call's table is its receiver:
+  one binding, a binding assigned from another, or one chain of calls; a
+  function's calls have one table per body. `first` is the earliest call of
+  the same table and row that always ran before this one, written earlier
+  in the call's own block or a block around it, and None when no such call
+  exists. A call one registering call makes in place of another (a marked
+  method of a mounted value, or a convention file's page under
+  `.routes(from:)`) is heard too, and its CompilerCall's `source` names the
+  file it stands for; a written call's is None.
+  `reject(finding, at: part, also: other, label: "…")` raises the finding
+  at `part` with a second span `other` labeled `label`. A `row` without a
+  three-parameter `check`, or a three-parameter `check` without `row`, is
+  E0907; a second `row` is E0105.
   `expand` runs at each site its `sites` names, and `target` is the record a
   derive reads there: a struct's or enum's TypeInfo, a field's FieldInfo, an
   enum case's CaseInfo, a method's MethodInfo, a function's FunctionInfo, an impl's

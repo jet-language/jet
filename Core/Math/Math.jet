@@ -44525,6 +44525,52 @@ Ray2: struct<T, From, To> {
     direction: Delta2<T, To>,
 }
 
+// The rule a transform's method calls are heard by: `first.then(second)`
+// composes only when the first transform's destination space `To` is the
+// second's source space `From`, read from each one's generic bindings.
+TransformChain: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "then" && call.args.len() == 1 && call.receiver == .Val(first) {
+                second: call.args[0]
+                if transform_space(first.type, "To") == .Val(to) && transform_space(second.type, "From") == .Val(from) && to.identity != from.identity {
+                    reject(TransformCompositionMismatch{first: first.type.name, second: second.type.name, middle_a: to.name, middle_b: from.name}, at: call.name)
+                }
+            }
+        }
+    }
+}
+
+// The space a transform type `id` binds to its type parameter `name`.
+priv transform_space: fn(id: TypeId, name: String) -> TypeId? {
+    loop binding in id.generic_bindings {
+        if binding.name == name -> return Val(binding.type)
+    }
+    None
+}
+
+// The finding E2521 reports, with the texts of its row in
+// Prelude/Diagnostics.jet.
+TransformCompositionMismatch: struct {
+    first: String,
+    second: String,
+    middle_a: String,
+    middle_b: String,
+
+    impl Diagnostic {
+        code: "E2521",
+
+        what: fn(self) -> String { "Cannot compose `{self.first}` with `{self.second}`: `{self.middle_a}` does not match `{self.middle_b}`." }
+
+        why: fn(self) -> String { "A transform chain is valid only when the destination of the first transform is the source of the next one." }
+
+        fix: fn(self) -> String { "Reverse or replace one transform so both middle spaces are the same." }
+    }
+}
+
+#TransformChain
 Transform: struct<From, To> {
     m00: Float,
     m01: Float,
@@ -44605,6 +44651,7 @@ Transform: struct<From, To> {
     }
 }
 
+#TransformChain
 Transform2: struct<T, From, To> {
     m00: Float,
     m01: Float,

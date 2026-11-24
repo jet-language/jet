@@ -1,0 +1,43 @@
+// A route table a package declares, as Core's HTTP router does: each method
+// call on a router is heard, a route's row is its method and path, and a
+// route whose row an earlier route of the same router has clashes with it.
+Clash: struct {
+    method: String,
+    path: String,
+
+    impl Diagnostic {
+        code: "router.Clash",
+
+        what: fn(self) -> String { "two routes both answer `{self.method} {self.path}`" }
+
+        why: fn(self) -> String { "a request reaches only the first of them" }
+
+        fix: fn(self) -> String { "remove one of the two routes" }
+    }
+}
+
+Routes: struct {
+    impl Marker {
+        sites: [.Type],
+
+        row: fn(self, call: CompilerCall) -> String? {
+            if call.args.len() == 1 && call.args[0].value == .Val(.Text(path)) -> return Val("{call.name.text.upper()} {path}")
+            None
+        }
+
+        check: fn(self, call: CompilerCall, first: CompilerCall?) {
+            if first == .Val(earlier) && call.args[0].value == .Val(.Text(path)) {
+                reject(Clash{method: call.name.text.upper(), path: path}, at: call.name, also: earlier.name, label: "first registered here")
+            }
+        }
+    }
+}
+
+#Routes
+Router: struct {
+    name: String,
+
+    get: fn(self, path: String) { print("{self.name} GET {path}") }
+
+    post: fn(self, path: String) { print("{self.name} POST {path}") }
+}

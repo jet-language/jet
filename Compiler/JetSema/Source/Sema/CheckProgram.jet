@@ -1836,7 +1836,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.runtime_policy = sema_function_runtime_policy(func.markers)
     context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
     context.marker_check_call = None
-    if func.marker_check && func.params.len() == 2 -> context.marker_check_call = Val("{func.params[1].name}")
+    if func.marker_check && func.name == "check" && func.params.len() >= 2 -> context.marker_check_call = Val("{func.params[1].name}")
     context.return_view_declared = func.declared_return_view_provenance != None
     if !context.compiler_generated && stand_in == None {
         context.eval_walk = sema_eval_walk_open(program, module_identity, func.span, owner_key)

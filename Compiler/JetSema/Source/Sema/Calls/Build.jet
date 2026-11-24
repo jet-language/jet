@@ -1021,41 +1021,65 @@ sema_call_compiler_report_finding: fn(receiver: Expr, receiver_value: TExpr, arg
 // whose heard call parameter `context.marker_check_call` names): the rule
 // ends with the finding, raised at `part`'s span, the heard call's when no
 // `at:` is written. `part` is the CompilerCall, its CompilerName or one of its
-// CompilerArgs. The finding's `impl Diagnostic` gives its code and tier as for
-// `meta.report` (sema_compiler_report_facts). The call is checked, under the
-// rule's `CompilerRejection? Err!` result, as
+// CompilerArgs. A clash between two calls also names the other one,
+// `also: other`, with `label: text` under it; it is reported beside the
+// call's own errors (sema_call_rule_rejects). The finding's
+// `impl Diagnostic` gives its code and tier as for `meta.report`
+// (sema_compiler_report_facts). The call is checked, under the rule's
+// `CompilerRejection? Err!` result, as
 //     finding: <finding>
 //     at: <part>.span
-//     return CompilerRejection{code: <code>, tier: <tier>, what: finding.what(), why: finding.why(), fix: finding.fix(), span: at}
+//     also: <other>.span
+//     label: <text>
+//     return CompilerRejection{code: <code>, tier: <tier>, what: finding.what(), why: finding.why(), fix: finding.fix(), span: at, also: Val(also), label: label}
 // in a frame of its own: the rule reads `part` without taking it.
 sema_call_check_marker_reject: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     heard: context.marker_check_call ?? return None
     end := call.name_span.end
     loop argument in call.args -> end = argument.span.end
     span: Span{start: call.name_span.start, end: end}
-    shaped := call.args.len() == 1 || call.args.len() == 2
+    shaped := call.args.len() >= 1 && call.args.len() <= 4
     if shaped {
         if call.args[0].spread || call.args[0].label != None -> shaped = false
     }
-    if shaped && call.args.len() == 2 {
-        placed: if call.args[1].label == .Val(label) -> label.name == "at" else -> false
-        if call.args[1].spread || !placed -> shaped = false
+    // The labeled parts, `at:`, `also:` and `label:`, each at most once.
+    at_part := Expr?{None}
+    also_part := Expr?{None}
+    label_part := Expr?{None}
+    loop index in 1..<call.args.len() {
+        if !shaped -> break
+        written: if call.args[index].label == .Val(label) -> "{label.name}" else -> ""
+        if call.args[index].spread -> shaped = false
+        if {
+            written == "at" && at_part == None -> at_part = Val(call.args[index].expr)
+            written == "also" && also_part == None -> also_part = Val(call.args[index].expr)
+            written == "label" && label_part == None -> label_part = Val(call.args[index].expr)
+            else -> shaped = false
+        }
     }
     if !shaped {
-        diagnostics.push(sema_error("E0104", span, "`reject` takes a finding and, optionally, `at:` the part of the call it names", "a finding is a value whose type implements `Diagnostic`, raised at the heard call or at its name or one of its arguments", "write `reject(BadRoute{{path: text}}, at: call.args[0])`"))
+        diagnostics.push(sema_error("E0104", span, "`reject` takes a finding and, optionally, `at:` the part of the call it names, `also:` the part of another call it clashes with and `label:` the text under that part", "a finding is a value whose type implements `Diagnostic`, raised at the heard call or at its name or one of its arguments", "write `reject(BadRoute{{path: text}}, at: call.args[0])`"))
         return None
     }
     at: span.start
     finding_name: "__jet_reject_finding_{at}"
     span_name: "__jet_reject_at_{at}"
+    also_name: "__jet_reject_also_{at}"
+    label_name: "__jet_reject_label_{at}"
     return_type: Val(Type.Result{ok: Type.Option{inner: Type.Named{name: "CompilerRejection"}}, err: Type.Named{name: "Err"}})
     mark: sema_scope_mark(scopes)
     sema_scope_enter(scopes, state, "reject@{at}")
-    part: if call.args.len() == 2 -> call.args[1].expr else -> Expr.Ident{name: "{heard}", span: span, id: AST_NODE_GENERATED}
+    part: at_part ?? Expr.Ident{name: "{heard}", span: span, id: AST_NODE_GENERATED}
     placed: Expr.Field{base: part, member: "span", span: span, id: AST_NODE_GENERATED}
-    bindings: [Stmt]{
+    bindings := [Stmt]{
         sema_compiler_events_binding(finding_name, None, call.args[0].expr, span),
         sema_compiler_events_binding(span_name, None, placed, span),
+    }
+    if also_part == .Val(other) {
+        bindings.push(sema_compiler_events_binding(also_name, None, Expr.Field{base: other, member: "span", span: span, id: AST_NODE_GENERATED}, span))
+    }
+    if label_part == .Val(text) {
+        bindings.push(sema_compiler_events_binding(label_name, Val(Type.String), text, span))
     }
     bound := sema_check_statements(bindings, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
     if !bound.complete {
@@ -1081,6 +1105,13 @@ sema_call_check_marker_reject: fn(call: Call, expected: Type?, environment: Sema
         sema_call_marker_reject_text(finding_name, "fix", span),
     }
     fields.push(ExprField{name: "span", name_span: span, value: Expr.Ident{name: "{span_name}", span: span, id: AST_NODE_GENERATED}})
+    also_value := Expr.EnumLit{type_name: "", variant: "None", variant_span: Val(span), args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+    if also_part != None {
+        also_value = Expr.EnumLit{type_name: "", variant: "Val", variant_span: Val(span), args: [EnumLitArg]{EnumLitArg.Positional{value: Expr.Ident{name: "{also_name}", span: span, id: AST_NODE_GENERATED}}}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+    }
+    fields.push(ExprField{name: "also", name_span: span, value: also_value})
+    label_value: if label_part != None -> Expr.Ident{name: "{label_name}", span: span, id: AST_NODE_GENERATED} else -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED}
+    fields.push(ExprField{name: "label", name_span: span, value: label_value})
     rejection: Expr.StructLit{type_name: "CompilerRejection", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span, id: AST_NODE_GENERATED}
     checked := sema_check_statements([Stmt]{Stmt.Return{value: Val(rejection), span: span}}, return_type, environment, program, scopes, state, tail_store, context, diagnostics, scopes.loop_depth)
     if !checked.complete {
