@@ -6,11 +6,13 @@
 // read it). An unsaved loose buffer is checked by itself. A document that is
 // a module its package's last `jet build` generated carries what made it.
 // The check carries the automatic choices its modules record, which hovers
-// show on their lines.
+// show on their lines. The failure marks are the `?` sites
+// `jet fmt --explicit-failures` finds, from the same compile of the entry
+// under `#Policy(failures: .Explicit)`.
 use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverToolStageItem, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
-    jet_foundation.[Diagnostic, Span, diagnostic_headline]
+    jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_headline]
     jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
     jet_semindex.[SemSymbol, semindex_build_symbols]
 }
@@ -76,7 +78,52 @@ JetCLILSPChecker: struct {
             }
             run.answers
         }
+
+        // A document that already declares the policy writes its own marks;
+        // the second declaration refuses the prepended copy, so it gets none.
+        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            alone: jet_cli_lsp_unsaved_loose(entry)
+            entry_path: jet_cli_overlay_path(entry)
+            shift: JET_CLI_FMT_EXPLICIT_FAILURES_POLICY.count_bytes()
+            given := [JetCLIOverlay]{}
+            length := -1
+            loop overlay in overlays.move() {
+                if jet_cli_overlay_path(overlay.path) == entry_path {
+                    length = overlay.source.count_bytes()
+                    given.push(JetCLIOverlay{path: overlay.path, source: "{JET_CLI_FMT_EXPLICIT_FAILURES_POLICY}{overlay.source}"})
+                    next
+                }
+                if !alone -> given.push(JetCLIOverlay{path: overlay.path, source: overlay.source})
+            }
+            sites := [Int]{}
+            if length < 0 -> return sites
+            if jet_cli_prepare_overlays(entry, entry, given, false, None, JetDriverCompileMode.Doc, alone) == {
+                .Refused(_) -> return sites
+                .Prepared(request, snapshot) -> {
+                    demanded := request.move()
+                    demanded.doc_core_on_demand = true
+                    result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}}) ?? return sites
+                    loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                        owner: diagnostic.origin ?? next
+                        if diagnostic.code != "E0434" || owner.path != snapshot.entry_path -> next
+                        // A call read as a receiver is written `(call()?)`: its
+                        // `?)` is the mark.
+                        loop edit in diagnostic.fix_edits -> jet_cli_failure_mark(sites, edit, shift, length)
+                        if diagnostic.edit == .Val(first) -> jet_cli_failure_mark(sites, first, shift, length)
+                    }
+                }
+            }
+            sites
+        }
     }
+}
+
+// The source offset of a failure mark the policy's `?`/`?)` insertion
+// `edit` writes, shifted back past the prepended policy; each site once.
+jet_cli_failure_mark: fn(sites: &[Int], edit: TextEdit, shift: Int, length: Int) Never! {
+    if edit.span.start != edit.span.end || (edit.new_text != "?" && edit.new_text != "?)") -> return
+    site: edit.span.start - shift
+    if site >= 0 && site <= length && !sites.contains(site) -> sites.push(site)
 }
 
 // Each diagnostic's `jet check --json` report, its paths absolute as the

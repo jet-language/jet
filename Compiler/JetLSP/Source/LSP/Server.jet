@@ -43,6 +43,12 @@ LSPServer: struct {
         items
     }
 
+    // Where each call in the document `view` reads passes a failure up by
+    // itself: the byte just past the call.
+    failure_marks: fn(self, view: LSPView) -> [Int] {
+        self.checker.failure_marks(view.doc.path, self.overlays())
+    }
+
     overlays: fn(self) -> [LSPOverlay] Never! {
         overlays := [LSPOverlay]{}
         loop (_, open) in self.diagnostic_state.docs {

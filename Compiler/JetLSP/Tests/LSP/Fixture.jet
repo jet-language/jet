@@ -4,7 +4,8 @@
 // resolves declarations, impl heads and free calls, which the feature tests
 // lean on. Its tool stages answer each hook call without running it: a
 // `SELECT` completion, a `keyword` token over the body's first word, and a
-// `: block` hint at the body's end.
+// `: block` hint at the body's end. Without a failure solve, its failure
+// marks fall just past each written `fail()`.
 use {
     core.encoding.[Dyn]
     jet_foundation.[Diagnostic, Span, TOOL_STAGE_LSP_COMPLETION, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json, interner_empty]
@@ -65,6 +66,21 @@ LSPFixtureChecker: struct {
                 answers.push([JetDriverToolStageItem]{row})
             }
             answers
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            sites := [Int]{}
+            loop overlay in overlays {
+                if overlay.path != entry -> next
+                text: overlay.source
+                at := text.find("fail()")
+                loop at >= 0 {
+                    sites.push(at + 6)
+                    later: text.slice(at + 6, text.count_bytes()).find("fail()")
+                    at = if later < 0 -> -1 else -> at + 6 + later
+                }
+            }
+            sites
         }
     }
 }
