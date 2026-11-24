@@ -1,0 +1,246 @@
+// The REPL's submission history (D-FE-REPL-HISTORY1=A): the latest
+// successful submissions, kept between sessions in `<state>/jet/repl-history`
+// (`$XDG_STATE_HOME`, else `~/.local/state`). Failed turns and meta-commands
+// are never stored.
+//
+// The file holds one record per line: the submission with `\`, newline and
+// carriage return escaped, so multiline input round-trips losslessly, then a
+// newline. A record that does not decode, or has no final newline, starts a
+// corrupt tail: the tail is discarded with a warning and the valid prefix is
+// kept. The state directory is held from `/` one part at a time, never through
+// a link (JetCLIRootedDirectory, created owner-only), and the held `jet`
+// directory is the authority for every later read, replacement and erasure.
+// Every write locks it, rereads the file and appends, so concurrent sessions
+// merge their submissions and a cleared entry never returns. When the store
+// cannot be held, read or written, the session warns and keeps session-only
+// history. `JET_REPL_HISTORY=off` makes history session-only;
+// `JET_REPL_HISTORY_LIMIT=N` sets the retained bound.
+use {
+    history_sys: core.sys
+    jet_foundation.[
+        ENV_JET_REPL_HISTORY,
+        ENV_JET_REPL_HISTORY_LIMIT,
+    ]
+}
+
+JET_CLI_REPL_HISTORY_FILE: "repl-history"
+
+// The retained bound when `JET_REPL_HISTORY_LIMIT` does not set one.
+JET_CLI_REPL_HISTORY_LIMIT: 2000
+
+// The largest history file a session reads.
+JET_CLI_REPL_HISTORY_MAX_BYTES: 67108864
+
+JetCLIReplHistory: struct {
+    // Every successful submission the session knows, oldest first; the latest
+    // `limit` are the ones searched and stored.
+    entries: [String],
+    limit: Int,
+    // The held state directory; None when history is session-only.
+    held: JetCLIRootedDirectory?,
+}
+
+// The records of a history file's valid prefix, and that prefix's length in
+// bytes.
+JetCLIReplHistoryRecords: struct {
+    entries: [String],
+    valid: Int,
+}
+
+// Session-only history with the default bound (`jet eval`, and a session
+// before its store opens).
+jet_cli_repl_history_none: fn() -> JetCLIReplHistory Never! {
+    JetCLIReplHistory{entries: [String]{}, limit: JET_CLI_REPL_HISTORY_LIMIT, held: None}
+}
+
+jet_cli_repl_history_unavailable: fn(reason: String) {
+    jet_cli_repl_err("warning: REPL history is unavailable ({reason}); continuing with session-only history\n")
+}
+
+jet_cli_repl_history_limit: fn() -> Int {
+    text: history_sys.get(ENV_JET_REPL_HISTORY_LIMIT) ?? return JET_CLI_REPL_HISTORY_LIMIT
+    limit: Int.parse(text.trim()) ?? -1
+    if limit < 0 {
+        jet_cli_repl_err("warning: JET_REPL_HISTORY_LIMIT `{text}` is not a count; keeping the latest {JET_CLI_REPL_HISTORY_LIMIT} submissions\n")
+        return JET_CLI_REPL_HISTORY_LIMIT
+    }
+    limit
+}
+
+// The parts of `<state>/jet` below `/` (jet_cli_state_dir), or None when
+// there is no user state directory.
+jet_cli_repl_history_parts: fn() -> [String]? {
+    path: jet_cli_state_dir(JET_CLI_REPL_HISTORY_FILE) ?? return None
+    parts := [String]{}
+    loop part in path.removesuffix("/{JET_CLI_REPL_HISTORY_FILE}").split("/") {
+        if part != "" -> parts.push(part)
+    }
+    Val(parts)
+}
+
+// The session's history: the stored submissions, unless history is off or
+// the store cannot be held or read.
+jet_cli_repl_history_open: fn() -> JetCLIReplHistory {
+    history := jet_cli_repl_history_none()
+    history.limit = jet_cli_repl_history_limit()
+    if history_sys.get(ENV_JET_REPL_HISTORY) == .Val(setting) {
+        if setting == "off" -> return history
+    }
+    parts: jet_cli_repl_history_parts() ?? {
+        jet_cli_repl_history_unavailable("there is no user state directory")
+        return history
+    }
+    held: JetCLIRootedDirectory.open("/", parts, true) ?? {
+        jet_cli_repl_history_unavailable(err.message)
+        return history
+    }
+    history.entries = jet_cli_repl_history_load(held) ?? {
+        jet_cli_repl_history_unavailable(err.message)
+        return history
+    }
+    history.held = Val(held)
+    history
+}
+
+// The stored submissions. A corrupt tail is discarded with a warning and the
+// valid prefix written back.
+jet_cli_repl_history_load: fn(held: JetCLIRootedDirectory) -> [String] JetCLIReadError! {
+    _owner: held.lock("REPL history") ?? return Err(err)
+    bytes: if held.read(JET_CLI_REPL_HISTORY_FILE, JET_CLI_REPL_HISTORY_MAX_BYTES) == {
+        .Val(stored) -> stored
+        .None -> return Ok([String]{})
+        .Err(error) -> return Err(error)
+    }
+    records: jet_cli_repl_history_parse(bytes)
+    if records.valid < bytes.len() {
+        jet_cli_repl_err("warning: corrupt history tail in `{jet_cli_rooted_join(held.path, JET_CLI_REPL_HISTORY_FILE)}`: {bytes.len() - records.valid} byte(s) discarded, {records.entries.len()} entries kept\n")
+        held.replace(JET_CLI_REPL_HISTORY_FILE, bytes.slice(0, records.valid), Val(0o600)) ?? return Err(err)
+    }
+    Ok(records.entries)
+}
+
+// The byte an escape sequence's second byte stands for: `n` newline, `r`
+// carriage return, `\` itself; any other byte is no escape.
+jet_cli_repl_history_unescape: fn(byte: U8) -> U8? Never! {
+    if byte == (U8{110}) -> return Val(U8{10})
+    if byte == (U8{114}) -> return Val(U8{13})
+    if byte == (U8{92}) -> return Val(U8{92})
+    None
+}
+
+// The records a history file's bytes hold, up to the first corrupt one.
+jet_cli_repl_history_parse: fn(bytes: [U8]) -> JetCLIReplHistoryRecords Never! {
+    entries := [String]{}
+    valid := 0
+    record := [U8]{}
+    escaped := false
+    loop index in 0..<bytes.len() {
+        byte: bytes[index]
+        if {
+            escaped -> {
+                escaped = false
+                decoded: jet_cli_repl_history_unescape(byte) ?? break
+                record.push(decoded)
+            }
+            byte == (U8{92}) -> escaped = true
+            byte == (U8{10}) -> {
+                entry: String.from_bytes(record) ?? break
+                entries.push(entry)
+                record = [U8]{}
+                valid = index + 1
+            }
+            else -> record.push(byte)
+        }
+    }
+    JetCLIReplHistoryRecords{entries: entries, valid: valid}
+}
+
+jet_cli_repl_history_encode: fn(entry: String) -> String Never! {
+    entry.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+}
+
+// Keep one successful submission: in the session, then in the held store.
+jet_cli_repl_history_add: fn(history: &JetCLIReplHistory, entry: &&String) {
+    record: "{jet_cli_repl_history_encode(entry)}\n"
+    history.entries.push(entry)
+    failed := String?{None}
+    if history.held == .Val(held) {
+        if jet_cli_repl_history_append(held, record, history.limit) == .Err(error) -> failed = Val(error.message)
+    }
+    if failed == .Val(reason) {
+        jet_cli_repl_history_unavailable(reason)
+        history.held = None
+    }
+}
+
+// Under the store's lock: the file's valid records, then `record`, keeping
+// the latest `limit`.
+jet_cli_repl_history_append: fn(held: JetCLIRootedDirectory, record: String, limit: Int) JetCLIReadError! {
+    _owner: held.lock("REPL history") ?? return Err(err)
+    kept := [U8]{}
+    count := 0
+    if held.read(JET_CLI_REPL_HISTORY_FILE, JET_CLI_REPL_HISTORY_MAX_BYTES) == {
+        .Val(current) -> {
+            records: jet_cli_repl_history_parse(current)
+            count = records.entries.len()
+            kept = current.slice(0, records.valid)
+        }
+        .None -> {}
+        .Err(error) -> return Err(error)
+    }
+    kept.extend(record.bytes())
+    count += 1
+    // A raw newline only ends a record, so dropping the oldest records drops
+    // through that many newlines.
+    drop := count - limit
+    start := 0
+    loop drop > 0 && start < kept.len() {
+        if kept[start] == (U8{10}) -> drop -= 1
+        start += 1
+    }
+    held.replace(JET_CLI_REPL_HISTORY_FILE, kept.slice(start, kept.len()), Val(0o600)) ?? return Err(err)
+}
+
+// `:history clear`: the session's entries and the stored file.
+jet_cli_repl_history_clear: fn(history: &JetCLIReplHistory) {
+    history.entries = [String]{}
+    failed := String?{None}
+    if history.held == .Val(held) {
+        if jet_cli_repl_history_erase(held) == .Err(error) -> failed = Val(error.message)
+    }
+    if failed == .Val(reason) {
+        jet_cli_repl_history_unavailable(reason)
+        history.held = None
+    }
+    jet_cli_repl_out("History cleared.\n")
+}
+
+jet_cli_repl_history_erase: fn(held: JetCLIRootedDirectory) JetCLIReadError! {
+    _owner: held.lock("REPL history") ?? return Err(err)
+    _: held.remove(JET_CLI_REPL_HISTORY_FILE) ?? return Err(err)
+}
+
+// `:history search <text>`: every retained submission holding `text`,
+// numbered oldest first.
+jet_cli_repl_history_search: fn(history: JetCLIReplHistory, text: String) {
+    total: history.entries.len()
+    first: if total > history.limit -> total - history.limit else -> 0
+    shown := ""
+    loop index in first..<total {
+        if history.entries[index].contains(text) {
+            shown = "{shown}{index - first + 1}  {history.entries[index].replace("\n", "\n   ")}\n"
+        }
+    }
+    if shown == "" -> jet_cli_repl_out("No history matches.\n") else -> jet_cli_repl_out(shown)
+}
+
+// `:history search <text>` or `:history clear`.
+jet_cli_repl_history_meta: fn(history: &JetCLIReplHistory, argument: String?) {
+    words: (argument ?? "").trim()
+    if {
+        words == "clear" -> jet_cli_repl_history_clear(history)
+        words == "search" -> jet_cli_repl_history_search(history, "")
+        words.starts_with("search ") -> jet_cli_repl_history_search(history, words.slice(7, words.len()).trim())
+        else -> jet_cli_repl_err("Usage: :history search <text> | :history clear\n")
+    }
+}

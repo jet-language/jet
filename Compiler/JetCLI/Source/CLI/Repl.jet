@@ -130,6 +130,8 @@ JetCLIReplSession: struct {
     denied: Bool,
     // The effects the session has named in its notice (jet_cli_repl_refusal).
     noticed: [String],
+    // Successful submissions, kept between sessions (ReplHistory.jet).
+    history: JetCLIReplHistory,
 }
 
 // One value a turn shows: the binding (or the echo) and its checked type.
@@ -1375,9 +1377,10 @@ jet_cli_repl_meta: fn(session: &JetCLIReplSession, command: String, argument: St
             session.turns[index].pinned = pinned
             jet_cli_repl_out(if pinned -> "Turn pinned\n" else -> "Turn unpinned\n")
         }
-        "rerun" | "history" -> {
+        "rerun" -> {
             jet_cli_repl_err(jet_cli_not_ported_output("repl :{command}", session.color).stderr)
         }
+        "history" -> jet_cli_repl_history_meta(session.history, argument)
         "?" -> {
             if argument == .Val(name) -> jet_cli_repl_docs(session, name) else {
                 jet_cli_repl_out(jet_cli_repl_help(session.color))
@@ -1444,6 +1447,7 @@ jet_cli_repl_session: fn(project: String?, options: JetCLIReplOptions, color: Bo
         baseline_items: [String]{},
         denied: false,
         noticed: [String]{},
+        history: jet_cli_repl_history_none(),
     })
 }
 
@@ -1463,6 +1467,7 @@ jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions,
     }
     session := jet_cli_repl_session(project, options, color) ?? return jet_cli_repl_no_session(color)
     jet_cli_repl_banner(color)
+    session.history = jet_cli_repl_history_open()
     if project == .Val(dir) {
         loaded := jet_cli_repl_load_dir(session, "{dir}/src")
         if loaded == 0 -> loaded = jet_cli_repl_load_dir(session, dir)
@@ -1476,7 +1481,13 @@ jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions,
             jet_cli_repl_out("\n")
             break
         }
+        recorded: session.turns.len()
         if !jet_cli_repl_line(session, text) -> break
+        // A submission that recorded a successful turn joins the history;
+        // a failed turn, a meta-command and an empty line never do.
+        if session.turns.len() > recorded && session.turns[recorded].status == JetCLIReplStatus.Ok {
+            jet_cli_repl_history_add(session.history, text)
+        }
     }
     repl_files.remove_all(session.dir).drop("the session directory is private to this REPL")
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: if session.denied -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK}
