@@ -2014,6 +2014,8 @@ ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
         point: ir_map_added_index(m, b, shape, map, found)
         ir_emit(b.f, IROp.Copy, at, point, -1, -1, b.line)
     } else {
+        // The fallback leaves, so the key no entry takes ends before it.
+        if b.fresh[key] && ir_has_drop(m, b, key) -> ir_emit(b.f, IROp.Drop, -1, key, -1, -1, b.line)
         ir_fallback_route(m, p, b, fallback, -1, span)
         if ir_failed(b) {
             return

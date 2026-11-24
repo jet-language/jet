@@ -1,0 +1,20 @@
+# A `??` whose fallback leaves its function or loop (`?? return`,
+# `?? break`, `?? next`) drops the failure or absent value it discards
+# before it leaves. This includes a `return` that reads the discarded error
+# as `err`, and an `if` test that returns from the payload it bound. The
+# fixture runs each form 100000 times, and the resident set grows by less
+# than 4 MiB per form. If each discarded error box and its text stayed
+# alive past the exit, every form would grow by 12 to 31 MiB. The result
+# is the same at every tier.
+fixture: AFallbackThatLeavesDropsWhatItDiscards.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "?? return None after a parse failure: flat true\n?? return None after a read failure: flat true\n?? return that reads err: flat true\n?? break: flat true\n?? next: flat true\n?? return on an absent value: flat true\nif test that returns from its payload: flat true\ntotal true\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "?? return None after a parse failure: flat true\n?? return None after a read failure: flat true\n?? return that reads err: flat true\n?? break: flat true\n?? next: flat true\n?? return on an absent value: flat true\nif test that returns from its payload: flat true\ntotal true\n"
+step o2: jet run --release main.jet
+exit: 0
+stdout: = "?? return None after a parse failure: flat true\n?? return None after a read failure: flat true\n?? return that reads err: flat true\n?? break: flat true\n?? next: flat true\n?? return on an absent value: flat true\nif test that returns from its payload: flat true\ntotal true\n"
