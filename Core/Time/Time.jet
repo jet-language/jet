@@ -183,10 +183,36 @@ clock_state_now: fn(state: ClockState) -> Int Never! {
     }
 }
 
+// The rule an expiring value's method calls are heard by: its payload is
+// read only through the fallible `get(clock)`, so `force` is refused
+// (E0511).
+ExpiryChecked: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "force" -> reject(ExpiringForce{}, at: call.name)
+        }
+    }
+}
+
+// The finding E0511 reports.
+ExpiringForce: struct {
+    impl Diagnostic {
+        code: "E0511",
+
+        what: fn(self) -> String { "`ExpiringValue.force` bypasses expiry checking" }
+
+        why: fn(self) -> String { "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly" }
+
+        fix: fn(self) -> String { "Use `.get(clock)` and handle `Expired`" }
+    }
+}
+
 // Payloads remain owned; an explicit caller clock determines access.
 // Main's owner-approved private-field correction keeps deadline mutation out
 // of the public API; payload access always checks the strict expiry boundary.
-#!Debug
+#[!Debug, ExpiryChecked]
 ExpiringValue: struct<T> {
     value: T,
     deadline_ms: Int,
@@ -571,6 +597,91 @@ duration_add: fn(a: Duration, b: Duration) -> Duration Never! {
 
 duration_sub: fn(a: Duration, b: Duration) -> Duration Never! {
     duration_ns(saturating_sub_ns(a.ns, b.ns))
+}
+
+/// The unit `duration.in(unit)` counts whole spans of.
+DurationUnit: enum {
+    Nanoseconds,
+    Microseconds,
+    Milliseconds,
+    Seconds,
+    Minutes,
+    Hours,
+}
+
+priv duration_unit_ns: fn(unit: DurationUnit) -> Int Never! {
+    if unit == {
+        .Nanoseconds -> 1
+        .Microseconds -> 1000
+        .Milliseconds -> 1000000
+        .Seconds -> 1000000000
+        .Minutes -> 60000000000
+        .Hours -> 3600000000000
+    }
+}
+
+// The Duration methods: the compiler checks `d.<method>(…)` as a call of
+// `__duration_<method>(d, …)`. `%%` keeps the dividend's sign, so
+// `value - value %% scale` is a multiple of `scale` toward zero.
+
+// The whole `unit`s in the span, truncated toward zero.
+priv __duration_in: fn(d: Duration, unit: DurationUnit) -> Int Never! {
+    scale: duration_unit_ns(unit)
+    (d.ns - d.ns %% scale) /% scale
+}
+
+priv __duration_is_zero: fn(d: Duration) -> Bool Never! { duration_is_zero(d) }
+
+// The whole seconds in the span, truncated toward zero.
+priv __duration_total_seconds: fn(d: Duration) -> Int Never! {
+    (d.ns - d.ns %% 1000000000) /% 1000000000
+}
+
+priv __duration_difference: fn(d: Duration, other: Duration) -> Duration Never! { duration_sub(d, other) }
+
+priv __duration_abs: fn(d: Duration) -> Duration Never! { duration_abs(d) }
+
+priv __duration_negated: fn(d: Duration) -> Duration Never! {
+    if d.ns == time_int_min() -> return duration_ns(time_int_max())
+    duration_ns(0 - d.ns)
+}
+
+priv __duration_sign: fn(d: Duration) -> Int Never! { civil_sign(d.ns) }
+
+// The span in `unit` (a civil_unit_ns name) as a Float; 0.0 for a unit
+// with no such name.
+priv __duration_total_in: fn(d: Duration, unit: String) -> Float Never! {
+    scale: civil_unit_ns(unit) ?? return 0.0
+    Float{d.ns} / Float{scale}
+}
+
+// The span rounded to `increment` `unit`s (civil_round); an unknown unit or
+// mode, an increment below 1, or a result outside the i64 nanosecond range
+// keeps the span.
+priv __duration_round: fn(d: Duration, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> Duration Never! {
+    rounded: civil_round(d.ns, unit, increment, rounding_mode)
+    if rounded < time_int_min() || rounded > time_int_max() -> return d.copy()
+    duration_ns(rounded)
+}
+
+#Test("the Duration methods count, compare and round the span") {
+    span: duration_ns(-90500000000)
+    assert_eq(__duration_in(span, .Minutes), -1)
+    assert_eq(__duration_in(span, .Milliseconds), -90500)
+    assert_eq(__duration_total_seconds(span), -90)
+    assert_eq(__duration_sign(span), -1)
+    assert_eq(__duration_abs(span).ns, 90500000000)
+    assert_eq(__duration_negated(span).ns, 90500000000)
+    assert_eq(__duration_negated(duration_ns(time_int_min())).ns, time_int_max())
+    assert_eq(__duration_difference(duration_ns(time_int_min()), duration_ns(1)).ns, time_int_min())
+    assert(__duration_is_zero(duration_ns(0)))
+    assert_eq(__duration_total_in(span, "min"), -90.5 / 60.0)
+    assert_eq(__duration_total_in(span, "fortnight"), 0.0)
+    assert_eq(__duration_round(span, "s").ns, -91000000000)
+    assert_eq(__duration_round(span, "s", 1, "half_even").ns, -90000000000)
+    assert_eq(__duration_round(span, "min", increment: 2, rounding_mode: "ceil").ns, 0)
+    assert_eq(__duration_round(span, "s", 0).ns, span.ns)
+    assert_eq(__duration_round(duration_ns(time_int_max()), "week", 1, "expand").ns, time_int_max())
 }
 
 min_date: fn(a: LocalDate, b: LocalDate) -> LocalDate Never! {

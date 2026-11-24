@@ -7,7 +7,6 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     EffectRowEntry,
-    EnumLitArg,
     FunctionDefaultRef,
     NodeKind,
     ParamZone,
@@ -18,14 +17,12 @@ use jet_foundation.[
     TypeTupleField,
     AST_EMPTY_CALL_ARG_FLAGS,
     core_receiver_method,
-    core_source_owns_type,
     expr_source_span,
     expr_span,
     type_name,
     type_unqualified_nominals,
     UnOp,
     core_identity_in_module,
-    core_identity_is,
     TEST_SETTINGS_PLAN_ENV,
     TestSettingKind,
     TestSettingRow,
@@ -415,13 +412,13 @@ sema_data_query_push_argument: fn(argument: CallArg, value: TExpr?, source_args:
 }
 
 sema_data_query_receiver: fn(name: String, parameters: [Type], method: String) -> String Never! {
-    if sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 && (method == "query" || method == "insert" || method == "replace" || method == "remove") {
+    if sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 && (method == "insert" || method == "replace" || method == "remove") {
         return "DataTracked"
     }
     if sema_data_nominal_is(name, "DataWatch") && parameters.len() == 1 && (method == "get" || method == "status" || method == "cancel") {
         return "DataWatch"
     }
-    if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && (method == "filter" || method == "sort_by" || method == "map" || method == "min" || method == "max" || method == "inner_join" || method == "left_join" || method == "collect" || method == "plan" || method == "group_by" || method == "watch") {
+    if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && (method == "filter" || method == "map" || method == "min" || method == "max" || method == "inner_join" || method == "left_join" || method == "group_by" || method == "watch") {
         return "Query"
     }
     if sema_data_nominal_is(name, "DataGroupedQuery") && parameters.len() == 2 && (method == "count" || method == "sum" || method == "mean") {
@@ -432,7 +429,7 @@ sema_data_query_receiver: fn(name: String, parameters: [Type], method: String) -
 
 sema_data_query_arity: fn(method: String) -> Int Never! {
     if method == {
-        "insert" | "remove" | "filter" | "sort_by" | "map" | "min" | "max" | "group_by" | "sum" | "mean" -> 1
+        "insert" | "remove" | "filter" | "map" | "min" | "max" | "group_by" | "sum" | "mean" -> 1
         "replace" -> 2
         "inner_join" | "left_join" -> 3
         else -> 0
@@ -481,24 +478,19 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     sum_value := Type.Int
     if receiver_type == "DataTracked" {
         key: parameters[1]
-        if method == "query" {
-            call_type_args = [Type]{row, key}
-            result_type = Type.Apply{name: query_name, args: [Type]{row}}
-        } else {
-            slots := if method == {
-                "insert" -> [Type]{row}
-                "replace" -> [Type]{key, row}
-                else -> [Type]{key}
-            }
-            loop index in 0..<slots.len() {
-                if index >= args.len() -> break
-                value: sema_data_expect_core_arg(method, index, slots[index], args[index], environment, program, scopes, state, tail_store, context, diagnostics)
-                if !sema_data_query_push_argument(args[index], value, source_args, argument_types, typed) {
-                    complete = false
-                }
-            }
-            result_type = Type.Result{ok: Type.Named{name: "Unit"}, err: data_error}
+        slots := if method == {
+            "insert" -> [Type]{row}
+            "replace" -> [Type]{key, row}
+            else -> [Type]{key}
         }
+        loop index in 0..<slots.len() {
+            if index >= args.len() -> break
+            value: sema_data_expect_core_arg(method, index, slots[index], args[index], environment, program, scopes, state, tail_store, context, diagnostics)
+            if !sema_data_query_push_argument(args[index], value, source_args, argument_types, typed) {
+                complete = false
+            }
+        }
+        result_type = Type.Result{ok: Type.Named{name: "Unit"}, err: data_error}
     }
     if receiver_type == "DataWatch" {
         result_type = if method == {
@@ -508,15 +500,12 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
         }
     }
     if receiver_type == "Query" {
-        if method == "filter" || method == "sort_by" {
+        if method == "filter" {
             // Ordinary Query combinators collect later; the empty effect bound
             // belongs to the live `.watch()` callbacks.
-            callback_result: if method == "filter" -> Type.Bool else -> Type.String
-            callback_type: Type.Fn{params: [Type]{row}, ret: Val(callback_result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-            if method == "filter" && args.len() > 0 {
-                sema_data_filter_push(args[0].expr, row, span, environment, program, scopes, state, tail_store, context, source_args, argument_types, typed)
-            }
+            callback_type: Type.Fn{params: [Type]{row}, ret: Val(Type.Bool), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
             if args.len() > 0 {
+                sema_data_filter_push(args[0].expr, row, span, environment, program, scopes, state, tail_store, context, source_args, argument_types, typed)
                 value: sema_data_expect_core_arg(method, 0, callback_type, args[0], environment, program, scopes, state, tail_store, context, diagnostics)
                 if !sema_data_query_push_argument(args[0], value, source_args, argument_types, typed) {
                     complete = false
@@ -575,14 +564,6 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
             joined_right: if method == "left_join" -> Type.Option{inner: right_row} else -> right_row
             call_type_args = [Type]{row, right_row}
             result_type = Type.Apply{name: name, args: [Type]{Type.Apply{name: sema_data_source_type_name(environment, program, "DataJoin"), args: [Type]{row, joined_right}}}}
-        }
-        if method == "collect" {
-            call_type_args = [Type]{row}
-            result_type = sema_data_result(Type.List{element: row}, data_error)
-        }
-        if method == "plan" {
-            call_type_args = [Type]{row}
-            result_type = Type.List{element: Type.String}
         }
         if method == "group_by" {
             key := Type.String
@@ -650,23 +631,6 @@ sema_data_try_query_method: fn(receiver: Expr, receiver_value: TExpr, name: Stri
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-// The event-time Stream stages:
-// `stream.with_event_time(f)` is `StreamEventTime<T>`, `.key_by(f)` is
-// `KeyedStream<K, T>`, and `.window(width, watermark: lateness, late: .Drop)`
-// is `Stream<Window<K, T>>`. Each stage moves its receiver into its core.data
-// source stage. The stream calls the callbacks once per element as it is
-// pulled, so they take the element and carry no effects.
-sema_data_event_time_receiver: fn(name: String, parameters: [Type], method: String) -> String Never! {
-    if name == "Stream" && parameters.len() == 1 && method == "with_event_time" -> return "Stream"
-    if sema_data_nominal_is(name, "StreamEventTime") && parameters.len() == 1 && method == "key_by" {
-        return "StreamEventTime"
-    }
-    if sema_data_nominal_is(name, "KeyedStream") && parameters.len() == 2 && method == "window" {
-        return "KeyedStream"
-    }
-    ""
-}
-
 sema_data_event_time_callback: fn(method: String, element: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaDataQueryCallback {
     required: Type.Fn{params: [Type]{element}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
     checked: sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDataQueryCallback{value: None, result: None}
@@ -689,119 +653,53 @@ sema_data_event_time_is_datetime: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// `window`'s first argument is positional; the lateness and the late-event
-// policy are named so the two durations cannot be swapped.
-sema_data_event_time_labels: fn(method: String, args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
-    names: if method == "window" -> [String]{"", "watermark", "late"} else -> [String]{""}
-    valid := true
-    loop (index, argument) in args {
-        want: names[index]
-        if argument.label == {
-            .Val(label) -> {
-                if want == "" {
-                    diagnostics.push(sema_error("E0767", label.span, "argument {index + 1} of `.{method}()` is positional, so it takes no label `{label.name}:`", "the first argument of an event-time stage is its subject and has no name", "drop `{label.name}:`"))
-                    valid = false
-                } else if label.name != want {
-                    diagnostics.push(sema_error("E0764", label.span, "`.{method}()` has no parameter labeled `{label.name}`", "a label binds an argument to the parameter of that name", "write `{want}:` for argument {index + 1}"))
-                    valid = false
-                }
-            }
-            .None -> {
-                if want != "" {
-                    diagnostics.push(sema_error("E0769", expr_span(argument.expr), "argument {index + 1} of `.{method}()` needs the label `{want}:`", "the window's lateness and late-event policy are named so the two durations cannot be swapped", "write `{want}: ` before argument {index + 1}"))
-                    valid = false
-                }
-            }
-        }
-    }
-    valid
-}
-
+// `stream.with_event_time(f)` on the builtin pull stream is
+// `StreamEventTime<T>`, whose Core declaration carries the later stages
+// (`key_by`, `window`). The stage moves its receiver into its core.data source
+// stage. The stream calls `f` once per element as it is pulled, so `f` takes
+// the element, carries no effects and returns the element's event time.
 sema_data_try_event_time_method: fn(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
-    receiver_type: sema_data_event_time_receiver(name, parameters, method)
-    if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    least: if method == "window" -> 2 else -> 1
-    most: if method == "window" -> 3 else -> 1
-    if type_args.len() != 0 || args.len() < least || args.len() > most {
+    if name != "Stream" || parameters.len() != 1 || method != "with_event_time" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if type_args.len() != 0 || args.len() != 1 {
         if type_args.len() != 0 {
-            sema_data_check_explicit_type_args("{receiver_type}.{method}", type_args, 0, span, diagnostics)
+            sema_data_check_explicit_type_args("Stream.{method}", type_args, 0, span, diagnostics)
         }
-        if args.len() < least {
-            diagnostics.push(sema_wrong_core_arity(method, least, args.len(), span))
-        }
-        if args.len() > most {
-            diagnostics.push(sema_wrong_core_arity(method, most, args.len(), span))
+        if args.len() != 1 {
+            diagnostics.push(sema_wrong_core_arity(method, 1, args.len(), span))
         }
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    complete := sema_data_event_time_labels(method, args, diagnostics)
-    element: parameters[parameters.len() - 1]
+    complete := true
+    if args[0].label == .Val(label) {
+        diagnostics.push(sema_error("E0767", label.span, "argument 1 of `.{method}()` is positional, so it takes no label `{label.name}:`", "the first argument of an event-time stage is its subject and has no name", "drop `{label.name}:`"))
+        complete = false
+    }
+    element: parameters[0]
     source_args := [CallArg]{CallArg{convention: AccessConvention.Move, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
     argument_types := [Type]{receiver_value.ty}
     typed := [TExpr]{receiver_value}
-    call_type_args := [Type]{element}
-    result_type := Type.Named{name: "Unit"}
     target := String?{None}
-    if method == "with_event_time" {
-        callback: sema_data_event_time_callback(method, element, args[0], environment, program, scopes, state, tail_store, context, diagnostics)
-        if !sema_data_query_push_argument(args[0], callback.value, source_args, argument_types, typed) {
-            complete = false
-        }
-        if callback.result == .Val(stamp) {
-            if sema_data_event_time_is_datetime(stamp) {
-                target = Val("core.data.__stream_with_event_datetime")
-            } else if stamp != Type.Int {
-                diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`with_event_time` wants the callback to return `Int` Unix seconds or a `DateTime`, but it returns {sema_type_show(stamp)}", "the result is the element's event time", "return the element's timestamp as Unix seconds or a `DateTime`"))
-                complete = false
-            }
-        }
-        result_type = Type.Apply{name: sema_data_source_type_name(environment, program, "StreamEventTime"), args: [Type]{element}}
+    callback: sema_data_event_time_callback(method, element, args[0], environment, program, scopes, state, tail_store, context, diagnostics)
+    if !sema_data_query_push_argument(args[0], callback.value, source_args, argument_types, typed) {
+        complete = false
     }
-    if method == "key_by" {
-        callback: sema_data_event_time_callback(method, element, args[0], environment, program, scopes, state, tail_store, context, diagnostics)
-        if !sema_data_query_push_argument(args[0], callback.value, source_args, argument_types, typed) {
+    if callback.result == .Val(stamp) {
+        if sema_data_event_time_is_datetime(stamp) {
+            target = Val("core.data.__stream_with_event_datetime")
+        } else if stamp != Type.Int {
+            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`with_event_time` wants the callback to return `Int` Unix seconds or a `DateTime`, but it returns {sema_type_show(stamp)}", "the result is the element's event time", "return the element's timestamp as Unix seconds or a `DateTime`"))
             complete = false
         }
-        key := Type.Named{name: "Unit"}
-        if callback.result == .Val(found) {
-            key = found
-            if !sema_type_equatable(environment, program, found) {
-                diagnostics.push(sema_error("E0312", expr_span(args[0].expr), "`key_by` keys must support `==`, but `{sema_type_show(found)}` doesn't", "a window groups the events whose keys are equal", "return an Equatable key such as a String or Int field, or add `#Equatable` to `{sema_type_show(found)}`"))
-                complete = false
-            }
-        }
-        call_type_args = [Type]{key, element}
-        result_type = Type.Apply{name: sema_data_source_type_name(environment, program, "KeyedStream"), args: [Type]{key, element}}
-    }
-    if method == "window" {
-        duration: Type.Named{name: "Duration"}
-        loop index in 0..<2 {
-            value: sema_data_expect_core_arg("window", index, duration, args[index], environment, program, scopes, state, tail_store, context, diagnostics)
-            if !sema_data_query_push_argument(args[index], value, source_args, argument_types, typed) {
-                complete = false
-            }
-        }
-        disposition: sema_data_source_type_name(environment, program, "LateEventDisposition")
-        // `late:` defaults to `.Drop`.
-        late: if args.len() == 3 -> args[2] else -> CallArg{convention: AccessConvention.Read, expr: Expr.EnumLit{type_name: disposition, variant: "Drop", variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
-        value: sema_data_expect_core_arg("window", 2, Type.Named{name: disposition}, late, environment, program, scopes, state, tail_store, context, diagnostics)
-        if !sema_data_query_push_argument(late, value, source_args, argument_types, typed) {
-            complete = false
-        }
-        call_type_args = [Type]{parameters[0], element}
-        // The window stage is a core.data generator: its declared `Stream<T>`
-        // carries the default `Err` failure.
-        windows: Type.Apply{name: "Stream", args: [Type]{Type.Apply{name: sema_data_source_type_name(environment, program, "Window"), args: [Type]{parameters[0], element}}}}
-        result_type = Type.Result{ok: windows, err: Type.Named{name: "Err"}}
     }
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    record := core_receiver_method(receiver_type, method) ?? {
+    record := core_receiver_method("Stream", method) ?? {
         diagnostics.push(sema_error("E0003", span, "event-time method `{method}` has no canonical receiver Core row", "every event-time stage lowers onto its receiver Core row", "repair the Core registry receiver rows"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if target == .Val(found) -> record.source_target = Val(found)
-    value: sema_data_core_emit(record, "{receiver_type}.{method}", source_args, argument_types, typed, call_type_args, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
+    result_type: Type.Apply{name: sema_data_source_type_name(environment, program, "StreamEventTime"), args: [Type]{element}}
+    value: sema_data_core_emit(record, "Stream.{method}", source_args, argument_types, typed, [Type]{element}, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
@@ -894,31 +792,6 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 }
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
-            if name == "RealtimeStream" {
-                ret := if {
-                    method == "next_deadline" && args.len() == 0 -> Val(Type.Named{name: "Instant"})
-                    method == "receipt" && args.len() == 0 -> Val(Type.Named{name: "RealtimeReceipt"})
-                    method == "cancel" && args.len() == 0 -> Val(Type.Named{name: "Unit"})
-                    method == "is_canceled" && args.len() == 0 -> Val(Type.Bool)
-                    else -> None
-                }
-                if ret != None {
-                    if type_args.len() != 0 {
-                        sema_data_check_explicit_type_args("RealtimeStream.{method}", type_args, 0, span, diagnostics)
-                    }
-                    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
-                        return SemaMethodSpecialCheck{handled: true, value: None}
-                    }
-                    operation := if {
-                        method == "next_deadline" -> THandleOp.RealtimeNextDeadline
-                        method == "receipt" -> THandleOp.RealtimeReceipt
-                        method == "cancel" -> THandleOp.RealtimeCancel
-                        else -> THandleOp.RealtimeIsCanceled
-                    }
-                    value := sema_tree_node(ret ?? Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
-                    return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
-                }
-            }
             // `suite.run()` runs the package's `#Test` blocks on the harness the
             // `Test` value carries and returns the failure count.
             if name == "Test" && method == "run" {
@@ -982,28 +855,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 return sema_data_check_test_setting(row, receiver, receiver_value, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
         }
-        .Apply(name, parameters) -> {
-            if name == "DataStream" && parameters.len() == 1 && method == "next" {
-                if args.len() != 0 {
-                    sema_data_arity_diagnostic("DataStream.next", 0, args.len(), span, diagnostics)
-                }
-                if type_args.len() != 0 {
-                    sema_data_check_explicit_type_args("DataStream.next", type_args, 0, span, diagnostics)
-                }
-                sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
-                if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
-                ret := sema_data_result(Type.Option{inner: parameters[0]}, Type.Named{name: "DataError"})
-                value := sema_tree_node(ret, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DataStreamNext, args: [TExpr]{}}, span)
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
-            }
-            if parameters.len() == 1 && method == "force" && (name == "ExpiringValue" || (core_source_owns_type(name) && core_identity_is(name, "core.time", "ExpiringValue"))) {
-                diagnostics.push(sema_error("E0511", span, "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `.get(clock)` and handle `Expired`"))
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
-        }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Apply(_, _) | .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
