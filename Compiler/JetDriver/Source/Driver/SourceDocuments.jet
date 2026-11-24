@@ -34,14 +34,6 @@ JetDriverSourceMapping: struct {
     jet: Span,
 }
 
-// Where a Jet span sits in the host text: `Mapped` when one mapping holds the
-// whole span, `Generated` when any of it is generated text. A whole document
-// maps every span to itself.
-JetDriverHostSpan: enum {
-    Mapped(Span),
-    Generated,
-}
-
 // Why `document`'s mappings can't be used, or None when they can. Each
 // mapping lies inside both texts with its ends on UTF-8 boundaries, keeps its
 // bytes unchanged, and starts at or after the end of the one before it on
@@ -86,16 +78,19 @@ jet_driver_utf8_boundary: fn(bytes: [U8], offset: Int) -> Bool Never! {
     offset == bytes.len() || (Int{bytes[offset]} & 192) != 128
 }
 
-jet_driver_host_span: fn(document: JetDriverSourceDocument, span: Span) -> JetDriverHostSpan Never! {
-    host: document.host ?? return JetDriverHostSpan.Mapped(span)
-    if span.start > span.end -> return JetDriverHostSpan.Generated
+// Where a Jet span sits in the host text: the host span when one mapping
+// holds the whole span, None when any of it is generated text. A whole
+// document maps every span to itself.
+jet_driver_host_span: fn(document: JetDriverSourceDocument, span: Span) -> Span? Never! {
+    host: document.host ?? return Val(span)
+    if span.start > span.end -> return None
     loop mapping in host.mappings {
         if mapping.jet.start <= span.start && span.end <= mapping.jet.end {
             shift: mapping.host.start - mapping.jet.start
-            return JetDriverHostSpan.Mapped(Span{start: span.start + shift, end: span.end + shift})
+            return Val(Span{start: span.start + shift, end: span.end + shift})
         }
     }
-    JetDriverHostSpan.Generated
+    None
 }
 
 // The Jet offset of host byte `offset`, or None outside every mapping. An
@@ -116,8 +111,8 @@ jet_driver_jet_offset: fn(document: JetDriverSourceDocument, offset: Int) -> Int
 // text, so the edit is refused rather than applied somewhere else.
 jet_driver_host_edit: fn(document: JetDriverSourceDocument, edit: TextEdit) -> TextEdit? Never! {
     if jet_driver_host_span(document, edit.span) == {
-        .Mapped(span) -> Val(TextEdit{span: span, new_text: edit.new_text, path: edit.path})
-        .Generated -> None
+        .Val(span) -> Val(TextEdit{span: span, new_text: edit.new_text, path: edit.path})
+        .None -> None
     }
 }
 
@@ -144,8 +139,8 @@ jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: &&
     generated := false
     if placed.span == .Val(span) {
         if jet_driver_host_span(document, span) == {
-            .Mapped(moved) -> placed.span = Val(moved)
-            .Generated -> generated = true
+            .Val(moved) -> placed.span = Val(moved)
+            .None -> generated = true
         }
     }
     fixed := true
@@ -162,7 +157,7 @@ jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: &&
     if !fixed -> placed = diagnostic_without_fix(placed)
     labels := [DiagnosticLabel]{}
     loop label in placed.labels.move() {
-        if jet_driver_host_span(document, label.span) == .Mapped(moved) {
+        if jet_driver_host_span(document, label.span) == .Val(moved) {
             labels.push(DiagnosticLabel{span: moved, message: label.message})
         }
     }
@@ -176,8 +171,8 @@ jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: &&
         if elsewhere -> next
         span: placed.cause[index].span ?? next
         placed.cause[index].span = if jet_driver_host_span(document, span) == {
-            .Mapped(moved) -> Val(moved)
-            .Generated -> None
+            .Val(moved) -> Val(moved)
+            .None -> None
         }
     }
     JetDriverHostDiagnostic{revision: Val(host.revision), generated: generated, diagnostic: placed}
