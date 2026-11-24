@@ -511,11 +511,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "style_force" -> None
             else -> Val("IO")
         }
-        "core.net" -> if member == {
-            "gethostname" -> Val("Env")
-            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "__ip_from_bytes" | "__socket_from_parts" | "is_ipv6" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "ready_readable" | "ready_writable" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" | "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight" | "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated" -> None
-            else -> Val("Net")
-        }
+        "core.net" -> if member == "__ip_from_bytes" || member == "__socket_from_parts" -> None else -> Val("Net")
         "core.watcher" -> if member == {
             "files" -> Val("FS")
             "process_pid" -> Val("Exec")
@@ -594,11 +590,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
     }
     if module_name == {
-        "core.net" -> if member == {
-            "gethostname" -> Val("FS.Read")
-            "socket_addr" | "socket_addrs" | "__tcp_reply" | "__unix_wait_wake_raw" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "unix_wait_wake" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" -> Val("Time.Wait")
-            else -> None
-        }
         "core.sys" -> if member == {
             "hostname" -> Val("FS.Read")
             "wait" | "waitpid" -> Val("Time.Wait")
