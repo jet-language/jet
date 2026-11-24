@@ -171,16 +171,16 @@ lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     lsp_response(id, lsp_location_json(location))
 }
 
+// Every use of the declaration, in this document's check and in each other
+// open document's check that read the declaring module's text.
 lsp_references_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
-    index: at.view.checked.index ?? return lsp_response(id, "null")
+    if at.view.checked.index == None -> return lsp_response(id, "null")
     target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "[]")
     declaration: lsp_bool_member(lsp_param(params, "context") ?? Dyn.Null, "includeDeclaration")
     rows := [String]{}
-    loop occurrence in lsp_occurrences(index, target, declaration: declaration) {
-        if lsp_location(at.view.checked, occurrence.module_path, occurrence.span) == .Val(location) {
-            rows.push(lsp_location_json(location))
-        }
+    loop placed in lsp_open_occurrences(server, at.view, target, declaration: declaration).placed {
+        rows.push(lsp_location_json(LSPLocation{uri: lsp_path_to_uri(placed.path), source: placed.source, span: placed.span}))
     }
     lsp_response(id, "[{rows.join(",")}]")
 }
@@ -275,7 +275,8 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         }
     }
     index: at.view.checked.index ?? return lsp_response(id, "null")
-    errors := 0
+    occurrences: lsp_open_occurrences(server, at.view, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true)
+    errors := occurrences.errors
     loop diagnostic in at.view.checked.diagnostics {
         if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> errors += 1
     }
@@ -286,24 +287,22 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     by_uri := [String:[String]]{}
     versions := [String:String]{}
     order := [String]{}
-    loop occurrence in lsp_occurrences(index, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true) {
-        module_ref: at.view.checked.modules[lsp_module_index(at.view.checked, occurrence.module_path) ?? next]
-        if module_ref.physical_path == "" -> next
-        source: module_ref.source
-        span: lsp_name_span(source, occurrence.span, target.def.name)
+    loop placed in occurrences.placed {
+        source: placed.source
+        span: lsp_name_span(source, placed.span, target.def.name)
         if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != target.def.name {
             next
         }
-        uri: lsp_path_to_uri(module_ref.physical_path)
+        uri: lsp_path_to_uri(placed.path)
         fresh: !by_uri.has_key(uri)
         if fresh {
             // An open document's edits apply only to the version the check
             // read; a file no editor holds is the one on disk.
             version := "null"
             loop (_, doc) in server.diagnostic_state.docs {
-                if !lsp_source_paths_equal(doc.path, module_ref.physical_path) -> next
+                if !lsp_source_paths_equal(doc.path, placed.path) -> next
                 if doc.text != source {
-                    return lsp_error_response(id, -32801, "`{module_ref.physical_path}` changed after the check; rename again")
+                    return lsp_error_response(id, -32801, "`{placed.path}` changed after the check; rename again")
                 }
                 version = "{doc.version}"
             }

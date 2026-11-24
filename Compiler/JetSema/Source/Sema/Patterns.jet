@@ -21,6 +21,7 @@ use {
         Span,
         StrMatchPart,
         StructPatField,
+        Symbol,
         SymbolID,
         SymbolKind,
         TBinaryPatternPart,
@@ -76,6 +77,9 @@ SemaPatternPayload: struct {
     // The tag of the union member a union arm names, which the checked tree
     // carries in place of the arm's written name.
     tag: String?,
+    // The declared enum case the arm names, which the arm reads as a
+    // reference to it.
+    variant: Symbol?{None},
 }
 
 SemaPatternValidation: struct {
@@ -571,6 +575,7 @@ sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnviro
         loop row in nominal.variants {
             if row.symbol.name == variant {
                 result.payload = Val(row.payload)
+                result.variant = Val(row.symbol)
                 result.types = sema_pattern_variant_types(program.registration_graph, row.payload, nominal, normalized)
                 result.known = true
                 return result
@@ -912,9 +917,11 @@ sema_pattern_qualified_case: fn(subject_ty: Type, variant: String, env: SemaScop
     None
 }
 
-sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slots: [PatSlot], leading_dot: Bool, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], mutable: Bool) -> SemaPatternValidation {
+// `name_start` is where the arm writes the case's name, past its leading `.`
+// or its type's name.
+sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slots: [PatSlot], leading_dot: Bool, span: Span, name_start: Int, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], mutable: Bool) -> SemaPatternValidation {
     if !leading_dot && sema_pattern_qualified_case(subject_ty, variant, env, program) == .Val(named_case) {
-        return sema_pattern_validate_variant(subject_ty, named_case, written_slots, true, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
+        return sema_pattern_validate_variant(subject_ty, named_case, written_slots, true, span, name_start + variant.count_bytes() - named_case.count_bytes(), env, program, writes, state, tail_store, context, diagnostics, mutable)
     }
     named: sema_pattern_has_named_slots(written_slots)
     carrier: sema_pattern_unwrap_tags(subject_ty)
@@ -929,7 +936,7 @@ sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slo
     if sema_pattern_flat_union_owner(carrier, variant, env, program, span) == .Val(owner) {
         flat: Pattern.Variant{variant: variant, bindings: written_slots, leading_dot: leading_dot, span: span}
         owner_tag: if carrier == .Union(members) -> sema_pattern_union_tag(members, owner) else -> type_union_member_tag(owner)
-        return sema_pattern_validate_variant(subject_ty, owner_tag, [PatSlot.Nested{pattern: flat}], true, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
+        return sema_pattern_validate_variant(subject_ty, owner_tag, [PatSlot.Nested{pattern: flat}], true, span, name_start, env, program, writes, state, tail_store, context, diagnostics, mutable)
     }
     // A compiler-owned fact enum has no registered nominal.
     fact_enum: sema_fact_enum_pattern(carrier, variant, written_slots, leading_dot, span, env, program, diagnostics)
@@ -940,6 +947,9 @@ sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slo
     complete := payload.known
     if !payload.known {
         return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
+    }
+    if payload.variant == .Val(declared) {
+        context.name_references.push(sema_name_reference(Span{start: name_start, end: name_start + variant.count_bytes()}, declared, Val(SymbolKind.Variant)))
     }
     // A union arm's tree names the member's tag, whatever name the arm wrote.
     shape_variant: payload.tag ?? variant
@@ -1644,7 +1654,7 @@ sema_pattern_validate_internal: fn(subject_ty: Type, pattern: Pattern, env: Sema
         .Map(entries, rest, _) -> sema_pattern_map(subject_ty, entries, rest, span, env, program, writes, state, tail_store, context, diagnostics)
         .StrMatch(parts, _) -> sema_pattern_text(subject_ty, parts, span, diagnostics, mutable, writes, true)
         .BinMatch(parts, _) -> sema_pattern_binary(subject_ty, parts, span, diagnostics, mutable, writes, true)
-        .Variant(variant, slots, leading_dot, _) -> sema_pattern_validate_variant(subject_ty, variant, slots, leading_dot, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
+        .Variant(variant, slots, leading_dot, _) -> sema_pattern_validate_variant(subject_ty, variant, slots, leading_dot, span, span.start + (if leading_dot -> 1 else -> 0), env, program, writes, state, tail_store, context, diagnostics, mutable)
         .Or(alternatives, _) -> {
             if alternatives.len() == 0 {
                 diagnostics.push(sema_error("E0317", span, "an or-pattern needs at least one alternative", "or-patterns compare one or more valid pattern shapes", "write a pattern before the `|`"))

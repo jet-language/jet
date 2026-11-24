@@ -29,7 +29,9 @@ use {
         Marker,
         NamedSpan,
         OutputKind,
+        PatSlot,
         Param,
+        Pattern,
         ParamZone,
         Span,
         StmtNode,
@@ -45,6 +47,7 @@ use {
         authority_covers,
         core_identity_is_module,
         core_identity_module,
+        symbol_key_leaf,
         symbol_key_parts,
         DerivationStore,
         derivation_identity,
@@ -1502,7 +1505,8 @@ semindex_expr: fn(expr: ExprNode, db: &SemDB, ctx: &SemWalk, modules: [JetDriver
             }
             semindex_list("body", values, db, ctx, modules)
         }
-        .EnumLit(_, _, _, args, _, _, _) -> {
+        .EnumLit(_, variant, variant_span, args, _, _, _) -> {
+            if variant_span == .Val(name_span) -> semindex_resolved_ref(variant, name_span, db, ctx)
             values: loop argument in args -> if argument == {
                 .Positional(value) -> value
                 .Named(_, value) -> value
@@ -1541,7 +1545,10 @@ semindex_expr: fn(expr: ExprNode, db: &SemDB, ctx: &SemWalk, modules: [JetDriver
                 }
             }
         }
-        .PatternTest(subject, _, _, _) -> { semindex_scalar("subject", subject, db, ctx, modules) }
+        .PatternTest(subject, pattern, _, _) -> {
+            semindex_scalar("subject", subject, db, ctx, modules)
+            semindex_pattern(pattern, db, ctx)
+        }
         .Lambda(lambda, _) -> {
             loop parameter in lambda.params {
                 db.defs.push(semindex_def(ctx, semindex_local_identity(semindex_active_scope(ctx), "param", parameter.name), parameter.name, parameter.name, parameter.name_span, SemKind.Param{ty: parameter.ty ?? Type.Int}))
@@ -1572,6 +1579,47 @@ semindex_expr: fn(expr: ExprNode, db: &SemDB, ctx: &SemWalk, modules: [JetDriver
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .TypeValue(_, _, _) -> {}
     }
     semindex_pop_parent(ctx, structural_id)
+}
+
+// A name sema resolved at `span`, as a reference; a name it did not resolve
+// there (an Option or union arm's case) records nothing.
+semindex_resolved_ref: fn(name: String, span: Span, db: &SemDB, ctx: SemWalk) Never! {
+    found: semindex_scoped_ref(name, span, ctx)
+    if found.target != None -> db.refs.push(found)
+}
+
+// The enum cases a pattern names, each a reference to its declaration: a
+// leading-dot arm writes the case after its `.`, a qualified arm after its
+// type's name.
+semindex_pattern: fn(pattern: Pattern, db: &SemDB, ctx: SemWalk) Never! {
+    if pattern == {
+        .Variant(variant, slots, leading_dot, span) -> {
+            if leading_dot -> semindex_resolved_ref(variant, Span{start: span.start + 1, end: span.start + 1 + variant.count_bytes()}, db, ctx)
+            if !leading_dot && variant.split_once(".") == .Val(qualified) {
+                start: span.start + qualified.before.count_bytes() + 1
+                semindex_resolved_ref(qualified.after, Span{start: start, end: start + qualified.after.count_bytes()}, db, ctx)
+            }
+            loop slot in slots -> semindex_pattern_slot(slot, db, ctx)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> semindex_pattern(nested, db, ctx)
+        }
+        .Or(alternatives, _) -> {
+            loop alternative in alternatives -> semindex_pattern(alternative, db, ctx)
+        }
+        .List(items, _, _) -> {
+            loop item in items -> semindex_pattern_slot(item, db, ctx)
+        }
+        .Absent(_) | .Range(_, _, _) | .Struct(_, _, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
+    }
+}
+
+semindex_pattern_slot: fn(slot: PatSlot, db: &SemDB, ctx: SemWalk) Never! {
+    if slot == {
+        .Nested(pattern) -> semindex_pattern(pattern, db, ctx)
+        .Named(_, _, inner) -> semindex_pattern_slot(inner, db, ctx)
+        .Wildcard | .Bind(_, _) | .Range(_, _) | .Rest(_) | .Value(_) -> {}
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2206,21 +2254,40 @@ semindex_callee_anchor: fn(db: SemDB, modules: [JetDriverDocModule], key: String
     loop doc_module in modules {
         loop function in doc_module.functions {
             if function.key != key -> next
-            found := SemAnchor?{None}
-            loop definition in db.defs {
-                if definition.module_path != doc_module.path || definition.name != function.name {
-                    next
-                }
-                if semindex_definition_kind(definition.kind) != "function" || !definition.identity.starts_with("fn:") {
-                    next
-                }
-                if found != None -> return None
-                found = Val(SemAnchor{module_path: definition.module_path.copy(), kind: "function", def_span: definition.def_span.copy(), semantic_identity: None})
-            }
-            return found
+            return semindex_function_anchor(db, doc_module.path, function.name)
         }
     }
+    // An `extern` function has no Jet body, so no checked function row holds
+    // its key (`function:<module>.<name>`); its call names the boundary
+    // declaration that module indexes.
+    loop doc_module in modules {
+        if doc_module.module_identity == "" || key != "function:{doc_module.module_identity}.{symbol_key_leaf(key)}" -> next
+        return semindex_function_anchor(db, doc_module.path, symbol_key_leaf(key), foreign: true)
+    }
     None
+}
+
+// The one function definition named `name` in `module_path`; None when there
+// is none or more than one. `foreign` keeps only `extern` boundary
+// declarations.
+semindex_function_anchor: fn(db: SemDB, module_path: String, name: String, foreign: Bool{false}) -> SemAnchor? Never! {
+    found := SemAnchor?{None}
+    loop definition in db.defs {
+        if definition.module_path != module_path || definition.name != name {
+            next
+        }
+        if semindex_definition_kind(definition.kind) != "function" || !definition.identity.starts_with("fn:") {
+            next
+        }
+        if foreign {
+            boundary := false
+            if definition.kind == .Function(callable) -> boundary = callable.foreign_boundary
+            if !boundary -> next
+        }
+        if found != None -> return None
+        found = Val(SemAnchor{module_path: definition.module_path.copy(), kind: "function", def_span: definition.def_span.copy(), semantic_identity: None})
+    }
+    found
 }
 
 semindex_definition_kind: fn(kind: SemKind) -> String Never! {

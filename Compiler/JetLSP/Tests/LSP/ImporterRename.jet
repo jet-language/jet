@@ -1,0 +1,81 @@
+// A module that imports another is checked from its own document, so the
+// declaring document's check never reads its uses. This checker resolves the
+// importer's call the way a type check does, and only in the importer's own
+// check: the fixture checker runs no type check, so the reference is the one
+// a checked index records for `shapes.make()`.
+use {
+    jet_driver.[JetDriverToolStageItem]
+    jet_foundation.[Span, interner_empty]
+    jet_semindex.[SemAnchor, SemEffectProjection, SemRef, semindex_build]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, lsp_server]
+}
+
+LSP_IMPORTER_SHAPES_URI: "file:///w/shapes.jet"
+LSP_IMPORTER_MAIN_URI: "file:///w/main.jet"
+
+// `make` is declared at bytes 0-4.
+LSP_IMPORTER_SHAPES: `make: fn() -> Int { 1 }
+`
+
+// `make` is called at bytes 44-48 (line 3, characters 11-15).
+LSP_IMPORTER_MAIN: `use "shapes"
+
+run: fn() -> Int {
+    shapes.make()
+}
+`
+
+LSPImporterChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            checked := LSPFixtureChecker{}.check(entry, overlays)
+            if entry != "/w/main.jet" -> return checked
+            index := semindex_build(checked.modules, interner_empty(), SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
+            made: SemAnchor{module_path: "/w/shapes.jet", kind: "function", def_span: Span{start: 0, end: 4}, semantic_identity: None}
+            index.references.push(SemRef{name: "make", span: Span{start: 44, end: 48}, module_path: "/w/main.jet", scope_identity: None, target: Val(made), fact: None})
+            checked.index = Val(index)
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [LSPOverlay] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+    }
+}
+
+#Test("rename and references from a declaration reach the open documents that import it") {
+    server := lsp_server(LSPImporterChecker{})
+    lsp_test_open(server, LSP_IMPORTER_SHAPES_URI, LSP_IMPORTER_SHAPES)
+    lsp_test_open(server, LSP_IMPORTER_MAIN_URI, LSP_IMPORTER_MAIN)
+    lsp_test_publish(server, LSP_IMPORTER_SHAPES_URI)
+    lsp_test_publish(server, LSP_IMPORTER_MAIN_URI)
+    params: "{{{lsp_test_text_document(LSP_IMPORTER_SHAPES_URI)},\"position\":{{\"line\":0,\"character\":1}},\"newName\":\"build\"}}"
+    changes: lsp_test_field(lsp_test_result(server, "textDocument/rename", params), "changes")
+    assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_field(changes, LSP_IMPORTER_SHAPES_URI))), [String]{"0:0-0:4"})
+    assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_field(changes, LSP_IMPORTER_MAIN_URI))), [String]{"3:11-3:15"})
+    with: "{{{lsp_test_text_document(LSP_IMPORTER_SHAPES_URI)},\"position\":{{\"line\":0,\"character\":1}},\"context\":{{\"includeDeclaration\":true}}}}"
+    places := [String]{}
+    loop row in lsp_test_rows(lsp_test_result(server, "textDocument/references", with)) {
+        places.push("{lsp_test_text(row, "uri")} {lsp_test_range(lsp_test_field(row, "range"))}")
+    }
+    places.sort()
+    assert_eq(places, [String]{"file:///w/main.jet 3:11-3:15", "file:///w/shapes.jet 0:0-0:4"})
+}
+
+#Test("rename from a declaration refuses when an importing document's check has errors") {
+    server := lsp_server(LSPImporterChecker{})
+    lsp_test_open(server, LSP_IMPORTER_SHAPES_URI, LSP_IMPORTER_SHAPES)
+    lsp_test_open(server, LSP_IMPORTER_MAIN_URI, "{LSP_IMPORTER_MAIN}broken: fn() {{ make( }}\n")
+    lsp_test_publish(server, LSP_IMPORTER_SHAPES_URI)
+    lsp_test_publish(server, LSP_IMPORTER_MAIN_URI)
+    params: "{{{lsp_test_text_document(LSP_IMPORTER_SHAPES_URI)},\"position\":{{\"line\":0,\"character\":1}},\"newName\":\"build\"}}"
+    assert_eq(lsp_test_error_code(server, "textDocument/rename", params), -32803)
+}
