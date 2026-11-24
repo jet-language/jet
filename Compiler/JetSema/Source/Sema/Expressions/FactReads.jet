@@ -271,8 +271,6 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "markers" || field == "expanded_markers" -> Val(sema_fact_list_of("MarkerInfo"))
             field == "traits" -> Val(sema_fact_list_of("TraitInfo"))
             field == "constants" -> Val(sema_fact_list_of("ConstantInfo"))
-            field == "generic_bindings" -> Val(sema_fact_list_of("GenericBindingInfo"))
-            field == "numeric" -> Val(sema_fact_optional("NumericInfo"))
             field == "states" -> Val(sema_fact_list_of("StateInfo"))
             field == "transitions" -> Val(sema_fact_list_of("TransitionInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
@@ -630,13 +628,6 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             else -> None
         }
     }
-    if type_name == "NumericInfo" {
-        return if {
-            field == "signed" || field == "is_float" -> Val(Type.Bool)
-            field == "bits" -> Val(Type.Int)
-            else -> None
-        }
-    }
     if type_name == "ConstantInfo" {
         return if {
             field == "name" || field == "trait_name" || field == "identity" || field == "scope" -> Val(string)
@@ -657,6 +648,7 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "identity" || field == "name" -> Val(string)
             field == "signature" -> Val(sema_fact_optional("CallableSignature"))
             field == "generic_bindings" -> Val(sema_fact_list_of("GenericBindingInfo"))
+            field == "kind" -> Val(sema_fact_named("TypeKind"))
             else -> None
         }
     }

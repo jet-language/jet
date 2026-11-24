@@ -1,7 +1,8 @@
-// A type's TypeInfo lists the traits it implements (`traits`), the
-// associated constants of those traits with their values (`constants`), the
-// type each parameter is bound to when the type is named with its arguments
-// (`generic_bindings`), and a number's signedness and width (`numeric`). A
+// A type's TypeInfo lists the traits it implements (`traits`) and the
+// associated constants of those traits with their values (`constants`); its
+// identity lists the type each parameter is bound to when the type is named
+// with its arguments (`generic_bindings`), and says whether a number is
+// signed or a float (`kind`), with a sized number's `bits` binding. A
 // compile-time value and the program read the same records.
 Shape: trait {
     sides: Int,
@@ -28,11 +29,27 @@ Pair: struct<A, B> {
 
 Meters: distinct Float
 
+// A number's signedness, width and kind; a distinct type reads its base.
+number_form: fn(id: TypeId) -> String? {
+    if id.kind == .Distinct {
+        loop binding in id.generic_bindings {
+            if binding.name == "base" -> return number_form(binding.type)
+        }
+    }
+    if id.kind == .Number(signed, float) {
+        sign: if signed -> "signed" else -> "unsigned"
+        kind: if float -> "float" else -> "integer"
+        loop binding in id.generic_bindings {
+            if binding.name == "bits" -> return Val("{sign} {binding.size ?? 0}-bit {kind}")
+        }
+        return Val("{sign} {kind}")
+    }
+    None
+}
+
 number: fn(info: TypeInfo) -> String {
-    form: info.numeric ?? return "{info.name}: not a number"
-    sign: if form.signed -> "signed" else -> "unsigned"
-    kind: if form.is_float -> "float" else -> "integer"
-    "{info.name}: {sign} {form.bits}-bit {kind}"
+    form: number_form(info.identity) ?? return "{info.name}: not a number"
+    "{info.name}: {form}"
 }
 
 NUMBERS: #run { [number(I32.reflect()), number(U8.reflect()), number(F32.reflect()), number(Int.reflect())] }
@@ -51,7 +68,7 @@ describe: fn(info: TypeInfo) -> String {
         constants.push("{constant.trait_name}.{constant.name}: {constant.type.name} = {constant.value ?? "unknown"}")
     }
     bindings := [String]{}
-    loop binding in info.generic_bindings -> bindings.push("{binding.name} = {binding.type.name}")
+    loop binding in info.identity.generic_bindings -> bindings.push("{binding.name} = {binding.type.name}")
     "{info.name}: traits [{traits.join(", ")}]; constants [{constants.join("; ")}]; bindings [{bindings.join(", ")}]"
 }
 
