@@ -337,7 +337,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_function_rows_get, ir_precise_helper_names, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
+    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_core_role_names, ir_first_function_rows, ir_function_rows_get, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -1148,7 +1148,7 @@ JetDriverComptimeRunIndex: struct {
     // The functions each landed constant's value names
     // (TComptimeValue.Function, `f: double` in a folded record), which a
     // closure whose bodies read the constant queues as it queues a function
-    // value a body names (jet_driver_comptime_precise_refs).
+    // value a body names (jet_driver_comptime_named_refs).
     value_functions: IRReachHeld{IRReachHeld{}},
 }
 
@@ -1359,13 +1359,12 @@ jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
     dependencies.push(key.copy())
 }
 
-// Codegen lowers a precise operation to its `Core/Math/Math.jet` helper by
-// name (`jet_codegen_lower_precise_builtin`) or to the Core function that
-// fills its jet_builtins role, and Sema records no call fact for either, so
-// the closure queues each helper `roots` and `body` lower to (as Rust
-// `is_core_precise_source_target` roots it): it is checked and lowered with
-// the item, together with its own callees.
-jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
+// A compile-time body's callees Sema records no call fact for are checked and
+// lowered with the item, together with their own callees: the function keys
+// its tree names (ir_named_function_keys, which takes in each precise
+// operation Sema bound to its core.math function) and the Core functions
+// filling the jet_builtins roles its lowering runs (ir_core_role_names).
+jet_driver_comptime_named_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
     // Function values the body stores or reads out of a constant, Core
     // source functions Sema rewrote a Core call to, and the error
     // conversions its `?` calls are lowered with it, like its callees.
@@ -1393,22 +1392,10 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
             }
         }
     }
-    helpers: ir_precise_helper_names(graph.interner, tree, roots, body)
-    if helpers.names.len() == 0 && helpers.roles.len() == 0 {
-        return
-    }
+    roles: ir_core_role_names(graph.interner, tree, roots, body)
+    if roles.len() == 0 -> return
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
-    loop module_row in graph.modules {
-        if module_row.module_name != "core.math" -> next
-        module_text_value: module_text(graph.module_table, module_row.module_identity)
-        loop name in helpers.names {
-            key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
-            if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
-                refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
-            }
-        }
-    }
-    loop filler in sema_core_role_functions(graph, helpers.roles) {
+    loop filler in sema_core_role_functions(graph, roles) {
         key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, filler.module_identity), "", filler.name)
         if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
             refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
@@ -1421,7 +1408,7 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
 // target encodes or decodes, that it reaches by owner type, named from
 // `module_identity` (sema_comptime_codec_methods), and the
 // Core/Encoding/Encoding.jet decode helpers a container target is decoded
-// through, queued like the precise helpers.
+// through, queued like the role fillers.
 jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) {
     targets: ir_comptime_codec_targets(graph.interner, tree, roots, body)
     if targets.len() == 0 {
@@ -1474,13 +1461,13 @@ jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 }
 
 // The functions that `roots` and `body` of `tree` (named from
-// `module_identity`) reach with no call fact: the precise helpers, codec
-// methods, owner-type methods and bounded trait methods lowering calls, in
-// that order, each possibly more than once. The closure queues each the
-// first time.
+// `module_identity`) reach with no call fact: the named functions and role
+// fillers, codec methods, owner-type methods and bounded trait methods
+// lowering calls, in that order, each possibly more than once. The closure
+// queues each the first time.
 jet_driver_comptime_body_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int]) -> [JetDriverComptimeFunctionRef] {
     refs := [JetDriverComptimeFunctionRef]{}
-    jet_driver_comptime_precise_refs(graph, index, tree, roots, body, refs)
+    jet_driver_comptime_named_refs(graph, index, tree, roots, body, refs)
     jet_driver_comptime_codec_refs(graph, index, module_identity, tree, roots, body, refs)
     jet_driver_comptime_owner_refs(graph, index, module_identity, tree, roots, body, refs)
     loop method in sema_comptime_bound_methods(graph, tree, module_identity) {

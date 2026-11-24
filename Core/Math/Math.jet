@@ -27,7 +27,8 @@ use {
     n
 }
 
-abs_float: fn(n: Float) -> Float Never! { core.math.fabs(n) }
+// `math.abs` on a Float (MathBuiltin `abs`) runs this.
+#Builtin.Role(.AbsFloat) abs_float: fn(n: Float) -> Float Never! { core.math.fabs(n) }
 
 is_even: fn(n: Int) -> Bool Never! { n % 2 == 0 }
 
@@ -40232,7 +40233,10 @@ __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
     Val(Fraction{num_value: top /% divisor, den_value: bottom /% divisor})
 }
 
-__fraction_from_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
+// An Int `/` that makes a Fraction, and a Fraction `/`, stop at the operator's
+// own line on a zero divisor: the IR emits that check (FractionIsZero for a
+// Fraction divisor), then runs FractionFromParts or FractionDiv, by role.
+#Builtin.Role(.FractionFromParts) __fraction_from_parts: fn(numerator: Int, denominator: Int) -> Fraction Never! {
     __fraction_new(numerator, denominator) ?? core.math.__numeric_stop("divided by zero")
 }
 
@@ -40254,7 +40258,7 @@ __fraction_mul: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     __fraction_from_parts(left.num_value * right.num_value, left.den_value * right.den_value)
 }
 
-__fraction_div: fn(left: Fraction, right: Fraction) -> Fraction Never! {
+#Builtin.Role(.FractionDiv) __fraction_div: fn(left: Fraction, right: Fraction) -> Fraction Never! {
     if right.num_value == 0 -> core.math.__numeric_stop("divided by zero")
     __fraction_from_parts(left.num_value * right.den_value, left.den_value * right.num_value)
 }
@@ -40425,7 +40429,7 @@ __fraction_equal: fn(left: Fraction, right: Fraction) -> Bool Never! {
     left.num_value == right.num_value && left.den_value == right.den_value
 }
 
-__fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
+#Builtin.Role(.FractionIsZero) __fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
 
 __fraction_to_float: fn(value: Fraction) -> Float Never! {
     Float{value.num_value} / Float{value.den_value}
@@ -40640,8 +40644,9 @@ priv unit_huge_precision_rounded: fn(ratio: Fraction, mode: Int, digits: Int) ->
 
 // An explicit unit conversion (`Kelvin.from_celsius(x)`): the converted
 // value only when it is an integer some Float holds exactly, else `failure`.
-// The IR's UnitConvert calls it with the conversion's String failure.
-__unit_conversion_exact: fn<E>(value: Float, scale: String, offset: String, failure: E) -> Float E! {
+// The IR's UnitConvert calls it, by its role, with the conversion's String
+// failure.
+#Builtin.Role(.UnitConversionExact) __unit_conversion_exact: fn<E>(value: Float, scale: String, offset: String, failure: E) -> Float E! {
     if !is_finite(value) -> return Err(failure)
     converted: unit_converted(value, scale, offset)
     if converted.den_value != 1 -> return Err(failure)
@@ -40653,7 +40658,7 @@ __unit_conversion_exact: fn<E>(value: Float, scale: String, offset: String, fail
 // the converted value rounded under `mode` to `digits` decimal places, when
 // some Float holds that decimal exactly; else `failure` (`negative_digits`
 // for negative `digits`).
-__unit_conversion_rounded: fn<E>(value: Float, scale: String, offset: String, mode: Int, digits: Int, negative_digits: E, failure: E) -> Float E! {
+#Builtin.Role(.UnitConversionRounded) __unit_conversion_rounded: fn<E>(value: Float, scale: String, offset: String, mode: Int, digits: Int, negative_digits: E, failure: E) -> Float E! {
     if digits < 0 -> return Err(negative_digits)
     if !is_finite(value) -> return Err(failure)
     converted: unit_converted(value, scale, offset)

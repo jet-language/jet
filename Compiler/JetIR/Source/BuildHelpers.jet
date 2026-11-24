@@ -1,5 +1,5 @@
-// Typed expression lowering helpers: precise builtin source helpers and
-// checked numeric bounds.
+// Typed expression lowering helpers: the jet_builtins roles of precise
+// builtins and checked numeric bounds.
 use {
     math: core.math
     jet_foundation.[
@@ -9,84 +9,24 @@ use {
     ]
 }
 
-ir_precise_source_helper: fn(owner: String, operation: String) -> String? Never! {
-    if operation == "abs" {
-        if owner == "Int" -> return Val("abs")
-        if owner == "Float" -> return Val("fabs")
-    }
-    if owner == "Fraction" {
-        return if operation == {
-            "new" -> Val("__fraction_new")
-            "from_parts" -> Val("__fraction_from_parts")
-            "quotient" -> Val("__fraction_from_parts")
-            "from_owned_parts" -> Val("__fraction_from_owned_parts")
-            "from_int" -> Val("__fraction_from_int")
-            "from_float" -> Val("__fraction_from_float")
-            "from_decimal" -> Val("__decimal_to_fraction")
-            "add" -> Val("__fraction_add")
-            "sub" -> Val("__fraction_sub")
-            "mul" -> Val("__fraction_mul")
-            "div" -> Val("__fraction_div")
-            "equal" -> Val("__fraction_equal")
-            "numerator" -> Val("__fraction_numerator")
-            "denominator" -> Val("__fraction_denominator")
-            "owned_numerator" -> Val("__fraction_owned_numerator")
-            "owned_denominator" -> Val("__fraction_owned_denominator")
-            "is_zero" -> Val("__fraction_is_zero")
-            "to_int" -> Val("__fraction_to_int")
-            "try_int" -> Val("__fraction_try_int")
-            "to_float" -> Val("__fraction_to_float")
-            "to_decimal" -> Val("__fraction_to_decimal")
-            "to_string" -> Val("__fraction_to_string")
-            else -> None
-        }
-    }
-    if owner == "Decimal" {
-        return if operation == {
-            "from_str" -> Val("__decimal_from_str")
-            "from_int" -> Val("__decimal_from_int")
-            "from_float" -> Val("__decimal_from_float")
-            "from_fraction" -> Val("__decimal_from_fraction")
-            "add" -> Val("__decimal_add")
-            "sub" -> Val("__decimal_sub")
-            "mul" -> Val("__decimal_mul")
-            "div" -> Val("__decimal_div")
-            "equal" -> Val("__decimal_equal")
-            "compare" -> Val("__decimal_compare")
-            "to_int" -> Val("__decimal_to_int")
-            "try_int" -> Val("__decimal_try_int")
-            "to_float" -> Val("__decimal_to_float")
-            "to_fraction" -> Val("__decimal_to_fraction")
-            "to_string" -> Val("__decimal_to_string")
-            else -> None
-        }
-    }
-    if owner == "Complex" {
-        return if operation == {
-            "abs" -> Val("__complex_abs")
-            "from_parts" -> Val("__complex_from_parts")
-            "add" -> Val("__complex_add")
-            "sub" -> Val("__complex_sub")
-            "mul" -> Val("__complex_mul")
-            "div" -> Val("__complex_div")
-            "to_string" -> Val("__complex_to_string")
-            else -> None
-        }
-    }
-    None
-}
-
 // The jet_builtins role (Core/Builtins/Builtins.jet `RoleKind`) whose Core
-// function a typed `abs` or a Float or F32 `pow` runs: lowering finds that
-// function by the role it fills (ir_core_role_row), not by its name.
+// function a typed `abs`, a Float or F32 `pow`, or a step of a Fraction `/`
+// (ir_precise_division) runs: lowering finds that function by the role it
+// fills (ir_core_role_row), not by its name.
 ir_precise_source_role: fn(owner: String, operation: String) -> String? Never! {
     if operation == "abs" {
+        if owner == "Float" -> return Val("AbsFloat")
         if owner == "F32" -> return Val("AbsF32")
         if owner == "I64" -> return Val("AbsI64")
     }
     if operation == "pow" {
         if owner == "Float" -> return Val("PowFloat")
         if owner == "F32" -> return Val("PowF32")
+    }
+    if owner == "Fraction" {
+        if operation == "is_zero" -> return Val("FractionIsZero")
+        if operation == "from_parts" -> return Val("FractionFromParts")
+        if operation == "div" -> return Val("FractionDiv")
     }
     None
 }
@@ -199,18 +139,15 @@ ir_numeric_bound_constant: fn(ty: Type, member: String) -> IRNumericBound? {
     None
 }
 
-#Test("Int.abs extends the existing source helper gate by one exact key") {
-    assert_eq(ir_precise_source_helper("Int", "abs"), Val("abs"))
-    assert_eq(ir_precise_source_helper("Int", "add"), None)
-}
-
-#Test("the typed abs and the Float and F32 powers are jet_builtins roles") {
+#Test("the typed abs, the Float and F32 powers and a Fraction division's steps are jet_builtins roles") {
+    assert_eq(ir_precise_source_role("Float", "abs"), Val("AbsFloat"))
     assert_eq(ir_precise_source_role("F32", "abs"), Val("AbsF32"))
     assert_eq(ir_precise_source_role("I64", "abs"), Val("AbsI64"))
     assert_eq(ir_precise_source_role("Float", "pow"), Val("PowFloat"))
     assert_eq(ir_precise_source_role("F32", "pow"), Val("PowF32"))
+    assert_eq(ir_precise_source_role("Fraction", "is_zero"), Val("FractionIsZero"))
+    assert_eq(ir_precise_source_role("Fraction", "from_parts"), Val("FractionFromParts"))
+    assert_eq(ir_precise_source_role("Fraction", "div"), Val("FractionDiv"))
     assert_eq(ir_precise_source_role("Int", "abs"), None)
     assert_eq(ir_precise_source_role("Fraction", "add"), None)
-    assert_eq(ir_precise_source_helper("F32", "abs"), None)
-    assert_eq(ir_precise_source_helper("Float", "pow"), None)
 }

@@ -145,6 +145,7 @@ body_flat_function: fn(value: &&TFunc, arena: &&BodyTree, arena_syntax: &&[Type]
     pre: body_flat_list_contract(owned_value.pre, flat)
     body_flat_resolve_types(flat, owned_syntax, program, context)
     tree := flat.tree.move()
+    sema_precise_bind(tree, program)
     // The body's own symbol keys (SYMBOL_LOCAL_BIT ids) leave with it, so a
     // reader after the check names its locals (symbol_key).
     tree.symbols = flat.arena.symbols.move()

@@ -2130,10 +2130,13 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
         ir_render_trait(m, p, b, builder, slot, mode, member, span)
         return
     }
-    // A core.math precise value inside another renders as its own text does.
+    // A core.math precise value inside another renders as its own text does:
+    // its Display implementation under every mode, or without core.math its
+    // runtime route.
     precise: if mode == .Debug -> "" else -> ir_render_precise(p, ty)
     if precise != "" {
-        text: ir_precise_values(m, p, b, Type.String, precise, "to_string", [Int]{slot}, span)
+        display: ir_render_impl_row(m, p, b, slot, IRRender.Display) ?? -1
+        text: if display >= 0 -> ir_render_impl_call(m, p, b, slot, display, "Display") else -> ir_precise_values(m, p, b, Type.String, precise, "to_string", [Int]{slot}, span)
         if ir_failed(b) || text < 0 {
             return
         }
@@ -2632,9 +2635,10 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
     }
     if kind == .Float || kind == .Float32 {
         // Float `%` and floor division call the runtime's libm exports, never
-        // a libm symbol. A Float and F32 `value.pow(y)` calls its correctly
-        // rounded `Core/Math/Math.jet` power (ir_precise_helper_row), so
-        // every tier and the comptime builder compute the same bits.
+        // a libm symbol. A Float and F32 `value.pow(y)` calls the correctly
+        // rounded power of the Core function filling its jet_builtins role
+        // (ir_precise_helper_row), so every tier and the comptime builder
+        // compute the same bits.
         if op == .Pow {
             owner: if kind == .Float -> "Float" else -> "F32"
             power_row: ir_precise_helper_row(p, owner, "pow") ?? return ir_fail_slot(b, span, "{owner} power without its core.math power")
@@ -2673,19 +2677,20 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
             }
         }
     }
-    // A compound update of an exact number (`first += 1.25` on a Decimal
-    // place) reaches the builder as the operator itself: it calls the
-    // core.math helper the checked `+`, `-` and `*` call.
-    precise: ir_render_precise(p, left_ty)
-    if precise != "" && (op == .Add || op == .Sub || op == .Mul) {
-        function: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
-        return ir_precise_values(m, p, b, left_ty, precise, function, [Int]{left, right}, span)
-    }
     if op == .Add || op == .Sub || op == .Mul || op == .Div {
         left_slot_ty: ir_row_ty(m, p, b.f.slot_type[left])
         right_slot_ty: ir_row_ty(m, p, b.f.slot_type[right])
         hooked: ir_operator_impl(m, p, b, op, left_slot_ty, left, right_slot_ty, right, span)
         if ir_failed(b) || hooked >= 0 -> return hooked
+    }
+    // A compound update of an exact number Sema keeps as the operator (its
+    // place's second read could differ, sema_stmt_policy_compound) runs
+    // core.math's operator implementation above; without core.math it is
+    // the runtime route.
+    precise: ir_render_precise(p, left_ty)
+    if precise != "" && (op == .Add || op == .Sub || op == .Mul) {
+        function: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+        return ir_precise_values(m, p, b, left_ty, precise, function, [Int]{left, right}, span)
     }
     ir_fail_slot(b, span, "operator {op} on {ir_type_name(left_ty)}")
 }

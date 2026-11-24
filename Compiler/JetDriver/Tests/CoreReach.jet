@@ -220,14 +220,14 @@ reach_test_load_module: fn(source: String, module_name: String, owned: [String],
 }
 
 #Test("a routed Core module's `__` helpers and F32 forms load by use, and its compiler routes always load") {
-    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n__sin_f32: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\nfabs: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
-    routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"__sin_f32", "fabs"}, text)
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\n__tabled: fn() -> Int Never! {{ __TABLE }}\n\n__WIDTH: 2.0\n\n__sin_f32: fn(x: Float) -> Float Never! {{ x * __WIDTH }}\n\n__RATIO: 3.0\n\n__to_bits_i64: fn(x: Float) -> Float Never! {{ x * __RATIO }}\n"
+    routed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", [String]{"__sin_f32", "__to_bits_i64"}, text)
     assert_eq(reach_test_constants(routed, "core.math"), [String]{"__RATIO"})
-    assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "fabs"})
+    assert_eq(reach_test_functions(routed, "core.math"), [String]{"plain", "__to_bits_i64"})
     // A call of `sin` (on an F32) runs its F32 form.
-    narrow: reach_test_load_module("use m: core.math\nrun: fn(x: F32) {{ print(m.sin(x)) }}\n", "core.math", [String]{"__sin_f32", "fabs"}, text)
+    narrow: reach_test_load_module("use m: core.math\nrun: fn(x: F32) {{ print(m.sin(x)) }}\n", "core.math", [String]{"__sin_f32", "__to_bits_i64"}, text)
     assert_eq(reach_test_constants(narrow, "core.math"), [String]{"__WIDTH", "__RATIO"})
-    assert_eq(reach_test_functions(narrow, "core.math"), [String]{"__sin_f32", "fabs"})
+    assert_eq(reach_test_functions(narrow, "core.math"), [String]{"__sin_f32", "__to_bits_i64"})
     // Any other module's `__` names stay routes as a group.
     grouped: reach_test_load_module("use m: core.devtools\nrun: fn() {{ print(m.plain()) }}\n", "core.devtools", [String]{}, text)
     assert_eq(reach_test_constants(grouped, "core.devtools"), [String]{"__TABLE", "__WIDTH", "__RATIO"})
@@ -286,10 +286,11 @@ reach_test_read: fn(path: String) -> String {
         }
     }
     assert_eq(failures, [String]{})
-    // The calls that route into core.math: the bit casts and the exact
-    // types' crossing to Float. The Core call rows are computed from Core's
-    // own declarations, so they spell no route here.
-    assert(checked >= 4, "the scan found {checked} routes")
+    // The calls that route into core.math: the bit casts. An exact type's
+    // operations reach core.math through its precise family
+    // (sema_precise_bind), and the Core call rows are computed from Core's
+    // own declarations, so neither spells a route here.
+    assert(checked >= 2, "the scan found {checked} routes")
 }
 
 #Test("a unit's spellings come from its code tokens: a string spells only its interpolations, and comments spell nothing") {

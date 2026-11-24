@@ -8644,11 +8644,21 @@ sema_stmt_field_write_mismatch: fn(target: LValue, required: Type, value: Expr, 
 // function's `#Overflow` mode, for + - * **: `place = OverflowOpt(read,
 // value)`, the policy's operation exactly as the binary form lowers it
 // (Expressions.jet sema_expr_check_binary, sema_expr_arithmetic_policy_value).
-// `read` is the place read as a value. None outside a policy, for any other
-// operator or type, and for a place whose second read could differ from the
-// first (a call on its path); those keep the compound form, which JetIR
-// checks for overflow (BuildTypes ir_assign_overflow).
+// An exact number's `+=`, `-=` and `*=` of its own type is `place =
+// read op value`, the operation the binary form checks
+// (sema_expr_check_precise_binary), at any mode. `read` is the place read as
+// a value. None outside a policy, for any other operator or type, and for a
+// place whose second read could differ from the first (a call on its path);
+// those keep the compound form, which JetIR checks for overflow (BuildTypes
+// ir_assign_overflow).
 sema_stmt_policy_compound: fn(op: BinOp, ty: Type, read: TExpr, value: TExpr, line: Int, span: Span, context: SemaCheckContext) -> TExpr? {
+    if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul) && sema_stmt_pure_place(read, context) {
+        precise: sema_expr_precise_name(ty) ?? ""
+        if precise != "" && (sema_expr_precise_name(value.ty) ?? "") == precise {
+            function: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+            return Val(sema_tree_node(Type.Named{name: precise}, TExprKind.PreciseBuiltin{type_name: precise, function: function, args: [TExpr]{read, value}}, span))
+        }
+    }
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Pow) && ty == .IntN(_, _) && sema_stmt_pure_place(read, context) && context.arithmetic_policy == .Val(policy) {
         operation: if op == {
             .Add -> ArithmeticOperation.Add

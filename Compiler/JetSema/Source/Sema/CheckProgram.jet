@@ -678,6 +678,7 @@ sema_publish_expression: fn(value: TExpr, program: SemaProgramTables, context: &
     body_flat_resolve_types(flat, syntax, program, context)
     if lends -> context.arena.arena_syntax = syntax.move()
     tree := flat.tree.move()
+    sema_precise_bind(tree, program)
     // The expression's own symbol keys leave with it (body_flat_function).
     tree.symbols = context.arena.tree.symbols.copy()
     body_tree_finish(tree)
