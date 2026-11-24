@@ -2087,7 +2087,6 @@ sema_call_builtin_method_arities: fn(receiver: Type, method: String) -> [Int] Ne
             "Duration" -> sema_time_duration_result(method, arity) != None || (method == "round" && arity >= 1)
             "Decimal" | "Fraction" -> sema_value_method_precise_result(owner, method, arity) != None
             "DeterministicWorld" -> sema_time_world_contract(method, arity) != None
-            "RNG" -> sema_time_rng_fixed_signature(method, arity) != None || ((method == "pick" || method == "shuffle") && arity == 1) || ((method == "weighted_pick" || method == "sample") && arity == 2)
             "Clock" -> (method == "now" && arity == 0) || ((method == "tick" || method == "advance" || method == "wait") && arity == 1)
             "Task" -> ((method == "join" || method == "detach" || method == "resume" || method == "cancel" || method == "trace") && arity == 0) || (method == "pause" && arity < 2)
             else -> false
@@ -2111,9 +2110,6 @@ sema_call_builtin_method_pool: fn(receiver: Type) -> [String] Never! {
             pool = [String]{"add", "sub", "mul", "div", "numerator", "denominator", "rounded", "to_string", "to_float", "is_zero", "equal"}
         }
         "DeterministicWorld" -> pool = [String]{"now", "advance", "wait_idle", "history"}
-        "RNG" -> {
-            pool = [String]{"int", "float", "float_range", "bool", "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample", "shuffle"}
-        }
         "Clock" -> pool = [String]{"now", "tick", "advance", "wait"}
         "Task" -> pool = [String]{"join", "detach", "pause", "resume", "cancel", "trace"}
         else -> {

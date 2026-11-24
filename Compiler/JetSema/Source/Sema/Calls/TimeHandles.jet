@@ -1,4 +1,5 @@
-// Checked deterministic time/random handles and the built-in Duration methods.
+// Checked deterministic time handles and the built-in Duration methods. Core's
+// `RNG` is a source record, so its draws are ordinary checked method calls.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -14,10 +15,7 @@ use jet_foundation.[
     TLetTy,
     TFailureCarrier,
     TagMarker,
-    SymbolKind,
     Type,
-    expr_span,
-    type_name,
     core_identity_is,
     checked_symbol_local,
 ]
@@ -154,170 +152,6 @@ sema_time_clock_record: fn(receiver_value: TExpr, method: String, args: [CallArg
     Val(sema_time_record_intrinsic(result, effect_name, "Clock.{method}", span, environment, program, scopes, context, diagnostics))
 }
 
-sema_time_rng_fixed_signature: fn(method: String, argc: Int) -> Type? {
-    return if {
-        method == "int" && argc == 2 -> Val(Type.Int)
-        method == "float" && argc == 0 -> Val(Type.Float)
-        method == "float_range" && argc == 2 -> Val(Type.Float)
-        method == "bool" && (argc == 0 || argc == 1) -> Val(Type.Bool)
-        method == "normal" && argc == 2 -> Val(Type.Float)
-        method == "exponential" && argc == 1 -> Val(Type.Float)
-        method == "bytes" && argc == 1 -> Val(Type.List{element: Type.IntN{signed: false, bits: 8}})
-        method == "split" && argc == 0 -> Val(sema_time_named("RNG"))
-        else -> None
-    }
-}
-
-sema_time_rng_fixed_args: fn(method: String, argc: Int) -> [Type] Never! {
-    return if {
-        method == "int" -> [Type]{Type.Int, Type.Int}
-        (method == "float_range" || method == "normal") -> [Type]{Type.Float, Type.Float}
-        method == "bool" && argc == 1 -> [Type]{Type.Float}
-        method == "exponential" -> [Type]{Type.Float}
-        method == "bytes" -> [Type]{Type.Int}
-        else -> [Type]{}
-    }
-}
-
-sema_time_rng_op: fn(method: String, argc: Int) -> THandleOp? {
-    return if {
-        method == "int" -> Val(THandleOp.RNGInt)
-        method == "float" -> Val(THandleOp.RNGFloat)
-        method == "float_range" -> Val(THandleOp.RNGFloatRange)
-        method == "bool" && argc == 1 -> Val(THandleOp.RNGBoolP)
-        method == "bool" -> Val(THandleOp.RNGBool)
-        method == "normal" -> Val(THandleOp.RNGNormal)
-        method == "exponential" -> Val(THandleOp.RNGExponential)
-        method == "bytes" -> Val(THandleOp.RNGBytes)
-        method == "split" -> Val(THandleOp.RNGSplit)
-        else -> None
-    }
-}
-
-sema_time_rng_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method == "pick" || method == "weighted_pick" || method == "sample" || method == "shuffle" {
-        return sema_time_rng_generic_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
-    result: sema_time_rng_fixed_signature(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    required: sema_time_rng_fixed_args(method, args.len())
-    values: sema_time_check_values(args, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_time_check_method_ownership(receiver, method, args, required, AccessConvention.Write, span, scopes, state, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    operation: sema_time_rng_op(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    sema_time_finish_handle(receiver_value, operation, values, result, "Rand", "RNG.{method}", span, expected, environment, program, scopes, context, diagnostics)
-}
-
-sema_time_rng_generic_arity: fn(method: String) -> Int Never! {
-    if method == "weighted_pick" || method == "sample" -> 2 else -> 1
-}
-
-sema_time_rng_generic_result: fn(method: String, element: Type) -> Type Never! {
-    return if {
-        method == "pick" || method == "weighted_pick" -> Type.Option{inner: element}
-        method == "sample" -> Type.List{element: element}
-        else -> Type.Named{name: "Unit"}
-    }
-}
-
-// Rust `finish_rng_generic`: the receiver's root binding must be writable
-// (every draw advances the stream); the call site needs no `&` mark.
-sema_time_rng_generic_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    updated_args := args
-    if sema_expr_place_root_ident(receiver) == .Val(root) {
-        if sema_scope_resolve_index(scopes, root) == .Val(index) {
-            if scopes.bindings[index].mutable {
-                sema_ownership_note_mutation(state, scopes.bindings[index].symbol.span.start)
-            }
-            if !scopes.bindings[index].mutable && scopes.bindings[index].access != AccessConvention.Write {
-                why: "every `RNG` draw advances the stream, so its receiver needs write access"
-                if scopes.bindings[index].symbol.kind == SymbolKind.Parameter {
-                    diagnostics.push(sema_error("E0205", expr_span(receiver), "`.{method}()` changes `{root}`, which has read access only", why, "change the parameter to `{root}: &RNG`"))
-                } else {
-                    diagnostics.push(sema_ownership_diag_unchangeable(scopes.bindings[index], root, expr_span(receiver), "{why}, so `{root}` must be mutable (`:=`)"))
-                }
-            }
-        }
-    }
-    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    required_arity: sema_time_rng_generic_arity(method)
-    if updated_args.len() != required_arity {
-        diagnostics.push(
-            sema_error(
-                "E0104",
-                span,
-                "`.{method}()` takes {required_arity} argument(s), got {updated_args.len()}",
-                "this `RNG` draw operates on a list and optional draw parameter",
-                if {
-                    method == "weighted_pick" -> "call `rng.weighted_pick(items, weights)`"
-                    method == "sample" -> "call `rng.sample(items, k)`"
-                    else -> "call `rng.{method}(items)"
-                },
-            ),
-        )
-        _ := sema_time_untyped_values(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    first: sema_check_expression(updated_args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    element: if first.ty == {
-        .List(inner) -> inner
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            diagnostics.push(sema_error("E0112", updated_args[0].span, "`{method}` needs a list, not {type_name(first.ty)}", "`rng.{method}` operates on a `[T]`", "pass a `[T]` value"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-    }
-    values := [TExpr]{first}
-    if method == "weighted_pick" {
-        weights: sema_check_expression(updated_args[1].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        if weights.ty != (Type.List{element: Type.Float}) {
-            diagnostics.push(sema_error("E0112", updated_args[1].span, "`weighted_pick` weights must be [Float], not {type_name(weights.ty)}", "`rng.weighted_pick` pairs each item with a non-negative Float weight", "pass a `[Float]` weights list"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        values.push(weights)
-    }
-    if method == "sample" {
-        count: sema_check_expression(updated_args[1].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        count_is_valid := count.ty == Type.Int
-        if count.ty == {
-            .InlineRange(_, _, _) -> { count_is_valid = true }
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
-        }
-        if !count_is_valid {
-            diagnostics.push(sema_error("E0112", updated_args[1].span, "`sample` count must be Int, not {type_name(count.ty)}", "`rng.sample` chooses up to k items without replacement", "pass an Int count"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        values.push(count)
-    }
-    ownership_params := [SemaCallParam]{
-        {label: "items", name: "items", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: if method == "shuffle" -> AccessConvention.Write else -> AccessConvention.Read, ty: Val(Type.List{element: element}), variadic: false},
-    }
-    if method == "weighted_pick" {
-        ownership_params.push(SemaCallParam{label: "weights", name: "weights", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.List{element: Type.Float}), variadic: false})
-    }
-    if method == "sample" {
-        ownership_params.push(SemaCallParam{label: "count", name: "count", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
-    }
-    ownership := sema_ownership_check_call_arguments(state, "RNG.{method}", ownership_params, updated_args, scopes, diagnostics)
-    if !ownership.accepted || !ownership.complete {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    result: sema_time_rng_generic_result(method, element)
-    operation: if method == {
-        "pick" -> THandleOp.RNGPick
-        "weighted_pick" -> THandleOp.RNGWeightedPick
-        "sample" -> THandleOp.RNGSample
-        else -> THandleOp.RNGShuffle
-    }
-    if !sema_time_record_intrinsic(result, "Rand", "RNG.{method}", span, environment, program, scopes, context, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
-    checked := sema_expression_call_expected(value, expected, environment, program, context, diagnostics)
-    return SemaMethodSpecialCheck{handled: true, value: checked}
-}
-
 sema_time_default_string: fn(value: String, span: Span) -> Expr Never! {
     Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span, id: AST_NODE_GENERATED}
 }
@@ -442,9 +276,6 @@ sema_call_try_time_handle_method: fn(receiver: Expr, receiver_value: TExpr, meth
     receiver_name: sema_time_handle_receiver_name(receiver_value.ty)
     if receiver_name == "Clock" {
         return sema_time_clock_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    }
-    if receiver_name == "RNG" {
-        return sema_time_rng_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if receiver_name == "Duration" {
         if method != "round" {
