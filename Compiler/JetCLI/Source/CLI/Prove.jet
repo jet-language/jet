@@ -7,6 +7,7 @@ use {
     cli_sys: core.sys
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, EvidenceFacet, diagnostic_from_registry, diagnostic_render_all, evidence_facet_name]
+    jet_pkg_model.[pkg_authority_source_walk_skips]
 }
 
 // The `--lens` values, in report order: the evidence facets' names.
@@ -335,7 +336,7 @@ jet_cli_prove_collect: fn(directory: String, found: ^[String]) -[FS]> JetCLIRead
             if cli_files.is_dir(path) -> next
             return Err(jet_cli_read_error("proof target contains symlink `{path}`"))
         }
-        if entry.name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(entry.name) -> next
+        if pkg_authority_source_walk_skips(entry.name) -> next
         if info.is_dir {
             jet_cli_prove_collect(path, found)
             next
