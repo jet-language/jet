@@ -8386,6 +8386,15 @@ recovery. A restart strategy controls which siblings are restarted after a
 worker failure. A service handler must report or persist its outcome according
 to the selected delivery policy rather than assuming retries are free.
 
+The tree, workflow, endpoint, delivery and runtime operations are methods of
+their Core types (`tree.group(name, workers)`, `tree.workflow_start(id,
+version)`, `workflow.sleep(duration)`, `endpoint.receive()`,
+`delivery.wait()`, `runtime.send(endpoint, message, key: k)`). Core's own
+`check:` rules hold the builder shape at the call (E0112): a tree name the build
+knows, and every group, workflow and directory name, is non-blank visible text
+of at most 256 bytes; a group lists a non-empty literal list of such worker
+names; and a known workflow version is positive.
+
 ### `core.archive` — byte containers and checksummed compression
 
 `core.archive` contains bounded archive and compression primitives. The Jet

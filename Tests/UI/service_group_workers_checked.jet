@@ -1,0 +1,9 @@
+// E0112: service group workers are outside the checked builder shape
+// why: groups require a non-empty literal list of visible worker names
+// fix: use a non-empty list of literal worker names
+use service: core.service
+
+run: fn() {
+    tree := service.tree("checked")
+    tree.group("pool", ["worker", ""]) ?? panic("group")
+}

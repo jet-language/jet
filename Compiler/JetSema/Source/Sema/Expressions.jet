@@ -4546,26 +4546,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if tree == .Val(check) {
         if check.handled -> return check
     }
-    workflow := sema_check_service_workflow_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if workflow == .Val(check) {
-        if check.handled -> return check
-    }
-    endpoint := sema_check_service_endpoint_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if endpoint == .Val(check) {
-        if check.handled -> return check
-    }
-    delivery := sema_check_delivery_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if delivery == .Val(check) {
-        if check.handled -> return check
-    }
-    delivery_state := sema_check_delivery_state_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if delivery_state == .Val(check) {
-        if check.handled -> return check
-    }
-    runtime := sema_check_service_runtime_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if runtime == .Val(check) {
-        if check.handled -> return check
-    }
 
     reactive := sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reactive.handled -> return reactive
@@ -5014,6 +4994,11 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     // and holds `b.compiler` to the root build, ahead of the declared check.
     build: sema_call_try_build_context_method(receiver, receiver_value, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if build.handled -> return build.value
+    // Core declares ServiceTree's `send` and `send_durable` over a String
+    // ServiceEndpoint; a typed Endpoint<Q, R> sends, calls and sends durably
+    // at its own Q and R ahead of the declared check.
+    typed_delivery: sema_services_typed_delivery(method, receiver, receiver_value.ty, args, expected, method_span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if typed_delivery == .Val(check) -> return check.value
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.

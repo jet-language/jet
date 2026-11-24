@@ -6943,7 +6943,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Core",
       "file": "Core/Service/Service.jet",
-      "line": 1684,
+      "line": 1904,
       "column": 5,
       "reason": "read the final path component's OS metadata kind without opening an identity handle"
     },
@@ -12796,7 +12796,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Net/SSL/TLS.jet | 4658:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Process/Process.jet | 237:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
 | Core | Core/Process/Process.jet | 343:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
-| Core | Core/Service/Service.jet | 1684:5 | "read the final path component's OS metadata kind without opening an identity handle" |
+| Core | Core/Service/Service.jet | 1904:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 1018:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 1221:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
 | Core | Core/Sys/Sys.jet | 1352:1 | "posix set_wall_clock: the caller owns the machine's wall clock, which every process reads" |

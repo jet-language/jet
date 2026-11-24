@@ -1,0 +1,9 @@
+// E0112: service workflow name is outside the checked builder shape
+// why: workflow names must be non-empty visible literals of at most 256 bytes
+// fix: use a literal visible workflow name
+use service: core.service
+
+run: fn() {
+    tree := service.tree("checked")
+    _: tree.workflow_start("", 1) ?? return
+}
