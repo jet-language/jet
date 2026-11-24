@@ -31,3 +31,16 @@ A ballot must still state the owner-only choice, same-program alternatives,
 exact syntax and behavior, trade-offs, edge cases, and beginner and expert
 paths. If it includes visual or DX direction, state the observable owner
 acceptance separately; machine evidence and visual taste are not interchangeable.
+
+## Whole-mechanism scope
+
+Before the adversarial pass, the author inventories every place the ballot's
+kind of fact or operation already lives: each record, table, maker, reader,
+tier (check time, comptime child, `fn build`, runtime, CLI and LSP) and every
+similar construct that should share the mechanism (for a TypeId, every other
+compiler-issued handle). The recommendation gives one source of truth for all
+of them, with an exact `file:symbol` cutover list and the copies it deletes,
+and states with numbers why anything kept separate stays separate. The
+reviewer attacks this inventory first. A missing site, a second store, a
+second maker or an untreated sibling is a failed claim, and the ballot goes
+back before it reaches the owner.

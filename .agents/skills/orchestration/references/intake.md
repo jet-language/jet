@@ -268,6 +268,38 @@ runs and one 39-minute full test pass. These rules bind every train:
     re-censused by reach (build, guards, self-checks and the Jetpack areas
     its paths reach), never in full, and then the rest lands. Whole-profile
     ui and golden runs are sharded four ways.
+21. **Built on the dev tip.** A patch is a diff against the `dev` tip of the
+    hour it was written, never against a train tree, a batch export or another
+    worker's stack that has not landed. Intake runs `git apply --check` on the
+    current `dev` tip (plus the patch's declared `stack:`) and refuses a patch
+    that fails, before it is staged. A refused patch goes straight back to its
+    worker to rebase; it never costs a train.
+22. **A Core half proves itself on the seed.** A submission that changes
+    `Core/` runs, on the newest batch compiler and before it is submitted,
+    `jet Compiler/Toolchain/PreludeRows/Main.jet --check` (it checks all of
+    Core) and a single-file `jet run` of a program that calls every Core
+    function the patch adds or changes, so the lowering of each one runs. Both
+    pass lines go in its `msg`. A `seed:` part b names the batch compiler that
+    carries its part a and runs both checks on that compiler. The lander runs
+    the same PreludeRows check on the composed tree before the build and sets
+    aside any submission it refuses. A part b that the seed cannot compile or
+    lower goes back to its part a's owner as a compiler fix, never into a
+    train to find out.
+23. **Guards and ratchets before the build.** On the composed tree and with
+    the seed, the lander runs every repository ratchet `--check` (after
+    regenerating the generated files) and `jet test Tests/Guards`, and
+    compares the guard findings row by row with `dev`'s last run. A new row
+    (a spelling, a copy over its ceiling, a decision ID, an example grant)
+    sets aside the submission whose paths it names. A guard red found on
+    `dev` after a landing is a lander defect. The unit tests of every compiler
+    package a train touches run beside its suites, and a new red there holds
+    the submission that caused it, like any suite row.
+24. **Close in the same hour.** When a train lands, the orchestrator meets
+    every criterion its rows proved within the hour, with the landed commit as
+    evidence. Then it reports to the owner in criteria met and open criteria
+    left per epoch, never in activity. A submission sitting in the inbox while
+    the build slot is idle, or a proven criterion left unmet, is an
+    orchestrator failure, fixed the same hour.
 
 `Tools/Agent/Land.jet batch` runs rules 1 to 4, 7 and 8 itself: the seed gate
 of every touched package from an empty directory, one `precommit`, the
