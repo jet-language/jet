@@ -17,7 +17,7 @@ use {
     files: core.files
     net: core.net
     sys: core.sys
-    tasks: core.tasks
+    time: core.time
 }
 
 // Where the fake looks at a frame, in window pixels at scale 1: the panel;
@@ -211,7 +211,7 @@ fake_flush: fn(f: &Fake) -[Net, Time]> {
 // what comes next apart from it.
 fake_pause: fn(f: &Fake, ms: Int) -[Net, Time]> {
     fake_flush(f)
-    tasks.sleep(ms)
+    time.sleep(time.duration_ms(ms))
 }
 
 fake_fail: fn(f: &Fake, message: String) {

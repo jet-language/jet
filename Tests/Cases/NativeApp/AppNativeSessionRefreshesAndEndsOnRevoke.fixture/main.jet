@@ -6,7 +6,7 @@ use {
     app
     auth: core.auth
     sys: core.sys
-    tasks: core.tasks
+    time: core.time
 }
 
 // The server's Crew, as the app calls it.
@@ -31,7 +31,7 @@ run: fn() {
     print("signed in: {app.signed_in(server)}")
     print("whoami: {whoami(crew)}")
     // Past the access token's three seconds, the call refreshes it first.
-    tasks.sleep(4000)
+    time.sleep(4000ms)
     print("whoami after the access token ended: {whoami(crew)}")
     revoked: if crew.revoke("laptop") == {
         .Ok(held) -> "{held}"
@@ -41,7 +41,7 @@ run: fn() {
     // The access token still lasts, so this call is answered.
     print("whoami right after the revoke: {whoami(crew)}")
     // Its refresh is refused, so the device is signed out.
-    tasks.sleep(4000)
+    time.sleep(4000ms)
     print("whoami after the access token ended: {whoami(crew)}")
     print("signed in at the end: {app.signed_in(server)}")
 }

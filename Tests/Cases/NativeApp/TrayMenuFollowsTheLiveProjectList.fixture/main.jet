@@ -5,7 +5,7 @@
 use {
     app
     files: core.files
-    tasks: core.tasks
+    time: core.time
     core.reactive.loadable.[Loadable]
 }
 
@@ -66,13 +66,13 @@ run: fn() {
     }
     loop _ in 0..<6000 {
         if app.notices().len() > 0 || files.exists("first.read") -> break
-        tasks.sleep(10)
+        time.sleep(10ms)
     }
     if app.notices().len() == 0 {
         add_project("Launch")
         app.invalidate(my_projects)
         // The desktop chooses the new project, then Quit, which ends the app.
-        loop _ in 0..<6000 -> tasks.sleep(10)
+        loop _ in 0..<6000 -> time.sleep(10ms)
     }
     loop notice in app.notices() -> print("notice: {notice.text}")
 }

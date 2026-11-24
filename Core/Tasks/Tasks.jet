@@ -271,10 +271,6 @@ waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> {index: Int, value: T?} N
     {index: 0, value: recv(receivers[0])}
 }
 
-host_sleep_ms: fn(ms: Int) -[Time.Wait]> {
-    _: recv(core.tasks.after(Duration.milliseconds(ms) ?? panic("sleep duration is outside Duration's range"), 0))
-}
-
 host_yield: fn() -[Time.Wait]> { core.tasks.__yield_now() }
 
 /// Joins the scheduler's carrier and timer threads, the safe step before a
@@ -298,12 +294,6 @@ is_ready: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_ready() }
 delay_ms: fn<T>(rx: Receiver<T>) -> Int Never! { rx.delay_ms() }
 
 timeout: fn(delay: time.Duration) -[Time.Wait]> Never! { _: recv(core.tasks.after(delay, 0)) }
-
-sleep: fn(ms: Int) -[Time.Wait]> Never! {
-    delay := ms
-    if delay < 0 -> delay = 0
-    host_sleep_ms(delay)
-}
 
 try_recv: fn<T>(rx: Receiver<T>) -> T? Never! { rx.try_receive() }
 
@@ -437,7 +427,7 @@ spawn_name: fn(name: String) -> String Never! { name.copy() }
     assert(!units.acquire_within(20ms))
     task.group helpers {
         helper: task {
-            sleep(10)
+            time.sleep(10ms)
             units.release()
         }
         assert(units.acquire_within(10s))

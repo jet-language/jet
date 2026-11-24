@@ -6,7 +6,7 @@
 use {
     app
     db: core.db
-    tasks: core.tasks
+    time: core.time
 }
 
 #Codable
@@ -88,7 +88,7 @@ run: fn() {
     adds(app.remote(Board{store: store.copy(), runs: runs.copy()}))
     loop _ in 0..<500 {
         if note(store, 101) != "none" -> break
-        tasks.sleep(10)
+        time.sleep(10ms)
     }
     ids: [Int]{1, 2, 101, 102}
     loop id in ids -> print("note {id}: {note(store, id)}")

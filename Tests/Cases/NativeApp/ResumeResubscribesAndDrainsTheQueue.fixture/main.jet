@@ -12,7 +12,7 @@ use {
     files: core.files
     net: core.net
     sys: core.sys
-    tasks: core.tasks
+    time: core.time
     ui: core.ui
     web: core.web
     core.color.[Color]
@@ -81,7 +81,7 @@ board: fn(_view: BoardView) -> UINode Never! {
 serve: fn(port: String) {
     loop _ in 0..<12000 {
         if files.exists("asleep") -> break
-        tasks.sleep(10)
+        time.sleep(10ms)
     }
     served: web.app().mount("/api", Board{})
     server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen: {err}")
@@ -112,6 +112,6 @@ run: fn() {
         return
     }
     // Closing the window ends the app; it waits up to two minutes for that.
-    loop _ in 0..<12000 -> tasks.sleep(10)
+    loop _ in 0..<12000 -> time.sleep(10ms)
     print("the window stayed open")
 }

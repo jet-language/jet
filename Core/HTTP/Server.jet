@@ -481,7 +481,7 @@ HTTPServer: struct {
                             backoff * 2 > C_ACCEPT_BACKOFF_MAX_MS -> C_ACCEPT_BACKOFF_MAX_MS
                             else -> backoff * 2
                         }
-                        core.tasks.sleep(backoff)
+                        core.time.sleep(core.time.duration_ms(backoff))
                     } else if !accept_timed_out(error) {
                         failure = Val(HTTPError.IO{operation: "accept: {error}"})
                         running = false
@@ -509,10 +509,10 @@ HTTPServer: struct {
                             take_while_draining(self, stream)
                         }
                         .Err(error) -> {
-                            if !accept_timed_out(error) -> core.tasks.sleep(C_DRAIN_POLL_MS)
+                            if !accept_timed_out(error) -> core.time.sleep(core.time.duration_ms(C_DRAIN_POLL_MS))
                         }
                     }
-                } else { core.tasks.sleep(C_DRAIN_POLL_MS) }
+                } else { core.time.sleep(core.time.duration_ms(C_DRAIN_POLL_MS)) }
             }
             left_ms = (drain_end - rt.clock_mono_ns()) /% 1000000
         }

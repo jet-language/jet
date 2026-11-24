@@ -7,7 +7,7 @@ use {
     app
     ui: core.ui
     files: core.files
-    tasks: core.tasks
+    time: core.time
     core.color.[Color]
     core.ui.[UINode]
 }
@@ -57,14 +57,14 @@ run: fn() {
     }
     loop _ in 0..<6000 {
         if app.notices().len() > 0 || files.exists("first.frame") -> break
-        tasks.sleep(10)
+        time.sleep(10ms)
     }
     if app.notices().len() == 0 {
         paint_red()
         app.invalidate(panel_red)
         // The compositor closes the window once it sees the new color,
         // which ends the app; it waits up to a minute for that.
-        loop _ in 0..<6000 -> tasks.sleep(10)
+        loop _ in 0..<6000 -> time.sleep(10ms)
     }
     loop notice in app.notices() -> print("notice: {notice.text}")
     print("the window stayed open")

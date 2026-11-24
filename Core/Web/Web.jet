@@ -3651,7 +3651,7 @@ priv app_trace_take: fn(export: AppTraceExport) -> [TraceSpan] Never! {
 // The export task: every schedule delay, the queue goes out.
 priv app_trace_export_loop: fn(export: AppTraceExport) -[Net, Time.Wait]> Never! {
     loop {
-        core.tasks.sleep(export.settings.delay_ms)
+        core.time.sleep(core.time.duration_ms(export.settings.delay_ms))
         app_trace_flush(export)
     }
 }
