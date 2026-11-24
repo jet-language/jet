@@ -4026,7 +4026,7 @@ sema_expr_try_explicit_unit_method: fn(receiver: Expr, method: String, method_sp
     value := sema_tree_node(scalar_ty, TExprKind.UnitConvert{argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
     if measured_crossing {
         relative: sema_node(context, Type.Float, NodeKind.FloatLit{value: relative_uncertainty ?? 0.0}, conversion_span)
-        value = sema_expression_measurement_source_call("__measurement_result", [TExpr]{value, relative}, result_ty, conversion_span, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value = sema_expression_measurement_source_call("MeasurementResult", [TExpr]{value, relative}, result_ty, conversion_span, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     }
     checked := sema_expr_expected(value, expected, environment, program, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
@@ -5442,7 +5442,7 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 }
                 if !sema_expression_interpolation_display(checked, environment, program, scopes, diagnostics) -> return None
                 shown_span: checked.span
-                formatted: if sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.move()}, Type.String, shown_span, environment, program) ?? return None else -> checked
+                formatted: if sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked.move()}, Type.String, shown_span, environment, program, diagnostics) ?? return None else -> checked
                 tree_parts.push(TStrPart.Interpolation{value: formatted, debug: false})
             }
         }
@@ -6620,7 +6620,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
             }
             if operand.ty == Type.Float {
                 zero: sema_node(context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
-                operand = sema_expression_measurement_source_call("__measurement_new", [TExpr]{operand, zero}, measured_type, span, environment, program) ?? return None
+                operand = sema_expression_measurement_source_call("MeasurementNew", [TExpr]{operand, zero}, measured_type, span, environment, program, diagnostics) ?? return None
             }
             if !type_identity_equal(operand.ty, measured_type) {
                 _ := sema_expr_binary_type(op, lhs.ty, rhs.ty, span, diagnostics)
@@ -6628,13 +6628,13 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
             }
             operands[index] = operand
         }
-        function: if op == {
-            .Add -> "add"
-            .Sub -> "sub"
-            .Mul -> "mul"
-            .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> "div"
+        role: if op == {
+            .Add -> "MeasurementAdd"
+            .Sub -> "MeasurementSub"
+            .Mul -> "MeasurementMul"
+            .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare | .And | .Or -> "MeasurementDiv"
         }
-        value: sema_expression_measurement_source_call("__measurement_{function}", operands, measured_type, span, environment, program) ?? return None
+        value: sema_expression_measurement_source_call(role, operands, measured_type, span, environment, program, diagnostics) ?? return None
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     left_point: if lhs.ty == {

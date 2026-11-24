@@ -679,7 +679,7 @@ sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment,
             complete = false
             next
         }
-        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
         values.push(formatted)
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -770,12 +770,12 @@ sema_call_check_eval_show: fn(call: Call, environment: SemaScopeEnvironment, pro
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     item: item_type ?? {
-        shown: sema_call_eval_show_text(checked, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        shown: sema_call_eval_show_text(checked, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.Print{value: shown}, span))}
     }
     local: checked_generated_local("__jet_eval_item_{call.name_span.start}", span, item)
     read: sema_tree_node(item, TExprKind.Local{local: local}, span)
-    shown: sema_call_eval_show_text(read, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    shown: sema_call_eval_show_text(read, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     line: TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: shown}, span), span: span}
     by_value: sema_stmt_for_in_consumes_collection(checked.ty, item) && (sema_stmt_for_in_by_value(checked.ty, item) || sema_stmt_for_in_is_list(checked.ty))
     walk: TStmt.ForIn{label: None, variable: local, variable_two: None, source: checked.copy(), collection: checked, step: None, method_kind: None, columnar: false, by_value: by_value, source_stable: false, body: [TStmt]{line}, span: span}
@@ -792,11 +792,11 @@ sema_call_eval_show_item: fn(ty: Type) -> Type? Never! {
     }
 }
 
-// A shown value as `print` passes it on: a Measurement through its
-// `__measurement_show` text, any other value as it is.
-sema_call_eval_show_text: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? Never! {
+// A shown value as `print` passes it on: a Measurement through the text of
+// its MeasurementShow helper, any other value as it is.
+sema_call_eval_show_text: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? Never! {
     if value.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) {
-        return sema_expression_measurement_source_call("__measurement_show", [TExpr]{value}, Type.String, value.span, environment, program)
+        return sema_expression_measurement_source_call("MeasurementShow", [TExpr]{value}, Type.String, value.span, environment, program, diagnostics)
     }
     Val(value)
 }
@@ -918,7 +918,7 @@ sema_call_check_term_eprint: fn(record: CoreCallRecord, args: [CallArg], span: S
             next
         }
         if parts.len() > 0 -> parts.push(TStrPart.Literal{text: "\n"})
-        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("MeasurementShow", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
         parts.push(TStrPart.Interpolation{value: formatted, debug: false})
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -2236,7 +2236,7 @@ sema_call_try_direct_forms: fn(call: Call, expected: Type?, environment: SemaSco
             values.push(value)
         }
         result: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
-        value: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        value: sema_expression_measurement_source_call("MeasurementNew", values, result, call.name_span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, environment, program, diagnostics)}
     }
     sema_policy_try_apply(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)

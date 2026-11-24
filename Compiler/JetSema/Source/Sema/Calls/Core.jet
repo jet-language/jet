@@ -1159,7 +1159,7 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
         return None
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && sema_expression_is_float_measurement(args[0].ty, environment, program) {
-        value: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment, program) ?? return None
+        value: sema_expression_measurement_source_call("MeasurementSqrt", args, result_type, span, environment, program, diagnostics) ?? return None
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 {

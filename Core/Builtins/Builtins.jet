@@ -35,9 +35,17 @@
 // decode helpers a `tree.decode<T>()` with no Decode implementation of T's
 // own runs for a List (DecodeList), a `[T#N]` (DecodeFixedList), a byte List
 // (DecodeBytes), an Option (DecodeOption) and a String-keyed Map
-// (DecodeMap), with the one `FieldError.under` runs (DecodeUnder). A role's
-// name ends in `Point` exactly when it is a point constructor's, and starts
-// with `Decode` exactly when it is a decode helper's.
+// (DecodeMap), with the one `FieldError.under` runs (DecodeUnder). The
+// `core.units` helpers a `Measurement<Float>` runs fill roles too: making one
+// from a value and its uncertainty (MeasurementNew), its `.value`
+// (MeasurementValue) and `.uncertainty` (MeasurementUncertainty), its `+`,
+// `-`, `*` and `/` (MeasurementAdd, MeasurementSub, MeasurementMul,
+// MeasurementDiv), its `math.sqrt` (MeasurementSqrt), its text
+// (MeasurementShow) and a rounded conversion into a measured unit
+// (MeasurementResult). A role's name ends in `Point` exactly when it is a
+// point constructor's, starts with `Decode` exactly when it is a decode
+// helper's, and starts with `Measurement` exactly when it is a measurement
+// helper's.
 // The compiler runs the one Core function that fills a role and never names
 // it, so the function can be private and keep any name.
 // The rest are filled by a trait of Compiler/Prelude/Traits.jet, whose
@@ -77,6 +85,16 @@ RoleKind: enum {
     ProcessStderrLine,
     TextInputDrop,
     TextInputChange,
+    MeasurementNew,
+    MeasurementValue,
+    MeasurementUncertainty,
+    MeasurementAdd,
+    MeasurementSub,
+    MeasurementMul,
+    MeasurementDiv,
+    MeasurementSqrt,
+    MeasurementShow,
+    MeasurementResult,
     Add,
     Sub,
     Mul,

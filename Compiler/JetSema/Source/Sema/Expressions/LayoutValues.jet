@@ -396,10 +396,19 @@ sema_expression_is_float_measurement: fn(ty: Type, environment: SemaScopeEnviron
     inner == Type.Float
 }
 
-sema_expression_measurement_source_call: fn(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+// The call of the `core.units` helper that fills `role` (MeasurementNew,
+// MeasurementShow, …): the compiler finds it through its jet_builtins role,
+// never its name. E1015 when core.units is loaded and nothing fills `role`.
+sema_expression_measurement_source_call: fn(role: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    _ := sema_call_core_module_identity(environment, program, "core.units") ?? return None
+    graph: program.registration_graph ?? return None
+    helper: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
+        return None
+    }
     // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
-    type_args: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
-    sema_expression_core_source_call("core.units", function, values, result_type, type_args, span, environment, program)
+    type_args: if role == "MeasurementResult" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
+    sema_expression_core_source_call("core.units", helper.name, values, result_type, type_args, span, environment, program)
 }
 
 // The call of Core source module `module_name`'s function `function`, which
@@ -433,7 +442,8 @@ sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, meth
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type := Type.Float
-    value: sema_expression_measurement_source_call("__measurement_{method}", [TExpr]{receiver_value}, result_type, span, environment, program) ?? {
+    role: if method == "value" -> "MeasurementValue" else -> "MeasurementUncertainty"
+    value: sema_expression_measurement_source_call(role, [TExpr]{receiver_value}, result_type, span, environment, program, diagnostics) ?? {
         context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
