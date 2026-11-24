@@ -2,6 +2,7 @@ use {
     core: core
     core.ui.host.[UIHostError, UINodeID, UITextRange]
     internal.[ime_failure, ime_offset, ime_phase]
+    rt: jet.runtime.ui
 }
 
 // core.ui.host.ime — typed input-method editor events.
@@ -33,10 +34,10 @@ UIIMEEvent: struct {
 // composition and carries none. An empty record is the provider's mark that
 // its queue overflowed and dropped events.
 poll: fn() -[IO]> UIIMEEvent? UIHostError! {
-    if !core.ui.host.__capability(2) {
+    if !rt.capability(2) {
         return Err(UIHostError.CapabilityUnavailable{capability: "IME"})
     }
-    raw: core.ui.host.__event_pop(0) ?? return Ok(None)
+    raw: rt.event_pop(0) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "IME"})
     fields: core.ui.host.provider_record_fields(raw) ?? return Err(ime_failure("an IME event is not a provider record"))
     if fields.len() != 7 -> return Err(ime_failure("an IME event has 7 fields, not {fields.len()}"))

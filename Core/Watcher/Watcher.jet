@@ -9,15 +9,18 @@ package: {
     }
 }
 
-use core: core
+use {
+    core: core
+    rt: jet.runtime.watcher
+}
 
-files: fn(path: String) -[FS]> WatchHandle IOError! { core.watcher.__files(path) }
+files: fn(path: String) -[FS]> WatchHandle IOError! { rt.files(path) }
 
-process_pid: fn(pid: Int) -> WatchHandle Never! { core.watcher.__process_pid(pid) }
+process_pid: fn(pid: Int) -> WatchHandle Never! { rt.process_pid(pid) }
 
-port: fn(host: String, port: Int) -[Net]> WatchHandle Never! { core.watcher.__port(host, port) }
+port: fn(host: String, port: Int) -[Net]> WatchHandle Never! { rt.port(host, port) }
 
-set: fn() -> WatchSet Never! { core.watcher.__set() }
+set: fn() -> WatchSet Never! { rt.set() }
 
 add: fn(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
     set.add(handle)
@@ -191,9 +194,9 @@ watch_kind_named: fn(name: String) -> WatchKind Never! {
 // target.
 impl WatchHandle {
     poll: fn(self) -[IO]> [WatchEvent] Never! {
-        texts: core.watcher.__poll(self)
-        target: core.watcher.__target(self)
-        number: core.watcher.__number(self)
+        texts: rt.poll(self)
+        target: rt.target(self)
+        number: rt.number(self)
         pid: if target == 1 -> number else -> 0
         port: if target == 2 -> number else -> 0
         bus: core.watcher.__event(self)
@@ -218,35 +221,35 @@ impl WatchHandle {
         core.watcher.__event(self).once(scope, handler)
     }
 
-    cancel: fn(self) -[IO]> Never! { core.watcher.__cancel(self) }
+    cancel: fn(self) -[IO]> Never! { rt.cancel(self) }
 
-    is_active: fn(self) -> Bool Never! { core.watcher.__is_active(self) }
+    is_active: fn(self) -> Bool Never! { rt.is_active(self) }
 
     summary: fn(self) -> String Never! {
-        target: core.watcher.__target(self)
-        if target == 1 -> return "watch process {core.watcher.__number(self)}"
+        target: rt.target(self)
+        if target == 1 -> return "watch process {rt.number(self)}"
         if target == 2 {
-            return "watch port {core.watcher.__text(self)}:{core.watcher.__number(self)}"
+            return "watch port {rt.text(self)}:{rt.number(self)}"
         }
-        "watch file {core.watcher.__text(self)}"
+        "watch file {rt.text(self)}"
     }
 }
 
 // WatchSet: a shared list of handles polled in order.
 impl WatchSet {
-    add: fn(self, handle: WatchHandle) -[IO]> Never! { core.watcher.__set_add(self, handle) }
+    add: fn(self, handle: WatchHandle) -[IO]> Never! { rt.set_add(self, handle) }
 
     poll: fn(self) -[IO]> [WatchEvent] Never! {
         out := [WatchEvent]{}
-        loop index in 0..<core.watcher.__set_len(self) {
-            loop ev in core.watcher.__set_get(self, index).poll() -> out.push(ev)
+        loop index in 0..<rt.set_len(self) {
+            loop ev in rt.set_get(self, index).poll() -> out.push(ev)
         }
         out
     }
 
     events: fn(self) -[IO]> [WatchEvent] Never! { self.poll() }
 
-    summary: fn(self) -> String Never! { "watchset handles={core.watcher.__set_len(self)}" }
+    summary: fn(self) -> String Never! { "watchset handles={rt.set_len(self)}" }
 }
 
 #Test("WatchEvent source layout keeps all fields and independent copies") {

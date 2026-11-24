@@ -1,6 +1,7 @@
 use {
     core: core
     core.ui.host.[UIClipboardText, UIClipboardWrite, UIHostError]
+    rt: jet.runtime.ui
 }
 
 // core.ui.host.clipboard — typed UTF-8 clipboard over the host provider's
@@ -8,18 +9,18 @@ use {
 // the clipboard text the page last observed (a paste, copy or cut, or its own
 // write_text); a browser lends the live clipboard only to a user gesture.
 read_text: fn() -[IO]> UIClipboardText UIHostError! {
-    if !core.ui.host.__capability(1) {
+    if !rt.capability(1) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     }
-    text: core.ui.host.__clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "no clipboard text has been observed yet: the host has seen no paste, copy, cut or write"})
+    text: rt.clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "no clipboard text has been observed yet: the host has seen no paste, copy, cut or write"})
     Ok(UIClipboardText{text: text, selection: None})
 }
 
 write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
-    if !core.ui.host.__capability(1) {
+    if !rt.capability(1) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
     }
-    if !core.ui.host.__clipboard_set(text) {
+    if !rt.clipboard_set(text) {
         return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not write the clipboard"})
     }
     characters := 0

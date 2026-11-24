@@ -521,13 +521,10 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4" | "__socket_from_parts" | "__socket_ip" | "__socket_port" | "__socket_scope" | "__udp_packet_addr" | "is_ipv6" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "ready_readable" | "ready_writable" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" | "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight" | "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated" -> None
             else -> Val("Net")
         }
-        // A poll reads what the watched target did since the last one: IO, as
-        // WatchHandle.poll declares.
         "core.watcher" -> if member == {
-            "files" | "__files" -> Val("FS")
-            "process_pid" | "__process_pid" -> Val("Exec")
-            "port" | "__port" -> Val("Net")
-            "__poll" -> Val("IO")
+            "files" -> Val("FS")
+            "process_pid" -> Val("Exec")
+            "port" -> Val("Net")
             else -> None
         }
         "core.browser" -> if member == {

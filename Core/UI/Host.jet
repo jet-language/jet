@@ -2,16 +2,17 @@ use {
     core: core
     host_path: __core_files_path_components
     internal.[file_dialog, granted_path, provider_record]
+    rt: jet.runtime.ui
 }
 
 // core.ui.host — typed host capability leaves for dialogs and metadata.
 //
 // Core owns every rule here: request validation, capability checks, the
 // shortcut registry, event decoding and what each UIHostError means. The host
-// is a provider of primitives only (`__capability`, `__clipboard_get`,
-// `__clipboard_set`, `__event_pop`, `__dialog_request`, `__dialog_result`,
-// `__key_claim`). A
-// native build's provider is headless and reports every capability absent; a
+// is a provider of primitives only (jet.runtime.ui: `capability`,
+// `clipboard_get`, `clipboard_set`, `event_pop`, `dialog_request`,
+// `dialog_result`, `key_claim`). A native build's provider is headless and
+// reports every capability absent; a
 // web build's provider is the page's browser provider (JetWeb Host.jet
 // `defaultUiProvider`, unless the page installs its own).
 //
@@ -183,7 +184,7 @@ capabilities: fn() -> UICapabilityFacts Never! {
 
 // Whether the UI provider has the capability with provider code `code`:
 // Core's own in UICapability order, a package's by the code it owns.
-provider_capability: fn(code: Int) -> Bool Never! { core.ui.host.__capability(code) }
+provider_capability: fn(code: Int) -> Bool Never! { rt.capability(code) }
 
 open_file: fn(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     file_dialog(request, .Open)
@@ -258,18 +259,18 @@ priv internal: module {
                 return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
             }
         }
-        if !core.ui.host.__capability(0) {
+        if !rt.capability(0) {
             return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
         }
         wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
         loop filter in request.filters {
             loop extension in filter.extensions -> wire.push(extension.copy())
         }
-        token: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
+        token: rt.dialog_request(if opening -> 0 else -> 1, provider_record(wire))
         if token < 0 {
             return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
         }
-        answer: core.ui.host.__dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
+        answer: rt.dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
         items: provider_record_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
         if items.len() == 0 {
             return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
