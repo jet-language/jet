@@ -547,7 +547,12 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "__heap_mark" | "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
             else -> None
         }
-        "core.sys" -> if member == "success" -> None else -> Val("Env")
+        // fork and setsid change the process tree, like every other child launch.
+        "core.sys" -> if member == {
+            "success" -> None
+            "__fork" | "__setsid" -> Val("Exec")
+            else -> Val("Env")
+        }
         "core.db" | "core.jobs" -> Val("DB")
         "core.auth" -> if member == {
             "register_user" | "password_login" | "session_validate" | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish" | "tokens_login" | "tokens_refresh" | "devices" | "revoke_device" -> Val("DB")
