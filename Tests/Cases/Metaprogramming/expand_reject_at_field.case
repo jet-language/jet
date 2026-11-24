@@ -1,0 +1,12 @@
+# A marker's `expand` body rejects with `reject(value, at: field)`: the
+# diagnostic lands on the reflected field's span, not on the marker.
+fixture: ExpandRejectAtField.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # the marker rejects the `when` field
+stderr: ~ "Error: form.UnsupportedField: Form field `when` has unsupported type `[Int]`" # the finding the expand body raises
+stderr: ~ "--> main.jet:39:" # at the `when: [Int]` field
+stderr: !~ "main.jet:35:" # not at the `#FormFields` marker
+stderr: !~ "ComptimeConstructNotSupported" # the evaluator takes `at:`
