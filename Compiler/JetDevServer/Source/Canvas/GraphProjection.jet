@@ -71,7 +71,7 @@ canvas_reasoning_family: fn(record: DerivationRecord) -> String {
 canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
     records := [String]{}
     lens_rows := [String:[String]]{}
-    loop record in index.derivations {
+    loop record in index.derivations.records {
         source_span := "null"
         loop fact in index.definition_facts {
             if fact.stable_id == record.subject {
@@ -93,7 +93,7 @@ canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
         "{{\"name\":{json_str(name)},\"records\":[{rows.join(",")}]}}"
     }
     shown_path: source_path.split("\\").join("/")
-    "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(shown_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":{index.derivations.len()},\"records_truncated\":false,\"expanded\":true}}}}"
+    "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(shown_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":{index.derivations.records.len()},\"records_truncated\":false,\"expanded\":true}}}}"
 }
 
 // The Canvas document of a checked file with the devserver's facts beside the

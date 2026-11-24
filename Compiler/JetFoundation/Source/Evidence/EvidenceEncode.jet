@@ -191,3 +191,14 @@ evidence_report_encode: fn(report: EvidenceReport) -> [U8] EvidenceCodecError! {
     }
     Ok(out)
 }
+
+DERIVATION_STORE_MAGIC: "JETDRV01"
+
+// The derivation relation's bytes: the magic, the record count, then each
+// record in row order as `evidence_encode_derivation` writes one.
+derivation_store_encode: fn(store: DerivationStore) -> [U8] EvidenceCodecError! {
+    out := DERIVATION_STORE_MAGIC.bytes()
+    evidence_put_number(out, U64{store.records.len()}, 4)
+    loop record in store.records -> evidence_encode_derivation(record, out)
+    Ok(out)
+}

@@ -32,10 +32,6 @@ DerivationRecord: struct {
     payload: DerivationPayload?,
 }
 
-DerivationStore: struct {
-    records: [DerivationRecord],
-}
-
 derivation_identity: fn(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
     DerivationIdentity{source: source, build: build, run: run, target: target}
 }
@@ -119,25 +115,23 @@ derivation_strings_sorted_unique: fn(values: [String]) -> [String] Never! {
 }
 
 derivation_method_name: fn(method: DerivationMethod) -> String Never! {
-    if method == {
-        .StaticDerivation -> derivation_json_quote("static_derivation")
-        .FormalProof -> derivation_json_quote("formal_proof")
-        .RecordedExecution -> derivation_json_quote("recorded_execution")
-        .SampledAgreement -> derivation_json_quote("sampled_agreement")
-        .ExternalAssumption -> derivation_json_quote("external_assumption")
-    }
+    derivation_json_quote(derivation_method_raw(method))
 }
 
 derivation_disposition_name: fn(disposition: DerivationDisposition) -> String Never! {
+    derivation_json_quote(derivation_disposition_raw(disposition))
+}
+
+derivation_disposition_raw: fn(disposition: DerivationDisposition) -> String Never! {
     if disposition == {
-        .Current -> derivation_json_quote("current")
-        .Stale -> derivation_json_quote("stale")
-        .Expired -> derivation_json_quote("expired")
-        .Redacted -> derivation_json_quote("redacted")
-        .Unavailable -> derivation_json_quote("unavailable")
-        .Unsupported -> derivation_json_quote("unsupported")
-        .BudgetExhausted -> derivation_json_quote("budget_exhausted")
-        .Unknown -> derivation_json_quote("unknown")
+        .Current -> "current"
+        .Stale -> "stale"
+        .Expired -> "expired"
+        .Redacted -> "redacted"
+        .Unavailable -> "unavailable"
+        .Unsupported -> "unsupported"
+        .BudgetExhausted -> "budget_exhausted"
+        .Unknown -> "unknown"
     }
 }
 

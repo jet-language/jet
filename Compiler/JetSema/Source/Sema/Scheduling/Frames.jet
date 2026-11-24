@@ -10,7 +10,6 @@ use jet_foundation.[
     CoreCallResourceAccessMode,
     DerivationPayload,
     DerivationRecord,
-    DerivationRef,
     Expr,
     FrameCompletion,
     FrameDependency,
@@ -27,7 +26,6 @@ use jet_foundation.[
     ResourceRegion,
     derivation_identity,
     derivation_record,
-    derivation_record_reference,
     derivation_record_with_payload,
 ]
 
@@ -40,7 +38,6 @@ SemaFrameScheduleFacts: struct {
     schedule: FrameSchedule?,
     explanation: String?,
     derivation_record: DerivationRecord?,
-    derivation: DerivationRef?,
     error: String?,
 }
 
@@ -338,14 +335,14 @@ sema_frame_schedule_build: fn(operations: [FrameOperation]) -> SemaFrameSchedule
 
 sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaScopeEnvironment, program: SemaProgramTables, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
     if operations.len() == 0 {
-        return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: None}
+        return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: None}
     }
     built := sema_frame_schedule_build(operations)
     if built.schedule == None {
-        return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: built.error}
+        return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: built.error}
     }
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: Val("frame schedule derivation requires registered module identity")}
+        module_index: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: Val("frame schedule derivation requires registered module identity")}
         module_path := graph.modules[module_index].module_path
         schedule: built.schedule ?? FrameSchedule{operations: [FrameOperation]{}, dependencies: [FrameDependency]{}, transfers: [FrameTransfer]{}, reuse: [FrameReuse]{}, retentions: [FrameRetention]{}, conservative: [String]{}}
         premises := [String]{}
@@ -359,11 +356,10 @@ sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaS
             schedule: Val(schedule),
             explanation: Val(sema_frame_schedule_explain(schedule)),
             derivation_record: Val(record),
-            derivation: Val(derivation_record_reference(record)),
             error: None,
         }
     }
-    SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: Val("frame schedule derivation requires registered module identity")}
+    SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, error: Val("frame schedule derivation requires registered module identity")}
 }
 
 sema_frame_schedule_validate: fn(operations: [FrameOperation]) -> String? {

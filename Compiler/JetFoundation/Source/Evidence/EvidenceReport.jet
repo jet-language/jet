@@ -13,7 +13,7 @@ EvidenceReport: struct {
     build: EvidenceBuild,
     revision: EvidenceRevision,
     records: [EvidenceRecord],
-    derivations: [DerivationRecord],
+    derivations: DerivationStore,
     attachments: [EvidenceAttachment],
     diagnostics: [EvidenceDiagnostic],
     completeness: EvidenceCompleteness,
@@ -223,31 +223,25 @@ evidence_record_checked_derivation: fn(record: EvidenceRecord) -> DerivationReco
 }
 
 evidence_report_new: fn(report_id: String, producer: EvidenceProducerKind, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceReport Never! {
-    EvidenceReport{schema_version: EVIDENCE_REPORT_VERSION, identity: EvidenceIdentity{report_id: report_id, claim_id: "", evidence_id: ""}, producer: producer, source: source, build: build, revision: revision, records: [EvidenceRecord]{}, derivations: [DerivationRecord]{}, attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: EvidenceCompleteness.Complete}
+    EvidenceReport{schema_version: EVIDENCE_REPORT_VERSION, identity: EvidenceIdentity{report_id: report_id, claim_id: "", evidence_id: ""}, producer: producer, source: source, build: build, revision: revision, records: [EvidenceRecord]{}, derivations: derivation_store_new(), attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: EvidenceCompleteness.Complete}
 }
 
 evidence_report_derivation: fn(report: EvidenceReport, reference: DerivationRef) -> DerivationRecord? Never! {
-    loop item in report.derivations {
-        if item.id == reference.id -> return Val(item)
-    }
-    None
+    derivation_store_record(report.derivations, reference)
 }
 
-evidence_report_intern_derivation: fn(report: &EvidenceReport, derivation: &&DerivationRecord) -> DerivationRef Never! {
-    loop item in report.derivations {
-        if item.id == derivation.id -> return derivation_record_reference(item)
+// Interns `derivation` in the report's relation, kept in canonical id order.
+evidence_report_intern_derivation: fn(report: &EvidenceReport, derivation: &&DerivationRecord) -> DerivationRef EvidenceMergeError! {
+    if derivation_store_add(report.derivations, derivation) == {
+        .Ok(reference) -> {
+            derivation_store_sort(report.derivations)
+            Ok(reference)
+        }
+        .Err(error) -> Err(EvidenceMergeError.InvalidDerivation(error.message))
     }
-    reference: derivation_record_reference(derivation)
-    report.derivations.push(derivation)
-    report.derivations = loop fresh_item in report.derivations -> fresh_item
-    report.derivations.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { left.id <=> right.id })
-    reference
 }
 
 evidence_report_add_record_with_derivation: fn(report: &EvidenceReport, record: &&EvidenceRecord, derivation: &&DerivationRecord) EvidenceMergeError! {
-    if !derivation_record_validate(derivation) {
-        return Err(EvidenceMergeError.InvalidDerivation("derivation {derivation.id} has a non-canonical identity"))
-    }
     value := record
     value.derivation = Val(evidence_report_intern_derivation(report, derivation))
     evidence_report_add_record(report, value)
@@ -294,9 +288,6 @@ evidence_report_try_from_records: fn(report_id: String, records: &&[EvidenceReco
         report.revision = records[0].revision.copy()
     }
     loop derivation_item in derivations {
-        if !derivation_record_validate(derivation_item) {
-            return Err(EvidenceMergeError.InvalidDerivation("derivation {derivation_item.id} has a non-canonical identity"))
-        }
         _: evidence_report_intern_derivation(report, derivation_item)
     }
     loop record_item in records {

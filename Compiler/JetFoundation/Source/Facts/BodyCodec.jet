@@ -4244,17 +4244,19 @@ body_codec_get_opt_frameschedule: fn(bytes: [U8], input: &BodyCodecIn) -> FrameS
     None
 }
 
-body_codec_put_opt_derivationref: fn(out: &BodyCodecOut, value: DerivationRef?) Never! {
+body_codec_put_opt_derivationrecord: fn(out: &BodyCodecOut, value: DerivationRecord?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
-        body_codec_put_derivationref(out, inner)
+        body_codec_put_derivationrecord(out, inner)
         return
     }
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_derivationref: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationRef? Never! {
-    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_derivationref(bytes, input))
+body_codec_get_opt_derivationrecord: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationRecord? Never! {
+    if body_codec_get_bool(bytes, input) {
+        return Val(body_codec_get_derivationrecord(bytes, input))
+    }
     None
 }
 
@@ -4290,7 +4292,7 @@ body_codec_put_bodylambda: fn(out: &BodyCodecOut, value: BodyLambda) Never! {
     body_codec_put_bodylambdabody(out, value.executable)
     body_codec_put_span(out, value.source_span)
     body_codec_put_opt_frameschedule(out, value.frame_schedule)
-    body_codec_put_opt_derivationref(out, value.frame_schedule_derivation)
+    body_codec_put_opt_derivationrecord(out, value.frame_schedule_derivation)
     body_codec_put_tcapturefacts(out, value.capture_facts)
     body_codec_put_tfailurecarrier(out, value.failure_carrier)
     body_codec_put_teffectfacts(out, value.effects)
@@ -4313,7 +4315,7 @@ body_codec_get_bodylambda: fn(bytes: [U8], input: &BodyCodecIn) -> BodyLambda Ne
     f0: body_codec_get_bodylambdabody(bytes, input)
     f1: body_codec_get_span(bytes, input)
     f2: body_codec_get_opt_frameschedule(bytes, input)
-    f3: body_codec_get_opt_derivationref(bytes, input)
+    f3: body_codec_get_opt_derivationrecord(bytes, input)
     f4: body_codec_get_tcapturefacts(bytes, input)
     f5: body_codec_get_tfailurecarrier(bytes, input)
     f6: body_codec_get_teffectfacts(bytes, input)
@@ -4676,13 +4678,156 @@ body_codec_get_frameretention: fn(bytes: [U8], input: &BodyCodecIn) -> FrameRete
     FrameRetention{resource: f0, operation: f1, owner: f2, completion_token: f3, completed: f4}
 }
 
-body_codec_put_derivationref: fn(out: &BodyCodecOut, value: DerivationRef) Never! {
-    body_codec_put_string(out, value.id)
+body_codec_put_opt_derivationobservation: fn(out: &BodyCodecOut, value: DerivationObservation?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_derivationobservation(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
 }
 
-body_codec_get_derivationref: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationRef Never! {
+body_codec_get_opt_derivationobservation: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationObservation? Never! {
+    if body_codec_get_bool(bytes, input) {
+        return Val(body_codec_get_derivationobservation(bytes, input))
+    }
+    None
+}
+
+body_codec_put_opt_derivationpayload: fn(out: &BodyCodecOut, value: DerivationPayload?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_derivationpayload(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_derivationpayload: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationPayload? Never! {
+    if body_codec_get_bool(bytes, input) {
+        return Val(body_codec_get_derivationpayload(bytes, input))
+    }
+    None
+}
+
+body_codec_put_derivationrecord: fn(out: &BodyCodecOut, value: DerivationRecord) Never! {
+    body_codec_put_string(out, value.id)
+    body_codec_put_string(out, value.subject)
+    body_codec_put_string(out, value.claim)
+    body_codec_put_string(out, value.producer)
+    body_codec_put_derivationmethod(out, value.method)
+    body_codec_put_string(out, value.rule)
+    body_codec_put_list_string(out, value.premises)
+    body_codec_put_derivationidentity(out, value.identity)
+    body_codec_put_list_string(out, value.assumptions)
+    body_codec_put_derivationdisposition(out, value.disposition)
+    body_codec_put_opt_derivationobservation(out, value.observation)
+    body_codec_put_opt_derivationpayload(out, value.payload)
+}
+
+body_codec_get_derivationrecord: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationRecord Never! {
     f0: body_codec_get_string(bytes, input)
-    DerivationRef{id: f0}
+    f1: body_codec_get_string(bytes, input)
+    f2: body_codec_get_string(bytes, input)
+    f3: body_codec_get_string(bytes, input)
+    f4: body_codec_get_derivationmethod(bytes, input)
+    f5: body_codec_get_string(bytes, input)
+    f6: body_codec_get_list_string(bytes, input)
+    f7: body_codec_get_derivationidentity(bytes, input)
+    f8: body_codec_get_list_string(bytes, input)
+    f9: body_codec_get_derivationdisposition(bytes, input)
+    f10: body_codec_get_opt_derivationobservation(bytes, input)
+    f11: body_codec_get_opt_derivationpayload(bytes, input)
+    DerivationRecord{id: f0, subject: f1, claim: f2, producer: f3, method: f4, rule: f5, premises: f6, identity: f7, assumptions: f8, disposition: f9, observation: f10, payload: f11}
+}
+
+body_codec_put_derivationmethod: fn(out: &BodyCodecOut, value: DerivationMethod) Never! {
+    if value == {
+        .StaticDerivation -> { body_codec_put_tag(out, 0) }
+        .FormalProof -> { body_codec_put_tag(out, 1) }
+        .RecordedExecution -> { body_codec_put_tag(out, 2) }
+        .SampledAgreement -> { body_codec_put_tag(out, 3) }
+        .ExternalAssumption -> body_codec_put_tag(out, 4)
+    }
+}
+
+body_codec_get_derivationmethod: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationMethod Never! {
+    position: body_codec_get_tag(bytes, input, 5, 0)
+    if position == {
+        1 -> DerivationMethod.FormalProof
+        2 -> DerivationMethod.RecordedExecution
+        3 -> DerivationMethod.SampledAgreement
+        4 -> DerivationMethod.ExternalAssumption
+        else -> DerivationMethod.StaticDerivation
+    }
+}
+
+body_codec_put_derivationidentity: fn(out: &BodyCodecOut, value: DerivationIdentity) Never! {
+    body_codec_put_string(out, value.source)
+    body_codec_put_string(out, value.build)
+    body_codec_put_string(out, value.run)
+    body_codec_put_string(out, value.target)
+}
+
+body_codec_get_derivationidentity: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationIdentity Never! {
+    f0: body_codec_get_string(bytes, input)
+    f1: body_codec_get_string(bytes, input)
+    f2: body_codec_get_string(bytes, input)
+    f3: body_codec_get_string(bytes, input)
+    DerivationIdentity{source: f0, build: f1, run: f2, target: f3}
+}
+
+body_codec_put_derivationdisposition: fn(out: &BodyCodecOut, value: DerivationDisposition) Never! {
+    if value == {
+        .Current -> { body_codec_put_tag(out, 0) }
+        .Stale -> { body_codec_put_tag(out, 1) }
+        .Expired -> { body_codec_put_tag(out, 2) }
+        .Redacted -> { body_codec_put_tag(out, 3) }
+        .Unavailable -> { body_codec_put_tag(out, 4) }
+        .Unsupported -> { body_codec_put_tag(out, 5) }
+        .BudgetExhausted -> { body_codec_put_tag(out, 6) }
+        .Unknown -> body_codec_put_tag(out, 7)
+    }
+}
+
+body_codec_get_derivationdisposition: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationDisposition Never! {
+    position: body_codec_get_tag(bytes, input, 8, 0)
+    if position == {
+        1 -> DerivationDisposition.Stale
+        2 -> DerivationDisposition.Expired
+        3 -> DerivationDisposition.Redacted
+        4 -> DerivationDisposition.Unavailable
+        5 -> DerivationDisposition.Unsupported
+        6 -> DerivationDisposition.BudgetExhausted
+        7 -> DerivationDisposition.Unknown
+        else -> DerivationDisposition.Current
+    }
+}
+
+body_codec_put_derivationobservation: fn(out: &BodyCodecOut, value: DerivationObservation) Never! {
+    body_codec_put_opt_string(out, value.event_id)
+    body_codec_put_opt_string(out, value.counterexample_id)
+}
+
+body_codec_get_derivationobservation: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationObservation Never! {
+    f0: body_codec_get_opt_string(bytes, input)
+    f1: body_codec_get_opt_string(bytes, input)
+    DerivationObservation{event_id: f0, counterexample_id: f1}
+}
+
+body_codec_put_derivationpayload: fn(out: &BodyCodecOut, value: DerivationPayload) Never! {
+    if value == {
+        .FrameSchedule(p0) -> {
+            body_codec_put_tag(out, 0)
+            body_codec_put_frameschedule(out, p0)
+        }
+    }
+}
+
+body_codec_get_derivationpayload: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationPayload Never! {
+    body_codec_skip_tag(bytes, input, 1)
+    f0: body_codec_get_frameschedule(bytes, input)
+    DerivationPayload.FrameSchedule{schedule: f0}
 }
 
 body_codec_put_tcapturefacts: fn(out: &BodyCodecOut, value: TCaptureFacts) Never! {
@@ -6732,6 +6877,20 @@ body_codec_get_tclosureop: fn(bytes: [U8], input: &BodyCodecIn) -> TClosureOp Ne
     }
 }
 
+body_codec_put_opt_derivationref: fn(out: &BodyCodecOut, value: DerivationRef?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_derivationref(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_derivationref: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationRef? Never! {
+    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_derivationref(bytes, input))
+    None
+}
+
 body_codec_put_list_strmatchpart: fn(out: &BodyCodecOut, values: [StrMatchPart]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_strmatchpart(out, value)
@@ -7475,6 +7634,15 @@ body_codec_get_registerwidth: fn(bytes: [U8], input: &BodyCodecIn) -> RegisterWi
         3 -> RegisterWidth.U64
         else -> RegisterWidth.U8
     }
+}
+
+body_codec_put_derivationref: fn(out: &BodyCodecOut, value: DerivationRef) Never! {
+    body_codec_put_string(out, value.id)
+}
+
+body_codec_get_derivationref: fn(bytes: [U8], input: &BodyCodecIn) -> DerivationRef Never! {
+    f0: body_codec_get_string(bytes, input)
+    DerivationRef{id: f0}
 }
 
 body_codec_put_list_componenttypedescriptor: fn(out: &BodyCodecOut, values: [ComponentTypeDescriptor]) Never! {

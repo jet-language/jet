@@ -1,0 +1,21 @@
+# The editor reads the one derivation relation. A hover inside an `on_frame`
+# callback adds a `Known by` line for the schedule the frame scheduler checked
+# for it: its producer, rule and method, then its claim. A hover on a plain
+# definition adds none, because its record says only that it checked.
+env: NO_COLOR=1
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use game: core.game\\n\\nPosition: struct {\\n    x: Int,\\n}\\n\\nsimulate: fn(positions: &Position) { positions.x += 1 }\\n\\ndraw_scene: fn(positions: Position) { print(positions.x) }\\n\\nrun: fn() {\\n    scene := game.Scene.new(\\\"resource-schedule\\\")\\n    scene.on_frame(\\n        fn(frame) {\\n            positions := Position{x: frame.index}\\n            simulate(positions) ?? panic(\\\"simulate\\\")\\n            draw_scene(positions)\\n        },\\n    )\\n    transcript: game.run(scene)\\n    print(transcript)\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":16,\"character\":14}}}"
+recv lsp until $.id = 2
+stdout: ~ "draw_scene" # the hover still names the called function
+stdout: ~ "Known by jet-sema · checked-frame-accesses · static derivation: checked frame resource schedule" # the callback's schedule, read from the relation
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":6,\"character\":1}}}"
+recv lsp until $.id = 3
+stdout: !~ "Known by" # a definition that only checked says nothing more
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 4
+close lsp
+exit: any # the server's status after shutdown is not what this case shows

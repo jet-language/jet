@@ -1,0 +1,153 @@
+// The one derivation relation: how each fact was produced. Every producer
+// (the checked definitions, the frame schedules, the proof, test and import
+// evidence) adds its records here, and every reader (the semantic index, the
+// evidence report, `jet explain`, the editor's hover) resolves them here.
+//
+// A record is interned under its canonical id: adding an equal record again
+// returns the reference already held, while a different record under the same
+// id, or a record whose id is not the hash of its own fields, is refused.
+// `subjects` indexes the records that conclude each subject, so a reader
+// follows a fact's premises back through the records that concluded them.
+// Ids and subjects are interned once each in `keys`, and the columns hold
+// rows at their keys (Docs/Spec/compiler-data.md, Lookups).
+// The evidence codec persists the relation losslessly
+// (`derivation_store_encode`, `derivation_store_decode`): the decode re-checks
+// every id and every conflict.
+
+DerivationStore: struct {
+    // Canonical order, by id, once `derivation_store_sort` has run.
+    records: [DerivationRecord],
+    // The ids and subjects the records name.
+    keys: NameTable,
+    // At an id's key, its record's row in `records`.
+    slots: [Int],
+    // At a subject's key, its row in `subject_rows`.
+    subjects: [Int],
+    // The rows of the records that conclude each subject, in row order.
+    subject_rows: [[Int]],
+}
+
+// A record the relation refuses: its id is not the hash of its fields, or
+// another record already holds the id.
+#Error
+DerivationStoreError: struct {
+    message: String,
+}
+
+// One record of a subject's derivation chain and how many premises it sits
+// below the subject (0 for the subject's own records).
+DerivationChainStep: struct {
+    depth: Int,
+    record: DerivationRecord,
+}
+
+derivation_store_new: fn() -> DerivationStore Never! {
+    DerivationStore{records: [DerivationRecord]{}, keys: name_column_table(), slots: name_column(), subjects: name_column(), subject_rows: [[Int]]{}}
+}
+
+// Interns `record`: its reference, shared with an equal record already held.
+derivation_store_add: fn(store: &DerivationStore, record: &&DerivationRecord) -> DerivationRef DerivationStoreError! {
+    if !derivation_record_validate(record) -> return Err(DerivationStoreError{message: "derivation {record.id} has a non-canonical identity"})
+    reference: derivation_record_reference(record)
+    if name_column_get(store.keys, store.slots, record.id) == .Val(slot) {
+        if store.records[slot] != record -> return Err(DerivationStoreError{message: "two different derivation records claim the id {record.id}"})
+        return Ok(reference)
+    }
+    derivation_store_index(store, store.records.len(), record)
+    store.records.push(record)
+    Ok(reference)
+}
+
+// Binds the record at `slot` under its id and its subject.
+derivation_store_index: fn(store: &DerivationStore, slot: Int, record: DerivationRecord) Never! {
+    name_column_set(store.keys, store.slots, record.id, slot)
+    if name_column_get(store.keys, store.subjects, record.subject) == .Val(row) {
+        store.subject_rows[row].push(slot)
+        return
+    }
+    name_column_set(store.keys, store.subjects, record.subject, store.subject_rows.len())
+    store.subject_rows.push([Int]{slot})
+}
+
+// Puts the records in canonical order, by id. The index is rebuilt in that
+// order, so it is the same as a store that added the sorted records one by
+// one, and two stores holding the same records are equal whatever order
+// their producers added them in.
+derivation_store_sort: fn(store: &DerivationStore) Never! {
+    sorted := true
+    loop index in 1..<store.records.len() {
+        if store.records[index - 1].id > store.records[index].id {
+            sorted = false
+            break
+        }
+    }
+    if sorted -> return
+    records := loop fresh_item in store.records -> fresh_item
+    records.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { left.id <=> right.id })
+    store.keys = name_column_table()
+    store.slots = name_column()
+    store.subjects = name_column()
+    store.subject_rows = [[Int]]{}
+    loop (slot, record) in records -> derivation_store_index(store, slot, record)
+    store.records = records
+}
+
+derivation_store_record: fn(store: DerivationStore, reference: DerivationRef) -> DerivationRecord? Never! {
+    slot: name_column_get(store.keys, store.slots, reference.id) ?? return None
+    Val(store.records[slot])
+}
+
+// The records that conclude `subject`.
+derivation_store_subject: fn(store: DerivationStore, subject: String) -> [DerivationRecord] Never! {
+    records := [DerivationRecord]{}
+    row: name_column_get(store.keys, store.subjects, subject) ?? return records
+    loop slot in store.subject_rows[row] -> records.push(store.records[slot])
+    records
+}
+
+// `subject`'s records, each followed, depth first, by the records that
+// conclude its premises. A premise names a subject or a record id; one that
+// names neither (a source hash, an operation) is a leaf. Each record appears
+// once, where the walk first reaches it.
+derivation_store_chain: fn(store: DerivationStore, subject: String) -> [DerivationChainStep] Never! {
+    steps := [DerivationChainStep]{}
+    shown := loop _ in store.records -> false
+    loop slot in derivation_store_premise_slots(store, subject) -> derivation_store_chain_from(store, slot, 0, shown, steps)
+    steps
+}
+
+derivation_store_chain_from: fn(store: DerivationStore, slot: Int, depth: Int, shown: &[Bool], steps: &[DerivationChainStep]) Never! {
+    if shown[slot] -> return
+    shown[slot] = true
+    steps.push(DerivationChainStep{depth: depth, record: store.records[slot]})
+    loop premise in store.records[slot].premises {
+        loop premise_slot in derivation_store_premise_slots(store, premise) -> derivation_store_chain_from(store, premise_slot, depth + 1, shown, steps)
+    }
+}
+
+// The rows `name` reaches: the records concluding it as a subject, else the
+// record it names by id.
+derivation_store_premise_slots: fn(store: DerivationStore, name: String) -> [Int] Never! {
+    if name_column_get(store.keys, store.subjects, name) == .Val(row) -> return store.subject_rows[row]
+    if name_column_get(store.keys, store.slots, name) == .Val(slot) -> return [Int]{slot}
+    [Int]{}
+}
+
+// How `record` knows its fact, as one line a reader shows:
+// `jet-sema · checked-definition · static derivation`, then the record's
+// disposition when it is not current.
+derivation_record_line: fn(record: DerivationRecord) -> String Never! {
+    method: derivation_method_raw(record.method).replace("_", " ")
+    line := "{record.producer} · {record.rule} · {method}"
+    if record.disposition != DerivationDisposition.Current {
+        line = "{line} · {derivation_disposition_raw(record.disposition).replace("_", " ")}"
+    }
+    line
+}
+
+// Whether `record` says more than that a definition checked: any rule but the
+// checked definition's, or a record that is no longer current. An editor
+// shows only these.
+derivation_record_notable: fn(record: DerivationRecord) -> Bool Never! {
+    record.rule != "checked-definition" || record.disposition != DerivationDisposition.Current
+}

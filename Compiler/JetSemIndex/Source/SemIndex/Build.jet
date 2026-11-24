@@ -45,8 +45,11 @@ use {
         core_identity_is_module,
         core_identity_module,
         symbol_key_parts,
+        DerivationStore,
         derivation_identity,
         derivation_record,
+        derivation_store_add,
+        derivation_store_new,
         failure_contract_shown_return,
         failure_contract_shown_name,
         failure_contract_shown_type,
@@ -2768,6 +2771,7 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
             }
             block_spans[position] = value
         }
+        block_next: loop index in 0..<block_spans.len() + 1 -> index
         ctx := SemWalk{
             module_path: doc_module.path,
             source: doc_module.source,
@@ -2778,8 +2782,8 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
             structural_parents: [Int]{},
             structural_slot: "root",
             structural_slot_kind: "list",
-            block_spans: block_spans.copy(),
-            block_next: loop index in 0..<block_spans.len() + 1 -> index,
+            block_spans: block_spans,
+            block_next: block_next,
             references: doc_module.name_references,
             module_paths: module_paths.copy(),
             written_returns: semindex_written_returns(doc_module),
@@ -2811,7 +2815,14 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
     semindex_align_reference_targets(db)
     definitions: semindex_convert_defs(db, modules)
     definition_facts: semindex_definition_facts(definitions, modules)
-    derivations: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+    // One relation holds every derivation the check made: each written
+    // definition's, then each frame schedule's.
+    derivations := derivation_store_new()
+    loop fact in definition_facts {
+        record: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+        _: derivation_store_add(derivations, record) ?? panic("checked definition {fact.stable_id}: {err.message}")
+    }
+    semindex_frame_derivations(modules, derivations)
     arithmetic := db.arithmetic.move()
     arithmetic = loop fresh_item in arithmetic -> fresh_item
     arithmetic.sort_by(fn(left: SemArithmetic, right: SemArithmetic) { (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end) })
@@ -2834,6 +2845,21 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
         slot_boundaries: db.slot_boundaries,
         bypasses: db.bypasses,
         display_paths: display_paths,
+    }
+}
+
+// The frame scheduler's records, each carried by the checked `on_frame`
+// callback it scheduled (JetSema Scheduling/Frames.jet).
+semindex_frame_derivations: fn(modules: [JetDriverDocModule], derivations: &DerivationStore) Never! {
+    loop doc_module in modules {
+        loop function in doc_module.functions {
+            loop node in function.tree.nodes {
+                if node.kind == .Lambda(lambda) && lambda.frame_schedule_derivation == .Val(record) {
+                    // copy: the record stays with its callback in the checked body.
+                    _: derivation_store_add(derivations, record.copy()) ?? panic("frame schedule {record.subject}: {err.message}")
+                }
+            }
+        }
     }
 }
 

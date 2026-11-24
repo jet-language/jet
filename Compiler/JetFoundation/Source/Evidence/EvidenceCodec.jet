@@ -270,3 +270,23 @@ evidence_report_from_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceReport Ev
         .Err(error) -> Err(evidence_codec_error(evidence_merge_error_text(error)))
     }
 }
+
+derivation_store_decode: fn(bytes: [U8], usize_max: U64) -> DerivationStore EvidenceCodecError! {
+    magic: DERIVATION_STORE_MAGIC.bytes()
+    if bytes.len() < magic.len() -> return Err(evidence_codec_error("invalid derivation relation magic"))
+    loop index in 0..<magic.len() {
+        if bytes[index] != magic[index] -> return Err(evidence_codec_error("invalid derivation relation magic"))
+    }
+    cursor := evidence_cursor(bytes, magic.len(), usize_max)
+    count: Int{evidence_get_number(cursor, 4)}
+    store := derivation_store_new()
+    loop _ in 0..<count {
+        record: evidence_decode_derivation(cursor)
+        if derivation_store_add(store, record) == {
+            .Ok(_) -> {}
+            .Err(error) -> return Err(evidence_codec_error(error.message))
+        }
+    }
+    if cursor.at != cursor.bytes.len() -> return Err(evidence_codec_error("derivation relation has trailing bytes"))
+    Ok(store)
+}
