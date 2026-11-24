@@ -11,7 +11,9 @@ use {
 // The longest message body the server reads.
 LSP_MAX_MESSAGE_BYTES: 67108864
 
-// The next message body; None at the end of input.
+// The next message body; None at the end of input. A body can arrive in
+// several reads, so reading goes on until `Content-Length` bytes are in; only
+// an empty read, the end of input, cuts it short.
 lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
     header: lsp_loop_term.read_until("\r\n\r\n") ?? return Err(LSPRPCError{code: -32700, message: "could not read a message header: {err}"})
     if header == "" -> return Ok(None)
@@ -30,9 +32,11 @@ lsp_read_message: fn() -[IO, Time.Wait]> String? LSPRPCError! {
     if length > LSP_MAX_MESSAGE_BYTES {
         return Err(LSPRPCError{code: -32700, message: "a message is longer than {LSP_MAX_MESSAGE_BYTES} bytes"})
     }
-    bytes: lsp_loop_term.take(length) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
-    if bytes.len() != length {
-        return Err(LSPRPCError{code: -32700, message: "input ended inside a message body"})
+    bytes := lsp_loop_term.take(length) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
+    loop bytes.len() < length {
+        rest: lsp_loop_term.take(length - bytes.len()) ?? return Err(LSPRPCError{code: -32700, message: "could not read a message body: {err}"})
+        if rest.len() == 0 -> return Err(LSPRPCError{code: -32700, message: "input ended inside a message body"})
+        bytes.extend(rest)
     }
     Ok(Val(String.from_bytes(bytes) ?? return Err(LSPRPCError{code: -32700, message: "a message body is not UTF-8"})))
 }

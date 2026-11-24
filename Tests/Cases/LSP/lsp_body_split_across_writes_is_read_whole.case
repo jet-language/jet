@@ -1,0 +1,17 @@
+# A didOpen body of 6,757 bytes reaches the server in two writes, 200 ms
+# apart; the server reads it whole and keeps serving.
+session lsp: jet self lsp
+send lsp: Messages/LSPBodySplitAcrossWritesIsReadWhole/0.json
+recv lsp until $.id = 1
+send lsp raw: Messages/LSPBodySplitAcrossWritesIsReadWhole/1-head.frame
+sleep: 200ms
+send lsp raw: Messages/LSPBodySplitAcrossWritesIsReadWhole/2-rest.frame
+send lsp: Messages/LSPBodySplitAcrossWritesIsReadWhole/3.json
+recv lsp collect until ndjson $[?id=2] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file:///tmp/lsp_body_split.jet"][?params.version=1] #>= 1 # the opened document was published
+json: stdout ndjson $[?id=2].result[?name="caller_0"] #= 1 # a symbol from the first write
+json: stdout ndjson $[?id=2].result[?name="marker_split_end"] #= 1 # a symbol from the second write
+send lsp: Messages/LSPBodySplitAcrossWritesIsReadWhole/4.json
+recv lsp until $.id = 99
+close lsp
+exit: 0

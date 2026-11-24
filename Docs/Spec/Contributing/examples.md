@@ -178,6 +178,11 @@ newline-joined units gathered so far. Predicates are `$PATH = JSON`,
 run's step timeout applies; `optional` passes with partial output at the
 deadline instead of failing. A later `close` or `wait` reports only the stdout
 no `recv` consumed.
+`send LABEL: FILE` writes FILE (or a quoted literal) to a live session's
+stdin, framed as the session frames its messages: a Content-Length header on
+a Content-Length session, a newline on a `line` session. `send LABEL raw:`
+writes the bytes as they are, so one write can carry several frames or part
+of one.
 `pty: true [size ROWSxCOLS]` runs a step or session on a terminal (0x0 or no
 size leaves the size unset); its stdin and stdout share the terminal, so
 stdout is the transcript, echo and `\r\n` included. On a step,
