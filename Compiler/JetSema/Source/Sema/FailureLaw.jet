@@ -1084,18 +1084,25 @@ sema_prelude_conversion_demands: fn(module_identity: String, functions: [FnBody]
             loop demand in demands -> sema_prelude_conversion_demand_keep(out, demand)
             next
         }
-        if !sema_prelude_tree_has_try(function.tree) -> next
-        walk_state: Shared{SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}}
-        loop statement in function.body {
-            body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child) {
-                sema_prelude_conversion_walk_expr(walk_state, function.tree, child)
-            })
-        }
-        loop demand in sema_prelude_demand_walk_take(walk_state) {
-            sema_prelude_conversion_demand_keep(out, demand)
-        }
+        sema_prelude_function_demands(module_identity, function, out)
     }
     out
+}
+
+// Keeps into `out` the prelude conversions `function` demands, in body
+// order, unless `out` holds their routine already
+// (sema_prelude_conversion_demands for one function).
+sema_prelude_function_demands: fn(module_identity: String, function: FnBody, out: ^[SemaPreludeConversionDemand]) {
+    if !sema_prelude_tree_has_try(function.tree) -> return
+    walk_state: Shared{SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}}
+    loop statement in function.body {
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child) {
+            sema_prelude_conversion_walk_expr(walk_state, function.tree, child)
+        })
+    }
+    loop demand in sema_prelude_demand_walk_take(walk_state) {
+        sema_prelude_conversion_demand_keep(out, demand)
+    }
 }
 
 // Demand-driven injection: only the conversions this module's propagation sites

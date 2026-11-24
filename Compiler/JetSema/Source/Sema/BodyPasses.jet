@@ -454,19 +454,14 @@ sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module:
 }
 
 // A compiler thread that checked a body also walks it for the module's
-// prelude conversion demands (sema_prelude_conversion_demands), so the
+// prelude conversion demands (sema_prelude_function_demands), so the
 // module check's demand walk (sema_inject_prelude_error_conversions) reads
-// them instead of walking that body again. The checked function moves into
-// a one-row list for the walk and back into the returned result.
+// them instead of walking that body again.
 sema_check_walk_prelude_demands: fn(checked: ^^SemaFunctionResult, module_identity: String) -> SemaFunctionResult {
     walked := checked.move()
-    if walked.value == None -> return walked
-    taken := walked.value.move()
-    walked.value = None
-    functions := [FnBody]{taken.move() ?? panic("a checked body lost its function")}
-    walked.prelude_demands = Val(sema_prelude_conversion_demands(module_identity, functions, [Int:[SemaPreludeConversionDemand]]{}))
-    function := functions.pop() ?? panic("a walked body lost its function")
-    walked.value = Val(function.move())
+    demands := [SemaPreludeConversionDemand]{}
+    if walked.value == .Val(function) -> sema_prelude_function_demands(module_identity, function, demands) else -> return walked
+    walked.prelude_demands = Val(demands.move())
     walked
 }
 

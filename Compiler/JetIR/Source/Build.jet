@@ -1442,6 +1442,26 @@ ir_declared_owners: fn(functions: ^[FnBody], types: [TTypeDef]) Never! {
     if name_count(owners) == 0 {
         return
     }
+    declared: ir_declared_owner_rows(owners, types)
+    loop index in 0..<functions.len() -> ir_declared_owner_rekey(functions[index], declared, types)
+}
+
+// ir_declared_owners for the one function `function`.
+ir_declared_function_owner: fn(function: ^FnBody, types: [TTypeDef]) Never! {
+    name: ir_declared_owner_name(function.kind) ?? return
+    owners := name_table_sized(4)
+    _ := name_intern(owners, name)
+    ir_declared_owner_rekey(function, ir_declared_owner_rows(owners, types), types)
+}
+
+// The rows in `types` of the names `owners` holds, by their key scoped to
+// the declaring module (ir_declared_owner looks them up).
+IRDeclaredOwnerRows: struct {
+    keys: NameTable,
+    rows: [Int],
+}
+
+ir_declared_owner_rows: fn(owners: NameTable, types: [TTypeDef]) -> IRDeclaredOwnerRows Never! {
     declared_keys := name_column_table()
     declared := name_column()
     loop (index, definition) in types {
@@ -1449,18 +1469,22 @@ ir_declared_owners: fn(functions: ^[FnBody], types: [TTypeDef]) Never! {
         scoped: "{definition.module_identity.id}|{definition.name}"
         name_column_set_first(declared_keys, declared, scoped, index)
     }
-    loop index in 0..<functions.len() {
-        if functions[index].kind == {
-            .Method(convention, owner_type) -> {
-                owner: ir_declared_owner(declared_keys, declared, types, functions[index].module_identity, owner_type) ?? next
-                functions[index].kind = TFuncKind.Method{self_convention: convention, owner_type: owner}
-            }
-            .TraitMethod(is_unsafe, convention, owner_type, trait_name, codec) -> {
-                owner: ir_declared_owner(declared_keys, declared, types, functions[index].module_identity, owner_type) ?? next
-                functions[index].kind = TFuncKind.TraitMethod{is_unsafe: is_unsafe, self_convention: convention, owner_type: owner, trait_name: trait_name, serde_codec: codec}
-            }
-            .TopLevel -> {}
+    IRDeclaredOwnerRows{keys: declared_keys.move(), rows: declared.move()}
+}
+
+// Rekeys the owner of method `function` to its declared type's key, when
+// `declared` holds it.
+ir_declared_owner_rekey: fn(function: ^FnBody, declared: IRDeclaredOwnerRows, types: [TTypeDef]) Never! {
+    if function.kind == {
+        .Method(convention, owner_type) -> {
+            owner: ir_declared_owner(declared.keys, declared.rows, types, function.module_identity, owner_type) ?? return
+            function.kind = TFuncKind.Method{self_convention: convention, owner_type: owner}
         }
+        .TraitMethod(is_unsafe, convention, owner_type, trait_name, codec) -> {
+            owner: ir_declared_owner(declared.keys, declared.rows, types, function.module_identity, owner_type) ?? return
+            function.kind = TFuncKind.TraitMethod{is_unsafe: is_unsafe, self_convention: convention, owner_type: owner, trait_name: trait_name, serde_codec: codec}
+        }
+        .TopLevel -> {}
     }
 }
 
@@ -2195,10 +2219,9 @@ IR_HELD_ROOT_SOURCE: "<eval>"
 ir_build_held_root: fn(program: ^^IRProgram, root: ^^FnBody, text: String, threads: CompilerThreads) -> IRBuildKept Never! {
     p := program.move()
     ir_held_source_put(p, IR_HELD_ROOT_SOURCE, text)
-    owned := [FnBody]{root.move()}
-    ir_declared_owners(owned, p.types)
-    ir_add_signature_union_types(p.types, p.type_rows_keys, p.type_rows, owned, p.interner)
-    function := owned.pop() ?? panic("the held build lost its root")
+    function := root.move()
+    ir_declared_function_owner(function, p.types)
+    ir_add_function_union_types(p.types, p.type_rows_keys, p.type_rows, function, p.interner)
     function.source_file = IR_HELD_ROOT_SOURCE
     row: ir_function_row(p, function.key) ?? p.functions.len()
     if {
@@ -2252,10 +2275,9 @@ ir_held_source_put: fn(program: ^IRProgram, file: String, text: String) Never! {
 // own `text`, which no checked file holds, so its file is
 // IR_HELD_ROOT_SOURCE followed by its key, whose source is `text`. Its row.
 ir_held_append: fn(program: ^IRProgram, function: ^^FnBody, decl: DeclID, text: String) -> Int Never! {
-    owned := [FnBody]{function.move()}
-    ir_declared_owners(owned, program.types)
-    ir_add_signature_union_types(program.types, program.type_rows_keys, program.type_rows, owned, program.interner)
-    appended := owned.pop() ?? panic("the held append lost its function")
+    appended := function.move()
+    ir_declared_function_owner(appended, program.types)
+    ir_add_function_union_types(program.types, program.type_rows_keys, program.type_rows, appended, program.interner)
     appended.source_file = "{IR_HELD_ROOT_SOURCE}{appended.key}"
     ir_held_source_put(program, appended.source_file, text)
     if ir_held_binds(program.checks) {

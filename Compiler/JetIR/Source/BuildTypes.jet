@@ -3628,6 +3628,23 @@ ir_add_signature_union_types: fn(types: ^[TTypeDef], type_rows_keys: ^NameTable,
     }
     found := [Type]{}
     ir_collect_signature_unions(functions, interner, found)
+    ir_add_found_union_types(types, type_rows_keys, type_rows, found)
+}
+
+// ir_add_signature_union_types for the one function `function`.
+ir_add_function_union_types: fn(types: ^[TTypeDef], type_rows_keys: ^NameTable, type_rows: ^[Int], function: FnBody, interner: Interner) Never! {
+    if types.len() == 0 {
+        return
+    }
+    found := [Type]{}
+    seen_ids := [U32:Bool]{}
+    ir_collect_function_unions(function, interner, seen_ids, found)
+    ir_add_found_union_types(types, type_rows_keys, type_rows, found)
+}
+
+// Adds the structural enum of each union of `found` that `types` lacks
+// (ir_add_signature_union_types).
+ir_add_found_union_types: fn(types: ^[TTypeDef], type_rows_keys: ^NameTable, type_rows: ^[Int], found: [Type]) Never! {
     module_identity: types[0].module_identity.copy()
     loop ty in found {
         key: ir_union_key(ty)
@@ -3646,18 +3663,22 @@ ir_add_signature_union_types: fn(types: ^[TTypeDef], type_rows_keys: ^NameTable,
 // fails with that same union.
 ir_collect_signature_unions: fn(functions: [FnBody], interner: Interner, found: ^[Type]) Never! {
     seen_ids := [U32:Bool]{}
-    loop function in functions {
-        if function.generic_params.len() > 0 -> next
-        loop param in function.params -> ir_collect_unions(param.ty, found)
-        if function.ret == .Val(ret) -> ir_collect_unions(ret, found)
-        loop row in function.tree.expr_types {
-            if seen_ids.has_key(row.ty.id) -> next
-            seen_ids[row.ty.id] = true
-            if type_kind(interner, row.ty) == .Result {
-                err_id: type_b_type(interner, row.ty)
-                if type_kind(interner, err_id) == .Union {
-                    ir_collect_unions(type_syntax(interner, err_id), found)
-                }
+    loop function in functions -> ir_collect_function_unions(function, interner, seen_ids, found)
+}
+
+// ir_collect_signature_unions for the one function `function`, skipping the
+// expression types `seen_ids` holds and adding those it reads.
+ir_collect_function_unions: fn(function: FnBody, interner: Interner, seen_ids: ^[U32:Bool], found: ^[Type]) Never! {
+    if function.generic_params.len() > 0 -> return
+    loop param in function.params -> ir_collect_unions(param.ty, found)
+    if function.ret == .Val(ret) -> ir_collect_unions(ret, found)
+    loop row in function.tree.expr_types {
+        if seen_ids.has_key(row.ty.id) -> next
+        seen_ids[row.ty.id] = true
+        if type_kind(interner, row.ty) == .Result {
+            err_id: type_b_type(interner, row.ty)
+            if type_kind(interner, err_id) == .Union {
+                ir_collect_unions(type_syntax(interner, err_id), found)
             }
         }
     }
