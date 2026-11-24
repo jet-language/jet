@@ -1,0 +1,17 @@
+// `unix_ms(now())` is the epoch milliseconds of the instant `now()` read:
+// it falls between the wall clock's Unix milliseconds read just before and
+// just after, so `now` and the Unix timestamps name one instant. The program
+// prints one fixed line, and stops naming all three readings otherwise.
+use {
+    time: core.time
+}
+
+run: fn() {
+    before: time.unix_ns() /% 1000000
+    read: time.unix_ms(time.now())
+    after: time.unix_ns() /% 1000000
+    if read < before || read > after {
+        panic("unix_ms(now()) read {read}, outside the epoch milliseconds {before} to {after}")
+    }
+    print("unix_ms(now()) is the epoch milliseconds of the same instant")
+}
