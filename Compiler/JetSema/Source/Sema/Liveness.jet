@@ -476,7 +476,8 @@ sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_ind
 // type is handed to (`json.decode<T>`, a generic call, a game scene's
 // `component<T>()` or `query<A, B>()`), reflection (a
 // `T.reflect()` record, `reflect.of`, a type a module constant names, a type
-// a user marker or derive marks, a marker type itself), a C layout, a
+// a user marker or derive marks, a type a signature a user marker marks
+// holds, a marker type itself), a C layout, a
 // foreign signature, an effect row (an effect type's members are named
 // there) and a module constant, whose compile-time loops and `#run` blocks
 // leave no checked body, read every field its type holds and build every
@@ -1048,6 +1049,12 @@ sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [Sema
                 sema_liveness_whole_type_uses(sema_call_reflection_leaf_name(implementation.target_type_name), uses)
             }
         }
+        loop item in module_row.program.items {
+            if item == .Func(function) -> sema_liveness_marked_signature_uses(function, markers, uses)
+            if item == .Struct(definition) {
+                loop method in definition.methods -> sema_liveness_marked_signature_uses(method, markers, uses)
+            }
+        }
     }
     uses
 }
@@ -1061,6 +1068,22 @@ sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [Sema
 sema_liveness_whole_type_uses: fn(type_name: String, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     _ := name_intern(uses.read_types, type_name)
     _ := name_intern(uses.built_types, type_name)
+}
+
+// A function a user marker marks: the marker's rules reflect its signature
+// and hear each call's arguments as the values they encode, so the types its
+// parameters and result hold count as read and built, as a type the marker
+// marks does.
+sema_liveness_marked_signature_uses: fn(function: Func, markers: NameTable, uses: &SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+    if !sema_liveness_carries_marker(function.markers, [NamedSpan]{}, markers) -> return
+    loop parameter in function.params {
+        sema_liveness_type_names(parameter.ty, uses.read_types)
+        sema_liveness_type_names(parameter.ty, uses.built_types)
+    }
+    if function.return_type == .Val(returned) {
+        sema_liveness_type_names(returned, uses.read_types)
+        sema_liveness_type_names(returned, uses.built_types)
+    }
 }
 
 // Whether node `id` is a value a local computed while compiling landed as

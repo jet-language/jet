@@ -1,0 +1,27 @@
+# A trait value meets a bound of its own trait on every tier: a
+# `Pair<Describe>` takes `impl Pair<T: Describe>.Describe`, and a
+# `[Describe]` is passed to `fn<T: Describe>(xs: [T])`. Sema compares the
+# trait identities, not their spellings: the value's trait is held under its
+# module-qualified name and the bound is written bare.
+# trait_value_as_another_trait_is_refused.case keeps the other side: a
+# trait value never meets another trait's bound.
+fixture: TraitValueMeetsItsOwnBound.fixture
+env: NO_COLOR=1
+step: jet run -O0 pair.jet
+exit: 0
+stdout: = "pair #1\n"
+step: jet run -O1 pair.jet
+exit: 0
+stdout: = "pair #1\n"
+step: jet run -O2 pair.jet
+exit: 0
+stdout: = "pair #1\n"
+step: jet run -O0 list.jet
+exit: 0
+stdout: = "[#1, #2]\n"
+step: jet run -O1 list.jet
+exit: 0
+stdout: = "[#1, #2]\n"
+step: jet run -O2 list.jet
+exit: 0
+stdout: = "[#1, #2]\n"

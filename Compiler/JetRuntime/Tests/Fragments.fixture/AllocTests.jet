@@ -254,9 +254,9 @@ alloc_test_full_slabs: fn() {
     }
     alloc_cache_flush()
     head: alloc_head(arena, I64{4096})
-    #Unsafe("after all payloads are freed, the class keeps its emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS and counts each; any further empty slab went onto the free-slab stack; a first slab the host's blocks share never empties, so it stays linked") {
+    #Unsafe("after all payloads are freed, the arena keeps emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS across its classes and the class counts each it keeps; any further empty slab went onto the free-slab stack; a first slab the host's blocks share never empties, so it stays linked") {
         retained: os_load_i64(wrapping(head + I64{64}))
-        alloc_test_require(retained > I64{0} && retained <= ALLOC_RETAINED_EMPTY_SLABS)
+        alloc_test_require(retained >= I64{0} && alloc_arena_retained(arena) <= ALLOC_RETAINED_EMPTY_SLABS)
         if (own < I64{15}) {
             alloc_test_require(os_load_i64(wrapping(first_slab + I64{24})) == wrapping(I64{15} - own))
         }
@@ -276,10 +276,10 @@ alloc_test_full_slabs: fn() {
     }
 }
 
-// Ten slabs of class 4096 emptied at once: the class keeps at most
-// ALLOC_RETAINED_EMPTY_SLABS of them, the rest go on the arena's free-slab
-// stack still mapped, and the arena's next slab of any class is the stack's
-// top.
+// Ten slabs of class 4096 emptied at once: the arena keeps at most
+// ALLOC_RETAINED_EMPTY_SLABS empty slabs across its classes, the rest go on
+// its free-slab stack still mapped, and the arena's next slab of any class is
+// the stack's top.
 alloc_test_slab_stack: fn() {
     alloc_cache_flush()
     chain := I64{0}

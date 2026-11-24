@@ -1,0 +1,16 @@
+# A library's private type never enters another module's scope: `patterns`
+# declares a private struct named `Compiler`, as a Core library may, and the
+# root's build still hands its `Compiler` value (the one `b.compiler`
+# returns) to `trace`, whose `meta.events` handler rewrites the marked
+# `greet`. The library keeps using its own `Compiler` internally.
+fixture: ALibraryTypeNeverStandsInForTheBuildCompiler.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check app/main.jet
+exit: 0
+step: jet build app/main.jet
+exit: 0
+stderr: !~ "Internal compiler error" # the build value is not read as the library's struct
+step: {work}/app/.jet/build/app
+exit: 0
+stdout: = "traced 3\n" # the handler ran and the library's own type still works

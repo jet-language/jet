@@ -2312,6 +2312,26 @@ sema_type_graph_trait_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, b
     Val(sema_resolved_symbol(graph, resolved))
 }
 
+// Whether a trait value carrying the traits `carried` meets the bound
+// `bound_name`, both named as seen from `caller`: the trait identities are
+// compared, never their spellings, so a resolved value's canonical
+// `app.Describe` meets the bound written `Describe`. A compiler-owned trait
+// no source declares is its builtin identity. An unresolved bound is unmet.
+sema_type_trait_value_meets: fn(graph: SemaRegistrationGraph, carried: [String], bound_name: String, caller: Int) -> Bool Never! {
+    wanted: sema_type_trait_identity(graph, caller, bound_name) ?? return false
+    loop name in carried {
+        own: sema_type_trait_identity(graph, caller, name) ?? next
+        if own == wanted -> return true
+    }
+    false
+}
+
+sema_type_trait_identity: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> SymbolID? {
+    if sema_type_graph_trait_symbol_at(graph, caller, name) == .Val(declared) -> return Val(declared.id)
+    builtin: sema_type_builtin_trait_symbol(name) ?? return None
+    Val(builtin.id)
+}
+
 // Rust Generics.BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
 // a compiler-owned trait that no source module declares (`bare_bound` in
 // OWNED_TRAITS). Its identity is the bare trait name with no owning module.
@@ -2458,7 +2478,7 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
     // A trait value meets only the traits it carries: the type inside it is
     // not known where it is used, so no impl of another trait can be found
     // for it (a `Shown` value passed where `Back` is expected is refused).
-    if actual_resolved == .TraitObject(carried) -> return Val(carried.contains(bound_name))
+    if actual_resolved == .TraitObject(carried) -> return Val(sema_type_trait_value_meets(graph, carried, bound_name, caller))
     nominal_row: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return sema_type_bound_satisfied_builtin_target(graph, actual_resolved, bound_name, caller)
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
     // The nominal row is passed in place: binding it copied the declaration.
@@ -2664,7 +2684,7 @@ sema_type_builtin_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
                 return Val(true)
             }
         }
-        .TraitObject(bounds) -> return Val(bounds.contains(bound_name))
+        .TraitObject(bounds) -> return Val(sema_type_trait_value_meets(graph, bounds, bound_name, caller))
         // A function value has no nominal row to carry an impl, and no
         // compiler-owned bound trait is met by a function.
         .Fn(_, _, _, _, _, _) -> return Val(false)

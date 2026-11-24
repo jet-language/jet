@@ -53,6 +53,7 @@ SemParam: struct {
 
 // `failure_contract` is `None` exactly when `failure_unavailable` explains why
 // (`CallableFactAvailability`); the same holds for `generic_parameters`.
+// `receiver` is the access of a method's `self`, which `params` leaves out.
 SemCallable: struct {
     params: [SemParam],
     signature_facts_available: Bool,
@@ -65,6 +66,7 @@ SemCallable: struct {
     policies: [CallablePolicy],
     generic_parameters: [String]?,
     generic_unavailable: SemUnavailable?,
+    receiver: AccessConvention?{None},
 }
 
 SemField: struct {
@@ -373,4 +375,12 @@ semindex_callable: fn(definition: SemDef) -> SemCallable? Never! {
     // copy: `callable` is a payload of read parameter `definition`, which keeps the original; the Val carrier owns this one
     if definition.kind == .Function(callable) -> return Val(callable.copy())
     None
+}
+
+// The human identity `fact` has once its definition is named `to`.
+semindex_renamed_identity: fn(fact: SemDefinitionFact, to: String) -> String Never! {
+    if fact.human_identity.ends_with(fact.name) {
+        return "{fact.human_identity.slice(0, fact.human_identity.len() - fact.name.len())}{to}"
+    }
+    "{fact.module_path}.{to}"
 }

@@ -183,21 +183,21 @@ send lsp9: Messages/LSPJSONTranscripts/10EditorReports/1.json
 send lsp9: Messages/LSPJSONTranscripts/10EditorReports/2.json
 recv lsp9
 stdout: ~ "publishDiagnostics" # original predicate; response metadata and paths vary
-stdout: ~ "\"message\":\"one marker is written without brackets\"" # original predicate; response metadata and paths vary
+stdout: ~ "\"message\":\"One marker is written without brackets\"" # the record's message, as `jet check --json` writes it
 stdout: ~ "\"codeDescription\":{\"href\":\"jet://explain/E0999\"}" # original predicate; response metadata and paths vary
-stdout: ~ "\"data\":{\"schema\":\"jet.report/v1\"" # original predicate; response metadata and paths vary
+stdout: ~ "\"data\":{\"schema\":\"jet.report/v4\"" # the diagnostic's `jet check --json` report
 stdout: ~ "\"moment\":\"compile\"" # original predicate; response metadata and paths vary
 stdout: ~ "\"severity\":\"error\"" # original predicate; response metadata and paths vary
 stdout: ~ "\"code\":\"E0999\"" # original predicate; response metadata and paths vary
-stdout: ~ "\"why\":\"brackets group two or more markers; one marker stays bare\"" # original predicate; response metadata and paths vary
-stdout: ~ "\"fix\":\"replace `#[Codable]` with `#Codable`\"" # original predicate; response metadata and paths vary
+stdout: ~ "\"why\":\"Brackets group two or more markers; one marker stays bare\"" # the report's why
+stdout: ~ "\"fix\":\"Replace `#[Codable]` with `#Codable`\"" # the report's fix
 stdout: ~ "\"applicability\":\"safe\"" # original predicate; response metadata and paths vary
-stdout: ~ "\"fix_edits\":[{\"file\":\"/tmp/lsp_editor_report_test.jet\",\"span\":{\"start\":0,\"end\":10},\"new_text\":\"#Codable\",\"safety\":\"formatting\"}]" # original predicate; response metadata and paths vary
+stdout: ~ "\"fix_edits\":[{\"span\":{\"file\":\"/tmp/lsp_editor_report_test.jet\",\"start\":0,\"end\":10},\"new_text\":\"#Codable\",\"safety\":\"formatting\"}]" # the report's fix edit, its file absolute
 stdout: ~ "\"cause\":[],\"clears\":0" # original predicate; response metadata and paths vary
 send lsp9: Messages/LSPJSONTranscripts/10EditorReports/3.json
 recv lsp9
 stdout: ~ "quickfix" # original predicate; response metadata and paths vary
-stdout: ~ "replace `#[Codable]` with `#Codable`" # original predicate; response metadata and paths vary
+stdout: ~ "Replace `#[Codable]` with `#Codable`" # the fix's title
 stdout: ~ "\"newText\":\"#Codable\"" # original predicate; response metadata and paths vary
 stdout: ~ "\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":10}}" # original predicate; response metadata and paths vary
 send lsp9: Messages/LSPJSONTranscripts/10EditorReports/4.json
@@ -215,8 +215,8 @@ recv lsp10
 stdout: ~ "publishDiagnostics" # original predicate; response metadata and paths vary
 send lsp10: Messages/LSPJSONTranscripts/11AdjacentSubjectDispatch/3.json
 recv lsp10
-stdout: ~ "refactor.rewrite" # original predicate; response metadata and paths vary
-stdout: ~ "Rewrite adjacent guards as an ordered subject table" # original predicate; response metadata and paths vary
+stdout: ~ "quickfix" # the lint's fix
+stdout: ~ "Rewrite as `if key == { … }` and group aliases with `|`" # the lint's fix title
 stdout: ~ "if key == {" # original predicate; response metadata and paths vary
 stdout: ~ "\\\"revision\\\" | \\\"rev\\\"" # original predicate; response metadata and paths vary
 stdout: ~ "path" # original predicate; response metadata and paths vary

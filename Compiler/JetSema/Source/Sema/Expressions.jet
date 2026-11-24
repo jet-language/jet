@@ -856,11 +856,12 @@ sema_expr_registration_operator_candidates: fn(graph: SemaRegistrationGraph, rec
 sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, module_index: Int, receiver_canonical: Bool, receiver_type: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: ModuleID, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
     // A resolved receiver carries the canonical identity (`module.Vec2`)
     // while the registered row keeps the declared spelling; infer such a
-    // receiver against the declaration resolved in its own module.
+    // receiver against the declaration resolved in its own module, where its
+    // parameters shadow same-named types (`Pair<T>` beside a struct `T`).
     owner_module: graph.modules[module_index].module_identity
     inference_ty := nominal.ty
     if receiver_canonical {
-        inference_ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
+        inference_ty = sema_type_resolve_member_type(Val(graph), nominal, nominal.ty)
     }
     // Every registered nominal of the receiver's name is a candidate owner
     // (a user `Transform` beside `core.math`'s `Transform<From, To>`); one
@@ -950,8 +951,8 @@ sema_expr_operator_block_methods: fn(graph: SemaRegistrationGraph, nominal: Sema
         return
     }
     // The authored right-hand type resolves in the owner's module, like the
-    // impl rows.
-    block_rhs: sema_inference_substitute_type_bindings(sema_type_resolve_declared(graph, block.operator_rhs ?? nominal.ty, owner_module), substitutions)
+    // impl rows, with the owner's parameters kept.
+    block_rhs: sema_inference_substitute_type_bindings(sema_type_resolve_member_type(Val(graph), nominal, block.operator_rhs ?? nominal.ty), substitutions)
     if !sema_expr_operator_rhs_matches(Val(block_rhs), rhs_type) {
         return
     }
@@ -3390,7 +3391,7 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
         found_owner = true
         inference_ty := nominal.ty
         if receiver_canonical {
-            inference_ty = sema_type_resolve_declared(graph, nominal.ty, graph.modules[owner_index].module_identity)
+            inference_ty = sema_type_resolve_member_type(Val(graph), nominal, nominal.ty)
         }
         // A same-named nominal that cannot own the receiver is skipped, not
         // reported (see sema_expr_operator_nominal_candidates).

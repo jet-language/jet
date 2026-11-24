@@ -604,6 +604,16 @@ dyn_push_count: fn(target: I64, count: I64) {
     jet_rt_int_drop(exact)
 }
 
+// The one list-position stop text: "index {position} is out of range
+// (length {length})" for the Array `array`, after a stop's "{site}: ".
+dyn_push_position_out_of_range: fn(target: I64, position: I64, array: I64) {
+    jet_rt_string_builder_push(target, rt_static_text("index "))
+    dyn_push_count(target, position)
+    jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
+    dyn_push_count(target, dyn_word(wrapping(dyn_word(wrapping(array + DYN_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
+    jet_rt_string_builder_push(target, rt_static_text(")"))
+}
+
 // jet_dyn_get_key: Some(clone) of the first entry named `key`.
 #Export(c) jet_dyn_get_key: fn(tree: I64, key: I64, some: I64) -> I64 {
     found: dyn_object_find(tree, key)
@@ -679,11 +689,7 @@ dyn_push_count: fn(target: I64, count: I64) {
     kind: dyn_word(wrapping(tree + DYN_TAG))
     target: dyn_stop_begin(site)
     if kind == DYN_ARRAY {
-        jet_rt_string_builder_push(target, rt_static_text("index "))
-        dyn_push_count(target, position)
-        jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
-        dyn_push_count(target, dyn_word(wrapping(dyn_word(wrapping(tree + DYN_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
-        jet_rt_string_builder_push(target, rt_static_text(")"))
+        dyn_push_position_out_of_range(target, position, tree)
     } else {
         jet_rt_string_builder_push(target, rt_static_text("expected an array, found "))
         jet_rt_string_builder_push(target, dyn_kind_name(kind))
@@ -986,11 +992,7 @@ dyn_set_refused: fn(target: I64, value: I64, err: I64) -> I64 {
             found: dyn_array_item(node, position)
             if (found == I64{0}) {
                 target: dyn_stop_begin(site)
-                jet_rt_string_builder_push(target, rt_static_text("index "))
-                dyn_push_count(target, position)
-                jet_rt_string_builder_push(target, rt_static_text(" is out of range (length "))
-                dyn_push_count(target, dyn_word(wrapping(dyn_word(wrapping(node + DYN_PAYLOAD)) + DATA_SEQUENCE_LENGTH)))
-                jet_rt_string_builder_push(target, rt_static_text(")"))
+                dyn_push_position_out_of_range(target, position, node)
                 return dyn_set_refused(target, value, err)
             }
             node = found

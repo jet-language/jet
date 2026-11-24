@@ -17,6 +17,13 @@ LSPServer: struct {
     initialized: Bool,
     shutdown: Bool,
     exited: Bool,
+    // The client applies versioned `documentChanges` edits
+    // (`workspace.workspaceEdit.documentChanges` in `initialize`).
+    document_changes: Bool,
+    // The semantic tokens last answered in full for each open document, which
+    // a `full/delta` request names by result id, and the last id given.
+    semantic_results: [String:LSPSemanticResult],
+    semantic_serial: Int,
 
     // Every open document is overlaid, so a check sees unsaved imports too.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
@@ -40,6 +47,12 @@ LSPServer: struct {
         items
     }
 
+    // Where each call in the document `view` reads passes a failure up by
+    // itself: the byte just past the call.
+    failure_marks: fn(self, view: LSPView) -> [Int] {
+        self.checker.failure_marks(view.doc.path, self.overlays())
+    }
+
     overlays: fn(self) -> [LSPOverlay] Never! {
         overlays := [LSPOverlay]{}
         loop (_, open) in self.diagnostic_state.docs {
@@ -52,7 +65,7 @@ LSPServer: struct {
 }
 
 lsp_server: fn(checker: &&LSPChecker) -> LSPServer Never! {
-    LSPServer{diagnostic_state: lsp_diagnostic_state(), checker: checker, published: [String:LSPChecked]{}, initialized: false, shutdown: false, exited: false}
+    LSPServer{diagnostic_state: lsp_diagnostic_state(), checker: checker, published: [String:LSPChecked]{}, initialized: false, shutdown: false, exited: false, document_changes: false, semantic_results: [String:LSPSemanticResult]{}, semantic_serial: 0}
 }
 
 // An inline package block is masked first, as the loader does, so its manifest

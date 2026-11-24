@@ -1,0 +1,218 @@
+// Type and call hierarchies from the checked index.
+//
+// A type's supertypes are the traits it implements and a trait's subtypes are
+// the types that implement it, as the index's trait contracts record them. A
+// contract names its trait as written; that is the trait of that name in the
+// implementing type's module, else the only trait of that name in the index,
+// else no trait the hierarchy can show.
+//
+// A function's incoming calls are the index's calls whose callee resolves to
+// it, grouped by the function making them; its outgoing calls are the calls
+// it makes whose callee resolves to a declaration, grouped by callee. A
+// call's callee is the resolved reference at the call's name, and its caller
+// the function of the recorded name in the call's module.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[foundation_json_quote]
+    jet_semindex.[SemCall, SemDef, SemIndex, SemKind]
+}
+
+// The definition a hierarchy item names, by its slot in the index of the
+// view that checked it.
+LSPHierarchyItem: struct {
+    view: LSPView,
+    slot: Int,
+}
+
+lsp_hierarchy_type_kind: fn(kind: SemKind) -> Bool Never! {
+    if kind == {
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) -> true
+        .Module | .Function(_) | .Tag | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> false
+    }
+}
+
+lsp_hierarchy_trait_kind: fn(kind: SemKind) -> Bool Never! {
+    if kind == {
+        .Trait -> true
+        .Struct(_, _) | .Enum(_, _) | .Type(_) | .Module | .Function(_) | .Tag | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> false
+    }
+}
+
+lsp_hierarchy_function_kind: fn(kind: SemKind) -> Bool Never! {
+    if kind == {
+        .Function(_) -> true
+        .Struct(_, _) | .Enum(_, _) | .Trait | .Type(_) | .Module | .Tag | .Const | .EnumVariant(_) | .Field(_, _) | .Local(_, _) | .Param(_) -> false
+    }
+}
+
+// The kinds a call hierarchy (`calls`) or a type hierarchy shows.
+lsp_hierarchy_kind: fn(kind: SemKind, calls: Bool{false}) -> Bool Never! {
+    if calls -> lsp_hierarchy_function_kind(kind) else -> lsp_hierarchy_type_kind(kind)
+}
+
+// The slot in the index's definitions of the trait a contract of a type in
+// `module_path` names.
+lsp_contract_trait: fn(index: SemIndex, module_path: String, trait_name: String) -> Int? Never! {
+    parts: trait_name.split(".").to_list()
+    leaf: parts[parts.len() - 1]
+    found := Int?{None}
+    count := 0
+    loop slot in 0..<index.definitions.len() {
+        def: index.definitions[slot].def
+        if !lsp_hierarchy_trait_kind(def.kind) || def.name != leaf -> next
+        if def.module_path == module_path -> return Val(slot)
+        count += 1
+        found = Val(slot)
+    }
+    if count == 1 -> found else -> None
+}
+
+// A TypeHierarchyItem or CallHierarchyItem; its `data` carries the
+// definition's identity, which the follow-up requests read back.
+lsp_hierarchy_item_json: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
+    kind: lsp_symbol_kind(def.kind) ?? return None
+    location: lsp_location(checked, def.module_path, def.def_span) ?? return None
+    range: lsp_range_json(lsp_byte_span_to_range(location.source, lsp_clamped_span(location.source, location.span)))
+    Val("{{\"name\":{foundation_json_quote(def.name)},\"kind\":{kind},\"detail\":{foundation_json_quote(def.module_path)},\"uri\":{foundation_json_quote(location.uri)},\"range\":{range},\"selectionRange\":{range},\"data\":{{\"identity\":{foundation_json_quote(def.identity)}}}}}")
+}
+
+// The declaration a follow-up request's `item` names: by the identity its
+// `data` carries, else by its name in the open document its `uri` names.
+lsp_hierarchy_item: fn(server: LSPServer, params: Dyn?, calls: Bool{false}) -> LSPHierarchyItem? {
+    item: lsp_param(params, "item") ?? return None
+    view: lsp_view_of(server, lsp_text_member(item, "uri") ?? return None) ?? return None
+    index: view.checked.index ?? return None
+    identity: lsp_text_member(lsp_member(item, "data") ?? Dyn.Null, "identity") ?? ""
+    name: lsp_text_member(item, "name") ?? ""
+    loop slot in 0..<index.definitions.len() {
+        def: index.definitions[slot].def
+        if !lsp_hierarchy_kind(def.kind, calls: calls) -> next
+        named: if identity != "" -> def.identity == identity else -> def.name == name && (view.module_path ?? "") == def.module_path
+        if named -> return Val(LSPHierarchyItem{view: view, slot: slot})
+    }
+    None
+}
+
+// The item for the declaration at the cursor, or for the one a reference
+// there resolves to.
+lsp_prepare_hierarchy_response: fn(server: LSPServer, params: Dyn?, id: Dyn, calls: Bool{false}) -> String {
+    at: lsp_at(server, params) ?? return lsp_response(id, "null")
+    index: at.view.checked.index ?? return lsp_response(id, "null")
+    target: lsp_target_at(at.view, at.offset) ?? return lsp_response(id, "null")
+    def: lsp_definition_at(index, target) ?? return lsp_response(id, "null")
+    if !lsp_hierarchy_kind(def.kind, calls: calls) -> return lsp_response(id, "null")
+    item: lsp_hierarchy_item_json(at.view.checked, def) ?? return lsp_response(id, "null")
+    lsp_response(id, "[{item}]")
+}
+
+lsp_type_supertypes_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    found: lsp_hierarchy_item(server, params, calls: false) ?? return lsp_response(id, "null")
+    index: found.view.checked.index ?? return lsp_response(id, "null")
+    definition: index.definitions[found.slot]
+    own: definition.def
+    rows := [String]{}
+    seen := [Int]{}
+    loop contract in definition.trait_contracts {
+        slot: lsp_contract_trait(index, own.module_path, contract.trait_name) ?? next
+        if slot == found.slot || seen.contains(slot) -> next
+        seen.push(slot)
+        rows.push(lsp_hierarchy_item_json(found.view.checked, index.definitions[slot].def) ?? next)
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+lsp_type_subtypes_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    found: lsp_hierarchy_item(server, params, calls: false) ?? return lsp_response(id, "null")
+    index: found.view.checked.index ?? return lsp_response(id, "null")
+    rows := [String]{}
+    if !lsp_hierarchy_trait_kind(index.definitions[found.slot].def.kind) -> return lsp_response(id, "[]")
+    loop slot in 0..<index.definitions.len() {
+        definition: index.definitions[slot]
+        if slot == found.slot || !lsp_hierarchy_type_kind(definition.def.kind) -> next
+        loop contract in definition.trait_contracts {
+            named: lsp_contract_trait(index, definition.def.module_path, contract.trait_name) ?? next
+            if named != found.slot -> next
+            rows.push(lsp_hierarchy_item_json(found.view.checked, definition.def) ?? break)
+            break
+        }
+    }
+    lsp_response(id, "[{rows.join(",")}]")
+}
+
+// The slot of the declaration a call's callee resolves to: the resolved
+// reference ending at the call's name, which may be qualified
+// (`module.name`).
+lsp_call_callee: fn(index: SemIndex, call: SemCall) -> Int? Never! {
+    loop reference in index.references {
+        if reference.module_path != call.module_path || reference.span.end != call.span.end || reference.span.start > call.span.start -> next
+        anchor: reference.target ?? return None
+        target: LSPTarget{module_path: anchor.module_path, span: anchor.def_span}
+        loop slot in 0..<index.definitions.len() {
+            def: index.definitions[slot].def
+            if lsp_same_target(target, def.module_path, def.def_span) -> return Val(slot)
+        }
+        return None
+    }
+    None
+}
+
+// The slot of the function making a call.
+lsp_call_caller: fn(index: SemIndex, call: SemCall) -> Int? Never! {
+    loop slot in 0..<index.definitions.len() {
+        def: index.definitions[slot].def
+        if lsp_hierarchy_function_kind(def.kind) && def.module_path == call.module_path && def.name == call.caller -> return Val(slot)
+    }
+    None
+}
+
+// The calls between one function and the other at `slot`.
+LSPCallGroup: struct {
+    slot: Int,
+    item: String,
+    ranges: [String],
+}
+
+lsp_call_group_add: fn(groups: &[LSPCallGroup], checked: LSPChecked, index: SemIndex, slot: Int, call: SemCall) Never! {
+    location: lsp_location(checked, call.module_path, call.span) ?? return
+    range: lsp_range_json(lsp_byte_span_to_range(location.source, lsp_clamped_span(location.source, location.span)))
+    loop group in 0..<groups.len() {
+        if groups[group].slot == slot {
+            groups[group].ranges.push(range)
+            return
+        }
+    }
+    item: lsp_hierarchy_item_json(checked, index.definitions[slot].def) ?? return
+    groups.push(LSPCallGroup{slot: slot, item: item, ranges: [String]{range}})
+}
+
+// Each group as `{"<side>": item, "fromRanges": [...]}`.
+lsp_call_groups_json: fn(groups: [LSPCallGroup], side: String) -> String Never! {
+    rows := [String]{}
+    loop group in groups -> rows.push("{{\"{side}\":{group.item},\"fromRanges\":[{group.ranges.join(",")}]}}")
+    "[{rows.join(",")}]"
+}
+
+lsp_incoming_calls_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    found: lsp_hierarchy_item(server, params, calls: true) ?? return lsp_response(id, "null")
+    index: found.view.checked.index ?? return lsp_response(id, "null")
+    groups := [LSPCallGroup]{}
+    loop call in index.calls {
+        if lsp_call_callee(index, call) != Val(found.slot) -> next
+        caller: lsp_call_caller(index, call) ?? next
+        lsp_call_group_add(groups, found.view.checked, index, caller, call)
+    }
+    lsp_response(id, lsp_call_groups_json(groups, "from"))
+}
+
+lsp_outgoing_calls_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    found: lsp_hierarchy_item(server, params, calls: true) ?? return lsp_response(id, "null")
+    index: found.view.checked.index ?? return lsp_response(id, "null")
+    caller: index.definitions[found.slot].def
+    groups := [LSPCallGroup]{}
+    loop call in index.calls {
+        if call.module_path != caller.module_path || call.caller != caller.name -> next
+        callee: lsp_call_callee(index, call) ?? next
+        lsp_call_group_add(groups, found.view.checked, index, callee, call)
+    }
+    lsp_response(id, lsp_call_groups_json(groups, "to"))
+}

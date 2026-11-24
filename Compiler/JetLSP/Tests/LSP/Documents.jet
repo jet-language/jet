@@ -90,12 +90,12 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
 
 LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
 
-#Test("a publication carries the document's diagnostics and version") {
+#Test("a publication carries the document's diagnostics, version and reports") {
     server := lsp_test_server()
     uri: "file:///w/broken.jet"
     lsp_test_open(server, uri, LSP_TEST_BROKEN)
     doc: server.diagnostic_state.docs.get(uri) ?? panic("open")
-    checked: server.check(doc)
+    checked := server.check(doc)
     assert(checked.diagnostics.len() > 0, "the broken fixture has parse diagnostics")
     targets := [String:Bool]{}
     groups: lsp_diagnostic_groups(server.diagnostic_state, uri, checked, targets)
@@ -103,7 +103,12 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
     indices: groups[uri]
     assert_eq(indices.len(), checked.diagnostics.len())
     assert(targets.has_key(uri), "the root is a target")
-    message: lsp_test_json(lsp_document_group_json(server.diagnostic_state, uri, checked.diagnostics, indices))
+    // A host that renders reports hands each published diagnostic its own
+    // as `data`.
+    reports := [String]{}
+    loop diagnostic in checked.diagnostics -> reports.push("{{\"code\":\"{diagnostic.code}\"}}")
+    checked.reports = reports.move()
+    message: lsp_test_json(lsp_document_group_json(server.diagnostic_state, uri, checked, indices))
     assert_eq(lsp_test_text(message, "method"), "textDocument/publishDiagnostics")
     params: lsp_test_field(message, "params")
     assert_eq(lsp_test_text(params, "uri"), uri)
@@ -115,6 +120,7 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
     assert_eq(lsp_test_int(first, "severity"), 1)
     assert_eq(lsp_test_text(first, "code"), checked.diagnostics[0].code)
     assert(lsp_test_text(lsp_test_field(first, "codeDescription"), "href").starts_with("jet://explain/"), "codes link to their explanation")
+    assert_eq(lsp_test_text(lsp_test_field(first, "data"), "code"), checked.diagnostics[0].code)
 }
 
 #Test("a target the previous publication wrote is cleared once no longer reported") {
@@ -129,7 +135,7 @@ LSP_TEST_BROKEN: "run: fn() {{\n    x: (\n}}\n"
     groups: lsp_diagnostic_groups(server.diagnostic_state, LSP_TEST_MAIN_URI, checked, targets)
     assert_eq(groups.len(), 2)
     assert_eq(groups["file:///w/gone.jet"].len(), 0)
-    clear: lsp_test_json(lsp_document_group_json(server.diagnostic_state, "file:///w/gone.jet", checked.diagnostics, groups["file:///w/gone.jet"]))
+    clear: lsp_test_json(lsp_document_group_json(server.diagnostic_state, "file:///w/gone.jet", checked, groups["file:///w/gone.jet"]))
     params: lsp_test_field(clear, "params")
     assert_eq(lsp_test_rows(lsp_test_field(params, "diagnostics")).len(), 0)
     assert(lsp_member(params, "version") == None, "a clear of a closed document has no version")

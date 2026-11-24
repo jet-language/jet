@@ -1,7 +1,7 @@
 // Document and workspace symbols, folding, selection ranges and import links.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[ImportDecl, Span, foundation_json_quote]
+    jet_foundation.[ImportDecl, Span, foundation_byte_text, foundation_json_quote]
     jet_semindex.[SemDef, semindex_symbol_imported_module]
 }
 
@@ -10,17 +10,24 @@ lsp_symbol_information_json: fn(def: SemDef, location: LSPLocation, kind: Int) -
     "{{\"name\":{foundation_json_quote(def.name)},\"kind\":{kind},\"location\":{lsp_location_json(location)}{container}}}"
 }
 
-// The document's declarations in source order; bindings and parameters are
-// not symbols of the document.
+// Whether `span` of `source` spells `name`: a declaration the source writes.
+// One a derive or marker generated (a derived `encode` names its type's span)
+// has no written name there.
+lsp_source_spells: fn(source: String, span: Span, name: String) -> Bool Never! {
+    bytes: source.bytes()
+    span.start >= 0 && span.end <= bytes.len() && foundation_byte_text(bytes, span.start, span.end) == name
+}
+
+// The document's written declarations in source order; bindings and
+// parameters are not symbols of the document.
 lsp_document_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     index: view.checked.index ?? return lsp_response(id, "[]")
     module_path: view.module_path ?? return lsp_response(id, "[]")
     defs := [SemDef]{}
     loop definition in index.definitions {
-        if definition.def.module_path == module_path && lsp_symbol_kind(definition.def.kind) != None {
-            defs.push(definition.def)
-        }
+        if definition.def.module_path != module_path || lsp_symbol_kind(definition.def.kind) == None -> next
+        if lsp_source_spells(view.doc.text, definition.def.def_span, definition.def.name) -> defs.push(definition.def)
     }
     defs.sort_by(fn(left: SemDef, right: SemDef) { left.def_span.start <=> right.def_span.start })
     rows := [String]{}
@@ -63,6 +70,7 @@ lsp_workspace_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> S
             key: "{def.module_path}:{def.def_span.start}"
             if seen.has_key(key) -> next
             location: lsp_location(checked, def.module_path, def.def_span) ?? next
+            if !lsp_source_spells(location.source, def.def_span, def.name) -> next
             seen[key] = true
             rows.push(lsp_symbol_information_json(def, location, kind))
             if rows.len() >= LSP_WORKSPACE_SYMBOL_LIMIT {

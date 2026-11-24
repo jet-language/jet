@@ -43,7 +43,10 @@ lsp_open_document: fn(server: LSPServer, params: Dyn?) -> LSPDocument? Never! {
 // request, so the document's last publication read the current texts; a
 // document never published is checked now.
 lsp_view: fn(server: LSPServer, params: Dyn?) -> LSPView? {
-    uri: lsp_params_uri(params) ?? return None
+    lsp_view_of(server, lsp_params_uri(params) ?? return None)
+}
+
+lsp_view_of: fn(server: LSPServer, uri: String) -> LSPView? {
     doc: server.diagnostic_state.docs.get(uri) ?? return None
     checked: server.published.get(uri) ?? server.check(doc)
     module_path := String?{None}

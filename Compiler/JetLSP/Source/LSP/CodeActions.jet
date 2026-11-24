@@ -24,20 +24,24 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
         preferred: fix.applicability == DiagnosticFixApplicability.Safe
         whole := [TextEdit]{fix.edit.move()}
         whole.extend(fix.edits.move())
-        actions.push(lsp_action_json(view, fix.title, "quickfix", whole, preferred: preferred))
+        actions.push(lsp_action_json(view, fix.title, "quickfix", whole, document_changes: server.document_changes, preferred: preferred))
     }
     if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {
-        actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+        actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
     }
     if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
-        actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, preferred: false))
+        actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
     }
     lsp_response(id, "[{actions.join(",")}]")
 }
 
-// The edit names the document version it was computed for, so an editor
-// drops it once the text has moved on.
-lsp_action_json: fn(view: LSPView, title: String, kind: String, edits: [TextEdit], preferred: Bool{false}) -> String Never! {
+// A client that negotiated `documentChanges` gets an edit naming the document
+// version it was computed for, so it drops the edit once the text has moved
+// on; any other client gets the plain `changes` map.
+lsp_action_json: fn(view: LSPView, title: String, kind: String, edits: [TextEdit], document_changes: Bool{false}, preferred: Bool{false}) -> String Never! {
     preference: if preferred -> ",\"isPreferred\":true" else -> ""
-    "{{\"title\":{foundation_json_quote(title)},\"kind\":{foundation_json_quote(kind)}{preference},\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{foundation_json_quote(view.uri)},\"version\":{view.doc.version}}},\"edits\":{lsp_text_edits_json(view.doc.text, edits)}}}]}}}}"
+    uri: foundation_json_quote(view.uri)
+    text_edits: lsp_text_edits_json(view.doc.text, edits)
+    edit: if document_changes -> "{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{uri},\"version\":{view.doc.version}}},\"edits\":{text_edits}}}]}}" else -> "{{\"changes\":{{{uri}:{text_edits}}}}}"
+    "{{\"title\":{foundation_json_quote(title)},\"kind\":{foundation_json_quote(kind)}{preference},\"edit\":{edit}}}"
 }

@@ -59,6 +59,33 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
     loop edit in edits -> assert_eq(lsp_test_text(edit, "newText"), "sum")
 }
 
+#Test("rename binds negotiated documentChanges to the checked version and names the renamed identity") {
+    server := lsp_test_main_server()
+    _ := lsp_test_result(server, "initialize", "{{\"capabilities\":{{\"workspace\":{{\"workspaceEdit\":{{\"documentChanges\":true}}}}}}}}")
+    params: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":5,\"character\":12}},\"newName\":\"sum\"}}"
+    result: lsp_test_result(server, "textDocument/rename", params)
+    files: lsp_test_rows(lsp_test_field(result, "documentChanges"))
+    assert_eq(files.len(), 1)
+    document: lsp_test_field(files[0], "textDocument")
+    assert_eq(lsp_test_text(document, "uri"), LSP_TEST_MAIN_URI)
+    assert_eq(lsp_test_int(document, "version"), 1)
+    assert_eq(lsp_test_ranges(lsp_test_rows(lsp_test_field(files[0], "edits"))), [String]{"0:0-0:3", "5:11-5:14", "5:4-5:7"})
+    operation: lsp_test_rows(lsp_test_field(result, "semantic_ops"))[0]
+    assert_eq(lsp_test_text(operation, "kind"), "rename")
+    assert_eq(lsp_test_text(operation, "from"), "add")
+    assert_eq(lsp_test_text(operation, "to"), "sum")
+    target: lsp_test_rows(lsp_test_field(operation, "targets"))[0]
+    assert_eq(lsp_test_text(target, "before"), "fn:main.add")
+    assert_eq(lsp_test_text(target, "after"), "fn:main.sum")
+}
+
+#Test("rename refuses a program with errors, which may hide a use") {
+    server := lsp_test_server()
+    uri: "file:///w/broken.jet"
+    lsp_test_open(server, uri, "add: fn() -> Int {{ 1 }}\nrun: fn() {{ add( }}\n")
+    assert_eq(lsp_test_error_code(server, "textDocument/rename", "{{{lsp_test_text_document(uri)},\"position\":{{\"line\":0,\"character\":1}},\"newName\":\"sum\"}}"), -32803)
+}
+
 #Test("rename refuses a keyword and a position with no declaration") {
     server := lsp_test_main_server()
     keyword: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":5,\"character\":5}},\"newName\":\"fn\"}}"
@@ -66,6 +93,10 @@ lsp_test_ranges: fn(rows: [Dyn]) -> [String] Never! {
     spaced: "{{{lsp_test_text_document(LSP_TEST_MAIN_URI)},\"position\":{{\"line\":5,\"character\":5}},\"newName\":\"a b\"}}"
     assert_eq(lsp_test_error_code(server, "textDocument/rename", spaced), -32602)
     assert_eq(lsp_test_error_code(server, "textDocument/prepareRename", lsp_test_at(LSP_TEST_MAIN_URI, 3, 0)), -32803)
+    // A language word says so by name.
+    word: lsp_test_field(lsp_test_response(server, "textDocument/prepareRename", lsp_test_at(LSP_TEST_MAIN_URI, 0, 5)), "error")
+    assert_eq(lsp_test_int(word, "code"), -32803)
+    assert_eq(lsp_test_text(word, "message"), "`fn` is Jet syntax, not a name you can rename")
 }
 
 #Test("signature help names the call's parameters and the active one") {

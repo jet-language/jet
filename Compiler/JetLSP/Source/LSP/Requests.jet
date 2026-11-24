@@ -10,7 +10,11 @@ use {
 // answers MethodNotFound.
 lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -> String {
     if method == {
-        "initialize" -> lsp_initialize_response(id)
+        "initialize" -> {
+            workspace: lsp_member(lsp_param(params, "capabilities") ?? Dyn.Null, "workspace") ?? Dyn.Null
+            server.document_changes = lsp_bool_member(lsp_member(workspace, "workspaceEdit") ?? Dyn.Null, "documentChanges")
+            lsp_initialize_response(id)
+        }
         "shutdown" -> {
             server.shutdown = true
             lsp_response(id, "null")
@@ -33,8 +37,15 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "textDocument/selectionRange" -> lsp_selection_range_response(server, params, id)
         "textDocument/documentLink" -> lsp_document_link_response(server, params, id)
         "textDocument/semanticTokens/full" -> lsp_semantic_tokens_response(server, params, id)
+        "textDocument/semanticTokens/full/delta" -> lsp_semantic_tokens_delta_response(server, params, id)
         "textDocument/semanticTokens/range" -> lsp_semantic_tokens_range_response(server, params, id)
         "textDocument/inlayHint" -> lsp_inlay_hint_response(server, params, id)
+        "textDocument/prepareTypeHierarchy" -> lsp_prepare_hierarchy_response(server, params, id, calls: false)
+        "typeHierarchy/supertypes" -> lsp_type_supertypes_response(server, params, id)
+        "typeHierarchy/subtypes" -> lsp_type_subtypes_response(server, params, id)
+        "textDocument/prepareCallHierarchy" -> lsp_prepare_hierarchy_response(server, params, id, calls: true)
+        "callHierarchy/incomingCalls" -> lsp_incoming_calls_response(server, params, id)
+        "callHierarchy/outgoingCalls" -> lsp_outgoing_calls_response(server, params, id)
         else -> lsp_error_response(id, -32601, "method not found: {method}")
     }
 }
@@ -62,7 +73,7 @@ lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, st
 
 LSP_SEMANTIC_TOKEN_TYPES: [String]{"keyword", "type", "function", "variable", "parameter", "property", "enumMember", "string", "number", "comment", "operator", "namespace", "decorator"}
 
-LSP_SEMANTIC_TOKEN_MODIFIERS: [String]{"declaration", "readonly"}
+LSP_SEMANTIC_TOKEN_MODIFIERS: [String]{"declaration", "readonly", "modification"}
 
 lsp_json_strings: fn(values: [String]) -> String Never! {
     rows := [String]{}
@@ -90,8 +101,10 @@ lsp_initialize_response: fn(id: Dyn) -> String Never! {
         "\"foldingRangeProvider\":true",
         "\"selectionRangeProvider\":true",
         "\"documentLinkProvider\":{{\"resolveProvider\":false}}",
-        "\"semanticTokensProvider\":{{\"legend\":{{\"tokenTypes\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_TYPES)},\"tokenModifiers\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_MODIFIERS)}}},\"full\":true,\"range\":true}}",
+        "\"semanticTokensProvider\":{{\"legend\":{{\"tokenTypes\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_TYPES)},\"tokenModifiers\":{lsp_json_strings(LSP_SEMANTIC_TOKEN_MODIFIERS)}}},\"full\":{{\"delta\":true}},\"range\":true}}",
         "\"inlayHintProvider\":true",
+        "\"typeHierarchyProvider\":true",
+        "\"callHierarchyProvider\":true",
     }
     lsp_response(id, "{{\"capabilities\":{{{capabilities.join(",")}}},\"serverInfo\":{{\"name\":\"jet\"}}}}")
 }

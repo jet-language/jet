@@ -1,44 +1,43 @@
 # Port of tests/lsp.rs:2834-2938; source bytes copied verbatim.
-# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
-# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+# Prepare rename gives the name under the cursor and refuses a language word
+# by name, semantic tokens answer a range, and the call hierarchy finds that
+# `caller` calls `add`.
 session lsp content-length: jet self lsp
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/0.json
-recv lsp
-stdout: ~ "\"prepareProvider\": true" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"range\": true" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"callHierarchyProvider\": true" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 1
+json: stdout doc $.result.capabilities.renameProvider.prepareProvider = true
+json: stdout doc $.result.capabilities.semanticTokensProvider.range = true
+json: stdout doc $.result.capabilities.callHierarchyProvider = true
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/1.json
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/2.json
 recv lsp
-stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "publishDiagnostics" # the open document's diagnostics arrive before any request is answered
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/3.json
-recv lsp
-stdout: ~ "\"placeholder\":\"add\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"start\":{\"line\":0,\"character\":3}" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"end\":{\"line\":0,\"character\":6}" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 2
+json: stdout doc $.result.placeholder = "add"
+json: stdout doc $.result.range = {"start":{"line":0,"character":0},"end":{"line":0,"character":3}}
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/4.json
-recv lsp
-stdout: ~ "\"error\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "`fn` is Jet syntax, not a name you can rename" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 3
+json: stdout doc $.error.message = "`fn` is Jet syntax, not a name you can rename"
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/5.json
-recv lsp
-stdout: ~ "\"data\":[" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 4
+json: stdout doc $.result.data[0] = 0
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/6.json
-recv lsp
-stdout: ~ "\"name\":\"add\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"kind\":12" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 5
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].name = "add"
+json: stdout doc $.result[0].kind = 12
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/7.json
-recv lsp
-stdout: ~ "\"from\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"name\":\"caller\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"fromRanges\"" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 6
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].from.name = "caller"
+json: stdout doc $.result[0].fromRanges = [{"start":{"line":5,"character":12},"end":{"line":5,"character":15}}]
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/8.json
-recv lsp
-stdout: ~ "\"to\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"name\":\"add\"" # original predicate; other response fields contain variable metadata/paths
-stdout: ~ "\"fromRanges\"" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 7
+json: stdout doc $.result #= 1
+json: stdout doc $.result[0].to.name = "add"
+json: stdout doc $.result[0].fromRanges = [{"start":{"line":5,"character":12},"end":{"line":5,"character":15}}]
 send lsp: Messages/LSPWave3PrepareRenameSemanticRangeAndCallHierarchy/9.json
-recv lsp
-stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+recv lsp until $.id = 99
 close lsp
 exit: any # Original transcript only waited; it did not assert process status.

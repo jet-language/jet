@@ -1,0 +1,14 @@
+# Hover on a call shows the callee's checked signature with its effect row.
+session lsp content-length: jet self lsp
+send lsp: Messages/LSPHoverShowsEffectRow/0.json
+recv lsp until $.id = 1
+send lsp: Messages/LSPHoverShowsEffectRow/1.json
+recv lsp
+json: stdout doc $.params.diagnostics #= 0
+send lsp: Messages/LSPHoverShowsEffectRow/2.json
+recv lsp until $.id = 2
+stdout: ~ "save: fn(path: String) -[FS.Write]> IOError!" # the hover's markdown also names the failure contract
+json: stdout doc $.result.range = {"start":{"line":7,"character":4},"end":{"line":7,"character":8}}
+send lsp: Messages/LSPHoverShowsEffectRow/3.json
+recv lsp until $.id = 3
+close lsp

@@ -1,0 +1,23 @@
+# `jet repl` keeps its memory flat from turn to turn: its peak resident set
+# (the kernel's VmHWM, which `jet perf attach --lens=counts` reports as
+# `peak_rss_bytes` from the reap) after 31 one-line turns is less than 30 MiB
+# above its peak after one, under 1 MiB a turn. Each turn compiles on the
+# compile threads; the heap gives a turn's emptied slabs back to the arenas
+# that can reuse them instead of keeping them idle per class, so later turns
+# reuse earlier turns' pages rather than touching fresh ones.
+requires: os-name:linux
+requires: tool:sh
+requires: probe sh -c 'set -- /sys/bus/event_source/devices/cpu*; test -e "$1"' # the CPU's own counters
+requires: probe sh -c 'test "$(cat /proc/sys/kernel/perf_event_paranoid)" -le 2' # this user may count its own processes
+fixture: PeakGrowthPerTurn.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet perf attach --lens=counts --out one.jettrace -- {jet} repl
+stdin: PeakGrowthPerTurn.fixture/one.txt
+exit: 0
+json: file one.jettrace doc $.content.receipt_sections[?name="counts"][0].value.peak_rss_bytes > 0 # the one-turn session's peak
+capture: one file one.jettrace doc $.content.receipt_sections[?name="counts"][0].value.peak_rss_bytes
+step: jet perf attach --lens=counts --out many.jettrace -- {jet} repl
+stdin: PeakGrowthPerTurn.fixture/thirty_one.txt
+exit: 0
+json: file many.jettrace doc $.content.receipt_sections[?name="counts"][0].value.peak_rss_bytes < {cap:one}+31457280 # 30 more turns add under 30 MiB

@@ -20,7 +20,9 @@ LSPOverlay: struct {
 // are the checked user modules (path, source, items) in load order.
 // `producer` is what made the entry, when it is a module the last `jet build`
 // of its package generated. `choices` are the automatic choices the checked
-// modules record, as `jet inspect choices` lists them.
+// modules record, as `jet inspect choices` lists them. `reports` are the
+// `jet.report` objects of `diagnostics`, by index, when the host renders
+// them; a published diagnostic carries its own as `data`.
 LSPChecked: struct {
     diagnostics: [Diagnostic],
     modules: [JetDriverDocModule],
@@ -28,6 +30,7 @@ LSPChecked: struct {
     symbols: [SemSymbol],
     producer: LSPProducer?{None},
     choices: [LSPChoice]{[LSPChoice]{}},
+    reports: [String]{[String]{}},
 }
 
 // What made a generated module, as the build that made it recorded it
@@ -60,10 +63,13 @@ LSPChoice: struct {
 // comptime code may reach the network and inline assembly. `stage` runs a
 // tool stage's `program` (JetDriver ToolStages.jet) beside `entry` with the
 // open documents overlaid: the answer rows of the call on each of `bodies`,
-// in call order.
+// in call order. `failure_marks` gives the byte offsets in `entry`'s open
+// text just past each call that passes a failure up by itself, where
+// `jet fmt --explicit-failures` writes its `?`.
 LSPChecker: trait {
     check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
     stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
+    failure_marks: fn(self, entry: String, overlays: &&[LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never!,
 }
 
 // A quick fix a diagnostic offers: its primary edit, then each alternative.

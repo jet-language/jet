@@ -106,10 +106,11 @@ lsp_diagnostic_groups: fn(state: LSPDiagnosticState, uri: String, checked: LSPCh
     groups
 }
 
-lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics: [Diagnostic], indices: [Int]) -> String Never! {
+lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics: [Diagnostic], reports: [String], indices: [Int]) -> String Never! {
     items := [String]{}
     loop index in indices {
-        items.push(lsp_diagnostic_json(diagnostics[index], src, uri, diagnostics))
+        report: if index < reports.len() -> reports[index] else -> ""
+        items.push(lsp_diagnostic_json(diagnostics[index], src, uri, diagnostics, report))
     }
     version_json: if version == .Val(value) -> ",\"version\":{value}" else -> ""
     "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{{\"uri\":{foundation_json_quote(uri)}{version_json},\"diagnostics\":[{items.join(",")}]}}}}"
@@ -118,16 +119,22 @@ lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics
 // The protocol diagnostic converts the one record (DiagnosticRecord) at the
 // edge: severity from its severity and tier, the range from its span over
 // `src`, the text whose SHA-256 its origin holds, and its code and message.
-lsp_diagnostic_json: fn(diagnostic: Diagnostic, src: String, uri: String, diagnostics: [Diagnostic]) -> String Never! {
+// The host's whole report, when it rendered one, is its `data`.
+lsp_diagnostic_json: fn(diagnostic: Diagnostic, src: String, uri: String, diagnostics: [Diagnostic], report: String) -> String Never! {
     record: lsp_diagnostic_record(diagnostic)
-    warning: record.severity == "lint" && (diagnostic_tier_word(diagnostic) ?? "") == "warning"
-    severity: if warning -> 2 else -> 1
+    severity: if lsp_record_is_warning(record, diagnostic) -> 2 else -> 1
     range: if record.span == {
         .Val(span) -> lsp_byte_span_to_range(src, lsp_clamped_span(src, Span{start: span.start, end: span.end}))
         .None -> lsp_full_document_range(src)
     }
     related: lsp_related_information_json(diagnostic, uri, src, diagnostics)
-    "{{\"range\":{lsp_range_json(range)},\"severity\":{severity},\"code\":{foundation_json_quote(record.code)},\"source\":\"jet\",\"message\":{foundation_json_quote(record.message)},\"codeDescription\":{{\"href\":{foundation_json_quote(lsp_diagnostic_explanation_uri(record.code))}}}{related}}}"
+    data: if report.len() > 0 -> ",\"data\":{report}" else -> ""
+    "{{\"range\":{lsp_range_json(range)},\"severity\":{severity},\"code\":{foundation_json_quote(record.code)},\"source\":\"jet\",\"message\":{foundation_json_quote(record.message)},\"codeDescription\":{{\"href\":{foundation_json_quote(lsp_diagnostic_explanation_uri(record.code))}}}{related}{data}}}"
+}
+
+// A warning-tier lint; every other diagnostic is an error.
+lsp_record_is_warning: fn(record: DiagnosticRecord, diagnostic: Diagnostic) -> Bool Never! {
+    record.severity == "lint" && (diagnostic_tier_word(diagnostic) ?? "") == "warning"
 }
 
 // The record of a checked diagnostic, named by the physical path of the file
@@ -219,7 +226,7 @@ lsp_publish_document_diagnostics: fn(server: &LSPServer, uri: String, stdout: &l
     loop (target, _) in groups -> ordered.push(target)
     ordered.sort()
     loop target in ordered {
-        lsp_write_message(stdout, lsp_document_group_json(server.diagnostic_state, target, checked.diagnostics, groups[target])) ?? return Err(err)
+        lsp_write_message(stdout, lsp_document_group_json(server.diagnostic_state, target, checked, groups[target])) ?? return Err(err)
     }
     server.diagnostic_state.diagnostic_targets[uri] = targets
     server.diagnostic_state.checked_modules[uri] = lsp_checked_module_paths(checked)
@@ -228,27 +235,28 @@ lsp_publish_document_diagnostics: fn(server: &LSPServer, uri: String, stdout: &l
 
 // A group publishes the document's version only when the open text's digest
 // is the one its diagnostics' origin holds.
-lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, diagnostics: [Diagnostic], indices: [Int]) -> String Never! {
+lsp_document_group_json: fn(state: LSPDiagnosticState, target: String, checked: LSPChecked, indices: [Int]) -> String Never! {
     loop index in indices {
-        if diagnostics[index].origin == .Val(origin) {
+        if checked.diagnostics[index].origin == .Val(origin) {
             version := Int?{None}
             if state.docs.get(target) == .Val(open) {
                 if sha256_hex(open.text) == origin.revision -> version = Val(open.version)
             }
-            return lsp_publish_diagnostics(target, origin.source, version, diagnostics, indices)
+            return lsp_publish_diagnostics(target, origin.source, version, checked.diagnostics, checked.reports, indices)
         }
     }
     if state.docs.get(target) == .Val(open) {
-        return lsp_publish_diagnostics(target, open.text, Val(open.version), diagnostics, indices)
+        return lsp_publish_diagnostics(target, open.text, Val(open.version), checked.diagnostics, checked.reports, indices)
     }
-    lsp_publish_diagnostics(target, "", None, diagnostics, indices)
+    lsp_publish_diagnostics(target, "", None, checked.diagnostics, checked.reports, indices)
 }
 
-// didClose drops the document and marks the open documents that read it
-// dirty, then clears each URI only this root's publication held. The state
-// changes even when a clear's write fails.
+// didClose drops the document and its kept semantic tokens and marks the
+// open documents that read it dirty, then clears each URI only this root's
+// publication held. The state changes even when a clear's write fails.
 lsp_close_document: fn(server: &LSPServer, uri: String, stdout: &lsp_diag_term.Stdout) -[IO]> IOError! {
     _ := server.published.remove(uri)
+    _ := server.semantic_results.remove(uri)
     lsp_close_document_state(server.diagnostic_state, uri, stdout) ?? return Err(err)
 }
 
@@ -266,6 +274,6 @@ lsp_close_document_state: fn(state: &LSPDiagnosticState, uri: String, stdout: &l
     targets: state.diagnostic_targets.remove(uri) ?? return
     loop (target, _) in targets {
         if lsp_target_retained_elsewhere(state, uri, target) -> next
-        lsp_write_message(stdout, lsp_publish_diagnostics(target, "", None, [Diagnostic]{}, [Int]{})) ?? return Err(err)
+        lsp_write_message(stdout, lsp_publish_diagnostics(target, "", None, [Diagnostic]{}, [String]{}, [Int]{})) ?? return Err(err)
     }
 }

@@ -3,7 +3,7 @@
 fixture: LSPCheckedImportedDiagnosticsAndRepairs.fixture
 session lsp content-length: jet self lsp
 stderr: null
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":{\"capabilities\":{\"workspace\":{\"workspaceEdit\":{\"documentChanges\":true}}}}}"
 recv lsp until $.id = 7
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use \\\"scoring\\\"\\nrun: fn() { print(scoring.letter(91)) }\\n\"}}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"letter: fn(score: Int, offset: Int) -> String {\\n    adjusted = score + offset\\n    return if {\\n        adjusted >= 90 -> \\\"A\\\"\\n        adjusted >= 80 -> \\\"B\\\"\\n        else -> \\\"C\\\"\\n    }\\n}\\nrepair_probe: fn() {\\n    m: [String:Int]{}\\n    _: m.gett(\\\"a\\\")\\n}\\n\"}}}"

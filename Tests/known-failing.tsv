@@ -99,7 +99,6 @@ Tests/Cases/CoreLibPartsEncodingSurface/base_decoders_preserve_2026_union_with_c
 Tests/Cases/ComptimeCorePureParity/bag_comptime_matches_run_and_build_exactly.case	#6955	E0506 `Tally<TallyToken>` is refused as not hashable although `TallyToken` is a fieldless enum (the Calls/Static.jet Tally element check)
 Tests/Cases/ComptimeCorePureParity/pool_comptime_matches_run_and_build_exactly.case	#6955	ref build failed: E0312 `ID<String>` doesn't support `==`
 Tests/Cases/ComptimeCorePureParity/time_plane_comptime_matches_aot_and_dev_tiers.case	#6955	`EXPECTED: #run time_plane_view()` is NondeterminismInPureEval: the helper reads `time.instant()`, and the clock cannot appear in a pure evaluation
-Tests/Cases/CoreLibPartsRuntime/core_default_time_literal_ignores_caller_unit_of_same_name.case	#6896	`local: 5ms` binds the prelude Duration, not the file's `#UnitFamily(Lag) { ms }` member, so `local.to_float()` is E0311 on Duration
 Tests/Cases/Effects/retired_effect_marker_is_e0066.case	#6839	`calc: fn() #(FS) -> Int` stops in the parser with E0003/E0081 at `#`, so the retired effect marker never reaches the E0066 diagnostic
 Tests/Cases/ComptimeCorePureParity/public_transcript_covers_bag_methods_exactly.case	#6955	E0506 `Tally<TallyToken>` is not valid — `TallyToken` is not hashable
 Tests/Cases/ComptimeCorePureParity/public_transcript_covers_linalg_overflow_and_expect_exactly.case	#6955	`jet run main.jet` is E0102 at `expect_view`'s `expect("ok")`: the Rust-era bare `expect(value)` builtin is gone, and current Jet has `expect(value)` only as the test snapshot form `expect(value).snapshot()`. With those two lines removed, the linalg and overflow transcripts match the .1.out exactly, so the expect transcript needs a current form chosen by its owner
@@ -357,31 +356,17 @@ Tests/Cases/JetpackTasks/jet_top_jobs_forward_flags_after_name.case	#6952	unbuil
 Tests/Cases/JetpackTool/multi_store_root_commit_crash_recovers_before_pointer_switch.case	#6941	unbuilt: after a crash between root commits, `jetpack tool list` recovery republishes the still-current generation 1 instead of rolling forward to the complete generation 2
 Tests/Cases/LSP/lsp_builtin_member_completion_uses_shared_semantic_symbol_docs.case	#6902	`jet self lsp` completion offers no Core member docs yet
 Tests/Cases/LSP/lsp_canceled_costly_request_returns_32800_and_never_publishes.case	#6903	`jet self lsp` answers requests in order and does not honor `$/cancelRequest` (-32800)
-Tests/Cases/LSP/lsp_checked_identity_and_versioned_rename.case	#6901	`jet self lsp` rename carries no checked identity or version metadata
 Tests/Cases/LSP/lsp_checked_text_contract_survives_editor_navigation.case	#6902	`jet self lsp` hover and rename carry no `nominal_base` / CheckedText facts
 Tests/Cases/LSP/lsp_completion_returns_items.case	#6902	`jet self lsp` is ported; this case's completion detail is unconfirmed against the port (rerun with the built compiler)
 Tests/Cases/LSP/lsp_completion_returns_snippets_and_auto_imports.case	#6902	`jet self lsp` completion offers no snippets or auto-imports
 Tests/Cases/LSP/lsp_completion_uses_local_discovery_index_for_packages_and_options.case	#6902	`jet self lsp` completion reads no package discovery index
 Tests/Cases/LSP/lsp_definition_foreign_declaration_uses_checked_jet_boundary.case	#6901	`jet self lsp` is ported; this case's foreign definition is unconfirmed against the port (rerun with the built compiler)
-Tests/Cases/LSP/lsp_definition_imported_identity_collisions_are_exact.case	#6901	`jet self lsp` is ported; this case's imported definitions are unconfirmed against the port (rerun with the built compiler)
 Tests/Cases/LSP/lsp_definition_uses_build_graph_generated_source.case	#6901	`jet self lsp` definition does not reach build-graph generated sources
 Tests/Cases/LSP/lsp_document_links_and_code_lenses.case	#6904	`jet self lsp` answers no `textDocument/codeLens`
-Tests/Cases/LSP/lsp_document_symbol_returns_symbols_for_imported_package_module.case	#6901	`jet self lsp` is ported; this case's imported module symbols are unconfirmed against the port (rerun with the built compiler)
 Tests/Cases/LSP/lsp_execute_command_impact_returns_report.case	#6904	`jet self lsp` answers no `workspace/executeCommand` (impact)
 Tests/Cases/LSP/lsp_generated_definition_uses_selected_buildplan_identity.case	#6901	`jet self lsp` definition carries no generated-source identity
 Tests/Cases/LSP/lsp_hover_projects_typestate_graph_facts.case	#6921	`jet self lsp` hover carries no typestate graph facts
-Tests/Cases/LSP/lsp_incremental_sync_rejects_stale_and_malformed_edits.case	#6901	`jet self lsp` is ported; this case's stale-edit replies are unconfirmed against the port (rerun with the built compiler)
-Tests/Cases/LSP/lsp_initialize_capabilities_have_named_test_coverage.case	#6903	the exact `initialize` snapshot file this case compares against was never written
-Tests/Cases/LSP/lsp_inlay_hints_include_scattered_method_breadcrumbs.case	#6902	`jet self lsp` answers no `textDocument/inlayHint`
-Tests/Cases/LSP/lsp_inlay_hints_return_call_parameter_names.case	#6902	`jet self lsp` answers no `textDocument/inlayHint`
-Tests/Cases/LSP/lsp_inlay_hints_returns_type_labels.case	#6902	`jet self lsp` answers no `textDocument/inlayHint`
-Tests/Cases/LSP/lsp_json_transcripts.case	#6901	`jet self lsp` answers no `textDocument/inlayHint` and its rename carries no `semantic_ops`
 Tests/Cases/LSP/lsp_mcp_environment_resources_are_read_only.case	#6903	`jet self lsp` serves no MCP resources
-Tests/Cases/LSP/lsp_rename_produces_workspace_edit.case	#6901	`jet self lsp` rename carries no `semantic_ops` metadata
-Tests/Cases/LSP/lsp_semantic_tokens_delta_returns_full_fallback.case	#6902	`jet self lsp` answers no `textDocument/semanticTokens/full/delta`
-Tests/Cases/LSP/lsp_type_hierarchy_trait_impls.case	#6921	`jet self lsp` answers no `textDocument/prepareTypeHierarchy`
-Tests/Cases/LSP/lsp_wave2_navigation_features.case	#6903	`jet self lsp` is ported; this case's folding and selection ranges are unconfirmed against the port (rerun with the built compiler)
-Tests/Cases/LSP/lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy.case	#6901	`jet self lsp` answers no call hierarchy requests
 Tests/Cases/LSP/lsp_workspace_symbols_follow_all_roots_and_folder_changes.case	#6903	`jet self lsp` does not follow workspace folder changes
 Tests/Cases/OutputCallable/invalid_output_selection_stops_in_jet_before_codegen.case	#4913	unbuilt: E2104 command form not built (E2104)
 Tests/Cases/PolyglotSystems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.case	#6948	`jet inspect bind counter.h` writes `.jet`, `.metadata` and `.hash` but no `counter.provenance` sidecar with the bridge-provenance schema, identity and linked-archive digest the case reads
@@ -433,7 +418,6 @@ Tests/Cases/EncodingParity/published_schema_preserves_unknown_wire_order_across_
 Tests/Cases/EnvHook/export_rejects_shell_syntax_in_environment_names.case	#6937	bug: the hostile name is refused (E1332 "preset.variables variable 'BAD; touch envhook-var-pwned' is not a valid environment name", no marker written), but `jetpack env export bash` exits 0: the refusal comes from the env plan load, which keeps the previous activation and returns 0 (Jetpack/CLI/Source/Env/EnvExport.jet:112); the Rust original had the same load-time validation and return-0 path (crates/jetpack/src/CLI/run_enter_dev.rs at 75a297cf28 and c9129d174d^), so where its expected nonzero exit came from is unexplained
 Tests/Cases/FactReads/typed_fact_fixture_matches_aot_default_and_o0.case	#6848	bug: `send_report.reflect().effects.values.len()` reads 0 for the empty-bodied fn where the golden reads 1; also the golden prints one `false` before `report` and two after, where the fixture's print order gives none before and three after (golden from a different print order)
 Tests/Cases/FmtWaveA/cli_check_diff_and_write_keep_distinct_file_outcomes.case	#6839	testkit: the step-name capture file canonical.stdout is not created
-Tests/Cases/GateLedger/source_gate_kinds_keep_their_written_reasons.case	#6848	unbuilt: jet inspect gates --json has no gates.entries
 Tests/Cases/O0ExtensionLintPolicy/literal_cli_run_and_interpret_enforce_compiler_extension_lint_policy.case	#6858	unbuilt: compiler-extension lint findings are not denied by policy.lints.deny (E1293)
 Tests/Cases/JetpackTasks/jet_build_job_dispatch_matches_default_and_o0.case	#6952	unbuilt: jobs with parameters are not argv-selectable (Pipeline.jet:2685-2688), and top-level `jet <job>` lookup is not built (Front.jet:1688-1717)
 Tests/Cases/JetpackTasks/jet_jobs_after_runs_predecessors_and_scalar_args.case	#6952	unbuilt: jobs with parameters are not argv-selectable (Pipeline.jet:2685-2688), so `jet run main.jet -- migrate --to 004` runs `fn run`

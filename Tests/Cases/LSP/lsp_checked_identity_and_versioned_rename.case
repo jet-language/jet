@@ -1,5 +1,5 @@
-# Port of tests/lsp.rs:3798-3926; fixture bytes unchanged.
-# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+# Port of tests/lsp.rs:3798-3926. The files are loose: files of one package
+# share a namespace, so they cannot import each other by path.
 fixture: LSPCheckedIdentityAndVersionedRename.fixture
 session lsp content-length: jet self lsp
 stderr: null
@@ -12,13 +12,13 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"
 recv lsp until $.id = 7
 json: stdout doc $.result.uri = "file://{work}/scoring.jet"
-json: stdout doc $.result.range = {"start":{"line":2,"character":3},"end":{"line":2,"character":9}}
+json: stdout doc $.result.range = {"start":{"line":2,"character":0},"end":{"line":2,"character":6}}
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/references\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19},\"context\":{\"includeDeclaration\":true}}}"
 recv lsp until $.id = 7
 json: stdout doc $.result #= 2
 json: stdout doc $.result[*].uri in ["file://{work}/run.jet", "file://{work}/scoring.jet"]
 json: stdout doc each $.result[?uri="file://{work}/run.jet"] as r: {r}.range = {"start":{"line":3,"character":17},"end":{"line":3,"character":23}} # original per-row predicate, vacuous on empty
-json: stdout doc each $.result[?uri!="file://{work}/run.jet"] as r: {r}.range = {"start":{"line":2,"character":3},"end":{"line":2,"character":9}} # original per-row predicate, vacuous on empty
+json: stdout doc each $.result[?uri!="file://{work}/run.jet"] as r: {r}.range = {"start":{"line":2,"character":0},"end":{"line":2,"character":6}} # original per-row predicate, vacuous on empty
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/prepareRename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"
 recv lsp until $.id = 7
 json: stdout doc $.result.range = {"start":{"line":3,"character":17},"end":{"line":3,"character":23}}
@@ -32,17 +32,39 @@ json: stdout doc each $.result.documentChanges[?textDocument.uri="file://{work}/
 json: stdout doc each $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"] as r: {r}.edits[0].newText = "grade" # original per-row predicate, vacuous on empty
 json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.textDocument.version = 2 # original per-row predicate, vacuous on empty
 json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits #= 1 # original per-row predicate, vacuous on empty
-json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].range = {"start":{"line":2,"character":3},"end":{"line":2,"character":9}} # original per-row predicate, vacuous on empty
+json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].range = {"start":{"line":2,"character":0},"end":{"line":2,"character":6}} # original per-row predicate, vacuous on empty
 json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].newText = "grade" # original per-row predicate, vacuous on empty
 json: stdout doc $.result.semantic_ops[0].targets #= 1
 json: stdout doc $.result.semantic_ops[0].targets[0].before = "fn:scoring.letter"
 json: stdout doc $.result.semantic_ops[0].targets[0].after = "fn:scoring.grade"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"version\":3},\"contentChanges\":[{\"text\":\"// moved\\nuse grades: scoring\\nuse \\\"util\\\"\\nrun: fn() {\\n    print(\\\"🚀\\\"); print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nshadow: fn(letter: Int) { print(letter) }\\n\"}]}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":31},\"newName\":\"grade\"}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"version\":3},\"contentChanges\":[{\"text\":\"// moved\\nuse grades: scoring\\nuse \\\"util\\\"\\nrun: fn() {\\n    print(\\\"🚀\\\", grades.letter(91))\\n    print(util.letter(91))\\n}\\nshadow: fn(letter: Int) { print(letter) }\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":25},\"newName\":\"grade\"}}"
 recv lsp until $.id = 7
 json: stdout doc $.result.documentChanges #= 2
 json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"][0].textDocument.version = 3
-json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"][0].edits[0].range = {"start":{"line":4,"character":30},"end":{"line":4,"character":36}}
+json: stdout doc $.result.documentChanges[?textDocument.uri="file://{work}/run.jet"][0].edits[0].range = {"start":{"line":4,"character":23},"end":{"line":4,"character":29}}
+# A name declared outside the checked modules is refused.
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":5},\"newName\":\"show\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.error.code = -32803
+# A Unicode identifier hovers and renames over its exact UTF-16 span.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/naive.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"naïve_score: fn(score: Int) -> Int { score }\\n\\nrun: fn() {\\n    print(naïve_score(3))\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/naive.jet\"},\"position\":{\"line\":3,\"character\":12}}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.range = {"start":{"line":3,"character":10},"end":{"line":3,"character":21}}
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/naive.jet\"},\"position\":{\"line\":3,\"character\":12},\"newName\":\"naïve_total\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.result.documentChanges #= 1
+json: stdout doc $.result.documentChanges[0].textDocument.version = 1
+json: stdout doc $.result.documentChanges[0].edits #= 2
+json: stdout doc $.result.documentChanges[0].edits[0].range = {"start":{"line":0,"character":0},"end":{"line":0,"character":11}}
+json: stdout doc $.result.documentChanges[0].edits[1].range = {"start":{"line":3,"character":10},"end":{"line":3,"character":21}}
+json: stdout doc $.result.semantic_ops[0].targets[0].after = "fn:naive.naïve_total"
+# A program that does not check may hide a use, so its rename is refused.
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"version\":4},\"contentChanges\":[{\"text\":\"// moved\\nuse grades: scoring\\nuse \\\"util\\\"\\nrun: fn() {\\n    print(\\\"🚀\\\", grades.lettr(91))\\n    print(util.letter(91))\\n}\\nshadow: fn(letter: Int) { print(letter) }\\n\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":5,\"character\":16},\"newName\":\"grade\"}}"
+recv lsp until $.id = 7
+json: stdout doc $.error.code = -32803
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"shutdown\",\"params\":{}}"
 recv lsp until $.id = 7
 close lsp

@@ -1,0 +1,23 @@
+// A `Describe` value meets the bound `T: Describe` of a generic impl: the
+// value's trait and the bound's are one trait, though sema holds the value's
+// trait under its module-qualified name.
+Describe: trait {
+    describe: fn(self) -> String,
+}
+
+impl Int.Describe {
+    describe: fn(self) -> String { "#{self}" }
+}
+
+Pair: struct<T> {
+    a: T,
+}
+
+impl Pair<T: Describe>.Describe {
+    describe: fn(self) -> String { "pair {self.a.describe()}" }
+}
+
+run: fn() {
+    p: Pair<Describe>{a: 1}
+    print(p.describe())
+}
