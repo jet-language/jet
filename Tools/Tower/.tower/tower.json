@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 113925,
+    "rev": 113934,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58084,6 +58084,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Parked for owner-ordered cleanup #6999 (2026-11-24 12:00): c13 leaf step B (f32 bits callers) and the Time __duration_* roles slice (9 names; CBD 70 counts them) are unwritten; c36-05c-r2 (derive #if conditions must fold without the comptime image) and c36-06 are parked with TypeIDSlice3-3; c18 continues under #6999 B. Queued for batch 30: c13 string/service/math-precise r2, math-f32-roles, f32-bits-leaf, c18-guard-priv, c18-a."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "c18 proof command: the guard's proof is `jet test Tests/Guards/CoreDeclarations`. A `--filter core_declarations` run matches no test. The guard was red on dev because the Core declaration checks missed `priv __x: fn` lines (176 false problems); 6851-c18-guard-priv fixes that and is queued for batch 30 with c18-a (core.compute, 59 dispatcher rows)."
         },
         {
@@ -58645,7 +58650,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T16:50:59.053Z",
+      "updated": "2026-11-24T17:03:06.691Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -76406,14 +76411,136 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A. Rust remnants gone: no comment in Compiler/, Core/ or Jetpack/ cites the deleted Rust implementation (Rust interop and peer comparisons stay); a new guard Tests/Guards/rust_era.jet runs Tools/Agent/RustEraRatchet.jet widened to refuse any such comment; name_mangle and its __jet_ prefix are deleted; architecture.md R6 and every stale Rust passage in Docs/Spec are cut or corrected; every case in Compiler/JetTestKit/retired-with-rust.tsv is ported to the native tiers or deleted, and the list is deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:40.385Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/rust_era.jet"
+            ]
+          }
+        },
+        {
+          "n": 2,
+          "text": "B. One source of truth for the Core API: the Core sources declare every Core function, record and layout; Core.rows dispatcher rows, CoreSurfaceInventory.rows, the Registry signature tables (CoreSignatures, CoreHostSignatures, CorePlatformSignatures, CoreValueSignatures, WebCoreSignatures) and the hand *ABI.jet layouts are deleted or generated from the checked Core program.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:41.782Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/CoreDeclarations"
+            ]
+          }
+        },
+        {
+          "n": 3,
+          "text": "C. Generated copies are computed while building, not committed, wherever the seed rule allows (DiagnosticRows, RuntimeCExports, the codecs); each one that must stay committed names its reason in its header.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:43.069Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/diagnostic_registry_ratchet.jet"
+            ]
+          }
+        },
+        {
+          "n": 4,
+          "text": "D. Closed lists: the shared-member pairs in Tests/Guards/closed_lists/duplicates.tsv collapse to one home each, and lists in baseline.tsv get a declared home or a kernel row; both files shrink.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:44.431Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/closed_lists.jet"
+            ]
+          }
+        },
+        {
+          "n": 5,
+          "text": "E. Sema architecture: one checking-context record replaces the threaded environment/program/scopes/state/tail_store/context/diagnostics bundle; CheckProgram.jet and Statements.jet are split by concern; string-built lookup keys become typed keys. Its adversarial review audit in Docs/Audits passes first.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:45.802Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Compiler/JetSema/Tests"
+            ]
+          }
+        },
+        {
+          "n": 6,
+          "text": "F. Idiomatic Jet in the compiler: push loops become yielding loops, ==.Val chains become patterns, free functions over one record become its methods, needless .copy() calls go, package by package; the copy ratchet only falls.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:47.178Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/copy_ratchet.jet"
+            ]
+          }
+        },
+        {
+          "n": 7,
+          "text": "G. No panic guards an assumption about checked input in a compiler phase: each becomes a keep-going report (census row) or is proven unreachable; a new guard Tests/Guards/panic_ratchet.jet holds the count and only lets it fall.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:57.503Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/panic_ratchet.jet"
+            ]
+          }
+        },
+        {
+          "n": 8,
+          "text": "H. Tools in other languages are kept (owner order: not removed yet) but deduplicated and organized: the roots table has one data home that roots.sh, roots.mjs and the Jet Roots tools all read, the two Jet Roots tools become one, and duplicated tool scripts are merged; a new guard Tests/Guards/tool_roots.jet checks every reader agrees.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T17:01:58.874Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards/tool_roots.jet"
+            ]
+          }
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-24T17:01:07.086Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-24T17:01:58.874Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 8
     }
   ],
   "decisions": [
@@ -140896,6 +141023,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T17:03:06.691Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T17:01:58.874Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "8 criteria, soft limit 6: one owner order with eight findings, all due 15:00"
+    },
+    {
+      "at": "2026-11-24T17:01:58.874Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#8 H. Tools in other languages are kept (owner order: not remov"
+    },
+    {
+      "at": "2026-11-24T17:01:57.503Z",
+      "by": "Orchestrator",
+      "action": "card.over-limit",
+      "ref": "c0mhrplj",
+      "note": "7 criteria, soft limit 6: one owner order with eight findings, all due 15:00"
+    },
+    {
+      "at": "2026-11-24T17:01:57.503Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#7 G. No panic guards an assumption about checked input in a co"
+    },
+    {
+      "at": "2026-11-24T17:01:47.178Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#6 F. Idiomatic Jet in the compiler: push loops become yielding"
+    },
+    {
+      "at": "2026-11-24T17:01:45.802Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#5 E. Sema architecture: one checking-context record replaces t"
+    },
+    {
+      "at": "2026-11-24T17:01:44.431Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#4 D. Closed lists: the shared-member pairs in Tests/Guards/clo"
+    },
+    {
+      "at": "2026-11-24T17:01:43.070Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#3 C. Generated copies are computed while building, not committ"
+    },
+    {
+      "at": "2026-11-24T17:01:41.782Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#2 B. One source of truth for the Core API: the Core sources de"
+    },
+    {
+      "at": "2026-11-24T17:01:40.385Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0mhrplj",
+      "note": "#1 A. Rust remnants gone: no comment in Compiler/, Core/ or Jet"
+    },
     {
       "at": "2026-11-24T17:01:07.086Z",
       "by": "Orchestrator",
