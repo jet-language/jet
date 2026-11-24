@@ -106,6 +106,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `if T == { Int -> … else -> … }` | type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int { … }` is the one-arm test; `.Int -> …` names a union member without binding it |
 | `if n % <> == 0 { 3 -> … else -> … }` | hole table: the one `<>` in an `if` header is filled by each arm's candidate in turn; the header runs once per arm tried and calls nothing with an effect, `(a \| b)` tries a group, a table used as a value ends in `else`, and pattern and range arms belong in a plain `if subject == {` table |
 | `T: trait { name: Type } / name: Type{default} / impl X.T { name: value } / T.name` | trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type |
+| `impl [T].Trait / impl [T#N].Trait / impl T?.Trait / impl [K: V].Trait` | structural impl: implements a trait for every list, fixed array, optional or map, each head position a fresh parameter name (a fixed array's length a number) that the methods see; only the module that declares the trait writes one, a concrete or repeated name in the head is E0003, and a bound on a head parameter has no spelling yet |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes |
 | `;` | retired explicit statement terminator; only a `jet eval` one-liner separates the statements on its one line with it |
 | `_name` | ordinary identifier |

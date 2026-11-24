@@ -60,6 +60,9 @@ use jet_foundation.[
     type_with_effective_fn_returns,
     core_source_owns_type,
     type_name,
+    type_structural_args,
+    type_structural_family,
+    type_structural_head_names,
     type_union_member_tag,
     type_unqualified_name,
     type_unqualified_nominals,
@@ -2480,13 +2483,28 @@ sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actua
     target: type_name(actual_resolved)
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
-            if graph.modules[module_index].impls[impl_index].target_type_name != target -> next
+            if graph.modules[module_index].impls[impl_index].target_type_name != target && sema_type_structural_head_bindings(graph.modules[module_index].impls[impl_index].target_type, actual_resolved) == None {
+                next
+            }
             trait_matches: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? next
             if trait_matches -> return Val(true)
         }
     }
     if !graph.complete -> return None
     Val(false)
+}
+
+// The bindings structural impl head `head` (`impl [T].Trait`, `impl
+// [T#N].Trait`, `impl T?.Trait`, `impl [K: V].Trait`) takes at `actual`: each
+// head parameter to `actual`'s argument in that position, a fixed array's
+// length as a number. None when `head` is no structural head or `actual` is
+// not of its shape.
+sema_type_structural_head_bindings: fn(head: Type, actual: Type) -> [SemaInferenceBinding]? Never! {
+    names: type_structural_head_names(head) ?? return None
+    if type_structural_family(head) != type_structural_family(actual) -> return None
+    args: type_structural_args(actual) ?? return None
+    if args.len() != names.len() -> return None
+    Val(loop index in 0..<names.len() -> SemaInferenceBinding{name: names[index], ty: args[index], source: "structural impl head"})
 }
 
 // Impl rows are read by index through the read graph: element loops over

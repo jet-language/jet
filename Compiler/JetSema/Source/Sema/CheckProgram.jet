@@ -131,6 +131,7 @@ use jet_foundation.[
     checked_symbol_local,
     checked_test_artifact_fact,
     type_name,
+    type_structural_head_names,
     type_with_effective_parameter_fn_return,
     CodeModule,
     TraitImplBlock,
@@ -1399,7 +1400,12 @@ sema_function_owner_generic_params: fn(graph: SemaRegistrationGraph, owner_type:
     normalized_owner_type := sema_function_normalize_owner_type(graph, owner_type, caller_module_identity)
     nominal_row: sema_type_resolve_nominal_row(graph, normalized_owner_type, caller_module_identity) ?? {
         if normalized_owner_type == .Apply(_, _) -> complete = false
-        return [TGenericParam]{}
+        // A structural impl's methods (`impl [T#N].Trait`) see its head's
+        // parameters; a fixed array's length is a number parameter.
+        names: type_structural_head_names(normalized_owner_type) ?? return [TGenericParam]{}
+        fixed := false
+        if normalized_owner_type == .FixedList(_, _) -> fixed = true
+        return loop (index, name) in names -> TGenericParam{name: name, bounds: [SymbolID]{}, number: fixed && index == 1}
     }
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     owner_args := if normalized_owner_type == {

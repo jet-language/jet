@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -1864,7 +1864,8 @@ IROwnerBinder: struct {
 // The owner type parameters a method of a generic type declaration binds:
 // each argument of its owner pattern that is one of the declaration's
 // parameters the method does not shadow with its own (`impl Pair<Int>`
-// binds none). None for any other function.
+// binds none). A structural impl's method (`impl [T#N].Trait`) binds each
+// parameter of its head. None for any other function.
 ir_owner_binders: fn(p: IRProgram, function: FnBody) -> [IROwnerBinder] Never! {
     binders := [IROwnerBinder]{}
     owner: if function.kind == {
@@ -1880,6 +1881,12 @@ ir_owner_binders: fn(p: IRProgram, function: FnBody) -> [IROwnerBinder] Never! {
         loop (index, arg) in args {
             name: ir_type_parameter_name(arg) ?? next
             if !ir_declares(declared, name) || ir_declares(function.generic_params, name) -> next
+            binders.push(IROwnerBinder{index: index, name: name})
+        }
+    }
+    if type_structural_head_names(owner) == .Val(names) {
+        loop (index, name) in names {
+            if ir_declares(function.generic_params, name) -> next
             binders.push(IROwnerBinder{index: index, name: name})
         }
     }
@@ -1902,13 +1909,13 @@ ir_declares: fn(params: [TGenericParam], name: String) -> Bool Never! {
 }
 
 // The owner arguments an instance of `function` binds for its owner type
-// `owner` (`[Int]` for `Pair<T>` at `Pair<Int>`): None when `owner` does
-// not spell them.
+// `owner` (`[Int]` for `Pair<T>` at `Pair<Int>`, `[Int, 4]` for `[T#N]` at
+// `[Int#4]`): None when `owner` does not spell them.
 ir_owner_args: fn(p: IRProgram, function: FnBody, owner: Type) -> [Type]? Never! {
     args := [Type]{}
     binders: ir_owner_binders(p, function)
     if binders.len() == 0 -> return Val(args)
-    actual: ir_type_args(owner)
+    actual: type_structural_args(ir_untag(owner)) ?? ir_type_args(owner)
     loop binder in binders {
         if binder.index >= actual.len() -> return None
         args.push(actual[binder.index].copy())

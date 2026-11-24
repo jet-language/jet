@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, interner_empty, module_none, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity]
+use jet_foundation.[Interner, Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NameTable, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, interner_empty, module_none, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, sha256_bytes, symbol_table, type_carrier_identity, type_structural_family, type_structural_head_names]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -253,7 +253,7 @@ ir_scan_function_nodes: fn(fn_row: Int, function: FnBody, check_boxed: Bool, int
 }
 
 ir_trait_boxed_candidate: fn(concrete: &&Type, target: Type, out: &[IRBodyScanBoxed]) Never! {
-    if ir_type_args(concrete).len() == 0 {
+    if ir_type_args(concrete).len() == 0 && type_structural_family(ir_untag(concrete)) == None {
         return
     }
     bounds: if ir_untag(target) == .TraitObject(names) -> names else -> {
@@ -277,7 +277,7 @@ ir_trait_boxed_put_short: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTabl
 // `concrete` boxed as a value of `target`, into ir_trait_boxed's `boxed`
 // when it is a generic instance and `target` a single trait.
 ir_trait_boxed_put: fn(p: IRProgram, boxed: &IRTraitBoxed, seen: &NameTable, concrete: &&Type, target: Type) Never! {
-    if ir_type_args(concrete).len() == 0 {
+    if ir_type_args(concrete).len() == 0 && type_structural_family(ir_untag(concrete)) == None {
         return
     }
     bounds: if ir_untag(target) == .TraitObject(names) -> names else -> {
@@ -301,8 +301,10 @@ ir_trait_holds: fn(p: IRProgram, bound: String, concrete: Type) -> Bool Never! {
 }
 
 // Whether `owner` spells a parameter of its generic type declaration
-// (`impl<T> Box<T>`), as ir_owner_binders reads an owner pattern.
+// (`impl<T> Box<T>`), as ir_owner_binders reads an owner pattern, or is a
+// structural impl's head (`impl [T].Trait`).
 ir_owner_generic: fn(p: IRProgram, owner: Type) -> Bool Never! {
+    if type_structural_head_names(ir_untag(owner)) != None -> return true
     if ir_untag(owner) == .Apply(name, args) {
         row: ir_type_def(p, name) ?? return false
         loop arg in args {
@@ -464,19 +466,30 @@ ir_method_key: fn(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef)
     head: ir_trait_head_identity(p, receiver) ?? return method_key
     loop row in candidates {
         implementer: ir_trait_implementer(p, row, owner) ?? next
-        implementer_head: ir_trait_head_identity(p, implementer) ?? ir_trait_identity(p, implementer)
+        implementer_head: ir_trait_implementer_head(p, implementer)
         if implementer_head == head -> return p.functions[row].key.copy()
     }
     method_key
 }
 
-// The identity of generic application `ty`'s nominal head, None for any
-// other type.
+// The identity of generic application `ty`'s nominal head, or of the shape
+// family a list, fixed array, optional or map shares with its structural
+// impl heads (`impl [T].Trait`); None for any other type.
 ir_trait_head_identity: fn(p: IRProgram, ty: Type) -> String? Never! {
     if ir_untag(ty) == .Apply(name, _) {
         return Val(ir_trait_identity(p, Type.Named{name: name.copy()}))
     }
+    if type_structural_family(ir_untag(ty)) == .Val(family) -> return Val("shape {family}")
     None
+}
+
+// The head an implementer serves: a concrete shape (`impl Bytes.Decode`)
+// serves only its own type, while a structural head serves its family.
+ir_trait_implementer_head: fn(p: IRProgram, implementer: Type) -> String Never! {
+    if type_structural_family(ir_untag(implementer)) != None && type_structural_head_names(ir_untag(implementer)) == None {
+        return ir_trait_identity(p, implementer)
+    }
+    ir_trait_head_identity(p, implementer) ?? ir_trait_identity(p, implementer)
 }
 
 // The constant key of trait constant `name` of the implementation of trait
