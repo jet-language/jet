@@ -32,7 +32,7 @@ use jet_foundation.[
     TDeclarationFacts,
     TVisibility,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     compiler_transfer_rows,
     symbol_find,
@@ -734,7 +734,7 @@ sema_name_part_builders: fn(shared_state: Shared<SemaNameShared>, queue: SemaNam
     task.group sema_name_threads {
         head: task sema_name_parts_claimed(shared_state, queue)
         sema_name_part_builders(shared_state, queue, from + 1, workers, parts)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
             parts[done.part] = done.facts.move()

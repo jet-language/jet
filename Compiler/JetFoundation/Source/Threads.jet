@@ -224,3 +224,12 @@ compiler_threads_failure_text: fn(failure: TaskFailure) -> String Never! {
         .Canceled -> "a compiler thread was canceled"
     }
 }
+
+// Joins a compiler thread's task and returns its value. Every phase joins
+// through here. A failed join re-raises the worker's own failure on the
+// caller, with its text unchanged (compiler_threads_failure_text), as the same
+// internal error: this checks nothing about the input, it only carries a stop
+// that already happened on the worker back to the thread that ends the compile.
+compiler_threads_joined: fn<T>(handle: ^^Task<T>) -> T Never! {
+    handle.join() ?? panic(compiler_threads_failure_text(err))
+}

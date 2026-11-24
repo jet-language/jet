@@ -80,7 +80,7 @@ use jet_foundation.[
     ViewSourceProjection,
     compiler_take_rows,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_transfer_rows,
     effect_scope_descriptor,
     expr_span,
@@ -4702,7 +4702,7 @@ sema_pass_facts_claimers: fn(graph: SemaRegistrationGraph?, queue: SemaFinalizeC
     task.group sema_pass_facts_threads {
         head: task sema_pass_facts_claimed(graph, queue, threads, jobs)
         sema_pass_facts_claimers(graph, queue, threads, jobs, from + 1, workers, facts)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
             sema_pass_fact_join(done, facts)

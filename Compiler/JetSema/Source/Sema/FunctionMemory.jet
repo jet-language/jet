@@ -23,7 +23,7 @@ use jet_foundation.[
     Type,
     TypedLitBody,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     gate_kind_parse,
     module_none,
@@ -426,7 +426,7 @@ sema_function_memory_walk_parts: fn(graph: SemaRegistrationGraph, packages: Sema
     task.group sema_function_memory_walk_group {
         head: task sema_function_memory_walk_part(graph, packages, from, to)
         rest: sema_function_memory_walk_parts(graph, packages, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

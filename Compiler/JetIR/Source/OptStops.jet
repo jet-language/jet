@@ -15,7 +15,7 @@
 // drops of Int and word slots move (no code of theirs can publish or mask
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_intern]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, name_intern]
 
 ir_opt_stops_after_calls: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never! {
     poll := ir_interned_name(m, IR_STOP_POLL_KEY) ?? -1
@@ -380,7 +380,7 @@ ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bo
     task.group ir_opt_stops_threads {
         head: task ir_opt_stops_part(m, keys, bodies, reports, last.move())
         done = ir_opt_stops_walks(m, keys, bodies, reports, rest.move())
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
     }
     done
 }

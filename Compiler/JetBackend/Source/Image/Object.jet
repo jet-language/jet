@@ -41,7 +41,7 @@
 // it at link time and the library's calls reach the program's definition.
 use {
     core.collections.[Rows]
-    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
+    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
 }
 
 ELF64_SECTION_HEADER_SIZE: 64
@@ -452,7 +452,7 @@ x64_object_text_parts: fn(inputs: Shared<X64ObjectTextShared>, parts: [Shared<X6
     task.group x64_object_text_threads {
         head: task x64_object_text_part(inputs, parts[from])
         built = x64_object_text_parts(inputs, parts, from + 1)
-        built += head.join() ?? panic(compiler_threads_failure_text(err))
+        built += compiler_threads_joined(head)
     }
     built
 }
@@ -476,7 +476,7 @@ x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64Obje
     task.group x64_object_text_finalize_threads {
         done_head: task x64_object_text_finalize_one(head)
         rest := x64_object_text_finalize_items(owned)
-        first: done_head.join() ?? panic(compiler_threads_failure_text(err))
+        first: compiler_threads_joined(done_head)
         out.push(first)
         loop row in rest.move() -> out.push(row)
     }
@@ -1013,7 +1013,7 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
             task.group x64_object_dwarf_thread {
                 dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
                 laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
-                dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
+                dwarf_rows.push(compiler_threads_joined(dwarfing))
             }
         }
         else -> {
@@ -1021,8 +1021,8 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
                 zoning: task x64_object_zone_spans(functions, offsets, false)
                 dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
                 laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
-                dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
-                zone_spans = zoning.join() ?? panic(compiler_threads_failure_text(err))
+                dwarf_rows.push(compiler_threads_joined(dwarfing))
+                zone_spans = compiler_threads_joined(zoning)
             }
         }
     }
@@ -1048,9 +1048,9 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
         drop_dbg: task x64_object_drop(released, 1)
         drop_prog: task x64_object_drop(released, 2)
         files.push(x64_object_file_assembled(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans, true, split))
-        _: drop_fns.join() ?? panic(compiler_threads_failure_text(err))
-        _: drop_dbg.join() ?? panic(compiler_threads_failure_text(err))
-        _: drop_prog.join() ?? panic(compiler_threads_failure_text(err))
+        _: compiler_threads_joined(drop_fns)
+        _: compiler_threads_joined(drop_dbg)
+        _: compiler_threads_joined(drop_prog)
     }
     assembled := files.pop() ?? panic("the object writer lost its file")
     assembled.imports = laid.imports.move()
@@ -1492,7 +1492,7 @@ x64_object_materialize_parallel: fn(items: ^^[X64ObjectSection]) -> [[U8]] Never
     task.group x64_object_materialize_threads {
         done_head: task ^^head { x64_object_materialize_one(head) }
         rest := x64_object_materialize_parallel(owned)
-        first: done_head.join() ?? panic(compiler_threads_failure_text(err))
+        first: compiler_threads_joined(done_head)
         out.push(first)
         loop row in rest.move() -> out.push(row)
     }
@@ -1566,11 +1566,11 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
             t_line: task x64_object_encode_relas(dwarf.line_relas)
             t_jet: task x64_object_encode_relas(dwarf.jet_line_relas)
             b_addr := x64_object_encode_relas(dwarf.addr_relas)
-            b_data := t_data.join() ?? panic(compiler_threads_failure_text(err))
-            b_eh := t_eh.join() ?? panic(compiler_threads_failure_text(err))
-            b_info := t_info.join() ?? panic(compiler_threads_failure_text(err))
-            b_line := t_line.join() ?? panic(compiler_threads_failure_text(err))
-            b_jet := t_jet.join() ?? panic(compiler_threads_failure_text(err))
+            b_data := compiler_threads_joined(t_data)
+            b_eh := compiler_threads_joined(t_eh)
+            b_info := compiler_threads_joined(t_info)
+            b_line := compiler_threads_joined(t_line)
+            b_jet := compiler_threads_joined(t_jet)
             rela_data_sec = x64_object_rela_bytes_section(".rela.data", b_data, ELF64_OBJECT_DATA)
             rela_eh_sec = x64_object_rela_bytes_section(".rela.eh_frame", b_eh, ELF64_OBJECT_EH_FRAME)
             rela_info_sec = x64_object_rela_bytes_section(".rela.debug_info", b_info, ELF64_OBJECT_DEBUG_INFO)

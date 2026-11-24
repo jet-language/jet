@@ -14,7 +14,7 @@
 // glue, so the classes start as one and split until no class holds bodies
 // that differ: copies that only reach copies of each other stay one. A
 // function whose address is taken keeps it.
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_hash, name_index, name_intern, name_table]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_hash, name_index, name_intern, name_table]
 
 // Folds the copies among `m.functions`' bodies `functions`; returns how many
 // functions nothing reaches any more.
@@ -134,7 +134,7 @@ ir_opt_fold_shape_parts: fn(m: IRModule, rows: [Int], parts: ^[[IRFunction]], at
     task.group ir_opt_fold_group {
         head: task ir_opt_fold_part(m, rows, compiler_take_rows<IRFunction>(parts[at]))
         rest: ir_opt_fold_shape_parts(m, rows, parts, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
@@ -206,7 +206,7 @@ ir_opt_fold_buckets: fn(groups: IROptFoldGroups, at: Int) -> [IROptFoldBucket] N
     task.group ir_opt_fold_grouping {
         head: task ir_opt_fold_bucket(groups, at)
         rest: ir_opt_fold_buckets(groups, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop bucket in rest.move() -> done.push(bucket)
     }
     done

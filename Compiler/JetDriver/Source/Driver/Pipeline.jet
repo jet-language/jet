@@ -210,7 +210,7 @@ use {
         CompilerThreads,
         CompilerEventRecord,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -1998,7 +1998,7 @@ jet_driver_comptime_prefetch: fn(environments: ^[SemaScopeEnvironment], programs
     task.group jet_driver_comptime_prefetch_threads {
         walkers: task sema_comptime_walk_run(walk)
         jet_driver_comptime_walk(environments[0], programs[0], sema_comptime_available_version(available), index, values.len(), walk, seeds, seen, kept, follows: true)
-        _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
+        _ := compiler_threads_joined(walkers)
     }
     kept
 }
@@ -2105,7 +2105,7 @@ jet_driver_comptime_prefetch_landed: fn(environments: ^[SemaScopeEnvironment], p
     task.group jet_driver_comptime_prefetch_landed_threads {
         walkers: task sema_comptime_walk_run(walk)
         jet_driver_comptime_walk(environments[0], programs[0], sema_comptime_available_version(available), index, values.len(), walk, jobs, seen, kept, follows: true)
-        _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
+        _ := compiler_threads_joined(walkers)
     }
     kept
 }
@@ -2145,7 +2145,7 @@ jet_driver_comptime_closure_prefetch: fn(environment: ^SemaScopeEnvironment, pro
     task.group jet_driver_comptime_closure_prefetch_threads {
         walkers: task sema_comptime_walk_run(walk)
         jet_driver_comptime_walk(environment, program, sema_comptime_available_version(available), index, values.len(), walk, jobs, seen, kept, follows: false)
-        _ := walkers.join() ?? panic(compiler_threads_failure_text(err))
+        _ := compiler_threads_joined(walkers)
     }
 }
 
@@ -2275,7 +2275,7 @@ jet_driver_comptime_prefetch_refs_ranges: fn(graph: SemaRegistrationGraph, snaps
     task.group jet_driver_comptime_prefetch_refs_group {
         head: task jet_driver_comptime_prefetch_refs_chunk(graph, snapshot, done, eligible, ranges[at], ranges[at + 1])
         rest: jet_driver_comptime_prefetch_refs_ranges(graph, snapshot, done, eligible, ranges, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         loop part in rest -> out.push(part)
     }
     out
@@ -6884,7 +6884,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
         task.group driver_prelower_owners_index {
             reg_task: task jet_driver_registered_function_keys(registration_graph)
             repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
-            out.push(reg_task.join() ?? panic(compiler_threads_failure_text(err)))
+            out.push(compiler_threads_joined(reg_task))
         }
         // Unreachable: the group above pushed the one joined row.
         out.pop() ?? panic("lost registered function keys")
@@ -7264,9 +7264,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
                     budget_rows = jet_driver_package_effect_rows(load, sema_functions, budget_entry, budget_spans, budget_roots, request.compiler_threads)
                 }
             }
-            entry_effects = t_req.join() ?? panic(compiler_threads_failure_text(err))
-            foreign_link = t_foreign.join() ?? panic(compiler_threads_failure_text(err))
-            rust_foreign = t_rust.join() ?? panic(compiler_threads_failure_text(err))
+            entry_effects = compiler_threads_joined(t_req)
+            foreign_link = compiler_threads_joined(t_foreign)
+            rust_foreign = compiler_threads_joined(t_rust)
         }
         if run_budget {
             if budget_rows == .Val(found) {
@@ -8046,7 +8046,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         }
         owners = pkg_effect_module_owners(program)
         loop function in functions -> rows.push(module_rows.get(function.module_identity.id) ?? -1)
-        by_key = t_keys.join() ?? panic(compiler_threads_failure_text(err))
+        by_key = compiler_threads_joined(t_keys)
     }
     entry_row: ir_function_rows_get(by_key, entry_key) ?? return None
     if rows[entry_row] < 0 -> return None
@@ -8209,11 +8209,11 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                 cs5.push(c.move())
                 es5.push(e.move())
             }
-            chunks.push(t0.join() ?? panic(compiler_threads_failure_text(err)))
-            chunks.push(t1.join() ?? panic(compiler_threads_failure_text(err)))
-            chunks.push(t2.join() ?? panic(compiler_threads_failure_text(err)))
-            chunks.push(t3.join() ?? panic(compiler_threads_failure_text(err)))
-            chunks.push(t4.join() ?? panic(compiler_threads_failure_text(err)))
+            chunks.push(compiler_threads_joined(t0))
+            chunks.push(compiler_threads_joined(t1))
+            chunks.push(compiler_threads_joined(t2))
+            chunks.push(compiler_threads_joined(t3))
+            chunks.push(compiler_threads_joined(t4))
             chunks.push(jet_driver_budget_edge_chunk(cs5.move(), es5.move()))
         }
         callees.try_reserve(fn_count) ?? ()
@@ -8444,8 +8444,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
                 row: rows[index]
                 program.modules[row].function_spans[effect_keys[index]] = jet_driver_budget_name_span_of(name_spans, function.key) ?? function.source_span
             }
-            summaries = t_summaries.join() ?? panic(compiler_threads_failure_text(err))
-            solved = t_solved.join() ?? panic(compiler_threads_failure_text(err))
+            summaries = compiler_threads_joined(t_summaries)
+            solved = compiler_threads_joined(t_solved)
         }
     } else {
         loop index in sited {
@@ -8638,7 +8638,7 @@ jet_driver_tidy_pass_a_threads: fn(functions: [FnBody], decls: DeclTable, symbol
     task.group driver_tidy_a {
         head: task jet_driver_tidy_pass_a_range(functions, decls, symbols, interner, starts[at], ends[at], collect_cost)
         rest := jet_driver_tidy_pass_a_threads(functions, decls, symbols, interner, starts, ends, at + 1, collect_cost)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         compiler_transfer_rows<JetDriverTidyPartA>(out, rest)
     }
     out
@@ -8653,7 +8653,7 @@ jet_driver_tidy_pass_b_threads: fn(functions: [FnBody], bodies: [Int?], decls: D
     task.group driver_tidy_b {
         head: task jet_driver_recursion_calls_range(functions, bodies, decls, starts[at], ends[at])
         rest := jet_driver_tidy_pass_b_threads(functions, bodies, decls, starts, ends, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         compiler_transfer_rows<[[Int]]>(out, rest)
     }
     out
@@ -8799,7 +8799,7 @@ jet_driver_verify_owners_ranges: fn(modules: [SemaGraphModuleResult], registered
     task.group jet_driver_verify_owners_group {
         head: task jet_driver_verify_owners_chunk(modules, registered_function_keys, bounds[at], bounds[at + 1])
         rest: jet_driver_verify_owners_ranges(modules, registered_function_keys, bounds, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         loop part in rest -> out.push(part)
     }
     out

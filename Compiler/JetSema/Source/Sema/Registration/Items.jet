@@ -94,7 +94,7 @@ use {
         ast_program,
         compiler_apply_order,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
         compiler_transfer_rows,
@@ -2496,7 +2496,7 @@ sema_registration_resolve_impl_traits_spawn: fn(graph: SemaRegistrationGraph, bo
         head: task sema_registration_resolve_impl_traits_range(graph, from, to)
         rest := [[SemaRegistrationImplResolved]]{}
         sema_registration_resolve_impl_traits_spawn(graph, bounds, part + 1, rest)
-        out.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.extend(compiler_threads_joined(head))
         out.extend(rest.move())
     }
 }
@@ -4621,7 +4621,7 @@ sema_registration_preparers: fn(shared_state: Shared<SemaRegistrationPrepareShar
     task.group sema_registration_prepare_threads {
         head: task sema_registration_prepare_claimed(shared_state)
         sema_registration_preparers(shared_state, from + 1, workers, slots)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
             slots[done.position] = Val(done.row.move())
@@ -7109,7 +7109,7 @@ sema_registration_bind_namespace_parts: fn(graph: SemaRegistrationGraph, own_sym
     task.group sema_bind_ns_group {
         head: task sema_registration_bind_namespace_range(graph, own_symbols, templated, from, to)
         rest := sema_registration_bind_namespace_parts(graph, own_symbols, templated, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

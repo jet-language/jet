@@ -16,6 +16,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_limit,
     compiler_threads_failure_text,
+    compiler_threads_joined,
     symbol_find,
     symbol_key_text,
     symbol_table_key,
@@ -823,7 +824,7 @@ sema_comptime_precheck_enter_spawn: fn(run: SemaPrecheckEnterRun, module_identit
     task.group sema_precheck_enter_threads {
         head: task sema_comptime_precheck_enter_worker(run, module_identities, start, count, version, queue)
         sema_comptime_precheck_enter_spawn(run, module_identities, start, count, version, queue, from + 1, workers)
-        _ := head.join() ?? panic(compiler_threads_failure_text(err))
+        _ := compiler_threads_joined(head)
     }
 }
 
@@ -1099,7 +1100,7 @@ sema_comptime_precheck_claimers: fn(shared_state: Shared<SemaPrecheckShared>, pl
     task.group sema_precheck_threads {
         head: task sema_comptime_precheck_claimed(shared_state, plan)
         sema_comptime_precheck_claimers(shared_state, plan, threads, from + 1, workers, done, memory_plan)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             row := claimed.pop() ?? break
             done.push(row)
@@ -1406,7 +1407,7 @@ sema_comptime_walk_threads: fn(walk: SemaComptimeWalk, from: Int) -> Int {
     task.group sema_comptime_walk_group {
         head: task sema_comptime_walk_watched(walk)
         made += sema_comptime_walk_threads(walk, from + 1)
-        made += head.join() ?? panic(compiler_threads_failure_text(err))
+        made += compiler_threads_joined(head)
     }
     made
 }

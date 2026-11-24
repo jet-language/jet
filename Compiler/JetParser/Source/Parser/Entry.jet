@@ -29,7 +29,7 @@ use {
         WebBucket,
         ast_program,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_transfer_rows,
         expr_span,
         name_count,
@@ -852,7 +852,7 @@ parser_prepare_sliced_slots: fn(tokens: [Token], tables: TokenTables, source: [U
     task.group parser_prepare_slice_threads {
         head: task parser_prepare_sliced_slot(tokens, tables, source, line_starts, expect_leading_semi, slots[from])
         prepared = parser_prepare_sliced_slots(tokens, tables, source, line_starts, expect_leading_semi, slots, from + 1)
-        prepared += head.join() ?? panic(compiler_threads_failure_text(err))
+        prepared += compiler_threads_joined(head)
     }
     prepared
 }
@@ -881,7 +881,7 @@ parser_prepare_direct_slots: fn(source: [U8], slots: [Shared<ParserChunkSlot>], 
     task.group parser_prepare_direct_threads {
         head: task parser_prepare_direct_slot(source, slots[from])
         prepared = parser_prepare_direct_slots(source, slots, from + 1)
-        prepared += head.join() ?? panic(compiler_threads_failure_text(err))
+        prepared += compiler_threads_joined(head)
     }
     prepared
 }
@@ -1013,7 +1013,7 @@ parser_parse_slot_parts: fn(marker_scopes: [ParserMarkerScope], source_end: Int,
     task.group parser_chunk_threads {
         head: task parser_parse_slot_part(marker_scopes, source_end, allow_environment_reads, slots[from])
         parsed = parser_parse_slot_parts(marker_scopes, source_end, allow_environment_reads, slots, from + 1)
-        parsed += head.join() ?? panic(compiler_threads_failure_text(err))
+        parsed += compiler_threads_joined(head)
     }
     parsed
 }

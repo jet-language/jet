@@ -57,7 +57,7 @@
 // The other addresses (`.debug_addr`'s, the call sites', `.debug_line`'s and
 // `.debug_jetline`'s) and the section offsets are relocations against
 // section symbols, so any ELF linker can place the sections.
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single]
 
 ELF64_R_X86_64_32: 10
 
@@ -294,7 +294,7 @@ dwarf_eh_chunks: fn(debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], sym
     task.group dwarf_eh_threads {
         head: task dwarf_eh_chunk(debug, offsets, sizes, symbols, bounds[at], bounds[at + 1])
         rest: dwarf_eh_chunks(debug, offsets, sizes, symbols, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -1167,7 +1167,7 @@ dwarf_info_patch_parts: fn(jobs: ^[DwarfInfoPatch]) -> [DwarfInfoPatched] Never!
     task.group dwarf_info_patch_group {
         done_head: task ^^head { dwarf_info_patch_one(head) }
         rest: dwarf_info_patch_parts(jobs)
-        out.push(done_head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(done_head))
         loop item in rest.move() -> out.push(item)
     }
     out
@@ -1266,7 +1266,7 @@ dwarf_info_parts: fn(inputs: Shared<DwarfInfoShared>, parts: [Shared<DwarfInfoPa
     task.group dwarf_info_threads {
         head: task dwarf_info_part(inputs, parts[from])
         built = dwarf_info_parts(inputs, parts, from + 1)
-        built += head.join() ?? panic(compiler_threads_failure_text(err))
+        built += compiler_threads_joined(head)
     }
     built
 }
@@ -1589,7 +1589,7 @@ dwarf_line_chunks: fn(program: X64ObjectModule, functions: [X64CompiledFunction]
     task.group dwarf_line_parts {
         head: task dwarf_line_range(program, functions, debug, offsets, sizes, symbols, bounds[at], bounds[at + 1])
         rest: dwarf_line_chunks(program, functions, debug, offsets, sizes, symbols, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -1720,7 +1720,7 @@ dwarf_jet_line_chunks: fn(kept: [Int], debug: [X64FunctionDebug], bounds: [Int],
     task.group dwarf_jet_line_parts {
         head: task dwarf_jet_line_chunk(kept, debug, bounds[at], bounds[at + 1])
         rest: dwarf_jet_line_chunks(kept, debug, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -1873,9 +1873,9 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
                 lining: task dwarf_line_threads(program, functions, debug, offsets, sizes, symbols, threads)
                 jet_lining: task dwarf_jet_line_threads(program, functions, debug, offsets, sizes, symbols, threads)
                 dwarf_info(sections, program, functions, debug, offsets, sizes, text_size, symbols, threads)
-                frame = framing.join() ?? panic(compiler_threads_failure_text(err))
-                line = lining.join() ?? panic(compiler_threads_failure_text(err))
-                jet_line = jet_lining.join() ?? panic(compiler_threads_failure_text(err))
+                frame = compiler_threads_joined(framing)
+                line = compiler_threads_joined(lining)
+                jet_line = compiler_threads_joined(jet_lining)
             }
         }
     }

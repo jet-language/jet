@@ -34,7 +34,7 @@ use jet_foundation.[
     compiler_threads_beside,
     compiler_threads_capped,
     compiler_threads_limit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     compiler_transfer_rows,
     symbol_find,
@@ -710,7 +710,7 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
                 walking: task sema_finalize_walk_all(final_graph, walk_inputs)
                 effects = sema_finalize_effect_pass(modules, final_graph, effect_inputs, effect_prepared, effects.symbols, effects.interner, package_denials, denial_modules, file_caps, trait_caps, prep_functions, effect_threads, organization_denials, organization_source, stage.package_policies, expert_modules, heap_free, heap_entries, closed: closed, trace_sink: trace_sink)
                 if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
-                walked = walking.join() ?? panic(compiler_threads_failure_text(err))
+                walked = compiler_threads_joined(walking)
             }
         }
         else -> {
@@ -1245,7 +1245,7 @@ sema_finalize_walkers: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalk
     task.group sema_finalize_walk_threads {
         head: task sema_finalize_walk_claimed(graph, inputs, queue)
         sema_finalize_walkers(graph, inputs, queue, from + 1, workers, walked, masked, fixed)
-        sema_finalize_walk_keep(head.join() ?? panic(compiler_threads_failure_text(err)), walked, masked, fixed)
+        sema_finalize_walk_keep(compiler_threads_joined(head), walked, masked, fixed)
     }
 }
 
@@ -1584,7 +1584,7 @@ sema_finalize_side_claimers: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     task.group sema_finalize_side_threads {
         head: task sema_finalize_side_claimed(graph, modules, inputs, queue)
         sema_finalize_side_claimers(graph, modules, inputs, queue, from + 1, workers, sides, found, results, assembled, contexts)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.sides.len() > 0 {
             done: claimed.sides.pop() ?? break
             job: done.job

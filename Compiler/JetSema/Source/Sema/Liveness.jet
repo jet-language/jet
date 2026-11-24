@@ -39,7 +39,7 @@ use {
         type_kind,
         type_syntax,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_threads_partition,
         comptime_walk_identifiers,
         core_bare_source_module,
@@ -865,7 +865,7 @@ sema_liveness_member_uses_parts: fn(graph: SemaRegistrationGraph, modules: [Sema
     task.group sema_liveness_member_threads {
         head: task sema_liveness_member_uses_range(graph, modules, markers, bounds[from], bounds[from + 1])
         sema_liveness_member_uses_parts(graph, modules, markers, bounds, from + 1, workers, parts)
-        parts[from] = Val(head.join() ?? panic(compiler_threads_failure_text(err)))
+        parts[from] = Val(compiler_threads_joined(head))
     }
 }
 

@@ -21,7 +21,7 @@ use {
         checked_expr_type_id,
         compiler_take_rows,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_threads_partition,
         compiler_transfer_rows,
         TTryConvert,
@@ -667,7 +667,7 @@ ir_reachable_core_rows: fn(functions: ^[FnBody], decls: DeclTable, symbols: ^[Sy
                     weights.push(sizes[index])
                 }
             }
-            decl_parts = decl_task.join() ?? panic(compiler_threads_failure_text(err))
+            decl_parts = compiler_threads_joined(decl_task)
         }
         loop part in decl_parts {
             loop i in 0..<part.decl_indices.len() {
@@ -734,7 +734,7 @@ ir_core_reach_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: S
     task.group ir_core_reach_decl_group {
         head: task ir_core_reach_decl_range(functions, decls, symbols, candidates, starts[at], ends[at])
         rest := ir_core_reach_decl_threads(functions, decls, symbols, candidates, starts, ends, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         compiler_transfer_rows<IRCoreReachDeclPart>(out, rest)
     }
     out
@@ -907,7 +907,7 @@ ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [In
     task.group core_reach_threads {
         head: task ir_core_reach_claimed(slot, rows, bounds, queue, progress, None)
         ir_core_reach_claimers(slot, rows, bounds, queue, from + 1, workers, parts, progress, trace_sink)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         ir_core_reach_place(claimed, parts)
     }
 }

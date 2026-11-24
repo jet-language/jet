@@ -41,7 +41,7 @@ use jet_foundation.[
     sema_casing_acronym_name,
     sema_casing_pascal_words,
     module_text,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
 ]
 
 // Rounds of the call-graph join before a still-growing row widens to the
@@ -627,7 +627,7 @@ sema_failure_union_row_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     task.group sema_failure_union_row_threads {
         head: task sema_failure_union_row_part(graph, modules, entry_index, bounds[at], bounds[at + 1])
         rest: sema_failure_union_row_parts(graph, modules, entry_index, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

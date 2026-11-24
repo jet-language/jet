@@ -40,7 +40,7 @@ use jet_foundation.[
     Type,
     compiler_threads_admit,
     compiler_threads_limit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     expr_span,
     symbol_builtin,
     symbol_find,
@@ -1236,7 +1236,7 @@ sema_comptime_collect_module_sources_parts: fn(program: SemaProgramTables, modul
     task.group sema_comptime_sources_group {
         head: task sema_comptime_collect_module_sources_range(program, lo, hi)
         rest := sema_comptime_collect_module_sources_parts(program, module_count, from + 1, workers)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
@@ -1559,7 +1559,7 @@ sema_check_declaration_claimers: fn(shared_state: Shared<SemaCheckShared>, input
     task.group sema_declaration_threads {
         head: task sema_check_declaration_claimed(shared_state, inputs, plan)
         sema_check_declaration_claimers(shared_state, inputs, plan, from + 1, workers, placed)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             check := claimed.pop() ?? break
             position: check.position

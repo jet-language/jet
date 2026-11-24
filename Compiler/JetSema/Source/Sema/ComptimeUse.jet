@@ -30,7 +30,7 @@ use jet_foundation.[
     Type,
     compiler_take_rows,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_heaviest_first,
     diagnostic_with_alternative_edit,
     diagnostic_with_edit,
@@ -236,7 +236,7 @@ sema_graph_scan_threads: fn(shared_state: Shared<SemaGraphScan>, from: Int, work
     task.group sema_graph_scan_group {
         head: task sema_graph_scan_claimed(shared_state)
         sema_graph_scan_threads(shared_state, from + 1, workers, found)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
             position: done.position

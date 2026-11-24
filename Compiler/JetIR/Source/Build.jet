@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -878,7 +878,7 @@ ir_program_new: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
         indexing: task ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
         ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
-        index := indexing.join() ?? panic(compiler_threads_failure_text(err))
+        index := compiler_threads_joined(indexing)
         ir_program_take_sources(p, index.move())
         programs.push(p)
     }
@@ -1114,11 +1114,11 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
                 name_column_set_first(render_impls_keys, render_impls, render_key, row)
             }
         }
-        p.rows = t_rows.join() ?? panic(compiler_threads_failure_text(err))
-        p.trait_methods = t_traits.join() ?? panic(compiler_threads_failure_text(err))
-        decl_parts = t_decls.join() ?? panic(compiler_threads_failure_text(err))
-        p.intrinsics = t_intrinsics.join() ?? panic(compiler_threads_failure_text(err))
-        scanned = t_scan.join() ?? panic(compiler_threads_failure_text(err))
+        p.rows = compiler_threads_joined(t_rows)
+        p.trait_methods = compiler_threads_joined(t_traits)
+        decl_parts = compiler_threads_joined(t_decls)
+        p.intrinsics = compiler_threads_joined(t_intrinsics)
+        scanned = compiler_threads_joined(t_scan)
     }
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
     loop part in decl_parts {
@@ -1388,7 +1388,7 @@ ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolT
     task.group ir_bind_decl_group {
         head: task ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])
         rest := ir_bind_decl_threads(functions, decls, symbols, starts, ends, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         compiler_transfer_rows<IRBindDeclPart>(out, rest)
     }
     out
@@ -1560,7 +1560,7 @@ ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], interner: Inter
     task.group ir_body_scan_threads {
         head: task ir_body_scan_range(functions, check_boxed, interner, bounds[part], bounds[part + 1])
         rest := ir_body_scan_parts(functions, check_boxed, interner, bounds, part + 1)
-        first: head.join() ?? panic(compiler_threads_failure_text(err))
+        first: compiler_threads_joined(head)
         parts.push(first)
         loop row in rest.move() -> parts.push(row)
     }
@@ -3989,7 +3989,7 @@ ir_recursion_scan_ranges: fn(functions: [IRFunction], bounds: [Int], count: Int,
     task.group ir_recursion_scan_threads {
         head: task ir_recursion_scan_range(functions, bounds[at], end, count)
         rest: ir_recursion_scan_ranges(functions, bounds, count, at + 1)
-        scans.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        scans.push(compiler_threads_joined(head))
         loop item in rest -> scans.push(item)
     }
     scans
@@ -4023,7 +4023,7 @@ ir_recursion_walks: fn(count: Int, recursive: [Bool], parts: ^^[IRRecursionPart]
     task.group ir_recursion_threads {
         head: task ir_recursion_part(count, recursive, last.move())
         done = ir_recursion_walks(count, recursive, rest.move())
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
     }
     done
 }

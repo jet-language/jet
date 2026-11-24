@@ -49,7 +49,7 @@
 // Selection reads every operand of an instruction before it writes the
 // instruction's result (the builder already emits `add s <- s, one`), so a
 // pass may make a result slot equal to an operand slot.
-use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
+use jet_foundation.[CompilerThreads, Interner, NameTable, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_heaviest_first, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set, name_column_value]
 
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
@@ -574,7 +574,7 @@ ir_opt_bodies_part_threads: fn(view: IRModule, parts: ^[[IRFunction]], work: IRO
             ir_opt_bodies_part_run(view, head_rows, work, options, lint, pass)
         }
         rest: ir_opt_bodies_part_threads(view, parts, work, options, lint, pass, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -599,7 +599,7 @@ ir_opt_body_claimers: fn(view: IRModule, claims: IROptClaims, work: IROptBodyWor
     task.group ir_opt_body_threads {
         head: task ir_opt_body_claimed(view, claims, work, options, lint, pass)
         parts = ir_opt_body_claimers(view, claims, work, options, lint, pass, tasks - 1)
-        part: head.join() ?? panic(compiler_threads_failure_text(err))
+        part: compiler_threads_joined(head)
         parts.push(part)
     }
     parts

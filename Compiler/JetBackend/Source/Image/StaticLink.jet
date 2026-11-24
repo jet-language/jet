@@ -59,7 +59,7 @@
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/Research/jet-backend-design-2026-10-01.md.
 use {
-    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized]
+    jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, name_count, name_find, name_index, name_intern, name_table, name_table_sized]
     link_crypto: core.crypto
     link_hex: core.encoding.hex
 }
@@ -3328,7 +3328,7 @@ link_emit_slice_jobs: fn(c: LinkContext, slices: [LinkSectionSlice], at: Int) ->
     task.group link_slice_threads {
         head: task link_emit_slice_one(c, slices[at])
         rest: link_emit_slice_jobs(c, slices, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -3433,7 +3433,7 @@ link_emit_parts: fn(inputs: Shared<LinkEmitInputs>, parts: [Shared<LinkEmitPart>
     task.group link_emit_threads {
         head: task link_emit_part(inputs, parts[from])
         built = link_emit_parts(inputs, parts, from + 1)
-        built += head.join() ?? panic(compiler_threads_failure_text(err))
+        built += compiler_threads_joined(head)
     }
     built
 }
@@ -3641,7 +3641,7 @@ link_local_syms_parts: fn(c: LinkContext, class_headers: [Int], obj: Int, bounds
     task.group link_local_sym_threads {
         head: task link_local_syms_range(c, class_headers, obj, bounds[at], bounds[at + 1])
         rest: link_local_syms_parts(c, class_headers, obj, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -3903,7 +3903,7 @@ link_crc32_parts: fn(bytes: [U8], workers: Int, part: Int) -> [Int] Never! {
     task.group link_crc32_threads {
         head: task link_crc32_range(bytes, workers, part)
         rest: link_crc32_parts(bytes, workers, part + 1)
-        crcs.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        crcs.push(compiler_threads_joined(head))
         loop crc in rest -> crcs.push(crc)
     }
     crcs
@@ -4021,7 +4021,7 @@ link_build_id_digests: fn(image: [U8], side: [U8]) -> [U8] Never! {
         task.group link_build_id_sha {
             t_side: task link_sha256_whole(side)
             digests = link_sha256_whole(image)
-            digests.extend(t_side.join() ?? panic(compiler_threads_failure_text(err)))
+            digests.extend(compiler_threads_joined(t_side))
         }
         return digests
     }

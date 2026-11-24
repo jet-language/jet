@@ -29,7 +29,7 @@ use jet_foundation.[
     module_is_core,
     CompilerThreads,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     NameTable,
     name_count,
@@ -259,7 +259,7 @@ sema_copy_close_parts: fn(graph: SemaRegistrationGraph?, bounds: [Int], at: Int)
     task.group sema_copy_close_group {
         head: task sema_copy_close_range(graph, from, to)
         rest := sema_copy_close_parts(graph, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

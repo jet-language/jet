@@ -77,7 +77,7 @@ use jet_foundation.[
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_beside,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_limit,
     decl_table_find,
     decl_table_key,
@@ -843,7 +843,7 @@ sema_core_bodies_ahead_stream: fn(graph: SemaRegistrationGraph, hooks: SemaRegis
         task.group sema_core_bodies_ahead_last {
             last: task sema_core_bodies_ahead_decoder(graph, taken.move())
             sema_core_bodies_ahead_feed(hooks, found.move(), feed.move())
-            thread: last.join() ?? panic(compiler_threads_failure_text(err))
+            thread: compiler_threads_joined(last)
             loop entry in thread.move() -> decoded.push(entry)
         }
         return
@@ -851,7 +851,7 @@ sema_core_bodies_ahead_stream: fn(graph: SemaRegistrationGraph, hooks: SemaRegis
     task.group sema_core_bodies_ahead_threads {
         head: task sema_core_bodies_ahead_decoder(graph, taken.copy())
         sema_core_bodies_ahead_stream(graph, hooks, found.move(), feed.move(), taken.move(), decoders - 1, decoded)
-        thread: head.join() ?? panic(compiler_threads_failure_text(err))
+        thread: compiler_threads_joined(head)
         loop entry in thread.move() -> decoded.push(entry)
     }
 }

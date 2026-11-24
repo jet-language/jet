@@ -49,7 +49,7 @@ use jet_foundation.[
     ast_binding,
     ast_empty_lambda_meta,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     expr_span,
     module_is_core,
@@ -915,7 +915,7 @@ sema_app_route_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
     task.group sema_app_route_scan_threads {
         head: task sema_app_route_scan(graph, modules, places, from, to, takes, screen)
         rest: sema_app_route_scans(graph, modules, places, bounds, at + 1, takes, screen)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

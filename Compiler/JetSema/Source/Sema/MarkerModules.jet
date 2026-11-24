@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, CORE_FORMAT_NAMES, CompilerThreads, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, registration_marker_rule, registration_marker_rules, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, CORE_FORMAT_NAMES, CompilerThreads, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, registration_marker_rule, registration_marker_rules, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -506,7 +506,7 @@ sema_marker_module_bindings_parts: fn(inputs: [SemaRegistrationModuleInput], inp
     task.group sema_marker_bindings_group {
         head: task sema_marker_module_bindings_range(inputs, input_by_id, edges, from, to)
         rest := sema_marker_module_bindings_parts(inputs, input_by_id, edges, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
@@ -750,7 +750,7 @@ sema_marker_module_check_parts: fn(graph: SemaRegistrationGraph, applied: TAppli
     task.group sema_marker_check_group {
         head: task sema_marker_module_check_range(graph, applied, catalog, from, to)
         rest := sema_marker_module_check_parts(graph, applied, catalog, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

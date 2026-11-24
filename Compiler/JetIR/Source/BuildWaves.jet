@@ -8,7 +8,7 @@
 // content and numbers every row by first use in a walk from the jobs taken in
 // key order, so the module is the same whichever thread built a job and in
 // whatever order the jobs were built.
-use jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, name_column, name_column_set, name_column_table, name_column_value, symbol_table]
+use jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_take_rows, compiler_threads_failure_text, compiler_threads_joined, name_column, name_column_set, name_column_table, name_column_value, symbol_table]
 
 // Building one checked function's body costs about this on one thread, so the
 // build admits threads by x64 selection admission (ir_x64_admit) with each
@@ -227,11 +227,11 @@ ir_build_waves_parted: fn(program: ^^IRProgram, roots: ^^[IRWaveJob], entry: Boo
             d3: task ^^q2 { q2.len() }
             d4: task ^^q3 { q3.len() }
             result_box.push(ir_build_waves_finish(jobs.move(), built_parts.move(), parts.move(), preps.move(), base_interner.move(), rooted, entry, entry_root.move(), entry_failures.move(), trace_sink))
-            _: d0.join() ?? panic(compiler_threads_failure_text(err))
-            _: d1.join() ?? panic(compiler_threads_failure_text(err))
-            _: d2.join() ?? panic(compiler_threads_failure_text(err))
-            _: d3.join() ?? panic(compiler_threads_failure_text(err))
-            _: d4.join() ?? panic(compiler_threads_failure_text(err))
+            _: compiler_threads_joined(d0)
+            _: compiler_threads_joined(d1)
+            _: compiler_threads_joined(d2)
+            _: compiler_threads_joined(d3)
+            _: compiler_threads_joined(d4)
         }
         finished := result_box.pop() ?? panic("the IR build lost its merged result")
         return IRBuildKept{result: finished.move(), program: kept_program.move()}
@@ -434,7 +434,7 @@ ir_build_parts: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], 
             rings.value.stopped.store(1)
             _: rings.value.rings.add(1)
         }
-        later := rest.join() ?? panic(compiler_threads_failure_text(err))
+        later := compiler_threads_joined(rest)
         ended.built += later.built
         if ended.stop == "" {
             ended.stop = later.stop.move()
@@ -549,7 +549,7 @@ ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], 
     task.group ir_build_threads {
         head: task ir_wave_glues(inputs, slots[at])
         done = ir_waves_glues(inputs, slots, at + 1)
-        done += head.join() ?? panic(compiler_threads_failure_text(err))
+        done += compiler_threads_joined(head)
     }
     done
 }

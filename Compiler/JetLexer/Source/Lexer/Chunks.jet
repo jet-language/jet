@@ -14,7 +14,7 @@ use jet_foundation.[
     Diagnostic,
     Name,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_transfer_rows,
     name_index,
     name_table_merge,
@@ -420,7 +420,7 @@ lexer_lex_chunk_parts: fn(source: [U8], config_surface: Bool, allow_reserved_ide
     task.group lexer_chunk_threads {
         head: task lexer_lex_chunk_part(source, config_surface, allow_reserved_identifiers, parts[from])
         lexed = lexer_lex_chunk_parts(source, config_surface, allow_reserved_identifiers, parts, from + 1)
-        lexed += head.join() ?? panic(compiler_threads_failure_text(err))
+        lexed += compiler_threads_joined(head)
     }
     lexed
 }
@@ -498,7 +498,7 @@ lexer_remap_chunk_parts: fn(parts: [Shared<LexerChunkPart>], from: Int) -> Int {
     task.group lexer_remap_threads {
         head: task lexer_remap_chunk_part(parts[from])
         remapped = lexer_remap_chunk_parts(parts, from + 1)
-        remapped += head.join() ?? panic(compiler_threads_failure_text(err))
+        remapped += compiler_threads_joined(head)
     }
     remapped
 }

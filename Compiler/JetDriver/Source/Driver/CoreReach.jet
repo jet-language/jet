@@ -45,7 +45,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -1767,7 +1767,7 @@ jet_driver_reach_parse_parts: fn(parts: ^[[JetDriverReachSource]]) -> [[JetDrive
     task.group held_parse_threads {
         head: task jet_driver_reach_parse_part(part.move())
         rest := jet_driver_reach_parse_parts(parts)
-        parsed.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        parsed.push(compiler_threads_joined(head))
         loop done in rest.move() -> parsed.push(done)
     }
     parsed
