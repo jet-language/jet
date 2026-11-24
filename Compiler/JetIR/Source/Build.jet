@@ -1259,59 +1259,59 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
     None
 }
 
-// Core's builder intrinsics, by declaration: a call of Core function `name`
-// of `module_name` is its operation, never a call (ir_intrinsic_call).
-// core.math `__to_bits_i64` and `__from_bits_i64` (Core/Math/Math.jet) are
-// the runtime bitcasts' frame-word copy on every tier and in compile-time
-// evaluation, so Core's bit work stays in I64 where Int to_bits would box;
-// their Jet bodies are only what a compiler without this table (the seed)
-// runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout and
-// bulk List moves, volatile and streaming access, the raw pointer steps,
-// and the raw block copy and fill at the call's one type argument, and the
-// raw heap allocation and release, the memory sentry's account of an OS
-// mapping, a region's reserve and release of fresh pages, and
-// `context.allocator`'s take, give and room of a block, which take none.
+// Core's builder intrinsics, by role: a call of the Core function that fills
+// jet_builtins role `role` is its operation, never a call
+// (ir_intrinsic_call). Each such role's name starts with `Inline`. The
+// core.math bit copies (InlineFloatBits, InlineFloatFromBits;
+// Core/Math/Math.jet) are the runtime bitcasts' frame-word copy on every tier
+// and in compile-time evaluation, so Core's bit work stays in I64 where Int
+// to_bits would box; their Jet bodies are only what a compiler without this
+// table (the seed) runs. The core.mem rows (Core/Mem/Mem.jet) are the raw
+// List layout and bulk List moves, volatile and streaming access, the raw
+// pointer steps, and the raw block copy and fill at the call's one type
+// argument, and the raw heap allocation and release, the memory sentry's
+// account of an OS mapping, a region's reserve and release of fresh pages,
+// and `context.allocator`'s take, give and room of a block, which take none.
 IRCoreIntrinsicRow: struct {
-    module_name: String,
-    name: String,
+    role: String,
     intrinsic: IRRuntimeIntrinsic,
 }
 
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
-    IRCoreIntrinsicRow{module_name: "core.math", name: "__to_bits_i64", intrinsic: IRRuntimeIntrinsic.FloatBits},
-    IRCoreIntrinsicRow{module_name: "core.math", name: "__from_bits_i64", intrinsic: IRRuntimeIntrinsic.FloatFromBits},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__type_size", intrinsic: IRRuntimeIntrinsic.TypeSize},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__list_capacity", intrinsic: IRRuntimeIntrinsic.ListCapacity},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__list_reserve_exact", intrinsic: IRRuntimeIntrinsic.ListReserveExact},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "list_append", intrinsic: IRRuntimeIntrinsic.ListAppend},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "list_copy", intrinsic: IRRuntimeIntrinsic.ListCopy},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "volatile_read", intrinsic: IRRuntimeIntrinsic.VolatileRead},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "volatile_write", intrinsic: IRRuntimeIntrinsic.VolatileWrite},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "stream_store", intrinsic: IRRuntimeIntrinsic.StreamStore},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__ptr_offset", intrinsic: IRRuntimeIntrinsic.PtrOffset},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__ptr_byte_offset", intrinsic: IRRuntimeIntrinsic.PtrByteOffset},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__view_from_raw", intrinsic: IRRuntimeIntrinsic.ViewFromRaw},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "copy", intrinsic: IRRuntimeIntrinsic.MemCopy},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "fill", intrinsic: IRRuntimeIntrinsic.MemFill},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "alloc_raw", intrinsic: IRRuntimeIntrinsic.AllocRaw},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "free_raw", intrinsic: IRRuntimeIntrinsic.FreeRaw},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "mapped", intrinsic: IRRuntimeIntrinsic.Mapped},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "unmapping", intrinsic: IRRuntimeIntrinsic.Unmapping},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_reserve", intrinsic: IRRuntimeIntrinsic.RegionReserve},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_release", intrinsic: IRRuntimeIntrinsic.RegionRelease},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_take", intrinsic: IRRuntimeIntrinsic.ContextTake},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_give", intrinsic: IRRuntimeIntrinsic.ContextGive},
-    IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_room", intrinsic: IRRuntimeIntrinsic.ContextRoom},
+    IRCoreIntrinsicRow{role: "InlineFloatBits", intrinsic: IRRuntimeIntrinsic.FloatBits},
+    IRCoreIntrinsicRow{role: "InlineFloatFromBits", intrinsic: IRRuntimeIntrinsic.FloatFromBits},
+    IRCoreIntrinsicRow{role: "InlineTypeSize", intrinsic: IRRuntimeIntrinsic.TypeSize},
+    IRCoreIntrinsicRow{role: "InlineListCapacity", intrinsic: IRRuntimeIntrinsic.ListCapacity},
+    IRCoreIntrinsicRow{role: "InlineListReserveExact", intrinsic: IRRuntimeIntrinsic.ListReserveExact},
+    IRCoreIntrinsicRow{role: "InlineListAppend", intrinsic: IRRuntimeIntrinsic.ListAppend},
+    IRCoreIntrinsicRow{role: "InlineListCopy", intrinsic: IRRuntimeIntrinsic.ListCopy},
+    IRCoreIntrinsicRow{role: "InlineVolatileRead", intrinsic: IRRuntimeIntrinsic.VolatileRead},
+    IRCoreIntrinsicRow{role: "InlineVolatileWrite", intrinsic: IRRuntimeIntrinsic.VolatileWrite},
+    IRCoreIntrinsicRow{role: "InlineStreamStore", intrinsic: IRRuntimeIntrinsic.StreamStore},
+    IRCoreIntrinsicRow{role: "InlinePtrOffset", intrinsic: IRRuntimeIntrinsic.PtrOffset},
+    IRCoreIntrinsicRow{role: "InlinePtrByteOffset", intrinsic: IRRuntimeIntrinsic.PtrByteOffset},
+    IRCoreIntrinsicRow{role: "InlineViewFromRaw", intrinsic: IRRuntimeIntrinsic.ViewFromRaw},
+    IRCoreIntrinsicRow{role: "InlineMemCopy", intrinsic: IRRuntimeIntrinsic.MemCopy},
+    IRCoreIntrinsicRow{role: "InlineMemFill", intrinsic: IRRuntimeIntrinsic.MemFill},
+    IRCoreIntrinsicRow{role: "InlineAllocRaw", intrinsic: IRRuntimeIntrinsic.AllocRaw},
+    IRCoreIntrinsicRow{role: "InlineFreeRaw", intrinsic: IRRuntimeIntrinsic.FreeRaw},
+    IRCoreIntrinsicRow{role: "InlineMapped", intrinsic: IRRuntimeIntrinsic.Mapped},
+    IRCoreIntrinsicRow{role: "InlineUnmapping", intrinsic: IRRuntimeIntrinsic.Unmapping},
+    IRCoreIntrinsicRow{role: "InlineRegionReserve", intrinsic: IRRuntimeIntrinsic.RegionReserve},
+    IRCoreIntrinsicRow{role: "InlineRegionRelease", intrinsic: IRRuntimeIntrinsic.RegionRelease},
+    IRCoreIntrinsicRow{role: "InlineContextTake", intrinsic: IRRuntimeIntrinsic.ContextTake},
+    IRCoreIntrinsicRow{role: "InlineContextGive", intrinsic: IRRuntimeIntrinsic.ContextGive},
+    IRCoreIntrinsicRow{role: "InlineContextRoom", intrinsic: IRRuntimeIntrinsic.ContextRoom},
 }
 
-// The checked functions IR_CORE_INTRINSICS names, by function key, each of
-// its operation's shape.
+// The checked Core functions that fill an IR_CORE_INTRINSICS role, by
+// function key, each of its operation's shape.
 ir_core_intrinsics: fn(functions: [FnBody]) -> IRIntrinsics Never! {
     intrinsics := ir_intrinsics()
     loop function in functions {
-        if function.module_name != "core.mem" && function.module_name != "core.math" -> next
+        if !ir_core_inline_role(function.role) -> next
         loop row in IR_CORE_INTRINSICS {
-            if row.name != function.name || row.module_name != function.module_name -> next
+            if row.role != function.role -> next
             if ir_core_intrinsic_shaped(function, row.intrinsic) {
                 ir_intrinsics_put(intrinsics, function.key, row.intrinsic.copy())
             }

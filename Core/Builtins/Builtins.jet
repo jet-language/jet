@@ -70,11 +70,17 @@
 // (TLSClientConfigDeadline), and `term.take` (TermTake). The `#CLI` entry the
 // compiler generates calls the core.args parser helpers by their roles, each
 // starting with `CLI` (CLISpec through CLIMissing), whose fillers the compiler
-// reads from Core/Args/Args.jet while it builds. A role's name ends
+// reads from Core/Args/Args.jet while it builds. `context.allocator` reads
+// the function that fills ContextAllocator, and a `#Context(allocator: a)`
+// block calls the one that fills AllocatorHandler on `a`. The core.mem and
+// core.math operations the compiler builds inline at each call, never as a
+// call (a raw List's capacity, a pointer step, a block copy, a bit copy and
+// the rest), fill the roles that start with `Inline`. A role's name ends
 // in `Point` exactly when it is a point constructor's, starts with `Decode`
-// exactly when it is a decode helper's, starts with `Measurement` exactly
-// when it is a measurement helper's, and starts with `Tape` exactly when it
-// is an autodiff tape call's.
+// exactly when it is a decode helper's, starts with `Inline` exactly when it
+// is a builder intrinsic's, starts with `Measurement` exactly when it is a
+// measurement helper's, and starts with `Tape` exactly when it is an
+// autodiff tape call's.
 // The compiler runs the one Core function that fills a role and never names
 // it, so the function can be private and keep any name.
 // The rest are filled by a trait of Compiler/Prelude/Traits.jet, whose
@@ -184,11 +190,37 @@ RoleKind: enum {
     PowF32,
     AbsF32,
     AbsI64,
+    InlineFloatBits,
+    InlineFloatFromBits,
     FractionFromParts,
     FractionDiv,
     FractionIsZero,
     UnitConversionExact,
     UnitConversionRounded,
+    InlineVolatileRead,
+    InlineVolatileWrite,
+    InlineMemCopy,
+    InlineMemFill,
+    InlineListAppend,
+    InlineListCopy,
+    InlineAllocRaw,
+    InlineFreeRaw,
+    InlineMapped,
+    InlineUnmapping,
+    InlineViewFromRaw,
+    InlineStreamStore,
+    InlineTypeSize,
+    InlineListCapacity,
+    InlineListReserveExact,
+    InlinePtrOffset,
+    InlinePtrByteOffset,
+    InlineRegionReserve,
+    InlineRegionRelease,
+    AllocatorHandler,
+    InlineContextTake,
+    InlineContextGive,
+    InlineContextRoom,
+    ContextAllocator,
     UnixConnect,
     UnixConnectDeadline,
     TLSClientStream,

@@ -974,7 +974,7 @@ core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFi
 // What is wrong with the core.mem gate tiers against the checker, or "". The
 // checker asks for an enclosing `#Unsafe("reason")` at a call exactly when
 // the called declaration carries `#Unsafe("…")`, so the items the map tiers
-// Audit are exactly core.mem's `#Unsafe` functions.
+// Audit are exactly core.mem's `#Unsafe` functions but its reserved `__` ones.
 core_decl_mem_tier_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], sources: [CoreDeclarationFile]) -> String CoreDeclarationError! {
     body: core_decl_mem_tiers_body(syntax) ?? return Err(err)
     audit_entries: loop entry in body.split("{{field_0:") if entry.find("CoreMemGate.Audit") >= 0 -> entry
@@ -999,6 +999,9 @@ core_decl_mem_tier_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarat
         }
         written: "{attributes}{foundation_byte_text(line.bytes(), 0, core_decl_attributes_end(line))}"
         attributes = ""
+        // A reserved `__` function is Core's own, never a core.mem item, so
+        // it takes no tier; the checker still asks for `#Unsafe` at its calls.
+        if name.starts_with("__") -> next
         if written.find("#Unsafe(\"") >= 0 || (written.find("#[") >= 0 && written.find("Unsafe(\"") >= 0) {
             marked.push(name)
         }

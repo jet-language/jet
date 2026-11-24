@@ -11052,14 +11052,20 @@ sema_stmt_context_user_allocator: fn(ty: Type, environment: SemaScopeEnvironment
 }
 
 // A `#Context(allocator: a)` block over a user allocator: the guard's value
-// is core.mem's `__allocator_handler(a)`, the function the runtime calls for
-// each allocation and release inside the block (JetRuntime Alloc.jet
-// alloc_user_call). It lends `a` as `^`, and the block keeps `a` in place
-// until it ends (E0204, Ownership/Checks.jet SemaOwnershipBlockAllocator).
+// is the call, on `a`, of the core.mem function that fills the
+// AllocatorHandler role: the function the runtime calls for each allocation
+// and release inside the block (JetRuntime Alloc.jet alloc_user_call). It
+// lends `a` as `^`, and the block keeps `a` in place until it ends (E0204,
+// Ownership/Checks.jet SemaOwnershipBlockAllocator).
 sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
-    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? return None
-    target: sema_call_core_source_target(environment, program, identity, "__allocator_handler", [Type]{ty}, field.span, true, diagnostics) ?? {
-        diagnostics.push(sema_error("E0003", field.span, "core.mem's allocator handler is missing", "a `#Context(allocator:)` block over a user allocator calls core.mem's `__allocator_handler`", "load the registered Core source module"))
+    if sema_call_core_module_identity(environment, program, "core.mem") == None -> return None
+    graph: program.registration_graph ?? return None
+    filler: sema_core_role_function(graph, "AllocatorHandler") ?? {
+        diagnostics.push(sema_missing_core_role("AllocatorHandler", field.span))
+        return None
+    }
+    target: sema_call_core_source_target(environment, program, filler.module_identity, filler.name, [Type]{ty}, field.span, true, diagnostics) ?? {
+        diagnostics.push(sema_error("E0003", field.span, "core.mem's allocator handler is missing", "a `#Context(allocator:)` block over a user allocator calls the core.mem function that fills the AllocatorHandler role", "load the registered Core source module"))
         return None
     }
     args := [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}

@@ -70,12 +70,18 @@ ir_codec_decode_roles: fn() -> [String] Never! {
 // `Decode` exactly when it is a decode helper's.
 ir_codec_decode_role: fn(role: String) -> Bool Never! { role.starts_with("Decode") }
 
+// Whether `role` is a builder intrinsic's (Build.jet IR_CORE_INTRINSICS): a
+// role's name starts with `Inline` exactly when lowering builds each call of
+// its filler as the operation itself.
+ir_core_inline_role: fn(role: String) -> Bool Never! { role.starts_with("Inline") }
+
 // A Core function that fills a jet_builtins role (FnBody.role): lowering
 // finds it by that role, with no keyed call in a kept caller's checked body.
-// A decode helper's role is the exception: only a decode site reaches it
-// (ir_core_reach_expr_keys).
+// A decode helper's role is one exception: only a decode site reaches it
+// (ir_core_reach_expr_keys). A builder intrinsic's is the other: its callers
+// name it by key, so it is kept as any function is, when a kept body names it.
 ir_core_role_target: fn(function: FnBody) -> Bool Never! {
-    function.role != "" && !ir_codec_decode_role(function.role) && module_is_core(function.module_identity)
+    function.role != "" && !ir_codec_decode_role(function.role) && !ir_core_inline_role(function.role) && module_is_core(function.module_identity)
 }
 
 // The jet_builtins role (`RoleKind`) of the Core function that reads one

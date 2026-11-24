@@ -170,12 +170,17 @@ rmlr_findings: fn(found: [String:Int]) -> [String] Never! {
     guards_enter_root()
     build: rmlr_files.read("{RMLR_SOURCE}Build.jet") ?? panic("read Build.jet: {err}")
     kernel: rmlr_files.read("Core/Mem/Mem.jet") ?? panic("read Core/Mem/Mem.jet: {err}")
+    math: rmlr_files.read("Core/Math/Math.jet") ?? panic("read Core/Math/Math.jet: {err}")
     rows := 0
     loop line in build.split("\n") {
-        if !line.contains("IRCoreIntrinsicRow{{module_name: \"core.mem\", name: \"") -> next
-        rows += 1
-        name: line.split("name: \"").to_list()[2].split("\"").to_list()[0].to_string()
-        assert(kernel.contains("\n{name}: fn") || kernel.contains(" {name}: fn"), "IR_CORE_INTRINSICS row `{name}` lowers no primitive of Core/Mem/Mem.jet")
+        if !line.contains("IRCoreIntrinsicRow{{role: \"") -> next
+        role: line.split("role: \"").to_list()[1].split("\"").to_list()[0].to_string()
+        marker: "Builtin.Role(.{role})"
+        if kernel.contains(marker) {
+            rows += 1
+            next
+        }
+        assert(math.contains(marker), "IR_CORE_INTRINSICS row `{role}` lowers no primitive of Core/Mem/Mem.jet or Core/Math/Math.jet")
     }
     assert(rows >= 10, "found only {rows} core.mem intrinsic rows")
 }

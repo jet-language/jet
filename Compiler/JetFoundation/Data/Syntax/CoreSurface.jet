@@ -854,7 +854,8 @@ CoreMemGate: enum {
 
 /// S58: one tier for every current `core.mem` module item. The compiler build
 /// refuses an export missing here, and the core-declarations guard requires
-/// the Audit items to be exactly core.mem's `#Unsafe("…")` functions.
+/// the Audit items to be exactly core.mem's `#Unsafe("…")` functions but its
+/// reserved `__` ones, which are Core's own and no module item.
 CORE_MEM_GATE_TIERS: [{field_0: String, field_1: CoreMemGate}]{
     {field_0: TYPE_PTR, field_1: CoreMemGate.Import},
     {field_0: MEM_FROM_ADDR, field_1: CoreMemGate.Audit},
@@ -869,21 +870,9 @@ CORE_MEM_GATE_TIERS: [{field_0: String, field_1: CoreMemGate}]{
     {field_0: MEM_MAPPED, field_1: CoreMemGate.Audit},
     {field_0: MEM_UNMAPPING, field_1: CoreMemGate.Audit},
     {field_0: MEM_WINDOW, field_1: CoreMemGate.Audit},
-    {field_0: "__view_from_raw", field_1: CoreMemGate.Audit},
     {field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import},
     {field_0: MEM_PIN, field_1: CoreMemGate.Import},
     {field_0: MEM_STREAM_STORE, field_1: CoreMemGate.Import},
-    {field_0: "__type_size", field_1: CoreMemGate.Import},
-    {field_0: "__list_capacity", field_1: CoreMemGate.Import},
-    {field_0: "__list_reserve_exact", field_1: CoreMemGate.Import},
-    {field_0: "__ptr_offset", field_1: CoreMemGate.Audit},
-    {field_0: "__ptr_byte_offset", field_1: CoreMemGate.Audit},
-    {field_0: "__region_reserve", field_1: CoreMemGate.Audit},
-    {field_0: "__region_release", field_1: CoreMemGate.Audit},
-    {field_0: "__context_take", field_1: CoreMemGate.Import},
-    {field_0: "__context_give", field_1: CoreMemGate.Import},
-    {field_0: "__context_room", field_1: CoreMemGate.Import},
-    {field_0: "__context_allocator", field_1: CoreMemGate.Import},
     {field_0: TYPE_PIN, field_1: CoreMemGate.Import},
     {field_0: MEM_ARENA, field_1: CoreMemGate.Import},
     {field_0: MEM_BUMP, field_1: CoreMemGate.Import},
