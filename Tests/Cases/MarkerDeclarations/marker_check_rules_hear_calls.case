@@ -59,16 +59,16 @@ stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers" # at `2.5`
 stderr: count "Error: " = 1 # in place of the type error
 step: jet run -O0 tiers_rejected/main.jet
 exit: 1
-stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
-stderr: count "Error: " = 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers" # a run hears the rule at O0
+stderr: count "Error: " = 1 # in place of the type error
 step: jet run -O2 tiers_rejected/main.jet
 exit: 1
-stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
-stderr: count "Error: " = 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers" # and at O2
+stderr: count "Error: " = 1 # in place of the type error
 step: jet build -O1 tiers_rejected/main.jet
 exit: 1
-stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers"
-stderr: count "Error: " = 1
+stderr: ~ "Error: tiers.Fraction: `scale` scales whole numbers" # a build hears it too
+stderr: count "Error: " = 1 # in place of the type error
 step: jet check values/main.jet
 exit: 0 # each known argument is heard as the Dyn its `encode()` returns
 step: jet run -O0 values/main.jet
