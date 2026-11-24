@@ -8,7 +8,7 @@
 // navigation and edits come back in host bytes, and editors count UTF-16
 // units from them.
 use {
-    jet_foundation.[Span, TextEdit, diagnostic_utf8_width]
+    jet_foundation.[Diagnostic, DiagnosticLabel, Span, TextEdit, diagnostic_utf8_width, diagnostic_without_fix]
 }
 
 JetDriverSourceDocument: struct {
@@ -119,6 +119,76 @@ jet_driver_host_edit: fn(document: JetDriverSourceDocument, edit: TextEdit) -> T
         .Mapped(span) -> Val(TextEdit{span: span, new_text: edit.new_text, path: edit.path})
         .Generated -> None
     }
+}
+
+// A diagnostic of a document's Jet source placed in its host's text, with
+// the host revision the Jet source was generated from (None for a whole
+// document). `generated` when its span lies in Jet text the host does not
+// hold: the span then stays in Jet bytes, so a reader shows it as generated
+// instead of placing it in the host.
+JetDriverHostDiagnostic: struct {
+    revision: Int?,
+    generated: Bool,
+    diagnostic: Diagnostic,
+}
+
+// `diagnostic`, presented in `document`'s Jet source (its span, labels and
+// edits in that file's bytes), placed in the host's text. Its fix moves as a
+// whole: when an edit reaches generated text the host has no place for it,
+// so the diagnostic keeps no fix. A label or a cause in generated text has no
+// host place either, so the label is left out and the cause keeps no span.
+// An edit or a cause that names another file is not this document's to move.
+jet_driver_host_diagnostic: fn(document: JetDriverSourceDocument, diagnostic: &&Diagnostic) -> JetDriverHostDiagnostic Never! {
+    host: document.host ?? return JetDriverHostDiagnostic{revision: None, generated: false, diagnostic: diagnostic}
+    placed := diagnostic
+    generated := false
+    if placed.span == .Val(span) {
+        if jet_driver_host_span(document, span) == {
+            .Mapped(moved) -> placed.span = Val(moved)
+            .Generated -> generated = true
+        }
+    }
+    fixed := true
+    if placed.edit == .Val(edit) {
+        if jet_driver_host_document_edit(document, edit) == .Val(moved) {
+            placed.edit = Val(moved)
+        } else { fixed = false }
+    }
+    loop index in 0..<placed.fix_edits.len() {
+        if jet_driver_host_document_edit(document, placed.fix_edits[index]) == .Val(moved) {
+            placed.fix_edits[index] = moved
+        } else { fixed = false }
+    }
+    if !fixed -> placed = diagnostic_without_fix(placed)
+    labels := [DiagnosticLabel]{}
+    loop label in placed.labels.move() {
+        if jet_driver_host_span(document, label.span) == .Mapped(moved) {
+            labels.push(DiagnosticLabel{span: moved, message: label.message})
+        }
+    }
+    placed.labels = labels
+    loop index in 0..<placed.cause.len() {
+        elsewhere := false
+        if placed.cause[index].origin == .Val(cause_origin) {
+            elsewhere = true
+            if placed.origin == .Val(origin) -> elsewhere = origin.path != cause_origin.path
+        }
+        if elsewhere -> next
+        span: placed.cause[index].span ?? next
+        placed.cause[index].span = if jet_driver_host_span(document, span) == {
+            .Mapped(moved) -> Val(moved)
+            .Generated -> None
+        }
+    }
+    JetDriverHostDiagnostic{revision: Val(host.revision), generated: generated, diagnostic: placed}
+}
+
+// `edit`, from a diagnostic of `document`, in the host's text: an edit with
+// no path or with this document's path moves through the map; one that names
+// another file stays as it is.
+jet_driver_host_document_edit: fn(document: JetDriverSourceDocument, edit: TextEdit) -> TextEdit? Never! {
+    if edit.path == .Val(path) && path != document.path -> return Val(TextEdit{span: edit.span, new_text: edit.new_text, path: edit.path})
+    jet_driver_host_edit(document, edit)
 }
 
 // The UTF-16 code units of `text` before byte `offset`: where an editor that

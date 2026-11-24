@@ -6,13 +6,14 @@ use {
         JetDriverHostSpan,
         JetDriverSourceDocument,
         JetDriverSourceMapping,
+        jet_driver_host_diagnostic,
         jet_driver_host_edit,
         jet_driver_host_span,
         jet_driver_jet_offset,
         jet_driver_source_document_problem,
         jet_driver_utf16_offset,
     ]
-    jet_foundation.[Span, TextEdit]
+    jet_foundation.[Diagnostic, DiagnosticCause, DiagnosticLabel, Span, TextEdit]
 }
 
 source_documents_require: fn(ok: Bool, detail: String) Never! {
@@ -120,4 +121,55 @@ source_documents_two_mappings: fn() -> [JetDriverSourceMapping] Never! {
     whole: JetDriverSourceDocument{path: "main.jet", source: "run: fn() {{}}\n"}
     source_documents_require(jet_driver_source_document_problem(whole) == None, "a whole document has nothing to refuse")
     source_documents_require(jet_driver_host_span(whole, Span{start: 4, end: 6}) == JetDriverHostSpan.Mapped(Span{start: 4, end: 6}), "a whole document maps a span to itself")
+}
+
+// Region 2's `limit` (Jet 39..44) is reported, with a label on region 1's
+// `limit` (Jet 0..5), a label on the generated line (Jet 10..20), a cause on
+// region 1's `3` (Jet 7..8) and a fix that rewrites that `3`.
+source_documents_reported: fn(fix_edits: [TextEdit]) -> Diagnostic Never! {
+    Diagnostic{
+        severity: 1,
+        code: "Jet.UnknownName",
+        span: Val(Span{start: 39, end: 44}),
+        cause: [DiagnosticCause]{DiagnosticCause{code: "Jet.UnknownName", span: Val(Span{start: 7, end: 8})}},
+        labels: [DiagnosticLabel]{
+            DiagnosticLabel{span: Span{start: 0, end: 5}, message: "declared here"},
+            DiagnosticLabel{span: Span{start: 10, end: 20}, message: "generated"},
+        },
+        what: "what",
+        why: "why",
+        fix: "fix",
+        edit: Val(TextEdit{span: Span{start: 7, end: 8}, new_text: "4"}),
+        fix_edits: fix_edits,
+    }
+}
+
+#Test("a region's diagnostic comes back in host bytes with the host revision") {
+    document: source_documents_two_regions(source_documents_two_mappings())
+    placed: jet_driver_host_diagnostic(document, source_documents_reported([TextEdit]{TextEdit{span: Span{start: 0, end: 5}, new_text: "most"}}))
+    source_documents_require(placed.revision == Val(2), "the result carries host revision 2")
+    source_documents_require(!placed.generated, "region 2's `limit` is host text")
+    source_documents_require(placed.diagnostic.span == Val(Span{start: 94, end: 99}), "the span is host bytes 94..99")
+    source_documents_require(placed.diagnostic.labels.len() == 1, "the label on generated text is left out")
+    source_documents_require(placed.diagnostic.labels[0].span == Span{start: 29, end: 34} && placed.diagnostic.labels[0].message == "declared here", "the region 1 label is host bytes 29..34")
+    source_documents_require(placed.diagnostic.cause[0].span == Val(Span{start: 36, end: 37}), "the cause is host bytes 36..37")
+    if placed.diagnostic.edit == {
+        .Val(edit) -> source_documents_require(edit.span == Span{start: 36, end: 37} && edit.new_text == "4", "the fix lands on host bytes 36..37")
+        .None -> source_documents_require(false, "the fix maps")
+    }
+    source_documents_require(placed.diagnostic.fix_edits.len() == 1 && placed.diagnostic.fix_edits[0].span == Span{start: 29, end: 34}, "the fix's other edit is host bytes 29..34")
+}
+
+#Test("a fix that reaches generated text is dropped whole and a generated span stays in Jet bytes") {
+    document: source_documents_two_regions(source_documents_two_mappings())
+    refused: jet_driver_host_diagnostic(document, source_documents_reported([TextEdit]{TextEdit{span: Span{start: 8, end: 23}, new_text: ""}}))
+    source_documents_require(refused.diagnostic.edit == None && refused.diagnostic.fix_edits.len() == 0, "no part of a fix that reaches generated text is kept")
+    source_documents_require(refused.diagnostic.span == Val(Span{start: 94, end: 99}), "the span still maps")
+    generated := source_documents_reported([TextEdit]{})
+    generated.span = Val(Span{start: 12, end: 20})
+    placed: jet_driver_host_diagnostic(document, generated)
+    source_documents_require(placed.generated, "a span in the generated line is labeled generated")
+    source_documents_require(placed.diagnostic.span == Val(Span{start: 12, end: 20}), "a generated span stays in Jet bytes")
+    whole: jet_driver_host_diagnostic(JetDriverSourceDocument{path: "main.jet", source: SOURCE_DOCUMENTS_TWO_REGIONS_JET}, source_documents_reported([TextEdit]{}))
+    source_documents_require(whole.revision == None && !whole.generated && whole.diagnostic.span == Val(Span{start: 39, end: 44}), "a whole document's diagnostic is its own, with no host revision")
 }
