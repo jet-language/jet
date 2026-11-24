@@ -1,0 +1,31 @@
+// The Jet repository's path case rule (jet_foundation's PathCase.jet) on a
+// check: each folder or file name of the entry root's `.jet` files that
+// breaks it is reported once (Jet.AcronymPathCase), on the first checked file
+// it covers. Outside a repository the rule finds nothing.
+use {
+    jet_driver.[JetDriverAuthorizedSourceSnapshot]
+    jet_foundation.[Diagnostic, diagnostic_with_source_path, path_case_diagnostic, path_case_disk_findings]
+}
+
+jet_cli_path_case_diagnostics: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> [Diagnostic] Never! {
+    found := [Diagnostic]{}
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        checked := [String]{}
+        owners := [String]{}
+        loop file in root.files {
+            if !file.path.ends_with(".jet") -> next
+            checked.push("{root.canonical_path}/{file.relative_path}")
+            owners.push(file.path.copy())
+        }
+        loop placed in path_case_disk_findings(checked) {
+            loop (index, absolute) in checked {
+                if absolute == placed.file {
+                    found.push(diagnostic_with_source_path(path_case_diagnostic(placed.finding), owners[index], 0))
+                    break
+                }
+            }
+        }
+    }
+    found
+}

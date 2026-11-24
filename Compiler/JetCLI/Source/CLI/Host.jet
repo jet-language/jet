@@ -292,7 +292,8 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // process ends (CheckReceipt.jet). `profile` is the `--profile` the compile
 // selects ("" for the default); the machine and verbose outcomes name it.
 // `style` (`jet check --style`) adds the opt-in style checks' findings
-// (StyleCheck.jet) to the compile's own. `target_machine` is the machine
+// (StyleCheck.jet) to the compile's own. In the Jet repository the path case
+// rule's findings (PathCase.jet) follow. `target_machine` is the machine
 // without an OS the program is checked for ("" for the host).
 jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}, target_machine: String{""}, prior_exit: Int{JET_DRIVER_EXIT_OK}, release_state_aside: Bool{false}) -> JetDriverVerbOutput {
     watch: cli_time.start()
@@ -322,6 +323,9 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
                 loop finding in jet_driver_present_diagnostics(jet_cli_style_diagnostics(snapshot), snapshot, result.generated_source_files) {
                     diagnostics.push(finding)
                 }
+            }
+            loop finding in jet_driver_present_diagnostics(jet_cli_path_case_diagnostics(snapshot), snapshot, result.generated_source_files) {
+                diagnostics.push(finding)
             }
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
                 if jet_cli_rust_foreign_check(result.rust_foreign, result.foreign_link) == .Err(error) {

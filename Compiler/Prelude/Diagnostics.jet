@@ -8654,6 +8654,28 @@ DetachedImpl: struct {
     }
 }
 
+AcronymPathCase: struct {
+    path: String,
+    problem: String,
+    spelled: String,
+
+    impl Diagnostic {
+        code: "L0536",
+        severity: .Lint,
+        lint_name: "acronym_path_case",
+        stage: [.Tooling],
+        meaning: "A folder or file name in the Jet repository is not TitleCase with its acronyms in capitals",
+
+        what: fn(self) -> String { "`{self.path}`: {self.problem}" }
+
+        why: fn(self) -> String {
+            "Every folder and code file in the Jet repository is TitleCase, and a lexicon acronym keeps its capitals, so one name has one spelling"
+        }
+
+        fix: fn(self) -> String { "Rename it to `{self.spelled}`" }
+    }
+}
+
 SoftPublicUse: struct {
     name: String,
 

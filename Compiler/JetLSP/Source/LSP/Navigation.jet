@@ -422,9 +422,7 @@ lsp_valid_identifier: fn(name: String) -> Bool Never! {
 }
 
 // The rename's edits, one file each, bound to the document versions the check
-// read, and its semantic operation: the checked identity it renames. A program
-// with errors may hold a use the check could not resolve, so its rename is
-// refused rather than offered as complete.
+// read, and its semantic operation: the checked identity it renames.
 lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     new_name: lsp_text_member(params ?? return lsp_response(id, "null"), "newName") ?? return lsp_error_response(id, -32602, "rename needs a string newName")
@@ -438,22 +436,40 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         }
     }
     index: at.view.checked.index ?? return lsp_response(id, "null")
-    occurrences: lsp_open_occurrences(server, at.view, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true)
+    edit: if lsp_rename_edit(server, at.view, target.def, new_name) == {
+        .Ok(members) -> members
+        .Err(problem) -> {
+            return lsp_error_response(id, problem.code, problem.message)
+        }
+    }
+    lsp_response(id, "{{{edit},\"semantic_ops\":[{lsp_rename_semantic_op(index, target.def, new_name)}]}}")
+}
+
+// The members of the workspace edit that renames `def` to `new_name` at every
+// occurrence the open documents' checks found, one file each, bound to the
+// document versions the checks read. A program with errors may hold a use the
+// check could not resolve, so the rename is refused rather than offered as
+// complete; `tolerated` names a code whose errors resolve every name as
+// written (a casing error never changes what a name means).
+lsp_rename_edit: fn(server: LSPServer, view: LSPView, def: SemDef, new_name: String, tolerated: String{""}) -> String LSPRPCError! {
+    occurrences: lsp_open_occurrences(server, view, LSPTarget{module_path: def.module_path, span: def.def_span}, declaration: true, tolerated: tolerated)
     errors := occurrences.errors
-    loop diagnostic in at.view.checked.diagnostics {
-        if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> errors += 1
+    loop diagnostic in view.checked.diagnostics {
+        if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) {
+            errors += 1
+        }
     }
     if errors > 0 {
         counted: if errors == 1 -> "1 error" else -> "{errors} errors"
-        return lsp_error_response(id, -32803, "the program has {counted}, so the check may have missed a use of `{target.def.name}`; fix them, then rename")
+        return Err(LSPRPCError{code: -32803, message: "the program has {counted}, so the check may have missed a use of `{def.name}`; fix them, then rename"})
     }
     by_uri := [String:[String]]{}
     versions := [String:String]{}
     order := [String]{}
     loop placed in occurrences.placed {
         source: placed.source
-        span: lsp_name_span(source, placed.span, target.def.name)
-        if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != target.def.name {
+        span: lsp_name_span(source, placed.span, def.name)
+        if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != def.name {
             next
         }
         uri: lsp_path_to_uri(placed.path)
@@ -465,7 +481,7 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
             loop (_, doc) in server.diagnostic_state.docs {
                 if !lsp_source_paths_equal(doc.path, placed.path) -> next
                 if doc.text != source {
-                    return lsp_error_response(id, -32801, "`{placed.path}` changed after the check; rename again")
+                    return Err(LSPRPCError{code: -32801, message: "`{placed.path}` changed after the check; rename again"})
                 }
                 version = "{doc.version}"
             }
@@ -481,8 +497,7 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         edits: by_uri[uri].join(",")
         files.push(if server.document_changes -> "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{versions[uri]}}},\"edits\":[{edits}]}}" else -> "{foundation_json_quote(uri)}:[{edits}]")
     }
-    edit: if server.document_changes -> "\"documentChanges\":[{files.join(",")}]" else -> "\"changes\":{{{files.join(",")}}}"
-    lsp_response(id, "{{{edit},\"semantic_ops\":[{lsp_rename_semantic_op(index, target.def, new_name)}]}}")
+    Ok(if server.document_changes -> "\"documentChanges\":[{files.join(",")}]" else -> "\"changes\":{{{files.join(",")}}}")
 }
 
 // The rename as a semantic operation, the shape `jet codemod` receipts record:

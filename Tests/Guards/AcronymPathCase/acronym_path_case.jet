@@ -1,0 +1,169 @@
+// Path case over the whole tracked tree: every tracked folder is TitleCase,
+// and every PascalCase word in a folder or file name writes a lexicon acronym
+// in its capitals. The rule, its kept classes and the lexicon it reads live in
+// jet_foundation's PathCase.jet, which `jet check` and the language server
+// also report from (Jet.AcronymPathCase); this guard gathers the tracked paths
+// and the cases' `fixture:` lines from git and runs the same rule over them.
+use {
+    apc_files: core.files
+    apc_process: core.process
+    guards.[guards_enter_root]
+    jet_foundation.[PATH_CASE_CLASSES, PATH_CASE_DATA, PATH_CASE_KEPT_TREES, PATH_CASE_LEXICON, PATH_CASE_NAMED, PATH_CASE_TOOL_LAYOUTS, PATH_CASE_TOOL_NAMES, path_case_class_keeps, path_case_depth, path_case_disk_findings, path_case_facts, path_case_findings, path_case_fixture_root, path_case_folders, path_case_repository, path_case_title, path_case_under]
+}
+
+path_case_tracked: fn() -> [String] {
+    listed: apc_process.cmd([String]{"git", "-c", "core.quotePath=false", "ls-files"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
+    assert(listed.code == 0, "git ls-files failed: {apc_process.combined_output(listed).trim()}")
+    paths := [String]{}
+    loop line in apc_process.stdout_lines(listed) {
+        if line.len() > 0 -> paths.push(line.copy())
+    }
+    paths
+}
+
+path_case_fixture_roots: fn() -> [String] {
+    listed: apc_process.cmd([String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-E", "-e", "^fixture:", "--", "*.case"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
+    assert(listed.code == 0, "git grep for `fixture:` lines failed: {apc_process.combined_output(listed).trim()}")
+    roots := [String]{}
+    loop line in apc_process.stdout_lines(listed) {
+        if path_case_fixture_root(line) == .Val(root) -> roots.push(root)
+    }
+    roots
+}
+
+// Every tracked folder or file name that breaks the rule, as `path: problem`
+// lines, sorted.
+path_case_report: fn(tracked: [String], fixture_roots: [String]) -> [String] {
+    lines := [String]{}
+    loop finding in path_case_findings(tracked, fixture_roots) {
+        lines.push("{finding.path}: {finding.problem}")
+    }
+    lines.sort()
+    lines
+}
+
+#Test("acronym_path_case: every tracked folder is TitleCase and every name writes acronyms in capitals") {
+    guards_enter_root()
+    findings: path_case_report(path_case_tracked(), path_case_fixture_roots())
+    assert(findings.len() == 0, "{findings.len()} tracked names break the path case rule:\n{findings.join("\n")}")
+}
+
+// `jet check` and the language server read the facts from the folders above
+// each checked file rather than from git; over the tracked tree they must
+// find what the sweep finds. A test project that holds the lexicon's home is
+// a repository of its own and is left to its snapshot.
+#Test("acronym_path_case: the rule on disk, as `jet check` runs it, agrees with the tracked sweep") {
+    guards_enter_root()
+    root: apc_files.cwd() ?? panic("read the working folder: {err}")
+    checked := [String]{}
+    loop path in path_case_tracked() {
+        if !path.ends_with(".jet") -> next
+        absolute: "{root}/{path}"
+        if (path_case_repository(absolute) ?? "") == root -> checked.push(absolute)
+    }
+    assert(checked.len() > 1000, "the on-disk rule found the repository above only {checked.len()} tracked `.jet` files")
+    found := [String]{}
+    loop placed in path_case_disk_findings(checked) {
+        found.push("{placed.finding.path}: {placed.finding.problem}")
+    }
+    assert(found.len() == 0, "{found.len()} names break the rule on disk but not in the tracked sweep:\n{found.join("\n")}")
+}
+
+#Test("acronym_path_case: TitleCase respells words and keeps acronyms, digits and plurals") {
+    lexicon: PATH_CASE_LEXICON
+    assert(lexicon.acronyms.len() > 50 && lexicon.compounds.len() > 0 && lexicon.exceptions.len() > 0, "the acronym lexicon was read: found {lexicon.acronyms.len()} acronyms, {lexicon.compounds.len()} compounds and {lexicon.exceptions.len()} word exceptions")
+    assert_eq(path_case_title("closed_lists"), "ClosedLists")
+    assert_eq(path_case_title("Tls"), "TLS")
+    assert_eq(path_case_title("jet_cli"), "JetCLI")
+    assert_eq(path_case_title("HTTPServer"), "HTTPServer")
+    assert_eq(path_case_title("IDs"), "IDs")
+    assert_eq(path_case_title("macos_ipv6"), "MacOSIPv6")
+    assert_eq(path_case_title("wasm_bindgen"), "WasmBindgen")
+    assert_eq(path_case_title("websocket_corelib"), "WebSocketCoreLib")
+    assert_eq(path_case_title("2393R1"), "2393R1")
+    assert_eq(path_case_title("MuslErrno1_2_5"), "MuslErrno1_2_5")
+    assert_eq(path_case_title("within_100ms"), "Within100ms")
+    assert_eq(path_case_title("Within100ms"), "Within100ms")
+    assert_eq(path_case_title("FixedReturn64k"), "FixedReturn64k")
+}
+
+#Test("acronym_path_case: the rule refuses a lowercase folder and a lowered acronym, and keeps the kept classes") {
+    planted: [String]{
+        "Core/Net/Tls.jet",
+        "Core/Net/TLS.jet",
+        "Tests/cases/Basic.case",
+        "Tools/Thing/node_modules/pkg/Index.js",
+        "Tools/Crate/Cargo.toml",
+        "Tools/Crate/src/main.rs",
+        "Examples/App/geo/module.jet",
+        "Docs/Site/Dist/e/E0001.html",
+        "Tests/Cases/Big.fixture/main.jet",
+        "Tests/Cases/Topic/Case/Input/o1/run.jet",
+        "Tests/Run/Topic/Program/run.jet",
+        "Tests/Run/Topic/Program/inputs/a.txt",
+        "Tests/Guards/closed_lists.jet",
+        "Tests/Guards/closed_lists/baseline.tsv",
+        "Docs/Audits/Raw/2393R1/notes.md",
+        "Jetpack/Provider/Batteries/web/package.jet",
+    }
+    findings: path_case_report(planted, [String]{"Tests/Cases/Topic/Case/Input"})
+    assert(findings.len() == 2, "expected the lowered acronym and the lowercase folder, got:\n{findings.join("\n")}")
+    assert(findings[0].starts_with("Core/Net/Tls.jet:"), "the lowered acronym is reported: {findings[0]}")
+    assert(findings[1].starts_with("Tests/cases:"), "the lowercase folder is reported: {findings[1]}")
+    assert_eq(path_case_fixture_root("Tests/Cases/A/B.case:fixture: \"../Shared/Input\"") ?? "", "Tests/Cases/Shared/Input")
+}
+
+#Test("acronym_path_case: every kept row names a tracked path") {
+    guards_enter_root()
+    tracked: path_case_tracked()
+    facts: path_case_facts(tracked, path_case_fixture_roots())
+    folders: path_case_folders(tracked)
+    loop row in PATH_CASE_TOOL_NAMES {
+        found := false
+        loop folder in folders {
+            if folder == row.pattern || folder.ends_with("/{row.pattern}") {
+                found = true
+                break
+            }
+        }
+        assert(found, "PATH_CASE_TOOL_NAMES names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_DATA {
+        assert(path_case_matches_below(tracked, row.pattern), "PATH_CASE_DATA names no tracked path below it; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_NAMED {
+        assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_NAMED names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_KEPT_TREES {
+        assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_KEPT_TREES names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_TOOL_LAYOUTS {
+        assert(path_case_matches_any(folders, row.pattern), "PATH_CASE_TOOL_LAYOUTS names no tracked folder; delete its row: {row.pattern}")
+    }
+    loop row in PATH_CASE_CLASSES {
+        found := false
+        loop folder in folders {
+            if path_case_class_keeps(row.kind, folder, folder.split("/").to_list(), facts) {
+                found = true
+                break
+            }
+        }
+        assert(found, "PATH_CASE_CLASSES keeps no tracked folder; delete its row: {row.why}")
+    }
+}
+
+path_case_matches_any: fn(paths: [String], pattern: String) -> Bool {
+    loop path in paths {
+        if path_case_under(path, pattern) -> return true
+    }
+    false
+}
+
+path_case_matches_below: fn(paths: [String], pattern: String) -> Bool {
+    loop path in paths {
+        if path_case_under(path, pattern) && path_case_depth(path) > path_case_depth(pattern) {
+            return true
+        }
+    }
+    false
+}

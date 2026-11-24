@@ -200,7 +200,8 @@ LSPPlaced: struct {
 
 // Every occurrence of a declaration across the open documents' checks.
 // `errors` counts the errors of the other checks that found one, since a check
-// with errors may have missed a use.
+// with errors may have missed a use; an error of the `tolerated` code is not
+// counted.
 LSPOpenOccurrences: struct {
     placed: [LSPPlaced],
     errors: Int,
@@ -210,7 +211,7 @@ LSPOpenOccurrences: struct {
 // other open document's check that read the same text of the declaring module.
 // A module that imports the declaring one is checked from its own document,
 // so a search from the declaration reaches it only through that check.
-lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, declaration: Bool{false}) -> LSPOpenOccurrences {
+lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, declaration: Bool{false}, tolerated: String{""}) -> LSPOpenOccurrences {
     found := LSPOpenOccurrences{placed: [LSPPlaced]{}, errors: 0}
     seen := [String:Bool]{}
     _: lsp_place_occurrences(view.checked, target, seen, found, declaration: declaration)
@@ -225,7 +226,7 @@ lsp_open_occurrences: fn(server: LSPServer, view: LSPView, target: LSPTarget, de
             if !lsp_source_paths_equal(module_ref.physical_path, declaring.physical_path) || module_ref.source != declaring.source -> next
             if lsp_place_occurrences(checked, LSPTarget{module_path: module_ref.path, span: target.span}, seen, found, declaration: declaration) {
                 loop diagnostic in checked.diagnostics {
-                    if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> found.errors += 1
+                    if diagnostic.code != tolerated && !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> found.errors += 1
                 }
             }
             break

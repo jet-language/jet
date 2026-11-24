@@ -4,7 +4,7 @@ use {
     core.encoding.[Dyn]
     jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem, jet_driver_tool_stage_plan]
     jet_lexer.[Lexed, lex]
-    jet_foundation.[foundation_json_integer]
+    jet_foundation.[foundation_json_integer, path_case_diagnostic, path_case_disk_findings]
     jet_pkg_model.[pkg_mask_inline_package_source]
 }
 
@@ -39,8 +39,14 @@ LSPServer: struct {
     pull_diagnostics: Bool{false},
 
     // Every open document is overlaid, so a check sees unsaved imports too.
+    // In the Jet repository the document's own path is held to the path case
+    // rule (jet_foundation's PathCase.jet), as `jet check` holds it.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
-        self.checker.check(doc.path, self.overlays())
+        checked := self.checker.check(doc.path, self.overlays())
+        loop placed in path_case_disk_findings([String]{doc.path}) {
+            checked.diagnostics.push(path_case_diagnostic(placed.finding))
+        }
+        checked
     }
 
     // The answer rows of `stage`'s hooks on the document `view` reads: the
