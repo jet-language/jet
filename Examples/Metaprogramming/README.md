@@ -23,6 +23,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [HostAndTargetFacts](BuildTime/HostAndTargetFacts.jet) — `#build.host.*` names the machine running the build and `#build.target.*` the machine the build is for.
 - [ProgrammableBuild](BuildTime/ProgrammableBuild/)
 - [TwoTargets](BuildTime/TwoTargets/) — One `build: fn` builds this source twice: `two_targets` for the machine running the build and `two_targets_page` for the web, through a toolchain for the web's triple.
+- [UserBuildHelper](BuildTime/UserBuildHelper/) — The root build hands its `Build` to a helper from a user package, which builds this executable the way core.build's own methods would.
 
 ## Comptime
 

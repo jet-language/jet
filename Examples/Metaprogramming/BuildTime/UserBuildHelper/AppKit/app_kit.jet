@@ -1,0 +1,16 @@
+// A build helper written as an ordinary package, in the shape core.build
+// gives its own `Build` methods: it takes the root's `Build`, reports at its
+// caller's line through `at: SourceLocation{#caller}`, fails with
+// `BuildError`, and makes the build through the same `Build` calls a root
+// `build: fn` writes.
+
+// One executable built from `sources`, sized by the package's `cache_slots`
+// setting and made the default target. The package declares the
+// `cache_slots` and `built_by` settings.
+app: fn(b: Build, name: String, sources: [String], slots: Int, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+    b.contribute("cache_slots", slots)
+    b.contribute("built_by", "app_kit")
+    target: b.add_executable(name, sources, [], at: at)
+    b.default(target, at: at)
+    target
+}
