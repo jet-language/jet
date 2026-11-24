@@ -1,6 +1,7 @@
 // Checked process handle methods. The caller supplies a checked receiver;
 // this module owns only these compiler-provided handle contracts.
 use jet_foundation.[
+    BodyHandleOp,
     AST_NODE_GENERATED,
     AccessConvention,
     CORE_BUILTINS_MODULE,
@@ -118,7 +119,7 @@ sema_process_record_intrinsic: fn(result: Type, effect_name: String, api: String
     sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
 }
 
-sema_process_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+sema_process_finish: fn(receiver: TExpr, operation: BodyHandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_process_record_intrinsic(result, effect_name, api, span, environment, program, scopes, context, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -371,7 +372,7 @@ sema_process_terminal_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     if !sema_process_check_method_ownership(receiver, "TerminalSession.resize", args, required, [Bool]{}, AccessConvention.Read, span, scopes, check.state, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    sema_process_finish(receiver_value, THandleOp.TerminalSessionResize, values, sema_process_io_result(Type.Named{name: "Unit"}), "IO", "TerminalSession.resize", span, expected, environment, program, scopes, check.context, diagnostics)
+    sema_process_finish(receiver_value, BodyHandleOp.TerminalSessionResize, values, sema_process_io_result(Type.Named{name: "Unit"}), "IO", "TerminalSession.resize", span, expected, environment, program, scopes, check.context, diagnostics)
 }
 
 sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -404,10 +405,10 @@ sema_process_stdin_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         else -> sema_process_io_result(Type.Named{name: "Unit"})
     }
     operation: if method == {
-        "write" -> THandleOp.ProcessStdinWriteText
-        "write_some" -> THandleOp.ProcessStdinWrite
-        "write_bytes" -> THandleOp.ProcessStdinWriteAll
-        else -> THandleOp.ProcessStdinClose
+        "write" -> BodyHandleOp.ProcessStdinWriteText
+        "write_some" -> BodyHandleOp.ProcessStdinWrite
+        "write_bytes" -> BodyHandleOp.ProcessStdinWriteAll
+        else -> BodyHandleOp.ProcessStdinClose
     }
     sema_process_finish(receiver_value, operation, values, result, "Exec", "ProcessStdin.{method}", span, expected, environment, program, scopes, check.context, diagnostics)
 }
@@ -444,7 +445,7 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     // `read_bytes(max)`: Read::read on the pipe, up to `max` bytes, empty at
     // EOF.
     if method == "read_bytes" {
-        operation: if stream_name == "ProcessStderrStream" -> THandleOp.ProcessStderrRead else -> THandleOp.ProcessStdoutRead
+        operation: if stream_name == "ProcessStderrStream" -> BodyHandleOp.ProcessStderrRead else -> BodyHandleOp.ProcessStdoutRead
         return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, environment, program, scopes, check.context, diagnostics)
     }
     // `chunks(size)`: the Core source body `core.process.__stdout_chunks` /
@@ -466,7 +467,7 @@ sema_process_stream_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(size)}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, check.context, diagnostics)}
     }
-    sema_process_finish(receiver_value, THandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, scopes, check.context, diagnostics)
+    sema_process_finish(receiver_value, BodyHandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, scopes, check.context, diagnostics)
 }
 
 sema_call_try_process_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {

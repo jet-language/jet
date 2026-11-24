@@ -2,6 +2,7 @@
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
+    BodyHandleOp,
     symbol_is_local,
     symbol_is_none,
     AST_NODE_GENERATED,
@@ -795,7 +796,7 @@ sema_call_eval_show_text: fn(value: TExpr, environment: SemaScopeEnvironment, pr
 
 // The ambient `input`: every line of the program's input, a lazy
 // `Iter<String>` over the files its arguments name, in order, else standard
-// input. It checks as the line source (THandleOp.LinesIter) of
+// input. It checks as the line source (BodyHandleOp.LinesIter) of
 // `core.term.__input_lines()` (__InputLines), whose `read_line` each pull
 // calls: one meaning on every tier. The names are the arguments (Exec.Args).
 // Reading the files they name needs no FS.Read grant: the person who ran the
@@ -825,7 +826,7 @@ sema_call_check_ambient_input: fn(span: Span, expected: Type?, environment: Sema
     returned: sema_call_signature_return(target.signature) ?? return None
     reader: if returned == .Result(ok, _) -> ok.copy() else -> returned
     receiver: sema_tree_node(reader, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
-    value: sema_tree_node(lines, TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.LinesIter, args: [TExpr]{}}, span)
+    value: sema_tree_node(lines, TExprKind.HandleMethod{receiver: receiver, operation: BodyHandleOp.LinesIter, args: [TExpr]{}}, span)
     sema_expr_expected_owned(value, expected, environment, program, diagnostics)
 }
 

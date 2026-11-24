@@ -12,7 +12,6 @@ use jet_foundation.[
     BodyEnumArg,
     BodyEnumPayload,
     BodyFnValueKind,
-    BodyHandleOp,
     BodyHostCall,
     BodyIfCond,
     BodyLambda,
@@ -716,7 +715,7 @@ body_flat_expr_kind: fn(value: TExprKind, flat: ^BodyFlat) -> NodeKind Never! {
         .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_flat_expr(f_receiver, flat), operation: f_operation}
         .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_flat_expr(f_receiver, flat), operation: f_operation, argument: body_flat_expr(f_argument, flat)}
         .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_flat_expr(f_lhs, flat), rhs: body_flat_expr(f_rhs, flat)}
-        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_flat_expr(f_receiver, flat), operation: body_flat_handle_op(f_operation, flat), args: body_flat_list_expr(f_args, flat)}
+        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_flat_expr(f_receiver, flat), operation: f_operation, args: body_flat_list_expr(f_args, flat)}
         .CoreClosureCall(f_kind) -> NodeKind.CoreClosureCall{kind: body_flat_core_closure_kind(f_kind, flat)}
         .TaskGroupAll(f_tasks) -> NodeKind.TaskGroupAll{tasks: body_flat_expr(f_tasks, flat)}
         .TaskGroupRace(f_tasks) -> NodeKind.TaskGroupRace{tasks: body_flat_expr(f_tasks, flat)}
@@ -837,144 +836,6 @@ body_flat_fn_value_kind: fn(value: TFnValueKind, flat: ^BodyFlat) -> BodyFnValue
         .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_flat_list_call_arg(f_policy_args, flat), policy_conventions: f_policy_conventions, wrapper: f_wrapper, captures: f_captures, callee: body_flat_expr(f_callee, flat)}
         .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_flat_expr(f_callee, flat), args: body_flat_list_call_arg(f_args, flat)}
         .Send(f_value) -> BodyFnValueKind.Send{value: body_flat_expr(f_value, flat)}
-    }
-}
-
-body_flat_handle_op: fn(value: THandleOp, flat: ^BodyFlat) -> BodyHandleOp Never! {
-    if value == {
-        .Hardware(f_operation) -> BodyHandleOp.Hardware{operation: f_operation}
-        .DurationNew(f_unit, f_float) -> BodyHandleOp.DurationNew{unit: f_unit, float: f_float}
-        .LinesIter -> BodyHandleOp.LinesIter
-        .DataStreamNext -> BodyHandleOp.DataStreamNext
-        .RealtimeNextDeadline -> BodyHandleOp.RealtimeNextDeadline
-        .RealtimeReceipt -> BodyHandleOp.RealtimeReceipt
-        .RealtimeCancel -> BodyHandleOp.RealtimeCancel
-        .RealtimeIsCanceled -> BodyHandleOp.RealtimeIsCanceled
-        .GameSceneNew -> BodyHandleOp.GameSceneNew
-        .GameReplayRecord -> BodyHandleOp.GameReplayRecord
-        .GameBackendHeadless -> BodyHandleOp.GameBackendHeadless
-        .GameBackendShouldContinue -> BodyHandleOp.GameBackendShouldContinue
-        .GameBackendPresent -> BodyHandleOp.GameBackendPresent
-        .GameSceneOnFrame(f_schedule, f_derivation) -> BodyHandleOp.GameSceneOnFrame{schedule: f_schedule, derivation: f_derivation}
-        .GameSceneComponent -> BodyHandleOp.GameSceneComponent
-        .GameSceneQuery -> BodyHandleOp.GameSceneQuery
-        .GameAssetsImage -> BodyHandleOp.GameAssetsImage
-        .GameAssetsSound -> BodyHandleOp.GameAssetsSound
-        .GameInputBind -> BodyHandleOp.GameInputBind
-        .GameInputPressed -> BodyHandleOp.GameInputPressed
-        .TestSuiteRun -> BodyHandleOp.TestSuiteRun
-        .TestSetting -> BodyHandleOp.TestSetting
-        .DurationNsValue -> BodyHandleOp.DurationNsValue
-        .DurationScale -> BodyHandleOp.DurationScale
-        .DurationDivide -> BodyHandleOp.DurationDivide
-        .AllocAlloc -> BodyHandleOp.AllocAlloc
-        .AllocTryAlloc -> BodyHandleOp.AllocTryAlloc
-        .AllocReset -> BodyHandleOp.AllocReset
-        .PreciseMethod(f_type_name, f_method) -> BodyHandleOp.PreciseMethod{type_name: f_type_name, method: f_method}
-        .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> body_flat_handle_op_1(value, flat)
-    }
-}
-
-body_flat_handle_op_1: fn(value: THandleOp, flat: ^BodyFlat) -> BodyHandleOp Never! {
-    if value == {
-        .TerminalSessionResize -> BodyHandleOp.TerminalSessionResize
-        .ProcessStdinWrite -> BodyHandleOp.ProcessStdinWrite
-        .ProcessStdinWriteText -> BodyHandleOp.ProcessStdinWriteText
-        .ProcessStdinClose -> BodyHandleOp.ProcessStdinClose
-        .ProcessStdinWriteAll -> BodyHandleOp.ProcessStdinWriteAll
-        .ProcessStdoutRead -> BodyHandleOp.ProcessStdoutRead
-        .ProcessStderrRead -> BodyHandleOp.ProcessStderrRead
-        .ReflectValueRead(f_symbol) -> BodyHandleOp.ReflectValueRead{symbol: f_symbol}
-        .ReflectValueFields -> BodyHandleOp.ReflectValueFields
-        .ReflectFieldName -> BodyHandleOp.ReflectFieldName
-        .ReflectFieldValue -> BodyHandleOp.ReflectFieldValue
-        .TaskJoin -> BodyHandleOp.TaskJoin
-        .TaskDetach -> BodyHandleOp.TaskDetach
-        .TaskPause -> BodyHandleOp.TaskPause
-        .TaskResume -> BodyHandleOp.TaskResume
-        .TaskCancel -> BodyHandleOp.TaskCancel
-        .ChannelReceive -> BodyHandleOp.ChannelReceive
-        .ChannelTryReceive -> BodyHandleOp.ChannelTryReceive
-        .ChannelIsTimer -> BodyHandleOp.ChannelIsTimer
-        .ChannelIsInterval -> BodyHandleOp.ChannelIsInterval
-        .ChannelIsCanceled -> BodyHandleOp.ChannelIsCanceled
-        .ChannelIsReady -> BodyHandleOp.ChannelIsReady
-        .ChannelDelayMs -> BodyHandleOp.ChannelDelayMs
-        .ChannelClose -> BodyHandleOp.ChannelClose
-        .SenderSend -> BodyHandleOp.SenderSend
-        .ReactiveGet -> BodyHandleOp.ReactiveGet
-        .ReactiveSet -> BodyHandleOp.ReactiveSet
-        .ReactiveEffectMethod -> BodyHandleOp.ReactiveEffectMethod
-        .EventMethod(f_symbol) -> BodyHandleOp.EventMethod{symbol: f_symbol}
-        .LayoutMethod(f_method) -> BodyHandleOp.LayoutMethod{method: f_method}
-        .DynField -> BodyHandleOp.DynField
-        .DynAt -> BodyHandleOp.DynAt
-        .DynInt -> BodyHandleOp.DynInt
-        .DynText -> BodyHandleOp.DynText
-        .DynBool -> BodyHandleOp.DynBool
-        .DynFloat -> BodyHandleOp.DynFloat
-        .DynToText -> BodyHandleOp.DynToText
-        .DynEqualUnordered -> BodyHandleOp.DynEqualUnordered
-        .DynDecode(f_ty, f_stored) -> BodyHandleOp.DynDecode{ty: f_ty, stored: f_stored}
-        .DynIndexKey(f_site, f_location) -> BodyHandleOp.DynIndexKey{site: f_site, location: f_location}
-        .DynIndexAt(f_site, f_location) -> BodyHandleOp.DynIndexAt{site: f_site, location: f_location}
-        .DynGetKey -> BodyHandleOp.DynGetKey
-        .DynGetAt -> BodyHandleOp.DynGetAt
-        .DynHas -> BodyHandleOp.DynHas
-        .DynKeys -> BodyHandleOp.DynKeys
-        .DynLen(f_site, f_location) -> BodyHandleOp.DynLen{site: f_site, location: f_location}
-        .DynRemove -> BodyHandleOp.DynRemove
-        .DynBinary(f_op, f_site, f_location) -> BodyHandleOp.DynBinary{op: f_op, site: f_site, location: f_location}
-        .DynCompare(f_op, f_site, f_location) -> BodyHandleOp.DynCompare{op: f_op, site: f_site, location: f_location}
-        .DynSetPath(f_keys, f_site, f_location) -> BodyHandleOp.DynSetPath{keys: f_keys, site: f_site, location: f_location}
-        .SerdeEncode(f_stored) -> BodyHandleOp.SerdeEncode{stored: f_stored}
-        .JSONField -> BodyHandleOp.JSONField
-        .JSONAt -> BodyHandleOp.JSONAt
-        .JSONInt -> BodyHandleOp.JSONInt
-        .JSONText -> BodyHandleOp.JSONText
-        .JSONBool -> BodyHandleOp.JSONBool
-        .JSONFloat -> BodyHandleOp.JSONFloat
-        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> body_flat_handle_op_2(value, flat)
-    }
-}
-
-body_flat_handle_op_2: fn(value: THandleOp, flat: ^BodyFlat) -> BodyHandleOp Never! {
-    if value == {
-        .JSONToText -> BodyHandleOp.JSONToText
-        .JSONEqualUnordered -> BodyHandleOp.JSONEqualUnordered
-        .PluginInvoke(f_export_name, f_signature) -> BodyHandleOp.PluginInvoke{export_name: f_export_name, signature: f_signature}
-        .ReaderOver(f_owned) -> BodyHandleOp.ReaderOver{owned: f_owned}
-        .ReaderReadU8 -> BodyHandleOp.ReaderReadU8
-        .ReaderReadI8 -> BodyHandleOp.ReaderReadI8
-        .ReaderReadU16Le -> BodyHandleOp.ReaderReadU16Le
-        .ReaderReadU16Be -> BodyHandleOp.ReaderReadU16Be
-        .ReaderReadI16Le -> BodyHandleOp.ReaderReadI16Le
-        .ReaderReadI16Be -> BodyHandleOp.ReaderReadI16Be
-        .ReaderReadU32Le -> BodyHandleOp.ReaderReadU32Le
-        .ReaderReadU32Be -> BodyHandleOp.ReaderReadU32Be
-        .ReaderReadI32Le -> BodyHandleOp.ReaderReadI32Le
-        .ReaderReadI32Be -> BodyHandleOp.ReaderReadI32Be
-        .ReaderReadU64Le -> BodyHandleOp.ReaderReadU64Le
-        .ReaderReadU64Be -> BodyHandleOp.ReaderReadU64Be
-        .ReaderReadI64Le -> BodyHandleOp.ReaderReadI64Le
-        .ReaderReadI64Be -> BodyHandleOp.ReaderReadI64Be
-        .ReaderReadF32Le -> BodyHandleOp.ReaderReadF32Le
-        .ReaderReadF32Be -> BodyHandleOp.ReaderReadF32Be
-        .ReaderReadF64Le -> BodyHandleOp.ReaderReadF64Le
-        .ReaderReadF64Be -> BodyHandleOp.ReaderReadF64Be
-        .ReaderPeek -> BodyHandleOp.ReaderPeek
-        .ReaderSeek -> BodyHandleOp.ReaderSeek
-        .ReaderSkip -> BodyHandleOp.ReaderSkip
-        .ReaderTake -> BodyHandleOp.ReaderTake
-        .ReaderRemaining -> BodyHandleOp.ReaderRemaining
-        .ReaderAtEnd -> BodyHandleOp.ReaderAtEnd
-        .CursorOver -> BodyHandleOp.CursorOver
-        .CursorTakeUntil -> BodyHandleOp.CursorTakeUntil
-        .CursorSkipWs -> BodyHandleOp.CursorSkipWs
-        .CursorTakePattern(f_parts, f_canonical) -> BodyHandleOp.CursorTakePattern{parts: f_parts, canonical: f_canonical}
-        .ReaderTakePattern(f_parts, f_canonical) -> BodyHandleOp.ReaderTakePattern{parts: f_parts, canonical: f_canonical}
-        .ProcessLines -> BodyHandleOp.ProcessLines
-        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> panic("THandleOp: a variant no chunk of body_flat_handle_op matches")
     }
 }
 
@@ -1480,7 +1341,7 @@ body_copy_expr_kind: fn(value: NodeKind, flat: ^BodyFlat) -> NodeKind Never! {
         .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_copy_expr(f_receiver, flat), operation: f_operation}
         .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_copy_expr(f_receiver, flat), operation: f_operation, argument: body_copy_expr(f_argument, flat)}
         .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_copy_expr(f_lhs, flat), rhs: body_copy_expr(f_rhs, flat)}
-        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_copy_expr(f_receiver, flat), operation: body_copy_handle_op(f_operation, flat), args: body_copy_list_expr(f_args, flat)}
+        .HandleMethod(f_receiver, f_operation, f_args) -> NodeKind.HandleMethod{receiver: body_copy_expr(f_receiver, flat), operation: f_operation, args: body_copy_list_expr(f_args, flat)}
         .CoreClosureCall(f_kind) -> NodeKind.CoreClosureCall{kind: body_copy_core_closure_kind(f_kind, flat)}
         .TaskGroupAll(f_tasks) -> NodeKind.TaskGroupAll{tasks: body_copy_expr(f_tasks, flat)}
         .TaskGroupRace(f_tasks) -> NodeKind.TaskGroupRace{tasks: body_copy_expr(f_tasks, flat)}
@@ -1577,104 +1438,6 @@ body_copy_fn_value_kind: fn(value: BodyFnValueKind, flat: ^BodyFlat) -> BodyFnVa
         .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_copy_list_call_arg(f_policy_args, flat), policy_conventions: f_policy_conventions, wrapper: f_wrapper, captures: f_captures, callee: body_copy_expr(f_callee, flat)}
         .Call(f_callee, f_args) -> BodyFnValueKind.Call{callee: body_copy_expr(f_callee, flat), args: body_copy_list_call_arg(f_args, flat)}
         .Send(f_value) -> BodyFnValueKind.Send{value: body_copy_expr(f_value, flat)}
-    }
-}
-
-body_copy_handle_op: fn(value: BodyHandleOp, flat: ^BodyFlat) -> BodyHandleOp Never! {
-    if value == {
-        .Hardware(f_operation) -> BodyHandleOp.Hardware{operation: f_operation}
-        .DurationNew(f_unit, f_float) -> BodyHandleOp.DurationNew{unit: f_unit, float: f_float}
-        .LinesIter -> BodyHandleOp.LinesIter
-        .DataStreamNext -> BodyHandleOp.DataStreamNext
-        .RealtimeNextDeadline -> BodyHandleOp.RealtimeNextDeadline
-        .RealtimeReceipt -> BodyHandleOp.RealtimeReceipt
-        .RealtimeCancel -> BodyHandleOp.RealtimeCancel
-        .RealtimeIsCanceled -> BodyHandleOp.RealtimeIsCanceled
-        .GameSceneNew -> BodyHandleOp.GameSceneNew
-        .GameReplayRecord -> BodyHandleOp.GameReplayRecord
-        .GameBackendHeadless -> BodyHandleOp.GameBackendHeadless
-        .GameBackendShouldContinue -> BodyHandleOp.GameBackendShouldContinue
-        .GameBackendPresent -> BodyHandleOp.GameBackendPresent
-        .GameSceneOnFrame(f_schedule, f_derivation) -> BodyHandleOp.GameSceneOnFrame{schedule: f_schedule, derivation: f_derivation}
-        .GameSceneComponent -> BodyHandleOp.GameSceneComponent
-        .GameSceneQuery -> BodyHandleOp.GameSceneQuery
-        .GameAssetsImage -> BodyHandleOp.GameAssetsImage
-        .GameAssetsSound -> BodyHandleOp.GameAssetsSound
-        .GameInputBind -> BodyHandleOp.GameInputBind
-        .GameInputPressed -> BodyHandleOp.GameInputPressed
-        .TestSuiteRun -> BodyHandleOp.TestSuiteRun
-        .TestSetting -> BodyHandleOp.TestSetting
-        .DurationNsValue -> BodyHandleOp.DurationNsValue
-        .DurationScale -> BodyHandleOp.DurationScale
-        .DurationDivide -> BodyHandleOp.DurationDivide
-        .AllocAlloc -> BodyHandleOp.AllocAlloc
-        .AllocTryAlloc -> BodyHandleOp.AllocTryAlloc
-        .AllocReset -> BodyHandleOp.AllocReset
-        .PreciseMethod(f_type_name, f_method) -> BodyHandleOp.PreciseMethod{type_name: f_type_name, method: f_method}
-        .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueRead(_) | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCanceled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> body_copy_handle_op_1(value, flat)
-    }
-}
-
-body_copy_handle_op_1: fn(value: BodyHandleOp, flat: ^BodyFlat) -> BodyHandleOp Never! {
-    if value == {
-        .TerminalSessionResize -> BodyHandleOp.TerminalSessionResize
-        .ProcessStdinWrite -> BodyHandleOp.ProcessStdinWrite
-        .ProcessStdinWriteText -> BodyHandleOp.ProcessStdinWriteText
-        .ProcessStdinClose -> BodyHandleOp.ProcessStdinClose
-        .ProcessStdinWriteAll -> BodyHandleOp.ProcessStdinWriteAll
-        .ProcessStdoutRead -> BodyHandleOp.ProcessStdoutRead
-        .ProcessStderrRead -> BodyHandleOp.ProcessStderrRead
-        .ReflectValueRead(f_symbol) -> BodyHandleOp.ReflectValueRead{symbol: f_symbol}
-        .ReflectValueFields -> BodyHandleOp.ReflectValueFields
-        .ReflectFieldName -> BodyHandleOp.ReflectFieldName
-        .ReflectFieldValue -> BodyHandleOp.ReflectFieldValue
-        .TaskJoin -> BodyHandleOp.TaskJoin
-        .TaskDetach -> BodyHandleOp.TaskDetach
-        .TaskPause -> BodyHandleOp.TaskPause
-        .TaskResume -> BodyHandleOp.TaskResume
-        .TaskCancel -> BodyHandleOp.TaskCancel
-        .ChannelReceive -> BodyHandleOp.ChannelReceive
-        .ChannelTryReceive -> BodyHandleOp.ChannelTryReceive
-        .ChannelIsTimer -> BodyHandleOp.ChannelIsTimer
-        .ChannelIsInterval -> BodyHandleOp.ChannelIsInterval
-        .ChannelIsCanceled -> BodyHandleOp.ChannelIsCanceled
-        .ChannelIsReady -> BodyHandleOp.ChannelIsReady
-        .ChannelDelayMs -> BodyHandleOp.ChannelDelayMs
-        .ChannelClose -> BodyHandleOp.ChannelClose
-        .SenderSend -> BodyHandleOp.SenderSend
-        .ReactiveGet -> BodyHandleOp.ReactiveGet
-        .ReactiveSet -> BodyHandleOp.ReactiveSet
-        .ReactiveEffectMethod -> BodyHandleOp.ReactiveEffectMethod
-        .EventMethod(f_symbol) -> BodyHandleOp.EventMethod{symbol: f_symbol}
-        .LayoutMethod(f_method) -> BodyHandleOp.LayoutMethod{method: f_method}
-        .DynField -> BodyHandleOp.DynField
-        .DynAt -> BodyHandleOp.DynAt
-        .DynInt -> BodyHandleOp.DynInt
-        .DynText -> BodyHandleOp.DynText
-        .DynBool -> BodyHandleOp.DynBool
-        .DynFloat -> BodyHandleOp.DynFloat
-        .DynToText -> BodyHandleOp.DynToText
-        .DynEqualUnordered -> BodyHandleOp.DynEqualUnordered
-        .DynDecode(f_ty, f_stored) -> BodyHandleOp.DynDecode{ty: f_ty, stored: f_stored}
-        .DynIndexKey(f_site, f_location) -> BodyHandleOp.DynIndexKey{site: f_site, location: f_location}
-        .DynIndexAt(f_site, f_location) -> BodyHandleOp.DynIndexAt{site: f_site, location: f_location}
-        .DynGetKey -> BodyHandleOp.DynGetKey
-        .DynGetAt -> BodyHandleOp.DynGetAt
-        .DynHas -> BodyHandleOp.DynHas
-        .DynKeys -> BodyHandleOp.DynKeys
-        .DynLen(f_site, f_location) -> BodyHandleOp.DynLen{site: f_site, location: f_location}
-        .DynRemove -> BodyHandleOp.DynRemove
-        .DynBinary(f_op, f_site, f_location) -> BodyHandleOp.DynBinary{op: f_op, site: f_site, location: f_location}
-        .DynCompare(f_op, f_site, f_location) -> BodyHandleOp.DynCompare{op: f_op, site: f_site, location: f_location}
-        .DynSetPath(f_keys, f_site, f_location) -> BodyHandleOp.DynSetPath{keys: f_keys, site: f_site, location: f_location}
-        .SerdeEncode(f_stored) -> BodyHandleOp.SerdeEncode{stored: f_stored}
-        .JSONField -> BodyHandleOp.JSONField
-        .JSONAt -> BodyHandleOp.JSONAt
-        .JSONInt -> BodyHandleOp.JSONInt
-        .JSONText -> BodyHandleOp.JSONText
-        .JSONBool -> BodyHandleOp.JSONBool
-        .JSONFloat -> BodyHandleOp.JSONFloat
-        .Hardware(_) | .DurationNew(_, _) | .LinesIter | .DataStreamNext | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCanceled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .TestSuiteRun | .TestSetting | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .JSONToText | .JSONEqualUnordered | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> value
     }
 }
 

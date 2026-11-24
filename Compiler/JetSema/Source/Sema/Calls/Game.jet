@@ -3,6 +3,7 @@
 // These calls use their exact registered Core namespace / handle identities;
 // ordinary Core module calls remain in Core.rows.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     CallArg,
     DerivationRef,
@@ -109,9 +110,9 @@ sema_game_static_call: fn(target: SemaGameCoreStaticTarget, method: String, args
     }
 
     operation := if {
-        target.type_name == "Scene" -> THandleOp.GameSceneNew
-        target.type_name == "Replay" -> THandleOp.GameReplayRecord
-        else -> THandleOp.GameBackendHeadless
+        target.type_name == "Scene" -> BodyHandleOp.GameSceneNew
+        target.type_name == "Replay" -> BodyHandleOp.GameReplayRecord
+        else -> BodyHandleOp.GameBackendHeadless
     }
     result_type := if {
         target.type_name == "Scene" -> Type.Named{name: "GameScene"}
@@ -223,7 +224,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
             }
             .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
         }
-        operation := THandleOp.GameSceneOnFrame{schedule: schedule, derivation: derivation}
+        operation := BodyHandleOp.GameSceneOnFrame{schedule: schedule, derivation: derivation}
         built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{callback}}, span)
         if !sema_game_record_effect("GameScene.on_frame", Type.Named{name: "Unit"}, [EffectRowEntry]{}, span, environment, program, scopes, check.context, diagnostics) {
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
@@ -252,7 +253,7 @@ sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: 
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
     result_type := if method == "query" -> Type.List{element: Type.String} else -> Type.Named{name: "Unit"}
-    operation := if method == "query" -> THandleOp.GameSceneQuery else -> THandleOp.GameSceneComponent
+    operation := if method == "query" -> BodyHandleOp.GameSceneQuery else -> BodyHandleOp.GameSceneComponent
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{argument}}, span)
     if !sema_game_record_effect("GameScene.{method}", result_type, [EffectRowEntry]{}, span, environment, program, scopes, check.context, diagnostics) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
@@ -273,7 +274,7 @@ sema_game_check_assets_method: fn(receiver: Expr, receiver_value: TExpr, method:
     }
     asset_type := if method == "image" -> Type.Named{name: "GameImage"} else -> Type.Named{name: "GameSound"}
     result_type := Type.Result{ok: asset_type, err: Type.String}
-    operation := if method == "image" -> THandleOp.GameAssetsImage else -> THandleOp.GameAssetsSound
+    operation := if method == "image" -> BodyHandleOp.GameAssetsImage else -> BodyHandleOp.GameAssetsSound
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{asset_path}}, span)
     if !sema_game_record_effect("GameAssets.{method}", result_type, [EffectRowEntry]{EffectRowEntry{name: "FS", span: span}}, span, environment, program, scopes, check.context, diagnostics) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
@@ -310,7 +311,7 @@ sema_game_check_input_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
-    operation := if method == "bind" -> THandleOp.GameInputBind else -> THandleOp.GameInputPressed
+    operation := if method == "bind" -> BodyHandleOp.GameInputBind else -> BodyHandleOp.GameInputPressed
     result_type := if method == "bind" -> Type.Named{name: "Unit"} else -> Type.Bool
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
     if !sema_game_record_effect("GameInput.{method}", result_type, [EffectRowEntry]{}, span, environment, program, scopes, check.context, diagnostics) {
@@ -329,7 +330,7 @@ sema_game_check_backend_method: fn(receiver: Expr, receiver_value: TExpr, method
     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
-    operation := if method == "present" -> THandleOp.GameBackendPresent else -> THandleOp.GameBackendShouldContinue
+    operation := if method == "present" -> BodyHandleOp.GameBackendPresent else -> BodyHandleOp.GameBackendShouldContinue
     result_type := if method == "present" -> Type.Named{name: "Unit"} else -> Type.Bool
     built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     if !sema_game_record_effect("GameBackend.{method}", result_type, [EffectRowEntry]{}, span, environment, program, scopes, check.context, diagnostics) {

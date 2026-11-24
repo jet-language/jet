@@ -2,6 +2,7 @@
 // `core.reflect.of`. Runtime reflection may expose only values accepted by the
 // same semantic predicate as display interpolation.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -867,22 +868,22 @@ sema_call_try_reflection_metadata_method: fn(
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-sema_call_reflection_handle_operation: fn(owner: String, method: String) -> THandleOp? {
+sema_call_reflection_handle_operation: fn(owner: String, method: String) -> BodyHandleOp? {
     if owner == "Value" {
         // A Value read names its runtime export by the method itself
         // (`jet_jit_reflect_{method}`); `fields` builds a list instead.
-        if method == "fields" -> return Val(THandleOp.ReflectValueFields)
+        if method == "fields" -> return Val(BodyHandleOp.ReflectValueFields)
         if method == "type_name" || method == "path" || method == "display" || method == "int" || method == "float" || method == "bool" || method == "char" || method == "string" || method == "case" {
-            return Val(THandleOp.ReflectValueRead{symbol: "jet_jit_reflect_{method}"})
+            return Val(BodyHandleOp.ReflectValueRead{symbol: "jet_jit_reflect_{method}"})
         }
     }
     // A Case read is named the same way, as `jet_jit_reflect_case_{method}`.
     if owner == "Case" && (method == "name" || method == "path" || method == "fields") {
-        return Val(THandleOp.ReflectValueRead{symbol: "jet_jit_reflect_case_{method}"})
+        return Val(BodyHandleOp.ReflectValueRead{symbol: "jet_jit_reflect_case_{method}"})
     }
     if owner == "Field" {
-        if method == "name" -> return Val(THandleOp.ReflectFieldName)
-        if method == "value" -> return Val(THandleOp.ReflectFieldValue)
+        if method == "name" -> return Val(BodyHandleOp.ReflectFieldName)
+        if method == "value" -> return Val(BodyHandleOp.ReflectFieldValue)
     }
     None
 }

@@ -4,6 +4,7 @@
 use {
     math: core.math
     jet_foundation.[
+        BodyHandleOp,
         LIST_TYPE_OWNER,
         AST_NODE_GENERATED,
         AccessConvention,
@@ -1348,7 +1349,7 @@ sema_expr_expected_owned: fn(value: ^^TExpr, expected: Type?, environment: SemaS
             payload: sema_tree_node(owned.ty, TExprKind.MapLit{entries: entries}, span)
             return Val(sema_tree_node(required, TExprKind.JSONLit{variant: "Object", arg: Val(payload), clone_arg: false}, span))
         }
-        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: owned.move(), operation: THandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span))
+        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: owned.move(), operation: BodyHandleOp.SerdeEncode{stored: false}, args: [TExpr]{}}, span))
     }
     if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(lifted_type) {
         span: owned.span
@@ -1805,12 +1806,12 @@ sema_expr_check_geometry_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
 
 sema_expr_check_duration_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span) -> TExpr? {
     if lhs.ty == (Type.Named{name: "Duration"}) && rhs.ty == Type.Int && (op == BinOp.Mul || op == BinOp.Div) {
-        operation := THandleOp.DurationScale
-        if op == BinOp.Div -> operation = THandleOp.DurationDivide
+        operation := BodyHandleOp.DurationScale
+        if op == BinOp.Div -> operation = BodyHandleOp.DurationDivide
         return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: lhs, operation: operation, args: [TExpr]{rhs}}, span))
     }
     if lhs.ty == Type.Int && rhs.ty == (Type.Named{name: "Duration"}) && op == BinOp.Mul {
-        return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: rhs, operation: THandleOp.DurationScale, args: [TExpr]{lhs}}, span))
+        return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: rhs, operation: BodyHandleOp.DurationScale, args: [TExpr]{lhs}}, span))
     }
     None
 }
@@ -4083,7 +4084,7 @@ sema_expr_check_take_pattern_method: fn(receiver: Expr, receiver_value: TExpr, m
                 }
                 ok_ty := if tuple_fields.len() == 0 -> Type.Named{name: "Unit"} else -> Type.Tuple{fields: tuple_fields}
                 result_ty := Type.Result{ok: ok_ty, err: Type.String}
-                operation := THandleOp.CursorTakePattern{parts: parts, canonical: canonical}
+                operation := BodyHandleOp.CursorTakePattern{parts: parts, canonical: canonical}
                 value := sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
                 checked := sema_expr_expected(value, expected, environment, program, diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: checked}
@@ -4107,7 +4108,7 @@ sema_expr_check_take_pattern_method: fn(receiver: Expr, receiver_value: TExpr, m
             }
             ok_ty := if tuple_fields.len() == 0 -> Type.Named{name: "Unit"} else -> Type.Tuple{fields: tuple_fields}
             result_ty := Type.Result{ok: ok_ty, err: Type.String}
-            operation := THandleOp.ReaderTakePattern{parts: parts, canonical: canonical}
+            operation := BodyHandleOp.ReaderTakePattern{parts: parts, canonical: canonical}
             value := sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
             checked := sema_expr_expected(value, expected, environment, program, diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: checked}
@@ -6568,7 +6569,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         }
         site: "{sema_dyn_site(left)} {sema_expr_binary_name(op)} {sema_dyn_site(right)}"
         location: sema_expression_panic_location(environment, program, scopes, span)
-        operation: if arithmetic -> THandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> THandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
+        operation: if arithmetic -> BodyHandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> BodyHandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
         value: sema_tree_node(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }

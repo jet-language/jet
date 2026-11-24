@@ -2,6 +2,7 @@
 // facts selected by Registration. It never synthesizes register widths, channels,
 // addresses, or ownership facts from a path spelling.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -368,7 +369,7 @@ sema_hardware_register_method: fn(receiver: Expr, receiver_value: TExpr, method:
     block: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return Val(sema_hardware_missing_fact(TargetHardwareUnresolvedReference.RegisterBlock{block: sema_hardware_ascii_upper(path.segments[1])}, "register block `{path.segments[1]}`", span, diagnostics))
     fact: sema_hardware_register_fact(block, path.segments[2]) ?? return Val(sema_hardware_missing_fact(TargetHardwareUnresolvedReference.Register{block: block.name, register: path.segments[2]}, "register `{block.name}.{path.segments[2]}`", span, diagnostics))
     operation := if method == "read" -> THardwareCall.RegisterRead{profile_id: path.profile_id, block: block.name, register: fact.name, width: fact.width} else -> THardwareCall.RegisterWrite{profile_id: path.profile_id, block: block.name, register: fact.name, width: fact.width}
-    built := sema_tree_node(if method == "read" -> Type.Int else -> Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.Hardware{operation: operation}, args: values}, span)
+    built := sema_tree_node(if method == "read" -> Type.Int else -> Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: values}, span)
     result := sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)})
     result.hardware_use.register_accesses.push(
         TargetRegisterAccessFact{
@@ -418,7 +419,7 @@ sema_hardware_dma_start: fn(receiver: Expr, receiver_value: TExpr, args: [CallAr
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
     operation := THardwareCall.DMAStart{profile_id: channel_path.profile_id, channel: channel_name, buffer_ty: buffer.ty}
-    built := sema_tree_node(Type.Named{name: "__JetDmaTransfer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.Hardware{operation: operation}, args: [TExpr]{sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: channel_name}}}, args[0].span), buffer}}, span)
+    built := sema_tree_node(Type.Named{name: "__JetDmaTransfer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: [TExpr]{sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: channel_name}}}, args[0].span), buffer}}, span)
     result := sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)})
     owner := if args[1].convention == AccessConvention.Move -> TargetDMAOwner.CPU else -> TargetDMAOwner.Device
     result.hardware_use.dma_operations.push(TargetDMAOperationFact{channel: channel_name, buffer: buffer_name, operation: TargetDMAOperation.Start, owner: owner})
@@ -449,7 +450,7 @@ sema_hardware_dma_wait: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg
         return Val(sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: None}))
     }
     operation := THardwareCall.DMAWait{profile_id: transfer.profile_id, channel: transfer.channel, buffer_ty: transfer.buffer_type}
-    built := sema_tree_node(Type.Named{name: "__JetDmaBuffer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.Hardware{operation: operation}, args: [TExpr]{}}, span)
+    built := sema_tree_node(Type.Named{name: "__JetDmaBuffer"}, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.Hardware{operation: operation}, args: [TExpr]{}}, span)
     result := sema_hardware_result(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)})
     result.hardware_use.dma_operations.push(TargetDMAOperationFact{channel: transfer.channel, buffer: transfer.buffer_name, operation: TargetDMAOperation.Wait, owner: TargetDMAOwner.Device})
     if result.check.value != None {

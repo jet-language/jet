@@ -5,6 +5,7 @@
 // owned operations here; a `:` binding of one of them becomes a zero-copy view
 // in Ownership/StringViews.jet.
 use jet_foundation.[
+    BodyHandleOp,
     AST_NODE_GENERATED,
     AccessConvention,
     BuiltinMethodReceiver,
@@ -318,7 +319,7 @@ sema_value_method_precise: fn(receiver: Expr, receiver_value: TExpr, method: Str
     if !sema_ownership_check_call_receiver(check.state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
+    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.PreciseMethod{type_name: owner, method: method}, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

@@ -1,5 +1,6 @@
 // Checked collection, scalar, indexing, slicing, and range expressions.
 use jet_foundation.[
+    BodyHandleOp,
     AST_NODE_GENERATED,
     AccessConvention,
     Call,
@@ -180,7 +181,7 @@ sema_expression_unit_literal: fn(raw: String, int_value: Int?, float_value: Floa
                     }
                 }
                 constructed_ty: Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}
-                constructed: sema_tree_node(constructed_ty, TExprKind.HandleMethod{receiver: unit_value, operation: THandleOp.DurationNew{unit: 0, float: is_float}, args: [TExpr]{}}, span)
+                constructed: sema_tree_node(constructed_ty, TExprKind.HandleMethod{receiver: unit_value, operation: BodyHandleOp.DurationNew{unit: 0, float: is_float}, args: [TExpr]{}}, span)
                 message: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "time literal is outside Duration's i64 range"}}}, span)
                 fallback: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, suffix_span)}
                 checked: sema_tree_node(Type.Named{name: "Duration"}, TExprKind.OrFallback{value: constructed, fallback: fallback, ambient_err: None}, span)

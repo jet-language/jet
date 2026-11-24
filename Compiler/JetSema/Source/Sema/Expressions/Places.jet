@@ -1,6 +1,7 @@
 // Checked field, place, borrow, dereference, and mutation expressions.
 use {
     jet_foundation.[
+        BodyHandleOp,
         AST_NODE_GENERATED,
         AccessConvention,
         CallArg,
@@ -901,7 +902,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
             return None
         }
         key: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
-        operation: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
+        operation: BodyHandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, program, scopes, span)}
         value: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span)
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }

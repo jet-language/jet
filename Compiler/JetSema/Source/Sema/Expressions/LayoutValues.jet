@@ -1,6 +1,7 @@
 // Axis-aware layout producers, the `name: Layout{ … }` statement and
 // generic Measurement<T> accessors.
 use jet_foundation.[
+    BodyHandleOp,
     AccessConvention,
     BinOp,
     CallArg,
@@ -252,7 +253,7 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     ownership := sema_ownership_check_method_call(check.state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> valid = false
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
+    value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: BodyHandleOp.LayoutMethod{method: method}, args: values}, span)
     if !sema_effect_record_intrinsic_fact(environment, program, scopes, check.context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
