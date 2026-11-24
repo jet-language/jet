@@ -286,7 +286,7 @@ body_codec_put_fnbody: fn(out: ^BodyCodecOut, value: FnBody) Never! {
     body_codec_put_string(out, value.endpoint)
     body_codec_put_string(out, value.system_run)
     body_codec_put_string(out, value.role)
-    body_codec_put_tvisibility(out, value.visibility)
+    body_codec_put_namevisibility(out, value.visibility)
     body_codec_put_opt_tforeignprovenance(out, value.foreign)
     body_codec_put_list_bodyparameter(out, value.params)
     body_codec_put_list_twebparamreconstruction(out, value.web_param_reconstructions)
@@ -344,7 +344,7 @@ body_codec_get_fnbody: fn(bytes: [U8], input: ^BodyCodecIn) -> FnBody Never! {
     f11: body_codec_get_string(bytes, input)
     f12: body_codec_get_string(bytes, input)
     f13: body_codec_get_string(bytes, input)
-    f14: body_codec_get_tvisibility(bytes, input)
+    f14: body_codec_get_namevisibility(bytes, input)
     f15: body_codec_get_opt_tforeignprovenance(bytes, input)
     f16: body_codec_get_list_bodyparameter(bytes, input)
     f17: body_codec_get_list_twebparamreconstruction(bytes, input)
@@ -1331,7 +1331,7 @@ body_codec_get_webpartitionmarker: fn(bytes: [U8], input: ^BodyCodecIn) -> WebPa
     }
 }
 
-body_codec_put_tvisibility: fn(out: ^BodyCodecOut, value: TVisibility) Never! {
+body_codec_put_namevisibility: fn(out: ^BodyCodecOut, value: NameVisibility) Never! {
     if value == {
         .Private -> { body_codec_put_tag(out, 0) }
         .Package -> { body_codec_put_tag(out, 1) }
@@ -1339,12 +1339,12 @@ body_codec_put_tvisibility: fn(out: ^BodyCodecOut, value: TVisibility) Never! {
     }
 }
 
-body_codec_get_tvisibility: fn(bytes: [U8], input: ^BodyCodecIn) -> TVisibility Never! {
+body_codec_get_namevisibility: fn(bytes: [U8], input: ^BodyCodecIn) -> NameVisibility Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
-        1 -> TVisibility.Package
-        2 -> TVisibility.Public
-        else -> TVisibility.Private
+        1 -> NameVisibility.Package
+        2 -> NameVisibility.Public
+        else -> NameVisibility.Private
     }
 }
 
@@ -4384,7 +4384,7 @@ body_codec_get_opt_resourcelayout: fn(bytes: [U8], input: ^BodyCodecIn) -> Resou
 
 body_codec_put_resourceaccess: fn(out: ^BodyCodecOut, value: ResourceAccess) Never! {
     body_codec_put_resourceidentity(out, value.resource)
-    body_codec_put_resourceaccessmode(out, value.mode)
+    body_codec_put_accessconvention(out, value.mode)
     body_codec_put_resourceregion(out, value.region)
     body_codec_put_opt_resourcelayout(out, value.layout)
     body_codec_put_bool(out, value.temporary)
@@ -4392,7 +4392,7 @@ body_codec_put_resourceaccess: fn(out: ^BodyCodecOut, value: ResourceAccess) Nev
 
 body_codec_get_resourceaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> ResourceAccess Never! {
     f0: body_codec_get_resourceidentity(bytes, input)
-    f1: body_codec_get_resourceaccessmode(bytes, input)
+    f1: body_codec_get_accessconvention(bytes, input)
     f2: body_codec_get_resourceregion(bytes, input)
     f3: body_codec_get_opt_resourcelayout(bytes, input)
     f4: body_codec_get_bool(bytes, input)
@@ -4417,23 +4417,6 @@ body_codec_get_resourceidentity: fn(bytes: [U8], input: ^BodyCodecIn) -> Resourc
             ResourceIdentity.Named{name: f0}
         }
         else -> ResourceIdentity.Unknown
-    }
-}
-
-body_codec_put_resourceaccessmode: fn(out: ^BodyCodecOut, value: ResourceAccessMode) Never! {
-    if value == {
-        .Read -> { body_codec_put_tag(out, 0) }
-        .Write -> { body_codec_put_tag(out, 1) }
-        .Move -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_resourceaccessmode: fn(bytes: [U8], input: ^BodyCodecIn) -> ResourceAccessMode Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> ResourceAccessMode.Write
-        2 -> ResourceAccessMode.Move
-        else -> ResourceAccessMode.Read
     }
 }
 
@@ -4921,30 +4904,13 @@ body_codec_get_corecallsignature: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCa
 
 body_codec_put_corecallresourceaccess: fn(out: ^BodyCodecOut, value: CoreCallResourceAccess) Never! {
     body_codec_put_int(out, value.argument)
-    body_codec_put_corecallresourceaccessmode(out, value.mode)
+    body_codec_put_accessconvention(out, value.mode)
 }
 
 body_codec_get_corecallresourceaccess: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallResourceAccess Never! {
     f0: body_codec_get_int(bytes, input)
-    f1: body_codec_get_corecallresourceaccessmode(bytes, input)
+    f1: body_codec_get_accessconvention(bytes, input)
     CoreCallResourceAccess{argument: f0, mode: f1}
-}
-
-body_codec_put_corecallresourceaccessmode: fn(out: ^BodyCodecOut, value: CoreCallResourceAccessMode) Never! {
-    if value == {
-        .Read -> { body_codec_put_tag(out, 0) }
-        .Write -> { body_codec_put_tag(out, 1) }
-        .Move -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_corecallresourceaccessmode: fn(bytes: [U8], input: ^BodyCodecIn) -> CoreCallResourceAccessMode Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> CoreCallResourceAccessMode.Write
-        2 -> CoreCallResourceAccessMode.Move
-        else -> CoreCallResourceAccessMode.Read
-    }
 }
 
 body_codec_put_corecallcompletion: fn(out: ^BodyCodecOut, value: CoreCallCompletion) Never! {

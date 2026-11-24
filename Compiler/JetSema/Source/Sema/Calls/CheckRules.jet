@@ -233,13 +233,24 @@ sema_call_rules_hear_stand_in: fn(
 // each heard method call's name and its receiver's table, which a call
 // chained on it adds to.
 SemaRuleTables: struct {
-    heard: [String]{[String]{}},
-    assigned: [String]{[String]{}},
+    heard: [SemaRuleBinding]{[SemaRuleBinding]{}},
+    assigned: [SemaRuleBinding]{[SemaRuleBinding]{}},
     assigned_at: [Int]{[Int]{}},
-    joined: [String]{[String]{}},
+    joined: [SemaRuleBinding]{[SemaRuleBinding]{}},
     joined_tables: [String]{[String]{}},
     calls_at: [Int]{[Int]{}},
     call_tables: [String]{[String]{}},
+}
+
+// A binding of SemaRuleTables: the body keyed `owner` and the binding's
+// key (SemaScopeBinding.key) in it.
+SemaRuleBinding: struct {
+    owner: String,
+    binding: String,
+}
+
+sema_rule_binding_is: fn(written: SemaRuleBinding, owner: String, binding: String) -> Bool Never! {
+    written.binding == binding && written.owner == owner
 }
 
 // The table a heard call's `receiver` names, in the body keyed `owner`. A
@@ -256,19 +267,20 @@ sema_rule_table: fn(receiver: Expr, owner: String, scopes: SemaScopeTable, conte
         }
     }
     if receiver == .Ident(name, span, _) && sema_scope_resolve_index(scopes, name) == .Val(binding) {
-        key: "{owner}:{scopes.bindings[binding].key}"
+        key: scopes.bindings[binding].key
         heard := false
         loop written in context.rule_tables.heard {
-            if written == key -> heard = true
+            if sema_rule_binding_is(written, owner, key) -> heard = true
         }
-        if !heard -> context.rule_tables.heard.push("{key}")
-        base := "{key}"
-        loop (index, joined) in context.rule_tables.joined {
-            if joined == key -> base = "{context.rule_tables.joined_tables[index]}"
+        if !heard -> context.rule_tables.heard.push(SemaRuleBinding{owner: owner, binding: key})
+        joined := -1
+        loop (index, written) in context.rule_tables.joined {
+            if sema_rule_binding_is(written, owner, key) -> joined = index
         }
+        base: if joined >= 0 -> "{context.rule_tables.joined_tables[joined]}" else -> "{owner}:{key}"
         generation := 0
         loop (index, assigned) in context.rule_tables.assigned {
-            if assigned == key && context.rule_tables.assigned_at[index] < span.start -> generation += 1
+            if sema_rule_binding_is(assigned, owner, key) && context.rule_tables.assigned_at[index] < span.start -> generation += 1
         }
         return "{base}#{generation}"
     }
@@ -282,7 +294,7 @@ sema_rule_table_join: fn(binding: Binding, scopes: SemaScopeTable, context: ^Sem
     if binding.init == .MethodCall(_, _, method_span, _, _, _, _) && sema_scope_resolve_index(scopes, binding.name) == .Val(index) {
         loop (call, at) in context.rule_tables.calls_at {
             if at == method_span.start {
-                context.rule_tables.joined.push("{sema_scope_function_owner_key(scopes)}:{scopes.bindings[index].key}")
+                context.rule_tables.joined.push(SemaRuleBinding{owner: sema_scope_function_owner_key(scopes), binding: scopes.bindings[index].key})
                 context.rule_tables.joined_tables.push("{context.rule_tables.call_tables[call]}")
                 return
             }
@@ -295,13 +307,14 @@ sema_rule_table_join: fn(binding: Binding, scopes: SemaScopeTable, context: ^Sem
 sema_rule_table_assigned: fn(root: String, at: Span, scopes: SemaScopeTable, context: ^SemaCheckContext) Never! {
     if context.rule_tables.heard.len() == 0 -> return
     index: sema_scope_resolve_index(scopes, root) ?? return
-    key: "{sema_scope_function_owner_key(scopes)}:{scopes.bindings[index].key}"
+    owner: sema_scope_function_owner_key(scopes)
+    key: scopes.bindings[index].key
     loop written in context.rule_tables.heard {
-        if written == key {
+        if sema_rule_binding_is(written, owner, key) {
             loop (row, assigned) in context.rule_tables.assigned {
-                if assigned == key && context.rule_tables.assigned_at[row] == at.start -> return
+                if sema_rule_binding_is(assigned, owner, key) && context.rule_tables.assigned_at[row] == at.start -> return
             }
-            context.rule_tables.assigned.push(key)
+            context.rule_tables.assigned.push(SemaRuleBinding{owner: owner, binding: key})
             context.rule_tables.assigned_at.push(at.start)
             return
         }
@@ -349,16 +362,14 @@ sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: ^^[Diagnostic], con
 // row, which the driver's batch of the rule hears (sema_call_rule_batches).
 // The site is keyed by `site_owner`, the body's key or a stand-in's.
 sema_call_rule_stage: fn(context: ^SemaCheckContext, environment: SemaScopeEnvironment, owner: String, site_owner: String, rule: SemaCallRule, call: SemaCallRuleHeard, site_span: Span) Never! {
+    if sema_comptime_body_source_row(context, environment.module_identity, site_owner, rule.span, site_span) != None -> return
     destination_key: sema_comptime_body_destination_key(site_owner, rule.span, site_span)
-    key: "{environment.module_identity.id}.{destination_key}"
-    if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
-        if sema_comptime_key_row(context.comptime_body_source_rows[slot], key) != None -> return
-    }
     sema_comptime_body_source_append(context, SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: owner,
+        site_owner: if site_owner == owner -> None else -> Val(site_owner),
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, site_span),
-        key: key,
+        key: "{environment.module_identity.id}.{destination_key}",
         destination_key: destination_key,
         name: "{rule.marker}.check",
         expression: Expr.Unit{span: site_span, id: AST_NODE_GENERATED},
@@ -984,6 +995,7 @@ SemaCallRuleBatchSite: struct {
     module_identity: ModuleID,
     key: String,
     destination_key: String,
+    place: SemaComptimeBodyPlace,
 }
 
 // The batches the rule sites among `pending` make: one per rule (its
@@ -1001,7 +1013,7 @@ sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: ^[SemaComptime
             batches.push(SemaCallRuleBatch{module_identity: site.module_identity, marker: "{site.marker}", span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", paired: site.call.words[SEMA_CALL_RULE_PAIRED_WORD] == 1, sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
         }
         batches[row].rows.push(index)
-        batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key})
+        batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key, place: sema_comptime_body_source_place(pending[index])})
     }
     loop batch in batches {
         columns := SemaCallRuleColumns{rules: [TComptimeValue]{}, rows: [Int]{}, words: [Int]{}, names: name_column_table(batch.rows.len()), types: [TComptimeValue]{}, values: [TComptimeValue]{}, functions: [TComptimeValue]{}}
@@ -1236,7 +1248,7 @@ sema_call_rule_batch_land: fn(batch: SemaCallRuleBatch, answers: ^[TComptimeValu
         index -= 1
         answer: if whole -> answers.pop() ?? TComptimeValue.Unit else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: sema_call_rule_answer_type()}}
         if answer == .Present(_) || answer == .Struct(_, _) -> rejected = true
-        values.push(SemaComptimeItemValue{module_identity: batch.sites[index].module_identity, key: batch.sites[index].key, destination_key: batch.sites[index].destination_key, kind: SemaComptimeItemKind.BodyExpression, value: answer, ty: sema_call_rule_answer_type()})
+        values.push(SemaComptimeItemValue{module_identity: batch.sites[index].module_identity, key: batch.sites[index].key, destination_key: batch.sites[index].destination_key, kind: SemaComptimeItemKind.BodyExpression, value: answer, ty: sema_call_rule_answer_type(), place: Val(batch.sites[index].place)})
     }
     rejected
 }

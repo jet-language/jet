@@ -95,6 +95,8 @@ use {
         compiler_apply_order,
         compiler_threads_admit,
         compiler_threads_joined,
+        compiler_threads_slot_taken,
+        compiler_threads_taken,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
         compiler_transfer_rows,
@@ -4584,7 +4586,7 @@ sema_registration_prepare_rows: fn(jobs: ^^[SemaRegistrationPrepareJob], threads
     slots.reverse()
     loop slots.len() > 0 {
         slot := slots.pop() ?? break
-        row := slot.move() ?? panic("a prepared module row left its slot")
+        row := compiler_threads_slot_taken(slot)
         rows.push(row)
     }
     rows
@@ -4646,7 +4648,7 @@ sema_registration_prepare_claimed: fn(shared_state: Shared<SemaRegistrationPrepa
 sema_registration_prepare_claim: fn(shared_state: Shared<SemaRegistrationPrepareShared>) -> SemaRegistrationPrepareClaim? {
     permit: shared_state.guard_edit()
     job := permit.value.jobs.pop() ?? return None
-    position: permit.value.positions.pop() ?? panic("a module prepare job has no position")
+    position: compiler_threads_taken(permit.value.positions)
     Val(SemaRegistrationPrepareClaim{position: position, job: job.move()})
 }
 

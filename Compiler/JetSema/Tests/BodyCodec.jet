@@ -36,6 +36,7 @@ use {
         SemaRegistrationPackagePolicy,
         SemaSourceOrigin,
         SemaGraphResult,
+        SemaFinalized,
         SemaSourceSegment,
         body_codec_get_semaparallelbody,
         body_codec_put_semaparallelbody,
@@ -173,6 +174,13 @@ body_codec_source: fn() -> String {
 // The result keeps its registration graph, whose interner names the types
 // of its function checks.
 body_codec_check: fn(failures: ^[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool{false}, extra: String{""}, own_entry: Bool{false}) -> SemaGraphResult? Err! {
+    finalized := body_codec_finalized(failures, package, hooks, core, extra, own_entry) ?? return None
+    Val(finalized.result.move())
+}
+
+// body_codec_check with the registration graph its finalization checked
+// against.
+body_codec_finalized: fn(failures: ^[String], package: String, hooks: Shared<SemaRegistrationHostHooks>, core: Bool, extra: String, own_entry: Bool) -> SemaFinalized? Err! {
     threads: compiler_threads_single()
     loading: hooks.guard_read().value.core_bodies != None
     stage := body_codec_declared(failures, package, core, loading, extra, own_entry) ?? return None
@@ -184,8 +192,8 @@ body_codec_check: fn(failures: ^[String], package: String, hooks: Shared<SemaReg
     }
     trail := sema_graph_trail_init()
     checked := sema_finalize_graph(graph, trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, true, None)
-    if !checked.complete {
-        failures.push("checking failed {checked.diagnostics:Debug}")
+    if !checked.result.complete {
+        failures.push("checking failed {checked.result.diagnostics:Debug}")
         return None
     }
     Val(checked.move())
@@ -665,7 +673,8 @@ body_codec_types_spelled: fn(text: String, interner: Interner) -> String {
 // records are blanked, so a record read from the lent bytes would not load.
 body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     failures := [String]{}
-    captured := body_codec_check(failures, package, body_codec_hooks(), core) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
+    captured_run := body_codec_finalized(failures, package, body_codec_hooks(), core, "", false) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
+    captured := captured_run.result.move()
     bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
     count: bodies.head.count
     file := [U8]{}
@@ -681,7 +690,8 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
         edit: hooks.guard_edit()
         edit.value.core_bodies_records = Val(BodyCodecRecords{bytes: file.move()})
     }
-    loaded := body_codec_check(failures, package, hooks, core) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
+    loaded_run := body_codec_finalized(failures, package, hooks, core, "", false) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
+    loaded := loaded_run.result.move()
     permit: hooks.guard_read()
     loaded_count := 0
     loaded_keys: sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded)
@@ -699,8 +709,8 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     }
     // Each check interns its types in its own order, so the functions compare
     // by the types their ids name, not by the ids.
-    text_graph: captured.registration_graph ?? panic("BodyCodec: the check from text kept no registration graph")
-    loaded_graph: loaded.registration_graph ?? panic("BodyCodec: the loading check kept no registration graph")
+    text_graph: captured_run.graph
+    loaded_graph: loaded_run.graph
     loop (position, text) in captured.modules {
         if position >= loaded.modules.len() -> break
         row: loaded.modules[position]

@@ -174,8 +174,8 @@ build_key_debug_text: fn(value: String) -> String Never! {
                         if number == 0 -> break
                     }
                     digits.reverse()
-                    // Unreachable: every byte comes from the ASCII alphabet above.
-                    hex: String.from_bytes(digits) ?? panic("hex is ASCII")
+                    // Valid UTF-8: every byte comes from the ASCII alphabet above.
+                    hex: String.from_bytes_lossy(digits)
                     parts.push("\\u{{{hex}}}")
                 } else { parts.push(String.from_bytes_lossy(raw[start..<position])) }
             }

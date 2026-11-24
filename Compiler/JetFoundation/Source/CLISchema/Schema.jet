@@ -345,13 +345,15 @@ cli_schema_job_float_display: fn(value: Float) -> String Never! {
     if decimal <= 0 {
         zero_bytes := [U8]{}
         loop _ in 0..<(-decimal) -> zero_bytes.push(U8{48})
-        zeros: String.from_bytes(zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
+        // Valid UTF-8: the padding is the ASCII `0` bytes this loop writes, so the lossy decode keeps every byte.
+        zeros: String.from_bytes_lossy(zero_bytes)
         return "{sign}0.{zeros}{digits}"
     }
     if decimal >= digits.len() {
         zero_bytes := [U8]{}
         loop _ in digits.len()..<decimal -> zero_bytes.push(U8{48})
-        zeros: String.from_bytes(zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
+        // Valid UTF-8: the padding is the ASCII `0` bytes this loop writes, so the lossy decode keeps every byte.
+        zeros: String.from_bytes_lossy(zero_bytes)
         return "{sign}{digits}{zeros}"
     }
     "{sign}{digits.slice(0..<decimal)}.{digits.slice(decimal..<digits.len())}"

@@ -22,6 +22,7 @@ use {
         Func,
         Program,
         Span,
+        SymbolID,
         SymbolKind,
         BinOp,
         TComptimeValue,
@@ -50,8 +51,12 @@ use {
         module_is_core,
         name_count,
         name_find,
+        name_index,
         name_intern,
+        name_pair_find_slot,
+        name_pair_slot,
         name_table,
+        Name,
         NameTable,
     ]
     jet_parser.[parse_type_text]
@@ -485,18 +490,22 @@ sema_liveness_unreachable_reexports: fn(graph: SemaRegistrationGraph, module_ind
 // members unless the type and the member are public.
 
 // Each set of spellings is a NameTable of its own, holding each spelling
-// once.
+// once. A set of pairs keys each pair by its slot (name_pair_slot) over
+// `spellings`.
 SemaLivenessMemberUses: struct {
-    // `{owner id}:{field}` for a field read through its owner.
-    fields: NameTable,
+    // The spellings `fields` and `case_names` key by.
+    spellings: NameTable,
+    // A field read through its owner: the owner id high, the field's
+    // spelling id low (sema_liveness_field_slot).
+    fields: [Int:Bool],
     // A field name read where no owner is known (an optional chain, a
     // destructuring, a pattern): every field of that name counts as read.
     field_names: NameTable,
     // The case ids an expression builds.
     cases: [U32:Bool],
-    // `{type}.{case}` for a case built by name (a literal, a compile-time
-    // value), the type by its last name segment.
-    case_names: NameTable,
+    // A case built by name (a literal, a compile-time value): the (type,
+    // case) pair slot, the type by its last name segment.
+    case_names: [Int:Bool],
     // Types whose every field counts as read, by last name segment.
     read_types: NameTable,
     // Types whose every case counts as built, by last name segment.
@@ -506,13 +515,30 @@ SemaLivenessMemberUses: struct {
     program_index: Bool,
 
     empty: fn() -> SemaLivenessMemberUses Never! {
-        SemaLivenessMemberUses{fields: name_table(), field_names: name_table(), cases: [U32:Bool]{}, case_names: name_table(), read_types: name_table(), built_types: name_table(), program_index: false}
+        SemaLivenessMemberUses{spellings: name_table(), fields: [Int:Bool]{}, field_names: name_table(), cases: [U32:Bool]{}, case_names: [Int:Bool]{}, read_types: name_table(), built_types: name_table(), program_index: false}
     }
 }
 
 // Adds each spelling of `from` to `into`.
 sema_liveness_merge: fn(into: ^NameTable, from: NameTable) Never! {
     loop text in from.texts -> _ := name_intern(into, text)
+}
+
+// Adds the pairs of `part` to `into`, each spelling renamed into
+// `into.spellings`.
+sema_liveness_merge_pairs: fn(into: ^SemaLivenessMemberUses, part: SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+    loop (slot, _) in part.fields {
+        field: name_index(name_intern(into.spellings, part.spellings.texts[slot & 0xffffffff]))
+        into.fields[((slot >> 32) << 32) | field] = true
+    }
+    loop (slot, _) in part.case_names {
+        into.case_names[name_pair_slot(into.spellings, part.spellings.texts[slot >> 32], part.spellings.texts[slot & 0xffffffff])] = true
+    }
+}
+
+// The slot of the field spelled `field` read through the owner `owner`.
+sema_liveness_field_slot: fn(owner: SymbolID, field: Name) -> Int Never! {
+    (Int{owner.id} << 32) | name_index(field)
 }
 
 // The package of the entry module when it declares `run`: an application,
@@ -560,9 +586,30 @@ sema_liveness_node_type_names: fn(interner: Interner, type_delta: [InternerDelta
 }
 
 sema_liveness_note_field: fn(field: TFieldRef, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
-    if field.owner == .Val(owner) -> _ := name_intern(uses.fields, "{owner.id}:{field.name}") else {
-        _ := name_intern(uses.field_names, field.name)
+    if field.owner == .Val(owner) {
+        slot: sema_liveness_field_slot(owner, name_intern(uses.spellings, field.name))
+        uses.fields[slot] = true
+        return
     }
+    _ := name_intern(uses.field_names, field.name)
+}
+
+// The case `case_name` of the type `type_name` is built by name.
+sema_liveness_note_case: fn(uses: ^SemaLivenessMemberUses, type_name: String, case_name: String) -[Mem.Alloc]> Never! {
+    slot: name_pair_slot(uses.spellings, type_name, case_name)
+    uses.case_names[slot] = true
+}
+
+// Whether the field spelled `field` is read through the owner `owner`.
+sema_liveness_field_read: fn(uses: SemaLivenessMemberUses, owner: SymbolID, field: String) -> Bool Never! {
+    spelling: name_find(uses.spellings, field) ?? return false
+    uses.fields.get(sema_liveness_field_slot(owner, spelling)) != None
+}
+
+// Whether the case `case_name` of the type `type_name` is built by name.
+sema_liveness_case_named: fn(uses: SemaLivenessMemberUses, type_name: String, case_name: String) -> Bool Never! {
+    slot: name_pair_find_slot(uses.spellings, type_name, case_name) ?? return false
+    uses.case_names.get(slot) != None
 }
 
 // A pattern reads the fields it names; matching a case builds nothing.
@@ -618,7 +665,7 @@ sema_liveness_condition_uses: fn(condition: BodyIfCond, uses: ^SemaLivenessMembe
 sema_liveness_comptime_uses: fn(value: TComptimeValue, uses: ^SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
     if value == {
         .Enum(type_name, variant, args) -> {
-            _ := name_intern(uses.case_names, "{sema_call_reflection_leaf_name(type_name)}.{variant}")
+            sema_liveness_note_case(uses, sema_call_reflection_leaf_name(type_name), variant)
             loop arg in args -> sema_liveness_comptime_uses(arg.value, uses)
         }
         .Struct(type_name, fields) -> {
@@ -730,7 +777,7 @@ sema_liveness_member_body_uses: fn(interner: Interner, function: FnBody, uses: ^
         if kind == .IfExpr(condition, _, _, _, _) -> sema_liveness_condition_uses(condition, uses)
         if kind == .EnumCtor(_, variant, _) -> uses.cases[variant.id] = true
         if kind == .EnumLit(enum_type, variant, _) {
-            _ := name_intern(uses.case_names, "{sema_call_reflection_leaf_name(enum_type)}.{variant}")
+            sema_liveness_note_case(uses, sema_call_reflection_leaf_name(enum_type), variant)
         }
         if kind == .CtLit(value) -> sema_liveness_comptime_uses(value, uses)
         if kind == .Binary(op, _, _, lhs, _) && sema_liveness_compares(op) {
@@ -847,11 +894,10 @@ sema_liveness_member_closure: fn(graph: SemaRegistrationGraph, types: ^NameTable
     }
 }
 
-sema_liveness_member_uses_merge: fn(into: ^SemaLivenessMemberUses, part: SemaLivenessMemberUses) {
-    sema_liveness_merge(into.fields, part.fields)
+sema_liveness_member_uses_merge: fn(into: ^SemaLivenessMemberUses, part: SemaLivenessMemberUses) -[Mem.Alloc]> Never! {
+    sema_liveness_merge_pairs(into, part)
     sema_liveness_merge(into.field_names, part.field_names)
     loop (id, _) in part.cases -> into.cases[id] = true
-    sema_liveness_merge(into.case_names, part.case_names)
     sema_liveness_merge(into.read_types, part.read_types)
     sema_liveness_merge(into.built_types, part.built_types)
     if part.program_index -> into.program_index = true
@@ -916,13 +962,7 @@ sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [Sema
         }
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
         // A test checked outside test mode left only its member uses.
-        sema_liveness_merge(uses.fields, checked.test_member_uses.fields)
-        sema_liveness_merge(uses.field_names, checked.test_member_uses.field_names)
-        loop (id, _) in checked.test_member_uses.cases -> uses.cases[id] = true
-        sema_liveness_merge(uses.case_names, checked.test_member_uses.case_names)
-        sema_liveness_merge(uses.read_types, checked.test_member_uses.read_types)
-        sema_liveness_merge(uses.built_types, checked.test_member_uses.built_types)
-        if checked.test_member_uses.program_index -> uses.program_index = true
+        sema_liveness_member_uses_merge(uses, checked.test_member_uses)
         // A value computed while compiling (a local's, Comptime/LocalValues.jet,
         // or a `T.reflect()` record) holds its result in place of the code
         // that made it, so the cases that code names are built and the types
@@ -1000,10 +1040,10 @@ sema_liveness_member_uses_range: fn(graph: SemaRegistrationGraph, modules: [Sema
                 loop arg in alias.args {
                     if arg == .Value(value, _) {
                         if value == .Field(base, member, _, _) && base == .Ident(enum_name, _, _) {
-                            _ := name_intern(uses.case_names, "{enum_name}.{member}")
+                            sema_liveness_note_case(uses, enum_name, member)
                         }
                         if value == .EnumLit(enum_name, variant, _, _, _, _, _) {
-                            _ := name_intern(uses.case_names, "{enum_name}.{variant}")
+                            sema_liveness_note_case(uses, enum_name, variant)
                         }
                     }
                 }
@@ -1172,7 +1212,7 @@ sema_liveness_unused_members: fn(graph: SemaRegistrationGraph, module_index: Int
                         next
                     }
                     if !judge_pub && nominal.symbol.visibility > 1 && symbol.visibility > 1 -> next
-                    if name_find(uses.fields, "{nominal.symbol.id.id}:{name}") != None || name_find(uses.field_names, name) != None {
+                    if sema_liveness_field_read(uses, nominal.symbol.id, name) || name_find(uses.field_names, name) != None {
                         next
                     }
                     diagnostic: sema_lint("L0106", symbol.span, "Field `{type_name}.{name}` is never read.", "Code may write this field, but nothing reads it, so it carries data no part of the program uses. Printing, encoding, derived equality or ordering, reflection and foreign code count as reads; derived cloning does not.", "Remove the field, or rename `{name}` to `_{name}` when it is intentional.")
@@ -1188,7 +1228,7 @@ sema_liveness_unused_members: fn(graph: SemaRegistrationGraph, module_index: Int
                     name: sema_call_reflection_leaf_name(symbol.name)
                     if sema_liveness_ignored(name) || symbol.span.start >= symbol.span.end -> next
                     if !judge_pub && nominal.symbol.visibility > 1 && symbol.visibility > 1 -> next
-                    if uses.cases.get(symbol.id.id) != None || name_find(uses.case_names, "{type_name}.{name}") != None {
+                    if uses.cases.get(symbol.id.id) != None || sema_liveness_case_named(uses, type_name, name) {
                         next
                     }
                     diagnostic: sema_lint("L0107", symbol.span, "Case `{type_name}.{name}` is never built.", "Code may match this case, but nothing creates it, so the arms that handle it never run. Decoding and foreign code count as building it; matching does not.", "Remove the case, or rename `{name}` to `_{name}` when it is intentional.")

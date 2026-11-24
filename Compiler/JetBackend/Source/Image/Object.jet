@@ -41,7 +41,7 @@
 // it at link time and the library's calls reach the program's definition.
 use {
     core.collections.[Rows]
-    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
+    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_taken, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
 }
 
 ELF64_SECTION_HEADER_SIZE: 64
@@ -649,7 +649,7 @@ x64_object_symbol: fn(names: ^NameTable, import_of: ^[Int], export_of: ^[Int], n
 // A part's rows, after its thread joined.
 x64_object_text_part_take: fn(part: Shared<X64ObjectTextPart>) -> X64ObjectTextRows {
     permit: part.guard_edit()
-    permit.value.outputs.pop() ?? panic("a .text thread left no rows")
+    compiler_threads_taken(permit.value.outputs)
 }
 
 // Takes each function's code out of `functions`, in function order; each

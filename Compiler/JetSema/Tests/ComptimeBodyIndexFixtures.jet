@@ -4,6 +4,7 @@ use {
     jet_sema.[
         SemaBuildFacts,
         SemaCheckContext,
+        SemaComptimeBodyPlace,
         SemaComptimeBodyValue,
         SemaComptimeBodyValues,
         SemaComptimeBodyWork,
@@ -30,7 +31,6 @@ use {
         sema_comptime_body_capture,
         sema_comptime_body_destination_key,
         sema_comptime_body_source_append,
-        sema_comptime_body_source_key,
         sema_comptime_body_sources_truncate,
         sema_comptime_body_value_find,
         sema_comptime_body_values_append_items,
@@ -39,6 +39,7 @@ use {
         sema_comptime_body_values_replace,
         sema_comptime_body_values_truncate,
         sema_comptime_environment,
+        sema_comptime_environment_tables,
         sema_comptime_graph_apply_values,
         sema_comptime_key_row,
         sema_comptime_module_slot,
@@ -128,18 +129,22 @@ body_index_scopes: fn(function_key: String) -> SemaScopeTable Never! {
 
 body_index_value: fn(module_identity: String, function_key: String, source: Span, site: Span, number: Int) -> SemaComptimeBodyValue Never! {
     module_id: body_index_module(module_identity)
+    destination_key: sema_comptime_body_destination_key(function_key, source, site)
     SemaComptimeBodyValue{
         module_identity: module_id,
-        key: sema_comptime_body_source_key(module_id, function_key, source, site),
-        destination_key: sema_comptime_body_destination_key(function_key, source, site),
+        key: "{module_id.id}.{destination_key}",
+        destination_key: destination_key,
         value: TComptimeValue.Int{value: number},
         ty: Type.Int,
+        place: Val(SemaComptimeBodyPlace{owner: function_key, source: source, site: site}),
     }
 }
 
+// The pre-index query: the one row of the visible prefix whose module and
+// key text match, None for none or two.
 body_index_linear_value: fn(values: [SemaComptimeBodyValue], length: Int, module_identity: String, function_key: String, source: Span, site: Span) -> SemaComptimeBodyValue? {
     module_id: body_index_module(module_identity)
-    key: sema_comptime_body_source_key(module_id, function_key, source, site)
+    key: "{module_id.id}.{sema_comptime_body_destination_key(function_key, source, site)}"
     found := SemaComptimeBodyValue?{None}
     loop index in 0..<length {
         value: values[index]
@@ -396,13 +401,12 @@ body_index_publication_lifecycle: fn() {
     span: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
     first: body_index_value("mod.one", "function.one", span, site, 7)
-    initial: SemaComptimeItemValue{module_identity: first.module_identity, key: first.key, destination_key: first.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: first.value, ty: first.ty}
+    initial: SemaComptimeItemValue{module_identity: first.module_identity, key: first.key, destination_key: first.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: first.value, ty: first.ty, place: first.place}
     available := sema_comptime_available_constants(graph, [SemaComptimeItemValue]{initial})
     sites: sema_comptime_value_sites(graph)
     trail := sema_graph_trail_init()
-    environment := sema_comptime_environment(graph, [SemaComptimeItemValue]{initial}, None, None)
-    program := sema_program_tables_init(environment.registration_graph.move(), [TTypeDef]{})
-    environment.registration_graph = None
+    program := sema_comptime_environment_tables(graph, [SemaComptimeItemValue]{initial}, None)
+    environment := sema_comptime_environment(program, [SemaComptimeItemValue]{initial}, None)
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod.one"), empty), "an item check retargets the registered module")
     context := sema_check_context_init()
@@ -417,7 +421,7 @@ body_index_publication_lifecycle: fn() {
     prior: environment.comptime_body_publication.copy()
     next_site: Span{start: 30, end: 31}
     second: body_index_value("mod.one", "function.one", span, next_site, 9)
-    landed: SemaComptimeItemValue{module_identity: second.module_identity, key: second.key, destination_key: second.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: second.value, ty: second.ty}
+    landed: SemaComptimeItemValue{module_identity: second.module_identity, key: second.key, destination_key: second.destination_key, kind: SemaComptimeItemKind.BodyExpression, value: second.value, ty: second.ty, place: second.place}
     body_index_require(jet_driver_comptime_apply_landed(environment, program, available, sites, [SemaComptimeItemValue]{initial, landed}, 1, trail, None), "the authentic staging producer appends a body-only batch")
     body_index_require(environment.comptime_body_values.length == 1 && environment.comptime_body_publication.length == 2 && prior.length == 1, "append preserves the old selected view and old captured prefix")
     body_index_require(body_index_values_debug(prior) == "{[SemaComptimeBodyValue]{first}:Debug}", "an older prefix cannot see later appended rows")
@@ -441,7 +445,7 @@ body_index_publication_lifecycle: fn() {
 }
 
 body_index_item: fn(value: SemaComptimeBodyValue, kind: SemaComptimeItemKind) -> SemaComptimeItemValue {
-    SemaComptimeItemValue{module_identity: value.module_identity, key: value.key, destination_key: value.destination_key, kind: kind, value: value.value, ty: value.ty}
+    SemaComptimeItemValue{module_identity: value.module_identity, key: value.key, destination_key: value.destination_key, kind: kind, value: value.value, ty: value.ty, place: value.place}
 }
 
 body_index_append_prefixes: fn() {

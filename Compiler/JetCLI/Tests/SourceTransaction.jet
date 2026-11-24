@@ -76,7 +76,7 @@ JetCLITransactionFixtureRoot: struct {
     file: "{root}/run.jet"
     source: "run: fn() {{\n    value: 1\n    print(value)\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
-    baseline: jet_cli_fix_errors(file, source, [JetCLIFixFile]{}, [String?]{})
+    baseline: jet_cli_fix_errors(file, source, [JetCLIFixFile]{}, [String?]{}, "")
     assert(baseline.len() == 0)
     literal: "run: fn() {{\n    value: ".len()
     use_site: "run: fn() {{\n    value: 1\n    print(".len()
@@ -84,7 +84,7 @@ JetCLITransactionFixtureRoot: struct {
     breaks: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
     rejected := [JetCLIFixSkip]{}
     refused := [JetCLIFixSkip]{}
-    checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, [JetCLIFix]{keep, breaks}, baseline, rejected, refused)
+    checked: jet_cli_fix_checked(file, source, [JetCLIFixFile]{}, [JetCLIFix]{keep, breaks}, baseline, rejected, refused, "")
     assert(checked.source == "run: fn() {{\n    value: 2\n    print(value)\n}}\n")
     assert(checked.applied == 1)
     assert(rejected.len() == 1 && refused.len() == 0)

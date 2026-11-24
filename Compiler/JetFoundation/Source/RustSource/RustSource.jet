@@ -133,7 +133,8 @@ rust_code_mask: fn(source: String) -> String Never! {
             }
         }
     }
-    String.from_bytes(out) ?? panic("Rust source mask preserves UTF-8 bytes")
+    // Valid UTF-8: `source`'s own bytes, with every byte inside a string, char or comment (each opened and closed by ASCII) replaced by an ASCII space, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 rust_source_push_spaces: fn(out: ^[U8], count: Int) Never! {
@@ -240,7 +241,8 @@ strip_test_items: fn(source: String) -> String Never! {
         line_start = line_end
     }
     out.extend(raw[kept..<raw.len()])
-    String.from_bytes(out) ?? panic("stripping Rust items preserves UTF-8 bytes")
+    // Valid UTF-8: `source`'s own bytes in order, less whole lines cut at line starts, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 // Rust's bracket scan counts all three bracket kinds together. Compute every

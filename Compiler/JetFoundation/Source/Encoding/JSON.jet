@@ -30,7 +30,8 @@ foundation_json_escape: fn(value: String) -> String Never! {
         }
         index += 1
     }
-    String.from_bytes(out) ?? panic("JSON escaping preserves UTF-8")
+    // Valid UTF-8: `value`'s own bytes in order, with each whole control character replaced by an ASCII escape, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 foundation_json_quote: fn(value: String) -> String Never! { "\"{foundation_json_escape(value)}\"" }
@@ -81,7 +82,8 @@ foundation_float_display: fn(value: Float) -> String Never! {
         foundation_json_append(out, "0.")
         loop _ in 0..<(0 - point) -> out.push(U8{48})
         loop digit in digits -> out.push(digit)
-        return String.from_bytes(out) ?? panic("float display is ASCII")
+        // Valid UTF-8: only the ASCII sign, digits, `.` and `0` bytes this function writes, so the lossy decode keeps every byte.
+        return String.from_bytes_lossy(out)
     }
     loop index in 0..<point {
         if index < digits.len() -> out.push(digits[index]) else -> out.push(U8{48})
@@ -90,7 +92,8 @@ foundation_float_display: fn(value: Float) -> String Never! {
         out.push(U8{46})
         loop index in point..<digits.len() -> out.push(digits[index])
     }
-    String.from_bytes(out) ?? panic("float display is ASCII")
+    // Valid UTF-8: only the ASCII sign, digits, `.` and `0` bytes this function writes, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }
 
 // Shared structural Debug quoting (formerly JetEval's value formatter).
@@ -114,5 +117,6 @@ foundation_debug_quoted: fn(text: String, quote: Int) -> String Never! {
         }
     }
     out.push(U8{quote})
-    String.from_bytes(out) ?? panic("Debug quoting preserves UTF-8")
+    // Valid UTF-8: `text`'s own bytes in order, with ASCII quotes and ASCII escapes for ASCII controls, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(out)
 }

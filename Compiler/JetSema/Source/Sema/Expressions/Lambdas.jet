@@ -1251,7 +1251,7 @@ sema_expression_lambda_collect_reference_keys: fn(state: ^SemaOwnershipState, fi
             sema_expression_lambda_add_capture_key(keys, reference.def_id)
             // A `#Reactive` body writes its registration's clone, so the lambda
             // only reads the root.
-            if reference.kind == SemaOwnershipReferenceKind.Write && !sema_ownership_in_reactive_body(state, reference.use_span) {
+            if reference.kind == AccessConvention.Write && !sema_ownership_in_reactive_body(state, reference.use_span) {
                 sema_expression_lambda_add_capture_key(mutable_keys, reference.def_id)
             }
         }

@@ -28,6 +28,7 @@ use {
         SemaFunctionMemoryPlan,
         SemaGraphModuleResult,
         SemaGraphResult,
+        SemaFinalized,
         SemaLocalSpliceDemand,
         SemaLocalSpliceInto,
         SemaPassFacts,
@@ -508,11 +509,9 @@ jet_driver_comptime_body_pass: fn(
     registration = splice.graph.move()
     if splice.spliced {
         if full_input.move() == .Val(unspliced) {
-            full := jet_driver_recheck_comptime_bodies(registration, run.trail, stage, unspliced, body_sources, values, functions, request, pass)
-            verified := full.registration_graph.move()
-            full.registration_graph = None
-            registration = verified.move() ?? panic("body finalization lost its registration graph")
-            differences: jet_driver_recheck_differences(current_graph, full, registration.module_table)
+            full: jet_driver_recheck_comptime_bodies(registration, run.trail, stage, unspliced, body_sources, values, functions, request, pass)
+            registration = full.graph.move()
+            differences: jet_driver_recheck_differences(current_graph, full.result, registration.module_table)
             if differences.len() > 0 {
                 lines: differences.join("\n")
                 sema_graph_trail_undo(registration, run.trail)
@@ -548,7 +547,7 @@ jet_driver_comptime_body_pass: fn(
     earlier_functions = [SemaComptimeFunctionResult]{}
     // The run's graph already carries every value: the recheck finalizes it
     // in place instead of copying the registration graph.
-    rechecked := jet_driver_recheck_comptime_bodies(
+    rechecked: jet_driver_recheck_comptime_bodies(
         registration,
         run.trail,
         stage,
@@ -559,14 +558,12 @@ jet_driver_comptime_body_pass: fn(
         request,
         pass,
     )
-    restored := rechecked.registration_graph.move()
-    rechecked.registration_graph = None
-    registration = restored.move() ?? panic("body finalization lost its registration graph")
+    registration = rechecked.graph.move()
     sema_graph_trail_undo(registration, run.trail)
     jet_driver_comptime_body_pass(
         registration,
         stage,
-        rechecked,
+        rechecked.result.move(),
         values,
         functions,
         trace,
@@ -752,8 +749,8 @@ jet_driver_validate_checked_text: fn(
 }
 
 // Finalizes the rechecked bodies against the moved-in registration graph,
-// recording its edits on `trail`; the graph comes back in the result's
-// `registration_graph` with the edits still applied (the caller undoes them).
+// recording its edits on `trail`; the graph comes back beside the result
+// (SemaFinalized.graph) with the edits still applied (the caller undoes them).
 jet_driver_recheck_comptime_bodies: fn(
     graph: ^^SemaRegistrationGraph,
     trail: ^SemaGraphTrail,
@@ -764,11 +761,11 @@ jet_driver_recheck_comptime_bodies: fn(
     comptime_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
     pass: Int,
-) -> SemaGraphResult {
+) -> SemaFinalized {
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.recheck", body_sources, pass)
     body_stage := jet_driver_comptime_body_stage(stage, semantic_graph, body_sources)
     rechecked := sema_finalize_graph(graph, trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, true, request.trace_sink)
-    jet_driver_trace_step_end(request.trace_sink, "comptime.body.recheck", rechecked.modules.len())
+    jet_driver_trace_step_end(request.trace_sink, "comptime.body.recheck", rechecked.result.modules.len())
     rechecked
 }
 
@@ -917,9 +914,7 @@ jet_driver_land_local_values: fn(
             landing.staging,
         )
         if !reuse_staging -> bodies.modules = run.declared.move()
-        returned: run.graph_facts.move()
-        run.graph_facts = None
-        jet_driver_carried_return(bodies.carried, lent, returned)
+        jet_driver_carried_return(bodies.carried, lent, run.graph_facts.move())
         finished_registration := run.graph.move()
         run.graph = None
         partial_registration := run.partial_graph.move()
@@ -978,10 +973,10 @@ jet_driver_carried_lend: fn(carried: ^[SemaPassFacts]) -> JetDriverLentFacts Nev
 // Moves the facts jet_driver_carried_lend lent to a comptime run back into
 // `carried`, with the graph facts the run handed back (`returned`), which a
 // run hands back on every exit.
-jet_driver_carried_return: fn(carried: ^[SemaPassFacts], lent: ^^JetDriverLentFacts, returned: ^^SemaComptimeGraphFacts?) Never! {
+jet_driver_carried_return: fn(carried: ^[SemaPassFacts], lent: ^^JetDriverLentFacts, returned: ^^SemaComptimeGraphFacts) Never! {
     owned := lent.move()
     plan: owned.memory_plan.pop() ?? return
-    graph_facts: returned.move() ?? panic("a comptime run lost the finalization's boxed edges and copy facts")
+    graph_facts: returned.move()
     carried.push(SemaPassFacts{memory_plan: plan.move(), fixed_length_write_params: owned.fixed_length_write_params.move(), boxed_edges: graph_facts.boxed_edges.move(), copy_facts: graph_facts.copy_facts.move()})
 }
 
@@ -1040,16 +1035,14 @@ jet_driver_verify_landed_values: fn(
     registration.core_stand_ins = stand_ins.move()
     trail := sema_graph_trail_init()
     sema_comptime_graph_apply_values(registration, values, trail)
-    full := sema_finalize_graph(registration, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, false, None)
-    restored := full.registration_graph.move()
-    full.registration_graph = None
-    registration = restored.move() ?? panic("the verifying finalization lost its registration graph")
+    full: sema_finalize_graph(registration, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, false, None)
+    registration = full.graph.move()
     sema_graph_trail_undo(registration, trail)
     registration.core_stand_ins = None
     _ := sema_local_splice_demand_swap(registration, held)
-    differences := jet_driver_recheck_differences(landed, full, registration.module_table)
-    if full.core_stand_in_rerun != "" {
-        differences.push("the full recheck's Core stand-ins would not do ({full.core_stand_in_rerun}) where the landed finalization's did")
+    differences := jet_driver_recheck_differences(landed, full.result, registration.module_table)
+    if full.result.core_stand_in_rerun != "" {
+        differences.push("the full recheck's Core stand-ins would not do ({full.result.core_stand_in_rerun}) where the landed finalization's did")
     }
     if differences.len() > 0 {
         problem = Val("JET_RECHECK_VERIFY: the local values landed before the whole-program passes differ from the full recheck:\n{differences.join("\n")}")

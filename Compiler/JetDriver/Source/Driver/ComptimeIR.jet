@@ -5,7 +5,7 @@
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
 use {
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, Interner, ModuleTable, Span, StmtKind, SymbolKind, SymbolTable, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, interner_empty, module_text, symbol_key_text, symbol_table]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, Interner, ModuleTable, NameVisibility, Span, StmtKind, SymbolKind, SymbolTable, TComptimeValue, TConstantDef, TImplDef, TTypeDef, interner_empty, module_text, symbol_key_text, symbol_table]
     jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
     jet_ir.[IRProgram, ir_comptime_item_function, ir_comptime_item_key, ir_program_declared]
     jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_build_interner, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_ir_watched_sources, jet_eval_native_load, jet_eval_native_run]
@@ -85,7 +85,7 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: ^JetDri
 
 // The constant row of landed value `value` under `key`, named in `table`.
 jet_driver_comptime_value_row: fn(value: SemaComptimeItemValue, key: String, table: ModuleTable) -> TConstantDef Never! {
-    TConstantDef{module_identity: value.module_identity, key: key.copy(), name: key.copy(), symbol_key: symbol_key_text(SymbolKind.Constant, module_text(table, value.module_identity), "", key), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
+    TConstantDef{module_identity: value.module_identity, key: key.copy(), name: key.copy(), symbol_key: symbol_key_text(SymbolKind.Constant, module_text(table, value.module_identity), "", key), span: Span{start: 0, end: 0}, visibility: NameVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
 }
 
 // A fn-build or fn-dev invocation's run (`result`): the checked entry

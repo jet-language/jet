@@ -1011,7 +1011,8 @@ sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg]
 // A string literal with no interpolation whose written text holds a NUL byte.
 sema_call_literal_has_nul: fn(value: Expr) -> Bool Never! {
     if value == .Str(parts, _, _) {
-        nul: String.from_bytes([U8{0}]) ?? panic("NUL is UTF-8")
+        // Valid UTF-8: NUL is one ASCII byte, so the lossy decode keeps every byte.
+        nul: String.from_bytes_lossy([U8{0}])
         found := false
         loop part in parts {
             if part == {
@@ -1256,10 +1257,6 @@ sema_call_argument_fix_hint: fn(required: Type, offered: Type, value: Expr) -> S
 sema_call_parameter_type_undeclared: fn(required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     generic_names: loop param in environment.generic_params -> param.name
     if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_row(environment, graph)
-        return sema_type_names_undeclared(graph, caller, required, generic_names) || sema_type_names_bare_generic(graph, caller, required, generic_names)
-    }
-    if environment.registration_graph == .Val(graph) {
         caller: sema_scope_caller_row(environment, graph)
         return sema_type_names_undeclared(graph, caller, required, generic_names) || sema_type_names_bare_generic(graph, caller, required, generic_names)
     }

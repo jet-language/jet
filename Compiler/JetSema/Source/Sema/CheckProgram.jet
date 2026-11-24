@@ -40,6 +40,7 @@ use jet_foundation.[
     NameFacts,
     NameModule,
     NameReference,
+    NameVisibility,
     RuntimeLayer,
     StructureFact,
     TargetHardwareUse,
@@ -69,7 +70,6 @@ use jet_foundation.[
     TTestFact,
     TTypeDef,
     TUnsafeGate,
-    TVisibility,
     TWebParamReconstruction,
     Type,
     ViewProvenance,
@@ -474,6 +474,9 @@ SemaComptimeItemSource: struct {
     // A body site's run-time locals and parameters, which its staged check
     // names as run-time values (E0640) when the code reads one.
     runtime_locals: [String]{[String]{}},
+    // A body site's place, which its landed value keeps for the body checks
+    // that read it (SemaComptimeBodyValue.place).
+    place: SemaComptimeBodyPlace?{None},
 }
 
 SemaComptimeItemRequest: struct {
@@ -507,6 +510,8 @@ SemaComptimeItemValue: struct {
     // A module `Shared{X}` holder (sema_comptime_shared_payload): `value` is
     // the payload the build folded, `ty` the holder's Shared type.
     shared_holder: Bool{false},
+    // A body site's place (SemaComptimeItemSource.place).
+    place: SemaComptimeBodyPlace?{None},
 }
 
 sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComptimeBodyValue Never! {
@@ -516,6 +521,7 @@ sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComp
         destination_key: value.destination_key,
         value: value.value,
         ty: value.ty,
+        place: value.place,
     }
 }
 
@@ -681,10 +687,6 @@ SemaGraphResult: struct {
     // again without stand-ins (sema_finalize_program), else "".
     core_stand_ins: Int{0},
     core_stand_in_rerun: String{""},
-    // The registration graph finalization checked against (values and
-    // failure projections applied), handed back by sema_finalize_graph so its
-    // caller can undo the edits (sema_graph_trail_undo); None otherwise.
-    registration_graph: SemaRegistrationGraph?{None},
     // `SemaRegistrationGraph.retain_programs`: each module's program as sema
     // settled it, indexed like `modules`; empty otherwise.
     programs: [Program]{[Program]{}},
@@ -694,6 +696,14 @@ SemaGraphResult: struct {
     // The answers of the debugger's probes (EvalProbe.jet), ordered by
     // probe, expression and function; empty without probes.
     eval_answers: [SemaEvalProbeAnswer]{[SemaEvalProbeAnswer]{}},
+}
+
+// What sema_finalize_graph hands back: its result, and the registration graph
+// the finalization checked against (values and failure projections applied),
+// moved back to the caller so it can undo the edits (sema_graph_trail_undo).
+SemaFinalized: struct {
+    result: SemaGraphResult,
+    graph: SemaRegistrationGraph,
 }
 
 sema_name_facts_empty: fn() -> NameFacts Never! {
@@ -2168,8 +2178,8 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         return sema_function_result(None, owner_key, check.context.move())
     }
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
-    visibility := TVisibility.Private
-    if func.is_pub -> visibility = TVisibility.Public
+    visibility := NameVisibility.Private
+    if func.is_pub -> visibility = NameVisibility.Public
     effects := TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: check.context.module_writes.move()}
     check.context.module_writes = [TEffectSpan]{}
     if stand_in == .Val(seal_facts) -> effects = seal_facts.effects
@@ -2595,14 +2605,10 @@ sema_comptime_owner_generic_params: fn(environment: SemaScopeEnvironment, progra
     [TGenericParam]{}
 }
 
-// `memory_plan` is the graph's memory plan, built once by the caller: known-
-// time values only type constants, never the functions the plan annotates.
-// The caller keeps the run's checked functions and reuses a complete one
-// instead of calling this again.
-// `comptime_scopes` are the run's module scopes (sema_comptime_scopes_init),
-// lent to every item and function check of the run.
-sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: ModuleID, function_key: String) -> SemaComptimeFunctionResult {
-    unresolved := SemaComptimeFunctionResult{
+// The result of a comptime function check that could not run, with `reason`
+// as its one incomplete reason.
+sema_comptime_function_unresolved: fn(module_identity: ModuleID, function_key: String, reason: String) -> SemaComptimeFunctionResult Never! {
+    SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
         function: None,
@@ -2618,8 +2624,18 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
         exact_int_reachable: false,
         copy_events: [SemaCopyEvent]{},
         complete: false,
-        incomplete_reasons: [String]{"`{function_key}` has no registered comptime function source in module `{module_text(graph.module_table, module_identity)}`"},
+        incomplete_reasons: [String]{reason},
     }
+}
+
+// `memory_plan` is the graph's memory plan, built once by the caller: known-
+// time values only type constants, never the functions the plan annotates.
+// The caller keeps the run's checked functions and reuses a complete one
+// instead of calling this again.
+// `comptime_scopes` are the run's module scopes (sema_comptime_scopes_init),
+// lent to every item and function check of the run.
+sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: ModuleID, function_key: String) -> SemaComptimeFunctionResult {
+    unresolved := sema_comptime_function_unresolved(module_identity, function_key, "`{function_key}` has no registered comptime function source in module `{module_text(graph.module_table, module_identity)}`")
     source: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
     if source.declaration.inline_foreign != None || sema_function_is_guest_import(source.declaration) {
         unresolved.incomplete_reasons = [String]{}
@@ -2671,24 +2687,9 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
             diagnostics.push(diagnostic.copy())
         }
         sema_attach_diagnostic_source_locations(diagnostics, 0, environment.source_segments)
-        return SemaComptimeFunctionResult{
-            module_identity: module_identity,
-            function_key: function_key,
-            function: None,
-            waiting_dependencies: [String]{},
-            calls: [SemaComptimeRequest]{},
-            reachable_function_keys: [String]{},
-            call_facts: [SemaCallSiteFact]{},
-            hardware_use: sema_hardware_empty_use(),
-            name_references: [SemaNameReferenceFact]{},
-            comptime_body_sources: [SemaComptimeBodySource]{},
-            compute_facts: sema_compute_facts_empty(function_key),
-            diagnostics: diagnostics,
-            exact_int_reachable: false,
-            copy_events: [SemaCopyEvent]{},
-            complete: false,
-            incomplete_reasons: [String]{"the scope of module `{module_text(graph.module_table, module_identity)}` could not be applied"},
-        }
+        failed := sema_comptime_function_unresolved(module_identity, function_key, "the scope of module `{module_text(graph.module_table, module_identity)}` could not be applied")
+        failed.diagnostics = diagnostics
+        return failed
     }
     call_facts := [SemaCallSiteFact]{}
     calls := [SemaComptimeRequest]{}
@@ -4408,12 +4409,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     if checked_result == None {
         checked_result = sema_core_body_loaded(program, host_hooks, module_index, owner_id, scopes.type_delta, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     }
-    if input == None {
-        memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
-        input = Val(sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program))
-    }
-    owned_input := input.move() ?? panic("a method body has no canonical preparation")
-    input = None
+    owned_input := input.move() ?? sema_check_method_input(job, module_index, memory_plan, sema_check_registered_memory_position(job, module_index, memory_plan, environment, program), environment, program)
     // Prepared diagnostics already include preparation, in the same order.
     if checked_result == None {
         loop diagnostic in owned_input.diagnostics -> diagnostics.push(diagnostic)
@@ -4428,13 +4424,8 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     // overwrites it. Jet has no exchange on a field of the write-borrowed table.
     previous_location: scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, owned_input.memory_position, environment, program, scopes)
-    if checked_result == None {
-        checked_result = Val(sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, function_call_facts, function_comptime_requests, function_name_references))
-    } else {
-        sema_function_check_registered_name(job, module_index, memory_plan, owned_input.memory_position, environment, program)
-    }
-    checked := checked_result.move() ?? panic("a method body has no checked result")
-    checked_result = None
+    if checked_result != None -> sema_function_check_registered_name(job, module_index, memory_plan, owned_input.memory_position, environment, program)
+    checked := checked_result.move() ?? sema_function_check_registered(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
     // A captured method packet's diagnostics hold its preparation's, as a
     // prepared one's do.
     if capturing {
@@ -4581,24 +4572,13 @@ sema_check_item_kind_label: fn(item: Item) -> String Never! {
     }
 }
 
-// One immutable pass graph is moved into the existing environment owner.
-// Compute the borrowed graph facts before the handoff, never from a copied graph.
-sema_check_pass_environment: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTypeDef], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
-    fixed_length_write_params := sema_fixed_length_write_params_in_graph(graph)
-    tables := sema_program_tables_init(Val(graph.move()), checked_types)
-    sema_check_pass_environment_from(tables, fixed_length_write_params, body_values)
-}
-
-// The pass environment over `tables`, whose graph `fixed_length_write_params`
-// was computed from.
-sema_check_pass_environment_from: fn(tables: ^^SemaProgramTables, fixed_length_write_params: ^^[String], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
+// The environment of a pass over `program`, whose tables keep the pass's one
+// graph and its checked-type indexes; `fixed_length_write_params` were
+// computed from that graph. The pass reads fields of every registered struct,
+// not only its checked types, so it never skips the computed-field lookup.
+sema_check_pass_environment: fn(program: ^SemaProgramTables, fixed_length_write_params: ^^[String], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
+    program.has_computed_fields = true
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
-    environment.registration_graph = tables.registration_graph.move()
-    environment.checked_types = tables.checked_types.move()
-    environment.checked_type_names = tables.checked_type_names.move()
-    environment.checked_type_name_rows = tables.checked_type_name_rows.move()
-    environment.boxed_edges = tables.boxed_edges.move()
-    environment.copy_facts = tables.copy_facts.move()
     // Every module's functions, so the length-preserving fact covers calls
     // into other modules, bundle-wide.
     environment.fixed_length_write_params = fixed_length_write_params.move()

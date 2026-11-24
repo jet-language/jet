@@ -25,6 +25,7 @@ use jet_foundation.[
     compiler_threads_limit,
     compiler_threads_failure_text,
     compiler_threads_joined,
+    compiler_threads_taken,
     symbol_table_key,
     compiler_threads_heaviest_first,
 ]
@@ -131,10 +132,7 @@ sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallel
 }
 
 sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], count_work: Bool, functions_checked: ^Int) -> SemaFunctionResult {
-    prepared := sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta)
-    if prepared != None {
-        body := prepared.move() ?? panic("a prepared function packet disappeared")
-        prepared = None
+    if sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta) == .Val(body) {
         if !scopes_changed && !body.wanted_hooks {
             // Preserve the original method side effect.
             if function_kind != TFuncKind.TopLevel {
@@ -1023,7 +1021,7 @@ sema_check_body_part_place: fn(slot: Shared<SemaBodyPart>, placed: ^[SemaParalle
     permit: slot.guard_edit()
     loop permit.value.bodies.len() > 0 {
         body: permit.value.bodies.pop() ?? break
-        position: permit.value.positions.pop() ?? panic("a checked body has no job position")
+        position: compiler_threads_taken(permit.value.positions)
         delta: permit.value.deltas.pop() ?? None
         placed[position] = Val(body)
         placed_deltas[position] = delta
@@ -2125,17 +2123,17 @@ sema_check_shared_put_environment: fn(shared_state: Shared<SemaCheckShared>, env
 
 sema_check_shared_take_environment: fn(shared_state: Shared<SemaCheckShared>) -> SemaScopeEnvironment {
     permit: shared_state.guard_edit()
-    permit.value.environments.pop() ?? panic("the body-check environment left the threads' shared state")
+    compiler_threads_taken(permit.value.environments)
 }
 
 sema_check_shared_take_program: fn(shared_state: Shared<SemaCheckShared>) -> SemaProgramTables {
     permit: shared_state.guard_edit()
-    permit.value.programs.pop() ?? panic("the body-check program tables left the threads' shared state")
+    compiler_threads_taken(permit.value.programs)
 }
 
 sema_check_shared_take_memory_plan: fn(shared_state: Shared<SemaCheckShared>) -> SemaFunctionMemoryPlan {
     permit: shared_state.guard_edit()
-    permit.value.memory_plans.pop() ?? panic("the body-check memory plan left the threads' shared state")
+    compiler_threads_taken(permit.value.memory_plans)
 }
 
 // Moves the pass environment, program tables and memory plan into shared state.

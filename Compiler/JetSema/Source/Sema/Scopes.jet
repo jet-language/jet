@@ -614,6 +614,10 @@ SemaComptimePreparedLocal: struct {
 SemaComptimeBodySource: struct {
     module_identity: ModuleID,
     function_key: String,
+    // The key the site is staged under (SemaComptimeBodyPlace owner) when it
+    // is not `function_key`: a call rule's stand-in for it
+    // (sema_call_rule_stage).
+    site_owner: String?{None},
     source_file: String,
     key: String,
     destination_key: String,
@@ -674,6 +678,33 @@ SemaComptimeBodyValue: struct {
     destination_key: String,
     value: TComptimeValue,
     ty: Type,
+    // Where a body-level site's value lands; None for one no body check
+    // reads (a value computed ahead, a rule batch).
+    place: SemaComptimeBodyPlace?{None},
+}
+
+// Where a body-level staged value sits in its module: the key its site is
+// staged under (SemaComptimeBodySource.site_owner) and its source and site
+// spans. A lookup matches the parts; none joins them into one text.
+SemaComptimeBodyPlace: struct {
+    owner: String,
+    source: Span,
+    site: Span,
+}
+
+// A place within one module's index (SemaComptimePlaceRows): its owner's
+// id in the index's `owners` and its spans.
+SemaComptimePlaceKey: struct {
+    owner: Int,
+    source: Span,
+    site: Span,
+}
+
+// One module's index of staged places: each owner key's id in `owners`,
+// and the row each place names.
+SemaComptimePlaceRows: struct {
+    owners: NameTable,
+    rows: [SemaComptimePlaceKey:Int],
 }
 
 // One module's index of staged keys: each key's id in `keys` and, at that
@@ -690,9 +721,9 @@ SemaComptimeBodyFacts: struct {
     values: [SemaComptimeBodyValue],
     // Each module's slot at its ModuleID row (sema_comptime_index_module_slot).
     modules: [Int],
-    // Each slot's first row of a key, and at the same key id its second.
-    first_rows: [SemaComptimeKeyRows],
-    second_rows: [[Int]],
+    // Each slot's first row of a place, and its second.
+    first_rows: [SemaComptimePlaceRows],
+    second_rows: [[SemaComptimePlaceKey:Int]],
     indexed_rows: Int,
 }
 
@@ -736,10 +767,9 @@ SemaComptimeBodyWorkOperation: enum {
     OwnedRowReturned,
 }
 
-// Scope-local facts serve the program-table callers; retained-graph checks
-// also keep their owning graph and its checked-type indexes here.
+// Scope-local facts serve the program-table callers; the registration graph
+// lives in the program tables, never here.
 SemaScopeEnvironment: struct {
-    registration_graph: SemaRegistrationGraph?{None},
     module_identity: ModuleID,
     // The registration row of `module_identity` when module entry set it
     // (sema_scope_caller_row checks it still is), -1 otherwise.
@@ -789,13 +819,9 @@ SemaScopeEnvironment: struct {
 // (sema_target_no_os_reach_check): a reached OS module is E3301 at the
 // program's call that leads to it, and a body the program never reaches is
 // never refused. User bodies consume the selected machine fact, never a host
-// OS guess. A function body is checked with the graph in the program tables;
-// the scope environment holds it only between passes.
+// OS guess. A function body is checked with the graph in the program tables.
 sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        return graph.target_machine.no_os && environment.package_identity == graph.package_identity
-    }
-    if environment.registration_graph == .Val(graph) {
         return graph.target_machine.no_os && environment.package_identity == graph.package_identity
     }
     false
@@ -925,9 +951,9 @@ SemaCheckContext: struct {
     comptime_requests: [SemaComptimeRequest],
     comptime_body_sources: [SemaComptimeBodySource],
     comptime_body_values: SemaComptimeBodyValues,
-    // Derived module/key indexes into the canonical ordered source rows.
+    // Derived module/place indexes into the canonical ordered source rows.
     comptime_body_source_modules: [Int],
-    comptime_body_source_rows: [SemaComptimeKeyRows],
+    comptime_body_source_rows: [SemaComptimePlaceRows],
     compute_calls: [SemaComputeCallFact],
     autodiff_obligations: [SemaAutodiffObligation],
     // Ownership/GenericCrossings.jet: what this body's type parameters cross,
@@ -1547,7 +1573,6 @@ sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph?, checked_types: [TT
 
 sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
-        registration_graph: None,
         module_identity: module_identity,
         package_identity: package_identity,
         module_name: module_name,
@@ -1772,7 +1797,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         comptime_body_sources: [SemaComptimeBodySource]{},
         comptime_body_values: SemaComptimeBodyValues{},
         comptime_body_source_modules: [Int]{},
-        comptime_body_source_rows: [SemaComptimeKeyRows]{},
+        comptime_body_source_rows: [SemaComptimePlaceRows]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
         generic_crossings: [SemaGenericCrossing]{},
@@ -1926,7 +1951,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         // edits.
         comptime_body_values: source.comptime_body_values.copy(),
         comptime_body_source_modules: [Int]{},
-        comptime_body_source_rows: [SemaComptimeKeyRows]{},
+        comptime_body_source_rows: [SemaComptimePlaceRows]{},
         compute_calls: source.compute_calls.copy(),
         autodiff_obligations: source.autodiff_obligations.copy(),
         generic_crossings: source.generic_crossings.copy(),

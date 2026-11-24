@@ -233,3 +233,20 @@ compiler_threads_failure_text: fn(failure: TaskFailure) -> String Never! {
 compiler_threads_joined: fn<T>(handle: ^^Task<T>) -> T Never! {
     handle.join() ?? panic(compiler_threads_failure_text(err))
 }
+
+// Takes a value back from a handoff list in a phase's lock-guarded shared
+// state. Every phase hands values to and from its threads this way: the
+// phase's own code pushes each value before the take that pops it, in the same
+// order, so the list always holds it. This checks nothing about the input;
+// it stops only if a phase's handoff code itself pops more than it pushed.
+compiler_threads_taken: fn<T>(rows: ^[T]) -> T Never! {
+    rows.pop() ?? panic("a compiler phase took back a value its threads were never handed")
+}
+
+// Takes the result a worker left in its slot. A phase fills every slot through
+// workers it joins before it takes any, and a failed worker re-raises at that
+// join (compiler_threads_joined), so a joined phase's slot holds its value:
+// this checks nothing about the input.
+compiler_threads_slot_taken: fn<T>(slot: ^^T?) -> T Never! {
+    slot.move() ?? panic("a compiler thread's slot was taken before its worker filled it")
+}

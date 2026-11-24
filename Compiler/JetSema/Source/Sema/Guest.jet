@@ -7,6 +7,7 @@ use {
         AccessConvention,
         Diagnostic,
         Func,
+        JetLibScalar,
         Marker,
         MarkerHook,
         Param,
@@ -71,27 +72,21 @@ sema_guest_export_native_symbol: fn(name: String) -> String Never! {
     symbol
 }
 
-// The closed scalar projection of native Library artifacts.
-SemaGuestScalar: enum {
-    Int,
-    Float,
-    Bool,
-    Text,
-}
-
-sema_guest_scalar: fn(ty: Type) -> SemaGuestScalar? Never! {
+// The closed scalar projection of native Library artifacts: the scalar a
+// .jetlib export row records.
+sema_guest_scalar: fn(ty: Type) -> JetLibScalar? Never! {
     if ty == {
-        .Int -> Val(SemaGuestScalar.Int)
-        .Float -> Val(SemaGuestScalar.Float)
-        .Bool -> Val(SemaGuestScalar.Bool)
-        .String -> Val(SemaGuestScalar.Text)
+        .Int -> Val(JetLibScalar.Int)
+        .Float -> Val(JetLibScalar.Float)
+        .Bool -> Val(JetLibScalar.Bool)
+        .String -> Val(JetLibScalar.Text)
         .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
 // One scalar kind shared by every parameter and the return.
-sema_guest_scalar_shape: fn(params: [Param], return_type: Type?) -> SemaGuestScalar? Never! {
-    shape := SemaGuestScalar?{None}
+sema_guest_scalar_shape: fn(params: [Param], return_type: Type?) -> JetLibScalar? Never! {
+    shape := JetLibScalar?{None}
     loop parameter in params {
         next_shape: sema_guest_scalar(parameter.ty) ?? return None
         if shape == .Val(existing) && existing != next_shape -> return None
@@ -468,7 +463,7 @@ sema_guest_check_surfaces: fn(graph: ^SemaRegistrationGraph) {
                         sema_guest_record_symbol(symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), diagnostics)
                     }
                     if module_index == entry_index && sema_function_is_guest_export(function) {
-                        if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) {
+                        if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(JetLibScalar.Text)) {
                             has_text_export = true
                         }
                         sema_guest_record_symbol(symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), diagnostics)

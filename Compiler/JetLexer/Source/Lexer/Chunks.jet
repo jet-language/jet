@@ -15,6 +15,7 @@ use jet_foundation.[
     Name,
     compiler_threads_admit,
     compiler_threads_joined,
+    compiler_threads_taken,
     compiler_transfer_rows,
     name_index,
     name_table_merge,
@@ -406,7 +407,7 @@ lexer_chunk_name_map: fn(part: Shared<LexerChunkPart>, tables: ^TokenTables) -> 
 // A part's output row, after its threads joined.
 lexer_chunk_part_take: fn(part: Shared<LexerChunkPart>) -> LexerChunkOutput {
     permit: part.guard_edit()
-    permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
+    compiler_threads_taken(permit.value.outputs)
 }
 
 // Lexes `parts[from..]`, one task per part and the last part on this
@@ -505,7 +506,7 @@ lexer_remap_chunk_parts: fn(parts: [Shared<LexerChunkPart>], from: Int) -> Int {
 // joined table's.
 lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
     permit := part.guard_edit()
-    output := permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
+    output := compiler_threads_taken(permit.value.outputs)
     map := output.map.move()
     base: output.literal_base
     lexer_remap_tokens(output.tokens, map, base)

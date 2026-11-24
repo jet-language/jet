@@ -3437,7 +3437,9 @@ jet_cli_plan_with: fn(raw: [String], discovery: ^WorkspaceDeclarationCache) -[FS
             if cli_files.is_dir(target) {
                 if jet_cli_resolve_source_path("fix", target, color, [String]{}) == {
                     .File(path, _, written) -> {
-                        file = path
+                        // The suggestions sweep the folder's whole package
+                        // (jet_cli_fix_run); the other modes fix its entry.
+                        if asked_markers || style || pin -> file = path
                         notice = written
                     }
                     .Refused(plan) -> return plan

@@ -346,13 +346,10 @@ sema_call_build_generate_code: fn(receiver: Expr, receiver_value: TExpr, args: [
 // `meta.add` or `b.generate` module, a `meta.rewrite_body` body) is not the
 // root's own source either, even inside the root package, so code a value
 // added can't make another one. The root is the package of the load's entry
-// module. A function body is checked with the graph in the program tables;
-// the scope environment holds it only between passes.
+// module, read from the graph in the program tables.
 sema_build_compiler_site: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     root := ""
-    if program.registration_graph == .Val(graph) -> root = sema_build_root_package(graph) else if environment.registration_graph == .Val(graph) {
-        root = sema_build_root_package(graph)
-    }
+    if program.registration_graph == .Val(graph) -> root = sema_build_root_package(graph)
     written: environment.source_origin == SemaSourceOrigin.Snapshot
     if written && root != "" && environment.package_identity == root -> return true
     row: sema_diagnostic_row("E0776")

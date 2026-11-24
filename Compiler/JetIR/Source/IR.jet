@@ -955,7 +955,8 @@ ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: S
         nibble: Int{rest & U64{15}}
         symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
     }
-    made := ir_function_new(name, key, String.from_bytes(symbol) ?? panic("symbol bytes are UTF-8"), source_file, line)
+    // Valid UTF-8: `prefix`'s own bytes, then ASCII hex digits, so the lossy decode keeps every byte.
+    made := ir_function_new(name, key, String.from_bytes_lossy(symbol), source_file, line)
     made.symbol_hash = hash
     made
 }

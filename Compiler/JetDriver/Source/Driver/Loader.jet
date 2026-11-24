@@ -51,6 +51,8 @@ use {
         compiler_threads_beside,
         compiler_threads_failure_text,
         compiler_threads_joined,
+        compiler_threads_slot_taken,
+        compiler_threads_taken,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
         compiler_threads_single,
@@ -4244,7 +4246,7 @@ jet_driver_inline_part_take: fn(part: Shared<JetDriverInlinePart>) -> JetDriverI
     // Unreachable: the one caller takes each part once, after
     // jet_driver_inline_scan_parts joined it, and its thread pushed one output
     // (a thread that stops stops that join first).
-    permit.value.outputs.pop() ?? panic("an item scan thread left no output")
+    compiler_threads_taken(permit.value.outputs)
 }
 
 // Scans `parts[from..]`, one task per part and the last part on this
@@ -4934,7 +4936,7 @@ jet_driver_demand_shared_take: fn(inputs: Shared<JetDriverDemandShared>) -> Lexe
     permit: inputs.guard_edit()
     // Unreachable: the demand scan makes `inputs` with the one lexed unit, and
     // its threads only read it; this take runs once, after every join.
-    permit.value.lexed.pop() ?? panic("the demand scan left the lexed unit in its shared inputs")
+    compiler_threads_taken(permit.value.lexed)
 }
 
 // A part's output row, after its thread joined.
@@ -4943,7 +4945,7 @@ jet_driver_demand_part_take: fn(part: Shared<JetDriverDemandPart>) -> JetDriverC
     // Unreachable: the one caller takes each part once, after
     // jet_driver_demand_scan_parts joined it, and its thread pushed one output
     // (a thread that stops stops that join first).
-    permit.value.outputs.pop() ?? panic("a demand scan thread left no output")
+    compiler_threads_taken(permit.value.outputs)
 }
 
 // Scans `parts[from..]`, one task per part and the last part on this
@@ -5793,12 +5795,12 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
         jet_driver_parse_claimers(inputs, queue, 0, workers, placed, met)
         loop placed.len() > 0 {
             slot := placed.pop() ?? break
-            unit := slot.move() ?? panic("a parse job's unit left its thread")
+            unit := compiler_threads_slot_taken(slot)
             results.push(unit)
         }
         // The load's spellings, back from the shared inputs after the join.
         permit: inputs.guard_edit()
-        pooled = permit.value.spellings.pop() ?? panic("the parse wave left the load's spellings in its shared inputs")
+        pooled = compiler_threads_taken(permit.value.spellings)
         loop own in met -> name_pool_fold(pooled, own)
     }
     // One input-volume delta per completed wave, summed by the trace reader.

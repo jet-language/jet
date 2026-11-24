@@ -195,7 +195,8 @@ sha256_hex_bytes: fn(bytes: [U8]) -> String Never! {
         digits.push(sha256_hex_digit(((value >> 4)) & 15))
         digits.push(sha256_hex_digit((value) & 15))
     }
-    String.from_bytes(digits) ?? panic("hex digits are ASCII")
+    // Valid UTF-8: every byte is an ASCII hex digit from sha256_hex_digit, so the lossy decode keeps every byte.
+    String.from_bytes_lossy(digits)
 }
 
 // The lowercase hex SHA-256 of `value`'s UTF-8 bytes: Core's digest, which

@@ -23,8 +23,30 @@ sema_comptime_body_destination_key: fn(function_key: String, source_span: Span, 
     "{function_key}.body-comptime.{site_span.start}:{site_span.end}.{source_span.start}:{source_span.end}"
 }
 
-sema_comptime_body_source_key: fn(module_identity: ModuleID, function_key: String, source_span: Span, site_span: Span) -> String Never! {
-    "{module_identity.id}.{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
+// The place of body source `source` (SemaComptimeBodyValue.place).
+sema_comptime_body_source_place: fn(source: SemaComptimeBodySource) -> SemaComptimeBodyPlace Never! {
+    SemaComptimeBodyPlace{owner: source.site_owner ?? source.function_key, source: source.span, site: source.site_span}
+}
+
+// The slot of `module_identity` in a place index, as
+// sema_comptime_index_module_slot gives one in a key index.
+sema_comptime_place_module_slot: fn(modules: ^[Int], rows: ^[SemaComptimePlaceRows], module_identity: ModuleID) -> Int Never! {
+    slot: sema_comptime_claim_module_slot(modules, module_identity, rows.len())
+    if slot == rows.len() -> rows.push(SemaComptimePlaceRows{owners: name_table_sized(SEMA_COMPTIME_KEY_SLOTS), rows: [SemaComptimePlaceKey:Int]{}})
+    slot
+}
+
+// The key of the place `owner`, `source`, `site` in `index`, its owner
+// interned on first use.
+sema_comptime_place_key: fn(index: ^SemaComptimePlaceRows, owner: String, source: Span, site: Span) -> SemaComptimePlaceKey Never! {
+    SemaComptimePlaceKey{owner: name_index(name_intern(index.owners, owner)), source: source, site: site}
+}
+
+// The key of the place `owner`, `source`, `site` in `index`; None when no
+// place of `owner` is in it.
+sema_comptime_place_find: fn(index: SemaComptimePlaceRows, owner: String, source: Span, site: Span) -> SemaComptimePlaceKey? Never! {
+    id: name_find(index.owners, owner) ?? return None
+    Val(SemaComptimePlaceKey{owner: name_index(id), source: source, site: site})
 }
 
 // Module slots keep both identity components separate: `modules` holds each
@@ -135,23 +157,45 @@ sema_comptime_key_set_key: fn(set: SemaComptimeKeySet, pair: Int) -> String Neve
     name_text(set.slots[set.pair_slots[pair]].keys, Name{id: U32{set.pair_keys[pair]}})
 }
 
+// The key of body source `source` in `index` (sema_comptime_place_key).
+sema_comptime_body_source_place_key: fn(index: ^SemaComptimePlaceRows, source: SemaComptimeBodySource) -> SemaComptimePlaceKey Never! {
+    if source.site_owner == .Val(owner) -> return sema_comptime_place_key(index, owner, source.span, source.site_span)
+    sema_comptime_place_key(index, source.function_key, source.span, source.site_span)
+}
+
+// The key of body source `source` in `index` (sema_comptime_place_find).
+sema_comptime_body_source_place_find: fn(index: SemaComptimePlaceRows, source: SemaComptimeBodySource) -> SemaComptimePlaceKey? Never! {
+    if source.site_owner == .Val(owner) -> return sema_comptime_place_find(index, owner, source.span, source.site_span)
+    sema_comptime_place_find(index, source.function_key, source.span, source.site_span)
+}
+
 sema_comptime_body_source_index: fn(context: ^SemaCheckContext, row: Int) Never! {
-    slot: sema_comptime_index_module_slot(context.comptime_body_source_modules, context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
-    id: sema_comptime_key_id(context.comptime_body_source_rows[slot], context.comptime_body_sources[row].key)
-    if context.comptime_body_source_rows[slot].rows[id] < 0 -> context.comptime_body_source_rows[slot].rows[id] = row
+    slot: sema_comptime_place_module_slot(context.comptime_body_source_modules, context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
+    key: sema_comptime_body_source_place_key(context.comptime_body_source_rows[slot], context.comptime_body_sources[row])
+    if (context.comptime_body_source_rows[slot].rows.get(key) ?? -1) < 0 -> context.comptime_body_source_rows[slot].rows[key] = row
 }
 
 sema_comptime_body_sources_index: fn(context: ^SemaCheckContext) Never! {
     context.comptime_body_source_modules = [Int]{}
-    context.comptime_body_source_rows = [SemaComptimeKeyRows]{}
+    context.comptime_body_source_rows = [SemaComptimePlaceRows]{}
     loop row in 0..<context.comptime_body_sources.len() {
         sema_comptime_body_source_index(context, row)
     }
 }
 
+// The first source row staged at the place `owner`, `source`, `site` of
+// module `module_identity`, if any.
+sema_comptime_body_source_row: fn(context: SemaCheckContext, module_identity: ModuleID, owner: String, source: Span, site: Span) -> Int? Never! {
+    slot: sema_comptime_module_slot(context.comptime_body_source_modules, module_identity) ?? return None
+    key: sema_comptime_place_find(context.comptime_body_source_rows[slot], owner, source, site) ?? return None
+    row: context.comptime_body_source_rows[slot].rows.get(key) ?? return None
+    if row < 0 -> return None
+    Val(row)
+}
+
 // Lambda merges append every canonical row, including duplicates, in order.
 // Only capture deduplicates, returning the first existing row; the index
-// keeps a key's first row, so truncation can drop each appended row's entry.
+// keeps a place's first row, so truncation can drop each appended row's entry.
 sema_comptime_body_source_append: fn(context: ^SemaCheckContext, source: SemaComptimeBodySource) Never! {
     context.comptime_body_sources.push(source.copy())
     sema_comptime_body_source_index(context, context.comptime_body_sources.len() - 1)
@@ -161,37 +205,42 @@ sema_comptime_body_sources_truncate: fn(context: ^SemaCheckContext, length: Int)
     loop context.comptime_body_sources.len() > length {
         row: context.comptime_body_sources.len() - 1
         slot: sema_comptime_module_slot(context.comptime_body_source_modules, context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
-        id: name_find(context.comptime_body_source_rows[slot].keys, context.comptime_body_sources[row].key) ?? panic("an indexed body source lost its key")
-        if context.comptime_body_source_rows[slot].rows[name_index(id)] == row {
-            context.comptime_body_source_rows[slot].rows[name_index(id)] = -1
+        key: sema_comptime_body_source_place_find(context.comptime_body_source_rows[slot], context.comptime_body_sources[row]) ?? panic("an indexed body source lost its owner")
+        if (context.comptime_body_source_rows[slot].rows.get(key) ?? -1) == row {
+            context.comptime_body_source_rows[slot].rows[key] = -1
         }
         _ := context.comptime_body_sources.pop()
     }
 }
 
-sema_comptime_body_value_index_row: fn(modules: ^[Int], first_rows: ^[SemaComptimeKeyRows], second_rows: ^[[Int]], module_identity: ModuleID, key: String, row: Int) Never! {
-    slot: sema_comptime_index_module_slot(modules, first_rows, module_identity)
-    if second_rows.len() < first_rows.len() -> second_rows.push([Int]{-1})
-    id: sema_comptime_key_id(first_rows[slot], key)
-    if id == second_rows[slot].len() -> second_rows[slot].push(-1)
-    if first_rows[slot].rows[id] < 0 -> first_rows[slot].rows[id] = row else if second_rows[slot][id] < 0 {
-        second_rows[slot][id] = row
+sema_comptime_body_value_index_row: fn(modules: ^[Int], first_rows: ^[SemaComptimePlaceRows], second_rows: ^[[SemaComptimePlaceKey:Int]], module_identity: ModuleID, place: SemaComptimeBodyPlace, row: Int) Never! {
+    slot: sema_comptime_place_module_slot(modules, first_rows, module_identity)
+    if second_rows.len() < first_rows.len() -> second_rows.push([SemaComptimePlaceKey:Int]{})
+    key: sema_comptime_place_key(first_rows[slot], place.owner, place.source, place.site)
+    if first_rows[slot].rows.get(key) == None {
+        first_rows[slot].rows[key] = row
+        return
     }
+    if second_rows[slot].get(key) == None -> second_rows[slot][key] = row
 }
 
 // First and second positions settle every ordered prefix. Appending future
 // rows never rewrites either existing position or an earlier row payload.
+// A row without a place is kept but indexed under none: no body check
+// reads it.
 sema_comptime_body_values_freeze: fn(values: ^^[SemaComptimeBodyValue], work: Shared<SemaComptimeBodyWork>?, count_key_bytes: Bool) -> SemaComptimeBodyValues Never! {
     length: values.len()
     modules := [Int]{}
-    first_rows := [SemaComptimeKeyRows]{}
-    second_rows := [[Int]]{}
+    first_rows := [SemaComptimePlaceRows]{}
+    second_rows := [[SemaComptimePlaceKey:Int]]{}
     indexed_rows := 0
     index_key_utf8_bytes := 0
     loop row in 0..<length {
-        sema_comptime_body_value_index_row(modules, first_rows, second_rows, values[row].module_identity, values[row].key, row)
         indexed_rows += 1
-        if count_key_bytes -> index_key_utf8_bytes += values[row].key.count_bytes()
+        if values[row].place == .Val(place) {
+            sema_comptime_body_value_index_row(modules, first_rows, second_rows, values[row].module_identity, place, row)
+            if count_key_bytes -> index_key_utf8_bytes += place.owner.count_bytes()
+        }
     }
     if work == .Val(cell) {
         permit := cell.guard_edit()
@@ -225,8 +274,10 @@ sema_comptime_body_facts_append_items: fn(facts: Shared<SemaComptimeBodyFacts>, 
     loop index in from..<values.len() {
         if values[index].kind != SemaComptimeItemKind.BodyExpression -> next
         row: permit.value.values.len()
-        sema_comptime_body_value_index_row(permit.value.modules, permit.value.first_rows, permit.value.second_rows, values[index].module_identity, values[index].key, row)
-        if count_key_bytes -> key_utf8_bytes += values[index].key.count_bytes()
+        if values[index].place == .Val(place) {
+            sema_comptime_body_value_index_row(permit.value.modules, permit.value.first_rows, permit.value.second_rows, values[index].module_identity, place, row)
+            if count_key_bytes -> key_utf8_bytes += place.owner.count_bytes()
+        }
         permit.value.values.push(sema_comptime_body_value_from_item(values[index]))
         permit.value.indexed_rows += 1
         appended += 1
@@ -238,7 +289,7 @@ sema_comptime_body_values_append_items: fn(publication: ^SemaComptimeBodyValues,
     new_generation: if publication.facts == .Val(_) -> false else -> true
     if new_generation {
         if publication.length != 0 -> panic("a body prefix lost its facts owner")
-        publication.facts = Val(Shared{SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [Int]{}, first_rows: [SemaComptimeKeyRows]{}, second_rows: [[Int]]{}, indexed_rows: 0}})
+        publication.facts = Val(Shared{SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [Int]{}, first_rows: [SemaComptimePlaceRows]{}, second_rows: [[SemaComptimePlaceKey:Int]]{}, indexed_rows: 0}})
     }
     // copy: a handle copy (Shared facts, refcount bump): the append runs through `facts` while the
     // write-borrowed publication still owns its handle.
@@ -385,13 +436,11 @@ sema_comptime_body_capture_site: fn(
     local_binding: Bool,
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
+    if sema_comptime_body_source_row(context, environment.module_identity, function_key, source_span, site_span) == .Val(row) {
+        return context.comptime_body_sources[row]
+    }
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
     key: "{environment.module_identity.id}.{destination_key}"
-    if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
-        if sema_comptime_key_row(context.comptime_body_source_rows[slot], key) == .Val(row) {
-            return context.comptime_body_sources[row]
-        }
-    }
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
@@ -459,10 +508,14 @@ sema_comptime_reads_pending_local: fn(scopes: SemaScopeTable, context: SemaCheck
     false
 }
 
+// The value landed at the place `owner`, `source_span`, `site_span` of
+// module `module_identity`, where `owner` is the key the site is staged
+// under (SemaComptimeBodySource.site_owner); None when no row or two rows
+// of the visible prefix hold it.
 sema_comptime_body_value_find: fn(
     context: SemaCheckContext,
     module_identity: ModuleID,
-    function_key: String,
+    owner: String,
     source_span: Span,
     site_span: Span,
 ) -> SemaComptimeBodyValue? {
@@ -472,13 +525,12 @@ sema_comptime_body_value_find: fn(
     permit: facts.guard_read()
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.ModuleProbe)
     slot: sema_comptime_module_slot(permit.value.modules, module_identity) ?? return None
-    key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.FirstRowProbe)
-    id: name_find(permit.value.first_rows[slot].keys, key) ?? return None
-    row: permit.value.first_rows[slot].rows[name_index(id)]
-    if row < 0 || row >= context.comptime_body_values.length -> return None
+    key: sema_comptime_place_find(permit.value.first_rows[slot], owner, source_span, site_span) ?? return None
+    row: permit.value.first_rows[slot].rows.get(key) ?? return None
+    if row >= context.comptime_body_values.length -> return None
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.SecondRowProbe)
-    second: permit.value.second_rows[slot][name_index(id)]
+    second: permit.value.second_rows[slot].get(key) ?? -1
     if second >= 0 && second < context.comptime_body_values.length -> return None
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.OwnedRowReturned)
     // copy: the caller gets an owned body value, while the published row stays in the shared facts
@@ -502,6 +554,7 @@ sema_comptime_body_item_source: fn(source: SemaComptimeBodySource) -> SemaCompti
         prepared: source.prepared,
         impure: source.impure,
         runtime_locals: source.runtime_locals,
+        place: Val(sema_comptime_body_source_place(source)),
         local_value: source.local_value,
         local_binding: source.local_binding,
     }
