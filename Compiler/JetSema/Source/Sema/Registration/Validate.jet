@@ -49,9 +49,8 @@ SemaValidateRule: struct {
     message: Expr,
 }
 
-// Rust `process_validate_blocks`: one generated impl per struct with a
-// non-empty block, after the written items. A block with a malformed rule
-// reports it and generates nothing.
+// One generated impl per struct with a non-empty block, after the written
+// items. A block with a malformed rule reports it and generates nothing.
 sema_validate_blocks: fn(tables: ASTTables, items: ^[Item], diagnostics: ^[Diagnostic]) {
     generated := [Item]{}
     loop index in 0..<items.len() {
@@ -64,7 +63,6 @@ sema_validate_blocks: fn(tables: ASTTables, items: ^[Item], diagnostics: ^[Diagn
     loop item in generated -> items.push(item)
 }
 
-// Rust `synthesize_validate_impl`.
 sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: ^[Diagnostic]) -> ImplDef? {
     fields := [String:Bool]{}
     loop field in definition.fields -> fields[field.name] = true
@@ -79,9 +77,8 @@ sema_validate_impl: fn(tables: ASTTables, definition: StructDef, diagnostics: ^[
     Val(sema_validate_build(tables, definition, rules, definition.validate_span ?? definition.name_span))
 }
 
-// Rust `extract_check_rule`: `check(condition, at: field, message)` with a
-// bare sibling field after `at:`. A malformed rule reports its one problem
-// and gives None.
+// `check(condition, at: field, message)` with a bare sibling field after `at:`.
+// A malformed rule reports its one problem and gives None.
 sema_validate_rule: fn(statement: Stmt, fields: [String:Bool], diagnostics: ^[Diagnostic]) -> SemaValidateRule? {
     if statement == .Expr(expression) {
         if expression == .Call(call, _) {
@@ -123,10 +120,9 @@ sema_validate_e0354: fn(name: String, span: Span) -> Diagnostic Never! {
     sema_error("E0354", span, "`at: {name}` doesn't name a field on this struct", "`check(…, at: field, …)`'s `at:` argument must be a bare field name declared on the same struct — it's how the reported `FieldError.path` is chosen", "fix the field name, or add the field to the struct")
 }
 
-// Rust `build_validate_impl`. A rule reads its struct's fields by their bare
-// names (Rust `rewrite_field_refs` onto `value`): each field a
-// rule names is bound to `value.<field>` in the rules' own block, so the
-// rules and messages read exactly those fields and `value` stays the
+// The `Validate` impl. A rule reads its struct's fields by their bare names:
+// each field a rule names is bound to `value.<field>` in the rules' own block,
+// so the rules and messages read exactly those fields and `value` stays the
 // parameter after the block.
 sema_validate_build: fn(tables: ASTTables, definition: StructDef, rules: [SemaValidateRule], span: Span) -> ImplDef {
     fields := [String:Bool]{}

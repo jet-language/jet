@@ -300,8 +300,8 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
         .Tagged(_, _) | .Case(_, _) -> false
         .Named(name) -> {
             if sema_serde_builtin_codec_name(name) -> return true
-            // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the
-            // `Dyn.DateTime` payload, a built-in codec with no source impl.
+            // Core's ZonedDateTime is the `Dyn.DateTime` payload, a built-in
+            // codec with no source impl.
             if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || core_identity_in_module(name, "core.time")) {
                 return true
             }

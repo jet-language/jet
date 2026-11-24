@@ -134,11 +134,11 @@ sema_expression_core_export_variants: fn(environment: SemaScopeEnvironment, prog
     None
 }
 
-// Rust `infer_field` (`is_known_enum`): `Name.Variant` reads a variant when
-// `Name` is a declared enum, a compiler-owned enum menu (`Ordering`,
-// `RemoveBy`, the fact enums) or a Core enum, and no value binding shadows it.
-// A struct or distinct type the program declares under a Core enum's name
-// (`Severity`) is that type, not the Core enum.
+// `Name.Variant` reads a variant when `Name` is a declared enum, a
+// compiler-owned enum menu (`Ordering`, `RemoveBy`, the fact enums) or a Core
+// enum, and no value binding shadows it. A struct or distinct type the program
+// declares under a Core enum's name (`Severity`) is that type, not the Core
+// enum.
 sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Bool {
     index := sema_scope_resolve_index(scopes, name)
     if index == .Val(found) && scopes.bindings[found].symbol.kind != SymbolKind.Type -> return false
@@ -157,11 +157,10 @@ sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, 
     sema_expression_core_enum_name(name)
 }
 
-// The tail of Rust `is_known_enum`: Core enum leaves (`core_enum_cases`), the
-// compiler-owned payload families (`core_enum_payload_variants`) and the
-// compiler-owned hook enums, known whether or not the program imports them. A
-// Core enum a loaded Core source declares (`NetError`) resolves through its
-// symbol instead.
+// The rest of the known enums: Core enum leaves, the compiler-owned payload
+// families and the compiler-owned hook enums, known whether or not the program
+// imports them. A Core enum a loaded Core source declares (`NetError`)
+// resolves through its symbol instead.
 sema_expression_core_enum_name: fn(name: String) -> Bool Never! {
     core_enum_cases(name) != None || core_enum_payload_variants(name) != None || sema_expression_hook_decision_variants(name) != None
 }
@@ -204,10 +203,9 @@ sema_expression_join_segments: fn(segments: [String], start: Int) -> String Neve
     parts.join(".")
 }
 
-// Rust `fold_enum_variant_path`: the field chain `base.member` names a variant
-// when its root is a known enum (`Kind.Beta`, grouped `Kind.Group.Leaf`), or a
-// module alias whose next segment is one (`types.Kind.Beta`). A local value
-// root names no variant.
+// The field chain `base.member` names a variant when its root is a known enum
+// (`Kind.Beta`, grouped `Kind.Group.Leaf`), or a module alias whose next
+// segment is one (`types.Kind.Beta`). A local value root names no variant.
 sema_expression_enum_variant_path: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> SemaExpressionEnumPath? {
     segments := sema_expression_path_segments(base) ?? return None
     segments.push(member.copy())
@@ -246,10 +244,9 @@ sema_expression_core_enum_alias: fn(name: String, scopes: ^SemaScopeTable) -> St
     None
 }
 
-// Rust `infer_method_call` static-owner arm (`resolve_enum_variants`) and
-// `fold_enum_variant_path`: `Enum.Variant(args)` / `Enum.Group.Leaf(args)`
-// written as a call builds the variant when the enum declares it; any other
-// member stays a static method call.
+// A static-owner call `Enum.Variant(args)` / `Enum.Group.Leaf(args)` builds
+// the variant when the enum declares it; any other member stays a static
+// method call.
 sema_expression_enum_variant_call: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     if type_args.len() > 0 -> return unhandled
@@ -305,8 +302,8 @@ sema_expression_enum_declares_variant: fn(enum_name: String, variant: String, en
     core_enum_variant_payload(enum_name, variant) != None
 }
 
-// Rust `canonical_nominal_name`: two spellings of one declared nominal
-// (`Box`, `types.Box`, `module.Box`) name the same head.
+// Two spellings of one declared nominal (`Box`, `types.Box`, `module.Box`) name
+// the same head.
 sema_expression_same_nominal_head: fn(left: String, right: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if left == right -> return true
     if program.registration_graph == .Val(graph) {
@@ -485,10 +482,10 @@ sema_expression_struct_field_finish: fn(fact: SemaStructFieldFact, checked: TExp
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
 
-// Rust `named_view_has_stable_owner` for a list window stored in a struct
-// field: a named `View`/`ViewMut` over a local would let the struct outlive
-// the storage it reads, so only a window over a parameter (the receiver
-// included) or a module-level value may be stored.
+// A list window stored in a struct field needs a stable owner: a named
+// `View`/`ViewMut` over a local would let the struct outlive the storage it
+// reads, so only a window over a parameter (the receiver included) or a
+// module-level value may be stored.
 sema_expression_struct_field_view_escape: fn(field_value: Expr, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) {
     if field_value == .Ident(name, span, _) {
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return
@@ -754,8 +751,8 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
             diagnostics.push(diagnostic)
             return None
         }
-        // Rust `check_struct_lit`: a computed field is recomputed on every
-        // read, so a struct literal can never give it a value.
+        // A computed field is recomputed on every read, so a struct literal can
+        // never give it a value.
         if struct_def.fields[found].computed != None {
             diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
             computed_written = true
@@ -787,11 +784,11 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         }
         return None
     }
-    // Rust `check_struct_lit`: supplied fields are checked (and their moves
-    // recorded) in the order they are written, then omitted fields take their
-    // defaults in declaration order. The checked tree keeps that order, so lowering
-    // evaluates the initializers exactly as written. A non-generic struct's
-    // field facts are resolved once per check (sema_expression_struct_field_facts).
+    // Supplied fields are checked (and their moves recorded) in the order they are
+    // written, then omitted fields take their defaults in declaration order. The
+    // checked tree keeps that order, so lowering evaluates the initializers exactly
+    // as written. A non-generic struct's field facts are resolved once per check
+    // (sema_expression_struct_field_facts).
     facts: if names.len() == 0 -> sema_expression_struct_field_facts(owner, struct_def.fields, environment, program, context) else -> -1
     values := [TStructFieldValue]{}
     // Every written field is checked, so one literal reports all of its bad
@@ -1094,7 +1091,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                 }
             }
             // As a struct field: the payload type names types as the enum's
-            // module sees them (Rust `owner_type_for_reader`).
+            // module sees them.
             payload_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, ty, generic_names), generic_names, generic_args)
             sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
             diagnostic_start: diagnostics.len()
@@ -1116,9 +1113,9 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             payload = TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: checked}}}
         }
         .Named(fields) -> {
-            // Rust `check_enum_lit`: payload fields are checked and kept in the
-            // order they are written; lowering evaluates them in that order and
-            // places each into its declared slot afterwards.
+            // Payload fields are checked and kept in the order they are
+            // written; lowering evaluates them in that order and places each
+            // into its declared slot afterwards.
             supplied := [Bool]{}
             loop _ in fields -> supplied.push(false)
             named_values := [TNamedEnumArg]{}
@@ -1612,15 +1609,14 @@ sema_expression_case_owners: fn(variant: String, span: Span, expected: Type?, en
     owners
 }
 
-// Rust `check_struct_lit` / `check_enum_lit`: every field a literal leaves
-// out is named in one E0303 at the literal.
+// Every field a literal leaves out is named in one E0303 at the literal.
 sema_expression_missing_fields: fn(what: String, why: String, missing: [String], span: Span) -> Diagnostic {
     listed: missing.join(", ")
     sema_error("E0303", span, "{what} is missing fields: {listed}", why, "add: {listed}")
 }
 
-// Rust `check_enum_payload_assignable`: a payload value that doesn't fit its
-// declared slot is E0108 about that slot (`field` names a labeled payload).
+// A payload value that doesn't fit its declared slot is E0108 about that slot
+// (`field` names a labeled payload).
 sema_expression_enum_payload_mismatch: fn(enum_name: String, variant: String, field: String?, declared: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     required: sema_expr_expected_type(declared, environment, program)
     actual: sema_expr_expected_type(offered, environment, program)
@@ -2338,10 +2334,9 @@ sema_expression_typed_literal_byte_text: fn(parts: [ByteTextPart], head: Type, s
     Val(bytes)
 }
 
-// A `[U8]` byte-text value checks as one byte constant (the Rust reference lowering's
-// `constant_byte_list`), never one list element per byte: the generated
-// Unicode assets spell up to 1.49 MB this way, and per-byte Int expressions
-// cost every phase from sema to comptime a node per byte.
+// A `[U8]` byte-text value checks as one byte constant, never one list element per
+// byte: the generated Unicode assets spell up to 1.49 MB this way, and per-byte Int
+// expressions cost every phase from sema to comptime a node per byte.
 sema_expression_typed_literal_is_byte_list: fn(head: Type) -> Bool Never! {
     if head == .List(element) -> return element == Type.IntN{signed: false, bits: 8}
     false
@@ -3144,9 +3139,8 @@ sema_expression_typed_literal_body_expected: fn(value: Expr, head: Type) -> Type
 }
 
 // `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's
-// expected carrier, as in Rust's typed-literal inference; `I8{200}` /
-// `I8{-129}`: a fixed-width head is a bare integer literal's carrier, so the
-// literal is range-checked against it.
+// expected carrier; `I8{200}` / `I8{-129}`: a fixed-width head is a bare
+// integer literal's carrier, so the literal is range-checked against it.
 // `through_binary = false`: bare/signed decimals contextualize, but compound
 // numeric syntax keeps its operand types (ScalarConversionFixtures.jet).
 sema_expression_typed_literal_value_needs_head: fn(value: Expr, head: Type) -> Bool Never! {

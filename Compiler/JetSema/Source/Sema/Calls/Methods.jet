@@ -545,16 +545,15 @@ sema_call_try_builtin_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     sema_call_try_builtin_host_route(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// Rust `infer_method_call`'s type-parameter dispatch over the compiler's
-// synthetic hook traits (register_synthetic_operators,
-// register_synthetic_binary_trait): inside a generic body the bounded parameter
-// is the trait's `Self`, so `left.compare(right)` with `T: Comparable` takes a
-// `T` and yields an `Ordering`, and `left.equal(right)` with `T: Equatable` a
-// `Bool`. The checked call is the operator's own comparison, which is how
-// codegen lowers a builtin hook method (lower_builtin_binary_method). The first
-// bound that declares the method decides, so a registered trait bound keeps its
-// candidate path. When no bound declares it, the trait with the least name that
-// does is the missing bound (E0901).
+// Type-parameter dispatch over the compiler's synthetic hook traits: inside a
+// generic body the bounded parameter is the trait's `Self`, so
+// `left.compare(right)` with `T: Comparable` takes a `T` and yields an
+// `Ordering`, and `left.equal(right)` with `T: Equatable` a `Bool`. The checked
+// call is the operator's own comparison, which is how codegen lowers a builtin
+// hook method (lower_builtin_binary_method). The first bound that declares the
+// method decides, so a registered trait bound keeps its candidate path. When no
+// bound declares it, the trait with the least name that does is the missing
+// bound (E0901).
 sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     rejected: SemaMethodSpecialCheck{handled: true, value: None}
@@ -621,7 +620,7 @@ sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, 
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-// Rust's fallback over every registered trait: the least-named trait that
+// The fallback over every registered trait: the least-named trait that
 // declares `method`, the compiler-owned traits (OWNED_TRAITS) included.
 sema_call_type_param_method_trait: fn(program: SemaProgramTables, method: String) -> String? {
     best := String?{None}
@@ -1967,10 +1966,8 @@ sema_call_push_arity: fn(arities: ^[Int], arity: Int) Never! {
 }
 
 // The argument counts the receiver's built-in method table accepts for one
-// method name: the collection contracts, the value-method rows, the
-// dedicated parallel adapters and the built-in handle families (Rust
-// `Collections.builtin_method_return`, probed per arity as
-// `builtin_method_names` and `builtin_method_arity_diagnostic` do).
+// method name: the collection contracts, the value-method rows, the dedicated
+// parallel adapters and the built-in handle families.
 sema_call_builtin_method_arities: fn(receiver: Type, method: String) -> [Int] Never! {
     arities := [Int]{}
     ty: sema_expr_unwrap_tag(receiver)
@@ -2036,8 +2033,7 @@ sema_call_builtin_method_pool: fn(receiver: Type) -> [String] Never! {
     pool
 }
 
-// Rust `Collections.builtin_method_names` (jet-foundation): every name the
-// receiver's built-in table accepts at some arity.
+// Every name the receiver's built-in table accepts at some arity.
 sema_call_builtin_method_names: fn(receiver: Type) -> [String] Never! {
     names := [String]{}
     loop name in sema_call_builtin_method_pool(receiver) {
@@ -2048,8 +2044,7 @@ sema_call_builtin_method_names: fn(receiver: Type) -> [String] Never! {
     names
 }
 
-// Rust `method_names_for_type_name` filtered to instance methods: the
-// methods a nominal receiver declares in its own or impl blocks.
+// The instance methods a nominal receiver declares in its own or impl blocks.
 sema_call_declared_method_names: fn(receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     names := [String]{}
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return names
@@ -2526,8 +2521,7 @@ sema_call_method_reached_through: fn(method: String, receiver: Type, environment
     None
 }
 
-// Rust `builtin_method_arity_diagnostic`: the method exists for this receiver,
-// but at another argument count.
+// The method exists for this receiver, but at another argument count.
 sema_call_builtin_method_arity: fn(receiver: Type, method: String, actual: Int, span: Span) -> Diagnostic? {
     arities := sema_call_builtin_method_arities(receiver, method)
     if arities.len() == 0 || arities.contains(actual) -> return None
@@ -2556,11 +2550,10 @@ sema_call_is_iter_receiver: fn(receiver: Type) -> Bool Never! {
     }
 }
 
-// Rust `infer_method_call`'s missing-method tail: a built-in receiver reports
-// its arity or E0311 against its own table, a structural value reports E0311,
-// and a nominal receiver reports E0102 — a protected Core type has a closed
-// surface, a type parameter names its bounds, and any other type can declare
-// the method.
+// The missing-method tail: a built-in receiver reports its arity or E0311
+// against its own table, a structural value reports E0311, and a nominal
+// receiver reports E0102 — a protected Core type has a closed surface, a type
+// parameter names its bounds, and any other type can declare the method.
 sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     ty: sema_expr_unwrap_tag(receiver)
     source_owned: if ty == {
@@ -2586,7 +2579,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         return sema_call_missing_instance_method(method, ty, actual, "this value does not expose an instance method named `{method}`", span, environment, program)
     }
     display: sema_call_method_leaf(type_name_value)
-    // Rust `infer_method_call`: a static method named through a value.
+    // A static method named through a value.
     if sema_call_declares_static_method(nominal, method, program) {
         return sema_error("E0311", span, "`{method}` is a static method on `{display}`", "static methods belong to the type name, not a value", "write `{display}.{method}(...)` instead")
     }

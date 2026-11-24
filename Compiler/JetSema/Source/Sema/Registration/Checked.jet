@@ -282,8 +282,8 @@ sema_checked_marker_text_label: fn(marker: Marker, label: String) -> String? {
     None
 }
 
-// Rust reference lowering: `lower_derive_names` drops the `#CLI` marker; it
-// is a CLI entry fact, not a derived trait.
+// Derive lowering drops the `#CLI` marker; it is a CLI entry fact, not a
+// derived trait.
 sema_checked_derive_names: fn(derives: [NamedSpan]) -> [String] Never! {
     names := [String]{}
     loop derived in derives {
@@ -292,12 +292,10 @@ sema_checked_derive_names: fn(derives: [NamedSpan]) -> [String] Never! {
     names
 }
 
-// Rust reference lowering: `lower_derive_names`
-// / has_generated_block. The automatic Debug selection and sema's
-// structural Equatable and Comparable providers (compiler-generated blocks on
-// the type) reach the lowered program as derives, which the Rust printer lowers to `JetDebug`,
-// native `PartialEq`, and the native `Eq`/`PartialOrd`/`Ord` an ordered map key
-// needs.
+// The automatic Debug selection and sema's structural Equatable and Comparable
+// providers (compiler-generated blocks on the type) reach the lowered program
+// as derives, which lower to `JetDebug`, native `PartialEq`, and the native
+// `Eq`/`PartialOrd`/`Ord` an ordered map key needs.
 sema_checked_type_derive_names: fn(derives: [NamedSpan], definition: Item, auto_debug: Bool) -> [String] Never! {
     names := sema_checked_derive_names(derives)
     if auto_debug && !sema_checked_has_name(names, "Debug") -> names.push("Debug")
@@ -309,8 +307,7 @@ sema_checked_type_derive_names: fn(derives: [NamedSpan], definition: Item, auto_
     names
 }
 
-// Rust reference lowering: `has_generated_block`: any builtin structural
-// provider sema attached to a struct or enum.
+// Any builtin structural provider sema attached to a struct or enum.
 sema_checked_has_generated_block: fn(definition: Item, trait_name: String) -> Bool Never! {
     if definition == {
         .Struct(value) -> {
@@ -451,7 +448,7 @@ SemaCheckedForeignOwner: enum {
     GuestImport,
 }
 
-// A per-callable `#Import(c)` declaration (Rust `lower_guest_import_foreign`).
+// A per-callable `#Import(c)` declaration.
 
 SemaForeignHandleInput: struct {
     library: String,
@@ -815,8 +812,8 @@ SemaCheckedForeignFunction: struct {
     close_function_key: String?,
     close_foreign_key: String?,
     undo_function_key: String?,
-    // The target-checked operand contract of an `#FFI(asm)` body (Rust
-    // `check_inline_asm` stores it on the function); None for every other row.
+    // The target-checked operand contract of an `#FFI(asm)` body; None for
+    // every other row.
     asm_contract: InlineAsmContract?,
     // The audited `#Unsafe` gate an inline foreign declaration
     // carries; every call to the row runs inside this sentry scope.
@@ -1590,7 +1587,7 @@ sema_checked_foreign_first_library: fn(module_row: SemaRegistrationModule, regis
     true
 }
 
-// Rust `inline_ffi_scalar`: the scalar values every inline foreign binder accepts.
+// The scalar values every inline foreign binder accepts.
 sema_checked_inline_ffi_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Float32 | .Bool -> true
@@ -1601,8 +1598,7 @@ sema_checked_inline_ffi_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `inline_asm_integer`: the general-purpose register values of the
-// assembly binder.
+// The general-purpose register values of the assembly binder.
 sema_checked_inline_asm_integer: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
@@ -1612,7 +1608,7 @@ sema_checked_inline_asm_integer: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `inline_asm_integer_or_void`: an assembly result register or no result.
+// An assembly result register or no result.
 sema_checked_inline_asm_integer_or_void: fn(ty: Type) -> Bool Never! {
     if ty == .Named(name) -> return name == "Unit"
     sema_checked_inline_asm_integer(ty)
@@ -1644,7 +1640,7 @@ sema_checked_inline_validation: fn(module_row: SemaRegistrationModule, registere
         return false
     }
     if language != "asm" -> return true
-    // Rust `check_inline_asm`: the register binder takes integers only.
+    // The register binder takes integers only.
     asm_valid := true
     loop parameter in registered.declaration.params {
         if !sema_checked_inline_asm_integer(parameter.ty) -> asm_valid = false
@@ -1871,9 +1867,9 @@ sema_checked_inline_foreign_row: fn(graph: SemaRegistrationGraph, module_row: Se
     inline: registered.declaration.inline_foreign ?? return None
     if !sema_checked_inline_validation(module_row, registered, diagnostics) -> return None
     if !sema_checked_inline_undo(graph, module_row, registered, diagnostics) -> return None
-    // Rust `check_inline_asm`: an assembly body's operand contract (E3223) for
-    // the selected target, kept on the checked row for the wrapper generator,
-    // and on x86-64 the mnemonics its template assembler encodes (E3221).
+    // An assembly body's operand contract (E3223) for the selected target, kept
+    // on the checked row for the wrapper generator, and on x86-64 the mnemonics
+    // its template assembler encodes (E3221).
     language: sema_checked_ascii_lower(inline.lang)
     if language == "asm" && source.len() == 0 -> source = module_row.source.bytes()
     asm_contract: if language == "asm" -> sema_inline_assembly_contract(registered.declaration, graph.target_machine.triple, source, diagnostics) else -> None
@@ -1886,9 +1882,9 @@ sema_checked_inline_foreign_row: fn(graph: SemaRegistrationGraph, module_row: Se
         module_identity: module_identity,
         module_name: module_row.module_name,
         module_path: module_row.module_path,
-        // Rust `function_foreign_provenance` keeps the leaf on its own source
-        // file, as an ordinary checked function's FnBody does, so the native
-        // backend reads the inline body from the declaration span.
+        // The leaf keeps its own source file, as an ordinary checked
+        // function's FnBody does, so the native backend reads the inline body
+        // from the declaration span.
         source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, registered.declaration.span),
         name: registered.declaration.name,
         span: registered.declaration.span,
@@ -1936,8 +1932,8 @@ sema_checked_guest_import_foreign_row: fn(graph: SemaRegistrationGraph, module_r
     bridge_eligible: service == None && sema_guest_import_bridge_compatible(registered.declaration)
     // A runtime binding crosses the runtime's route carriers (#6615).
     runtime_binding: sema_guest_runtime_binding(module_row.package_identity, registered.declaration)
-    // A plain written return is the default failure carrier at every call
-    // site; the C value is that carrier's success (Rust `wraps_default_failure`).
+    // A plain written return is the default failure carrier at every call site;
+    // the C value is that carrier's success.
     wraps_default_failure: if registered.declaration.return_type == {
         None -> false
         Val(declared) -> sema_effective_return_type(Val(declared)) != declared
@@ -2382,8 +2378,7 @@ sema_checked_type_is_growable: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// E0217 (Rust `cell_guard_storage_diagnostic`): a Cell guard declared inside
-// a struct field or an enum payload.
+// E0217: a Cell guard declared inside a struct field or an enum payload.
 sema_checked_cell_guard_storage: fn(place: String, span: Span) -> Diagnostic {
     sema_error("E0217", span, "a Cell guard cannot be stored in {place}", "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends", "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections")
 }
@@ -2839,8 +2834,8 @@ sema_checked_box_components: fn(box_graph: SemaCheckedBoxGraph) -> [Int] Never! 
 }
 
 // `owner --key--> target` is boxed iff `target` reaches `owner`: the two share
-// a component (a self-loop is its owner's own component). Each owner's keys
-// are sorted like Rust `owner_boxed_edges`; owners with none are absent.
+// a component (a self-loop is its owner's own component). Each owner's keys are
+// sorted; owners with none are absent.
 sema_checked_box_select: fn(box_graph: SemaCheckedBoxGraph, component: [Int]) -> [U32:[String]] Never! {
     boxed := [U32:[String]]{}
     loop node in 0..<box_graph.keys.len() {
@@ -2863,10 +2858,10 @@ sema_checked_box_select: fn(box_graph: SemaCheckedBoxGraph, component: [Int]) ->
 }
 
 // The recursive-layout edges that need a box, for every struct and enum of the
-// graph, computed once: Rust `find_box_edges`. Every struct and enum is a root
-// and only those have edges, so no multi-type cycle runs through a non-root and
-// Rust's SCC answer is exact (its path-enumeration fallback never applies).
-// Result: nominal SymbolId -> the owner's boxed keys.
+// graph, computed once. Every struct and enum is a root and only those have
+// edges, so no multi-type cycle runs through a non-root and the strongly
+// connected component answer is exact. Result: nominal SymbolId -> the owner's
+// boxed keys.
 sema_checked_program_boxed_edges: fn(graph: SemaRegistrationGraph) -> [U32:[String]] Never! {
     nodes := [U32:Int]{}
     rows := [SemaRegistrationRowRef]{}
@@ -2915,7 +2910,7 @@ sema_checked_generic_params: fn(graph: SemaRegistrationGraph, module_row: SemaRe
     loop parameter in params {
         bounds := [SymbolID]{}
         loop bound in parameter.bounds {
-            // Rust never rejects an unregistered bound name at the declaration
+            // An unregistered bound name is never rejected at the declaration
             // (`T: Clone`); it carries no trait identity, so it is dropped.
             symbol: sema_type_graph_bound_symbol(graph, module_row.module_identity, bound) ?? next
             if sema_resolved_kind(graph, symbol) != SymbolKind.Trait {
@@ -2930,8 +2925,7 @@ sema_checked_generic_params: fn(graph: SemaRegistrationGraph, module_row: SemaRe
 }
 
 // A type row names each method by its function's SymbolId key, the key its
-// checked FnBody carries (the Rust reference lowering's `resolve_type_methods`
-// resolves these through the checked function registry).
+// checked FnBody carries.
 sema_checked_nominal_methods: fn(graph: SemaRegistrationGraph, definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
     keys := [String]{}
     if definition == {
@@ -2973,8 +2967,9 @@ sema_checked_item_span: fn(item: Item) -> Span Never! {
     }
 }
 
-// . Resolve nominal identity through the registration graph,
-// not a leaf-name scan, and only traverse structs like Rust StrongSharedCycleGraph.
+// Whether `ty` reaches `owner` through strong shared edges. Nominal identity
+// resolves through the registration graph, not a leaf-name scan, and only
+// structs are traversed.
 sema_checked_shared_reaches: fn(graph: SemaRegistrationGraph, owner: SymbolID, caller: ModuleID, ty: Type, memo: ^[U32:Bool], active: ^[U32:Bool]) -> {reaches: Bool, cut: Bool} Never! {
     if ty == {
         .Named(_) -> {
@@ -3131,10 +3126,10 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [U32:[String]], m
     boxed_edges := sema_checked_boxed_edges(graph, boxed, module_row.module_identity, definition)
     if nominal.compiler_owned -> boxed_edges = [String]{}
     derives := [String]{}
-    // Rust reference lowering lower_struct/lower_enum: the declaration's
-    // structural auto-derive selection (`TypeMetadata`) supplies the
-    // auto-Printable fact and the automatic Debug derive, which a field that
-    // is not printable or debuggable blocks (sema_comparability_rendering_blocked).
+    // The declaration's structural auto-derive selection (`TypeMetadata`)
+    // supplies the auto-Printable fact and the automatic Debug derive, which a
+    // field that is not printable or debuggable blocks
+    // (sema_comparability_rendering_blocked).
     auto_derives: sema_type_metadata_auto_derives(definition, module_row.declared_trait_impls)
     auto_debug: auto_derives.debug && !sema_comparability_rendering_blocked(graph, module_row.module_identity, definition, "Debug")
     auto_printable := false
@@ -3400,9 +3395,9 @@ sema_checked_validate_nested_impl: fn(graph: SemaRegistrationGraph, module_row: 
 // The impl's methods are the rows `rows` of `methods`.
 sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, target_type: Type, trait_name: String, methods: [SemaRegistrationFunction], rows: [Int], associated_type_impls: [NamedType], forwards: Bool, span: Span, diagnostics: ^[Diagnostic]) {
     trait_ref: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
-    // Rust `validate_trait_impl` (E0906): every trait method without a default
-    // body appears in the impl. A `using` delegation forwards them instead, and
-    // a generated codec writes its own.
+    // E0906: every trait method without a default body appears in the impl. A
+    // `using` delegation forwards them instead, and a generated codec writes
+    // its own.
     if !forwards {
         missing := [String]{}
         loop required_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
@@ -3495,11 +3490,10 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
     }
 }
 
-// (Rust `trait_method_expected_signature`) The callable a trait declares, as
-// this impl must write it: `Self` and the associated types are the impl's
-// concrete types. An effect row rides the arrow (`-[IO]> T`, pure `-[]> T`);
-// otherwise a success value is spelled `-> T`, and a Unit or unit-fallible
-// result keeps the arrowless form.
+// The callable a trait declares, as this impl must write it: `Self` and the
+// associated types are the impl's concrete types. An effect row rides the arrow
+// (`-[IO]> T`, pure `-[]> T`); otherwise a success value is spelled `-> T`, and
+// a Unit or unit-fallible result keeps the arrowless form.
 sema_checked_trait_method_expected: fn(declaration: TraitMethodSig, names: [String], types: [Type]) -> String {
     params := [String]{}
     loop param in declaration.params {
@@ -3549,10 +3543,10 @@ sema_checked_receiver_matches: fn(declared: [Param], written: [Param]) -> Bool N
     !declared_self || declared[0].convention == written[0].convention
 }
 
-// Rust `TraitRegistry` coherence (orphan rule). Top-level
-// impls register in source order, then the derive requests, then the trait
-// blocks of struct and enum declarations, so a duplicate reports at the later
-// block. An operator impl's identity includes its right-hand type.
+// Trait coherence (orphan rule). Top-level impls register in source order,
+// then the derive requests, then the trait blocks of struct and enum
+// declarations, so a duplicate reports at the later block. An operator impl's
+// identity includes its right-hand type.
 SemaCheckedOperatorImpl: struct {
     left: String,
     trait_name: String,
@@ -3560,16 +3554,16 @@ SemaCheckedOperatorImpl: struct {
 }
 
 SemaCheckedCoherence: struct {
-    // Registered `{owner}.{trait}` pairs (Rust `trait_impls`).
+    // Registered `{owner}.{trait}` pairs.
     trait_keys: NameTable{name_table_sized(2)},
     // `{left}.{trait}` -> the row of operator_rhs holding the right-hand
     // types of its valid operator impls, at its id in `operator_keys`.
     operator_keys: NameTable{name_column_table()},
     operator_slots: [Int]{name_column()},
     operator_rhs: [[Type]],
-    // The module's declarations, indexed once per check (Rust `local_types`,
-    // `local_tags`, `local_traits`): local type names, the applied owner type
-    // of the first struct, enum or alias of each name, tag and trait names.
+    // The module's declarations, indexed once per check: local type names, the
+    // applied owner type of the first struct, enum or alias of each name, tag
+    // and trait names.
     local_types: NameTable{name_table_sized(2)},
     owner_types: SemaInlineTypes,
     tags: NameTable{name_table_sized(2)},
@@ -3598,8 +3592,7 @@ sema_checked_associated_put: fn(table: ^SemaCheckedAssociated, key: String, type
     if row == table.rows.len() -> table.rows.push(Val(types.move())) else -> table.rows[row] = Val(types.move())
 }
 
-// Rust `TraitRegistry` local sets: one pass over the module's items and
-// nominals.
+// One pass over the module's items and nominals.
 sema_checked_coherence_state: fn(module_row: SemaRegistrationModule) -> SemaCheckedCoherence Never! {
     state := SemaCheckedCoherence{operator_rhs: [[Type]]{}, owner_types: SemaInlineTypes{}, associated: SemaCheckedAssociated{}, distinct_bases: SemaInlineTypes{}}
     loop item_index in 0..<module_row.program.items.len() {
@@ -3659,7 +3652,7 @@ sema_checked_coherence_note_associated: fn(state: ^SemaCheckedCoherence, owner_n
     }
 }
 
-// A type declared by this module (Rust `local_types`).
+// A type declared by this module.
 sema_checked_coherence_local_type: fn(state: SemaCheckedCoherence, type_name: String) -> Bool Never! {
     name_find(state.local_types, type_name) != None
 }
@@ -3670,14 +3663,13 @@ sema_checked_coherence_applied: fn(name: String, params: [TypeParam]) -> Type Ne
     Type.Apply{name: name, args: args}
 }
 
-// Rust `impl_owner_type`: a generic owner is applied to its own parameters.
+// A generic owner is applied to its own parameters.
 sema_checked_coherence_owner_type: fn(state: SemaCheckedCoherence, owner_name: String) -> Type Never! {
     sema_inline_type_of(state.owner_types, owner_name) ?? Type.Named{name: owner_name}
 }
 
-// Rust `local_traits`: a compiler-owned trait the table marks local, a trait
-// this module declares, or one imported from the same package (the package
-// is the orphan unit).
+// A compiler-owned trait the table marks local, a trait this module declares,
+// or one imported from the same package (the package is the orphan unit).
 sema_checked_coherence_local_trait: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, trait_name: String) -> Bool Never! {
     if trait_name.contains(".") -> return false
     if owned_trait(trait_name) == .Val(owned) -> return owned.local
@@ -3694,8 +3686,7 @@ sema_checked_coherence_rhs_local: fn(state: SemaCheckedCoherence, rhs: Type) -> 
     }
 }
 
-// Rust `validate_operator_marker` (E0907): `#Commutative` only on a typed Add
-// or Mul hook.
+// E0907: `#Commutative` only on a typed Add or Mul hook.
 sema_checked_coherence_operator_marker: fn(marker: OperatorMarker?, trait_name: String?, operator_rhs: Type?, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
     if marker == None -> return true
     name: trait_name ?? "the impl"
@@ -3704,9 +3695,9 @@ sema_checked_coherence_operator_marker: fn(marker: OperatorMarker?, trait_name: 
     false
 }
 
-// Rust `validate_trait_impl` up to the orphan rule (E0731, E0908, E0902),
-// then the owned-trait contract. A compiler-generated impl writes its own
-// methods, so only its operator identity is checked.
+// Trait impl validation up to the orphan rule (E0731, E0908, E0902), then the
+// owned-trait contract. A compiler-generated impl writes its own methods, so
+// only its operator identity is checked.
 sema_checked_coherence_register: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, trait_name: String, operator_rhs: Type?, operator_marker: OperatorMarker?, methods: [Func], associated: [NamedType], generated: Bool, local_type: Bool, span: Span, state: ^SemaCheckedCoherence, diagnostics: ^[Diagnostic]) {
     if !sema_checked_coherence_operator_marker(operator_marker, Val(trait_name), operator_rhs, span, diagnostics) {
         return
@@ -3768,10 +3759,9 @@ sema_checked_coherence_register: fn(graph: SemaRegistrationGraph, module_row: Se
     if key_by && valid -> sema_key_by_alone(graph, module_row, owner_name, span, diagnostics)
 }
 
-// Rust `validate_trait_impl` orphan rule (E0902): neither the trait nor the
-// type is this program's; an operator hook also needs its left type local,
-// or, for arithmetic, a local right-hand type; a conversion needs its target
-// or its source local.
+// E0902: neither the trait nor the type is this program's; an operator hook
+// also needs its left type local, or, for arithmetic, a local right-hand type;
+// a conversion needs its target or its source local.
 sema_checked_coherence_orphan: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, owner_name: String, trait_name: String, operator_rhs: Type?, local_type: Bool) -> Bool {
     operator_trait: owned_trait_is_operator(trait_name)
     rhs_local: operator_rhs != None && sema_checked_coherence_rhs_local(state, operator_rhs ?? sema_checked_coherence_owner_type(state, owner_name))
@@ -3834,9 +3824,8 @@ sema_checked_coherence_add_operator: fn(state: ^SemaCheckedCoherence, left: Stri
     }
 }
 
-// Rust `register_impl`: a `using` delegation registers its pair without the
-// coherence checks (sema owns its E2401 field check); a literal capability is
-// still validated in full.
+// A `using` delegation registers its pair without the coherence checks (sema
+// owns its E2401 field check); a literal capability is still validated in full.
 sema_checked_coherence_impl: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, implementation: SemaRegistrationImpl, state: ^SemaCheckedCoherence, diagnostics: ^[Diagnostic]) {
     definition: implementation.declaration
     if !sema_checked_coherence_operator_marker(definition.operator_marker, definition.trait_name, definition.operator_rhs, definition.type_span, diagnostics) {
@@ -3879,8 +3868,8 @@ sema_checked_coherence_blocks: fn(graph: SemaRegistrationGraph, module_row: Sema
     }
 }
 
-// Rust S62 E2401: a `using` delegation names a field of the struct, and that
-// field's type implements the delegated trait.
+// E2401: a `using` delegation names a field of the struct, and that field's
+// type implements the delegated trait.
 sema_checked_validate_delegation: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, implementation: SemaRegistrationImpl, diagnostics: ^[Diagnostic]) {
     definition: implementation.declaration
     trait_name: definition.trait_name ?? return
@@ -3946,11 +3935,11 @@ sema_checked_member_names: fn(graph: SemaRegistrationGraph, module_row: SemaRegi
         }
     }
     loop implementation_index in 0..<module_row.impls.len() {
-        // Rust register_impl_methods inserts each impl method into its type's
-        // method table once. An impl attached to a registered nominal row
-        // already contributed its methods to `nominal.methods`, which the
-        // owner module's walk above names; walking it again would see the
-        // same declaration twice. Only unattached impls are named here.
+        // Each impl method enters its type's method table once. An impl
+        // attached to a registered nominal row already contributed its methods
+        // to `nominal.methods`, which the owner module's walk above names;
+        // walking it again would see the same declaration twice. Only
+        // unattached impls are named here.
         if sema_registration_module_index(graph, module_row.impls[implementation_index].target_module_identity) == .Val(target_index) {
             if sema_registration_impl_nominal_index(graph.modules[target_index], module_row.impls[implementation_index].target_type_name) >= 0 {
                 next

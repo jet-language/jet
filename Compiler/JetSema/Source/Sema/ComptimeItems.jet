@@ -1015,11 +1015,10 @@ sema_comptime_add_meta_sources: fn(sources: ^SemaComptimeSourceList, graph: Sema
 // Only a function's `#Meta` fields are sources, so the caller formats the
 // owner key of a function with a `#Meta` alone (sema_comptime_function_has_sources).
 sema_comptime_add_function_sources: fn(sources: ^SemaComptimeSourceList, graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, function: Func, owner_key: String) {
-    // A function or method marker sits on a dynamic site: Rust
-    // `CheckerMarkers.resolve_static_rule_products` (`static_product_site`)
-    // stages no value for it and discards its evaluation errors, because its
-    // arguments may be menu words (`#Inline(Always)`, `#Job(.Dev)`) or name
-    // locals; ordinary marker validation reads those arguments instead.
+    // A function or method marker sits on a dynamic site: no value is staged
+    // for it and its evaluation errors are discarded, because its arguments
+    // may be menu words (`#Inline(Always)`, `#Job(.Dev)`) or name locals;
+    // ordinary marker validation reads those arguments instead.
     sema_comptime_add_meta_sources(sources, graph, source_module.module_identity, owner_key, function.meta)
 }
 
@@ -1177,8 +1176,8 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
         module_value: sema_checked_module_value_computed(constant.declaration)
         if !module_value && !sema_checked_module_value_evaluates(constant.declaration) -> next
         expression := constant.declaration.value
-        // Rust `module_scalar_const_type`: a bare decimal literal binding is a
-        // Float constant, not the expression default Decimal.
+        // A bare decimal literal binding is a Float constant, not the
+        // expression default Decimal.
         expected := constant.declaration.ty
         if expected == None && constant.declaration.value == .Float(_, _, _, _, _) {
             expected = Val(Type.Float)

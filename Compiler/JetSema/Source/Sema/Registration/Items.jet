@@ -349,11 +349,11 @@ sema_registration_unit_facts: fn(graph: SemaRegistrationGraph) -> [SemaRegistrat
     facts
 }
 
-// Rust unit_fact_for_type resolves a module-qualified name through its
-// declaring module's registry, so the compiler-owned `Duration`/`Instant`
-// time rows name only the bare built-in carriers: Core/Time's source struct
-// `Instant`, under its Core module identity, is a nominal with
-// Comparable/Equatable hooks, not the core.units point.
+// A module-qualified name resolves through its declaring module's registry,
+// so the compiler-owned `Duration`/`Instant` time rows name only the bare
+// built-in carriers: Core/Time's source struct `Instant`, under its Core
+// module identity, is a nominal with Comparable/Equatable hooks, not the
+// core.units point.
 sema_registration_unit_fact_for_type: fn(graph: SemaRegistrationGraph, ty: Type) -> SemaRegistrationUnitFact? {
     name: sema_registration_unit_leaf_name(ty) ?? return None
     if graph.unit_facts.len() == 2 && name != "Duration" && name != "Instant" -> return None
@@ -690,8 +690,8 @@ SemaRegistrationModuleInput: struct {
     // The dotted `name: module` path that declared the file ("" at the
     // package root): the start of SourceLocation's `module`.
     declared_module: String{""},
-    // The module's source text (Rust `Module.source`). A declared text block
-    // hands the text inside its braces to its rule.
+    // The module's source text. A declared text block hands the text inside its
+    // braces to its rule.
     source: String{""},
     // The unit mentions of `source` (sema_units_source_mentions) when the
     // driver already holds them, as for a Core module whose rows it read
@@ -794,9 +794,9 @@ SemaRegistrationModule: struct {
     persist_roots: [SymbolID]{[SymbolID]{}},
     imports: [SemaRegistrationImport],
     exports: [SemaRegistrationExport],
-    // Local import name -> its binding (Rust `Checker.imports`). Import
-    // names are unique per module, so each name has one row; the row packs
-    // the import and binding positions (sema_registration_import_binding_at).
+    // Local import name -> its binding. Import names are unique per module, so
+    // each name has one row; the row packs the import and binding positions
+    // (sema_registration_import_binding_at).
     import_binding_names: NameTable,
     import_binding_values: [Int],
     // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
@@ -865,9 +865,8 @@ SemaRegistrationHostHooks: struct {
     core_bodies_ahead: [U32:SemaCoreBodyAhead?]{[U32:SemaCoreBodyAhead?]{}},
 }
 
-// The folded build snapshot the driver
-// seeds before checking (Rust `BuildFactSnapshot`). Sema folds `#package.*`
-// and `build.*` reads from these values and never probes the host.
+// The folded build snapshot the driver seeds before checking. Sema folds
+// `#package.*` and `build.*` reads from these values and never probes the host.
 SemaBuildFacts: struct {
     package_name: String,
     package_version: String,
@@ -1045,10 +1044,9 @@ SemaRegistrationGraph: struct {
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
     compiler_builtin_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     compiler_builtin_refs: [SemaRegistrationRowRef?]{[SemaRegistrationRowRef?]{}},
-    // Resolved trait symbol id -> the impl rows implementing it, in
-    // module/row order (Rust's keyed trait registry), built with the callable
-    // index; a bound query before then (`impl_traits_indexed` false) scans
-    // every impl.
+    // Resolved trait symbol id -> the impl rows implementing it, in module/row
+    // order, built with the callable index; a bound query before then
+    // (`impl_traits_indexed` false) scans every impl.
     impl_trait_slots: [U32:Int]{[U32:Int]{}},
     impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}},
     impl_traits_indexed: Bool{false},
@@ -1103,8 +1101,8 @@ SemaRegistrationGraph: struct {
     // (sema_registration_module_settled). Empty when not set, or when an
     // error names no source file.
     settled_modules: [Bool]{[Bool]{}},
-    // Test mode (Rust `CompileMode.Test`/`TestOverride`), set by the driver:
-    // named `#Test` bodies are checked and lowered as synthetic functions.
+    // Test mode, set by the driver: named `#Test` bodies are checked and
+    // lowered as synthetic functions.
     test_mode: Bool{false},
     // Test mode: each law test the compiler could not make (TraitLaws.jet),
     // its test key with why. The test fails and the run ends as an internal
@@ -1133,10 +1131,9 @@ SemaRegistrationGraph: struct {
     // User modules only compile-time code uses, however they are imported;
     // the driver leaves their functions out of the shipped program.
     comptime_only_modules: [ModuleID]{[ModuleID]{}},
-    // One table per package namespace (Rust
-    // `NameLedger.namespace_owner`): namespace -> slot, and per slot name ->
-    // entry; entry -> declaring module and name. Entries are numbered in
-    // module order, then declaration order.
+    // One table per package namespace: namespace -> slot, and per slot name ->
+    // entry; entry -> declaring module and name. Entries are numbered in module
+    // order, then declaration order.
     namespace_names: NameTable{NameTable{bytes: [U8]{}, ends: [Int]{0}, texts: [String]{""}, hashes: [Int]{0}, slots: [Int]{0, 0}, mask: 1}},
     namespace_tables: [NameTable]{[NameTable]{}},
     namespace_table_entries: [[Int]]{[[Int]]{}},
@@ -1580,7 +1577,7 @@ sema_registration_extern_contract: fn(params: [Param]) -> [CallContractRow]? {
 
 // A written C binding (`#Import c.lib: module { … }`) calls a C symbol that has
 // no Jet failure rail: its contract is `T Never!`, and `#Import` declarations
-// cannot spell a contract (E3203). Rust bridge and generated rows keep the
+// cannot spell a contract (E3203). Bridge and generated rows keep the
 // declared-return projection.
 sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrationForeignOwner) -> Type Never! {
     params := [Type]{}
@@ -2041,9 +2038,8 @@ sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, 
     }
 }
 
-// The callable registered under `key` (Rust `funcs.get` / `registry.method`):
-// one keyed lookup of its DeclID. None means the target is unknown; callers
-// must not manufacture a false ABI.
+// The callable registered under `key`: one keyed lookup of its DeclID. None
+// means the target is unknown; callers must not manufacture a false ABI.
 sema_registration_callable_row: fn(graph: SemaRegistrationGraph, key: String) -> SemaRegistrationCallableRow? Never! {
     id: decl_table_find(graph.decls, graph.symbols, key) ?? return None
     Val(graph.callables[decl_id_index(id)])
@@ -2463,10 +2459,10 @@ sema_registration_index_callables: fn(graph: ^SemaRegistrationGraph) Never! {
     graph.impl_row_buckets = targets.buckets.move()
 }
 
-// Buckets every impl under the trait it implements (Rust's keyed trait
-// registry), in module/row order. An inherent impl or an unresolved trait
-// name matches no bound, so it has no bucket. The CheckedText impls are
-// listed once more on their own (`checked_text_impl_rows`).
+// Buckets every impl under the trait it implements, in module/row order. An
+// inherent impl or an unresolved trait name matches no bound, so it has no
+// bucket. The CheckedText impls are listed once more on their own
+// (`checked_text_impl_rows`).
 SemaRegistrationImplResolved: struct {
     target_nominal: SymbolID?,
     trait_id: SymbolID?,
@@ -2739,8 +2735,8 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
     owner_key: if symbol_builtin_declared(SymbolKind.Trait, module_name, owner.name) != None -> symbol_key_text(SymbolKind.Trait, module_name, "", owner.name) else -> symbol_table_key(symbols, owner.id)
     id: symbol_mint(symbols, SymbolKind.Function, module_identity, owner_key, method.name)
     key: symbol_table_key(symbols, id)
-    // A protocol ABI trait's own method signature is raw at dispatch, as in
-    // the Rust reference's trait-bound and trait-object method calls.
+    // A protocol ABI trait's own method signature is raw at dispatch, for
+    // trait-bound and trait-object method calls alike.
     signature: sema_registration_trait_method_signature(method, sema_raw_protocol_trait(Val(owner.name)), key, fallback_source_file, fallback_source_origin, source_segments)
     parameters := [SemaRegistrationParameter]{}
     metadata: sema_registration_signature_metadata(signature) ?? FunctionCallMetadata{names: [String]{}, defaults: [FunctionDefaultRef?]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{}}}
@@ -2967,11 +2963,11 @@ sema_registration_rule_module: fn(module_table: ^ModuleTable) -> SemaRegistratio
     }
 }
 
-// Rust `Prelude.retain_error_prelude_module`: a graph whose inputs already
-// retain the original error module (the driver loads it as a source module)
-// keeps that one owner after checking its source context; otherwise the
-// original module is appended once. An input holding the original path or
-// alias without the parsed provenance is refused rather than trusted.
+// A graph whose inputs already retain the original error module (the driver
+// loads it as a source module) keeps that one owner after checking its source
+// context; otherwise the original module is appended once. An input holding the
+// original path or alias without the parsed provenance is refused rather than
+// trusted.
 sema_registration_retain_original_error_module: fn(inputs: ^[SemaRegistrationModuleInput], module_table: ^ModuleTable, diagnostics: ^[Diagnostic]) {
     path: SEMA_PRELUDE_ERROR_SOURCE_PATH
     alias: sema_inline_generated_path(path)
@@ -3333,9 +3329,9 @@ sema_registration_add_root: fn(module_row: ^SemaRegistrationModule, module_text:
             sema_registration_push_declaration(module_row, item)
             return complete
         }
-        // A body-less `name: module` declares a file module the loader
-        // binds as the synthetic file import aliased `name` (Rust `load_file`);
-        // that import owns the name, so the declaration adds no second symbol.
+        // A body-less `name: module` declares a file module the loader binds as
+        // the synthetic file import aliased `name`; that import owns the name,
+        // so the declaration adds no second symbol.
         .CodeModule(definition) -> {
             if definition.body == None {
                 sema_registration_push_declaration(module_row, item)
@@ -3435,9 +3431,8 @@ sema_registration_declared_item: fn(item: Item) -> Item Never! {
     item.copy()
 }
 
-// E0106: the Rust reference's `register_struct`/`register_enum`/
-// `register_distinct`/`register_type_alias` reject a built-in type name
-// before the declaration registers.
+// E0106: a struct, enum, distinct type or type alias named like a built-in
+// type is rejected before the declaration registers.
 sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: String, diagnostics: ^[Diagnostic]) -> Bool {
     kind: if item == {
         .Struct(_) -> "struct"
@@ -3454,8 +3449,7 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
     false
 }
 
-// The registration rules of the Rust
-// reference's `register_distinct` and `register_type_alias`. A distinct
+// The registration rules of distinct types and type aliases. A distinct
 // built on a distinct declared earlier (E0129) and an alias without type
 // parameters over a plain type (E0324) are not registered. An alias without
 // type parameters stands when it names a record type (`Bounds: {min: Int,
@@ -3865,14 +3859,12 @@ sema_registration_builtin_impl_allowed: fn(items: [Item], definition: ImplDef) -
     false
 }
 
-// (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
-// type belongs to the package that declares the other operand, so
-// `impl Int.Mul(Price)` is legal when this module declares `Price`, and so
-// does a conversion into a built-in type from its source
-// (`impl Float.From(Celsius)`).
-// An imported operand (`impl Int.Sub(lib.Foreign)`) is not a built-in
-// target error: the orphan rule (E0902) judges which package owns it.
-// `items` are the module's program items.
+// An operator hook on a built-in type belongs to the package that declares the
+// other operand, so `impl Int.Mul(Price)` is legal when this module declares
+// `Price`, and so does a conversion into a built-in type from its source
+// (`impl Float.From(Celsius)`). An imported operand
+// (`impl Int.Sub(lib.Foreign)`) is not a built-in target error: the orphan rule
+// (E0902) judges which package owns it. `items` are the module's program items.
 sema_registration_opmix_builtin_impl: fn(items: [Item], definition: ImplDef) -> Bool {
     if definition.type_name.contains(".") -> return false
     if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) {
@@ -4030,17 +4022,15 @@ sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModul
 }
 
 // The prepared row of one module; its diagnostics are appended to `reported`.
-// The row is returned whole, so the graph takes it without a copy. The input
-// is consumed: its program moves into the row instead of being copied.
+// The row is returned whole, so the graph takes it without a copy. The input is
+// consumed: its program moves into the row instead of being copied.
 // `module_text` is the input's identity text, which its symbol keys spell;
-// `symbols` holds the module's reserved range, which mints them.
-// `templates` are the generic-module templates the module imports; its own
-// templates come from its program. `policies` are its package's checked user
-// policy declarations (Rust Registration: one policy set per package).
+// `symbols` holds the module's reserved range, which mints them. `templates` are
+// the generic-module templates the module imports; its own templates come from
+// its program. `policies` are its package's checked user policy declarations.
 // `settings` are its package's declared settings (sema_build_facts_settings_at),
-// which module arguments may read.
-// `codecs` are the codecs the graph gives the types its declarations hold
-// (sema_derive_foreign_codecs).
+// which module arguments may read. `codecs` are the codecs the graph gives the
+// types its declarations hold (sema_derive_foreign_codecs).
 sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, module_text: String, symbols: ^SymbolTable, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: NameTable, reported: ^[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     owned := input.move()
@@ -4118,11 +4108,9 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
             module_row.nominals.push(value)
         }
     }
-    // Each valid module alias becomes an expanded module
-    // instance before anything else sees the items (Rust expands before
-    // sibling mangling and registration).
-    // Each rewrite below updates the program in place and leaves it
-    // untouched (uncopied) when it has nothing to rewrite.
+    // Each valid module alias becomes an expanded module instance before
+    // anything else sees the items. Each rewrite below updates the program in
+    // place and leaves it untouched (uncopied) when it has nothing to rewrite.
     sema_generic_modules_expand(module_row.program, module_row.module_identity, module_text, templates, settings)
     // Ordered multi-head declarations fold into one ordinary enum pattern
     // table before inline lifting and registration see the items.
@@ -4212,14 +4200,12 @@ sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, m
         // The first declaration remains the lookup winner after a collision.
     }
     module_row.program.items = items.move()
-    // (E2408, E2415): serde field markers and anonymous-union decode
-    // shapes are checked on the registered items, as the Rust reference's
-    // `validate_serde_items` runs after the trait registry is built.
+    // (E2408, E2415): serde field markers and anonymous-union decode shapes
+    // are checked on the registered items, after the trait registry is built.
     sema_registration_serde_items(module_row.program.items, diagnostics)
     sema_registration_codable_options(module_row.program.items, diagnostics)
-    // Checked
-    // on the registered items, as the Rust reference's `validate_cli_items`
-    // runs after struct registration.
+    // The `#CLI` items are checked on the registered items, after struct
+    // registration.
     sema_registration_cli_items(module_row.program.items, diagnostics)
     // Only foreign-handle rows change; every other row is read in place (a
     // copied row would carry its whole source declaration).
@@ -4666,7 +4652,7 @@ sema_registration_prepare_claim: fn(shared_state: Shared<SemaRegistrationPrepare
     Val(SemaRegistrationPrepareClaim{position: position, job: job.move()})
 }
 
-// The CLI shape of one `#CLI` field (Rust `CLIFieldKind`).
+// The CLI shape of one `#CLI` field.
 SemaRegistrationCLIFieldKind: enum {
     Flag,
     OptionalOption,
@@ -4674,14 +4660,13 @@ SemaRegistrationCLIFieldKind: enum {
     RequiredOption,
 }
 
-// Rust `validate_cli_items`: every `#CLI` program struct of the module, in item
-// order. A struct that is not `#CLI` may carry neither a callable member
-// (E1345) nor `#Arg` (E1319). A `#CLI` struct's fields each map to one flag
-// (E1305), keep `#Arg(flag_only: true)` meaningful (E1309), derive distinct
-// flags beside the reserved `--help`/`--allow`/`--deny` (E1306), use
-// one-letter distinct `short:` names (E1318), and keep `env:` off presence
-// flags (E1319). Its methods
-// and bound members are commands with one namespace (E1344), read-only
+// Every `#CLI` program struct of the module, in item order. A struct that is
+// not `#CLI` may carry neither a callable member (E1345) nor `#Arg` (E1319). A
+// `#CLI` struct's fields each map to one flag (E1305), keep
+// `#Arg(flag_only: true)` meaningful (E1309), derive distinct flags beside the
+// reserved `--help`/`--allow`/`--deny` (E1306), use one-letter distinct
+// `short:` names (E1318), and keep `env:` off presence flags (E1319). Its
+// methods and bound members are commands with one namespace (E1344), read-only
 // receivers (E1347), and callable shapes (E1345), and are not allowed on a
 // Codable struct (E1346).
 sema_registration_cli_items: fn(items: [Item], diagnostics: ^[Diagnostic]) {
@@ -4863,9 +4848,9 @@ sema_registration_cli_command_word: fn(command: String, span: Span, seen_flags: 
     }
 }
 
-// Rust `validate_callable_params`: a command takes the shared program struct
-// at most once, first and read-only (bound members only), and otherwise only
-// scalar or optional scalar, non-variadic parameters with literal defaults.
+// A command takes the shared program struct at most once, first and read-only
+// (bound members only), and otherwise only scalar or optional scalar,
+// non-variadic parameters with literal defaults.
 sema_registration_cli_callable_params: fn(function: Func, command: String, shared_type: String?, diagnostics: ^[Diagnostic]) {
     shared_slots := [Int]{}
     if shared_type == .Val(shared_name) {
@@ -4903,7 +4888,7 @@ sema_registration_cli_callable_params: fn(function: Func, command: String, share
     }
 }
 
-// Rust `Expr.without_parens` matched against a literal Int, Float, Bool or String.
+// A literal Int, Float, Bool or String, under any parentheses.
 sema_registration_cli_literal_default: fn(expr: Expr) -> Bool Never! {
     current: sema_registration_cli_without_parens(expr)
     if current == {
@@ -4912,7 +4897,7 @@ sema_registration_cli_literal_default: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-// Rust `named_leaf`: the last `.` segment of a named type.
+// The last `.` segment of a named type.
 sema_registration_cli_named_leaf: fn(ty: Type) -> String? {
     if ty == .Named(name) {
         parts: name.split(".").to_list()
@@ -4921,7 +4906,7 @@ sema_registration_cli_named_leaf: fn(ty: Type) -> String? {
     None
 }
 
-// Rust `binding_target`: the module function a bound CLI member names.
+// The module function a bound CLI member names.
 sema_registration_cli_binding_target: fn(items: [Item], target: Expr) -> Func? {
     current: sema_registration_cli_without_parens(target)
     if current == .Ident(name, _, _) {
@@ -4932,7 +4917,6 @@ sema_registration_cli_binding_target: fn(items: [Item], target: Expr) -> Func? {
     None
 }
 
-// Rust `Expr.without_parens`.
 sema_registration_cli_without_parens: fn(expr: Expr) -> Expr Never! {
     current := expr
     loop {
@@ -4941,7 +4925,7 @@ sema_registration_cli_without_parens: fn(expr: Expr) -> Expr Never! {
     current
 }
 
-// The first marker named `name` (Rust `iter().find(|m| m.name == name)`).
+// The first marker named `name`.
 sema_registration_cli_marker: fn(markers: [Marker], name: String) -> Marker? {
     loop marker in markers {
         if marker.name == name -> return Val(marker)
@@ -4991,8 +4975,8 @@ sema_registration_cli_arg_text: fn(markers: [Marker], name: String) -> String? {
     sema_registration_cli_literal(value)
 }
 
-// Rust `classify_cli_field`: `Bool` is a flag; `T?` of a CLI scalar is an
-// optional option; any other CLI scalar is a defaulted or required option.
+// `Bool` is a flag; `T?` of a CLI scalar is an optional option; any other CLI
+// scalar is a defaulted or required option.
 sema_registration_cli_field_kind: fn(field: Field) -> SemaRegistrationCLIFieldKind? {
     if field.ty == .Bool -> return Val(SemaRegistrationCLIFieldKind.Flag)
     if field.ty == .Option(inner) {
@@ -5018,7 +5002,7 @@ sema_registration_e1345: fn(name: String, span: Span, why: String) -> Diagnostic
     sema_error("E1345", span, "CLI command member `{name}` has no callable shape", why, "bind a visible function with scalar parameters and, at most, one first read-only parameter of the program-struct type")
 }
 
-// Rust `validate_cli_items` standard-pack test: `#CLI(Standard)`.
+// The `#CLI` standard-pack test: `#CLI(Standard)`.
 sema_registration_cli_standard: fn(markers: [Marker]) -> Bool Never! {
     loop marker in markers {
         if marker.name != MARKER_CLI -> next
@@ -5031,13 +5015,13 @@ sema_registration_cli_standard: fn(markers: [Marker]) -> Bool Never! {
     false
 }
 
-// Rust `is_cli_scalar` or an optional one (`callable_param_shape`).
+// A CLI scalar, or an optional one.
 sema_registration_cli_field_mapped: fn(ty: Type) -> Bool Never! {
     if ty == .Option(inner) -> return sema_registration_cli_scalar(inner)
     sema_registration_cli_scalar(ty)
 }
 
-// Rust `is_cli_scalar`: `Int` (and an inline range), `Float`, `Bool`, `String`, `Path`.
+// `Int` (and an inline range), `Float`, `Bool`, `String`, `Path`.
 sema_registration_cli_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .InlineRange(_, _, _) | .Float | .Bool | .String -> true
@@ -5046,7 +5030,7 @@ sema_registration_cli_scalar: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `marker_string`: the marker's first argument when it is one literal string.
+// The marker's first argument when it is one literal string.
 sema_registration_cli_marker_string: fn(marker: Marker) -> String? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == .Expr(value) && value == .Str(parts, _, _) && parts.len() == 1 {
@@ -5055,13 +5039,13 @@ sema_registration_cli_marker_string: fn(marker: Marker) -> String? {
     None
 }
 
-// (Rust `validate_serde_items`): on every type that derives a codec
-// explicitly, a container `#Rename(.Case)` names one of the closed casing
-// styles (E2409), `#Codable(.Flatten)` needs a struct-typed field (E2408), every
-// encoded or decoded field or payload needs a wire form (E2411), and every
-// decoded anonymous union needs one distinct outer wire shape per member
-// (E2415, or E2411 for a member with no known shape). Automatic codecs are
-// selected only for declarations whose fields already qualify.
+// On every type that derives a codec explicitly, a container `#Rename(.Case)`
+// names one of the closed casing styles (E2409), `#Codable(.Flatten)` needs a
+// struct-typed field (E2408), every encoded or decoded field or payload needs a
+// wire form (E2411), and every decoded anonymous union needs one distinct outer
+// wire shape per member (E2415, or E2411 for a member with no known shape).
+// Automatic codecs are selected only for declarations whose fields already
+// qualify.
 sema_registration_serde_items: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     if !sema_registration_serde_any_explicit(items) {
         return
@@ -5188,10 +5172,10 @@ sema_registration_codable_error: fn(marker: Marker, what: String, why: String, f
     sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, what, why, fix)
 }
 
-// E2409 (Rust `validate_serde_items`): the container casing menu
-// on a type. `#Rename` there takes a NamingCase word; an unknown
-// word, a plain name or a string there is refused. An argument that is
-// neither a name nor text is the marker signature's problem (E0930).
+// E2409: the container casing menu on a type. `#Rename` there takes a
+// NamingCase word; an unknown word, a plain name or a string there is refused.
+// An argument that is neither a name nor text is the marker signature's problem
+// (E0930).
 sema_registration_serde_rename_all: fn(markers: [Marker], diagnostics: ^[Diagnostic]) {
     loop marker in markers {
         if marker.name != MARKER_RENAME || marker.negated || marker.args.len() == 0 -> next
@@ -5234,8 +5218,8 @@ sema_registration_serde_any_explicit: fn(items: [Item]) -> Bool Never! {
     false
 }
 
-// Rust `e2411` over `is_encodable_ty`/`is_decodable_ty`: the generated and
-// written codecs are already items here, so no automatic set is needed.
+// E2411 over encodability and decodability: the generated and written codecs
+// are already items here, so no automatic set is needed.
 // None when `ty` has the `direction` codec; otherwise the type on its path
 // that has none, innermost first (an element, a map value, a wire-reaching
 // type argument or a union member, else `ty` itself), with that type's own
@@ -5286,10 +5270,10 @@ sema_registration_serde_wire_report: fn(lack: SemaSerdeLack?, ty: Type, directio
     diagnostics.push(sema_error("E2411", span, "{shown} can't be {verb}", sema_serde_lack_why(found.shown, shown), found.fix))
 }
 
-// (Rust `check_deprecated_visibility`, E0932): a
-// `#Deprecated` marker needs a public (not package-public) item. Functions,
-// type markers, inherent and trait-impl methods, distinct types, and impl
-// methods are checked; an inline module body is walked as its own item list.
+// E0932: a `#Deprecated` marker needs a public (not package-public) item.
+// Functions, type markers, inherent and trait-impl methods, distinct types, and
+// impl methods are checked; an inline module body is walked as its own item
+// list.
 sema_registration_deprecated_visibility: fn(items: [Item], diagnostics: ^[Diagnostic]) {
     loop item in items {
         if item == {
@@ -5332,7 +5316,7 @@ sema_registration_deprecated_methods: fn(methods: [Func], diagnostics: ^[Diagnos
     }
 }
 
-// Rust `check_deprecated_marker_visibility`: the row's text is the report.
+// The row's text is the report.
 sema_registration_deprecated_markers: fn(markers: [Marker], is_public: Bool, diagnostics: ^[Diagnostic]) {
     if is_public {
         return
@@ -5438,15 +5422,14 @@ sema_registration_serde_derives_codec: fn(derives: [NamedSpan]) -> Bool Never! {
     false
 }
 
-// Rust `is_struct_named`: a named type that is not a data-tree type.
+// A named type that is not a data-tree type.
 sema_registration_serde_struct_named: fn(ty: Type) -> Bool Never! {
     if ty == .Named(name) -> return !sema_data_is_json_name(name)
     false
 }
 
-// Rust `validate_union_decode_shapes`. The parser writes every union in
-// canonical member order (type_union_sort); a nested union is flattened into
-// its members here first, as Rust `canonicalize_union` does.
+// Union decode shapes. The parser writes every union in canonical member order
+// (type_union_sort); a nested union is flattened into its members here first.
 sema_registration_serde_union_shapes: fn(items: [Item], ty: Type, span: Span, diagnostics: ^[Diagnostic]) {
     if ty == .Union(written) {
         canonical: sema_failure_union_canonical(written)
@@ -5525,7 +5508,7 @@ sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members
     }
 }
 
-// Rust `label`: the member's `Type.show` with surrounding backticks trimmed.
+// The member's `Type.show` with surrounding backticks trimmed.
 sema_registration_serde_label: fn(ty: Type) -> String Never! {
     label := sema_type_show(ty)
     loop label.starts_with("`") -> label = label.slice(1, label.len())
@@ -5533,7 +5516,7 @@ sema_registration_serde_label: fn(ty: Type) -> String Never! {
     label
 }
 
-// Rust `SerdeWireShape` order (`finish` sorts each resolved shape set).
+// The wire shape order (each resolved shape set is sorted).
 sema_registration_serde_shape_rank: fn(shape: SerdeWireShape) -> Int Never! {
     if shape == {
         .Null -> 0
@@ -5561,7 +5544,6 @@ sema_registration_serde_sorted_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWir
     sorted
 }
 
-// Rust `SerdeWireShape.name`.
 sema_registration_serde_shape_name: fn(shape: SerdeWireShape) -> String Never! {
     if shape == {
         .Null -> "Null"
@@ -6088,9 +6070,9 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
             .Unqualified(_, _, items, _, _) -> {
                 loop item in items {
                     local: sema_registration_import_local(item)
-                    // (Rust `core_list_path`): a member naming a
-                    // Core submodule (`use core.mem`, `core.encoding.[json]`) binds
-                    // that module as a namespace, exactly like `use mem: core.mem`.
+                    // A member naming a Core submodule (`use core.mem`,
+                    // `core.encoding.[json]`) binds that module as a namespace,
+                    // exactly like `use mem: core.mem`.
                     submodule: "{target_name}.{item.original}"
                     if (target_name == "core" || target_name.starts_with("core.")) && core_module_export(submodule) != None {
                         if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
@@ -6152,8 +6134,7 @@ sema_registration_populate_imports: fn(graph: ^SemaRegistrationGraph, module_ind
                             }
                         }
                         .None -> {
-                            // (Rust CheckInner `core_list_path`
-                            // Item): a Core module's ledger member with no source
+                            // A Core module's ledger member with no source
                             // declaration (a host leaf such as
                             // `core.files.__list_dir_raw`) binds as a Core item
                             // import, also inside its own module. Its symbol is
@@ -6257,15 +6238,15 @@ sema_registration_mint_tests: fn(graph: ^SemaRegistrationGraph, module_index: In
     loop key in keys -> _ := symbol_intern(graph.symbols, key)
 }
 
-// A package name binds after the module's own declarations
-// and the imports registered before the package names (`import_count` of
-// them), as Rust consults `namespace_owner` last. A name one of those already
-// binds stays theirs. A declaration of a package name is refused (E0105),
-// unless the module keeps that name to itself (`namespace_private`: a named
-// entry's or a command home's own command function, which the loader leaves
-// out of the namespace), and so is an imported item of a package function's
-// name unless it imports that very function; a module alias or an imported
-// type shadows the package name, as in Rust.
+// A package name binds after the module's own declarations and the imports
+// registered before the package names (`import_count` of them): the package
+// namespace is consulted last. A name one of those already binds stays theirs.
+// A declaration of a package name is refused (E0105), unless the module keeps
+// that name to itself (`namespace_private`: a named entry's or a command
+// home's own command function, which the loader leaves out of the namespace),
+// and so is an imported item of a package function's name unless it imports
+// that very function; a module alias or an imported type shadows the package
+// name.
 sema_registration_namespace_collisions: fn(graph: ^SemaRegistrationGraph, module_index: Int, import_count: Int) {
     if graph.modules[module_index].namespace_slot < 0 {
         return
@@ -6411,12 +6392,11 @@ sema_registration_compiler_builtin_row_hashed: fn(graph: SemaRegistrationGraph, 
 sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: ^^ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads, derive_hooks: SemaHostHookAccess?{None}, capture_derives: Bool{false}) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
-    // Rust CheckInner `retain_error_prelude_module` runs first: the original
-    // Prelude error declarations join the graph as their own compiler-generated
-    // module, the only source of the DefaultErr marker. Then Rust Bundle:
-    // inject_units_prelude, then resolve_unit_dimensions, before any module is
-    // registered. The compiler-owned effect module is not a source module and
-    // takes no catalog families.
+    // The original Prelude error declarations join the graph first, as their
+    // own compiler-generated module, the only source of the DefaultErr marker.
+    // Then the units Prelude is injected and unit dimensions resolve, before
+    // any module is registered. The compiler-owned effect module is not a
+    // source module and takes no catalog families.
     prepared_inputs := inputs.move()
     table := module_table.move()
     sema_registration_retain_original_error_module(prepared_inputs, table, diagnostics)
@@ -6441,8 +6421,8 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     // A use of a parameterized trait, `Store<Int>`, becomes the ordinary
     // trait it names before any module registers.
     sema_trait_instances_rewrite_inputs(prepared_inputs, diagnostics)
-    // Rust CheckInner `bind_marker_applications`: a directly used imported
-    // marker binds to its declaring module before any module registers.
+    // A directly used imported marker binds to its declaring module before any
+    // module registers.
     marker_bindings := sema_marker_module_bindings_threads(prepared_inputs, edges, threads)
     loop index in 0..<prepared_inputs.len() {
         if marker_bindings[index].len() > 0 {
@@ -6825,11 +6805,11 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     graph = sema_registration_canonicalize_qualified_types(graph, threads)
     sema_type_alias_cycles_check(graph)
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)
-    // Generic-module aliases resolve and check their
-    // arguments once every import is bound (Rust's expansion pre-pass).
+    // Generic-module aliases resolve and check their arguments once every
+    // import is bound.
     sema_generic_modules_check(graph, written_inputs)
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)
-    // Rust erases templates and aliases once expanded: their symbols stay
+    // Templates and aliases are erased once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed
     // in place; every other item stays in order, uncopied, and the rows that
     // read their bodies by item index follow them (`moved`: each old index's
@@ -6868,13 +6848,12 @@ sema_registration_prepare_graph: fn(inputs: ^^[SemaRegistrationModuleInput], edg
     sema_registration_bind_namespaces(graph, own_symbols, items_after != items_before, threads)
     sema_registration_index_callables(graph)
     sema_registration_index_impl_traits(graph, threads)
-    // Rust CheckInner check_guest_import_surface / check_guest_export_surface /
-    // check_guest_symbol_collisions: the C guest boundary is checked once every
-    // declaration is registered, before any body is checked.
+    // The C guest boundary (import surface, export surface, symbol
+    // collisions) is checked once every declaration is registered, before any
+    // body is checked.
     sema_guest_check_surfaces(graph)
-    // Rust CheckInner BudgetSpecs.validate_bundle: every performance role
-    // elaborates into its canonical typed budgets once every declaration is
-    // registered.
+    // Every performance role elaborates into its canonical typed budgets once
+    // every declaration is registered.
     budget_findings: sema_budget_validate_graph(graph)
     loop finding in budget_findings {
         sema_registration_push_graph_diagnostic(graph, finding.module_index, finding.diagnostic)
@@ -6988,11 +6967,11 @@ sema_source_word_byte: fn(byte: U8) -> Bool Never! {
     SEMA_WORD_BYTE[Int{byte}]
 }
 
-// Numbers every package namespace name once, per package one
-// name -> entry table (Rust `NameLedger` namespace names). Entries run in
-// module order, then declaration order; the loader already rejected a name
-// two members declare (E0624). The tables are filled from rows sorted by
-// (slot, name, entry), so each insert appends (SemaRegistrationKeyedRow).
+// Numbers every package namespace name once, per package one name -> entry
+// table. Entries run in module order, then declaration order; the loader
+// already rejected a name two members declare (E0624). The tables are filled
+// from rows sorted by (slot, name, entry), so each insert appends
+// (SemaRegistrationKeyedRow).
 SemaRegistrationNamespaceName: struct {
     slot: Int,
     name: String,
@@ -7037,9 +7016,8 @@ sema_registration_namespace_entry_hashed: fn(graph: SemaRegistrationGraph, slot:
     None
 }
 
-// (Rust `NameLedger.namespace_owner`): the registered symbol
-// row of `name` in the other member of `module_index`'s package that
-// declares it, or none (no namespace, the module's own name, or a
+// The registered symbol row of `name` in the other member of `module_index`'s
+// package that declares it, or none (no namespace, the module's own name, or a
 // declaration that did not register).
 sema_registration_namespace_owner: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> SemaRegistrationRowRef? Never! {
     if graph.modules[module_index].namespace_slot < 0 -> return None
@@ -7275,9 +7253,8 @@ sema_registration_core_unit_index: fn(graph: SemaRegistrationGraph, module_name:
 }
 
 // The default expression `reference` names. Its owner is one keyed callable
-// lookup (Rust `CallBinder` default slot of the resolved signature); trait
-// method declarations, which are not callable rows, are searched only when
-// the owner is not one.
+// lookup; trait method declarations, which are not callable rows, are searched
+// only when the owner is not one.
 sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: FunctionDefaultRef) -> Expr? {
     if sema_registration_callable_row(graph, reference.owner_key) == .Val(row) {
         if row == {
@@ -7322,8 +7299,8 @@ sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_id
 // binding it pushes for a constant still waiting for its known-time type,
 // with the graph row the binding was copied from. The module's package
 // names (`namespace_bindings`) bind after its own declarations and the
-// imports before `namespace_import_split`, as Rust consults
-// `namespace_owner` after locals and imports.
+// imports before `namespace_import_split`: the package namespace comes after
+// locals and imports.
 sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic], waiting: ^[SemaComptimeWaitingConstant]) -> Bool {
     module_index: sema_registration_module_index(graph, module_identity) ?? return false
     module_row: graph.modules[module_index]

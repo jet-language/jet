@@ -288,9 +288,9 @@ sema_stmt_local_view_facts_inner: fn(expr: Expr, scopes: SemaScopeTable, state: 
             return [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}}}
         }
         // A `trim`/`after`/`before` window on a `String` name stored straight
-        // into an aggregate field borrows that name (Rust `view_call_sources`).
-        // Any other call filling a view-typed field keeps the owners its view
-        // points into, as the same call returned bare does.
+        // into an aggregate field borrows that name. Any other call filling a
+        // view-typed field keeps the owners its view points into, as the same
+        // call returned bare does.
         .MethodCall(_, _, _, _, _, _, _) -> {
             if !aggregate -> return [SemaCallReturnViewFact]{}
             places := sema_string_view_call_sources(expr, scopes, state)
@@ -304,11 +304,10 @@ sema_stmt_local_view_facts_inner: fn(expr: Expr, scopes: SemaScopeTable, state: 
     }
 }
 
-// Rust `check_aggregate_view_return`: each field of a returned literal fills
-// its own output slot, and a report names the field value that holds the view.
-// `typed` keeps only fields checked against a view type (view_field_values);
-// a `s.slice(..)` field is a view only in such a field, so it is kept the
-// same way in either literal form.
+// Each field of a returned literal fills its own output slot, and a report
+// names the field value that holds the view. `typed` keeps only fields checked
+// against a view type (view_field_values); a `s.slice(..)` field is a view only
+// in such a field, so it is kept the same way in either literal form.
 sema_stmt_local_view_facts_fields: fn(fields: [ExprField], typed: Bool, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
     result := [SemaCallReturnViewFact]{}
     loop field in fields {
@@ -401,10 +400,9 @@ sema_stmt_string_view_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `report_temporary_view_source` at a binding or `return` that keeps a
-// returned view: every temporary source is refused, a static string literal
-// too, since the kept view outlives the statement. True when the fact names
-// a temporary.
+// At a binding or `return` that keeps a returned view, every temporary source
+// is refused, a static string literal too, since the kept view outlives the
+// statement. True when the fact names a temporary.
 sema_stmt_report_temporary_view_sources: fn(fact: SemaCallReturnViewFact, string_view: Bool, diagnostics: ^[Diagnostic]) -> Bool {
     loop span in fact.temporaries {
         sema_call_report_temporary_view_source(span, string_view, diagnostics)
@@ -537,9 +535,8 @@ sema_stmt_binds_map_slot: fn(statement: TStmt) -> Bool Never! {
     false
 }
 
-// Rust `place_from_expr` on a range: `xs[a..b]` over a named place (through
-// fields and indexes) is the source of a read window, and so is `xs[band]`
-// when the local `band` holds a range.
+// `xs[a..b]` over a named place (through fields and indexes) is the source of a
+// read window, and so is `xs[band]` when the local `band` holds a range.
 sema_stmt_is_bare_range_place: fn(expr: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
     if expr == .Slice(_, _, _, _, _, _) {
         return sema_ownership_places_from_expr_in_state(expr, scopes, state).len() > 0
@@ -559,11 +556,10 @@ sema_stmt_is_bare_range_place: fn(expr: Expr, scopes: SemaScopeTable, state: ^Se
     false
 }
 
-// Rust `check_return` (`bare_place`): a bare whole list place (a name or a
-// field of one) returned at a named `View<T>` boundary is a read window over
-// all of it. It is written as its full range `place[0..<place.len()]`, so it
-// takes the range-window path: typed `View<T>`, owned by the place, and
-// lowered without a copy.
+// A bare whole list place (a name or a field of one) returned at a named
+// `View<T>` boundary is a read window over all of it. It is written as its full
+// range `place[0..<place.len()]`, so it takes the range-window path: typed
+// `View<T>`, owned by the place, and lowered without a copy.
 sema_stmt_whole_list_window: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState) -> Expr? {
     if value == {
         .Ident(_, _, _) | .Field(_, _, _, _) -> {}
@@ -609,8 +605,7 @@ sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: Sema
         }
     }
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
-    // A copy of a value holding views carries the same views into the
-    // binding (Rust `Expr.Copy` keeps its operand's view sources).
+    // A copy of a value holding views carries the same views into the binding.
     copied: sema_stmt_copy_operand(binding.init)
     if sema_stmt_has_struct_view_source(binding.init) || copied != None {
         // A struct that stores a view is a new carrier of its places: it

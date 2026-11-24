@@ -7,8 +7,8 @@
 // Memory.jet.
 //
 // Every accepted call is one checked `THostCall` whose receiver type selects
-// the canonical core.host route in codegen, and records its Rust effect row as
-// an intrinsic call fact.
+// the canonical core.host route in codegen, and records its effect row as an
+// intrinsic call fact.
 use jet_foundation.[
     AccessConvention,
     CallArg,
@@ -287,8 +287,7 @@ sema_call_cell_get_or_set: fn(receiver: Expr, receiver_value: TExpr, inner: Type
     sema_call_shared_owner_host_value(receiver_value, "get_or_set", [TExpr]{callback}, stored, span, expected, environment, program, scopes, context, diagnostics)
 }
 
-// Rust `cell_guard_projection_path`: the lambda parameter itself or a chain of
-// field reads from it.
+// The lambda parameter itself or a chain of field reads from it.
 sema_call_cell_guard_projection_path: fn(expression: Expr, parameter: String) -> [String]? {
     if expression == {
         .Ident(name, _, _) -> {
@@ -332,8 +331,7 @@ sema_call_cell_guard_paths_overlap: fn(first: [String], second: [String]) -> Boo
     true
 }
 
-// Rust `finish_shared_closure`: one lambda over the guarded value; an edit
-// guard lends the value mutably.
+// One lambda over the guarded value; an edit guard lends the value mutably.
 sema_call_cell_closure: fn(method: String, inner: Type, argument: CallArg, editable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     is_lambda: if argument.expr == {
         .Lambda(_, _) -> true
@@ -454,12 +452,11 @@ sema_call_try_cell_method: fn(receiver: Expr, receiver_value: TExpr, name: Strin
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
-// Rust `finish_pool_add` / `finish_pool_remove` and the `("Pool", "ids")` arm:
-// `pool.add(value)` consumes a `T` and returns its `ID<T>`, `pool.remove(id)`
-// returns the removed `T?`, `pool.ids()` lists every live `ID<T>`. `add` and
-// `remove` change the pool, so like `pool[id] = v` they need a writable pool
-// (a `:=` binding or a `^` parameter); the call site needs no `^` mark. Each
-// lowers to the plain `JetPool<T>` method.
+// The Pool methods: `pool.add(value)` consumes a `T` and returns its `ID<T>`,
+// `pool.remove(id)` returns the removed `T?`, `pool.ids()` lists every live
+// `ID<T>`. `add` and `remove` change the pool, so like `pool[id] = v` they need
+// a writable pool (a `:=` binding or a `^` parameter); the call site needs no
+// `^` mark. Each lowers to the plain `JetPool<T>` method.
 sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     id_type: Type.Apply{name: "ID", args: [Type]{element}}

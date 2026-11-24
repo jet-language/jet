@@ -1,10 +1,6 @@
-// Comparability and equality capability for operators and Core calls. Port of
-// the Rust reference decisions `types_comparable`,
-// `native_structural_ordering`, `named_fields_comparable`,
-// `incomparable_field`, and `is_equatable` (jet-sema), and of the checker
-// wrappers `types_comparable_type`/`is_equatable_type`: a registered
-// implementation or bound first, then the structural rule. Every user of the
-// decision reads it from here (I8).
+// Comparability and equality capability for operators and Core calls: a
+// registered implementation or bound first, then the structural rule. Every
+// user of the decision reads it from here (I8).
 use jet_foundation.[
     BinOp,
     ImplDef,
@@ -100,9 +96,9 @@ sema_comparability_definition: fn(environment: SemaScopeEnvironment, program: Se
 // auto-derived `Equatable` counts as registered, selected by the same
 // declaration-marker rule codegen uses for the generated body.
 sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, trait_name: String) -> Bool Never! {
-    // Rust `register_synthetic_display_debug` registers the Prelude carriers'
-    // value equality and order (LocalDate, DateTime, ...) in
-    // the trait registry, so `implements_trait` answers by name.
+    // The Prelude carriers' value equality and order (LocalDate, DateTime,
+    // ...) are registered in the trait registry, so the trait check answers by
+    // name.
     if ty == .Named(carrier) {
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
     }
@@ -346,9 +342,9 @@ sema_comparability_generated_in: fn(blocks: [TraitImplBlock], trait_name: String
     false
 }
 
-// Rust `native_structural_ordering`: the shapes whose ordering is the
-// language's own lexicographic order. `aliases` holds the non-generic aliases
-// being expanded on this path, so an alias cycle answers false.
+// The shapes whose ordering is the language's own lexicographic order.
+// `aliases` holds the non-generic aliases being expanded on this path, so an
+// alias cycle answers false.
 sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, aliases: [String], query: ^SemaComparabilityQuery) -> Bool Never! {
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
@@ -385,8 +381,7 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
     }
 }
 
-// Rust `types_comparable`: the structural ordering rule without registered
-// implementations.
+// The structural ordering rule without registered implementations.
 sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, query: ^SemaComparabilityQuery) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
@@ -424,8 +419,8 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
     }
 }
 
-// Rust `named_fields_comparable`: a declared nominal is comparable when every
-// field is; the query's visited set makes the walk coinductive and linear.
+// A declared nominal is comparable when every field is; the query's visited set
+// makes the walk coinductive and linear.
 sema_comparability_named_fields: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String, query: ^SemaComparabilityQuery) -> Bool Never! {
     definition: sema_comparability_definition(environment, program, module_identity, name) ?? return false
     if !sema_comparability_ordering_selected(program, module_identity, name) -> return false
@@ -512,21 +507,19 @@ sema_comparability_incomparable_field: fn(environment: SemaScopeEnvironment, pro
     }
 }
 
-// Rust `types_comparable`: structural ordering only.
+// Structural ordering only.
 sema_types_comparable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_structural(environment, program, environment.module_identity, ty, query)
 }
 
-// Rust `incomparable_field`: the first field (or `payload`) that blocks
-// comparing values of `ty`.
+// The first field (or `payload`) that blocks comparing values of `ty`.
 sema_incomparable_field: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? {
     query := sema_comparability_query()
     sema_comparability_incomparable_field(environment, program, environment.module_identity, ty, query)
 }
 
-// Rust `types_comparable_type` plus `type_param_has_bound(_, Comparable)`: a
-// registered `Comparable` implementation, bound, or derive, else the
+// A registered `Comparable` implementation, bound, or derive, else the
 // structural rule.
 sema_type_comparable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
     if sema_comparability_implements(environment, program, ty, "Comparable") -> return true
@@ -563,8 +556,8 @@ sema_comparability_stored_parameter: fn(item: Item, name: String) -> Bool Never!
 }
 
 // Structural derives constrain stored generic parameters, not phantom names.
-// Rust records these indices in TraitRegistry.structural_params. Resolve the
-// same declaration-owned fields here; absent metadata keeps the strict rule.
+// The declaration-owned fields resolve here; absent metadata keeps the strict
+// rule.
 sema_comparability_equatable_arguments: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, args: [Type]) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         name: sema_type_graph_base_name(ty) ?? ""
@@ -593,8 +586,8 @@ sema_comparability_equatable_arguments: fn(environment: SemaScopeEnvironment, pr
     true
 }
 
-// Rust `is_equatable_type`/`is_equatable`: value equality is structural over
-// the built-in shapes and registered (`Equatable`) for nominals.
+// Value equality is structural over the built-in shapes and registered
+// (`Equatable`) for nominals.
 sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
@@ -667,10 +660,9 @@ sema_comparability_scalar_operand: fn(ty: Type) -> Bool Never! {
     sema_expr_is_numeric(ty) || sema_expr_is_integer(ty) || sema_expr_precise_name(ty) != None
 }
 
-// `==`/`!=` (Rust `infer_binary` Eq/Ne), `<=>` (Compare), and `<`/`<=`/`>`/`>=`
-// (Rust `check_relational`) over one operand type without a registered
-// operator hook. Mismatched operand types stay with the scalar path's
-// mismatch diagnostics.
+// `==`/`!=`, `<=>` (Compare), and `<`/`<=`/`>`/`>=` over one operand type
+// without a registered operator hook. Mismatched operand types stay with the
+// scalar path's mismatch diagnostics.
 sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> SemaComparabilityBinary {
     skipped := SemaComparabilityBinary{handled: false, value: None}
     rejected := SemaComparabilityBinary{handled: true, value: None}
@@ -713,19 +705,17 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
     SemaComparabilityBinary{handled: true, value: Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
 }
 
-// Rust `map_key_type_eligible` (E0502): map keys are ordered
-// values. Scalars and tuples of keys qualify, and a nominal qualifies when it
-// is a struct whose fields all qualify, an enum without payloads, or a
-// distinct type whose base qualifies. A nominal
-// reached again while it is still being decided lies on a cycle and answers
-// false, as the Rust walk's active set does.
+// E0502: map keys are ordered values. Scalars and tuples of keys qualify, and
+// a nominal qualifies when it is a struct whose fields all qualify, an enum
+// without payloads, or a distinct type whose base qualifies. A nominal reached
+// again while it is still being decided lies on a cycle and answers false.
 sema_type_map_key_eligible: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_map_key(environment, program, environment.module_identity, ty, query)
 }
 
-// Rust `check_declared_type_rules` (E0502): every map written in
-// a declared type needs a key-eligible key. False when one was reported.
+// E0502: every map written in a declared type needs a key-eligible key. False
+// when one was reported.
 sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if ty == {
         .Map(key, key_span, value) -> {
@@ -980,10 +970,10 @@ sema_comparability_written_order_of: fn(environment: SemaScopeEnvironment, progr
     None
 }
 
-// Rust `hashable_type_eligible` (E0506): the `Hash + Eq`
-// capability a `Set` or `Tally` element needs. Structural carriers follow
-// their parts; a nominal needs value equality and hashable fields. A nominal
-// still being decided answers false, and a finished one reuses its answer.
+// E0506: the `Hash + Eq` capability a `Set` or `Tally` element needs.
+// Structural carriers follow their parts; a nominal needs value equality and
+// hashable fields. A nominal still being decided answers false, and a finished
+// one reuses its answer.
 sema_type_hashable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_hashable(environment, program, environment.module_identity, ty, query)

@@ -137,11 +137,10 @@ sema_event_value_parameters: fn(owner: String, method: String, args: [Type]) -> 
     params
 }
 
-// Rust `F: Fn(T) + 'static` (Event), `Fn(T) -> R` (Hook),
-// `Fn(T) -> HookDecision<T, E>` (DecisionHook), `Fn(T) -> R` with
-// `R: JetIntoDispatchResult<E>` (AsyncEvent: a handler returns through a
-// `Result<Unit, E>` carrier, so a unit body is its Ok): one payload
-// parameter.
+// The handler type of each event owner, with one payload parameter:
+// `fn(T)` (Event), `fn(T) -> R` (Hook), `fn(T) -> HookDecision<T, E>`
+// (DecisionHook), and `fn(T) -> R` for AsyncEvent, where a handler returns
+// through a `Result<Unit, E>` carrier, so a unit body is its Ok.
 sema_event_handler_type: fn(owner: String, args: [Type]) -> Type Never! {
     ret: if owner == {
         "Hook" -> args[1].copy()

@@ -1081,7 +1081,7 @@ sema_pattern_struct: fn(subject_ty: Type, fields: [StructPatField], rest: Span?,
                 complete = false
             }
             // A redundant `..` still names every field, so the pattern stays
-            // checked and the surrounding checks run (Rust continues).
+            // checked and the surrounding checks run.
             rest != None && names.len() >= nominal.fields.len() && nominal.fields.len() > 0 -> {
                 diagnostics.push(sema_error("E0327", rest, "this `..` is redundant", "the pattern already names every field of `{nominal.symbol.name}`", "remove `..` or leave out at least one field"))
             }
@@ -1801,7 +1801,7 @@ sema_check_pattern: fn(subject: TExpr, pattern: Pattern, position: TPatternPosit
         }
     }
     // A redundant `..` (E0327) still leaves a complete pattern, so the match
-    // keeps checking past it as Rust did.
+    // keeps checking past it.
     blocking := false
     loop index in before..<diagnostics.len() {
         if diagnostics[index].code != "E0327" -> blocking = true

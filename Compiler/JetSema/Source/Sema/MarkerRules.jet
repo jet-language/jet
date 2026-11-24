@@ -320,9 +320,9 @@ sema_marker_rules_applied_row: fn(declaration: MarkerDecl, source: String) -> TA
     })
 }
 
-// Rust RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION: `Ident` is a free identifier
-// slot and `Type`/`T.default` are language-checked, so none names a
-// core.compiler.lang menu; every other identifier-kind type is a menu name.
+// `Ident` is a free identifier slot and `Type`/`T.default` are
+// language-checked, so none names a core.compiler.lang menu; every other
+// identifier-kind type is a menu name.
 sema_marker_rules_rule_requires_menu: fn(rule: TAppliedRule, source_type: String, kind: TAppliedRuleArgKind) -> String? {
     if source_type == "[Effect]" -> return Val("Effect")
     if kind != TAppliedRuleArgKind.Ident || source_type == "Ident" || source_type == "Type" || source_type == "T.default" {
@@ -442,8 +442,8 @@ sema_marker_rules_label: fn(marker: Marker, index: Int) -> String? {
 sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppliedRuleSignature, formats: [String]?) -> [SemaMarkerRuleArgumentBinding]? {
     if marker.args.len() != marker.arg_labels.len() -> return None
     bindings := [SemaMarkerRuleArgumentBinding]{}
-    // Rust `rule_signature_bindings`: a bare `#Unsafe` binds nothing; its
-    // missing reason is E3112's, not E0930's.
+    // A bare `#Unsafe` binds nothing; its missing reason is E3112's, not
+    // E0930's.
     if sema_marker_is_hook(marker, MarkerHook.Unsafe) && marker.args.len() == 0 {
         return Val(bindings)
     }
@@ -578,8 +578,8 @@ sema_marker_rules_signature_text: fn(name: String, signature: TAppliedRuleSignat
     "{name}({parts.join(", ")})"
 }
 
-// Rust `marker_argument_shape_error` for a registered rule, the
-// declared-signature form for a source-declared one. The span is Rust's marker
+// The marker argument shape error for a registered rule, the
+// declared-signature form for a source-declared one. The span is the marker
 // span: the name through the closing `)`, without `#`. A `#X: true` line
 // missing its Bool argument is the parentheses code.
 sema_marker_rules_signature_error: fn(marker: Marker, signature: TAppliedRuleSignature, declared: Bool) -> Diagnostic {
@@ -1059,15 +1059,13 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
     true
 }
 
-// Rust `validate_rule_signature`: a builtin marker binds its arguments against
-// its registered rule signature, each argument checked in the scope of the site
-// that carries it (E0930). Rust's sites, each ported here: a local binding
-// (`check_binding`), a marked statement or block
+// A builtin marker binds its arguments against its registered rule signature,
+// each argument checked in the scope of the site that carries it (E0930). The
+// sites: a local binding, a marked statement or block
 // (sema_marker_rules_check_statement_facts), a `#Context` block
 // (sema_marker_rules_check_context_fact), a function or method, and the
-// static-product sites (`resolve_static_rule_products`,
-// sema_marker_rules_check_static_sites). True when the arguments bind or no
-// registered rule governs the marker.
+// static-product sites (sema_marker_rules_check_static_sites). True when the
+// arguments bind or no registered rule governs the marker.
 sema_marker_rules_check_rule_signature: fn(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
     if marker.declaration_module != None -> return true
     if program.registration_graph == .Val(graph) {
@@ -1206,15 +1204,13 @@ sema_marker_rules_unqualified_type: fn(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-// Rust `take_statement_rule_fact` then `validate_rule_signature`: the marker of
-// a marked statement or block is the module's Statement- or Block-site
-// application targeting the statement. `#Meta` is its binding's
+// The marker of a marked statement or block is the module's Statement- or
+// Block-site application targeting the statement. `#Meta` is its binding's
 // (Statements/Bindings.jet) and `#Context` or `#Deadline` its block's
 // (sema_marker_rules_check_context_fact). A marker with a site-dependent
 // signature (`#HTML(path)` at the file site, bare `#HTML { … }` at the block
-// site; Rust `validate_registered_rule_marker`, @ 6083377777) is bare at its
-// block site. The block form's header is the checked text block's own law
-// (sema_stmt_check_scope_member, E0617).
+// site) is bare at its block site. The block form's header is the checked text
+// block's own law (sema_stmt_check_scope_member, E0617).
 sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) {
     if program.registration_graph == .Val(graph) {
         if graph.marker_catalog == .Val(registry) {
@@ -1250,7 +1246,7 @@ sema_marker_rules_block_form_is_bare: fn(registry: SemaScopeMembersMarkerRegistr
     registry.applied_rules[rule_index].sites.contains(sema_marker_rules_site_name(RuleSite.File)) && registry.applied_rules[rule_index].sites.contains(sema_marker_rules_site_name(RuleSite.Block))
 }
 
-// Rust `Stmt.ContextBlock`: the block's `#Context` application binds against
+// The block's `#Context` application binds against
 // `Context(allocator:, logger:)`, its labels naming `#ContextKey` constants
 // left out (ContextKeys.jet sema_context_marker_fields), and its `#Deadline`
 // application against `Deadline(limit:)`. False when it does not bind; the
@@ -1274,11 +1270,10 @@ sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvir
     true
 }
 
-// Rust `resolve_static_rule_products`: a marker at a static-product site (the
-// file, a type, a constant, a field, a variant, a test) binds its signature in
-// the module's own scope, where its arguments can name only module items. A
-// test's written name, `faults:` and `expected_fail:` are its `#Test` marker's
-// arguments.
+// A marker at a static-product site (the file, a type, a constant, a field, a
+// variant, a test) binds its signature in the module's own scope, where its
+// arguments can name only module items. A test's written name, `faults:` and
+// `expected_fail:` are its `#Test` marker's arguments.
 sema_marker_rules_check_static_sites: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, scopes: ^SemaScopeTable, diagnostics: ^[Diagnostic]) {
     if program.registration_graph == .Val(graph) {
         if graph.marker_catalog == None {
@@ -1347,12 +1342,11 @@ sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnviro
     }
 }
 
-// Rust `check_binding` → `check_meta_attr` → `check_meta_attr_fields`: a local
-// binding's `#Meta(...)` repeats a field (E0346) or has an empty (E0348) or not
-// plain (E0347) category. It runs once the arguments bind to the signature.
-// Rust then rewrites a constant category to its value; here only a written
-// literal decides: a non-literal category that may name a comptime constant is
-// left alone, and only an interpolated string is certainly not plain text.
+// A local binding's `#Meta(...)` repeats a field (E0346) or has an empty
+// (E0348) or not plain (E0347) category. It runs once the arguments bind to
+// the signature. Only a written literal decides: a non-literal category that
+// may name a comptime constant is left alone, and only an interpolated string
+// is certainly not plain text.
 sema_marker_rules_check_local_meta: fn(marker: Marker, diagnostics: ^[Diagnostic]) {
     seen := name_table_sized(2)
     loop index in 0..<marker.args.len() {
@@ -1380,9 +1374,8 @@ sema_marker_rules_meta_literal_text: fn(expression: Expr) -> String? Never! {
     None
 }
 
-// Rust `check_meta_attr_fields` for one field: a repeat is E0346; a category
-// is E0348 when its text is empty and E0347 when `plain_required` and it has
-// no plain text.
+// A repeat is E0346; a category is E0348 when its text is empty and E0347 when
+// `plain_required` and it has no plain text.
 sema_marker_rules_note_meta_field: fn(name: String, expression: Expr, field_span: Span, category: String?, plain_required: Bool, seen: ^NameTable, diagnostics: ^[Diagnostic]) {
     if name_find(seen, name) != None {
         if name == {
@@ -1663,8 +1656,7 @@ sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool N
     false
 }
 
-// Whether a function marker is the ratified `#Export(c)` spelling (Rust
-// `Sema.Guest.is_guest_export_marker`).
+// Whether a function marker is the ratified `#Export(c)` spelling.
 sema_marker_is_guest_export: fn(marker: Marker) -> Bool Never! {
     !marker.negated && sema_marker_is_hook(marker, MarkerHook.Export) && sema_marker_c_argument(marker)
 }
@@ -1740,8 +1732,7 @@ sema_marker_rules_unknown_error: fn(registry: SemaScopeMembersMarkerRegistry, ma
     if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
-// The one repeated-rule diagnostic, named for the target it
-// repeats on (Rust `marker_repeated_error`'s noun).
+// The one repeated-rule diagnostic, named for the target it repeats on.
 sema_marker_rules_repeated_error: fn(marker: Marker, first: Marker, site: RuleSite?) -> Diagnostic {
     noun := "target"
     if site == .Val(value) {
@@ -2560,15 +2551,14 @@ sema_marker_rules_no_prelude_error: fn(name: String, span: Span, fix: String) ->
     sema_error("E0429", span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", fix)
 }
 
-// (Rust `check_memoized_function`): the marker's result-cache
-// contract is proven from the declared signature before lowering. A lazy
-// `Iter`/`ViewIter` argument or result carries live computation state
-// (E0940); every other argument must be hashable and not a list (E0939).
-// A `#Memo` computed field's helper (Derives.jet
-// sema_computed_field_memo_helper_func) takes the fields its formula reads;
-// its store compares them by value, so each needs equality, not a hash.
-// The first refused parameter ends the check, as in the Rust reference.
-// Purity (E0938) is judged by the solved effect row, not here.
+// The marker's result-cache contract is proven from the declared signature
+// before lowering. A lazy `Iter`/`ViewIter` argument or result carries live
+// computation state (E0940); every other argument must be hashable and not a
+// list (E0939). A `#Memo` computed field's helper (Derives.jet
+// sema_computed_field_memo_helper_func) takes the fields its formula reads; its
+// store compares them by value, so each needs equality, not a hash. The first
+// refused parameter ends the check. Purity (E0938) is judged by the solved
+// effect row, not here.
 sema_check_memoized_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: ^[Diagnostic]) {
     memo := Marker?{None}
     loop candidate in func.markers {

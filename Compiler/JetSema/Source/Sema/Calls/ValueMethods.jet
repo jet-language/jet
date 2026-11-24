@@ -1,11 +1,9 @@
 // Built-in value receiver methods: `String`, `Bytes`, the numeric scalars,
-// `Ordering` and `Atomic<T>` (Rust `builtin_method_return` and
-// `finish_builtin_method`, lowered as `resolve_builtin_op` /
-// `resolve_numeric_op` do). Every row comes from the one table in
+// `Ordering` and `Atomic<T>`. Every row comes from the one table in
 // JetFoundation Registry/BuiltinMethods.jet; collection receivers keep their
 // own table in Calls/Collections.jet. `trim`/`after`/`before` lower to their
-// owned operations here; a `:` binding of one of them becomes a zero-copy
-// view in Ownership/StringViews.jet.
+// owned operations here; a `:` binding of one of them becomes a zero-copy view
+// in Ownership/StringViews.jet.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -31,10 +29,9 @@ use jet_foundation.[
     TUnaryOp,
 ]
 
-// Built-in methods are positional (Rust `check_builtin_method_labels`). Zip
-// labels name output fields rather than parameters; `Map.merge`'s optional
-// conflict callback and `para_map`'s limit are the only labeled built-in
-// method parameters.
+// Built-in methods are positional. Zip labels name output fields rather than
+// parameters; `Map.merge`'s optional conflict callback and `para_map`'s limit
+// are the only labeled built-in method parameters.
 sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     if method == "zip" || method == "zip_short" || method == "zip_pad" -> return true
     valid := true
@@ -50,10 +47,10 @@ sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics:
     valid
 }
 
-// Rust `check_builtin_method` infers each argument with its parameter type as
-// the expected type, so `bytes.write([66, 67])` types the literal as [U8].
-// A quoted pattern in a `Regex` slot (`text.has_line(r"^(a|b)")`) is a checked
-// `Regex{…}` literal: the pattern is checked now, never at run time.
+// Each argument is inferred with its parameter type as the expected type, so
+// `bytes.write([66, 67])` types the literal as [U8]. A quoted pattern in a
+// `Regex` slot (`text.has_line(r"^(a|b)")`) is a checked `Regex{…}` literal:
+// the pattern is checked now, never at run time.
 sema_value_method_argument: fn(argument: CallArg, method: String, index: Int, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if sema_expression_is_regex_head(required) && argument.expr == .Str(_, _, _) {
         return sema_expression_typed_literal_regex(argument.expr, expr_span(argument.expr), None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -173,10 +170,9 @@ sema_value_method_core_source: fn(owner: String, role: String, receiver_value: T
     SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
-// `opt.map(f: T -> R) -> R?`; the callback's own failure carrier
-// stays at the call boundary, so the result wraps its success value. The
-// callback result is open (Rust `finish_builtin_method` adopts it), so it is
-// checked like a collection callback and validated below.
+// `opt.map(f: T -> R) -> R?`; the callback's own failure carrier stays at the
+// call boundary, so the result wraps its success value. The callback result is
+// open, so it is checked like a collection callback and validated below.
 sema_value_method_option_map: fn(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     required := Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     callback: sema_expression_lambda_collection_callback(args[0].expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -277,10 +273,9 @@ sema_value_method_outcome_read: fn(receiver: Expr, method: String, method_span: 
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(notes, expected, environment, program, diagnostics)}
 }
 
-// Rust `decimal_method_return` / `fraction_method_return` (jet-foundation),
-// lowered as `handle_method_op` does to one precise-method operation. Neither
-// owner has declared argument types (`builtin_method_arg_types`), so the
-// arguments are checked as written; the receiver is read.
+// Decimal and Fraction methods, lowered to one precise-method operation.
+// Neither owner has declared argument types, so the arguments are checked as
+// written; the receiver is read.
 sema_value_method_precise_result: fn(owner: String, method: String, argc: Int) -> Type? {
     decimal: Type.Named{name: "Decimal"}
     fraction: Type.Named{name: "Fraction"}
@@ -369,10 +364,10 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     }
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
-    // Rust `builtin_receiver_borrow`: a String edit reserves its receiver
-    // two-phase, so `s.insert(s.len(), "]")` reads `s` before the edit
-    // begins (JetIR evaluates the arguments before it takes the place); its
-    // arguments retain no call loan.
+    // A String edit reserves its receiver two-phase, so
+    // `s.insert(s.len(), "]")` reads `s` before the edit begins (JetIR evaluates
+    // the arguments before it takes the place); its arguments retain no call
+    // loan.
     callee: "{owner}.{method}"
     two_phase: row.access == AccessConvention.Write && row.receiver == BuiltinMethodReceiver.String
     ownership := if two_phase -> sema_ownership_check_two_phase_method_call(state, callee, sema_ownership_receiver_consumer(callee), receiver, row.access, false, params, updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call(state, callee, receiver, row.access, params, updated_args, scopes, span, diagnostics)

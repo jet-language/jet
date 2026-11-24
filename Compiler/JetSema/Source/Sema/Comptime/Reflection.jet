@@ -2559,14 +2559,12 @@ sema_comptime_reflection_method_failure_type: fn(method: Func) -> TComptimeValue
     TComptimeValue.String{value: type_name(sema_effective_return_type(method.return_type))}
 }
 
-// A function's FunctionInfo (Rust `build_function_type_info`): its stable
-// source shape, its CallableSignature as known inside the check (the written
-// effect row; the solved row is read after the check,
-// jet_eval_compiler_services_function_info), its written `markers`
+// A function's FunctionInfo: its stable source shape, its CallableSignature as
+// known inside the check (the written effect row; the solved row is read after
+// the check, jet_eval_compiler_services_function_info), its written `markers`
 // (MarkerInfo rows) and where it is written. `module_name`, `identity` and
-// `package` are the names its reader shows. For a specialization, `function`
-// is already specialized and `bindings` are the signature's
-// `generic_bindings`.
+// `package` are the names its reader shows. For a specialization, `function` is
+// already specialized and `bindings` are the signature's `generic_bindings`.
 sema_comptime_reflection_function_info: fn(registration: SemaRegistrationGraph, caller: Int, function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue], bindings: [SemaInferenceBinding]) -> TComptimeValue {
     info: sema_comptime_reflection_struct(
         "FunctionInfo",

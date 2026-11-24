@@ -80,14 +80,12 @@ SemaTaskGroupState: struct {
     spawn_group_floor: Int,
     scoped_loan_read_reported: Bool,
     time_effects: [TEffectSpan],
-    // (Rust `current_binding_name` / `task_spawn_binding_name`):
-    // the binding whose initializer is being checked, and the binding a task
+    // The binding whose initializer is being checked, and the binding a task
     // spawn initializes while its body is checked.
     binding_name: String?{None},
     spawn_binding: String?{None},
-    // (Rust `view_borrow_escape_tasks` / `view_capture_tasks`): the
-    // task bindings whose spawn captured a view borrow (E1106 at `.detach()`)
-    // or failed sendability another way (E1103 at `.detach()`).
+    // The task bindings whose spawn captured a view borrow (E1106 at
+    // `.detach()`) or failed sendability another way (E1103 at `.detach()`).
     detach_view_tasks: [String]{[String]{}},
     detach_unsound_tasks: [String]{[String]{}},
     // The lambda about to be checked is a `task` body. Its
@@ -228,9 +226,9 @@ sema_taskgroup_active_lexical_name: fn(state: SemaTaskGroupState) -> String? {
     None
 }
 
-// (Rust `report_unsendable` in a task spawn context): an E1102 at a
-// task capture or result records the task binding, so `.detach()` reports the
-// right refusal: a view borrow is E1106, any other sendability failure E1103.
+// An E1102 at a task capture or result records the task binding, so `.detach()`
+// reports the right refusal: a view borrow is E1106, any other sendability
+// failure E1103.
 sema_taskgroup_note_detach_problem: fn(context: ^SemaCheckContext, view_borrow: Bool) Never! {
     binding := context.taskgroups.binding_name
     if binding == None -> binding = context.taskgroups.spawn_binding
@@ -627,8 +625,8 @@ sema_taskgroup_check_lambda_captures: fn(lambda: ^TLambda, span: Span, environme
             window_element = sema_taskgroup_view_element(capture.ty)
         }
         // A read window the body materializes still names the place it lends
-        // from, so a `task.group` child borrows that place like Rust's
-        // `admit_scoped_borrow`, which runs before any view materialization.
+        // from, so a `task.group` child borrows that place; the scoped borrow is
+        // admitted before any view materialization.
         if (!taken || window_element != None) && !frozen && !(left && writes) {
             borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, left, span, scopes, state, context, diagnostics)
         }
@@ -654,7 +652,7 @@ sema_taskgroup_check_lambda_captures: fn(lambda: ^TLambda, span: Span, environme
             }
         }
         // A scoped `task.group` borrow is admitted, but a detached task could
-        // outlive it (Rust `view_borrow_escape_tasks`).
+        // outlive it.
         if borrowed == (Val(true)) -> sema_taskgroup_note_detach_problem(context, true)
         if borrowed == (Val(false)) || (borrowed == (Val(true)) && !left) -> next
         // What the child has no copy of crosses as the value it would
@@ -1035,9 +1033,9 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
         .Lambda(_) -> { sema_function_reactive_note_task_lambda(context, lambda) }
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
     }
-    // Rust infer_task_spawn reports the capture and result crossings at
-    // `expr` of `task expr`, which the parser wraps in a zero-parameter
-    // expression lambda (parser_task_spawn); a call's span is its name.
+    // A task spawn reports the capture and result crossings at `expr` of
+    // `task expr`, which the parser wraps in a zero-parameter expression lambda
+    // (parser_task_spawn); a call's span is its name.
     capture_span := args[0].span
     spawned_span := expr_span(args[0].expr)
     if args[0].expr == .Lambda(spawn_lambda, _) {
@@ -1157,9 +1155,9 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
     if !sema_type_is_builtin_handle(receiver_value.ty, "Task") {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    // (Rust builtin `Task.detach`): a task whose spawn captured a
-    // view borrow may outlive it (E1106); one with any other sendability
-    // failure is unsound to run unsupervised (E1103).
+    // A task whose spawn captured a view borrow may outlive it (E1106); one
+    // with any other sendability failure is unsound to run unsupervised
+    // (E1103).
     if method == "detach" && receiver == .Ident(name, _, _) {
         if context.taskgroups.detach_view_tasks.contains(name) {
             diagnostics.push(sema_error("E1106", span, "can't detach task `{name}` — it captured a `view` borrow that may not live long enough", "a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle", "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`"))
@@ -1182,10 +1180,10 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-// Rust `task_method_return` (jet-foundation): the task handle's control-plane
-// hooks over the coroutine substrate. `pause` takes an optional
-// `mode: TaskPauseMode` (`.WaitPoints`, the default, or `.CheckLoops`), and
-// every hook reads the handle (it is not consumed) and returns nothing.
+// The task handle's control-plane hooks over the coroutine substrate. `pause`
+// takes an optional `mode: TaskPauseMode` (`.WaitPoints`, the default, or
+// `.CheckLoops`), and every hook reads the handle (it is not consumed) and
+// returns nothing.
 sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     selected: if {
         method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(THandleOp.TaskPause)
@@ -1266,9 +1264,9 @@ sema_call_check_channel: fn(call: Call, expected: Type?, environment: SemaScopeE
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
-// A readiness arm head (Rust `AST.readiness_head`): the parser carries
-// `value, receiver` and `after duration` in a one-field tuple whose `after`
-// field name no source can spell.
+// A readiness arm head: the parser carries `value, receiver` and
+// `after duration` in a one-field tuple whose `after` field name no source can
+// spell.
 SemaReadinessHead: enum {
     Receive(binding: String, source: Expr),
     After(duration: Expr),
@@ -1303,8 +1301,8 @@ sema_readiness_head: fn(cond: Expr) -> SemaReadinessHead? Never! {
     }
 }
 
-// Rust `check_switch`: a subjectless table with any readiness arm is a
-// readiness table, not a table of Boolean guards.
+// A subjectless table with any readiness arm is a readiness table, not a table
+// of Boolean guards.
 sema_readiness_is_table: fn(arms: [SwitchArm]) -> Bool Never! {
     index := 0
     loop index < arms.len() {
@@ -1325,9 +1323,9 @@ sema_readiness_receiver_payload: fn(ty: Type) -> Type? Never! {
     }
 }
 
-// Rust `check_readiness_switch`, one arm head: a receive arm validates one
-// plain `Receiver<T>` and returns the payload binding its body declares; an
-// `after` arm validates one `Duration` and records the Time effect.
+// One readiness arm head: a receive arm validates one plain `Receiver<T>` and
+// returns the payload binding its body declares; an `after` arm validates one
+// `Duration` and records the Time effect.
 sema_readiness_check_head: fn(cond: Expr, table: ^SemaReadinessTable, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaConditionBinding? {
     cond_span: expr_span(cond)
     head: sema_readiness_head(cond) ?? {
@@ -1389,10 +1387,10 @@ sema_readiness_result_field: fn(result: TLocal, result_ty: Type, index: Int, ty:
     sema_tree_node(ty, TExprKind.HostCall{call: THostCall.TupleIndex{base: base, index: index}}, span)
 }
 
-// Rust `lower_readiness_switch`: one scheduler wait over every arm in source
-// order, which yields `(arm, value: T?)`, then one dense integer dispatch on
-// the selected arm. A receive arm unwraps its payload only once it is
-// selected; a timer arm never reads it. An `else` makes the wait nonblocking.
+// One scheduler wait over every arm in source order, which yields
+// `(arm, value: T?)`, then one dense integer dispatch on the selected arm. A
+// receive arm unwraps its payload only once it is selected; a timer arm never
+// reads it. An `else` makes the wait nonblocking.
 sema_readiness_tree: fn(table: ^^SemaReadinessTable, branches: ^^[SemaStatementResult], else_result: ^^[TStmt]?, span: Span, context: ^SemaCheckContext) -> TStmt? {
     owned_table := table.move()
     owned_branches := branches.move()

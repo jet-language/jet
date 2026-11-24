@@ -1510,11 +1510,11 @@ sema_build_generate_format: fn(items: [Item]) -> String {
     jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
 }
 
-// Rust lower_build_generate expands and formats the typed body under an empty
-// compile-time scope. A `#{name}` still unbound there that names a build local
-// is spliced: the body is expanded again with each such name bound to its
-// marker, so the marker stands exactly where the value goes. `named` is a
-// `#code` value's paste of a name or type, and is otherwise a value literal.
+// The generated body is expanded and formatted under an empty compile-time
+// scope. A `#{name}` still unbound there that names a build local is spliced:
+// the body is expanded again with each such name bound to its marker, so the
+// marker stands exactly where the value goes. `named` is a `#code` value's
+// paste of a name or type, and is otherwise a value literal.
 sema_build_generate_splices: fn(body: [DeriveBodyItem], span: Span, named: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaBuildGenerateSplices? {
     items: sema_derive_expand_template_body(body, [NamedCtValue]{}, diagnostics) ?? return None
     splices := SemaBuildGenerateSplices{source: sema_build_generate_format(items), markers: [Int]{}, args: [CallArg]{}, values: [TExpr]{}}

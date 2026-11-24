@@ -163,8 +163,8 @@ sema_expression_simple_place: fn(expr: Expr, index_part: Bool) -> Bool Never! {
     }
 }
 
-// Rust `note_exact_move`'s element walk: a place whose field or paren chain
-// passes through an index names storage inside a collection element.
+// A place whose field or paren chain passes through an index names storage
+// inside a collection element.
 sema_expression_place_below_element: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .Field(base, _, _, _) | .Paren(base, _, _) -> sema_expression_place_below_element(base)
@@ -173,11 +173,11 @@ sema_expression_place_below_element: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-// Rust `note_exact_move`, after the place is typed: a Copy value simply
-// copies (any place, an element included); a place below an element stays in
-// its collection (E0225); a read or write parameter owns nothing to give away
-// (E0201). Pins are judged after the read, as Rust's move record does. `span`
-// covers `p.move()`; only a name or a field reaches here.
+// An exact move, after the place is typed: a Copy value simply copies (any
+// place, an element included); a place below an element stays in its
+// collection (E0225); a read or write parameter owns nothing to give away
+// (E0201). Pins are judged after the read. `span` covers `p.move()`; only a
+// name or a field reaches here.
 sema_expression_exact_move: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
@@ -245,9 +245,9 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
         diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
         return None
     }
-    // Rust `Expr.Place`: the ownership walk opened this window on the
-    // complete place, so the place's own base reads answer only for a move
-    // of the whole name (`s` in `^s` would otherwise meet its own loan).
+    // The ownership walk opened this window on the complete place, so the
+    // place's own base reads answer only for a move of the whole name (`s` in
+    // `^s` would otherwise meet its own loan).
     previous_root_read: context.suppress_partial_move_root_read
     context.suppress_partial_move_root_read = true
     checked_value: sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -258,9 +258,8 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, scopes, diagnostics) {
         return None
     }
-    // (Rust `Expr.Place`): a subrange of a declared view
-    // takes its write window from the view's own access; a `View<T>` never
-    // lends one.
+    // A subrange of a declared view takes its write window from the view's own
+    // access; a `View<T>` never lends one.
     if convention == AccessConvention.Write && checked.kind == .Slice(view_base, _, _, _, _) {
         if sema_expr_unwrap_tag(view_base.ty) == .Apply(view_name, _) {
             if view_name == "View" {
@@ -268,9 +267,9 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
             }
         }
     }
-    // Rust `Expr.Place`: a list range (a compute tensor range is one on the
-    // tensor's `data`) is a `View`/`ViewMut` of its element, any other ranged
-    // value (a `String`) keeps its own type.
+    // A list range (a compute tensor range is one on the tensor's `data`) is a
+    // `View`/`ViewMut` of its element, any other ranged value (a `String`)
+    // keeps its own type.
     element := Type?{None}
     if checked.kind == .Slice(_, _, _, _, _) {
         if checked.ty == {
@@ -333,7 +332,7 @@ sema_expression_tuple_field: fn(base: TExpr, member: String, span: Span, diagnos
 
 // A bare built-in boundary spelling with a Core carrier record (`URL` in
 // `core.net.url`) names that record wherever it is read, so its documented
-// fields resolve through the declaration (Rust `struct_owner_module`).
+// fields resolve through the declaration.
 sema_expression_carrier_type_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Symbol? {
     carrier: boundary_head_carrier_module(name) ?? return None
     if program.registration_graph == .Val(graph) {
@@ -349,9 +348,9 @@ sema_expression_carrier_type_symbol: fn(environment: SemaScopeEnvironment, progr
     None
 }
 
-// Rust `field_type` for `.value`: an untagged `SharedGuard<T>` or a guard
-// tagged by its acquisition (`guard_read()` / `guard_edit()`) holds `T`. Only
-// the edit tag makes the held place editable when lowered.
+// An untagged `SharedGuard<T>` or a guard tagged by its acquisition
+// (`guard_read()` / `guard_edit()`) holds `T`. Only the edit tag makes the held
+// place editable when lowered.
 sema_expression_shared_guard_value: fn(ty: Type) -> SemaCallMemoryGuard? {
     marker := TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}
     guard_type := ty
@@ -370,9 +369,9 @@ sema_expression_shared_guard_value: fn(ty: Type) -> SemaCallMemoryGuard? {
     None
 }
 
-// Rust `owner_type_for_reader`: a field's declared type names types as its
-// owning module sees them, so it resolves there (the owner's type parameters
-// stay parameters) before the owner's type arguments are substituted.
+// A field's declared type names types as its owning module sees them, so it
+// resolves there (the owner's type parameters stay parameters) before the
+// owner's type arguments are substituted.
 sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: ModuleID, declared: Type, generic_names: [String]) -> Type Never! {
     if program.registration_graph == .Val(graph) && !module_is_none(owner_module) {
         generics: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
@@ -542,8 +541,8 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                     diagnostics.push(sema_expression_method_read_without_call(owner_name, member, span))
                     return None
                 }
-                // Rust `infer_field_access`: the nearest declared field is
-                // the suggested fix and its edit; otherwise name the owner.
+                // The nearest declared field is the suggested fix and its edit;
+                // otherwise name the owner.
                 suggestion: sema_suggest_field(member, loop field in struct_def.fields -> field.name)
                 fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the field names on `{owner_name}`"
                 diagnostic: sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", fix)
@@ -744,13 +743,12 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         catalog: sema_fact_enum_values(base, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if catalog.handled -> return catalog.value
     }
-    // (Rust `infer_field` + `numeric_const_type`): `U8.MAX`,
-    // `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are the
-    // numeric type's own constants.
+    // `U8.MAX`, `Int.MIN`, `Float.INFINITY`/`NEG_INFINITY`/`NAN`/`EPSILON` are
+    // the numeric type's own constants.
     if base_local_slot == None || member == "MIN" || member == "MAX" || member == "INFINITY" || member == "NEG_INFINITY" || member == "NAN" || member == "EPSILON" {
         if sema_expression_numeric_bound_type(base, member, environment, program, scopes) == .Val(bound_type) {
-            // Rust `numeric_const_type`: a numeric constant is a value, not a
-            // call, so the site is known-pure rather than an unknown callee.
+            // A numeric constant is a value, not a call, so the site is
+            // known-pure rather than an unknown callee.
             if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, diagnostics) {
                 return None
             }
@@ -765,7 +763,6 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         if base == .Ident(owner, _, _) && owner == "TerminalFact" && sema_scope_resolve_index(scopes, owner) == None && sema_expression_type_symbol(scopes, environment, program, owner) == None {
             return sema_expression_terminal_fact(member, member_span, expected, environment, program, diagnostics)
         }
-        // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
         // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the
         // variant; a payload case read without a call is its constructor value.
         if sema_expression_enum_variant_path(base, member, environment, program, scopes) == .Val(path) {
@@ -774,9 +771,9 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
             if constructor.handled -> return constructor.value
             return sema_expression_enum_literal(path.enum_name, type_args, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
-        // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
-        // whole-module import reads that module's constant `NAME`, and
-        // `core.math.NAME` through `use core: core` the nested module's.
+        // `alias.NAME` where `alias` is a whole-module import reads that
+        // module's constant `NAME`, and `core.math.NAME` through
+        // `use core: core` the nested module's.
         if base == .Ident(alias, _, _) {
             module_constant: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
             if module_constant.handled -> return module_constant.value
@@ -796,10 +793,10 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
                 if nested_constant.handled -> return nested_constant.value
             }
         }
-        // Rust `infer_field` (static-owner arm): `Type.member` on a declared
-        // struct reads no value. A typestate label is a compile-time fact, and
-        // any other member is not a static member of the struct. A trait
-        // constant (`Type.name`, `T.name`) is the one static member a type has.
+        // `Type.member` on a declared struct reads no value. A typestate label
+        // is a compile-time fact, and any other member is not a static member
+        // of the struct. A trait constant (`Type.name`, `T.name`) is the one
+        // static member a type has.
         if base == .Ident(type_name, _, _) {
             trait_constant: sema_expression_trait_constant(type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
             if trait_constant.handled -> return trait_constant.value
@@ -894,8 +891,8 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         sema_ownership_fork_commit(state)
     }
     checked_base: checked_base_value ?? return None
-    // (Rust `infer_field` Dyn arm): `tree.member` on a Dyn
-    // reads the object member as a checked Dyn; method names stay reserved.
+    // `tree.member` on a Dyn reads the object member as a checked Dyn; method
+    // names stay reserved.
     if checked_base.ty == .Named(_) && sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
         if sema_dyn_is_member(member) {
             diagnostics.push(sema_dyn_member_error(member, member_span))
@@ -1166,11 +1163,10 @@ sema_expression_struct_static_member_error: fn(type_name: String, member: String
     sema_error("E0302", span, "`{type_name}` has no static member `{member}`", "`{type_name}` names a struct type; fields need a value before the dot", "use a `{type_name}` value before an instance field, or call a static method that exists on `{type_name}`")
 }
 
-// `alias.NAME` through a whole-module import `alias` (Rust `infer_field`:
-// `modules[member_owner].consts.get(member)`): a ConstRef to the target
+// `alias.NAME` through a whole-module import `alias`: a ConstRef to the target
 // module's constant, typed by its staged value. A member the module does not
-// declare is a field of its Module record (`pricing.category`) when it has
-// one; any other is the call path's import-member report, not an untyped base.
+// declare is a field of its Module record (`pricing.category`) when it has one;
+// any other is the call path's import-member report, not an untyped base.
 sema_expression_module_constant: fn(alias: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck {
     index: sema_scope_resolve_index(scopes, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if scopes.bindings[index].symbol.kind != SymbolKind.Import {
@@ -1280,7 +1276,7 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
         }
         value_type: sema_function_value_type(program, signature, symbol.module_identity, expected)
         // A C `#Import` function crosses only by a direct call: as a value it
-        // would be a Jet function type, which has no C ABI (Rust `e3203`).
+        // would be a Jet function type, which has no C ABI.
         if sema_registration_callable_row_of(graph, symbol.id) == .Val(.Foreign(module_index, index)) && graph.modules[module_index].foreign_functions[index].owner == SemaRegistrationForeignOwner.CModule {
             diagnostics.push(sema_checked_foreign_type_error(value_type, span, true))
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -1656,9 +1652,8 @@ sema_expression_swizzle_letter_name: fn(named: Int) -> String Never! {
     }
 }
 
-// (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to four
-// slots, with letters of one set. One lane reads the scalar; several read
-// as the declaration says, or a fixed array.
+// `v.xy` names up to four slots, with letters of one set. One lane reads the
+// scalar; several read as the declaration says, or a fixed array.
 SemaMathSwizzleParse: enum {
     NotSwizzle,
     InvalidLane,
@@ -1697,11 +1692,10 @@ sema_expression_math_swizzle_parse: fn(slots: SemaSwizzleSlots, member: String, 
     SemaMathSwizzleParse.Lanes{packed: packed, count: count, overlaps: overlaps}
 }
 
-// Rust `numeric_type_from_name` + `numeric_const_type`: the type of
-// `Numeric.MEMBER`, or None when `base` is not a numeric type name or
-// `member` is not one of its constants. The name means what it means
-// where it is written: a program's `Byte: Unsigned<8>` is U8, and its own
-// type spelled `U8` has no such constants.
+// The type of `Numeric.MEMBER`, or None when `base` is not a numeric type name
+// or `member` is not one of its constants. The name means what it means where
+// it is written: a program's `Byte: Unsigned<8>` is U8, and its own type
+// spelled `U8` has no such constants.
 sema_expression_numeric_bound_type: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) -> Type? {
     integer_member: member == "MIN" || member == "MAX"
     if !integer_member && member != "INFINITY" && member != "NEG_INFINITY" && member != "NAN" && member != "EPSILON" -> return None

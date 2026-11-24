@@ -74,8 +74,7 @@ sema_stmt_check_range_stride: fn(expr: Expr, environment: SemaScopeEnvironment, 
     Val(value)
 }
 
-// A number written in the source, with an optional
-// leading minus (Rust `written_range_int`).
+// A number written in the source, with an optional leading minus.
 sema_range_written_int: fn(expr: Expr) -> Int? {
     if expr == {
         .Int(value, _, _, _, _) -> Val(value)
@@ -89,9 +88,9 @@ sema_range_written_int: fn(expr: Expr) -> Int? {
     }
 }
 
-// Written ends and step that count in opposite
-// directions are E0170 (Rust `backward_range_diagnostic`). A loop range gets
-// a fix edit for its step; a range value is taught to write its ends in order.
+// Written ends and step that count in opposite directions are E0170. A loop
+// range gets a fix edit for its step; a range value is taught to write its ends
+// in order.
 sema_range_backward_diagnostic: fn(start: Expr, end: Expr, step: Expr?, exclusive: Bool, loop_range: Bool) -> Diagnostic? {
     s: sema_range_written_int(start) ?? return None
     e: sema_range_written_int(end) ?? return None
@@ -395,14 +394,12 @@ sema_stmt_for_in_source: fn(expression: Expr, collection: TExpr, method_kind: TF
                         // copy: `receiver` is a payload of read parameter `collection`, which keeps the original; the returned value owns this one
                         .MethodCall(receiver, _, _, _) -> return receiver.copy()
                         // `text.chars()` checks as the String builtin; the
-                        // loop walks its receiver's scalars, as Rust
-                        // lower_forin_collection sources `chars` from it.
+                        // loop walks its receiver's scalars.
                         .BuiltinMethod(receiver, operation, _) -> {
                             if operation == .Chars -> return receiver
                         }
                         // `child.stdout.lines()` checks as the process
-                        // stream's handle method; the loop reads the stream,
-                        // as Rust lower_forin_collection sources it.
+                        // stream's handle method; the loop reads the stream.
                         .HandleMethod(receiver, _, _) -> {
                             if method_kind == (Val(TForInMethod.LinesProcessStream)) {
                                 return receiver.copy()
@@ -444,8 +441,8 @@ sema_stmt_for_in_is_list: fn(collection_type: Type) -> Bool Never! {
     }
 }
 
-// Rust `frame_owns_place`: a bare name this frame owns outright. A read or
-// write parameter and a live view name storage the caller still owns.
+// A bare name this frame owns outright. A read or write parameter and a live
+// view name storage the caller still owns.
 sema_stmt_for_in_frame_owns: fn(expression: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
     if expression == {
         .Paren(value, _, _) | .Copy(value, _, _) -> return sema_stmt_for_in_frame_owns(value, scopes, state)
@@ -457,9 +454,8 @@ sema_stmt_for_in_frame_owns: fn(expression: Expr, scopes: SemaScopeTable, state:
     !(binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write))
 }
 
-// Rust `report_borrowed_loop_consume`: a loop over task handles hands out
-// each handle itself, which takes the list; a borrowed name, a field or an
-// index cannot give the list away.
+// A loop over task handles hands out each handle itself, which takes the list;
+// a borrowed name, a field or an index cannot give the list away.
 sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Diagnostic {
     why: "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
     place: if collection == {
@@ -477,7 +473,7 @@ sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type,
     sema_error("E0120", expr_span(collection), "this loop can't take handles out of a field or index", why, "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs {{ … }}`")
 }
 
-// Rust `collection_root_name`: the local a loop reads, through `.chars()`.
+// The local a loop reads, through `.chars()`.
 sema_stmt_for_in_collection_root: fn(expression: Expr) -> String? {
     if expression == {
         .Ident(name, _, _) -> return Val(name)
@@ -540,9 +536,8 @@ sema_stmt_for_in_plain_place: fn(expression: Expr) -> Bool Never! {
     }
 }
 
-// #4318 §4 stable loop source: the root name of a source that is a plain
-// place, `xs` or `a.b.xs`. A user `.copy()` copy, a call, or an index is not one.
-// Rust reference lowering: `stable_loop_source_root`.
+// A stable loop source: the root name of a source that is a plain place, `xs`
+// or `a.b.xs`. A user `.copy()` copy, a call, or an index is not one.
 sema_stmt_for_in_stable_root: fn(expression: Expr) -> String? {
     if expression == {
         .Ident(name, _, _) -> return Val(name)
@@ -574,12 +569,11 @@ sema_stmt_for_in_body_mentions: fn(state: SemaOwnershipState, references_before:
 }
 
 // True when the checked loop body names the definition `key` on any path,
-// as Rust's syntactic test does (`block_free_var_reads(body)` in
-// the Rust reference lowering). The ownership
-// references above miss an arm that does not fall through, whose branch
-// state is dropped: `loop x in s.xs { if c { f(s, x); return } }` looked
-// stable, lowered an in-place walk, and rustc rejected the `&mut s` call
-// that also borrows `s.xs[i]` (E0502).
+// syntactically. The ownership references above miss an arm that does not
+// fall through, whose branch state is dropped:
+// `loop x in s.xs { if c { f(s, x); return } }` would look stable and lower an
+// in-place walk whose `f(s, x)` call writes `s` while the walk still borrows
+// `s.xs[i]`.
 // `arena` holds the rows of the body's flat nodes (sema_node).
 sema_stmt_for_in_tree_mentions: fn(statements: [TStmt], key: SymbolID, arena: BodyTree) -> Bool Never! {
     if sema_stmt_for_in_tree_assigns(statements, key) -> return true
@@ -780,9 +774,8 @@ sema_stmt_for_in_row_stmt_assigns: fn(tree: BodyTree, item: Int, key: SymbolID) 
 }
 
 // True when the loop body leaves the source root `root` unchanged, so the
-// loop may walk the source in place, as Rust's
-// reference lowering's `loop_body_keeps_source`
-// decides. A body that never names the root qualifies. A body that names it
+// loop may walk the source in place. A body that never names the root
+// qualifies. A body that names it
 // qualifies only when every reference it adds to the root is a read, it
 // never assigns, write-borrows or captures the root, and it never leaves the
 // loop early or diverges (sema_stmt_for_in_tree_stays). With no early exit
@@ -1018,9 +1011,8 @@ sema_stmt_for_in_stable_list: fn(collection_type: Type) -> Bool Never! {
     }
 }
 
-// Rust `collection_changed_in_loop` / `collection_changed_by_method_in_loop`
-// (E0507): a change to a collection an active loop is reading. `operation`
-// is `` `name.method()` `` or `a mutation of `name``.
+// E0507: a change to a collection an active loop is reading. `operation` is
+// `` `name.method()` `` or `a mutation of `name``.
 sema_collection_changed_in_loop: fn(name: String, operation: String, span: Span) -> Diagnostic {
     sema_error("E0507", span, "While the loop is reading `{name}`, nothing may change it", "The loop reads `{name}` across its body, so {operation} can change the visited domain, element order, or termination.", "Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `{name}` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.")
 }
@@ -1033,7 +1025,7 @@ sema_expr_place_root_ident: fn(expression: Expr) -> String? {
     }
 }
 
-// Rust's indexed-write gate: a Pool, ViewMut, Map, List, or fixed list slot.
+// The indexed-write gate: a Pool, ViewMut, Map, List, or fixed list slot.
 sema_stmt_index_write_is_collection: fn(ty: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(ty) == {
         .Map(_, _, _) | .List(_) | .FixedList(_, _) -> true
@@ -1274,8 +1266,8 @@ sema_stmt_for_in_takes_map: fn(collection: Expr, collection_type: Type) -> Bool 
     }
 }
 
-// Rust lends each ViewMut item for one iteration; the descriptor may not
-// escape, and its source still participates in the ordinary view ledger.
+// Each ViewMut item is lent for one iteration; the descriptor may not escape,
+// and its source still participates in the ordinary view ledger.
 sema_stmt_for_in_lend_view_item: fn(local: TLocal?, ty: Type, collection: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) {
     if ty == .Apply(lend_name, item_args) && lend_name == "ViewMut" {
         if item_args.len() != 1 {

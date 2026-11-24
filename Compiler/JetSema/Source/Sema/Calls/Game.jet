@@ -338,10 +338,9 @@ sema_game_check_backend_method: fn(receiver: Expr, receiver_value: TExpr, method
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)})
 }
 
-// Scene setup needs an editable scene binding (Rust `needs_edit`: the root
-// local is mutable); the handle receiver itself is only read, so these calls
-// take no `^` mark. on_frame carries only the callback's checked schedule and
-// derivation, never a fabricated one.
+// Scene setup needs an editable scene binding; the handle receiver itself is
+// only read, so these calls take no `^` mark. on_frame carries only the
+// callback's checked schedule and derivation, never a fabricated one.
 sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaMethodSpecialCheck? {
     edit_api: if receiver_value.ty == {
         .Named(name) -> if {

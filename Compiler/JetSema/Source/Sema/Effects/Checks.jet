@@ -241,9 +241,9 @@ SemaEffectGraphResult: struct {
     interner: Interner,
 }
 
-// One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
-// is "alloc", "rc" or "arena"; an arena event's `bytes` is its proven upper
-// bound (None is unprovable); `executions` is None inside a loop.
+// One memory operation a body performs directly: `kind` is "alloc", "rc" or
+// "arena"; an arena event's `bytes` is its proven upper bound (None is
+// unprovable); `executions` is None inside a loop.
 SemaMemoryEvent: struct {
     span: Span,
     operation: String,
@@ -252,9 +252,8 @@ SemaMemoryEvent: struct {
     executions: Int?{Val(1)},
 }
 
-// A call site to a user function, for arena multiplicity (Rust `MemoryCall`).
-// `target` is the callee's node once the graph's edges are final
-// (sema_effect_resolve_edges).
+// A call site to a user function, for arena multiplicity. `target` is the
+// callee's node once the graph's edges are final (sema_effect_resolve_edges).
 SemaMemoryCall: struct {
     callee: String,
     span: Span,
@@ -262,7 +261,7 @@ SemaMemoryCall: struct {
     target: Int{-1},
 }
 
-// A place a strict memory fact cannot see through (Rust `OpenMemoryDispatch`).
+// A place a strict memory fact cannot see through.
 SemaMemoryOpen: struct {
     span: Span,
     source: String,
@@ -281,7 +280,7 @@ SemaMemoryFinding: struct {
     steps: [Int]{[Int]{}},
 }
 
-// Rust `ArenaProof`, or the finding that stops the proof.
+// An arena proof, or the finding that stops the proof.
 SemaMemoryArena: struct {
     bytes: Int,
     witness: SemaMemoryFinding?,
@@ -590,8 +589,8 @@ sema_effect_source_from_header: fn(func: Func, key: String, facts: ^^SemaEffectB
     }
 }
 
-// Rust `check_inferred_purity`: a comptime callable takes the purity path,
-// so only an ordinary function's first `#Memo` marker is judged by E0938.
+// A comptime callable takes the purity path, so only an ordinary function's
+// first `#Memo` marker is judged by E0938.
 sema_effect_memo_span: fn(func: Func) -> Span? Never! {
     if func.is_comptime -> return None
     loop marker in func.markers {
@@ -646,11 +645,10 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], facts: ^SemaEffectBo
     }
 }
 
-// E2-M16 (Rust core-call E3403): a non-deterministic Core call (a `Time` or
-// `Rand` row) inside a pure function, outside `assume_deterministic`. The call
-// is a fixed Core row or a source-owned Core function.
-// The module identity of a direct call's callee body, or the none id when
-// the call has no body node in this program.
+// E2-M16: a non-deterministic Core call (a `Time` or `Rand` row) inside a pure
+// function, outside `assume_deterministic`. The call is a fixed Core row or a
+// source-owned Core function. The module identity of a direct call's callee
+// body, or the none id when the call has no body node in this program.
 sema_effect_callee_module: fn(facts: SemaEffectCallIndex, expression: BodyNode) -> ModuleID Never! {
     if expression.kind == .Call(callee, _, _) {
         decl_row: callee.row.index()
@@ -683,8 +681,7 @@ sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode
     None
 }
 
-// Rust `assume_deterministic { … }` (Stmt.AssumeDet, det_suppress):
-// inside a pure body the block suspends the determinism rejections, E3403 and
+// Inside a pure body the block suspends the determinism rejections, E3403 and
 // E3401 alike.
 sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
     if !node.is_pure -> return false
@@ -695,12 +692,12 @@ sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
     false
 }
 
-// Rust `crate.Sema.e3403` at a Clock intrinsic site
-// (record_static_time_effect and the `Clock.{method}` check, `Clock
-// comparison`, `Clock formatting` and `Clock copy`) or an `ExpiringSecret.with`
-// expiry read: the producer recorded a `Time` row under the operation's own
-// name (`Clock.system`), so a pure body reports E3403 with the pure denial and
-// records none of the site's effects. False when the site is not one.
+// E3403 at a Clock intrinsic site (the static time effect and the
+// `Clock.{method}` check, `Clock comparison`, `Clock formatting` and
+// `Clock copy`) or an `ExpiringSecret.with` expiry read: the producer recorded
+// a `Time` row under the operation's own name (`Clock.system`), so a pure body
+// reports E3403 with the pure denial and records none of the site's effects.
+// False when the site is not one.
 sema_effect_report_nondeterministic_intrinsic: fn(nodes: ^[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: ^[Diagnostic]) -> Bool Never! {
     if !nodes[node_index].is_pure || fact.callee != None -> return false
     detail: fact.detail ?? return false
@@ -792,7 +789,7 @@ sema_effect_comptime_callee_name: fn(key: String) -> String Never! {
     "{owner.slice(10..<owner.len())}.{leaf}()"
 }
 
-// Rust `memory_control_multiplier`: one execution, or None inside a loop.
+// One execution, or None inside a loop.
 sema_effect_memory_executions: fn(node: SemaEffectNode, span: Span) -> Int? {
     loop loop_span in node.loop_spans {
         if sema_effect_span_contains(loop_span, span) -> return None
@@ -2185,10 +2182,10 @@ sema_effect_chain_name: fn(function: FnBody) -> String Never! {
     }
 }
 
-// Rust `check_effect_boundaries` `panic_site`, with the path to it: the
-// functions from `index` to the first one reached depth-first that stops (a
-// maximal row, a direct Panic, or a stop sentinel), both ends included, so a
-// function that stops itself is its own one-step path. Empty when none stops.
+// The panic site, with the path to it: the functions from `index` to the first
+// one reached depth-first that stops (a maximal row, a direct Panic, or a stop
+// sentinel), both ends included, so a function that stops itself is its own
+// one-step path. Empty when none stops.
 sema_effect_panic_path: fn(nodes: [SemaEffectNode], index: Int, seen: ^[Bool]) -> [Int] Never! {
     if seen[index] -> return [Int]{}
     seen[index] = true
@@ -2927,9 +2924,8 @@ sema_effect_record_memory_open: fn(nodes: ^[SemaEffectNode], node_index: Int, sp
 SemaEffectCallIndex: struct {
     modules: [SemaEffectModuleCalls],
     node_by_key: SemaEffectNodeKeys,
-    // Rust `seed_trait_dispatch_effects` `<static>` inputs: implementing type
-    // names by trait name, and `{trait}.{method}` -> implementing type ->
-    // that type's own method node.
+    // Implementing type names by trait name, and `{trait}.{method}` ->
+    // implementing type -> that type's own method node.
     trait_implementer_names: NameTable{name_table_sized(4)},
     trait_implementer_rows: [Int]{name_column()},
     trait_implementer_lists: [[String]]{[[String]]{}},
@@ -3177,9 +3173,9 @@ sema_effect_builtin_may_have_effect: fn(op: TBuiltinOp) -> Bool Never! {
 // protocol sugar, and closure intrinsics (`scope.guard`, `on_commit`, task
 // spawn), whose lambda bodies the walk visits on their own, and allocator
 // constructors (`mem.Arena.new`), whose storage the memory walk accounts.
-// Rust records their effects inline (`close`/`drop`/`scope.guard` record
-// none) and forces the maximal row only for opaque callees, so one with no
-// recorded call fact contributes no effect; it is not an unknown callee.
+// Their effects are recorded inline (`close`/`drop`/`scope.guard` record none)
+// and only opaque callees take the maximal row, so one with no recorded call
+// fact contributes no effect; it is not an unknown callee.
 sema_effect_is_compiler_intrinsic: fn(kind: NodeKind) -> Bool Never! {
     if kind == {
         .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HostCall(_) | .HandleMethod(_, _, _) -> true
@@ -3515,15 +3511,15 @@ sema_effect_record_value_reads: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCa
     }
 }
 
-// Rust `seed_trait_dispatch_effects` / generic dispatch: a call through a
-// generic bound (`producer: P` with `P: Producer`) is statically selected after
-// type inference. When the trait method declares a row, the call has that
-// row. Otherwise, when the receiver's type is one of this function's type
-// parameters, the call is a param dispatch: the caller that binds the
-// parameter runs the selected implementation (sema_effect_resolve_type_params).
-// Any other receiver takes the union of every implementation's summary
-// (sema_effect_add_dispatch_union). Only a trait-object receiver is the
-// open-world dispatch that stays maximal for a row-less method.
+// Trait dispatch: a call through a generic bound (`producer: P` with
+// `P: Producer`) is statically selected after type inference. When the trait
+// method declares a row, the call has that row. Otherwise, when the receiver's
+// type is one of this function's type parameters, the call is a param
+// dispatch: the caller that binds the parameter runs the selected
+// implementation (sema_effect_resolve_type_params). Any other receiver takes
+// the union of every implementation's summary (sema_effect_add_dispatch_union).
+// Only a trait-object receiver is the open-world dispatch that stays maximal
+// for a row-less method.
 sema_effect_record_static_dispatch: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) -> Bool Never! {
     if fact.facts.effect_bound != None -> return false
     if expression.kind == {
@@ -3556,10 +3552,9 @@ sema_effect_record_static_dispatch: fn(nodes: ^[SemaEffectNode], facts: SemaEffe
 }
 
 // Every implementation of `impls_key` (`{module}|{trait}.{method}`) as a call
-// edge of `node_index`. An implementing type with no summary of its own for
-// the method (a trait default body, an unloaded impl) is unresolved, and so
-// is a trait with no implementation: either forces the maximal row, as in
-// Rust.
+// edge of `node_index`. An implementing type with no summary of its own for the
+// method (a trait default body, an unloaded impl) is unresolved, and so is a
+// trait with no implementation: either forces the maximal row.
 sema_effect_add_dispatch_union: fn(nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, impls_key: String, span: Span) Never! {
     trait_key: impls_key.cut_last(".") ?? return
     unresolved := true
@@ -4003,8 +3998,8 @@ sema_effect_walk_expr: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyT
 }
 
 sema_effect_walk_record_call_node: fn(nodes: ^[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller) -> Bool {
-    // Rust's `Clock.{method}` check runs before the declared method's
-    // call is recorded: a pure body reports E3403 and records nothing.
+    // The `Clock.{method}` check runs before the declared method's call is
+    // recorded: a pure body reports E3403 and records nothing.
     if sema_effect_clock_intrinsic_position(facts, module_facts, caller, node.span) == .Val(clock) && sema_effect_report_nondeterministic_intrinsic(nodes, node_index, module_facts[clock], node.span, diagnostics) {
         return true
     }
@@ -4014,8 +4009,8 @@ sema_effect_walk_record_call_node: fn(nodes: ^[SemaEffectNode], node_index: Int,
             value: module_facts[position]
             nondeterministic: sema_effect_nondeterministic_core(nodes[node_index], node, value, sema_effect_callee_module(facts, node), tree, facts.symbols)
             if nondeterministic == .Val(api) {
-                // Rust returns before recording the call's effects, so
-                // the pure function reports E3403 instead of E3401.
+                // The call's effects are not recorded, so the pure function
+                // reports E3403 instead of E3401.
                 nodes[node_index].nondeterministic_call = true
                 diagnostics.push(sema_error("E3403", node.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
             } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
@@ -4100,7 +4095,7 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
-            // Rust `Arena.new`/`Bump.new`: a literal capacity is the proven bound.
+            // A literal capacity is the proven bound.
             allocator: if ctor == {
                 .Arena -> "Arena"
                 .Bump -> "Bump"
@@ -4119,8 +4114,7 @@ sema_effect_walk_expr_enter: fn(nodes: ^[SemaEffectNode], node_index: Int, tree:
             if !sema_effect_in_assume_det(nodes[node_index], node.span) && sema_effect_walk_record_call_node(nodes, node_index, tree, node, facts, module_facts, diagnostics, caller) {
                 return true
             }
-            // `Shared{x}` (Rust `Shared.new`): new shared storage that every
-            // handle copy retains.
+            // `Shared{x}`: new shared storage that every handle copy retains.
             if owner == .Prelude(_, path, _) && path == "jet_std.JetShared" && method.name == "new" {
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` allocates shared storage", "alloc", None)
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` introduces reference-counted ownership", "rc", None)
@@ -4922,9 +4916,9 @@ sema_effect_solve_scoped: fn(solved: ^[[String]], pending: ^[SemaEffectPending],
     }
 }
 
-// Rust `solve_reachability` "secret" row: only a direct `Secret` read seeds
-// it, never the every-root row of an open-world (maximal) call, and callers
-// inherit it along call edges. E1264 consults this row, not `solved`.
+// The "secret" reachability row: only a direct `Secret` read seeds it, never
+// the every-root row of an open-world (maximal) call, and callers inherit it
+// along call edges. E1264 consults this row, not `solved`.
 sema_effect_secret_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [Bool] Never! {
     reached := (loop _ in nodes -> false)
     pending := [Int]{}
@@ -4955,8 +4949,8 @@ sema_effect_tfacts: fn(node: SemaEffectNode, solved: [String]) -> TEffectFacts N
     TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span, value_edges: rare.value_edges, module_writes: rare.module_writes}
 }
 
-// Rust `e1264`: the span is the first entry of the declared effect row, or
-// the function's name when it declares none.
+// The span is the first entry of the declared effect row, or the function's
+// name when it declares none.
 sema_effect_secret_diagnostic: fn(node: SemaEffectNode) -> Diagnostic {
     sema_error("E1264", node.row_span ?? node.name_span, "`{node.name}` reads a secret but doesn't declare the `Secret` effect", "reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other effects, there is no silently-inferred default here, so a function must opt in even with no other explicit effect row at all.", "add `-[Secret]>` to `{node.name}`'s signature (or widen an existing effect row to cover it)")
 }
@@ -5088,7 +5082,7 @@ sema_effect_above_bytes: fn(name: String, opening: String) -> Int? {
     Val(bytes)
 }
 
-// Rust `MemoryFact.display` for the denials a memory proof covers.
+// The display of the denials a memory proof covers.
 sema_effect_memory_fact: fn(name: String) -> String? {
     if name == "Mem.Alloc" || name == "Mem.Rc" -> return Val("!{name}")
     bound: sema_effect_memory_bound(name) ?? return None
@@ -5137,8 +5131,8 @@ sema_effect_arena_failure: fn(finding: SemaMemoryFinding) -> SemaMemoryArena Nev
     SemaMemoryArena{bytes: 0, witness: None, failure: Val(finding)}
 }
 
-// Rust `shortest_violation` for the unbounded facts: breadth-first search
-// gives the shortest call path to the first event of `kind` ("alloc" for
+// The shortest violation for the unbounded facts: breadth-first search gives
+// the shortest call path to the first event of `kind` ("alloc" for
 // `!Mem.Alloc`, "rc" for `!Mem.Rc`) or, with `opens`, to an open dispatch.
 sema_effect_memory_search: fn(nodes: [SemaEffectNode], root: Int, kind: String, opens: Bool{true}) -> SemaMemoryFinding? {
     queue := [Int]{root}
@@ -5243,7 +5237,7 @@ sema_effect_own_node: fn(node: SemaEffectNode, inputs: [SemaEffectModuleInput], 
     graph_module < own_modules.len() && own_modules[graph_module]
 }
 
-// Rust `may_reach_arena` over the known call graph.
+// Whether an arena may be reached over the known call graph.
 sema_effect_may_reach_arena: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool]) -> Bool {
     if visiting[index] -> return true
     visiting[index] = true
@@ -5276,8 +5270,8 @@ sema_effect_unsized_alloc: fn(node: SemaEffectNode, event: SemaMemoryEvent) -> B
     true
 }
 
-// Rust `arena_bound`: the proven arena bytes `index` can reserve, with the
-// event that witnesses the total, or the finding that stops the proof.
+// The proven arena bytes `index` can reserve, with the event that witnesses the
+// total, or the finding that stops the proof.
 sema_effect_arena_bound: fn(nodes: [SemaEffectNode], index: Int, visiting: ^[Bool], path: [String]) -> SemaMemoryArena {
     if visiting[index] {
         return sema_effect_arena_failure(sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[index].display_key, "recursive call multiplicity is not statically bounded for arena accounting", index, path, 0))
@@ -6416,7 +6410,6 @@ sema_effect_check_stack: fn(walk: ^SemaStackWalk, frames: SemaStackFrames, nodes
     diagnostics.push(sema_error("E0921", span, "{display} may take {walk.bytes[root]} bytes of stack, above the effective `{fact}` declared at {nodes[root].source_display}", "the deepest call path is {trail.path}; each frame counts {JET_FRAME_ALLOWANCE} bytes of call linkage and saved registers plus two slots for every parameter and checked value; declaration provenance: {provenance}", "raise the bound, shorten the call path, or keep large values in a heap list"))
 }
 
-// Rust `memory_violation`.
 sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, fact: String, bounded: Bool, finding: SemaMemoryFinding) -> Diagnostic {
     declared_at: nodes[root].source_display
     provenance: "signature denial `-[!{denial.name}]>` in {declared_at}"
@@ -6434,9 +6427,8 @@ sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: Eff
     sema_error("E0921", span, "`{fact}` cannot be proved through the open dispatch at {open.source}", "{open.reason} is reachable through {path_text}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {provenance}", "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it")
 }
 
-// 2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
-// `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial holds for every
-// function the root can reach (E0921).
+// 2: a `-[!Mem.Alloc]>`, `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial
+// holds for every function the root can reach (E0921).
 sema_effect_memory_project: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, diagnostics: ^[Diagnostic]) -> SemaMemoryProjection {
     fact: sema_effect_memory_fact(denial.name) ?? panic("invalid checked memory denial")
     limit: sema_effect_memory_bound(denial.name)
@@ -6480,9 +6472,9 @@ sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], root: Int, stack: 
 sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?, notes: [SemaEffectInstanceNote], pure_reached: ^[String], diagnostics: ^[Diagnostic]) -> Bool {
     valid := true
     library_named: if node.rare == .Val(rare) -> rare.library_rows.len() > 0 else -> false
-    // This rule with (Rust `check_inferred_memo`, E0938): a
-    // `#Memo` function that is not declared pure is judged by its solved row;
-    // panic and memory are deny-only, as for an explicit empty bound.
+    // E0938: a `#Memo` function that is not declared pure is judged by its
+    // solved row; panic and memory are deny-only, as for an explicit empty
+    // bound.
     if !node.is_pure && node.memo_span == .Val(memo_span) {
         impure := sema_effect_uncovered(solved, [String]{})
         if impure.len() > 0 {
@@ -6570,8 +6562,7 @@ sema_effect_row_has_no_outcome: fn(node: SemaEffectNode, solved: [String]) -> Bo
     true
 }
 
-// The callee as written stands in for the call text (the Rust reference's
-// span covers the callee name, so its call text is that name).
+// The callee as written stands in for the call text.
 sema_effect_discarded_result_diagnostic: fn(node: SemaEffectNode, span: Span) -> Diagnostic {
     diagnostic: sema_lint("L0508", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `^`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
     diagnostic_with_source_derived_suggestion(diagnostic, Span{start: span.start, end: span.start}, "result: ")
@@ -6633,12 +6624,11 @@ sema_effect_region_walk: fn(nodes: [SemaEffectNode], owner: Int, function: FnBod
     walked
 }
 
-// (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
-// its own sites, everything its callees reach, and every effect when it makes
-// an unknown call. A call to a Core scope publisher inside the region reaches
-// it as the scoped effect its constant argument names, as a function's own
-// calls do (sema_effect_solve_scoped), so `files.read("data/{name}")` needs
-// `FS.Read("data/")`.
+// The effects a `#FX(…)` region reaches: its own sites, everything its callees
+// reach, and every effect when it makes an unknown call. A call to a Core scope
+// publisher inside the region reaches it as the scoped effect its constant
+// argument names, as a function's own calls do (sema_effect_solve_scoped), so
+// `files.read("data/{name}")` needs `FS.Read("data/")`.
 sema_effect_region_inferred: fn(nodes: [SemaEffectNode], solved: [[String]], owner: Int, function: FnBody, region: SemaEffectFxRegion, facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], module_index: Int) -> [String] {
     walked := sema_effect_region_walk(nodes, owner, function, region.span, "FX", facts, module_facts, module_index)
     inferred := walked.direct.move()
@@ -6745,9 +6735,9 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
     source_indices := owned_prepared.source_indices.move()
     node_keys := owned_prepared.node_keys.move()
     node_by_key := sema_effect_node_key_table(node_keys)
-    // Rust `seed_trait_dispatch_effects`: implementing types by
-    // `{module}|{trait}`, and each `{module}|{trait}.{method}`'s own summary
-    // per implementing type (sema_effect_add_trait_impls).
+    // Implementing types by `{module}|{trait}`, and each
+    // `{module}|{trait}.{method}`'s own summary per implementing type
+    // (sema_effect_add_trait_impls).
     tables := SemaEffectImplTables{}
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]
@@ -6928,10 +6918,10 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
         }
     }
-    // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
-    // function, including otherwise unreferenced bodies, not just entry.
-    // The organization's denials hold beside the package's own: a package
-    // row can't lift them, and each report names the row that denies.
+    // A manifest guarantee covers every qualified function, including otherwise
+    // unreferenced bodies, not just entry. The organization's denials hold
+    // beside the package's own: a package row can't lift them, and each report
+    // names the row that denies.
     denials := loop name in package_denials -> SemaEffectDenial{name: name, organization: ""}
     loop name in organization_denials {
         denials.push(SemaEffectDenial{name: name, organization: organization_source})
@@ -7506,11 +7496,11 @@ sema_effect_add_implementer: fn(tables: ^SemaEffectImplTables, trait_key: String
     tables.implementer_lists[group_row].push(owner.copy())
 }
 
-// Each implementation's node key per implementing type, first one kept
-// (Rust `seed_trait_dispatch_effects`), its owner as an implementer, and its
-// place in its method's trait-value group. The trait is the one its source
-// resolved where the `impl` block is written, so an `impl Trait` block in a
-// struct or enum body and an impl of another module's trait count too.
+// Each implementation's node key per implementing type, first one kept, its
+// owner as an implementer, and its place in its method's trait-value group. The
+// trait is the one its source resolved where the `impl` block is written, so an
+// `impl Trait` block in a struct or enum body and an impl of another module's
+// trait count too.
 sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, symbols: SymbolTable, tables: ^SemaEffectImplTables) {
     loop function in functions {
         if function.kind == .TopLevel -> next
@@ -8614,9 +8604,9 @@ sema_effect_walk_match_arm_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffec
 // executable (`scope.guard`, transaction hooks, spawn, reactive and UI
 // callbacks, C callbacks) must look its calls up under that key. Under the
 // enclosing function's key every such call has no fact and would read as an
-// unknown callee (the maximal row). Rust records these bodies' effects on the
-// enclosing function as it checks them. A compiler-private loop carrier keeps
-// the enclosing key, so the lambda key applies only when it owns facts.
+// unknown callee (the maximal row). These bodies' effects belong to the
+// enclosing function. A compiler-private loop carrier keeps the enclosing key,
+// so the lambda key applies only when it owns facts.
 sema_effect_walk_lambda_children: fn(walk: SemaEffectWalk, nodes: ^[SemaEffectNode], facts: SemaEffectCallIndex, module_facts: [SemaCallSiteFact], diagnostics: ^[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, lambda: BodyLambda) {
     // A structure-only walk (FailureLaw) builds its index with no modules; its
     // lambda bodies keep the enclosing caller, as for a lambda that owns no facts.

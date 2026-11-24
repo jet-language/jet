@@ -79,8 +79,8 @@ sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: Sem
             names.push(function.symbol.name.copy())
         }
     }
-    // Only impls registered under the owner's name can target it (Rust
-    // `registry.method` on the resolved owner), in module/row order.
+    // Only impls registered under the owner's name can target it, in module/row
+    // order.
     loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
         if !sema_call_impl_targets(implementation, nominal) -> next
@@ -332,10 +332,10 @@ sema_call_static_append_registered: fn(output: ^[SemaStaticMethodTarget], graph:
         return
     }
 
-    // Rust `owner_type_for_reader`, as for an exported function: the method
-    // names types as its owning module sees them (`X25519SecretKey` is
-    // `core.crypto`'s own), so it resolves there with every type parameter
-    // kept, before the caller's type arguments are substituted.
+    // As for an exported function, the method names types as its owning module
+    // sees them (`X25519SecretKey` is `core.crypto`'s own), so it resolves there
+    // with every type parameter kept, before the caller's type arguments are
+    // substituted.
     generics := [TGenericParam]{}
     loop param in nominal.generic_params {
         generics.push(TGenericParam{name: param.name, bounds: [SymbolID]{}})
@@ -624,11 +624,10 @@ sema_call_builtin_static_bound: fn(bindings: [SemaInferenceBinding], name: Strin
     false
 }
 
-// A row parameter is open while the declared row type names it and no
-// evidence has bound it. A bound value is the caller's type, read once as
-// written (Rust single-pass `substitute_type`): inside `f: fn<T>`,
-// `Shared{T?{…}}` binds the row's `T` to the caller's `T?`, whose `T` is not
-// the row parameter again.
+// A row parameter is open while the declared row type names it and no evidence
+// has bound it. A bound value is the caller's type, read once as written:
+// inside `f: fn<T>`, `Shared{T?{…}}` binds the row's `T` to the caller's `T?`,
+// whose `T` is not the row parameter again.
 sema_call_builtin_static_open: fn(ty: Type, row: BuiltinStaticRow, bindings: [SemaInferenceBinding]) -> Bool Never! {
     loop name in row.type_params {
         if !sema_call_builtin_static_bound(bindings, name) && sema_inference_type_mentions_param(ty, name) {
@@ -945,11 +944,11 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
             diagnostics.push(sema_error("E1102", expr_span(args[0].expr), "{sema_type_show(values[0].ty)} cannot be stored in `Shared<T>`", "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized", "store the value itself in `Shared<T>`, then read and write its fields directly"))
         }
     }
-    // Rust `finish_builtin_method` (and the `Shared.new` arm of `Shared{x}`)
-    // declares no parameter conventions for a builtin static: a written `.move()`
-    // is the consuming argument's exact move. The bare name in `Shared{x}` moves
-    // here like an unmarked owning position: a borrowed parameter keeps its
-    // value, and a later use turns the move into a share.
+    // A builtin static (and the `Shared.new` of `Shared{x}`) declares no
+    // parameter conventions: a written `.move()` is the consuming argument's
+    // exact move. The bare name in `Shared{x}` moves here like an unmarked
+    // owning position: a borrowed parameter keeps its value, and a later use
+    // turns the move into a share.
     params := [SemaCallParam]{}
     ownership_args := args
     named_moves := [Int]{}
@@ -1534,9 +1533,9 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                 diagnostics.push(sema_error("E0904", method_span, "`{type_name}.{method}` needs its generic receiver type here", "constructor inputs and the surrounding expected type must determine one concrete receiver type", "write the full receiver, such as `{written}.{method}(...)`"))
             }
             else -> {
-                // Rust `check_static_method_call`: a declared method with a
-                // `self` receiver named through its type needs a value. A
-                // static of that name failed on its arguments instead.
+                // A declared method with a `self` receiver named through its
+                // type needs a value. A static of that name failed on its
+                // arguments instead.
                 instance := false
                 loop name in sema_call_declared_method_names(owner_symbol.ty ?? Type.Named{name: type_name}, environment, program) {
                     if name == method {
@@ -1872,8 +1871,8 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, diagnostics)}
     }
     operation: sema_call_distinct_numeric_operation(row, sema_source_line_at(environment.source_segments, span) ?? 0) ?? return sema_call_distinct_conversion_failed()
-    // Rust `converted_literal`: an integer literal that fits the base is
-    // known at compile time, so a range type checks it here.
+    // An integer literal that fits the base is known at compile time, so a
+    // range type checks it here.
     literal_in_range := false
     if facts.range == .Val(bounds) {
         if argument.kind == .IntLit(literal, _) {

@@ -1,8 +1,6 @@
-// Inline code modules (`bank: module { ... }`). The Rust bootstrap gives every
-// member one compiler-owned identity before any declaration is registered
-// (`hoist_inline_module_member_types`, `mangle_inline_sibling_calls`, the
-// `Item.CodeModule` registration arm, and the inline-module body jobs). This
-// pass is that same step on one module program:
+// Inline code modules (`bank: module { ... }`). Every member gets one
+// compiler-owned identity before any declaration is registered. This pass is
+// that step on one module program:
 //
 // 1. member types (struct, enum, trait, tag, impl) lift beside the module
 //    under `module_type_name` (`bank.Account` -> `M4BankAccount`); the bare and
@@ -336,8 +334,7 @@ SemaInlineHoisted: struct {
 }
 
 // ---------------------------------------------------------------------------
-// Member naming (Rust `Syntax.generated_path`, `Names.member_name`,
-// `GenericModules.module_type_name`).
+// Member naming.
 
 sema_inline_is_alphanumeric: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
@@ -379,7 +376,6 @@ sema_inline_hex_value: fn(code: Int) -> Int Never! {
     }
 }
 
-// Rust `decode_generated_path_suffix`.
 sema_inline_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     bytes: suffix.bytes()
     out := [U8]{}
@@ -422,9 +418,8 @@ sema_inline_member_name: fn(module_path: String, name: String) -> String Never! 
 
 // The source name of a lifted member function (`__jet_bank_dopen` -> `open`),
 // so its own body diagnostics name it as written. Only the member segment must
-// be an identifier: a module path whose `_s` reads back as `/` (Rust
-// `member_name` decodes an unprefixed module path too) still names its member.
-// Any other name is returned unchanged.
+// be an identifier: a module path whose `_s` reads back as `/` still names its
+// member. Any other name is returned unchanged.
 sema_inline_member_source_name: fn(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return name.copy()
     decoded: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return name.copy()
@@ -471,7 +466,6 @@ sema_inline_type_name: fn(alias: String, name: String) -> String {
     "{sema_inline_type_prefix(alias)}{sema_inline_trim_leading_underscores(name)}"
 }
 
-// Rust `inline_type_alias`.
 sema_inline_type_alias: fn(source_path: String) -> String Never! {
     source_path.split(".").to_list().join("_")
 }
@@ -687,8 +681,7 @@ sema_inline_alias_imports: fn(items: [Item], parent: String, file_imports: [Impo
 }
 
 // ---------------------------------------------------------------------------
-// Rewriting (Rust `substitute_expr` / `substitute_stmts`,
-// `rewrite_inline_calls_expr` and the checker's inline-module call routes).
+// Rewriting.
 
 sema_inline_rewrite_empty: fn() -> SemaInlineRewrite Never! {
     SemaInlineRewrite{}
@@ -799,8 +792,7 @@ sema_inline_rewrite_tag_marker: fn(rewrite: SemaInlineRewrite, marker: TagMarker
     }
 }
 
-// Rust `Measure.resolve_symbols`: a fixed length named by an `Int` module
-// value parameter becomes that length.
+// A fixed length named by an `Int` module value parameter becomes that length.
 sema_inline_rewrite_measure: fn(rewrite: SemaInlineRewrite, measure: Measure) -> Measure Never! {
     if measure == {
         .Symbol(kind, name) -> {
@@ -832,8 +824,7 @@ sema_inline_rewrite_measure: fn(rewrite: SemaInlineRewrite, measure: Measure) ->
     }
 }
 
-// A substituted compile-time value takes the span of the name it replaces
-// (Rust `ct_value_expr`).
+// A substituted compile-time value takes the span of the name it replaces.
 sema_inline_value_at: fn(value: Expr, span: Span) -> Expr Never! {
     if value == {
         .Int(number, _, _, _, node) -> Expr.Int{value: number, span: span, width: None, raw: None, id: node}
@@ -987,10 +978,9 @@ sema_inline_rewrite_enum_args: fn(rewrite: ^SemaInlineRewrite, args: [EnumLitArg
     mapped
 }
 
-// `bank.f(...)` from anywhere in the file (Rust `infer_code_module_call`):
-// a re-export calls its owner, a member function its member
-// identity; any other name is E0608. The file is the enclosing module, so it
-// reaches the members of its `priv module`s too.
+// `bank.f(...)` from anywhere in the file: a re-export calls its owner, a
+// member function its member identity; any other name is E0608. The file is the
+// enclosing module, so it reaches the members of its `priv module`s too.
 sema_inline_rewrite_module_call: fn(rewrite: ^SemaInlineRewrite, surface: SemaInlineModuleSurface, alias_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr? Never! {
     if sema_inline_target_of(surface.reexports, method) == .Val(target) {
         if target.qualified {
@@ -1703,7 +1693,7 @@ sema_inline_rewrite_type_params: fn(rewrite: SemaInlineRewrite, params: [TypePar
     mapped
 }
 
-// Rust `specialize_func` / `specialize_function_types` plus the call routes.
+// Function specialization plus the call routes.
 sema_inline_rewrite_func: fn(rewrite: ^SemaInlineRewrite, function: Func) -> Func Never! {
     updated := function
     saved: rewrite.locals.len()
@@ -1758,7 +1748,7 @@ sema_inline_rewrite_impl_constants: fn(rewrite: ^SemaInlineRewrite, constants: [
     loop constant in constants -> ImplConstValue{name: constant.name, name_span: constant.name_span, value: sema_inline_rewrite_expr(rewrite, constant.value), span: constant.span}
 }
 
-// Rust `specialize_struct` with the module alias.
+// Struct specialization with the module alias.
 sema_inline_rewrite_struct: fn(rewrite: ^SemaInlineRewrite, definition: StructDef, alias: String) -> StructDef Never! {
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
@@ -1780,7 +1770,7 @@ sema_inline_rewrite_struct: fn(rewrite: ^SemaInlineRewrite, definition: StructDe
     updated
 }
 
-// Rust `specialize_enum` with the module alias.
+// Enum specialization with the module alias.
 sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, alias: String) -> EnumDef Never! {
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
@@ -1812,7 +1802,6 @@ sema_inline_rewrite_enum: fn(rewrite: ^SemaInlineRewrite, definition: EnumDef, a
     updated
 }
 
-// Rust `specialize_trait`.
 sema_inline_rewrite_trait: fn(rewrite: ^SemaInlineRewrite, definition: TraitDef) -> TraitDef Never! {
     updated := definition
     updated.name = sema_inline_mapped_name(rewrite, definition.name)
@@ -1832,7 +1821,6 @@ sema_inline_rewrite_trait: fn(rewrite: ^SemaInlineRewrite, definition: TraitDef)
     updated
 }
 
-// Rust `specialize_error_conv`.
 sema_inline_rewrite_error_conv: fn(rewrite: ^SemaInlineRewrite, definition: ErrorConvDef) -> ErrorConvDef Never! {
     updated := definition
     updated.from_ty = sema_inline_mapped_name(rewrite, definition.from_ty)
@@ -1841,8 +1829,8 @@ sema_inline_rewrite_error_conv: fn(rewrite: ^SemaInlineRewrite, definition: Erro
     updated
 }
 
-// Rust `specialize_impl`. An operator's right-hand type and a conversion's
-// source rename with the methods that name them, as an in-body block's do
+// Impl specialization. An operator's right-hand type and a conversion's source
+// rename with the methods that name them, as an in-body block's do
 // (sema_inline_rewrite_trait_blocks).
 sema_inline_rewrite_impl: fn(rewrite: ^SemaInlineRewrite, definition: ImplDef) -> ImplDef Never! {
     updated := definition
@@ -1858,7 +1846,7 @@ sema_inline_rewrite_impl: fn(rewrite: ^SemaInlineRewrite, definition: ImplDef) -
 }
 
 // ---------------------------------------------------------------------------
-// Rust `hoist_inline_module_types`.
+// Inline module type hoisting.
 
 sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist: ^SemaInlineHoist) -> SemaInlineHoisted {
     updated := code_module
@@ -2043,11 +2031,11 @@ sema_inline_rewrite_const: fn(rewrite: ^SemaInlineRewrite, constant: ^ConstDef) 
     constant.meta = sema_inline_rewrite_meta(rewrite, constant.meta)
 }
 
-// Rust `rewrite_exported_inline_types`: member types reach every function of
-// the enclosing file (and its inline modules) by their qualified name. The
-// file's own structs, enums, constants and tests name them the same way, so a
-// field `stream: transport.BodyStream` holds the hoisted member type and a
-// top-level `#run geo.Inner.reflect()` reflects it.
+// Member types reach every function of the enclosing file (and its inline
+// modules) by their qualified name. The file's own structs, enums, constants
+// and tests name them the same way, so a field `stream: transport.BodyStream`
+// holds the hoisted member type and a top-level `#run geo.Inner.reflect()`
+// reflects it.
 sema_inline_rewrite_exported: fn(items: ^^[Item], rewrite: ^SemaInlineRewrite) -> [Item] Never! {
     mapped := [Item]{}
     loop item in items.move() {
@@ -2122,7 +2110,7 @@ sema_inline_rewrite_exported: fn(items: ^^[Item], rewrite: ^SemaInlineRewrite) -
 }
 
 // ---------------------------------------------------------------------------
-// `use g: bank.f` over an inline module (Rust CheckInner 4).
+// `use g: bank.f` over an inline module.
 
 sema_inline_import_target: fn(declaration: ImportDecl, inline_names: NameTable) -> String? Never! {
     if declaration.kind == .Unqualified(module_alias, _, _, _, _) {
@@ -2192,13 +2180,13 @@ sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurfac
     kept
 }
 
-// Rust `resolve_inline_module_imports`: a module's own `use alias.[f]` binds
-// `f` inside that module only. `alias` is a sibling inline module (its member
-// must exist, E0611, and be public, E0609) or a file module this file imports
-// (the member is read qualified). A group with any problem binds nothing.
-// A re-export also declares each bound name as `module.name`. A sibling's
-// member may itself be a re-export, already resolved to its function
-// (sema_inline_resolve_reexports); one whose chain breaks was reported there.
+// A module's own `use alias.[f]` binds `f` inside that module only. `alias` is
+// a sibling inline module (its member must exist, E0611, and be public, E0609)
+// or a file module this file imports (the member is read qualified). A group
+// with any problem binds nothing. A re-export also declares each bound name as
+// `module.name`. A sibling's member may itself be a re-export, already resolved
+// to its function (sema_inline_resolve_reexports); one whose chain breaks was
+// reported there.
 sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlineModuleSurface], file_aliases: NameTable, rewrite: ^SemaInlineRewrite) -> SemaInlineTargets {
     reexports := SemaInlineTargets{}
     names := name_table_sized(2)
@@ -2457,9 +2445,9 @@ sema_inline_private_module_alias: fn(local: String, surface: SemaInlineModuleSur
     sema_error("E0609", span, "`{local}: {name}` re-exports `{name}`, a `priv module`", "a re-export is public, and `priv` keeps `{name}` inside this file", fix)
 }
 
-// Rust `resolve_inline_module_imports` for a file-module member, once every
-// import is bound: `use limits.[MAX]` inside a module names a declaration of
-// `limits` (E0611) that this file may see (E0609).
+// Import resolution for a file-module member, once every import is bound:
+// `use limits.[MAX]` inside a module names a declaration of `limits` (E0611)
+// that this file may see (E0609).
 sema_inline_modules_collect_import_diagnostics: fn(graph: SemaRegistrationGraph, module_index: Int, diagnostics: ^[Diagnostic]) {
     module_row: graph.modules[module_index]
     loop item in module_row.program.items {

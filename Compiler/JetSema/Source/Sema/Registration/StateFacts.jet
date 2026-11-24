@@ -1,6 +1,6 @@
 // Canonical state graph facts for reflection and semantic consumers, and the
-// one declaration diagnostic pass (Rust `StateTable.validate_declarations`).
-// Invalid transition labels are omitted from the graph; the pass reports them.
+// one declaration diagnostic pass. Invalid transition labels are omitted from
+// the graph; the pass reports them.
 use jet_foundation.[
     Diagnostic,
     EnumDef,
@@ -183,9 +183,9 @@ sema_state_items_use_typestate: fn(items: [Item]) -> Bool Never! {
     false
 }
 
-// Rust `e0151`: a state type or a state list names a state outside the owner's
-// list. `kind` names the owner: `struct` or `enum`. A suggestion replaces the
-// text at `edit_span`, when the name has one of its own.
+// E0151: a state type or a state list names a state outside the owner's list.
+// `kind` names the owner: `struct` or `enum`. A suggestion replaces the text at
+// `edit_span`, when the name has one of its own.
 sema_state_unknown: fn(state: String, type_name: String, kind: String, candidates: [String], span: Span, edit_span: Span?) -> Diagnostic {
     parts: state.split(".").to_list()
     suggestion: sema_suggest_field(parts[parts.len() - 1], candidates)
@@ -301,9 +301,9 @@ sema_state_validate_owner: fn(definition: StructDef, state: StateDecl, all_items
     }
 }
 
-// Rust `StateTable.validate_declarations`. Declarations are
-// bundle-wide (an owner and its impls may sit in different modules), so
-// `all_items` is every user module's items; reports cover `items`' owners.
+// State declarations are validated bundle-wide (an owner and its impls may sit
+// in different modules), so `all_items` is every user module's items; reports
+// cover `items`' owners.
 sema_state_validate_declarations: fn(items: [Item], all_items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     loop item in items {

@@ -146,9 +146,8 @@ BudgetFieldEntry: struct {
     span: Span,
 }
 
-// Rust `collect_located_budget_specs_bundle`: collect budgets while
-// retaining the module that owns each source span. Each diagnostic carries
-// its module's source location.
+// Collect budgets while retaining the module that owns each source span. Each
+// diagnostic carries its module's source location.
 sema_budget_located_specs_graph: fn(graph: SemaRegistrationGraph) -> [LocatedBudgetSpec] BudgetSpecError! {
     specs := [LocatedBudgetSpec]{}
     findings: sema_budget_graph_findings(graph, specs)
@@ -159,8 +158,8 @@ sema_budget_located_specs_graph: fn(graph: SemaRegistrationGraph) -> [LocatedBud
     Ok(specs)
 }
 
-// Rust `validate_bundle`: the diagnostics the graph check reports, each with
-// the position of the module its span belongs to.
+// The diagnostics the graph check reports, each with the position of the module
+// its span belongs to.
 sema_budget_validate_graph: fn(graph: SemaRegistrationGraph) -> [BudgetLocatedDiagnostic] Never! {
     specs := [LocatedBudgetSpec]{}
     sema_budget_graph_findings(graph, specs)
@@ -911,8 +910,7 @@ sema_budget_profile_selector: fn(name: String, expr: Expr) -> String BudgetSpecE
     Err(selector_error)
 }
 
-// ASCII lowercase of `value` (Rust `eq_ignore_ascii_case` against a
-// lowercase literal).
+// ASCII lowercase of `value`.
 sema_budget_ascii_lower: fn(value: String) -> String Never! {
     bytes := [U8]{}
     loop byte in value.bytes() {

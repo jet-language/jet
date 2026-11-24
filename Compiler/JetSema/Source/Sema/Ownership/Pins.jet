@@ -20,8 +20,8 @@ sema_pin_write_window: fn(argument: CallArg) -> Bool Never! {
     argument.convention == AccessConvention.Read && sema_receiver_mark_place_root(argument.expr) != None
 }
 
-// Rust `core_call` arm ("core.mem", "pin") for the one argument of
-// `mem.pin` (sema_call_memory_pin). False when the call is rejected.
+// The one argument of `mem.pin` (sema_call_memory_pin). False when the call
+// is rejected.
 sema_pin_check_call: fn(args: [CallArg], diagnostics: ^[Diagnostic]) -> Bool {
     if sema_pin_write_window(args[0]) -> return true
     diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a named place to pin", "a pin promises one storage location will not move, so it has to name that location instead of a temporary value", "bind the value to a `:=` name, then write `mem.pin(place)`"))
@@ -42,9 +42,9 @@ sema_pin_target: fn(ty: Type) -> Type? Never! {
     None
 }
 
-// Rust `ViewKind.Pin`: a view fact is a pin when its carrier holds a `Pin<T>`.
-// The carrier id was resolved from the carrier's name, so only that name's
-// binding positions can hold it; the scan stays off the module-wide table.
+// A view fact is a pin when its carrier holds a `Pin<T>`. The carrier id was
+// resolved from the carrier's name, so only that name's binding positions can
+// hold it; the scan stays off the module-wide table.
 sema_pin_view_fact: fn(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> Bool Never! {
     slot: sema_scope_name_slot(scopes, fact.carrier) ?? return false
     loop position in scopes.name_positions[slot] {
@@ -56,7 +56,7 @@ sema_pin_view_fact: fn(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> B
     false
 }
 
-// Rust matches only `alias.pin(arg)` with a `core.mem` alias; the caller also
+// Only `alias.pin(arg)` with a `core.mem` alias matches; the caller also
 // requires the `Pin<T>` result type.
 sema_pin_call_argument: fn(expr: Expr) -> CallArg? {
     if expr == {
@@ -66,9 +66,9 @@ sema_pin_call_argument: fn(expr: Expr) -> CallArg? {
     }
 }
 
-// Rust `core_call` ("core.mem", "pin") view fact: `pinned: mem.pin(place)`
-// keeps an exclusive write window on `place` for as long as `pinned` lives.
-// True when the binding is a pin and its fact was recorded.
+// The view fact of `mem.pin`: `pinned: mem.pin(place)` keeps an exclusive
+// write window on `place` for as long as `pinned` lives. True when the binding
+// is a pin and its fact was recorded.
 sema_pin_record_binding: fn(state: ^SemaOwnershipState, binding: Binding, init_ty: Type, scopes: SemaScopeTable) -> Bool {
     if !sema_pin_type(init_ty) -> return false
     argument: sema_pin_call_argument(binding.init) ?? return false
@@ -83,8 +83,8 @@ sema_pin_record_binding: fn(state: ^SemaOwnershipState, binding: Binding, init_t
     sema_ownership_record_view_fact(state, binding.name, binding.name_span, places[0], [String]{}, AccessConvention.Write, scopes, loan_seq)
 }
 
-// Rust `check_owner_change(name, "be moved")` for the exact move `place.move()`:
-// moving a pinned place is E0219. Runs before the moved place is read.
+// The exact move `place.move()` of a pinned place is E0219. Runs before the
+// moved place is read.
 sema_pin_check_move: fn(state: ^SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     loop place in sema_ownership_places_from_expr_in_state(expr, scopes, state) {
         if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {

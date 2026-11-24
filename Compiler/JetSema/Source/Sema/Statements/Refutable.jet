@@ -655,9 +655,9 @@ sema_stmt_state_body_writes: fn(tables: ASTTables, body: [StmtNode], name: Strin
     false
 }
 
-// Rust statement_writes_name: an assignment rooted at `name` anywhere in the
-// statement, or an expression that writes it (a write place or argument, a
-// method call on it, or an assignment inside a lambda, `if` or fallback body).
+// An assignment rooted at `name` anywhere in the statement, or an expression
+// that writes it (a write place or argument, a method call on it, or an
+// assignment inside a lambda, `if` or fallback body).
 sema_stmt_state_writes: fn(tables: ASTTables, statement: StmtNode, name: String) -> Bool Never! {
     view: ast_stmt(tables, statement)
     if view == .Assign(target, _, _, _) {
@@ -761,9 +761,9 @@ sema_stmt_args_write_name: fn(args: [CallArg], name: String) -> Bool Never! {
     false
 }
 
-// Rust state_loop_can_reach_next_turn: a body that does not always exit
-// reaches the condition again; one that does reaches it only through a
-// `continue` of this loop before its first exiting statement.
+// A body that does not always exit reaches the condition again; one that does
+// reaches it only through a `continue` of this loop before its first exiting
+// statement.
 sema_stmt_state_loop_reaches_next_turn: fn(body: [Stmt], label: String?) -> Bool Never! {
     if !sema_stmt_refutable_block_exits(body) -> return true
     loop statement in body {
@@ -1367,9 +1367,8 @@ sema_stmt_optional_exit_guard_name: fn(subject: Expr, arms: [SwitchArm], else_bo
     Val(test.name)
 }
 
-// The stable Optionals the `x == None` arms of a guard table
-// test, in arm order without repeats. The table's `else` holds each payload
-// (Rust `complement_condition_bindings`).
+// The stable Optionals the `x == None` arms of a guard table test, in arm order
+// without repeats. The table's `else` holds each payload.
 sema_stmt_else_presence_names: fn(arms: [SwitchArm], scopes: SemaScopeTable) -> [BindName] {
     names := [BindName]{}
     loop arm in arms {
@@ -1384,10 +1383,9 @@ sema_stmt_else_presence_names: fn(arms: [SwitchArm], scopes: SemaScopeTable) -> 
     names
 }
 
-// Refines the stable Optional `name` to its payload for the
-// rest of the current scope. Check `x ?? fallback` and bind the payload under
-// the same name, the operation the Rust frontend reaches through the
-// refutable binding `x == .Val(x) ?? { fallback }`.
+// Refines the stable Optional `name` to its payload for the rest of the
+// current scope: check `x ?? fallback` and bind the payload under the same
+// name, as the refutable binding `x == .Val(x) ?? { fallback }` does.
 sema_stmt_check_optional_refinement: fn(name: BindName, fallback: OrFallback, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
     guarded: Expr.OrFallback{value: Expr.Ident{name: name.name, span: name.span, id: AST_NODE_GENERATED}, fallback: fallback, is_option: true, span: span, id: AST_NODE_GENERATED}
     value: sema_check_expression(guarded, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
@@ -1540,10 +1538,9 @@ sema_stmt_check_bounds_refinement: fn(refinement: SemaStmtBoundsRefinement, span
     Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
 }
 
-// The `else` of a guard table holds the payload of every
-// stable `x == None` arm subject. Each refinement leads the block as
-// `x: x ?? <no else arm>`, as the Rust frontend prepends the dead-end
-// binding `x == .Val(x) ?? { }` (`prepend_else_presence_refinements`).
+// The `else` of a guard table holds the payload of every stable `x == None`
+// arm subject. Each refinement leads the block as `x: x ?? <no else arm>`, the
+// dead-end binding `x == .Val(x) ?? { }`.
 sema_stmt_check_else_complement: fn(names: [BindName], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
     sema_scope_enter(scopes, state, "if.else@{span.start}")
     statements := [TStmt]{}

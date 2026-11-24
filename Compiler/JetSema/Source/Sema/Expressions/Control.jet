@@ -60,12 +60,12 @@ use jet_foundation.[
     ModuleID,
 ]
 
-// The source location of a panic at `span` (Rust capture_panic_loc), naming the
-// function being checked: `scopes.location_function` on a compiler thread,
-// which never writes the shared environment, else the environment's
-// `function_name`. `column` is the 1-based byte column of the span's start
-// and `caret` the span's byte length; the backend, which holds the source
-// text, supplies the report's source line and character column.
+// The source location of a panic at `span`, naming the function being checked:
+// `scopes.location_function` on a compiler thread, which never writes the
+// shared environment, else the environment's `function_name`. `column` is the
+// 1-based byte column of the span's start and `caret` the span's byte length;
+// the backend, which holds the source text, supplies the report's source line
+// and character column.
 sema_expression_panic_location: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> TPanicLoc Never! {
     file := environment.source_file
     line := 0
@@ -136,11 +136,11 @@ sema_site_is_caller: fn(expr: Expr) -> Bool Never! {
     false
 }
 
-// The `assert`/`assert_eq`/`panic` report's safe locals (Rust safe_locals_snapshot):
-// the visible Int, Float and Bool locals and parameters of the body being
-// checked, sorted by name. A lambda body's locals end at its own frame;
-// compiler-generated `__` names are not the program's locals. Compile-time
-// code reports its stop as a build error, which lists no locals.
+// The `assert`/`assert_eq`/`panic` report's safe locals: the visible Int, Float and
+// Bool locals and parameters of the body being checked, sorted by name. A lambda
+// body's locals end at its own frame; compiler-generated `__` names are not the
+// program's locals. Compile-time code reports its stop as a build error, which lists
+// no locals.
 sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicLocal] Never! {
     if scopes.comptime_execution_depth > 0 -> return [TPanicLocal]{}
     chain := [Int:Bool]{}
@@ -273,11 +273,11 @@ sema_expression_absent_sibling: fn(sibling: TExpr?) -> Type? Never! {
     }
 }
 
-// Result constructors stay calls in the parsed AST so a user declaration
-// can shadow them. Classify only the unshadowed contextual spellings, as
-// Rust `normalize_contextual_expr` does before checking their payloads.
-// The flag selects success (`Ok`) or failure (`Err`) without building a
-// throwaway AST node when a return-carrier predicate asks the same question.
+// Result constructors stay calls in the parsed AST so a user declaration can
+// shadow them. Only the unshadowed contextual spellings are classified, before
+// their payloads are checked. The flag selects success (`Ok`) or failure
+// (`Err`) without building a throwaway AST node when a return-carrier
+// predicate asks the same question.
 sema_expression_contextual_result_call: fn(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool? Never! {
     if call.name != "Ok" && call.name != "Err" -> return None
     if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
@@ -327,9 +327,9 @@ sema_expression_default_err_struct: fn(value: Expr) -> Bool Never! {
     }
 }
 
-// Rust `infer_err`: the payload of `Err(x)` toward the default `Err` domain is
-// inferred first, and only a `String` builds the default error from a message;
-// a value that already is an `Err` (`?? return Err(err)`) is the failure itself.
+// The payload of `Err(x)` toward the default `Err` domain is inferred first, and
+// only a `String` builds the default error from a message; a value that already
+// is an `Err` (`?? return Err(err)`) is the failure itself.
 sema_expression_err_payload_is_err: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> Bool {
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
@@ -345,8 +345,8 @@ sema_expression_default_err_call: fn(value: Expr, span: Span, expected: Type, en
 // The parser stores `Ok(x.f.move())`'s move mark on the CallArg. A marked field
 // read keeps it as the exact-place move an ordinary consuming argument gets
 // (Calls/Checking.jet), so the payload moves out of its owner instead of
-// materializing a copy (the Rust reference's contextual Ok/Err normalization).
-// A field of a borrowed parameter has no storage to give up and keeps its copy.
+// materializing a copy. A field of a borrowed parameter has no storage to give
+// up and keeps its copy.
 sema_expression_result_call_takes_field: fn(call: Call, state: ^SemaOwnershipState, scopes: SemaScopeTable) -> Bool {
     if call.args.len() != 1 || call.args[0].convention != AccessConvention.Move || !(call.args[0].expr == .Field(_, _, _, _)) {
         return false
@@ -539,8 +539,7 @@ sema_expression_propagating_call: fn(expr: Expr, scopes: SemaScopeTable) -> Bool
     }
 }
 
-// A pattern that inspects the Result carrier itself (the Rust reference's
-// `pattern_consumes_result_carrier`).
+// A pattern that inspects the Result carrier itself.
 sema_pattern_consumes_result_carrier: fn(pattern: Pattern) -> Bool Never! {
     if pattern == {
         .Ok(_, _, _, _) | .Err(_, _, _, _) -> true
@@ -632,12 +631,11 @@ sema_check_pattern_subject: fn(subject: Expr, pattern: Pattern, expected: Type?,
 // success view for this call, a Result result is compared by its success side;
 // `sema_expression_auto_propagate` then inserts the one `Try`.
 sema_expression_call_expected: fn(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
-    // Rust `expr_definitely_diverges` / `infer_or_fallback`: a call whose
-    // checked result has a `Never` success (`Never`, or `Never E!`) diverges,
-    // and the slot type is only an inference hint for it; its consumer (`??`,
-    // a branch) accepts divergence. This is `x ?? fail(...)` with
-    // `fail: fn() -> Never Never!`, and the fixed Core route of
-    // `x ?? core.math.__numeric_stop(...)`.
+    // A call whose checked result has a `Never` success (`Never`, or
+    // `Never E!`) diverges, and the slot type is only an inference hint for it;
+    // its consumer (`??`, a branch) accepts divergence. This is
+    // `x ?? fail(...)` with `fail: fn() -> Never Never!`, and the fixed Core
+    // route of `x ?? core.math.__numeric_stop(...)`.
     if sema_expr_never_success(Val(sema_expr_unwrap_tag(value.ty))) -> return Val(value)
     if context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
@@ -682,15 +680,13 @@ sema_failure_conversion_name_part: fn(name: String) -> String Never! {
     "__{bytes.len()}_{String.from_bytes(encoded) ?? ""}"
 }
 
-// The canonical routine name of `impl Source -> Target`,
-// matching the Rust reference's `error_conv_fn_name`.
+// The canonical routine name of `impl Source -> Target`.
 sema_failure_conversion_function_name: fn(source: Type, target: Type) -> String Never! {
     "errconv_{sema_failure_conversion_name_part(type_name(source))}_to_{sema_failure_conversion_name_part(type_name(target))}"
 }
 
 // A declared `impl Source -> Target` registers under the leaf names of both
-// sides (the Rust reference names the routine by the declared names), so a
-// site whose failure types are canonical owner identities
+// sides, so a site whose failure types are canonical owner identities
 // (`module:….OuterError`) or qualified spellings finds the same routine.
 sema_failure_declared_conversion_name: fn(source_leaf: String, target_leaf: String) -> String Never! {
     "errconv_{sema_failure_conversion_name_part(source_leaf)}_to_{sema_failure_conversion_name_part(target_leaf)}"
@@ -871,9 +867,9 @@ sema_failure_callee: fn(expr: Expr?, environment: SemaScopeEnvironment, program:
             inferable: sema_failure_callee_inferable(environment, program, symbol.id) ?? return None
             return Val(SemaFailureCallee{key: scopes.bindings[index].key.copy(), inferable: inferable})
         }
-        // Rust `inferable_failure_callee`: `alias.member(...)` through a
-        // whole-module import names that module's source function, which the
-        // bundle solve settles like a same-module callee.
+        // `alias.member(...)` through a whole-module import names that module's
+        // source function, which the bundle solve settles like a same-module
+        // callee.
         .MethodCall(receiver, method, _, _, _, _, _) -> {
             alias: if receiver == {
                 .Ident(name, _, _) -> name
@@ -971,11 +967,11 @@ sema_failure_function_inferable: fn(func: Func) -> Bool {
     func.inline_foreign == None && sema_failure_contract_is_default(func.return_type)
 }
 
-// Whether the callee of `expr` declares a failure route on its declared
-// return (the Rust reference's `resolved_ret`): a direct call of a function
-// with no written return (the default `Err` route) or a written fallible one.
-// A written plain return (`-> Int`) declares none even though the call carries
-// the default route; any other fallible source declares its own.
+// Whether the callee of `expr` declares a failure route on its declared return:
+// a direct call of a function with no written return (the default `Err` route)
+// or a written fallible one. A written plain return (`-> Int`) declares none
+// even though the call carries the default route; any other fallible source
+// declares its own.
 sema_failure_source_declares_failure: fn(expr: Expr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
     source: expr ?? return true
     if source == {
@@ -1018,12 +1014,11 @@ sema_failure_record_edge: fn(callee: SemaFailureCallee?, context: ^SemaCheckCont
     context.failure_edges.push("")
 }
 
-// A failure passing up into the default `Err` route
-// joins this body's failure-union row: an unannotated callee as an edge the
-// bundle solve joins, any other failure as a member (the Rust reference's
-// failure-union probe arm of `infer_try`). An edge is appended as found;
-// looking for it first would scan the row once per call, quadratic in a
-// body's calls, so the body's facts keep each edge once when it ends
+// A failure passing up into the default `Err` route joins this body's
+// failure-union row: an unannotated callee as an edge the bundle solve joins,
+// any other failure as a member. An edge is appended as found; looking for it
+// first would scan the row once per call, quadratic in a body's calls, so the
+// body's facts keep each edge once when it ends
 // (sema_failure_union_edges_once).
 sema_failure_union_record_propagation: fn(callee: SemaFailureCallee?, error: Type, context: ^SemaCheckContext) Never! {
     if callee == .Val(found) {
@@ -1214,9 +1209,9 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
         .Result(_, error) -> {
             // `Never` is uninhabited whatever the caller's rail. A callee the
             // bundle failure solve projected onto `T Never!` still propagated
-            // the default `Err` in the Rust reference's one body check, which
-            // precedes that projection; a spawned task body records it so a
-            // recheck keeps the task element it was first checked with.
+            // the default `Err` in its first body check, which precedes that
+            // projection; a spawned task body records it so a recheck keeps
+            // the task element it was first checked with.
             if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
                 if context.taskgroups.in_spawn && sema_failure_callee_inferred_never(sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes), program) {
                     context.task_body_propagates = true
@@ -1277,8 +1272,7 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
                 diagnostics.push(sema_failure_domain_mismatch(source_expr, span, error, target, environment, program, scopes, context))
                 return sema_failure_defer_obligation(callee, diagnostics)
             }
-            // Rust `*ret_err == err || nominal_type_identity(ret_err, ^err)`: a
-            // callee may publish its failure by the declared spelling
+            // A callee may publish its failure by the declared spelling
             // (`NetError`) while the caller's contract carries the canonical
             // identity; both name one nominal type in this module.
             if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) {
@@ -1345,8 +1339,8 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
     }
 }
 
-// (Rust `task_body_propagates`): a failure that leaves this
-// body through the enclosing carrier. A lambda scopes and harvests the fact.
+// A failure that leaves this body through the enclosing carrier. A lambda
+// scopes and harvests the fact.
 sema_expression_propagation_taken: fn(context: ^SemaCheckContext, conversion: TTryConvert) -> TTryConvert? Never! {
     context.task_body_propagates = true
     Val(conversion)
@@ -1647,8 +1641,7 @@ sema_control_value_loop_attach_fallback: fn(value: Expr, fallback: OrFallback, s
                                 diagnostics.push(sema_error("E0078", updated_lambda.span, "this finite value loop has no root loop for its exhaustion route", "the route must be attached to the expression loop itself", "use the finite loop-expression form"))
                                 return None
                             }
-                            // The route belongs to the lambda's own root loop
-                            // (Rust `attach_value_loop_route` pushes in place).
+                            // The route belongs to the lambda's own root loop.
                             updated_lambda.body = LambdaBody.Block{body: updated_statements}
                         }
                         .Expr(_) -> {
@@ -1740,11 +1733,10 @@ sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, e
         sema_ownership_merge_references(state, fallback_path.references)
     }
     route_value: checked_route.value ?? TOrFallback.Value{value: sema_node(context, checked_route.payload, NodeKind.Unit, span)}
-    // (Rust `lower_or_fallback`): a mixed `T? E!`
-    // carrier has two failure routes, so `??` removes them one at a time:
-    // first its Result route (where `err` is bound and a value fallback is
-    // lifted to `Val(fallback)`), then the remaining Option route. Only one
-    // route runs, so the fallback is still evaluated at most once.
+    // A mixed `T? E!` carrier has two failure routes, so `??` removes them one
+    // at a time: first its Result route (where `err` is bound and a value
+    // fallback is lifted to `Val(fallback)`), then the remaining Option route.
+    // Only one route runs, so the fallback is still evaluated at most once.
     if subject.ty == .Result(ok, _) && ok == .Option(_) {
         failure_route: if route_value == {
             .Value(fallback_value) -> TOrFallback.Value{value: sema_tree_node(ok, TExprKind.Present{value: fallback_value}, fallback_value.span)}
@@ -1758,8 +1750,8 @@ sema_expression_or_fallback: fn(value: Expr, fallback: OrFallback, span: Span, e
     sema_expr_expected(result, expected, environment, program, diagnostics)
 }
 
-// Rust `is_core_compute_call`: a method call on the `core.compute` import
-// alias, such as `compute.mul(w, x)`.
+// A method call on the `core.compute` import alias, such as
+// `compute.mul(w, x)`.
 sema_control_is_core_compute_call: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     return if value == {
         .Paren(inner, _, _) -> sema_control_is_core_compute_call(inner, environment, program)
@@ -1775,11 +1767,10 @@ SemaOrFallbackRoute: struct {
     ambient_err: TLocal?,
 }
 
-// A valueless builtin call (`print`, `assert`, `assert_eq`, `consume`,
-// `close`) is a statement, not a fallback value (Rust `infer_call_like`:
-// `check_call` hands back no type only for these unshadowed builtins; a
-// declared function without `->` hands back `Unit`). Name the legal tails of
-// this already-braced block rather than recommending braces.
+// A valueless builtin call (`print`, `assert`, `assert_eq`, `consume`, `close`)
+// is a statement, not a fallback value: only these unshadowed builtins hand back
+// no type, and a declared function without `->` hands back `Unit`. Name the
+// legal tails of this already-braced block rather than recommending braces.
 sema_fallback_unit_call_name: fn(value: Expr, scopes: SemaScopeTable) -> String? Never! {
     if value == {
         .Paren(inner, _, _) -> sema_fallback_unit_call_name(inner, scopes)
@@ -1810,10 +1801,10 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
     sema_scope_enter(scopes, fallback_state, "or.fallback@{span.start}")
     ambient_err := TLocal?{None}
     if subject_ty == .Result(_, error_type) {
-        // Rust `declare_in_scope(AMBIENT_ERR, …)`: the report is declared in
-        // this fallback's own frame with none of `declare`'s redefinition
-        // checks and no single-use duty, so a nested fallible `??` shadows an
-        // enclosing `err` (as the refutable fallback's `err` already does).
+        // The report is declared in this fallback's own frame with none of
+        // `declare`'s redefinition checks and no single-use duty, so a nested
+        // fallible `??` shadows an enclosing `err` (as the refutable fallback's
+        // `err` already does).
         owner: sema_scope_local_owner_key(scopes)
         local_module: sema_scope_environment_module_text(environment, program)
         key: symbol_key_text(SymbolKind.Local, local_module, owner, "err")
@@ -1832,8 +1823,8 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
     if fallback == {
         .Value(other) -> {
             fallback_expected: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
-            // The success payload is the fallback's hint: its own E0108
-            // against it is the `??` mismatch (Rust `OrFallback.Value`).
+            // The success payload is the fallback's hint: its own E0108 against
+            // it is the `??` mismatch.
             fallback_start: diagnostics.len()
             checked: sema_check_expression(other, fallback_expected, environment, program, scopes, fallback_state, tail_store, context, diagnostics) ?? {
                 if fallback_expected != None && sema_value_mismatch_index(diagnostics, fallback_start, expr_span(other)) == .Val(mismatch_index) {
@@ -1859,9 +1850,8 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
             fallback_reaches_merge = checked.ty != Type.Named{name: "Never"}
         }
         .Block(body, tail, block_span) -> {
-            // Rust `parse_or_fallback_block`: a block with no value line must
-            // end in a real exit, which then needs no value of the success
-            // payload's type.
+            // A block with no value line must end in a real exit, which then
+            // needs no value of the success payload's type.
             if tail == None {
                 last_exits := false
                 last_span := Span{start: block_span.end - 1, end: block_span.end}
@@ -2549,9 +2539,9 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
     sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
 }
 
-// Rust `require_bool`: a condition is inferred with Bool as its target, and
-// one of another type is E0110 about the condition, in place of the generic
-// E0108 its check against Bool reported.
+// A condition is inferred with Bool as its target, and one of another type is
+// E0110 about the condition, in place of the generic E0108 its check against
+// Bool reported.
 sema_expression_condition_replace_mismatch: fn(condition: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) {
     value_span: expr_span(condition)
     mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
@@ -2577,8 +2567,7 @@ sema_expression_ident_name: fn(expr: Expr) -> BindName? {
     }
 }
 
-// The name and test span of an atomic `x == None` /
-// `x == .None` test (Rust `atomic_absent_optional_subject`).
+// The name and test span of an atomic `x == None` / `x == .None` test.
 sema_expression_absent_optional_test: fn(condition: Expr) -> {name: BindName, span: Span}? {
     if condition == {
         .Binary(op, left, right, span, _) -> {
@@ -2606,9 +2595,8 @@ sema_expression_absent_optional_test: fn(condition: Expr) -> {name: BindName, sp
     }
 }
 
-// The payload type of a stable Optional, an immutable local or
-// parameter of type `T?` that a proven test may refine to `T` (Rust
-// `flow_narrowable_optional_inner`).
+// The payload type of a stable Optional, an immutable local or parameter of
+// type `T?` that a proven test may refine to `T`.
 sema_expression_flow_optional_payload: fn(scopes: SemaScopeTable, name: String) -> Type? {
     index: sema_scope_resolve_index(scopes, name) ?? return None
     binding: scopes.bindings[index]
@@ -2628,9 +2616,8 @@ sema_expression_presence_test: fn(name: BindName, span: Span) -> Expr Never! {
     Expr.PatternTest{subject: Expr.Ident{name: name.name, span: name.span, id: AST_NODE_GENERATED}, pattern: Pattern.Present{binding: name.name, binding_span: name.span, inner: None, span: span}, span: span, id: AST_NODE_GENERATED}
 }
 
-// A stable `x != None` test, alone or along a `&&` chain, reads
-// as the presence test `x == .Val(x)` (Rust `rewrite_optional_flow_ne_none`).
-// None when the condition has no such test.
+// A stable `x != None` test, alone or along a `&&` chain, reads as the presence
+// test `x == .Val(x)`. None when the condition has no such test.
 sema_expression_rewrite_optional_ne_none: fn(condition: Expr, scopes: SemaScopeTable) -> Expr? {
     if condition == {
         .Binary(op, left, right, span, node) -> {
@@ -2693,8 +2680,7 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
                 }
                 next
             }
-            // `x == .Val(x)` over a stable Optional refines
-            // `x` to its payload (Rust `declare_condition_binding`).
+            // `x == .Val(x)` over a stable Optional refines `x` to its payload.
             sema_scope_refine_local(scopes, binding.symbol, binding.key)
         }
         if in_place -> sema_scope_mark_place_alias(scopes, binding.symbol.name)
@@ -2737,8 +2723,8 @@ sema_expression_source_reads_in_place: fn(source: Expr, scopes: SemaScopeTable) 
     }
 }
 
-// A payload binding that shadows the stable Optional it was
-// tested from refines that name (Rust `is_optional_flow_refine`).
+// A payload binding that shadows the stable Optional it was tested from refines
+// that name.
 sema_expression_refines_optional: fn(scopes: SemaScopeTable, symbol: Symbol) -> Bool {
     payload: sema_expression_flow_optional_payload(scopes, symbol.name) ?? return false
     bound: symbol.ty ?? return false
@@ -2767,9 +2753,9 @@ sema_expression_if_hoisted: fn(subject: Expr, condition: Expr, then_body: [Stmt]
 }
 
 // A multi-arm table (`if x == { None -> a  Val(v) -> b }`) reads as an `if`
-// chain whose next level tests the same name again. Rust checks such a table
-// as one switch over the declared type, so the `None` arm does not narrow
-// `x` for the arms after it; only a two-way `if x == None` swaps.
+// chain whose next level tests the same name again. Such a table is checked
+// as one switch over the declared type, so the `None` arm does not narrow `x`
+// for the arms after it; only a two-way `if x == None` swaps.
 sema_expression_if_continues_dispatch: fn(else_value: Expr, name: String) -> Bool Never! {
     if else_value == .If(next_condition, _, _, _, _, _, _) {
         if sema_expression_if_condition_subject(next_condition) == .Val(subject) {
@@ -2779,11 +2765,11 @@ sema_expression_if_continues_dispatch: fn(else_value: Expr, name: String) -> Boo
     false
 }
 
-// Whether a stable `x == None` level swaps into the presence
-// test. The last arm of an else-less table (`else_value` is `NoElse`) never
-// does: Rust checks the table as one switch, the swapped payload branch would
-// be the empty `NoElse`, and the table's E0307 coverage would then read the
-// `None` arm as `.Val` and report `None` missing.
+// Whether a stable `x == None` level swaps into the presence test. The last
+// arm of an else-less table (`else_value` is `NoElse`) never does: the table
+// is checked as one switch, the swapped payload branch would be the empty
+// `NoElse`, and the table's E0307 coverage would then read the `None` arm as
+// `.Val` and report `None` missing.
 sema_expression_if_absent_test_swaps: fn(else_value: Expr, name: String) -> Bool Never! {
     if else_value == .NoElse(_, _) -> return false
     !sema_expression_if_continues_dispatch(else_value, name)
@@ -2870,9 +2856,9 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
             }
         }
     }
-    // A stable `x == None` test reads as the presence test
-    // with the branches swapped, so the other branch holds the payload (Rust
-    // value `if`). Source order of evaluation is unchanged.
+    // A stable `x == None` test reads as the presence test with the branches
+    // swapped, so the other branch holds the payload. Source order of
+    // evaluation is unchanged.
     if sema_expression_absent_optional_test(condition) == .Val(test) {
         if sema_expression_flow_optional_payload(scopes, test.name.name) != None && sema_expression_if_absent_test_swaps(else_value, test.name.name) {
             return sema_expression_if(sema_expression_presence_test(test.name, test.span), else_body, else_value, then_body, then_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -3243,9 +3229,8 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
     sema_expr_expected(chain_value, expected, environment, program, diagnostics)
 }
 
-// Rust `nominal_type_identity`: two spellings of one declared type (the
-// written `Kind` and the canonical `module.Kind` a resolved type carries)
-// are the same type at a merge.
+// Two spellings of one declared type (the written `Kind` and the canonical
+// `module.Kind` a resolved type carries) are the same type at a merge.
 sema_expression_nominal_identity: fn(left: Type, right: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if type_identity_equal(left, right) -> return true
     type_identity_equal(sema_expr_expected_type(left, environment, program), sema_expr_expected_type(right, environment, program))

@@ -185,7 +185,7 @@ sema_stmt_tree_block_can_fall_through: fn(statements: [TStmt]) -> Bool Never! {
                 return false
             }
             .Loop(label, body, _) -> return sema_stmt_tree_loop_body_has_break(body, label, true)
-            // Rust flow facts: a wrapper block's own exit leaves the block.
+            // A wrapper block's own exit leaves the block.
             .Inline(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Shield(body, _) | .Region(body, _) -> return sema_stmt_tree_block_can_fall_through(body)
             .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .While(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .Defer(_, _) -> return true
         }
@@ -193,9 +193,9 @@ sema_stmt_tree_block_can_fall_through: fn(statements: [TStmt]) -> Bool Never! {
     true
 }
 
-// Rust `stream_element_type` reads the declared return type. The scope holds
-// the effective return, where a plain `Stream<T>` became
-// `Stream<T> Err!` (`sema_effective_return_type`), so that carrier is unwrapped.
+// A stream's element type comes from the declared return type. The scope
+// holds the effective return, where a plain `Stream<T>` became `Stream<T> Err!`
+// (`sema_effective_return_type`), so that carrier is unwrapped.
 sema_stmt_stream_element_type: fn(return_type: Type?) -> Type? {
     resolved: return_type ?? return None
     if resolved == {
@@ -266,7 +266,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, environme
     stream_return := return_type
     if sema_stmt_stream_element_type(stream_return) == None -> stream_return = scopes.return_type
     elem_type: sema_stmt_stream_element_type(stream_return) ?? {
-        // Rust reports at the `yield` keyword.
+        // The report sits at the `yield` keyword.
         keyword: Span{start: span.start, end: span.start + "yield".count_bytes()}
         diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove the `yield`"))
         _ := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -274,8 +274,8 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, environme
     }
     diagnostic_start: diagnostics.len()
     checked: sema_check_expression(value, Val(elem_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
-        // Rust `Stmt.Yield`: the element type is the yielded value's target,
-        // and a value of another type is E0807 about the stream.
+        // The element type is the yielded value's target, and a value of
+        // another type is E0807 about the stream.
         mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return None
         probe_diagnostics := [Diagnostic]{}
         offered: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
@@ -352,8 +352,8 @@ sema_stmt_block_has_no_fallthrough: fn(statements: [Stmt]) -> Bool Never! {
     }
 }
 
-// Rust `stmt_definitely_returns`: `return`, a diverging `panic`/`todo` line, a
-// loop that no `break` leaves, or a table whose every path returns.
+// `return`, a diverging `panic`/`todo` line, a loop that no `break` leaves, or
+// a table whose every path returns.
 sema_stmt_definitely_returns: fn(statement: Stmt) -> Bool Never! {
     if statement == {
         .Return(_, _) -> return true
@@ -861,8 +861,8 @@ sema_stmt_is_directory_filter: fn(statement: Stmt, var: String) -> Bool Never! {
     false
 }
 
-// Rust stmt_has_structural_control_flow: an exit, a loop, a table or a task
-// group, here or inside a plain nested block.
+// An exit, a loop, a table or a task group, here or inside a plain nested
+// block.
 sema_stmt_has_structural_control_flow: fn(statement: Stmt) -> Bool Never! {
     if statement == {
         .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) -> return true
@@ -878,9 +878,9 @@ sema_stmt_has_structural_control_flow: fn(statement: Stmt) -> Bool Never! {
     }
 }
 
-// Rust check_block_inner's value-tail lints for a value block (the shapes
-// jet_parser's parser_value_tails reads, which `jet fmt --simplify`
-// rewrites): L0513 when a fallback-free arm table of direct returns is
+// The value-tail lints for a value block (the shapes jet_parser's
+// parser_value_tails reads, which `jet fmt --simplify` rewrites): L0513 when a
+// fallback-free arm table of direct returns is
 // followed by a default return, and L0530 when the last line is
 // `return value`, which only repeats the implicit return. Each such arm
 // table's start joins `tables` whether or not `lint` is set: the table's
@@ -894,10 +894,9 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
             .ElseArm -> {
                 table: tail.table
                 tables.push(table.start)
-                // Rust check_redundant_arm_table_return: the lint is its
-                // rewrite, so a table whose source the rewrite cannot read
-                // is not reported. Only a reported table copies the module's
-                // bytes.
+                // The lint is its rewrite, so a table whose source the rewrite
+                // cannot read is not reported. Only a reported table copies the
+                // module's bytes.
                 if lint {
                     graph: program.registration_graph ?? next
                     caller: sema_scope_caller_index(environment, graph) ?? next
@@ -919,16 +918,16 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
     }
 }
 
-// Rust u8.is_ascii_whitespace: space, tab, newline, form feed, return.
+// Space, tab, newline, form feed, return.
 sema_stmt_ascii_space: fn(byte: U8) -> Bool {
     byte == U8{32} || byte == U8{9} || byte == U8{10} || byte == U8{12} || byte == U8{13}
 }
 
-// Rust `check_value_tail` for the end of a value block: an empty block, one
-// whose last line is a valueless builtin call (`print`, `assert`, …: Rust
-// `check_call` hands back no type for these), or one whose last line is a
-// statement that can still reach the end, reports E0114. A value line and a
-// table report their own errors. False when E0114 was reported.
+// The end of a value block: an empty block, one whose last line is a
+// valueless builtin call (`print`, `assert`, …, which have no type), or one
+// whose last line is a statement that can still reach the end, reports E0114.
+// A value line and a table report their own errors. False when E0114 was
+// reported.
 sema_stmt_check_value_block_end: fn(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Bool {
     if statements.len() == 0 {
         diagnostics.push(sema_stmt_missing_value(expected, None, function_name, block_span))
@@ -1110,8 +1109,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                     }
                     .None -> {
-                        // Rust `check_switch`: a guard table that ends a value
-                        // block with no `else` can skip every arm (E0114).
+                        // A guard table that ends a value block with no `else`
+                        // can skip every arm (E0114).
                         value_guard: index + 1 == statements.len() && context.value_tail_span == (Val(span)) && else_body == None && sema_stmt_refutable_is_subjectless_guard(subject, span)
                         checked: sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
                         if value_guard {
@@ -1239,9 +1238,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if sema_range_backward_diagnostic(start_expr, end_expr, step_expr, exclusive, true) == .Val(backward) {
                             diagnostics.push(backward)
                         }
-                        // Rust `check_stmt`: an arrow body is only the body's
-                        // spelling, and a second loop name is not declared for
-                        // a range.
+                        // An arrow body is only the body's spelling, and a
+                        // second loop name is not declared for a range.
                         valid := start_value != None && end_value != None
                         if step_expr != None && step_value == None -> valid = false
                         range_var_type := Type.Int
@@ -1650,8 +1648,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         context.arrow_loop_body = previous_arrow_loop_body
                         if label != None -> sema_scope_pop_loop_label(scopes)
                         sema_single_use_leave_scope(scopes, state, diagnostics)
-                        // Rust `check_stmt`: a literal `true` condition never
-                        // skips the body, as `loop`.
+                        // A literal `true` condition never skips the body, as
+                        // `loop`.
                         if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, false, !sema_stmt_refutable_expr_is_true(condition), environment, program, diagnostics) {
                             loop_scope_valid = false
                         }
@@ -1804,9 +1802,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             .Loop(body, _, _, _) -> {
                 if !sema_stmt_refutable_loop_body_can_break(body) -> reachable = false
             }
-            // Rust flow facts: a table whose every path leaves, or a literal
-            // `true` loop that nothing breaks, ends the reachable path too. A
-            // fallback table's miss runs on into its default return.
+            // A table whose every path leaves, or a literal `true` loop that
+            // nothing breaks, ends the reachable path too. A fallback table's
+            // miss runs on into its default return.
             .Switch(_, _, _, table_span) -> {
                 if !context.fallback_tables.contains(table_span.start) && sema_stmt_refutable_statement_exits(statements[index]) {
                     reachable = false
@@ -1905,8 +1903,8 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
     dead_state := sema_ownership_state_snapshot(state)
     dead_mark: sema_check_context_mark(context)
     // A dead last line is checked for its own diagnostics, never as the value
-    // the function hands back. Rust `check_value_tail`: a dead value line keeps
-    // the promised type as context (so a bare `None` still types).
+    // the function hands back. A dead value line keeps the promised type as
+    // context (so a bare `None` still types).
     dead_value_tail := false
     if index + 1 == statements.len() && statement == .Expr(tail) && context.value_tail_span == (Val(expr_span(tail))) && !sema_stmt_refutable_expr_diverges(tail) {
         dead_value_tail = true
@@ -2018,9 +2016,8 @@ sema_stmt_check_expression_statement: fn(expr: Expr, return_type: Type?, environ
                 discard_fact_start: context.call_facts.len()
                 discard_diagnostic_start: diagnostics.len()
                 // A direct call statement in a callback with no return row
-                // keeps the Result its callee declares (the Rust reference's
-                // open-callback statement root): the statement reports it
-                // unchecked (E0402) and the callback's return row becomes
+                // keeps the Result its callee declares: the statement reports
+                // it unchecked (E0402) and the callback's return row becomes
                 // that carrier.
                 raw_call: context.failure_inference && context.callback_return_open && expr == .Call(_, _) && sema_failure_source_declares_failure(Val(expr), environment, program, scopes)
                 value: if raw_call -> sema_check_expression_carrier(expr, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -2102,8 +2099,8 @@ sema_stmt_is_paren_if: fn(expr: Expr) -> Bool Never! {
 // Lowering installs the guards around the body (IR BuildTransact.jet
 // ir_context_block).
 sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], loop_depth: Int, output: ^[TStmt]) -> Bool {
-    // Rust binds the block's `#Context` or `#Deadline` application first;
-    // fields that do not bind (E0930) get no E0762 of their own.
+    // The block's `#Context` or `#Deadline` application binds first; fields
+    // that do not bind (E0930) get no E0762 of their own.
     signature_valid: sema_marker_rules_check_context_fact(span, environment, program, scopes, state, tail_store, context, diagnostics)
     complete := signature_valid
     guards := [TContextGuard]{}
@@ -2419,14 +2416,14 @@ sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body:
     table.complete
 }
 
-// Rust OSTarget `fold_switch` `#if
-// #build.target.os == { .Linux -> … }` folds to the chain of `#if` arms whose
-// conditions are whether the arm names this build's `#build.target.os`, as Bool
-// literals, so the `#if` check selects the arm. Every arm head is a bare OS
-// variant or an or-pattern of them (`.MacOS | .Windows`), no OS appears twice,
-// and the arms name every OS whatever the target: `OS` is a closed set, so an
-// `else` is E0641 (#6281). A `#build.settings.<key>` dispatch folds against
-// the declared setting's value (sema_stmt_check_setting_switch).
+// An OS target switch `#if #build.target.os == { .Linux -> … }` folds to the
+// chain of `#if` arms whose conditions are whether the arm names this build's
+// `#build.target.os`, as Bool literals, so the `#if` check selects the arm.
+// Every arm head is a bare OS variant or an or-pattern of them
+// (`.MacOS | .Windows`), no OS appears twice, and the arms name every OS
+// whatever the target: `OS` is a closed set, so an `else` is E0641. A
+// `#build.settings.<key>` dispatch folds against the declared setting's value
+// (sema_stmt_check_setting_switch).
 sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], loop_depth: Int, output: ^[TStmt]) -> Bool {
     // `#if T == { … }` over a type parameter is the
     // type table, which already keeps one arm per instance.
@@ -2733,7 +2730,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 else -> { output.push(TStmt.Defer{body: nested.value, span: span}) }
             }
         }
-        // Rust `Stmt.Live`: a lexical block; a no-OS target has no terminal.
+        // A lexical block; a no-OS target has no terminal.
         .Live(body, span) -> {
             if sema_scope_environment_no_os(environment, program) {
                 complete = false
@@ -2745,8 +2742,8 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 else -> output.push(TStmt.Live{body: nested.value, span: span})
             }
         }
-        // Rust `Stmt.AssumeDet`: the audited `#Nondeterministic("reason")`
-        // body is a lexical block (the gate ledger records the audit).
+        // The audited `#Nondeterministic("reason")` body is a lexical block
+        // (the gate ledger records the audit).
         .AssumeDet(_, _, body, span) -> {
             nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "nondeterministic@{span.start}", loop_depth)
             if {
@@ -2825,8 +2822,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                         kept -> output.push(TStmt.DeepCheck{body: checked.value, span: span})
                     }
                 }
-                // Rust checks any other switched marker's body as a plain
-                // block (`Stmt.Switched` fallback).
+                // Any other switched marker's body checks as a plain block.
                 else -> {
                     nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "switched@{span.start}", loop_depth)
                     if {
@@ -2889,10 +2885,9 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .AuthorityScope(caps, _, binding, body, span) -> {
-            // (Rust `Stmt.AuthorityScope`): the body is a lexical
-            // block; a named head binds the scoped `Authority` handle. The
-            // cap subset check (E0712) runs over the lowered region in the
-            // effect pass.
+            // The body is a lexical block; a named head binds the scoped
+            // `Authority` handle. The cap subset check (E0712) runs over the
+            // lowered region in the effect pass.
             sema_scope_enter(scopes, state, "fx@{span.start}")
             region_body := [TStmt]{}
             if binding == .Val(handle) {

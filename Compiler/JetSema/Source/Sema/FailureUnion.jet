@@ -1,5 +1,5 @@
-// The failure union of functions that write no failure contract, and the #3708
-// plain-return projection. The Rust reference is and `solve_inferred_failure`.
+// The failure union of functions that write no failure contract, and the
+// plain-return projection.
 //
 // Every body check records what reaches the function's default `Err` route
 // (`SemaCheckContext.failure_union_*`). After the one check of the bundle,
@@ -7,13 +7,13 @@
 // edges (least fixed point). Function-owned cases (`Err(.NotFound(n))`) are
 // minted into a closed `#Error enum` named after the function (`find` gives
 // `FindError`), and every function whose set holds a typed member is projected
-// onto `T (A | B)!` with no written span. Functions the #3708 solve proved
-// infallible are projected onto `T Never!`. A union contract changes what its
-// callers check against, so the modules that declare or reference one are
-// checked again (`sema_failure_recheck_modules`); a `T Never!` projection is
-// reconciled onto the bodies already checked, as the Rust reference does
+// onto `T (A | B)!` with no written span. Functions the solve proved infallible
+// are projected onto `T Never!`. A union contract changes what its callers
+// check against, so the modules that declare or reference one are checked
+// again (`sema_failure_recheck_modules`); a `T Never!` projection is
+// reconciled onto the bodies already checked
 // (`sema_failure_reconcile_infallible`; lowering reads a callee's plain return
-// against the `Result` carrier its call site names, #3740).
+// against the `Result` carrier its call site names).
 use jet_foundation.[
     symbol_table_key,
     Call,
@@ -429,10 +429,9 @@ sema_failure_function_row: fn(graph: SemaRegistrationGraph, module_index: Int, f
 
 // Project contracts onto each declaration, its registry row and symbol, the
 // module items and every import binding of it: the written-span-less return
-// type every later check and lowering read. Rows are replaced in place, and
-// the declaring modules and every import binding are walked once for the
-// whole batch (Rust `solve_inferred_failure` projection), not once per
-// function. Every replaced row is recorded on `trail`.
+// type every later check and lowering read. Rows are replaced in place, and the
+// declaring modules and every import binding are walked once for the whole
+// batch, not once per function. Every replaced row is recorded on `trail`.
 sema_failure_project_returns: fn(graph: ^SemaRegistrationGraph, projections: [SemaFailureProjection], trail: ^SemaGraphTrail) {
     if projections.len() == 0 {
         return
@@ -646,8 +645,8 @@ sema_failure_union_row_part: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
                 next
             }
             // The entry `run: fn` carries the default `Unit Err!` exit
-            // contract (Rust `default_entry_return`), so its failures meet
-            // `Err` instead of joining an inferred union.
+            // contract, so its failures meet `Err` instead of joining an
+            // inferred union.
             if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" {
                 next
             }

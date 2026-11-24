@@ -42,10 +42,10 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     decoded: SchemaSnapshot.parse(wire) ?? panic("snapshot codec")
     schema_require(decoded.write() == wire && decoded.fields.len() == 2, "canonical wire round trip")
     schema_require(decoded.squashed_before == Val("1.0.0"), "squash cutoff preserved")
-    // Rust accepts unknown versions, duplicate headers (last wins), blank
-    // fields and leading plus/zeroes; the reader does not add a validation rail.
+    // The reader accepts unknown versions, duplicate headers (last wins), blank
+    // fields and leading plus/zeroes; it does not add a validation rail.
     loose: SchemaSnapshot.parse(" schema_version = +0004294967295\ntype = Old\ntype = New\npublished_version = 2\nfield : \n") ?? panic("permissive snapshot grammar")
-    schema_require(loose.schema_version == (U32{4294967295}) && loose.type_name == "New" && loose.fields[0].ty == "", "Rust parser grammar")
+    schema_require(loose.schema_version == (U32{4294967295}) && loose.type_name == "New" && loose.fields[0].ty == "", "permissive parser grammar")
     loop version in ([String]{"", "+", "-1", "1_0", "4294967296", "１２"}) {
         invalid := false
         if SchemaSnapshot.parse("schema_version = {version}\ntype = A\npublished_version = 1\n") == .Err(_) {

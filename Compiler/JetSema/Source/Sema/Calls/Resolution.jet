@@ -565,13 +565,11 @@ sema_call_trait_signature_with_receiver: fn(signature: Type, receiver_type: Type
     }
 }
 
-// Rust `infer_method_call` (trait-object and bounded-generic dispatch, via
-// `check_trait_method_args`): the call exposes the method's declared success
-// value, as `checked_return_types(..).0`. The trait ABI keeps the effective
-// failure carrier, which IR lowering propagates at the call (Rust
-// reference lowering, MethodCall), so a declared `-> Bool` never auto-propagates
-// an implicit `Err` in the caller. With no written return the call keeps the
-// registered `Unit Err!` (or a raw protocol's `Unit`).
+// The call exposes the method's declared success value, as
+// `checked_return_types(..).0`. The trait ABI keeps the effective failure
+// carrier, which IR lowering propagates at the call, so a declared `-> Bool`
+// never auto-propagates an implicit `Err` in the caller. With no written return
+// the call keeps the registered `Unit Err!` (or a raw protocol's `Unit`).
 sema_call_trait_dispatch_signature: fn(signature: Type, declared_return: Type?) -> Type Never! {
     // copy: the dispatch signature is a new owned Type. Without a declared return it equals
     // `signature`, the trait method's signature (a read parameter), which stays in the trait.
@@ -743,12 +741,11 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
     }
 }
 
-// Rust `synthesize_impls` (default bodies, S62 `using` delegation): a
-// nominal's trait impl answers a method it doesn't write with the trait's
+// A nominal's trait impl answers a method it doesn't write with the trait's
 // default body, and a delegating impl answers every trait method. The call
-// dispatches through the trait, whose emitted form carries the default body
-// and the delegation forwarding. A top-level `impl T.Trait` and an
-// `impl Trait` block in the body of `T` answer the same way.
+// dispatches through the trait, whose emitted form carries the default body and
+// the delegation forwarding. A top-level `impl T.Trait` and an `impl Trait`
+// block in the body of `T` answer the same way.
 sema_call_implemented_trait_method_candidates: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, receiver_type: Type, method: String, type_args: [Type], caller_module: ModuleID, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: ^[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     candidates := [SemaCallMethodCandidate]{}
     loop graph_module_index in 0..<graph.modules.len() {

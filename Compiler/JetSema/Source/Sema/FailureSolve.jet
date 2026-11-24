@@ -26,13 +26,12 @@ use jet_foundation.[
 ]
 
 // #3708: a function whose failure contract sema may infer. No contract was
-// written, and nothing else owns its return protocol (the Rust reference's
-// `failure_inference_candidate`). A computed field's generated getter is the
-// user's formula, so its failures are inferred like a written method's: a
-// read of `path: String -> stored_path` is no failure source. A `#Memo`
-// field's helper is not: its contract is fixed when it is generated
-// (sema_computed_field_memo_helper_func), because a contract inferred after
-// its body was checked would leave the body built for the other one.
+// written, and nothing else owns its return protocol. A computed field's
+// generated getter is the user's formula, so its failures are inferred like a
+// written method's: a read of `path: String -> stored_path` is no failure
+// source. A `#Memo` field's helper is not: its contract is fixed when it is
+// generated (sema_computed_field_memo_helper_func), because a contract inferred
+// after its body was checked would leave the body built for the other one.
 sema_failure_inference_candidate: fn(func: Func) -> Bool Never! {
     if !sema_failure_contract_is_default(func.return_type) -> return false
     if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
@@ -62,7 +61,7 @@ sema_failure_solve: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRe
     loop part in sema_failure_candidate_parts(graph, modules, address_taken, bounds, 0) {
         candidates.extend(part)
     }
-    // Rust checks every declared function as a body job; a per-callable
+    // Every declared function is checked as a body job; a per-callable
     // `#Import(c)` declaration returns before its (empty) body, so its summary
     // has no failure source and no edge. An unannotated import is therefore a
     // candidate the solve proves infallible (a C function cannot fail) and
@@ -520,13 +519,12 @@ sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     selected
 }
 
-// #3708 / #3740: the Rust reference checks every body once and reconciles the `T
-// Never!` projection afterwards (`solve_inferred_failure`, the Rust reference's
-// `is_result_carrier`, `plain_named_fn_value`). A module checked before the solve
-// projected `projected` takes it here: each projected function's checked signature
-// names the `T Never!` carrier, and a dropped call to one is a discarded result
-// (L0508). Its call sites keep the carrier they were checked against; lowering hands
-// a plain-return callee's value to any `Result` carrier a call site names.
+// Every body is checked once and the `T Never!` projection is reconciled
+// afterwards. A module checked before the solve projected `projected` takes it
+// here: each projected function's checked signature names the `T Never!`
+// carrier, and a dropped call to one is a discarded result (L0508). Its call
+// sites keep the carrier they were checked against; lowering hands a
+// plain-return callee's value to any `Result` carrier a call site names.
 sema_failure_reconcile_infallible: fn(modules: ^[SemaGraphModuleResult], projected: [String], symbols: SymbolTable) Never! {
     if projected.len() == 0 {
         return

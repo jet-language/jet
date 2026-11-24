@@ -681,16 +681,15 @@ sema_finalize_program: fn(owned: ^^SemaRegistrationGraph, trail: ^SemaGraphTrail
             }
         }
     }
-    // The tag dataflow over every checked body (the Rust reference's
-    // `check_fact_tags_and_states`: a tagged value reaching a denied
-    // destination is reported, whatever else the bundle reported) reads only
-    // the graph's modules, rows and namespaces, never its symbol table, and
-    // the side checks' taint catalog and the bundle's E0307 reports, which
-    // only body checks make. The effect pass and the late checks write none
-    // of these, so a walk large enough for a thread of its own
+    // The tag dataflow over every checked body (a tagged value reaching a
+    // denied destination is reported, whatever else the bundle reported) reads
+    // only the graph's modules, rows and namespaces, never its symbol table,
+    // and the side checks' taint catalog and the bundle's E0307 reports, which
+    // only body checks make. The effect pass and the late checks write none of
+    // these, so a walk large enough for a thread of its own
     // (sema_finalize_walk_inputs) runs beside the effect pass, and a smaller
-    // one after it on this thread; either way its reports join after the
-    // late checks, where they always read. Beside the pass the two share the
+    // one after it on this thread; either way its reports join after the late
+    // checks, where they always read. Beside the pass the two share the
     // threads: the effect pass takes what the walk leaves.
     taint_reports := [Diagnostic]{}
     taint_catalog: taint_prepared.pop() ?? panic("the side checks left no taint catalog")
@@ -1051,20 +1050,18 @@ SEMA_FINALIZE_WALK_BESIDE_MIN_BYTES: 32768
 // Core usage jobs per admitted thread, claimed dynamically.
 SEMA_CORE_JOBS_PER_THREAD: 8
 
-// The tag dataflow's inputs (the Rust reference's `check_fact_tags_and_states`
-// taint walk), taken from `prepared` (sema_taint_prepare of the graph): its
-// catalog, its modules heaviest source first, the threads the walk admits,
-// and whether it runs beside the effect pass (sema_finalize_program): only
-// when `threads` admits more than one and the walk holds at least
+// The tag dataflow's inputs, taken from `prepared` (sema_taint_prepare of the
+// graph): its catalog, its modules heaviest source first, the threads the walk
+// admits, and whether it runs beside the effect pass (sema_finalize_program):
+// only when `threads` admits more than one and the walk holds at least
 // SEMA_FINALIZE_WALK_BESIDE_MIN_BYTES, so a small program's walk starts no
-// thread. Beside the pass it takes at most a quarter of `threads`' limit:
-// on the compiler the walk is about 1.6 s of CPU against the pass's 2.7 s
-// over 570 ms, so on a quarter it still ends inside the pass, which keeps
-// the rest. Given every thread, the walk took the pass's carriers and
-// sema.effects went from 0.46 s to 1.65 s of wall at 32 threads.
-// Its own reports move onto `reports`; the spans of the E0307 reports among
-// `existing_diagnostics` (the bundle's reports so far) settle switch
-// coverage (sema_taint_open_switches).
+// thread. Beside the pass it takes at most a quarter of `threads`' limit: on
+// the compiler the walk is about 1.6 s of CPU against the pass's 2.7 s over 570
+// ms, so on a quarter it still ends inside the pass, which keeps the rest.
+// Given every thread, the walk took the pass's carriers and sema.effects went
+// from 0.46 s to 1.65 s of wall at 32 threads. Its own reports move onto
+// `reports`; the spans of the E0307 reports among `existing_diagnostics` (the
+// bundle's reports so far) settle switch coverage (sema_taint_open_switches).
 sema_finalize_walk_inputs: fn(prepared: ^^SemaTaintPrepared, existing_diagnostics: [Diagnostic], threads: CompilerThreads, reports: ^[Diagnostic]) -> SemaFinalizeWalkInputs {
     taken: prepared.move()
     reports.extend(taken.reports.move())

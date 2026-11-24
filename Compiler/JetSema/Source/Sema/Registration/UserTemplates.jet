@@ -1,8 +1,7 @@
 // Package-authored templates (declared marker bodies and root `#loop`
 // declarations) expand through the same typed template engine as the Prelude
 // providers (Registration/Derives.jet). Generated items re-enter ordinary
-// registration as written items; nothing is serialized or re-lexed. Rust:
-// (marker bodies) and `expand_item_template_loops`.
+// registration as written items; nothing is serialized or re-lexed.
 use jet_foundation.[
     CallLabel,
     CodeModule,
@@ -145,35 +144,34 @@ sema_user_template_catalog: fn() -> TAppliedRuleCatalog Never! {
     TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
 }
 
-// The registered nominal's full reflection handle (Rust
-// `build_struct_type_info_with_path_and_vocabulary_and_engine`). A template
-// pastes its `name` as the target type in items that land beside the
-// declaration, so a type lifted from an inline module keeps the name it is
-// declared under there, not the source leaf a program reflects it by.
+// The registered nominal's full reflection handle. A template pastes its `name`
+// as the target type in items that land beside the declaration, so a type
+// lifted from an inline module keeps the name it is declared under there, not
+// the source leaf a program reflects it by.
 sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int, owner: String) -> CtValue? {
     info: sema_comptime_reflection_type_info(graph, graph.modules[module_index].module_identity, owner, sema_user_template_catalog(), [Type]{}) ?? return None
     if sema_name_type_leaf(graph.modules[module_index].program.items, owner) == owner -> return sema_user_template_ct_value(info)
     sema_user_template_ct_value(sema_comptime_reflection_with_field(info, "name", TComptimeValue.String{value: owner}))
 }
 
-// Rust `build_function_type_info`: a function rule sees the target's stable
-// source shape (sema_comptime_reflection_function_info), named by its own
-// name, with no module or package name. `module_index` is the row of the
-// module that declares it. `markers` are the function's written MarkerInfo
-// rows (sema_comptime_reflection_written_markers).
+// A function rule sees the target's stable source shape
+// (sema_comptime_reflection_function_info), named by its own name, with no
+// module or package name. `module_index` is the row of the module that declares
+// it. `markers` are the function's written MarkerInfo rows
+// (sema_comptime_reflection_written_markers).
 sema_user_template_function_info: fn(graph: SemaRegistrationGraph, module_index: Int, function: Func, markers: [TComptimeValue]) -> CtValue? {
     sema_user_template_ct_value(sema_comptime_reflection_function_info(graph, module_index, function, "", function.name, "", graph.modules[module_index], markers, [SemaInferenceBinding]{}))
 }
 
 // ---------------------------------------------------------------------------
-// Root `#loop` declarations (Rust `expand_item_template_loops`). They
-// expand before registration in the module's known-time constant scope: the
-// constants whose values are literal data, and the module values the build
-// computed for the loops that read them. A loop over a module value that
-// is not literal data (`#loop row in ROWS` over `ROWS: #run rows()`) waits
-// on that value: the driver's first pass registers the module without the
-// loop and computes the value, and the registration it hands the value to
-// expands the loop (JetDriver Pipeline.jet jet_driver_compile_stages).
+// Root `#loop` declarations. They expand before registration in the module's
+// known-time constant scope: the constants whose values are literal data, and
+// the module values the build computed for the loops that read them. A loop
+// over a module value that is not literal data (`#loop row in ROWS` over
+// `ROWS: #run rows()`) waits on that value: the driver's first pass registers
+// the module without the loop and computes the value, and the registration it
+// hands the value to expands the loop (JetDriver Pipeline.jet
+// jet_driver_compile_stages).
 
 // A module value a root `#loop` waits on, by its module's identity text and
 // its name, and the value the first pass computed for it (None until then,
@@ -1148,14 +1146,12 @@ SemaUserTextBlock: struct {
     site: Span,
 }
 
-// Rust `LValue.span`.
 sema_user_text_lvalue_span: fn(target: LValue) -> Span Never! {
     if target == {
         .Local(_, span) | .Index(_, _, span, _) | .Field(_, _, span) -> span
     }
 }
 
-// Rust `Stmt.span`.
 sema_user_text_stmt_span: fn(statement: Stmt) -> Span Never! {
     if statement == {
         .Expr(value) -> expr_span(value)
@@ -1198,7 +1194,6 @@ sema_user_text_block_source: fn(source: String, body: [Stmt], block_spans: [Span
     String.from_bytes(bytes[span.start..<span.end]) ?? ""
 }
 
-// Rust `ScopeMembers.statement_bodies`.
 sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
     if statement == {
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {

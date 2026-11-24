@@ -29,8 +29,8 @@ use jet_foundation.[
     type_carrier_identity,
 ]
 
-// Rust `uncovered_guard_path`: the case that none of a value block's trailing
-// `if cond -> return …` guards covers.
+// The case that none of a value block's trailing `if cond -> return …` guards
+// covers.
 sema_stmt_uncovered_guard_path: fn(statements: [Stmt]) -> String? {
     reversed := [Expr]{}
     index := statements.len() - 1
@@ -180,10 +180,9 @@ sema_stmt_guard_operator: fn(op: BinOp) -> String? {
     }
 }
 
-// Rust `switch_arm_pattern` over every arm: each head is a structural pattern
-// test (text and byte patterns can always miss). A guarded head
-// (`.Val(x) && x > 0`) counts: it covers no case, and coverage proves that the
-// other arms cover the subject (E0307).
+// Each head is a structural pattern test (text and byte patterns can always
+// miss). A guarded head (`.Val(x) && x > 0`) counts: it covers no case, and
+// coverage proves that the other arms cover the subject (E0307).
 sema_stmt_switch_all_patterns: fn(arms: [SwitchArm]) -> Bool Never! {
     if arms.len() == 0 -> return false
     loop arm in arms {
@@ -217,7 +216,7 @@ sema_stmt_switch_has_text_or_bytes: fn(arms: [SwitchArm]) -> Bool Never! {
     false
 }
 
-// Rust `check_switch` for a subject that is not a plain name: its pattern and
+// A switch whose subject is not a plain name: its pattern and
 // range heads test `it`. A place subject reads the same value in every arm, so
 // the heads read the place itself, as the value form does; any other subject is
 // checked once and bound to `it`.
@@ -256,9 +255,8 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
     key: symbol_key_text(SymbolKind.Local, local_module, owner, "it")
     id: sema_symbol_id_of(program, context, key)
     symbol: Symbol{id: id, kind: SymbolKind.Local, name: "it", module_identity: environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
-    // Rust `check_switch` declares `it` in its own scope with
-    // `declare_in_scope`, so a nested subject table shadows the enclosing
-    // table's `it` instead of reading it.
+    // `it` is declared in the switch's own scope, so a nested subject table
+    // shadows the enclosing table's `it` instead of reading it.
     it_frame: scopes.current
     bounds: checked_cost_integer_bounds(init)
     sema_ownership_declare_binding(state, symbol, false)
@@ -427,7 +425,7 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
     joined: sema_ownership_branch_join(state, fork, then_path, else_path, then_reaches_merge, else_reaches_merge, state.share_found)
     sema_ownership_fork_apply(state, joined)
     sema_ownership_fork_close(state, fork)
-    // Only paths that reach the merge count (Rust `merge_paths`).
+    // Only paths that reach the merge count.
     if then_reaches_merge && !else_reaches_merge -> state.uninit = then_path.uninit
     if else_reaches_merge && !then_reaches_merge -> state.uninit = else_path.uninit
     loop site in then_path.share_found -> sema_ownership_note_share_found(state, site)
@@ -492,22 +490,22 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         type_param = sema_stmt_type_switch_param(subject, environment, scopes)
     }
     type_arms := [Type]{}
-    // Rust `check_switch`: the arms of `if subject OP { … }` over a plain name
-    // test that name directly; any other subject is read once as the `it` the
-    // pattern heads test.
+    // The arms of `if subject OP { … }` over a plain name test that name
+    // directly; any other subject is read once as the `it` the pattern heads
+    // test.
     if !(subject_is_true || multi_head) {
         if subject == {
             .Ident(_, _, _) -> {}
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return sema_stmt_check_subject_switch(subject, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
         }
     }
-    // Rust `check_value_tail`: a table that ends a value block is that
-    // block's value, so each arm ends in a value line or leaves.
+    // A table that ends a value block is that block's value, so each arm ends
+    // in a value line or leaves.
     value_tail: context.value_tail_span == (Val(span))
-    // `if x == None -> a else -> b` over a stable Optional
-    // reads as `if x == .Val(x) -> b else -> a`, so `b` holds the payload.
-    // The guard is evaluated once at the same point; only the mutually
-    // exclusive bodies change places (Rust `check_switch`).
+    // `if x == None -> a else -> b` over a stable Optional reads as
+    // `if x == .Val(x) -> b else -> a`, so `b` holds the payload. The guard is
+    // evaluated once at the same point; only the mutually exclusive bodies
+    // change places.
     subjectless_guard: sema_stmt_refutable_is_subjectless_guard(subject, span)
     if subjectless_guard && arms.len() == 1 && else_body == .Val(present_body) {
         if sema_expression_absent_optional_test(arms[0].cond) == .Val(test) {
@@ -541,8 +539,8 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     complete := true
     // The paths of the arms that reach the merge.
     arm_paths := [SemaOwnershipPath]{}
-    // Rust `check_switch`: a subjectless table with a readiness arm waits on
-    // channels and timers; its heads are not Boolean guards.
+    // A subjectless table with a readiness arm waits on channels and timers;
+    // its heads are not Boolean guards.
     readiness: subjectless_guard && sema_readiness_is_table(arms)
     readiness_table := sema_readiness_table_new()
     // The diagnostics mark of the first `#Through` arm: a run-on body is
@@ -672,8 +670,8 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             branch_hardware_index += 1
         }
     }
-    // A blocking readiness wait always selects an arm, so without an `else`
-    // no path skips the table (Rust merges only the arm paths).
+    // A blocking readiness wait always selects an arm, so without an `else` no
+    // path skips the table.
     else_reaches_merge: if else_body == None -> !readiness else -> sema_stmt_tree_block_can_fall_through(else_result ?? [TStmt]{})
     // The paths that reach the merge ran the conditions up to the last arm
     // among them, or all of them when the else path reaches it. The
@@ -719,7 +717,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         table_tree: sema_readiness_tree(readiness_table, branches, else_result, span, context) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
         return SemaStatementResult{value: [TStmt]{table_tree}, complete: true}
     }
-    // Rust `check_switch` notes each all-pattern arm's coverage (E0365/L0301),
+    // Each all-pattern arm's coverage is noted (E0365/L0301),
     // with or without an `else`, before the E0307 completeness proof. A type
     // table noted its repeated arms itself (sema_stmt_type_switch_target).
     if !subjectless_guard && type_param == None {
@@ -736,14 +734,14 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         }
     }
     // A subjectless guard table proves no coverage: its arms test their own
-    // subjects (Rust `check_switch` skips E0307 for subjectless guards).
+    // subjects.
     if else_body == None && !subjectless_guard {
-        // Rust `check_switch`: only an all-pattern table can prove that one
-        // arm always matches; a text or byte pattern is left to coverage.
+        // Only an all-pattern table can prove that one arm always matches; a
+        // text or byte pattern is left to coverage.
         if !multi_head && !sema_stmt_switch_all_patterns(arms) && !sema_stmt_switch_has_text_or_bytes(arms) {
-            // Rust check_block_inner: a fallback table (L0513) is the old
-            // spelling of one value table; its miss runs on into the default
-            // return after it, so it needs no `else` arm.
+            // A fallback table (L0513) is the old spelling of one value table;
+            // its miss runs on into the default return after it, so it needs no
+            // `else` arm.
             if !context.fallback_tables.contains(span.start) {
                 diagnostics.push(sema_error("E0003", span, "this `if` needs an `else` arm", "mixed condition arms (or non-pattern arms) must always have a fallback", "add `else -> {{ ... }}` after the last arm"))
                 return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -755,10 +753,10 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
                 checked_conditions.push(checked.value)
             }
             sema_coverage_check_table(checked_conditions, multi_head, span, environment, program, diagnostics)
-            // Rust `lower_enum_match`: the miss path of a covered else-less table
-            // is unreachable (codegen ends it in an Unreachable terminator), so it
-            // never falls through to the join, exactly as
-            // sema_stmt_refutable_switch_exits already assumes.
+            // The miss path of a covered else-less table is unreachable (codegen
+            // ends it in an Unreachable terminator), so it never falls through to
+            // the join, exactly as sema_stmt_refutable_switch_exits already
+            // assumes.
             else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_node(context, Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm", line: 0}, span), span: span}})
         }
     }

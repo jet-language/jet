@@ -54,11 +54,11 @@ use jet_foundation.[
     pipe_value_name,
 ]
 
-// Rust `source != target && source.numeric_widening_to(target).is_some()`,
-// read through `sema_expr_numeric_value_widening` so a literal operand takes
-// the place's width. The port helper reports a contained fixed-width range as
-// `Val(true)` and an uncontained one as `Val(false)`, so ranged pairs widen
-// only on `Val(true)`.
+// Whether a numeric value widens into a different target type, read through
+// `sema_expr_numeric_value_widening` so a literal operand takes the place's
+// width. The helper reports a contained fixed-width range as `Val(true)` and
+// an uncontained one as `Val(false)`, so ranged pairs widen only on
+// `Val(true)`.
 sema_stmt_compound_widens: fn(value: TExpr, target: Type) -> Bool {
     if type_identity_equal(value.ty, target) -> return false
     widening: sema_expr_numeric_value_widening(value, target)
@@ -68,9 +68,9 @@ sema_stmt_compound_widens: fn(value: TExpr, target: Type) -> Bool {
     widening != None
 }
 
-// Rust `Stmt.Assign` and call arguments infer the value with the slot type
-// only as a hint, then widen a narrower numeric value into the slot
-// (`n = bytes[i]` with `n: Int`, `f(id.value)` of `U64` into `Int`). A name,
+// Assignments and call arguments infer the value with the slot type only as a
+// hint, then widen a narrower numeric value into the slot (`n = bytes[i]` with
+// `n: Int`, `f(id.value)` of `U64` into `Int`). A name,
 // field, or index read, and a typed literal with a written numeric head
 // (`F32{1.5}` into a `Float` parameter), has its own type whatever the hint,
 // so it checks without one and `sema_stmt_numeric_slot_value` fits it into
@@ -91,9 +91,8 @@ sema_stmt_numeric_slot_self_typed: fn(expr: Expr, required: Type, environment: S
     }
 }
 
-// A self-typed value in a numeric slot: widened (Rust `widen_numeric_expr`)
-// when its numeric type widens into the slot, else the ordinary expected-type
-// check.
+// A self-typed value in a numeric slot: widened when its numeric type widens
+// into the slot, else the ordinary expected-type check.
 sema_stmt_numeric_slot_value: fn(value: TExpr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> TExpr? {
     if sema_expr_is_numeric(value.ty) && sema_stmt_compound_widens(value, required) {
         line: sema_source_line_at(environment.source_segments, value.span) ?? 0
@@ -1145,16 +1144,16 @@ sema_stmt_check_shared_place_assignment: fn(handle: Expr, target: LValue, op: Bi
 sema_stmt_check_assignment_place: fn(target: LValue, compound: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
     if target == {
         .Field(base, member, span) -> {
-            // Rust `check_stmt` (LValue.Field): a plain assignment writes the
-            // field, so its base answers only for a move of the whole name
-            // (`env.graph = None` after `env.graph.move()`).
+            // A plain assignment writes the field, so its base answers only for
+            // a move of the whole name (`env.graph = None` after
+            // `env.graph.move()`).
             previous_root_read: context.suppress_partial_move_root_read
             if !compound -> context.suppress_partial_move_root_read = true
             checked_base_value: sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics)
             context.suppress_partial_move_root_read = previous_root_read
             checked_base: checked_base_value ?? return None
-            // (Rust `check_stmt` dyn_write_path): a Dyn
-            // member write is a path step, not a field of a nominal owner.
+            // A Dyn member write is a path step, not a field of a nominal
+            // owner.
             if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment, program)) {
                 if sema_dyn_is_member(member) {
                     diagnostics.push(sema_dyn_member_error(member, span))
@@ -1423,8 +1422,8 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     exit_diagnostics: diagnostics.len()
     exit_reasons: context.incomplete_reasons.len()
     place := checked_place.move()
-    // (Rust `check_stmt` __dyn_set_path): a plain write
-    // through a Dyn member/index chain sets the path on the root in place.
+    // A plain write through a Dyn member/index chain sets the path on the root
+    // in place.
     if place.kind == .HandleMethod(_, operation, _) && sema_stmt_is_dyn_index(operation) {
         if op != None {
             diagnostics.push(sema_error("E0164", place.span, "compound assignment can't target a Dyn path", "a compound update reads the path before it writes", "write the Dyn path assignment explicitly"))
@@ -1510,8 +1509,8 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: ^^TExpr, op:
     tree_op := TBinaryOp?{None}
     if op != None {
         operator: op
-        // (Rust `check_stmt` `compound_missing_struct_hook`) A record place
-        // whose type implements no hook for this operator has no arithmetic.
+        // A record place whose type implements no hook for this operator has no
+        // arithmetic.
         if sema_stmt_compound_missing_struct_hook(operator, place.ty, environment, program) {
             diagnostics.push(sema_expr_missing_operator_hook(operator, place.ty, op_span))
             return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
@@ -1648,15 +1647,15 @@ sema_stmt_compound_missing_struct_hook: fn(op: BinOp, place: Type, environment: 
     false
 }
 
-// (Rust `check_stmt`): compound arithmetic is the same operator as
-// its binary form, so on a place whose type has no built-in arithmetic (a
-// nominal type: an operator-hook struct such as `Vec3`, a time, unit,
-// geometry or distinct carrier, or an exact number such as `Decimal`)
-// `place op= value` checks as `place = place op value` and the checked tree
-// sees one binary spine. The binary check then resolves the hook, the exact
-// number's operation (which takes `Decimal` and `core.math.Decimal` as one
-// type and lifts an Int operand), or reports E0360 at the operator, as Rust's
-// missing-hook report does. Numbers and `String +=` keep the compound route.
+// Compound arithmetic is the same operator as its binary form, so on a place
+// whose type has no built-in arithmetic (a nominal type: an operator-hook
+// struct such as `Vec3`, a time, unit, geometry or distinct carrier, or an
+// exact number such as `Decimal`) `place op= value` checks as
+// `place = place op value` and the checked tree sees one binary spine. The
+// binary check then resolves the hook, the exact number's operation (which
+// takes `Decimal` and `core.math.Decimal` as one type and lifts an Int
+// operand), or reports the missing hook as E0360 at the operator. Numbers and
+// `String +=` keep the compound route.
 // Only a local or a field of a local qualifies: a nominal field below an
 // index keeps E0362, and an indexed slot keeps E0164.
 sema_stmt_compound_hook_operator: fn(op: BinOp?) -> BinOp? Never! {

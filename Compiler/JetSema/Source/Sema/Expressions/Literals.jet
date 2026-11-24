@@ -346,10 +346,9 @@ sema_expression_list_inference_error: fn(element: Type, expected: Type, index: I
     diagnostics.push(sema_error("E0504", span, "this list resolves to `{type_name(expected)}` but item {index + 1} is `{type_name(element)}`", "every item in a list literal must have the same type", "make every element the same type, or build the list in steps"))
 }
 
-// (Rust `check_list_element_assignable`): an item that does not fit the
-// list's element type is E0112 about the list item, after a checked
-// typed-text rejection and the missing implementation of a trait value's
-// trait (E0905).
+// An item that does not fit the list's element type is E0112 about the list
+// item, after a checked typed-text rejection and the missing implementation of
+// a trait value's trait (E0905).
 sema_expression_list_item_mismatch: fn(required: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     want: sema_expr_expected_type(required, environment, program)
     got: sema_expr_expected_type(offered, environment, program)
@@ -802,8 +801,8 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
     sema_expr_expected_owned(sema_tree_node(ty, TExprKind.Map{entries: lowered}, span), expected, environment, program, diagnostics)
 }
 
-// E0502: one why/fix for every rejected map key, as the Rust
-// reference's declared-type and map-literal sites print it.
+// E0502: one why/fix for every rejected map key, at declared-type and
+// map-literal sites alike.
 sema_map_key_error: fn(what: String, span: Span) -> Diagnostic {
     sema_error("E0502", span, what, "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, a list, tuple or struct whose parts recursively follow these rules, or a `KeyBy` type whose key does; Float, views, Shared, functions, maps, sets, and payload-carrying enums are not key-eligible", "use an eligible scalar, enum, list, tuple, or struct key, or implement `KeyBy` to name the key; remove non-key fields or store the value separately")
 }
@@ -1084,11 +1083,10 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
         .Named(_) -> if sema_call_math_lane_name(base_ty) != None -> Val(Type.Int) else -> None
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
-    // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
-    // named or written-type index (`i`, `U8{1}`) keeps its own type when it
-    // is a stored `Range` (a window selection, classified below) or a sized
-    // integer (every integer indexes); any other such index meets `Int` as
-    // before.
+    // The positional `Int` is only a hint, so a named or written-type index
+    // (`i`, `U8{1}`) keeps its own type when it is a stored `Range` (a window
+    // selection, classified below) or a sized integer (every integer indexes);
+    // any other such index meets `Int` as before.
     named_position: sema_expression_index_self_typed(index) && index_expected == (Val(Type.Int))
     borrows_map_string_key: read_only && index_expected == (Val(Type.String))
     view_str_key: borrows_map_string_key && sema_stmt_string_view_type(sema_stmt_return_known_type(index, environment, scopes) ?? Type.Int)
@@ -1145,8 +1143,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
         line: sema_source_line_at(environment.source_segments, checked_index.span) ?? 0
         checked_index = sema_expr_numeric_conversion(checked_index, Type.Int, checked_index.span, line) ?? return None
     }
-    // (Rust `infer` Index arm): `tree[key]` / `tree[i]` on a
-    // `Dyn` reads an object member or array position as a checked Dyn.
+    // `tree[key]` / `tree[i]` on a `Dyn` reads an object member or array
+    // position as a checked Dyn.
     if sema_dyn_is_type(sema_expr_expected_type(base_ty, environment, program)) {
         site: "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
         operation: sema_dyn_index_operation(checked_index.ty, site, span, expr_span(index), environment, program, scopes, diagnostics) ?? return None
@@ -1165,9 +1163,9 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
             .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
         }
         if element == .Val(item) {
-            // L0501 (Rust `infer` Index arm): a list window copies its range,
-            // so one taken on every loop pass copies every pass. A `View`
-            // subrange reborrows instead and is not reported.
+            // L0501: a list window copies its range, so one taken on every loop
+            // pass copies every pass. A `View` subrange reborrows instead and
+            // is not reported.
             if scopes.loop_depth > 0 {
                 diagnostics.push(sema_lint("L0501", span, "slicing inside a loop copies every time", "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list"))
             }
@@ -1258,8 +1256,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
         }
         .Apply(name, args) -> {
             if (name == "View" || name == "ViewMut") && args.len() == 1 {
-                // (Rust `infer_index`): `view[a..b]` is a
-                // `Slice` typed `View<T>`, a read reborrow of the view's owner.
+                // `view[a..b]` is a `Slice` typed `View<T>`, a read reborrow of
+                // the view's owner.
                 if checked_index.ty == (Type.Named{name: "Range"}) {
                     if sema_expression_view_subrange_type(base_ty) == .Val(window) {
                         zero_start: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
@@ -1274,8 +1272,8 @@ sema_expression_index_inner: fn(base: Expr, index: Expr, ast_kind: IndexKind, re
                 resolved_kind = IndexKind.List
                 result_ty = Val(args[0])
             }
-            // Rust `infer_index` Pool arm: `pool[id]` reads the slot its own
-            // `ID<T>` names; a stale id panics at run time (`jet_pool_get`).
+            // `pool[id]` reads the slot its own `ID<T>` names; a stale id
+            // panics at run time (`jet_pool_get`).
             if name == "Pool" && args.len() == 1 {
                 id_type: Type.Apply{name: "ID", args: [Type]{args[0]}}
                 if !type_identity_equal(checked_index.ty, id_type) {
@@ -1322,9 +1320,9 @@ sema_expression_number_param: fn(params: [TGenericParam], name: String) -> Bool 
     false
 }
 
-// Rust `infer` Index arm: an index of the wrong type is reported for the
-// collection it addresses (E0505, or E0112 for a pool), in place of the
-// generic E0108 its check against the index type reported.
+// An index of the wrong type is reported for the collection it addresses
+// (E0505, or E0112 for a pool), in place of the generic E0108 its check against
+// the index type reported.
 sema_expression_index_replace_mismatch: fn(base_ty: Type, offered: Type, index_span: Span, diagnostic_start: Int, diagnostics: ^[Diagnostic]) {
     mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, index_span) ?? return
     diagnostics[mismatch_index] = sema_expression_index_mismatch(base_ty, offered, index_span) ?? return
@@ -1457,8 +1455,8 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
         window: sema_call_compute_tensor_window(base, checked_base, range_checked, span, environment, program, scopes, diagnostics) ?? return None
         return sema_expr_expected(window, expected, environment, program, diagnostics)
     }
-    // L0501 (Rust `infer_slice`): an owned slice taken inside a loop copies on
-    // every pass; a `View` subrange reborrows its owner and is not reported.
+    // L0501: an owned slice taken inside a loop copies on every pass; a `View`
+    // subrange reborrows its owner and is not reported.
     if scopes.loop_depth > 0 && sema_expression_view_subrange_type(checked_base.ty) == None {
         diagnostics.push(sema_lint("L0501", span, "slicing inside a loop copies every time", "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list"))
     }
@@ -1512,9 +1510,9 @@ sema_expression_slice: fn(base: Expr, start: Expr, end: Expr, range: Expr?, span
     sema_expr_expected(result, expected, environment, program, diagnostics)
 }
 
-// (Rust `view_subrange_type`): a subrange of a declared
-// `View<T>`/`ViewMut<T>` is a `View<T>` read reborrow of the same owner;
-// `^view[a..b]` on a `ViewMut<T>` reopens the write window in the place.
+// A subrange of a declared `View<T>`/`ViewMut<T>` is a `View<T>` read reborrow
+// of the same owner; `^view[a..b]` on a `ViewMut<T>` reopens the write window
+// in the place.
 sema_expression_view_subrange_type: fn(ty: Type) -> Type? Never! {
     if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
         if (name == "View" || name == "ViewMut") && args.len() == 1 {
@@ -1584,11 +1582,11 @@ sema_expression_interpolation_auto_printable: fn(ty: Type, environment: SemaScop
     false
 }
 
-// (Rust `is_displayable`): bare `{value}` needs a value whose
-// type can be shown through `Display`. The shared reflection gate owns the
-// structural rules; a nominal type also counts when it derives its display
-// or is a unit-family member. Without a registration graph the nominal
-// facts are unknown, so a nominal type is not refused.
+// Bare `{value}` needs a value whose type can be shown through `Display`. The
+// shared reflection gate owns the structural rules; a nominal type also counts
+// when it derives its display or is a unit-family member. Without a
+// registration graph the nominal facts are unknown, so a nominal type is not
+// refused.
 sema_expression_displayable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
@@ -1667,8 +1665,7 @@ sema_expression_distinct_bundles: fn(name: String, environment: SemaScopeEnviron
     Val(granted)
 }
 
-// Rust `one_pass_materializer`: the call that turns a one-pass source into
-// a showable value, when it has one.
+// The call that turns a one-pass source into a showable value, when it has one.
 sema_expression_one_pass_fix: fn(ty: Type) -> String Never! {
     if ty == {
         .Apply(name, _) -> {

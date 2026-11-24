@@ -184,7 +184,7 @@ sema_error_count_since: fn(diagnostics: [Diagnostic], start: Int) -> Int Never! 
 
 // Whether the registration graph holds an error that stops checking. An
 // identifier-casing error (E0357) is reported but never changes what a name
-// resolves to, so bodies are still checked beside it, as the Rust reference did.
+// resolves to, so bodies are still checked beside it.
 sema_registration_blocking_error: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if sema_registration_blocking_diagnostic(diagnostic) -> return true
@@ -216,10 +216,10 @@ sema_link_reports_to_first_error: fn(diagnostics: ^[Diagnostic], root_start: Int
     }
 }
 
-// The 1-based line of `site`. Rust's `LineIndex.line_col` clamps an offset to
-// the source length, so a site past the end of the unit reads the final line.
-// That case is real: a derive expanded from `Prelude/Derives.jet` keeps that
-// template's offsets, which can run past a small file's end.
+// The 1-based line of `site`. An offset is clamped to the source length, so a
+// site past the end of the unit reads the final line. That case is real: a
+// derive expanded from `Prelude/Derives.jet` keeps that template's offsets,
+// which can run past a small file's end.
 sema_source_line_at: fn(segments: [SemaSourceSegment], site: Span) -> Int? {
     last_index := -1
     loop (index, segment) in segments {
@@ -249,9 +249,8 @@ sema_source_segment_line: fn(segment: SemaSourceSegment, local_offset: Int) -> I
     Val(low)
 }
 
-// The 1-based column of `site` in its source line (Rust `span_line_col`).
-// Segments carry line starts, not text, so this counts bytes; Rust counts
-// characters, which agree on ASCII lines.
+// The 1-based column of `site` in its source line. Segments carry line starts,
+// not text, so this counts bytes, which agree with characters on ASCII lines.
 sema_source_column_at: fn(segments: [SemaSourceSegment], site: Span) -> Int? {
     line: sema_source_line_at(segments, site) ?? return None
     loop segment in segments {
@@ -552,9 +551,9 @@ sema_type_mismatch: fn(required: Type, offered: Type, span: Span, program: SemaP
     )
 }
 
-// (Rust `check_type_assignable`) A carrier offered where its plain payload
-// is required: an unchecked fallible result (E0401) or an optional value
-// (E0310) must be tested before its value is used.
+// A carrier offered where its plain payload is required: an unchecked fallible
+// result (E0401) or an optional value (E0310) must be tested before its value
+// is used.
 sema_plain_carrier_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic? {
     if offered == .Result(ok, _) {
         if !(required == .Result(_, _)) && type_identity_equal(ok, required) {
@@ -629,8 +628,8 @@ sema_integer_narrowing_fix: fn(want: Type, got: Type) -> String? {
     None
 }
 
-// (Rust `typed_text_mismatch`): a runtime `String` never becomes a `Regex`, or
-// a type whose declared `CheckedText` impl makes it a text sink.
+// A runtime `String` never becomes a `Regex`, or a type whose declared
+// `CheckedText` impl makes it a text sink.
 sema_typed_text_mismatch: fn(required: Type, offered: Type, span: Span, program: SemaProgramTables) -> Diagnostic? {
     if required == .Named(name) && offered == Type.String {
         head: sema_call_reflection_leaf_name(name)
@@ -679,8 +678,8 @@ sema_wrong_core_arity: fn(name: String, expected: Int, actual: Int, span: Span) 
     sema_error("E0104", span, "`{name}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{name}`")
 }
 
-// The plain-words type name diagnostics print (the Rust reference's
-// `Type.show`): scalars carry a gloss and nominal names are quoted.
+// The plain-words type name diagnostics print: scalars carry a gloss and
+// nominal names are quoted.
 sema_type_show: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int (a whole number)"
@@ -752,8 +751,8 @@ sema_type_nominal_leaf: fn(ty: Type) -> String Never! {
     }
 }
 
-// The repair for a value of type `got` where `want` is required (the Rust
-// reference's `type_fix_hint`). A fix never prescribes what was written.
+// The repair for a value of type `got` where `want` is required. A fix never
+// prescribes what was written.
 sema_type_fix_hint: fn(want: Type, got: Type) -> String Never! {
     want_show: sema_type_show(want)
     if want_show == sema_type_show(got) {

@@ -253,9 +253,8 @@ sema_stmt_destructure_moves_field: fn(ty: Type, pattern: BindPattern, environmen
 
 // A destructure whose initializer is an owned temporary (a call result, a
 // literal, a take or an explicit copy) moves every field out of it, so
-// `(a, b): f()` never copies a field. Only a place initializer (a name,
-// field, index or view) keeps its value and copies fields out.
-// Rust reference lowering: `destructure_init_is_temporary`.
+// `(a, b): f()` never copies a field. Only a place initializer (a name, field,
+// index or view) keeps its value and copies fields out.
 sema_stmt_destructure_init_is_temporary: fn(init: Expr) -> Bool Never! {
     if init == {
         .Paren(inner, _, _) -> sema_stmt_destructure_init_is_temporary(inner)
@@ -352,7 +351,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
                         }
                     }
                     if field_type == None {
-                        // Rust `check_destructure`: the field-access E0302, nearest field suggested.
+                        // The field-access E0302, nearest field suggested.
                         suggestion: sema_suggest_field(selected_field.name, loop field in nominal.fields -> field.symbol.name)
                         fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the field names on `{type_name(ty)}`"
                         diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "field access only works on names declared in the struct", fix))
@@ -648,8 +647,8 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     sema_copy_site_check_borrowed_binding(binding, environment, program, scopes, context, diagnostics)
     binding_expr := sema_stmt_install_binding_loop_label(binding.init, binding.name, binding.name_span)
-    // (Rust `check_binding`): an immutable binding of a
-    // bare range place is a read window into its source, typed `View<T>`.
+    // An immutable binding of a bare range place is a read window into its
+    // source, typed `View<T>`.
     if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, state) {
         binding_expr = Expr.Place{value: binding_expr, access: PlaceAccess.Read, span: expr_span(binding.init), id: AST_NODE_GENERATED}
     }
@@ -662,12 +661,12 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // `mem.Fixed.new`/`.over` is allowed only as the whole initializer.
     previous_fixed_constructor: context.allow_fixed_constructor
     context.allow_fixed_constructor = sema_stmt_init_is_fixed_constructor(binding.init)
-    // (Rust `current_binding_name`): a task spawned by this
-    // initializer records its binding for the `.detach()` refusals.
+    // A task spawned by this initializer records its binding for the
+    // `.detach()` refusals.
     previous_binding_name: context.taskgroups.binding_name
     context.taskgroups.binding_name = Val(binding.name)
     // A place-view initializer's overlap with the live views is checked when
-    // the binding records its view, naming the binding (Rust `record_view`).
+    // the binding records its view, naming the binding.
     deferred_before: state.deferred_view_opens.len()
     if sema_stmt_binding_is_place_view(binding_expr) {
         state.deferred_view_opens.push(expr_span(binding_expr))
@@ -703,24 +702,23 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if sema_contains_expiring_secret_loan(init.ty) {
         diagnostics.push(sema_error("E0201", expr_span(binding.init), "an ExpiringSecret loan cannot be stored", "the callback parameter is a temporary read-only loan that ends when `.with` returns", "use the loan inside the callback and store only a non-secret result"))
     }
-    // E2502 (Rust `check_binding`): a line stream (`.lines()` on a file,
-    // stdin, or process reader) is consumed only directly by a loop; binding
-    // it lets it escape loop position.
+    // E2502: a line stream (`.lines()` on a file, stdin, or process reader) is
+    // consumed only directly by a loop; binding it lets it escape loop
+    // position.
     if init.ty == .Named(stream) && (stream == "FileLines" || stream == "StdinLines" || stream == "ProcessLines") {
         loop_name: if binding.name == "" -> "line" else -> binding.name
         diagnostics.push(sema_error("E2502", expr_span(binding.init), "a line stream can only be used directly in a loop", "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use", "iterate it directly: `loop {loop_name} in handle.lines() {{ … }}`"))
     }
-    // E1110 (Rust `check_binding`, contains_taskgroup): a value that holds a
-    // `Group` inside it could outlive the group's owner.
+    // E1110: a value that holds a `Group` inside it could outlive the group's
+    // owner.
     if init.ty != (Type.Named{name: "Group"}) && sema_stmt_contains_taskgroup(init.ty) {
         diagnostics.push(sema_error("E1110", binding.name_span, "`Group` cannot be stored inside another value", "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner", "pass `group: Group` directly to a helper function or method and use it there"))
     }
-    // This rule stage S5 (Rust `string_view_call_source`): `x: s.trim()`,
-    // `s.after(sep)` or `s.before(sep)` on a local or parameter `String`
-    // binds a scope-bound zero-copy view into `s`; a `:=` binding keeps the
-    // owned result, since it may later be reassigned an owned `String`. A
-    // `s.slice(..)` binding stays owned too: a slice is a view only where a
-    // `View<str>` slot (a return or a field) asks for one.
+    // This rule stage S5: `x: s.trim()`, `s.after(sep)` or `s.before(sep)` on a
+    // local or parameter `String` binds a scope-bound zero-copy view into `s`;
+    // a `:=` binding keeps the owned result, since it may later be reassigned
+    // an owned `String`. A `s.slice(..)` binding stays owned too: a slice is a
+    // view only where a `View<str>` slot (a return or a field) asks for one.
     view_sources := if binding.mutable || sema_string_view_is_slice_call(binding.init) -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, scopes, state)
     view_init := if view_sources.len() > 0 -> sema_string_view_lower_init(init) else -> None
     string_view := view_init != None
@@ -790,9 +788,8 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     sema_single_use_note_binding(state, symbol, environment, program)
     if binding.name == "_" {
         sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, diagnostics)
-        // Rust `check_binding`: an ordinary fallible call already propagates
-        // its failure in statement position, so its Unit success has nothing to
-        // bind.
+        // An ordinary fallible call already propagates its failure in statement
+        // position, so its Unit success has nothing to bind.
         if !binding.is_comptime && sema_expr_unwrap_tag(init.ty) == (Type.Named{name: "Unit"}) && sema_stmt_is_propagated_call(init) {
             row: diagnostic_registry_row("L0531") ?? panic("L0531 has no registry row")
             diagnostics.push(sema_lint("L0531", binding.name_span, row.what, row.why, row.fix))
@@ -859,11 +856,10 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     Val(TStmt.Let{local: local, let_ty: let_ty, init: stored, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: span})
 }
 
-// Rust `infer_owning_value` (`implicit_copy_target` over
-// `owned_type_for_read_view`): a `:=` binding, or a value `if` bound as a
-// non-view, owns its value, so a read-view initializer (`View<T>`,
-// `View<str>`) materializes one owned copy (`[T]`, `String`) under the
-// default copy policy. A binding declared `View`/`ViewMut` keeps the view.
+// A `:=` binding, or a value `if` bound as a non-view, owns its value, so a
+// read-view initializer (`View<T>`, `View<str>`) materializes one owned copy
+// (`[T]`, `String`) under the default copy policy. A binding declared
+// `View`/`ViewMut` keeps the view.
 sema_stmt_owning_view_init: fn(init: ^^TExpr, binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: ^SemaCheckContext) -> TExpr {
     declared_view: if binding.ty == .Val(.Apply(name, _)) -> name == "View" || name == "ViewMut" else -> false
     value_if: if binding.init == {
@@ -938,10 +934,10 @@ sema_stmt_check_range_conversion: fn(init: Expr, head: String, expected: Type?, 
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
-// (Rust `check_uninit_binding`): `name := Type{ uninit }`
-// needs `use core.mem` (E0424) and a plain-data type (E0423). The binding is
-// declared without a value and recorded as not yet written, so a read before
-// every path writes it is E0420; it lowers to the uninitialized-local let.
+// `name := Type{ uninit }` needs `use core.mem` (E0424) and a plain-data type
+// (E0423). The binding is declared without a value and recorded as not yet
+// written, so a read before every path writes it is E0420; it lowers to the
+// uninitialized-local let.
 sema_stmt_check_uninit_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
     valid := true
     if !sema_stmt_module_uses_core_mem(environment, program) {
@@ -981,7 +977,7 @@ sema_stmt_check_uninit_binding: fn(binding: Binding, environment: SemaScopeEnvir
     Val(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: ty, wrapper: TLetWrapper.Plain}, init: init, gc_promotion: None, gc_transferred: false, span: Span{start: binding.name_span.start, end: ty_span.end}})
 }
 
-// Rust `is_pod_uninit_type`: scalars, `Char`, `U8`, and fixed arrays of those.
+// Scalars, `Char`, `U8`, and fixed arrays of those.
 sema_stmt_uninit_plain_data: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Float32 | .Bool | .Char -> true
@@ -1114,8 +1110,8 @@ sema_stmt_uninit_fill_steps: fn(statement: Stmt, index_name: String) -> Bool {
     false
 }
 
-// (Rust `clear_uninit_mut_args`): a name a write parameter receives does not
-// prove the callee writes every value, so the binding stays unwritten (E0420).
+// A name a write parameter receives does not prove the callee writes every
+// value, so the binding stays unwritten (E0420).
 sema_stmt_uninit_write_arg: fn(arg: CallArg, state: SemaOwnershipState, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) Never! {
     if state.uninit.len() == 0 {
         return
@@ -1145,8 +1141,8 @@ sema_stmt_uninit_fixed_over_take: fn(receiver: Expr, method: String, args: [Call
     taken
 }
 
-// A `#Track` binding records its checked source identity
-// and declaration site (Rust `check_binding`); the marker stays on the AST.
+// A `#Track` binding records its checked source identity and declaration site;
+// the marker stays on the AST.
 sema_stmt_track_origin: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable) Never! {
     tracked: loop marker in binding.markers {
         if marker.name == MARKER_TRACK && !marker.negated {
@@ -1188,14 +1184,13 @@ sema_stmt_path_method_receiver: fn(value: TExpr, method: String) -> TExpr? {
     None
 }
 
-// `name: #run value` in a body is compile-time code
-// (Rust `check_binding` under `in_comptime`). A value already known here, such
-// as a fact read on a local, binds at once; any other value is staged through
-// the body comptime evaluator and binds when the owner body is checked again.
-// The name then reads as that value and the binding emits no runtime code.
-// Until then the name is declared with the initializer's checked type, so
-// the rest of the body checks in full and records what it records with the
-// value, except for the reads of the name: the staged local lands in its
+// `name: #run value` in a body is compile-time code. A value already known
+// here, such as a fact read on a local, binds at once; any other value is
+// staged through the body comptime evaluator and binds when the owner body is
+// checked again. The name then reads as that value and the binding emits no
+// runtime code. Until then the name is declared with the initializer's checked
+// type, so the rest of the body checks in full and records what it records with
+// the value, except for the reads of the name: the staged local lands in its
 // owner body like a local value (Comptime/LocalSplice.jet) instead of
 // finalizing the program again.
 sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
@@ -1294,9 +1289,9 @@ sema_stmt_comptime_site_refused: fn(program: SemaProgramTables, context: SemaChe
     diagnostics.len() > before
 }
 
-// Rust `Stmt.Assign` with a compound op checks the update value against the
-// place type: `text += "…"` appends to a String place (the binary `+`
-// itself is not text joining, which stays E0109); every other compound op
+// A compound assignment checks the update value against the place type:
+// `text += "…"` appends to a String place (the binary `+` itself is not text
+// joining, which stays E0109); every other compound op
 // keeps its binary operator typing, and `n /%= 0` its zero-divisor lint.
 sema_stmt_compound_result: fn(op: BinOp, place: Type, offered: Type, value: Expr, span: Span, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) -> Type? {
     if op == BinOp.Add && place == Type.String && offered == Type.String -> return Val(Type.String)
@@ -1332,11 +1327,10 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if sema_ownership_reject_frozen_write(state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", name_span, scopes, diagnostics) {
         return None
     }
-    // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
-    // module-level write target; it writes the binding's runtime storage cell.
-    // A function writes it only when it is `#Persist` or inside `#Unsafe`:
-    // every task sees module state, and two plain
-    // writes at once can lose one.
+    // A module-level `name := …` is the one module-level write target; it
+    // writes the binding's runtime storage cell. A function writes it only when
+    // it is `#Persist` or inside `#Unsafe`: every task sees module state, and
+    // two plain writes at once can lose one.
     if binding.symbol.kind == SymbolKind.Constant {
         if sema_stmt_module_storage_binding(environment, program, binding.symbol.id) == .Val(persists) {
             if !persists && context.unsafe_depth == 0 {
@@ -1388,9 +1382,9 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     number_target: sema_expr_number_target_open(index, scopes, context)
     plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, environment, program, scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, scopes)))
     if op == None && !plain_self_typed -> expected = Val(required)
-    // The Rust `Stmt.Assign` feeds the place type into the RHS for compound
-    // updates too, so `price *= 2.0` with `price: Float` reads the literal as
-    // Float rather than exact Decimal.
+    // The place type feeds the RHS for compound updates too, so
+    // `price *= 2.0` with `price: Float` reads the literal as Float rather
+    // than exact Decimal.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) {
         expected = Val(required)
     }
@@ -1405,8 +1399,8 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         return None
     }
     checked := checked_value
-    // A compound operand widens into the place's numeric type first
-    // (`total += byte`), as Rust `widen_numeric_expr` does after inference.
+    // A compound operand widens into the place's numeric type after
+    // inference (`total += byte`).
     if op != None && sema_stmt_compound_widens(checked, required) {
         widen_line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, diagnostics) ?? return None
@@ -1464,16 +1458,16 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     // Their declared range remains available through the type fact channel.
     sema_scope_note_binding_edit(scopes, index)
     scopes.bindings[index].integer_bounds = updated_bounds
-    // A new value has no `#Track` origin (Rust `clear_origin`).
+    // A new value has no `#Track` origin.
     scopes.bindings[index].origin = None
     Val(TStmt.Assign{place: TPlace.Local{local: local}, op: tree_op, value: value, line: line, span: span})
 }
 
-// Rust `is_global_mutable_binding`: this module's own `name := …` binding that
-// is not prepared while building, with whether it is `#Persist`; None for
-// any other binding. A checker on the registration graph has no local
-// declarations (sema_scope_environment for a graph module), so the binding is
-// read from the module's registered constant rows.
+// This module's own `name := …` binding that is not prepared while building,
+// with whether it is `#Persist`; None for any other binding. A checker on the
+// registration graph has no local declarations (sema_scope_environment for a
+// graph module), so the binding is read from the module's registered constant
+// rows.
 sema_stmt_module_storage_binding: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool? Never! {
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id != id -> next
@@ -1495,9 +1489,9 @@ sema_stmt_module_storage_binding: fn(environment: SemaScopeEnvironment, program:
     None
 }
 
-// Rust `Stmt.Assign` on a module-level mutable binding: the value checks
-// against the declared place type, and the write lands in the binding's
-// persistent storage cell (the Rust reference lowering's `persistent_local`).
+// Assignment to a module-level mutable binding: the value checks against the
+// declared place type, and the write lands in the binding's persistent
+// storage cell.
 sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
     required: symbol.ty ?? {
         // An unchecked module binding already carries its initializer's report.
