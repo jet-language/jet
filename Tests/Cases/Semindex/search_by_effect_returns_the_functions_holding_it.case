@@ -1,0 +1,15 @@
+# A search by effect returns the functions whose inferred effects hold that
+# authority, directly or through a call, and says why each matched. The
+# functions that hold another effect, or none, are not returned.
+fixture: SearchByEffect.fixture
+step: jet find --effect FS {work}/main.jet --json
+exit: 0
+json: stdout doc $.matches[*].name = ["load", "run", "size_of"]
+json: stdout doc $.matches[0].why = "holds FS (inferred: FS.Read, Panic; via load -> core.files.read)"
+json: stdout doc $.matches[2].why = "holds FS (inferred: FS.Read, Panic; via size_of -> main.load -> core.files.read)"
+step: jet find --effect FS {work}/main.jet
+exit: 0
+stdout: ~ "Find: effect FS\n" # the heading names the effect searched for
+stdout: ~ "Why: holds FS" # each match says why it matched
+stdout: !~ "shout" # a function holding IO alone is not returned
+stdout: !~ "double" # a pure function is not returned

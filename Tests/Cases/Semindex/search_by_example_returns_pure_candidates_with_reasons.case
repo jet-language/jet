@@ -1,0 +1,13 @@
+# A search by example returns the pure functions whose input and output
+# shape fits the example, and says why each matched. A function that reads a
+# file or prints is never a candidate, whatever its shape.
+fixture: SearchByEffect.fixture
+step: jet find --example "4 -> 8" {work}/main.jet --json
+exit: 0
+json: stdout doc $.matches[*].name = ["double", "halve"]
+json: stdout doc $.matches[*].why = ["pure candidate has the same input/output shape", "pure candidate has the same input/output shape"]
+step: jet find --example "4 -> 8" {work}/main.jet
+exit: 0
+stdout: ~ "Find: example 4 -> 8\n" # the heading names the example searched for
+stdout: ~ "Why: pure candidate" # each candidate says why it matched
+stdout: !~ "size_of" # a function that reads a file is not a candidate
