@@ -1211,7 +1211,8 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     }
     // The method as sent: a standard verb's upper-case name, or the custom
     // token in its exact case; "" for a run-time token, which only an App
-    // takes and checks when it registers.
+    // takes and checks when it registers (a router's call is refused first
+    // by its StaticRoutes check rule, E2808).
     wire := sema_http_route_method_name(method)
     token_value := TExpr?{None}
     if token_argument == .Val(token_arg) {
@@ -1219,10 +1220,6 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
             sema_http_route_stage_token_check(token, token_arg, environment, program, context, diagnostics)
             wire = token
         } else {
-            if !app {
-                diagnostics.push(sema_error("E2808", token_arg.span, "HTTPRouter custom route method must be a static String", "router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route on a `web.app()`"))
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
             token_value = Val(sema_call_http_check_value(token_arg, Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
             wire = ""
         }
