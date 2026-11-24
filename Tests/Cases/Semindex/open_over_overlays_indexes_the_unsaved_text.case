@@ -1,0 +1,21 @@
+# The editor's index opens over the unsaved text of an open document, not
+# the file on disk: `helper` exists only in the editor's buffer, and hover
+# and go-to-definition find it there.
+fixture: OpenOverOverlays.fixture
+session lsp content-length: jet self lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://{work}\",\"capabilities\":{}}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"helper: fn(n: Int) -> Int {\\n    n * 3\\n}\\n\\nrun: fn() {\\n    print(helper(2))\\n}\\n\"}}}"
+recv lsp
+stdout: ~ "\"diagnostics\":[]" # the unsaved text checks clean
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":5,\"character\":11}}}"
+recv lsp
+stdout: ~ "helper: fn(n: Int) -> Int" # the hover reads the unsaved declaration
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":5,\"character\":11}}}"
+recv lsp
+stdout: ~ "\"start\":{\"line\":0,\"character\":0}" # the definition is the unsaved line 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+close lsp
+exit: any # the session ends without an exit notification

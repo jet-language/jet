@@ -1,0 +1,30 @@
+use files: core.files
+
+// Holds FS: it reads a file.
+load: fn(path: String) -> String {
+    files.read(path) ?? ""
+}
+
+// Holds FS only through `load`.
+size_of: fn(path: String) -> Int {
+    load(path).len()
+}
+
+// Holds IO, not FS.
+shout: fn(text: String) {
+    print(text)
+}
+
+// Pure.
+double: fn(n: Int) -> Int {
+    n * 2
+}
+
+// Pure.
+halve: fn(n: Int) -> Int {
+    n /% 2
+}
+
+run: fn() {
+    shout("{size_of("data.txt")} {double(4)} {halve(4)}")
+}
