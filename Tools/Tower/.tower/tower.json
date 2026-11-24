@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6999,
-    "rev": 113904,
+    "rev": 113912,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47,6 +47,7 @@
         "radar:G6",
         "radar:G7",
         "radar:G8",
+        "radar:G1",
         "radar:G2"
       ]
     },
@@ -58083,6 +58084,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Staffing, 2026-11-24 (owner order: finish G1 now; all three agents on G1, LSP latency and non-G1 fixes parked). TypeIDSlice3-3: c36 (interned TypeId), then c6, then c24. G1Facts-2: D-DECL-FACTS1 review (for #6852 c1/c2), then c39, c14, c13, then #6852 c8/c9. G1Generation-2: #6998 steps A and B, the c37 split, c38, c5, c4. In batch 25 now: heard-args-r4 (c30, c31) and c29. Next as agents free up: c3, c7, c9, c18, c19, c21, c22, c33, c34."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Correction to the dead-tail log: on the batch 16 compiler, marker_check_rules_hear_calls now passes its tidy step (the dead-tail fix holds). It fails at its later step, jet check values/main.jet, with Jet.UnreadField for Account.user_name and Holder.item: fields reached only through a #Encoded marker's reflected parameters are not counted as read. That is a member-liveness defect on #4624's area, sent to its owner as 4624-marker-reflect-reads."
         },
         {
@@ -58429,11 +58435,11 @@
         {
           "n": 24,
           "text": "A module-qualified type reflects in a top-level #run: geo.Inner.reflect() returns geo.Inner's TypeInfo instead of failing with Jet.ModuleAsValue. Proof: a case under Tests/Cases/Reflection whose top-level #run reflects geo.Inner and prints its name and fields on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T12:16:06.637Z"
+          "evidence": "batch 25 compiler on dev 26184dbd4f: jet test Compiler --profile cases --filter a_module_qualified_type_reflects_in_a_top_level_run gives PASS 1, FAIL 0 (Tests/Cases/Reflect, landed in 9fa29e3fa0).",
+          "at": "2026-11-24T14:42:07.014Z"
         },
         {
           "n": 25,
@@ -58475,11 +58481,11 @@
         {
           "n": 29,
           "text": "A marker's expand body can reject at a reflected field: `reject(value, at: field)` reports the diagnostic at that field's span (today Jet.ComptimeConstructNotSupported 'reject with anything but one diagnostic value isn't supported by the current evaluator yet', probe form on tip18), so a Core #Web.Form marker reproduces e2474_form_action_input_mismatch.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-24T07:11:46.110Z",
+          "evidence": "batch 25 compiler on dev 26184dbd4f: jet test Compiler --profile cases --filter Metaprogramming/expand_reject_at_field gives PASS 1, FAIL 0 (landed in febaef41c3).",
+          "at": "2026-11-24T14:42:08.028Z",
           "proof": {
             "profile": "cases",
             "filter": "Metaprogramming/expand_reject_at_field"
@@ -58604,7 +58610,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T13:22:58.856Z",
+      "updated": "2026-11-24T14:42:08.028Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -58626,6 +58632,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "2026-11-24: c1 and c2 wait on D-DECL-FACTS1. It was drafted but never reviewed or posted, so the owner could not vote on it. G1Facts-2 is reviewing it now, and the orchestrator posts it for the owner when the review passes. c8 and c9 have been build work since D-FORMAT-TRAIT1, D-ITERATOR-FAIL1 and D-BUILTIN-METHOD1 were ratified (2026-11-18); G1Facts-2 takes them after its #6851 items."
+        },
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
@@ -58881,7 +58892,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-24T14:27:46.327Z",
+      "updated": "2026-11-24T14:37:32.873Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 15
     },
@@ -138193,6 +138204,231 @@
       "draft": true,
       "status": "open",
       "created": "2026-11-24T14:10:00.279Z"
+    },
+    {
+      "id": "D-DECL-FACTS1",
+      "cardId": "c0sdz4q0",
+      "group": "language",
+      "title": "How a type says it never copies, stays on its thread, or must be used up",
+      "situation": "The checker decides three facts about a type from lists of Core type names. Atomic, MutationPlan, ViewMut and the Cell guards never copy. Arena, Bump, Pool, Cell and the browser handles never leave the thread that made them. A Task must reach join or detach exactly once. Card #6852 c1 asks that these facts come from declarations, so the name lists in Ownership/Copy.jet, Ownership/Crossings.jet and Typestate.jet can go. Its c2 asks that a user type declared the same way gets the same facts. Jet already has three nearby markers. `#SingleUse` (D-LIN1) makes a type's values owe a consume on every path. `#MustUse` (E0419) refuses a result dropped as a bare statement. `#Local` (D-DATARACE1) rejects task, channel and parallel crossings, but only where a binding is declared. No ratified decision says how a type declares that it never copies or stays on its thread, or that Task is single-use.",
+      "gist": "How should a type declare that it never copies, never leaves its thread, or must be used up, so a user type can say the same?",
+      "lesson": "Three facts about a type change what the checker allows. A value that never copies can only move. A value bound to its thread never crosses to another. A value that must be used up has to reach a consuming call, such as a task's join or detach. Two facts are declared already: a Close type never copies and closes once, and a `#SingleUse` type is used up on every path. Never copying without being a resource, and staying on one thread, come only from Core type names.",
+      "explainer": "Think of a library that lends out books. Some books are one of a kind and may never be photocopied. Some may never leave the reading room. Some must come back before the borrower leaves. Today only the librarian knows which books are which, from a private list. This ballot decides where the label goes, so anyone who adds a book can label it the same way.",
+      "story": "Mia writes a `Pool` type for her game that hands out slots from memory her own thread owns. Core's `Arena` gets the same care for free: the checker refuses to copy it or send it to another task. Her `Pool` gets neither, because the checker finds `Arena` by name in a list. Nothing she can write on `Pool` puts it on that list.",
+      "inWild": "// Swift 5.9 (SE-0390): a struct opts out of copying where it is declared.\nstruct FileDescriptor: ~Copyable { deinit { close(fd) } }\n// Rust: a type opts out of crossing threads with a marker field.\nstruct NotSend { _marker: PhantomData<*const ()> }\n// Rust: #[must_use] warns when a value is dropped unused.",
+      "detail": "Sites at origin/dev fd32fefaf1, unchanged from 2a09ee0e42. Copy.jet `sema_copy_named_is_builtin_resource` at 371-376 lists twelve Core resource types. Copy.jet `sema_copy_apply_is_noncloneable` at 392-398 lists ten types that never copy, and `sema_copy_apply_is_dynamic_loan` at 400-405 lists the two Cell guards. Copy.jet 1077-1078 tests for Task and ExpiringSecret, and 1410 and 1457 test SharedGuard, ProcessChild, TempDir and the guards by name.\n\nCrossings.jet `sema_ownership_crossing_core_confined` at 144-157 names Arena, Bump, Pool, Fixed and seven browser handles by module and name. Crossings.jet 353, 363, 377 and 536 test Task, Receiver, Sender, Cell, the guards and Atomic. Typestate.jet 19-25 and 88-91 hold the Task states Running, Joined and Detached and the two methods that move between them. SingleUse.jet picks L1101 over E0140 for a bare task by name.\n\nWhat is already declared. A type that implements Close is a resource: Copy.jet 857 reads the impl, and a generic `T: Close` bound counts too (582). A user Close type and any struct that holds one are move-only today. So the resource list can go once each Core resource type writes its Close impl. A `#SingleUse` type owes a consume on every path, through containers and fields too (D-LIN1, D-LIN-CONTAINER1, E0140-E0143).\n\nA foreign handle carries `send` and `sync` facts from its binding (Registration/Items.jet 186-198). A runtime handle registered without `clone` already moves (RuntimeHandles.jet). Thread confinement already passes through fields: a struct that holds an Arena is refused at a task crossing (E1102).\n\nWhat is not declared. Ten carriers have no Core declaration at all, so nothing can be written on them: Task, Atomic, ViewMut, ViewIter, SharedGuard, ProcessChild, Receiver, Sender, CellReadGuard and CellEditGuard. The checker matches each by its name, and Task even when a program declares its own `Task`.\n\nWhat this ballot adds. One way to state the two missing facts on a type, which Core and packages write alike. Task's duty moves onto the existing `#SingleUse`. The checker then finds each fact by the declaration that carries it, not by a type name.\n\nWhat the review changed. The review checked every cited site at fd32fefaf1, where they are unchanged from 2a09ee0e42, and ran nine probes on the tip23 compiler. It refuted four claims. First, the third fact is already declared: `#SingleUse` (D-LIN1, D-LIN-CONTAINER1) gives a user type the consume-on-every-path duty today (probe: an unconsumed user `#SingleUse` struct is Jet.SingleUseDropped). Second, Jet already has a `#MustUse` marker with another meaning: E0419, a result dropped as a bare statement (probe: Jet.MustUseIgnored on a user type).\n\nSo the draft's `#MustUse` would have given one spelling two meanings. Third, `#Local` (D-DATARACE1) already rejects task, channel and parallel crossings (E1102). It is allowed only at the Declaration site today (probe: on a type it is Jet.InvalidScopedPolicy), so a separate `#ThreadBound` would be a second word for one fact. Fourth, Task, Atomic, ViewMut, ViewIter, SharedGuard, ProcessChild, Receiver, Sender and both Cell guards have no Core declaration to write a marker on (Copy.jet 1075-1076 says so for Task).\n\nThis draft keeps option A but repairs it. It adds one marker, `#MoveOnly` (the spec's own word, used six times). It gives `#Local` the Type site and puts the existing `#SingleUse` on Task. It adds arity-only Core declarations for the undeclared carriers, following the precedent of `Arena: struct {}` in core.mem. It folds L1101 into E0140 through the registry's Retired status. It also corrects the spec line references and the reasons B and C lose.\n\nIt corrects the Cell-guard loan claim too: dynamic_loan is a borrow fact used at CheckProgram.jet 1610 and Checks.jet 4532, not only a copy and thread fact. Each loss is now engineered away or comes with a named mitigation.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Markers on the declaration",
+          "detail": "A type takes each fact by a marker in its header, and any package may write the same markers on its own types. `#MoveOnly` is the one new marker: the type moves and never copies. `#Local`, which a binding can already carry, may also be written on a type: its values never leave the thread that made them. The existing `#SingleUse` goes on Task, so a task must reach join or detach, as any single-use value must reach a consuming call.\n\nA type that holds one of these facts in a field has the fact too, as fields already carry copy, crossing and single-use facts. Core writes the markers on Atomic, Arena, Cell, Task and every other listed type, and the name lists go.",
+          "technical": "`MoveOnly` joins the prelude marker registry (PreludeMarkers.jet) as a field-less struct implementing Marker with `sites: [.Type]`, beside `SingleUse`. The `Local` row gains the Type site. The checker reads a type's markers by the marker's declared identity, as it reads `#SingleUse` and `#MustUse` now.\n\nThe ten undeclared carriers get arity-only Core declarations, the form `Arena: struct {}` already uses in core.mem ('compiler-owned nominal surfaces'). The checker finds the builtin heads by those rows' Core identity, which also fixes the case where a program's own `Task` hides the builtin. Task declares `join: fn(&&self)` and `detach: fn(&&self)` under `#SingleUse`. A second join is then E0121 by ordinary move checking, and the Task rows in Typestate.jet go.\n\nAn unused task becomes E0140, whose text names the consuming methods the type declares ('owes `join` or `detach`'). L1101 takes the registry's Retired status, pointing to E0140. The Cell guards are `#MoveOnly #Local`. Their loan, which lives only as long as the Cell that lent it, stays a borrow rule on the Cell's guard methods, keyed by the guards' Core identity rather than their names. The existing `#MustUse` keeps its E0419 meaning.",
+          "code": "#[MoveOnly, Local]\nPool: struct {\n    slots: [Slot],\n}\n\n#SingleUse\nTask<T>: struct {\n    join: fn(&&self) -> T TaskFailure!\n    detach: fn(&&self)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Marker traits",
+          "detail": "Core declares member-less traits such as `MoveOnly` and `Local`. A type takes a fact by implementing the trait, as a resource already implements Close. A generic function can then ask for the fact in a bound, such as `T: Local`.",
+          "technical": "Each trait is found by a D-CORE-ROLE1 role, not by its name. The impl can sit inside the struct body, so the fact can stay near the header. But these facts pass through fields: a struct that holds an Arena is thread-bound without writing any impl. A bound would answer no for that struct unless Jet gains Rust-style automatic traits, a new kind of trait. Without them a `T: Local` bound would give the wrong answer for such holders.\n\nThe used-up fact would duplicate `#SingleUse` as a third spelling.",
+          "code": "Pool: struct {\n    slots: [Slot],\n    impl MoveOnly {}\n    impl Local {}\n}"
+        },
+        {
+          "key": "C",
+          "name": "Marker fields",
+          "detail": "Core declares empty types such as `MoveMark` and `LocalMark`. A type takes a fact by holding a field of one of them, as Rust code holds a `PhantomData` field. The fields take no memory.",
+          "technical": "The checker already passes copy and crossing facts from fields to the types that hold them, so only the leaf types are new. But every field list sees the extra field. Each struct literal has to write it or rely on a default, Codable and `#Layout(c)` have to skip it, and Core's runtime carriers each gain one. The facts never show in a type's header, only among its fields.",
+          "code": "Pool: struct {\n    slots: [Slot],\n    _move: MoveMark,\n    _local: LocalMark,\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep the compiler lists",
+          "detail": "The checker keeps its name lists, moved into one table with a role per fact. Core's types keep their facts, and a user type cannot take them.",
+          "technical": "One closed table in jet_builtins replaces the four lists. #6852 c2 stays unmet, because no package can join the table.",
+          "code": "// Compiler table; a package cannot add a row\nMOVE_ONLY_TYPES: [String]{\"Atomic\", \"MutationPlan\", \"ViewMut\"}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Swift 5.9 lets a struct or enum opt out of copying with `~Copyable` in its own declaration (SE-0390). Thread crossing is the Sendable protocol, which a type adopts or is refused where it is declared.",
+          "code": "struct FileDescriptor: ~Copyable {\n  private var fd: Int32\n  deinit { close(fd) }\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "Send and Sync are automatic traits. A type opts out with a marker field such as `PhantomData<*const ()>`, because negative impls are still unstable outside the standard library. `#[must_use]` on a type warns when a value is dropped unused.",
+          "code": "#[must_use]\nstruct Guard { _not_send: PhantomData<*const ()> }"
+        },
+        {
+          "lang": "C++",
+          "note": "A class forbids copying by deleting its copy constructor in its own declaration. Library and user classes write it the same way.",
+          "code": "class File {\n  File(const File&) = delete;\n};"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A writes each fact where a reader looks for it, on the type, in the marker form `#SingleUse` and `#Error` already use. It adds only one new word, because thread confinement reuses `#Local` and the used-up duty reuses `#SingleUse`. Core and packages write the same markers, which is what #6852 c2 asks. It needs no new kind of trait.",
+        "gains": [
+          "A reader sees a type's copy, thread and use facts in its header.",
+          "A user type gets exactly the facts a Core type gets.",
+          "The four name lists go, and so do the name tests for the ten undeclared carriers. Task's join and detach become ordinary consuming methods.",
+          "A program's own `Task` no longer collides with the builtin one."
+        ],
+        "losses": [
+          {
+            "loss": "One new marker, `#MoveOnly`, plus a new Type site for `#Local`.",
+            "mitigation": "`#MoveOnly` is the spec's own word for the fact. Most code never writes either. The copy and crossing errors name the marker and where it is written."
+          },
+          {
+            "loss": "Ten builtin carriers need Core declarations before they can carry markers.",
+            "mitigation": "Engineered away in the same cutover. Each gets an arity-only declaration, as Arena already has, and the checker matches the builtin heads by those rows' identity."
+          },
+          {
+            "loss": "L1101 folds into E0140, so one diagnostic code changes.",
+            "mitigation": "Engineered away. L1101 takes the registry's Retired status pointing to E0140, so `jet explain L1101` still answers. The message still says 'owes `join` or `detach`', from Task's declared consuming methods."
+          },
+          {
+            "loss": "A generic function cannot ask that its type argument be thread-bound.",
+            "mitigation": "Not needed for soundness. Crossing and copy checks run on the instantiated type at each site, so a generic holder of an Arena is still refused (probe: E1102 on a struct that holds an Arena)."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "These facts pass through fields, so a trait bound needs automatic traits, a new kind of trait, or it gives the wrong answer for holders. It also adds a third spelling for the duty `#SingleUse` already declares."
+          },
+          {
+            "key": "C",
+            "reason": "Hidden fields bury the facts among the data. Every struct literal, Codable list and C layout has to account for them."
+          },
+          {
+            "key": "D",
+            "reason": "It keeps the facts closed to user types, so #6852 c2 stays unmet."
+          }
+        ],
+        "tradeoff": "One rarely written marker and a new site for `#Local`, in exchange for facts that any type can state and every reader can see."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G1Facts-2. The review checked every cited site at fd32fefaf1 and ran nine probes on the tip23 compiler, refuting four claims of the earlier draft. It kept option A and repaired it, as the detail's last section shows."
+      },
+      "checkInstructions": "Check the lists named in detail against origin/dev. Copy.jet holds them at lines 371-405, 1070-1103, 1410 and 1457 of the file. Crossings.jet holds them at 144-157, 353-377 and 536, and Typestate.jet at 19-25 and 88-91 of each file.\n\nCheck the existing markers in PreludeMarkers.jet (Compiler/JetFoundation Policy): MustUse at 274, SingleUse at 394 and Local at 518 of that file. Check spec.md 4422-4431 for join, detach and L1101. Check syntax-decisions.md 4215 for D-LIN1 and 6309-6311 for `#Local`.\n\nProbes (tip23): a user `impl T.Close` type held in a field is UseAfterMove when copied. A user `#SingleUse` struct left unconsumed is SingleUseDropped. A user `#MustUse` struct dropped as a bare statement is MustUseIgnored. A struct that holds `mem.Arena` is ValueNotSendable at a task crossing. `#Local` on a type is InvalidScopedPolicy today.\n\nAfter ratification, one card does the cutover. It adds `MoveOnly` and the Type site of `Local`, and declares the ten carriers in Core. It writes the markers and Close impls on Core's types, puts `#SingleUse` on Task, retires L1101, and deletes the lists. Proofs: the lists leave Tests/Guards/closed_lists/baseline.tsv, and `jet test Tests/Guards --filter closed_lists` passes. The cases filter `declared_copy_resource_typestate_facts` shows a user type taking each fact.\n\nOnly check runs and probes were made for this draft, no build, test or speed run.",
+      "surface": {
+        "gist": "How should a type declare that it never copies, stays on its thread, or must be used up?",
+        "lesson": "Some types may only move, some must stay on one thread, and a task must be joined or detached. Today the checker knows the first two and Task's duty only from Core name lists, so user types cannot have them.",
+        "trio": {
+          "current": {
+            "note": "The checker finds thread-bound types by name.",
+            "code": "if module_name == \"core.mem\" && (name == \"Arena\" || name == \"Bump\" || name == \"Pool\") {\n    return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: name}))\n}"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "A Swift type opts out of copying in its own declaration.",
+            "code": "struct FileDescriptor: ~Copyable {\n  deinit { close(fd) }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Markers on the declaration",
+            "gist": "Write `#MoveOnly` or `#Local` on the type; Task takes the existing `#SingleUse`.",
+            "gains": [
+              "Facts show in the type's header.",
+              "Core and user types write the same markers.",
+              "Only one new word."
+            ],
+            "losses": [
+              "Ten builtin carriers need Core declarations (done in the same cutover).",
+              "L1101 retires into E0140 (it still explains)."
+            ],
+            "proposed": {
+              "code": "#[MoveOnly, Local]\nPool: struct {\n    slots: [Slot],\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Marker traits",
+            "gist": "Implement an empty trait such as `MoveOnly` for the type.",
+            "gains": [
+              "A generic function can ask for a fact."
+            ],
+            "losses": [
+              "Field-held facts need automatic traits, a new kind of trait."
+            ],
+            "proposed": {
+              "code": "Pool: struct {\n    slots: [Slot],\n    impl MoveOnly {}\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Marker fields",
+            "gist": "Hold an empty field that carries the fact.",
+            "gains": [
+              "Uses rules the checker already has."
+            ],
+            "losses": [
+              "Facts hide among the fields, and every literal sees them."
+            ],
+            "proposed": {
+              "code": "Pool: struct {\n    slots: [Slot],\n    _move: MoveMark,\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep the compiler lists",
+            "gist": "Keep the name lists in one compiler table.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "User types cannot take the facts."
+            ],
+            "proposed": {
+              "code": "MOVE_ONLY_TYPES: [String]{\"Atomic\", \"ViewMut\"}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A puts each fact on the type, reuses `#Local` and `#SingleUse`, and adds only `#MoveOnly`. Core and packages write it the same way.",
+          "gains": [
+            "Facts are visible where the type is declared.",
+            "User types get the facts Core types get."
+          ],
+          "losses": [
+            {
+              "loss": "One new marker.",
+              "mitigation": "It is the spec's own word, few authors write it, and errors name it."
+            },
+            {
+              "loss": "L1101 retires.",
+              "mitigation": "It points to E0140, whose text still says join or detach."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Field-held facts would need automatic traits."
+            },
+            {
+              "key": "C",
+              "reason": "Hidden fields bury the facts."
+            },
+            {
+              "key": "D",
+              "reason": "User types stay shut out."
+            }
+          ],
+          "tradeoff": "One rarely written marker, for facts any type can state."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "G1Facts-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T14:37:32.873Z"
     }
   ],
   "questions": [
@@ -140578,6 +140814,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T14:42:08.028Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-24T14:42:07.015Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0e6znz4",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-24T14:37:32.873Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-DECL-FACTS1",
+      "note": "How a type says it never copies, stays on its thread, or must be used up"
+    },
+    {
+      "at": "2026-11-24T14:31:13.966Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T14:31:06.696Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-24T14:27:46.327Z",
       "by": "Orchestrator",
