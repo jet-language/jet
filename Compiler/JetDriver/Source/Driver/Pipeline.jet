@@ -160,7 +160,6 @@ use {
         sema_source_location_at,
         sema_effect_chain_name,
         sema_check_registered_module_text,
-        sema_source_file_at,
         sema_core_role,
         sema_core_role_functions,
         sema_core_roles_check,
@@ -338,7 +337,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_core_role_names, ir_first_function_rows, ir_function_rows_get, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
+    jet_ir.[IRFunctionRows, IRProgram, IRReachHeld, IRSourceTexts, ir_codec_decode_roles, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_method_lowered_by_owner, ir_core_role_names, ir_first_function_rows, ir_function_rows_get, ir_named_function_keys, ir_reach_held_add, ir_reach_held_row, ir_reachable_core_rows, ir_runtime_intrinsic, ir_source_texts]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -1416,9 +1415,10 @@ jet_driver_comptime_named_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // What each codec target in `tree` calls with no call fact
 // (ir_comptime_codec_targets): every Encode or Decode implementation, as the
 // target encodes or decodes, that it reaches by owner type, named from
-// `module_identity` (sema_comptime_codec_methods), and the
-// Core/Encoding/Encoding.jet decode helpers a container target is decoded
-// through, queued like the role fillers.
+// `module_identity` (sema_comptime_codec_methods), and the Core decode
+// helpers a container target is decoded through, the functions that fill
+// their jet_builtins roles (ir_codec_decode_roles), queued like the other
+// role fillers.
 jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) {
     targets: ir_comptime_codec_targets(graph.interner, tree, roots, body)
     if targets.len() == 0 {
@@ -1430,16 +1430,10 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
         }
     }
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
-    loop module_row in graph.modules {
-        if !module_is_core(module_row.module_identity) || !module_row.source_file.ends_with("Core/Encoding/Encoding.jet") {
-            next
-        }
-        module_text_value: module_text(graph.module_table, module_row.module_identity)
-        loop name in ir_codec_decode_helpers() {
-            key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
-            if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
-                refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
-            }
+    loop filler in sema_core_role_functions(graph, ir_codec_decode_roles()) {
+        key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, filler.module_identity), "", filler.name)
+        if jet_driver_comptime_function_owner(index, key) == .Val(owner) {
+            refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
         }
     }
 }
@@ -5134,8 +5128,7 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
 
 // The Core functions and methods a compile that lowers checks up front under
 // Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
-// top-level functions lowering keeps with no keyed call in a checked body
-// (ir_core_lowered_by_name) or finds by the jet_builtins role they fill
+// top-level functions lowering finds by the jet_builtins role they fill
 // (sema_core_role), every top-level function of a Core module with foreign
 // rows, which jet_driver_prunable_core_modules leaves rooted, or of the Core
 // unit under test (`tested`, jet_driver_test_modules: a `jet test` of a Core
@@ -5156,8 +5149,7 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph, tested: [U32:Bo
         }
         loop item in module_row.program.items {
             if item == .Func(func) {
-                source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, func.span)
-                if rooted || ir_core_lowered_by_name(true, source_file, func.name) || sema_core_role(func.markers, graph, identity) != "" {
+                if rooted || sema_core_role(func.markers, graph, identity) != "" {
                     _ := name_intern(roots, symbol_key_text(SymbolKind.Function, identity_text, "", func.name))
                 }
             }

@@ -121,7 +121,8 @@ pipe_output_name: fn() -> I64 {
 // block (jet_rt_alloc_8) whose count word unique and release read; an align-1
 // buffer has no count word, and they would write its neighbor's bytes.
 // Empty success means EOF/None; UTF8, error policy and CRLF belong to Core's
-// __stdout_next_line/__stderr_next_line, never to this buffered byte leaf.
+// process line readers (stdout_next_line/stderr_next_line), never to this
+// buffered byte leaf.
 #Export(c) jet_process_stream_line_bytes_raw: fn(pipe: I64, data_out: I64, len_out: I64, error_out: I64) -> I64 {
     fd: pipe_borrow_mut(pipe)
     fd_put(data_out, I64{0}, I64{0})

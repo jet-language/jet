@@ -646,13 +646,9 @@ IRProgram: struct {
     // reports.
     spawn_sites_keys: NameTable{name_column_table()},
     spawn_sites: [Int]{name_column()},
-    // By ir_codec_decode_helpers index, that Core decode helper's function
-    // row (-1: the program does not hold it), found once by ir_program_bind
-    // (BuildDyn.jet ir_codec_decode_key).
-    decode_helpers: [Int]{[Int]{}},
     // The function rows of the Core functions that fill a jet_builtins role
     // (FnBody.role), in row order, found once by ir_program_bind: a precise
-    // operation finds its helper among them (ir_core_role_row).
+    // operation or a decode finds its helper among them (ir_core_role_row).
     core_roles: [Int]{[Int]{}},
     // The declared hook and decision points that no handler can reach, by
     // constant row (`constants`), found once by ir_program_bind
@@ -1169,15 +1165,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, thre
     if workers > 1 {
         scanned := ir_program_bind_parallel(p, owned, decls, workers, threads) ?? panic("the IR program bind threads failed")
         p.functions = owned.move()
-        quiet := [Int:Bool]{}
-        decode := [Int]{}
-        task.group ir_program_post_bind {
-            t_quiet: task ir_quiet_points(p)
-            decode = ir_codec_decode_rows(p)
-            quiet = t_quiet.join() ?? panic(compiler_threads_failure_text(err))
-        }
-        p.quiet_points = quiet.move()
-        p.decode_helpers = decode.move()
+        p.quiet_points = ir_quiet_points(p)
         ir_program_scan_bodies_apply(p, scanned.spawns, scanned.boxed, scanned.print)
         return
     }
@@ -1252,7 +1240,6 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable, thre
     p.functions = owned.move()
     p.quiet_points = ir_quiet_points(p)
     p.rows = rows
-    p.decode_helpers = ir_codec_decode_rows(p)
     ir_program_scan_bodies(p, threads)
     ir_program_bind_decls(p, decls)
     p.render_impls_keys = render_impls_keys

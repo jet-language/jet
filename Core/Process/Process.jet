@@ -13,6 +13,7 @@ package: {
 use {
     core: core
     files: core.files
+    builtin: jet_builtins
     rt: jet.runtime.process
     files_rt: jet.runtime.files
 }
@@ -842,12 +843,14 @@ default_fields: fn(argv: [String]) -> ProcessFields Never! {
     }
 }
 
-// Process stdout/stderr readers wait on the child execution boundary, not FS.
-__stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
+// The line readers of a child's output and error output, which a
+// `loop line in child.stdout.lines()` calls for each line. They wait on the
+// child execution boundary, not FS.
+#Builtin.Role(.ProcessStdoutLine) priv stdout_next_line: fn(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stdout_line_bytes(stream))
 }
 
-__stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
+#Builtin.Role(.ProcessStderrLine) priv stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
 }
 

@@ -44,8 +44,8 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
-    jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name]
+    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_table, name_table_sized, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_ir.[IR_CORE_INTRINSICS]
     jet_lexer.[
         Lexed,
         STRING_PART_INTERPOLATION,
@@ -732,24 +732,19 @@ JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 // (`form.validate` runs `typed_validate_field`). It holds too the source
 // targets a row names in place of its member, its BUILTIN_METHOD_ROWS
 // CoreSource helpers, its IR_CORE_INTRINSICS rows and its
-// JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route adds the functions
-// lowering keeps by name, and in a module that isn't routed every `__`
-// name. A routed module's F32-width source is called by its member's
-// spelling (jet_driver_core_f32_member).
+// JET_DRIVER_SOURCE_ROUTES; jet_driver_core_route adds, in a module that
+// isn't routed, every `__` name. A routed module's F32-width source is
+// called by its member's spelling (jet_driver_core_f32_member).
 JetDriverCoreRoutes: struct {
     module_name: String,
     routed: Bool,
-    path: String,
     names: [String:Bool],
 }
 
 jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
-    routes := JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), path: "", names: [String:Bool]{}}
+    routes := JetDriverCoreRoutes{module_name: module_name, routed: JET_DRIVER_ROUTED_MODULES.contains(module_name), names: [String:Bool]{}}
     // A user unit has no routes.
     if module_name == "" -> return routes
-    loop row in CORE_SOURCE_OWNED_ROWS {
-        if row.module_name == module_name -> routes.path = row.path
-    }
     loop row in CORE_CALLS {
         if row.module_name == module_name && (!routes.routed || row.member.starts_with("__")) {
             routes.names[row.member] = true
@@ -782,12 +777,12 @@ jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
 }
 
 // Whether the compiler calls `name` of the routes' module by a name no
-// program need spell: a route row or a function lowering keeps by name
-// (ir_core_lowered_by_name: an Encoding.jet decode helper, a core.process
-// line reader), and in a module that isn't routed every `__` name.
+// program need spell: a route row, and in a module that isn't routed every
+// `__` name. A Core function lowering finds by the jet_builtins role it fills
+// carries its role marker, so it is never lazy (jet_driver_reach_lazy_func).
 jet_driver_core_route: fn(routes: JetDriverCoreRoutes, name: String) -> Bool Never! {
     if !routes.routed && name.starts_with("__") -> return true
-    routes.names.get(name) != None || ir_core_lowered_by_name(true, routes.path, name)
+    routes.names.get(name) != None
 }
 
 // The member whose F32-width source (sema_call_core_f32_source) `name` is in

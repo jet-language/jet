@@ -36,6 +36,7 @@ package: {
 // - Whole-value codecs are pure (`->`) and callers pass text or bytes directly.
 use {
     base64: core.encoding.base64
+    builtin: jet_builtins
     stream: __core_encoding_stream
     time: core.time
 }
@@ -334,22 +335,22 @@ impl Dyn.Decode {
 }
 
 // Typed `tree.decode<T>()` of a container T with no Decode implementation of
-// its own, and `FieldError.under`. JetIR calls these by name (BuildDyn.jet
-// ir_dyn_decode, ir_decode_under); scalars cross the runtime's canonical
-// jet_rt_codec_decode_* adapters instead. The generic parameter is not
-// spelled `T` (see json.__decode_typed).
+// its own, and `FieldError.under`. Each fills a jet_builtins role, by which
+// JetIR calls it (BuildDyn.jet ir_dyn_decode, ir_decode_under); scalars
+// cross the runtime's canonical jet_rt_codec_decode_* adapters instead. The
+// generic parameter is not spelled `T` (see json.__decode_typed).
 
 // `FieldError.under(segment, inner)`: every error of `inner` framed under
 // `segment`; a success is handed back as is, its carrier and value neither
 // copied nor retained.
-__decode_under: fn<Item>(segment: String, inner: &&Item [FieldError]!) -> Item [FieldError]! {
+#Builtin.Role(.DecodeUnder) __decode_under: fn<Item>(segment: String, inner: &&Item [FieldError]!) -> Item [FieldError]! {
     if inner == .Err(errors) -> return Err(loop error in errors -> decode_under(segment, error))
     inner
 }
 
 // A List: each Array item decodes in order; a failing item's errors are
 // framed under `[index]` and every failure fails the List.
-__decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
+#Builtin.Role(.DecodeList) __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
     if tree == {
         .Array(items) -> {
             values := [Item]{}
@@ -370,7 +371,7 @@ __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
 }
 
 // A fixed List `[Item#length]`: the List decode of exactly `length` items.
-__decode_fixed_list: fn<Item: Decode>(tree: Dyn, length: Int) -> [Item] [FieldError]! {
+#Builtin.Role(.DecodeFixedList) __decode_fixed_list: fn<Item: Decode>(tree: Dyn, length: Int) -> [Item] [FieldError]! {
     values: tree.decode<[Item]>() ?? return Err(err)
     if values.len() != length {
         return Err([FieldError]{FieldError{path: "", reason: "expected a fixed list of length {length}, found {values.len()}"}})
@@ -380,7 +381,7 @@ __decode_fixed_list: fn<Item: Decode>(tree: Dyn, length: Int) -> [Item] [FieldEr
 
 // A byte List ([U8]) also takes Dyn.Bytes as is and Text as strict padded
 // standard base64.
-__decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
+#Builtin.Role(.DecodeBytes) __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
     if tree == {
         .Bytes(bytes) -> Ok(bytes.copy())
         .Text(text) -> {
@@ -393,7 +394,7 @@ __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
 
 // An Option: Null is None; any other value is Some of its decode, whose errors
 // pass through unframed.
-__decode_option: fn<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
+#Builtin.Role(.DecodeOption) __decode_option: fn<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
     if tree == {
         .Null -> Ok(None)
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
@@ -406,7 +407,7 @@ __decode_option: fn<Item: Decode>(tree: Dyn) -> Item? [FieldError]! {
 // A String-keyed Map: each Object entry decodes in entry order (a repeated key
 // keeps the later value); an entry's errors are framed under its key and every
 // failure fails the Map.
-__decode_map: fn<Item: Decode>(tree: Dyn) -> [String:Item] [FieldError]! {
+#Builtin.Role(.DecodeMap) __decode_map: fn<Item: Decode>(tree: Dyn) -> [String:Item] [FieldError]! {
     if tree == {
         .Object(entries) -> {
             values := [String:Item]{}

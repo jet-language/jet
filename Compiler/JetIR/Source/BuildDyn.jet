@@ -536,10 +536,11 @@ ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: 
 }
 
 // `tree.decode<T>()`: T's own Decode implementation, called with the tree
-// (F32 and Dyn have theirs in Core/Encoding/Encoding.jet); a container
-// target's Core/Encoding/Encoding.jet decode helper (ir_codec_decode_helper,
-// ir_dyn_fixed_decode); else the runtime's canonical scalar adapter
-// jet_rt_codec_decode_<scalar>, which borrows the tree.
+// (F32 and Dyn have theirs in core.encoding); a container target's Core
+// decode helper, the function that fills its jet_builtins role
+// (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's
+// canonical scalar adapter jet_rt_codec_decode_<scalar>, which borrows the
+// tree.
 // `tree.decode_stored<T>()` (`stored`) calls T's derived `decode_stored`
 // when T has one, a struct with a `#Secret` field; any other target decodes
 // as `decode<T>()` does.
@@ -553,7 +554,7 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         return ir_call(m, p, b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
     if ir_codec_decode_helper(concrete) == .Val(helper) {
-        helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
+        helper_key: ir_codec_decode_key(p, helper.role) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: the Core decode helper of role {helper.role} is outside the checked program")
         return ir_call(m, p, b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
     if ir_untag(concrete) == .FixedList(element, measure) {
@@ -573,7 +574,7 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
     ir_route(m, p, b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
 }
 
-// `tree.decode<[T#N]>()`: Core/Encoding/Encoding.jet __decode_fixed_list
+// `tree.decode<[T#N]>()`: the Core decode helper of role DecodeFixedList
 // decodes the List of exactly N items. A `[T#N]` carried as a List is that
 // List; an inline one takes a copy of its N elements.
 ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, fixed: Type, element: Type, measure: Measure, span: Span) -> Int Never! {
@@ -583,7 +584,7 @@ ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     fixed_row: ir_value_type(m, p, fixed) ?? return ir_type_fail(b, span, fixed)
-    key: ir_codec_decode_key(p, "__decode_fixed_list") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: Core/Encoding/Encoding.jet __decode_fixed_list is outside the checked program")
+    key: ir_codec_decode_key(p, "DecodeFixedList") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: the Core decode helper of role DecodeFixedList is outside the checked program")
     length: ir_node(m, p, b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
     listed: ir_call(m, p, b, key, [Type]{element.copy()}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
     if ir_failed(b) || listed < 0 -> return -1
@@ -682,8 +683,8 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     out
 }
 
-// `FieldError.under(segment, inner)`: Core/Encoding/Encoding.jet
-// __decode_under frames every error of the inner Result under `segment` and
+// `FieldError.under(segment, inner)`: the Core decode helper of role
+// DecodeUnder frames every error of the inner Result under `segment` and
 // passes a success through.
 ir_decode_under: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
     success: if ir_untag(ty) == {
@@ -692,66 +693,42 @@ ir_decode_under: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment
             return ir_fail_slot(b, span, "FieldError.under as {ir_type_name(ty)}")
         }
     }
-    key: ir_codec_decode_key(p, "__decode_under") ?? return ir_fail_slot(b, span, "FieldError.under: Core/Encoding/Encoding.jet __decode_under is outside the checked program")
+    key: ir_codec_decode_key(p, "DecodeUnder") ?? return ir_fail_slot(b, span, "FieldError.under: the Core decode helper of role DecodeUnder is outside the checked program")
     args: [BodyCallArg]{ir_codec_arg(segment), ir_codec_arg(inner)}
     ir_call(m, p, b, key, [Type]{success}, -1, [IRWriteBack]{}, args, span)
 }
 
-// A plain positional call argument for a by-name Core codec helper.
+// A plain positional call argument for a Core codec helper.
 ir_codec_arg: fn(value: Int) -> BodyCallArg Never! {
     BodyCallArg{value: value, template_items: [], borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
-// The Core decode helper for a target with no Decode implementation of its
-// own, and its type arguments: a List (a byte List also takes Bytes and
-// base64 Text), an Option and a String-keyed Map.
-ir_codec_decode_helper: fn(target: Type) -> {name: String, type_args: [Type]}? Never! {
+// The role of the Core decode helper for a target with no Decode
+// implementation of its own, and its type arguments: a List (a byte List
+// also takes Bytes and base64 Text), an Option and a String-keyed Map.
+ir_codec_decode_helper: fn(target: Type) -> {role: String, type_args: [Type]}? Never! {
     if ir_untag(target) == {
         .List(element) -> {
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
-                return Val({name: "__decode_bytes", type_args: [Type]{}})
+                return Val({role: "DecodeBytes", type_args: [Type]{}})
             }
-            Val({name: "__decode_list", type_args: [Type]{element.copy()}})
+            Val({role: "DecodeList", type_args: [Type]{element.copy()}})
         }
-        .Option(inner) -> Val({name: "__decode_option", type_args: [Type]{inner.copy()}})
+        .Option(inner) -> Val({role: "DecodeOption", type_args: [Type]{inner.copy()}})
         .Map(key, _, value) -> {
             if ir_untag(key) != Type.String -> return None
-            Val({name: "__decode_map", type_args: [Type]{value.copy()}})
+            Val({role: "DecodeMap", type_args: [Type]{value.copy()}})
         }
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
-// The checked key of the Core decode helper `name`, or None when the program
-// does not hold it (IRProgram.decode_helpers).
-ir_codec_decode_key: fn(p: IRProgram, name: String) -> String? Never! {
-    loop (at, helper) in ir_codec_decode_helpers() {
-        if helper != name -> next
-        row: p.decode_helpers[at]
-        if row < 0 -> return None
-        return Val(p.functions[row].key.copy())
-    }
-    None
-}
-
-// By ir_codec_decode_helpers index, the row of the first function of that
-// name the helpers' source holds (CoreReach.jet ir_codec_decode_source) that
-// is its key's first row; -1 for a helper the program lacks. Found once by
-// ir_program_bind, after it binds the functions and their rows.
-ir_codec_decode_rows: fn(p: IRProgram) -> [Int] Never! {
-    names: ir_codec_decode_helpers()
-    found := (loop _ in 0..<names.len() -> -1)
-    loop (index, function) in p.functions {
-        if !ir_codec_decode_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) {
-            next
-        }
-        loop (at, helper) in names {
-            if helper == function.name && found[at] < 0 && ir_function_row(p, function.key) == (Val(index)) {
-                found[at] = index
-            }
-        }
-    }
-    found
+// The checked key of the Core decode helper that fills jet_builtins role
+// `role` (CoreReach.jet ir_codec_decode_roles), or None when the program
+// does not hold it.
+ir_codec_decode_key: fn(p: IRProgram, role: String) -> String? Never! {
+    row: ir_core_role_row(p, role) ?? return None
+    Val(p.functions[row].key.copy())
 }
 
 // The runtime scalar Decode adapter's suffix for `target`, or None for a
@@ -797,7 +774,7 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
             }
         }
         if ir_sequence_element(concrete) == .Val(element) {
-            // A byte List encodes as Dyn.Bytes, the inverse of __decode_bytes
+            // A byte List encodes as Dyn.Bytes, the inverse of DecodeBytes
             // (encoding-decisions.md: Codable `[U8]` is never an integer array);
             // an inline `[U8#N]` crosses as a List copy of it.
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {

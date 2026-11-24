@@ -64,53 +64,32 @@ ir_print_style_keys: fn(functions: [FnBody], keys: &[String]) Never! {
     }
 }
 
-// The Core/Encoding/Encoding.jet decode helpers Dyn decode and
-// `FieldError.under` call by name (BuildDyn.jet ir_dyn_decode,
-// ir_decode_under).
-ir_codec_decode_helpers: fn() -> [String] Never! {
-    [String]{"__decode_list", "__decode_fixed_list", "__decode_bytes", "__decode_option", "__decode_map", "__decode_under"}
+// The jet_builtins roles (`RoleKind`) of Core's decode helpers, which Dyn
+// decode and `FieldError.under` call (BuildDyn.jet ir_dyn_decode,
+// ir_decode_under): a List, a `[T#N]`, a byte List, an Option, a
+// String-keyed Map, and a decode framed under a field. F32 and Dyn decode
+// through their own impls in core.encoding.
+ir_codec_decode_roles: fn() -> [String] Never! {
+    [String]{"DecodeList", "DecodeFixedList", "DecodeBytes", "DecodeOption", "DecodeMap", "DecodeUnder"}
 }
 
-// Whether a function with these header fields is one of those helpers.
-ir_codec_decode_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    if !core || !ir_core_source_path(source_file, "Core/Encoding/Encoding.jet") || !ir_core_reach_is_top_level(kind) {
-        return false
-    }
-    loop helper in ir_codec_decode_helpers() {
-        if helper == name -> return true
-    }
-    false
-}
+// Whether `role` is one of those helpers' roles: a role's name starts with
+// `Decode` exactly when it is a decode helper's.
+ir_codec_decode_role: fn(role: String) -> Bool Never! { role.starts_with("Decode") }
 
 // A Core function that fills a jet_builtins role (FnBody.role): lowering
 // finds it by that role, with no keyed call in a kept caller's checked body.
+// A decode helper's role is the exception: only a decode site reaches it
+// (ir_core_reach_expr_keys).
 ir_core_role_target: fn(function: FnBody) -> Bool Never! {
-    function.role != "" && module_is_core(function.module_identity)
+    function.role != "" && !ir_codec_decode_role(function.role) && module_is_core(function.module_identity)
 }
 
-// Whether a top-level Core function with these header fields is one lowering
-// keeps by name, with no keyed call in a kept caller's checked body: an
-// Encoding.jet decode helper or a core.process line reader
-// (ir_process_line_reader). A compile that lowers checks each up front
-// under Core demand (driver jet_driver_core_lowering_roots), since no
-// checked body names it.
-ir_core_lowered_by_name: fn(core: Bool, source_file: String, name: String) -> Bool Never! {
-    if ir_codec_decode_source(core, source_file, TFuncKind.TopLevel, name) {
-        return true
-    }
-    ir_core_process_source(core, source_file) && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
-}
-
-// Whether a function with these header fields is core.process's, whose one
-// source is Core/Process/Process.jet.
-ir_core_process_source: fn(core: Bool, source_file: String) -> Bool Never! {
-    core && ir_core_source_path(source_file, "Core/Process/Process.jet")
-}
-
-// The core.process function that reads one line of a child's stream of
-// owner type `owner` (ProcessStdoutStream / ProcessStderrStream), or "".
-ir_process_line_reader: fn(owner: String) -> String Never! {
-    if owner == "ProcessStdoutStream" -> "__stdout_next_line" else if owner == "ProcessStderrStream" -> "__stderr_next_line" else -> ""
+// The jet_builtins role (`RoleKind`) of the Core function that reads one
+// line of a child's stream of owner type `owner` (ProcessStdoutStream /
+// ProcessStderrStream), or "".
+ir_process_line_role: fn(owner: String) -> String Never! {
+    if owner == "ProcessStdoutStream" -> "ProcessStdoutLine" else if owner == "ProcessStderrStream" -> "ProcessStderrLine" else -> ""
 }
 
 // Whether an authored inherent Core method named `name` is one lowering
@@ -163,16 +142,16 @@ ir_core_reach_lambda_keys: fn(interner: Interner, tree: BodyTree, value: BodyLam
 // The Core function `loop line in handle.lines()` reads each line with
 // (jet_std_file_reader_read_line / jet_std_io_stdin_read_line / the process
 // stream line readers): the Core `read_line` whose owner is the handle's type,
-// FileReader or StdinHandle, or core.process `__stdout_next_line` /
-// `__stderr_next_line` for a child's ProcessStdoutStream / ProcessStderrStream;
-// "" when the program holds none.
+// FileReader or StdinHandle, or for a child's ProcessStdoutStream /
+// ProcessStderrStream the Core function that fills its line reader's role
+// (ir_process_line_role); "" when the program holds none.
 ir_line_reader_key: fn(functions: [FnBody], handle: Type) -> String Never! {
     owner: ir_line_reader_owner(handle)
     if owner == "" -> return ""
-    stream: ir_process_line_reader(owner)
+    role: ir_process_line_role(owner)
     loop function in functions {
-        if stream != "" {
-            if function.name == stream && ir_core_process_source(module_is_core(function.module_identity), function.source_file) {
+        if role != "" {
+            if function.role == role && module_is_core(function.module_identity) {
                 return function.key.copy()
             }
             next
@@ -327,15 +306,15 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> { ir_core_reach_add(keys, symbol_key(symbols, tree.symbols, symbol)) }
-        // `tree.decode<T>()` of a container and `FieldError.under` call their
-        // Core decode helper by name; a helper's own `decode<Item>` reaches
-        // the others, so a decode site roots them all.
+        // `tree.decode<T>()` of a container and `FieldError.under` call the
+        // Core decode helper that fills their role; a helper's own
+        // `decode<Item>` reaches the others, so a decode site roots them all.
         // The ambient `input` (LinesIter) reads each line with its receiver's
         // Core `read_line` (__InputLines).
         .HandleMethod(receiver, operation, _) -> {
             if operation == .DynDecode(_, _) {
-                loop name in ir_codec_decode_helpers() {
-                    ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, name) ?? "")
+                loop role in ir_codec_decode_roles() {
+                    ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, role) ?? "")
                 }
             }
             if operation == .LinesIter {
@@ -343,7 +322,7 @@ ir_core_reach_expr_keys: fn(interner: Interner, tree: BodyTree, expression: Int,
             }
         }
         .DecodeUnder(_, _) -> {
-            ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, "__decode_under") ?? "")
+            ir_core_reach_add(keys, ir_core_reach_source_key(source_keys, "DecodeUnder") ?? "")
         }
         .InlineBlock(body) -> { ir_core_reach_stmt_keys(interner, tree, body, functions, keys) }
         .Lambda(value) -> { ir_core_reach_lambda_keys(interner, tree, value, functions, keys) }
@@ -497,8 +476,8 @@ ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
 // `tree.decode<T>()` target decodes, every `value.encode()` receiver encodes,
 // and every type argument of a generic call does either (a codec such as
 // `cbor.to_bytes_canonical<T>` encodes its `T` inside the instance). Their
-// lowering calls the implementation by owner type and a container's
-// Core/Encoding/Encoding.jet helper by name (ir_dyn_decode, ir_serde_encode),
+// lowering calls the implementation by owner type and a container's Core
+// decode helper by its jet_builtins role (ir_dyn_decode, ir_serde_encode),
 // and Sema records no call fact for either, so a compile-time body queues
 // them itself (jet_driver_comptime_codec_refs).
 IRComptimeCodecTarget: struct {
@@ -600,7 +579,8 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // methods stay rooted because Codegen resolves their implicit uses (`close`,
 // `display`, index hooks, trait dispatch) by owner type rather than by a key
 // in the caller's body. A Core function that fills a jet_builtins role
-// (`ir_core_role_target`) is rooted. A compiler-generated Core method
+// (`ir_core_role_target`) is rooted, but for a decode helper, which only a
+// decode site reaches. A compiler-generated Core method
 // (`FnBody.synthetic`: a Prelude/Derives.jet `Equatable`/`Comparable` body)
 // is not a root: it is kept only when a kept body names it (sema rewrites
 // `==`/`<` on its owner into a keyed method call). An unreached derive then
@@ -635,8 +615,8 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
     weights := [Int]{}
     // Each row's source bytes, a wave's weight per row.
     sizes := [Int]{}
-    // The Core source helpers a lowering calls by name, with no keyed call:
-    // Fmt.jet selector helpers and Encoding.jet decode helpers.
+    // The Core source helpers a lowering calls with no keyed call: Fmt.jet
+    // selector helpers by name and decode helpers by role.
     source_keys := IRReachSources{names: name_table_sized(64), keys: [String]{""}}
     // A declaration's first candidate row by DeclID row (-1: none).
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
@@ -655,8 +635,8 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
             }
             core: module_is_core(function.module_identity)
-            if ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
-                ir_core_reach_source_set(source_keys, function.name, function.key)
+            if core && ir_codec_decode_role(function.role) {
+                ir_core_reach_source_set(source_keys, function.role, function.key)
             }
             rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_core_role_target(function)
             reachable.push(rooted)
@@ -678,8 +658,8 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
                 candidate_count += 1
                 name_column_set_first(by_key.keys, by_key.rows, function.key, index)
                 core: module_is_core(function.module_identity)
-                if ir_codec_decode_source(core, function.source_file, function.kind, function.name) {
-                    ir_core_reach_source_set(source_keys, function.name, function.key)
+                if core && ir_codec_decode_role(function.role) {
+                    ir_core_reach_source_set(source_keys, function.role, function.key)
                 }
                 rooted: !core_modules.has_key(function.module_identity.id) || ir_core_reach_has(rooted_keys, function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_core_role_target(function)
                 reachable.push(rooted)
@@ -776,9 +756,10 @@ ir_core_reach_decl_parts: fn(functions: [FnBody], decls: DeclTable, symbols: Sym
     ir_core_reach_decl_threads(functions, decls, symbols, candidates, starts, ends, 0)
 }
 
-// The Core source helpers a lowering calls by name (ir_reachable_core_rows):
-// a helper name's id in `names` indexes its function key in `keys` (id 0,
-// the empty name, holds "").
+// The Core source helpers a lowering calls with no keyed call
+// (ir_reachable_core_rows), by a selector helper's name or a decode
+// helper's role: a name's id in `names` indexes its function key in `keys`
+// (id 0, the empty name, holds "").
 IRReachSources: struct {
     names: NameTable,
     keys: [String],
