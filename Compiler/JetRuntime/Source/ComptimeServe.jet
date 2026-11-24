@@ -14,8 +14,9 @@
 // length) -> the raw bytes; 3 WRITE(address, length) + bytes; 4 ALLOC(size,
 // align) -> DONE(pointer); 5 TEXT(length) + bytes -> DONE(String);
 // 6 INT(length) + decimal bytes -> DONE(Int); 7 RETURN(word) answers the
-// innermost host request; 8 EXIT; 9 FILTER(handler, length, cookie) + BPF
-// program -> DONE(sigaction, prctl, seccomp results); 10 MAP(address,
+// innermost host request; 8 EXIT; 9 FILTER(handler, length, cookie,
+// tracer) + BPF program -> DONE(sigaction, prctl, seccomp, ptracer
+// results); 10 MAP(address,
 // length) -> DONE(mmap result): fresh read-write pages exactly there; 11
 // PROTECT(address, length, protection) -> DONE(mprotect result); 12
 // ADMIT(flag): the refusal handler reissues a trapped call while the flag is
@@ -98,8 +99,11 @@ comptime_serve_value: fn(kind: I64, length: I64) -> I64 {
 // Installs the SIGSYS handler `handler` (the object's
 // __jet_comptime_refused) and then the compiler's seccomp program of
 // `length` bytes: a refused system call traps to the handler instead of
-// reaching the host. `cookie` marks the handler's reissued calls.
-comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64) {
+// reaching the host. `cookie` marks the handler's reissued calls. A
+// nonzero `tracer` is the compiler's process id under `jet debug --build`:
+// that process and its helpers may trace this one (PR_SET_PTRACER), as the
+// system's ptrace scope otherwise lets only an ancestor; 0 sets nothing.
+comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64, tracer: I64) {
     #Unsafe("the filter is installed once, on the image's only thread, before any call it traps") {
         comptime_serve_cookie = cookie
     }
@@ -115,6 +119,8 @@ comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64) {
     trap_store(wrapping(action + I64{24}), I64{0})
     installed: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})
     private: trap_syscall(I64{157}, I64{38}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
+    // PR_SET_PTRACER, before the filter that would refuse it.
+    traced: if (tracer != I64{0}) -> trap_syscall(I64{157}, I64{1499557217}, tracer, I64{0}, I64{0}, I64{0}, I64{0}) else -> I64{0}
     fprog: jet_rt_alloc(I64{16}, I64{8})
     trap_store(fprog, length /% I64{8})
     trap_store(wrapping(fprog + I64{8}), program)
@@ -123,7 +129,7 @@ comptime_serve_filter: fn(frame: I64, handler: I64, length: I64, cookie: I64) {
     jet_rt_free(fprog, I64{16}, I64{8})
     jet_rt_free(action, I64{32}, I64{8})
     jet_rt_free(program, if (length < I64{8}) -> I64{8} else -> length, I64{8})
-    comptime_serve_reply(frame, I64{1}, installed, private, filtered, I64{0})
+    comptime_serve_reply(frame, I64{1}, installed, private, filtered, traced)
 }
 
 // Serves commands on `frame` until a RETURN, whose word it returns.
@@ -177,7 +183,7 @@ comptime_serve_loop: fn(frame: I64) -> I64 {
         }
         if (kind == I64{7}) { return a }
         if (kind == I64{9}) {
-            comptime_serve_filter(frame, a, b, c)
+            comptime_serve_filter(frame, a, b, c, d)
             next
         }
         if (kind == I64{10}) {

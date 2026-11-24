@@ -24,7 +24,7 @@ use {
         X64LineRow,
         X64ModuleDebug,
         X64ObjectModule,
-        X64Reloc,
+        X64DebugVariable,
         x64_reloc_data,
         x64_reloc_function,
         x64_reloc_runtime,
@@ -34,6 +34,9 @@ use {
         link_direct_bind,
         link_image_view,
         x64_bind_functions_at,
+        x64_bind_functions_debug_at,
+        x64_comptime_code,
+        x64_comptime_facts,
         x64_bind_runtime_image_at,
         x64_executable_whole,
         x64_image_file_read,
@@ -189,4 +192,62 @@ direct_bind_compare: fn(shape: Int, runtime: String, image: &&[U8], reference: &
     failed: direct_bind_straight(3, "jet_rt_alloc", image.move(), view.program_base, 0, 0)
     assert(failed.unwritten && failed.errors.len() == 1 && failed.errors[0].contains("not in the object"), "a call to a missing function is the object writer's error: {failed.errors.join("; ")}")
     assert(failed.executable.image == reference.bufs[1], "the image goes back unchanged")
+}
+
+// Whether `bytes` hold `name` somewhere.
+direct_bind_holds: fn(bytes: [U8], name: String) -> Bool Never! {
+    wanted: name.bytes()
+    if wanted.len() == 0 || bytes.len() < wanted.len() -> return false
+    loop at in 0..<(bytes.len() - wanted.len() + 1) {
+        same := true
+        loop k in 0..<wanted.len() {
+            if bytes[at + k] != wanted[k] {
+                same = false
+                break
+            }
+        }
+        if same -> return true
+    }
+    false
+}
+
+// A batch bound with its line tables for a debugger loads the bytes the
+// plain bind loads: the same segments, the same code and data at the same
+// addresses, so a build that runs under `jet debug --build` runs the code it
+// runs without it. Its line table and the rest of its debug facts lie past
+// the loaded bytes, which only the debugger reads.
+#Test("a batch bound with line tables loads the code the plain bind loads") {
+    path: direct_bind_image_path()
+    reference := link_context([[U8]]{[U8]{}, direct_bind_read(path)}, LINK_RUN_BASE)
+    view: link_image_view(reference, 1, 0, 0)
+    base: view.program_base + 8192
+    loop shape in 0..<3 {
+        plain := direct_bind_straight(shape, "jet_rt_alloc", direct_bind_read(path), base, 0, 0)
+        assert(plain.errors.len() == 0 && !plain.unwritten, "program {shape} binds plainly: {plain.errors.join("; ")}")
+        built := direct_bind_program(shape, "jet_rt_alloc")
+        built.debug[1].lines = [X64LineRow]{X64LineRow{at: 0, line: 3}, X64LineRow{at: 5, line: 4}, X64LineRow{at: 19, line: 5}}
+        held := direct_bind_module(built.data.move())
+        held.debug = X64ModuleDebug{directory: "/work", files: [String]{"prog.jet"}, types: [X64DebugType]{}}
+        // By function id: `main` has none.
+        held.functions = [X64FunctionSource]{
+            X64FunctionSource{name: "entry", file: 0, line: 2, variables: [X64DebugVariable]{}},
+            X64FunctionSource{name: "helper", file: 0, line: 8, variables: [X64DebugVariable]{}},
+            X64FunctionSource{name: "", file: -1, line: 0, variables: [X64DebugVariable]{}},
+        }
+        debugged := x64_bind_functions_debug_at("direct", held.move(), built.functions.move(), built.debug.move(), compiler_threads_single(), direct_bind_read(path), base, 0, 0)
+        assert(debugged.errors.len() == 0 && !debugged.unwritten, "program {shape} binds with its line tables: {debugged.errors.join("; ")}")
+        loaded: x64_comptime_code(plain.executable, base)
+        traced: x64_comptime_code(debugged.executable, base)
+        assert(loaded.failure == "" && traced.failure == "", "both binds read as loadable code: {loaded.failure} / {traced.failure}")
+        assert(loaded.segments.len() == traced.segments.len(), "program {shape} loads {loaded.segments.len()} segments plainly, {traced.segments.len()} with line tables")
+        loop k in 0..<loaded.segments.len() {
+            a: loaded.segments[k]
+            b: traced.segments[k]
+            assert(a.vaddr == b.vaddr && a.file_size == b.file_size && a.memory_size == b.memory_size && a.flags == b.flags && a.offset == b.offset, "program {shape}'s segment {k} loads alike with line tables")
+        }
+        assert(loaded.bytes == traced.bytes, "program {shape}'s loaded bytes are byte-identical with line tables")
+        assert(loaded.high == traced.high, "program {shape} reaches the same top address")
+        assert(direct_bind_holds(x64_comptime_facts(debugged.executable), ".debug_jetline"), "program {shape}'s facts carry its line table")
+        assert(!direct_bind_holds(x64_comptime_facts(plain.executable), ".debug_jetline"), "the plain bind carries no line table")
+    }
 }

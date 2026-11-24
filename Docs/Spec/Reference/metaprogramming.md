@@ -117,6 +117,14 @@ only to load the modules it adds. Only a pure function keeps results
 reorders a print
 ([`meta_ladder_levels_run_build_artifacts_and_cache_hits`](../../../Tests/Cases/BuildEntry/meta_ladder_levels_run_build_artifacts_and_cache_hits.case)).
 
+`jet debug --build` runs that build under the debugger: a breakpoint in a
+prep value or block, a `#run fn`, a marker body or `build: fn` pauses the
+build there and shows the call's locals, its call stack and the steps it
+spent of its limit. The debugger only reads the code it pauses, so the
+values, the step counts and the output are the ones `jet build` gives
+([Debugging the build](../observability.md#debugging-the-build),
+[`debug_build_stops_in_every_build_time_place`](../../../Tests/Cases/Debug/debug_build_stops_in_every_build_time_place.case)).
+
 A local whose value only calls pure code is computed while compiling when
 it can be, and the program reads the computed value; this automatic
 evaluation never changes what the program prints. `#Runtime(mode)` on a

@@ -38,6 +38,24 @@ x64_bind_functions_at: fn(name: String, program: &&X64ObjectModule, functions: &
     x64_bind_runtime_image_at(name, object.bytes.move(), taken.move(), program_base, gap_at, gap)
 }
 
+// Bind the program of `functions` as x64_bind_functions_at does, by the
+// object route, with its debug facts: the object carries `program`'s debug
+// files, types and sources (JetIR ir_x64_debug_program) and the bind keeps
+// its `.debug_*` sections, `.symtab` and section headers past its loaded
+// bytes, none of which a load maps. The loaded bytes are the ones the plain
+// bind gives (x64_comptime_code), so the code a debugger stops in is the
+// code that runs without one; x64_comptime_facts reads the facts out.
+x64_bind_functions_debug_at: fn(name: String, program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], threads: CompilerThreads, image: &&[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+    exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
+    object: x64_object_functions_threads(program.move(), functions.move(), debug.move(), exports, [X64DataExport]{}, threads, true, false)
+    if object.errors.len() > 0 {
+        failed := x64_executable_whole([U8]{})
+        failed.image = image.move()
+        return X64BindResult{executable: failed, errors: object.errors.move(), unwritten: true}
+    }
+    link_bind_image(name, object.bytes.move(), image.move(), gap_at, gap, Val(program_base), true)
+}
+
 // The executable x64_bind_runtime_image_at makes of the object of
 // `functions`, written into `exe` but for its image part (input 1 of `c`);
 // false, with `exe` unfinished, when the object route must make it.

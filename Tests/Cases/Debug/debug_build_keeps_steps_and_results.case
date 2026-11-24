@@ -1,0 +1,26 @@
+# Claim: the build-time evaluator behaves the same with the debugger
+# attached as without it. A thousand-iteration loop fits a step limit of
+# 1010 and runs past one of 990 (E0952) under `jet build`; under `jet debug
+# --build`, paused at a breakpoint in that loop's function, the same loop
+# still fits 1010 and still runs past 990 with the same report, because a
+# pause spends no steps and the debugger only reads the child. The build's
+# result and exit code are the ones `jet build` gives. Each program is its
+# own package, so the two `total` functions never share a namespace.
+fixture: DebugBuildKeepsStepsAndResults.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet build over/over.jet
+exit: 1
+stdout+stderr: ~ "ran past its step limit of 990 steps" # without the debugger the loop spends its limit
+step: jet debug --build over/over.jet --do 'break over.jet:3' --do run --do steps --do continue
+exit: 1
+stdout: ~ "Stopped at over.jet:3 in " # the debugger paused the loop's function
+stdout: ~ " of 990\n" # the stop counts the call's steps against its own limit
+stdout+stderr: ~ "ran past its step limit of 990 steps" # with it the same loop spends the same limit
+step: jet build under/under.jet
+exit: 0
+step: jet debug --build under/under.jet --do 'break under.jet:3' --do run --do steps --do continue
+exit: 0
+stdout: ~ "Stopped at under.jet:3 in " # paused in the loop's function
+stdout: ~ " of 1,010\n" # the limit it runs under
+stdout+stderr: !~ "ran past its step limit" # the pause spent no steps: the loop still fits

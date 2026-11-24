@@ -15,6 +15,8 @@ use {
         BinOp,
         BindPattern,
         Binding,
+        BuildDebugEvent,
+        BuildDebugLocal,
         BodyCodecIn,
         BodyCodecOut,
         CallArg,
@@ -80,6 +82,7 @@ use {
         Variant,
         VariantField,
         VariantPayload,
+        ast_comptime_value_debug,
         ast_comptime_value_type,
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_func,
@@ -94,6 +97,8 @@ use {
         body_codec_put_list_u8,
         body_codec_put_string,
         body_codec_put_uvarint,
+        build_debug_ask,
+        build_debug_waits,
         CompilerThreads,
         compiler_threads_admit,
         compiler_threads_failure_text,
@@ -118,6 +123,7 @@ use {
     ]
     jet_parser.[
         parse_source,
+        parser_line_starts_lower_bound,
     ]
 }
 
@@ -133,6 +139,18 @@ SemaDeriveExpansion: struct {
     // pastes produced so far ("" and nothing recorded otherwise).
     definition_module: String{""},
     pasted: [String]{[String]{}},
+    // Under `jet debug --build`: where a marker body was written, so an item
+    // a breakpoint waits on pauses its expansion (sema_derive_debug_stop);
+    // None otherwise.
+    origin: SemaTemplateOrigin?{None},
+}
+
+// A marker body's source file, that file's line starts and the marker's
+// name.
+SemaTemplateOrigin: struct {
+    file: String,
+    line_starts: [Int],
+    rule: String,
 }
 
 // One `impl T.Diagnostic` visible to a rule body. The declaring module's
@@ -1668,15 +1686,10 @@ sema_derive_expand_markers: fn(expansion: &SemaDeriveExpansion, markers: [Marker
     expanded
 }
 
+// A clause is rebuilt around its expanded condition and message, so neither
+// template expression is copied only to be replaced.
 sema_derive_expand_clauses: fn(expansion: &SemaDeriveExpansion, clauses: [ContractClause]) -> [ContractClause] Never! {
-    expanded := [ContractClause]{}
-    loop clause in clauses {
-        updated := clause.copy()
-        updated.cond = sema_derive_expand_expr(expansion, clause.cond)
-        updated.message_expr = sema_derive_expand_expr(expansion, clause.message_expr)
-        expanded.push(updated)
-    }
-    expanded
+    loop clause in clauses -> ContractClause{cond: sema_derive_expand_expr(expansion, clause.cond), message_expr: sema_derive_expand_expr(expansion, clause.message_expr), message_span: clause.message_span, span: clause.span, required: clause.required}
 }
 
 sema_derive_expand_params: fn(expansion: &SemaDeriveExpansion, params: [Param]) -> [Param] Never! {
@@ -1717,13 +1730,7 @@ sema_derive_expand_funcs: fn(expansion: &SemaDeriveExpansion, functions: [Func])
 }
 
 sema_derive_expand_named_types: fn(expansion: &SemaDeriveExpansion, types: [NamedType]) -> [NamedType] Never! {
-    expanded := [NamedType]{}
-    loop entry in types {
-        updated := entry.copy()
-        updated.ty = sema_derive_expand_type(expansion, entry.ty)
-        expanded.push(updated)
-    }
-    expanded
+    loop entry in types -> NamedType{name: entry.name, span: entry.span, ty: sema_derive_expand_type(expansion, entry.ty)}
 }
 
 sema_derive_expand_impl_constants: fn(expansion: &SemaDeriveExpansion, constants: [ImplConstValue]) -> [ImplConstValue] Never! {
@@ -1871,6 +1878,7 @@ sema_derive_expand_body: fn(expansion: &SemaDeriveExpansion, body: [DeriveBodyIt
         if expansion.failure != None {
             return
         }
+        if expansion.origin != None -> sema_derive_debug_stop(expansion, body_item)
         if body_item == {
             .Stmt(stmt) -> {
                 if stmt == .Val(binding) {
@@ -1927,6 +1935,44 @@ sema_derive_expand_body: fn(expansion: &SemaDeriveExpansion, body: [DeriveBodyIt
             }
         }
     }
+}
+
+// Under `jet debug --build` (JetFoundation BuildDebug.jet) a marker body
+// pauses before an item, statement, `#loop` or `#if` that starts on a line a
+// breakpoint waits on, and the console shows the template's values in
+// scope (the latest of each name). A marker body expands inside the
+// compiler, under no step limit; the pause changes nothing it expands.
+sema_derive_debug_stop: fn(expansion: SemaDeriveExpansion, body_item: DeriveBodyItem) -[Time.Wait]> Never! {
+    origin: expansion.origin ?? return
+    span: if body_item == {
+        .Stmt(stmt) -> sema_derive_stmt_span(stmt)
+        .Item(item) -> sema_checked_item_span(item)
+        .Loop(_, _, _, _, at) -> at
+        .If(_, _, _, _, at) -> at
+    }
+    if span.end <= span.start || origin.line_starts.len() == 0 -> return
+    // The lines at or before the item's start: its 1-based line.
+    line: parser_line_starts_lower_bound(origin.line_starts, span.start + 1)
+    if !build_debug_waits(origin.file, line) -> return
+    locals := [BuildDebugLocal]{}
+    loop index in 0..<expansion.scope.len() {
+        bound: expansion.scope[expansion.scope.len() - 1 - index]
+        if sema_derive_debug_shown(locals, bound.name) -> next
+        text := ast_comptime_value_debug(bound.value)
+        if text.len() > 200 -> text = "{text.slice(0, 200)}..."
+        locals.push(BuildDebugLocal{name: bound.name.copy(), text: text})
+    }
+    locals.reverse()
+    build_debug_ask(BuildDebugEvent{kind: .Template, file: origin.file.copy(), line: line, rule: origin.rule.copy(), locals: locals.move()})
+}
+
+// Whether `locals` already shows a value named `name`: an inner binding
+// hides an outer one of the same name.
+sema_derive_debug_shown: fn(locals: [BuildDebugLocal], name: String) -> Bool Never! {
+    loop local in locals {
+        if local.name == name -> return true
+    }
+    false
 }
 
 // Rust's typed selector reports an unknown field as E0302; any other binding
@@ -2167,15 +2213,16 @@ sema_derive_expand_provider_body: fn(body: [DeriveBodyItem], type_info: CtValue,
 
 // A marker rule body expands like a provider body; `self` is the marker's own
 // value, its fields the use site's arguments; its `reject(value)` raises one
-// of `reports` at the rule's use site.
-sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, type_info: CtValue, receiver: CtValue?, reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic]) -> [Item]? {
+// of `reports` at the rule's use site. `origin` is where the body was
+// written, under `jet debug --build` (sema_derive_debug_stop).
+sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, type_info: CtValue, receiver: CtValue?, reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic], origin: SemaTemplateOrigin?{None}) -> [Item]? {
     scope := [NamedCtValue]{}
     if receiver == .Val(value) -> scope.push(NamedCtValue{name: "self", value: value})
     if sema_derive_struct_field(type_info, "name") == .Val(.Str(name)) {
         scope.push(NamedCtValue{name: "name", value: CtValue.Str{value: name}})
     }
     scope.push(NamedCtValue{name: type_param, value: type_info})
-    sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics)
+    sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics, origin)
 }
 
 // Rust `Comptime.expand_template_body`: expand one typed item template in
@@ -2185,8 +2232,8 @@ sema_derive_expand_template_body: fn(body: [DeriveBodyItem], scope: [NamedCtValu
     sema_derive_expand_scoped(body, scope, [SemaDeriveReport]{}, None, "", diagnostics)
 }
 
-sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic]) -> [Item]? {
-    expansion := SemaDeriveExpansion{scope: scope, failure: None, reports: reports, site: site, definition_module: definition_module}
+sema_derive_expand_scoped: fn(body: [DeriveBodyItem], scope: [NamedCtValue], reports: [SemaDeriveReport], site: Span?, definition_module: String, diagnostics: &[Diagnostic], origin: SemaTemplateOrigin?{None}) -> [Item]? {
+    expansion := SemaDeriveExpansion{scope: scope, failure: None, reports: reports, site: site, definition_module: definition_module, origin: origin}
     items := [Item]{}
     sema_derive_expand_body(expansion, body, items)
     if expansion.failure == .Val(diagnostic) {
@@ -3595,8 +3642,7 @@ sema_computed_field_memo_helper_func: fn(definition: StructDef, field: Field, ma
     helper.params = params
     reads_only: sema_computed_formula_reads_only(formula, definition.fields, 0)
     helper.return_type = Val(field.ty.copy())
-    // copy: the contract test takes the written type as a return type.
-    if reads_only && sema_failure_contract_is_default(Val(field.ty.copy())) {
+    if reads_only && sema_failure_contract_is_default(helper.return_type) {
         helper.return_type = Val(Type.Result{ok: field.ty.copy(), err: Type.Named{name: "Never"}})
     }
     helper.return_type_span = Val(field.ty_span)

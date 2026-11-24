@@ -1,0 +1,481 @@
+// `jet debug --build [<file.jet>] [flags]`: the build `jet build` runs
+// with the same words, behind the `(Jet)` console, its breakpoints in the
+// code the build runs: a prep block (`#run { ... }`, `NAME: #run expr`), a
+// prep fn recipe (`#run fn`), a marker body, and a `build: fn` package
+// build. The build runs on a task of this process, as `jet build` would
+// (jet_cli_debug_build_run), and tells the console what it loads and runs
+// (jet_foundation BuildDebug.jet); the console traces the comptime children
+// that run the batches and plants each breakpoint when its code loads
+// (jet_debug NativeBuild.jet). A stop shows where it is, its locals, its
+// call stack and the steps its call spent of its limit; a pause spends no
+// steps, and the build's steps, limits and results are what they are
+// without the debugger.
+//
+// Before the build the console takes `break <file.jet>:<line>` (also
+// `--break`), `delete N` and `run`; the end of its input runs the build.
+// At a stop it takes `continue`, `bt`, `locals`, `steps`, `break`, `delete`
+// and `quit`, which lets the build go on to its end unwatched; the end of
+// its input continues. `--do COMMAND` (repeatable) runs commands instead of
+// reading them. The build's output follows the session's, and its exit
+// code is the command's; a refused command exits 1 when the build passed.
+// `--dap` serves the session to an editor over the Debug Adapter Protocol
+// instead (jet_cli_debug_build_dap): `setBreakpoints`, then
+// `configurationDone` starts the build; a stop is a `stopped` event whose
+// `stackTrace`, `scopes` and `variables` read it; `continue` goes on.
+use {
+    cli_files: core.files
+    cli_sys: core.sys
+    cli_term: core.term
+    cli_time: core.time
+    jet_debug.[NATIVE_DEBUG_PROMPT, NativeBreak, NativeBuild, NativeBuildFrame, NativeBuildStop, native_build_answer, native_build_backtrace, native_build_locals, native_build_steps, native_build_stop_text]
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+    jet_foundation.[BuildDebugEvent, build_debug_close, build_debug_open, build_debug_set_lines, foundation_json_quote]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+}
+
+// The commands the build's console answers, for a command it doesn't know.
+JET_CLI_DEBUG_BUILD_COMMANDS: "The build's console takes: break <file.jet>:<line>, delete N, run, continue, bt, locals, steps, quit.\n"
+
+// What `--dap` answers a step or a pause: the build's code stops only at its
+// breakpoints.
+JET_CLI_DEBUG_BUILD_NO_STEP: "the build's code stops at its breakpoints and goes on with `continue`; it doesn't step or pause"
+
+// One message the editor sent, or the end of its input.
+JetCLIDebugBuildPost: struct {
+    text: String,
+    end: Bool,
+}
+
+// The console's input: the `--do` commands, else stdin's lines, echoed when
+// stdin is not a terminal.
+JetCLIDebugBuildConsole: struct {
+    script: [String],
+    scripted: Bool,
+    echo: Bool,
+    done: Int{0},
+    // Whether a command was refused.
+    refused: Bool{false},
+
+    // The next command as it was given, untrimmed; None at the end of the
+    // commands or of stdin.
+    next: fn(&self) -[IO, Time.Wait]> String? Never! {
+        if self.scripted {
+            if self.done >= self.script.len() -> return None
+            command: "{self.script[self.done]}"
+            self.done += 1
+            return Val(command)
+        }
+        jet_cli_debug_write(NATIVE_DEBUG_PROMPT)
+        input := cli_term.stdin()
+        read := String?{None}
+        if input.read_line() == {
+            .Ok(line) -> { read = line }
+            .Err(_) -> {}
+        }
+        line: read ?? {
+            jet_cli_debug_write("\n")
+            return None
+        }
+        if self.echo -> jet_cli_debug_write("{line.trim()}\n")
+        Val(line)
+    }
+
+    // The answer to the command `given`, trimmed, which is not `run`,
+    // `continue` or `quit`: a breakpoint set or taken out, or, at a stop,
+    // what `stop` holds.
+    answer: fn(&self, session: &NativeBuild, given: String, stop: NativeBuildStop, stopped: Bool) -> String Never! {
+        command: given.trim()
+        if command == "" -> return ""
+        spaced: command.contains(" ")
+        word: if spaced -> command.before(" ") else -> command
+        rest: if spaced -> command.after(" ").trim() else -> ""
+        if word == "break" || word == "b" {
+            wanted: jet_cli_debug_break(rest) ?? {
+                self.refused = true
+                return "`break` takes <file.jet>:<line>, as `break tables.jet:12`.\n"
+            }
+            return jet_cli_debug_build_added(session, wanted)
+        }
+        if word == "delete" || word == "d" {
+            number: Int.parse(rest) ?? -1
+            if session.remove(number) -> return "Deleted breakpoint {number}\n"
+            self.refused = true
+            return "No breakpoint {rest}.\n"
+        }
+        if stopped {
+            if command == "bt" || command == "backtrace" -> return native_build_backtrace(stop)
+            if command == "locals" -> return native_build_locals(stop)
+            if command == "steps" -> return native_build_steps(stop)
+        } else if command == "bt" || command == "backtrace" || command == "locals" || command == "steps" {
+            self.refused = true
+            return "The build isn't stopped: `run` it, and `{command}` answers at its first stop.\n"
+        }
+        self.refused = true
+        "Unknown command `{command}`. {JET_CLI_DEBUG_BUILD_COMMANDS}"
+    }
+}
+
+// `jet debug --build`, its flags read by jet_cli_debug: the build of the
+// words `jet build` would run, behind the console or, with `dap`, an editor.
+jet_cli_debug_the_build: fn(jet_argv: [String], passthrough: [String]?, breaks: [NativeBreak], dos: [String], dap: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.C, FFI.Asm]> JetCLIPlan Never! {
+    argv: jet_cli_debug_build_argv(jet_argv, passthrough)
+    session := NativeBuild{}
+    console := JetCLIDebugBuildConsole{script: dos, scripted: dos.len() > 0, echo: dos.len() == 0 && !cli_term.stdin().is_tty()}
+    loop wanted in breaks -> jet_cli_debug_write(jet_cli_debug_build_added(session, wanted))
+    // The build's sends never wait: it holds the hook while it sends.
+    { sender: events, receiver: told }: channel<BuildDebugEvent>(capacity: 4096)
+    { sender: go, receiver: going }: channel<Bool>(capacity: 1)
+    { sender: finished, receiver: ended }: channel<JetDriverVerbOutput>(capacity: 1)
+    build_debug_open(events, session.lines(), cli_sys.pid())
+    plan := jet_cli_done("", "", JET_DRIVER_EXIT_OK)
+    if dap {
+        { sender: posted, receiver: requests }: channel<JetCLIDebugBuildPost>(capacity: 256)
+        task.group debug_build_dap {
+            reading: task jet_cli_debug_build_dap_read(posted)
+            building: task jet_cli_debug_build_run(argv, going, finished)
+            plan = jet_cli_debug_build_dap(session, told, go, ended, requests)
+            building.join().drop("the build's output came over its channel")
+            reading.join().drop("the editor's input ended")
+        }
+        return plan
+    }
+    task.group debug_build {
+        building: task jet_cli_debug_build_run(argv, going, finished)
+        plan = jet_cli_debug_build_console(session, console, told, go, ended)
+        building.join().drop("the build's output came over its channel")
+    }
+    plan
+}
+
+// The words of the `jet build` a `jet debug --build` runs: its own, `build`
+// for `debug`, without the debugger's flags, and the words after `--`.
+jet_cli_debug_build_argv: fn(jet_argv: [String], passthrough: [String]?) -> [String] Never! {
+    argv := [String]{}
+    skip := false
+    renamed := false
+    loop word in jet_argv {
+        if skip {
+            skip = false
+            next
+        }
+        if word == "--break" || word == "--do" {
+            skip = true
+            next
+        }
+        if word == "--build" || word == "--dap" || word.starts_with("--break=") || word.starts_with("--do=") -> next
+        if !renamed && word == "debug" {
+            renamed = true
+            argv.push("build")
+            next
+        }
+        argv.push("{word}")
+    }
+    if passthrough == .Val(words) {
+        argv.push("--")
+        loop word in words -> argv.push("{word}")
+    }
+    argv
+}
+
+// The build, once the console says go: planned and carried out as `jet
+// build` is (jet_cli_locked_build_host), its output sent back.
+jet_cli_debug_build_run: fn(argv: [String], going: Receiver<Bool>, finished: Sender<JetDriverVerbOutput>) -[FS, Env, Time, Exec, IO, Rand, FFI.C, FFI.Asm, Net]> Never! {
+    go: going.receive() ?? false
+    if !go -> return
+    discovery := WorkspaceDeclarationCache.new()
+    plan: jet_cli_front(argv, discovery)
+    compiles: jet_cli_plan_compiles(plan)
+    output: if compiles -> jet_cli_compile_on_worker(plan, discovery) ?? jet_cli_ice("the debugged build failed: {err}") else -> jet_cli_execute(plan) ?? jet_cli_ice("the debugged build failed: {err}")
+    finished.send(output) ?? return
+}
+
+// The breakpoint `wanted`, set, as the console says it.
+jet_cli_debug_build_added: fn(session: &NativeBuild, wanted: NativeBreak) -> String Never! {
+    placed: session.add(wanted.file, wanted.line)
+    build_debug_set_lines(session.lines())
+    number: session.numbered
+    if placed -> return "Breakpoint {number} at {wanted.file}:{wanted.line}\n"
+    "Breakpoint {number} at {wanted.file}:{wanted.line}, placed when its code loads\n"
+}
+
+// The build's next stop: one that waited, else the one its events (a marker
+// body's) or its traced threads (a trap's) give now; None when there is
+// none yet. A trap's stop is measured once the events the build sent
+// before it are taken, so its call's limit is the one it runs under.
+jet_cli_debug_build_stop: fn(session: &NativeBuild, told: Receiver<BuildDebugEvent>, waiting: &[NativeBuildStop]) -> NativeBuildStop? Never! {
+    if waiting.len() > 0 -> return waiting.remove(0, .Slot)
+    loop {
+        event: told.try_receive() ?? break
+        found: session.receive(event) ?? next
+        return Val(found)
+    }
+    trapped := session.poll() ?? return None
+    loop {
+        event: told.try_receive() ?? break
+        found: session.receive(event) ?? next
+        waiting.push(found)
+    }
+    session.measure(trapped)
+    Val(trapped)
+}
+
+// Let every event the build sent go on unwatched: the session ended.
+jet_cli_debug_build_release: fn(told: Receiver<BuildDebugEvent>) Never! {
+    loop {
+        event: told.try_receive() ?? break
+        native_build_answer(event)
+    }
+}
+
+// The session's end: no event waits on it, no trap is left in a child.
+jet_cli_debug_build_end: fn(session: &NativeBuild, told: Receiver<BuildDebugEvent>, waiting: &[NativeBuildStop]) Never! {
+    build_debug_close()
+    loop waiting.len() > 0 {
+        left := waiting.pop() ?? break
+        session.resume(left)
+    }
+    jet_cli_debug_build_release(told)
+    session.close()
+}
+
+// The console: breakpoints until `run`, then each stop until the build ends.
+jet_cli_debug_build_console: fn(session: &NativeBuild, console: &JetCLIDebugBuildConsole, told: Receiver<BuildDebugEvent>, go: Sender<Bool>, ended: Receiver<JetDriverVerbOutput>) -[FS, IO, Time, FFI.Asm]> JetCLIPlan Never! {
+    nothing: NativeBuildStop{number: 0, frames: [NativeBuildFrame]{}, what: ""}
+    loop {
+        given: console.next() ?? "run"
+        command: given.trim()
+        if command == "run" || command == "r" -> break
+        if command == "quit" || command == "q" {
+            go.send(false).drop("the build task waits for no word once it has ended")
+            build_debug_close()
+            session.close()
+            return jet_cli_done("", "", if console.refused -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK)
+        }
+        jet_cli_debug_write(console.answer(session, given, nothing, false))
+    }
+    go.send(true).drop("the build task waits for no word once it has ended")
+    waiting := [NativeBuildStop]{}
+    watching := true
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    loop {
+        if watching {
+            if session.notes != "" {
+                jet_cli_debug_write(session.notes)
+                session.notes = ""
+            }
+            stop := jet_cli_debug_build_stop(session, told, waiting) ?? NativeBuildStop{number: -1, frames: [NativeBuildFrame]{}, what: ""}
+            if stop.number >= 0 {
+                jet_cli_debug_write(native_build_stop_text(stop))
+                loop {
+                    given: console.next() ?? "continue"
+                    command: given.trim()
+                    if command == "continue" || command == "c" -> break
+                    if command == "quit" || command == "q" {
+                        watching = false
+                        break
+                    }
+                    jet_cli_debug_write(console.answer(session, given, stop, true))
+                }
+                session.resume(stop)
+                if !watching {
+                    jet_cli_debug_build_end(session, told, waiting)
+                    jet_cli_debug_write("Stopped watching the build; it goes on to its end.\n")
+                }
+                next
+            }
+        } else {
+            jet_cli_debug_build_release(told)
+        }
+        done: ended.try_receive() ?? {
+            cli_time.sleep(2ms)
+            next
+        }
+        output = done
+        break
+    }
+    if watching {
+        jet_cli_debug_build_end(session, told, waiting)
+        jet_cli_debug_write(session.unplaced())
+    }
+    code: if console.refused && output.exit_code == JET_DRIVER_EXIT_OK -> JET_DRIVER_EXIT_USER_ERROR else -> output.exit_code
+    jet_cli_done(output.stdout, output.stderr, code)
+}
+
+// The editor's messages, as they come, then the end of its input; the
+// adapter's `disconnect` is the last it reads.
+jet_cli_debug_build_dap_read: fn(posted: Sender<JetCLIDebugBuildPost>) -[IO, Time.Wait]> Never! {
+    loop {
+        text: jet_cli_dap_read() ?? break
+        last: jet_cli_dap_request(text).command == "disconnect"
+        posted.send(JetCLIDebugBuildPost{text: text, end: false}) ?? return
+        if last -> return
+    }
+    posted.send(JetCLIDebugBuildPost{text: "", end: true}) ?? return
+}
+
+// The adapter: requests until `configurationDone` starts the build, then
+// its stops and its end as events, until the editor disconnects.
+jet_cli_debug_build_dap: fn(session: &NativeBuild, told: Receiver<BuildDebugEvent>, go: Sender<Bool>, ended: Receiver<JetDriverVerbOutput>, requests: Receiver<JetCLIDebugBuildPost>) -[FS, IO, Time, FFI.Asm]> JetCLIPlan Never! {
+    dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false}
+    started := false
+    gone := false
+    finished := false
+    watching := true
+    stop := NativeBuildStop{number: -1, frames: [NativeBuildFrame]{}, what: ""}
+    waiting := [NativeBuildStop]{}
+    loop !(gone && (finished || !started)) {
+        idle := true
+        if !gone {
+            got := requests.try_receive()
+            if got == .Val(post) {
+                idle = false
+                if post.end {
+                    gone = true
+                } else {
+                    request := jet_cli_dap_request(post.text)
+                    if request.command == {
+                        "initialize" -> dap.respond(request, "{{\"supportsConfigurationDoneRequest\":true}}")
+                        "launch" -> {
+                            dap.respond(request, "{{}}")
+                            dap.event("initialized", "{{}}")
+                        }
+                        "setBreakpoints" -> dap.respond(request, jet_cli_debug_build_dap_breakpoints(session, dap, request))
+                        "configurationDone" -> {
+                            dap.respond(request, "{{}}")
+                            if !started {
+                                started = true
+                                go.send(true).drop("the build task waits for no word once it has ended")
+                            }
+                        }
+                        "threads" -> dap.respond(request, "{{\"threads\":[{{\"id\":1,\"name\":\"build\"}}]}}")
+                        "stackTrace" -> dap.respond(request, jet_cli_debug_build_dap_frames(stop))
+                        "scopes" -> {
+                            frame: jet_cli_dap_int(request.arguments, "frameId")
+                            dap.respond(request, "{{\"scopes\":[{{\"name\":\"Locals\",\"variablesReference\":{frame},\"expensive\":false}}]}}")
+                        }
+                        "variables" -> dap.respond(request, jet_cli_debug_build_dap_locals(stop, jet_cli_dap_int(request.arguments, "variablesReference")))
+                        "continue" -> {
+                            dap.respond(request, "{{\"allThreadsContinued\":true}}")
+                            if stop.number >= 0 {
+                                session.resume(stop)
+                                stop = NativeBuildStop{number: -1, frames: [NativeBuildFrame]{}, what: ""}
+                            }
+                        }
+                        "next" | "stepIn" | "stepOut" | "pause" -> dap.fail(request, JET_CLI_DEBUG_BUILD_NO_STEP)
+                        "disconnect" -> {
+                            dap.respond(request, "{{}}")
+                            gone = true
+                        }
+                        else -> dap.fail(request, "the build's debugger doesn't answer `{request.command}`")
+                    }
+                }
+            }
+        }
+        if gone && watching {
+            // The editor left: the build goes on unwatched.
+            if stop.number >= 0 {
+                session.resume(stop)
+                stop = NativeBuildStop{number: -1, frames: [NativeBuildFrame]{}, what: ""}
+            }
+            watching = false
+            if !started {
+                go.send(false).drop("the build task waits for no word once it has ended")
+                build_debug_close()
+                session.close()
+            } else {
+                jet_cli_debug_build_end(session, told, waiting)
+            }
+        }
+        if !watching {
+            jet_cli_debug_build_release(told)
+        } else if started && !finished && stop.number < 0 {
+            if session.notes != "" {
+                dap.event("output", "{{\"category\":\"console\",\"output\":{foundation_json_quote(session.notes)}}}")
+                session.notes = ""
+            }
+            stop = jet_cli_debug_build_stop(session, told, waiting) ?? NativeBuildStop{number: -1, frames: [NativeBuildFrame]{}, what: ""}
+            if stop.number >= 0 {
+                idle = false
+                dap.event("output", "{{\"category\":\"console\",\"output\":{foundation_json_quote(native_build_stop_text(stop))}}}")
+                dap.event("stopped", "{{\"reason\":\"breakpoint\",\"threadId\":1,\"allThreadsStopped\":true,\"hitBreakpointIds\":[{stop.number}],\"description\":{foundation_json_quote(native_build_steps(stop).trim())}}}")
+            }
+        }
+        if started && !finished && stop.number < 0 {
+            if ended.try_receive() == .Val(output) {
+                idle = false
+                finished = true
+                if watching {
+                    watching = false
+                    jet_cli_debug_build_end(session, told, waiting)
+                    unplaced: session.unplaced()
+                    if unplaced != "" -> dap.event("output", "{{\"category\":\"console\",\"output\":{foundation_json_quote(unplaced)}}}")
+                }
+                if output.stdout != "" -> dap.event("output", "{{\"category\":\"stdout\",\"output\":{foundation_json_quote(output.stdout)}}}")
+                if output.stderr != "" -> dap.event("output", "{{\"category\":\"stderr\",\"output\":{foundation_json_quote(output.stderr)}}}")
+                dap.event("exited", "{{\"exitCode\":{output.exit_code}}}")
+                dap.event("terminated", "{{}}")
+            }
+        }
+        if idle -> cli_time.sleep(2ms)
+    }
+    jet_cli_done("", "", JET_DRIVER_EXIT_OK)
+}
+
+// `setBreakpoints`: the source's breakpoints become the request's lines,
+// each placed now or when its code loads.
+jet_cli_debug_build_dap_breakpoints: fn(session: &NativeBuild, dap: &JetCLIDap, request: JetCLIDapRequest) -> String Never! {
+    path := ""
+    lines := [Int]{}
+    loop member in request.arguments {
+        if member.key == "source" && member.value == .Object(source) {
+            loop part in source {
+                if part.key == "path" && part.value == .Text(named) -> path = "{named}"
+            }
+        }
+        if member.key == "breakpoints" && member.value == .Array(items) {
+            loop item in items {
+                if item == .Object(spec) -> lines.push(jet_cli_dap_int(spec, "line"))
+            }
+        }
+    }
+    old: dap.placed.get(path) ?? [Int]{}
+    loop number in old -> _ := session.remove(number)
+    numbers := [Int]{}
+    rows := [String]{}
+    loop line in lines {
+        if path == "" || line < 1 {
+            rows.push("{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No source file names this breakpoint")}}}")
+            next
+        }
+        placed: session.add(cli_files.basename(path), line)
+        number: session.numbered
+        numbers.push(number)
+        waits: if placed -> "" else -> ",\"message\":{foundation_json_quote("placed when its code loads")}"
+        rows.push("{{\"id\":{number},\"verified\":{placed},\"line\":{line}{waits}}}")
+    }
+    dap.placed[path] = numbers
+    build_debug_set_lines(session.lines())
+    "{{\"breakpoints\":[{rows.join(",")}]}}"
+}
+
+// `stackTrace` at `stop`: its frames, innermost first, each's id its index
+// plus 1; none while the build runs.
+jet_cli_debug_build_dap_frames: fn(stop: NativeBuildStop) -> String Never! {
+    rows := [String]{}
+    loop (index, frame) in stop.frames {
+        path: if frame.path != "" -> frame.path else -> frame.file
+        rows.push("{{\"id\":{index + 1},\"name\":{foundation_json_quote(frame.function)},\"line\":{frame.line},\"column\":1,\"source\":{{\"name\":{foundation_json_quote(frame.file)},\"path\":{foundation_json_quote(path)}}}}}")
+    }
+    "{{\"stackFrames\":[{rows.join(",")}],\"totalFrames\":{rows.len()}}}"
+}
+
+// `variables` of frame `reference` (its id) at `stop`: its locals.
+jet_cli_debug_build_dap_locals: fn(stop: NativeBuildStop, reference: Int) -> String Never! {
+    rows := [String]{}
+    if reference >= 1 && reference <= stop.frames.len() {
+        loop local in stop.frames[reference - 1].locals {
+            rows.push("{{\"name\":{foundation_json_quote(local.name)},\"value\":{foundation_json_quote(local.value)},\"type\":{foundation_json_quote(local.type_name)},\"variablesReference\":0}}")
+        }
+    }
+    "{{\"variables\":[{rows.join(",")}]}}"
+}
