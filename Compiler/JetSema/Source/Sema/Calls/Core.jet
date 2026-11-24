@@ -322,7 +322,7 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
         if sema_call_core_module_identity(environment, program, source_name) != Val(module_identity) {
             return None
         }
-        if sema_call_core_typed_decode_module(source_name) && member == "decode" && type_args.len() != 0 {
+        if sema_call_core_typed_decode_role(source_name) != None && member == "decode" && type_args.len() != 0 {
             return None
         }
         caller_index: sema_scope_caller_index(environment, graph) ?? return None
@@ -1087,33 +1087,40 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
 // separate from source forwarding and never widens F32 values: an F32
 // `math.cmp` / `math.is_finite` runs its `__<member>_f32` source in place of
 // the Float row. A typed `json.decode<T>` / `toml.decode<T>` /
-// `yaml.decode<T>` runs its module's typed source (`__decode_typed`).
+// `yaml.decode<T>` runs the Core function that fills its module's typed
+// decode role; a `net.unix_connect` and a `tls.client` run the one that
+// fills the role of their arity and arguments.
 sema_call_core_normalized_source_record: fn(record: CoreCallRecord, args: [TExpr], type_args: [Type]) -> CoreCallRecord Never! {
     normalized := record
-    if record.symbol == CoreCallSymbol.SourceOwned && sema_call_core_typed_decode_module(record.module_name) && record.member == "decode" && type_args.len() != 0 {
-        normalized.source_target = Val("__decode_typed")
+    if record.symbol == CoreCallSymbol.SourceOwned && record.member == "decode" && type_args.len() != 0 {
+        if sema_call_core_typed_decode_role(record.module_name) == .Val(role) -> normalized.source_role = Val(role)
     }
     if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
         normalized.symbol = CoreCallSymbol.SourceOwned
         normalized.source_target = sema_call_core_f32_source(record.module_name, record.member)
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
-        normalized.source_target = Val(if args.len() == 1 -> "__unix_connect_entry" else -> "__unix_connect_deadline_entry")
+        normalized.source_role = Val(if args.len() == 1 -> "UnixConnect" else -> "UnixConnectDeadline")
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net.tls" && record.member == "client" {
-        if args.len() == 4 -> normalized.source_target = Val("__client_config_deadline_entry") else if args.len() == 3 {
-            normalized.source_target = Val("__client_deadline_entry")
+        if args.len() == 4 -> normalized.source_role = Val("TLSClientConfigDeadline") else if args.len() == 3 {
+            normalized.source_role = Val("TLSClientDeadline")
         } else if args.len() == 2 && args[0].ty != Type.String {
-            normalized.source_target = Val("__client_stream_entry")
+            normalized.source_role = Val("TLSClientStream")
         } else { normalized.source_target = Val("client") }
     }
     normalized
 }
 
-// The text codecs whose `decode<T>(text)` decodes the parsed tree through
-// their source `__decode_typed`, while untyped `decode(text)` stays the tree.
-sema_call_core_typed_decode_module: fn(module_name: String) -> Bool Never! {
-    module_name == "core.encoding.json" || module_name == "core.encoding.toml" || module_name == "core.encoding.yaml"
+// The role whose Core function a text codec's typed `decode<T>(text)` runs,
+// decoding the parsed tree in place; an untyped `decode(text)` stays the tree.
+sema_call_core_typed_decode_role: fn(module_name: String) -> String? Never! {
+    if module_name == {
+        "core.encoding.json" -> Val("JSONTypedDecode")
+        "core.encoding.toml" -> Val("TOMLTypedDecode")
+        "core.encoding.yaml" -> Val("YAMLTypedDecode")
+        else -> None
+    }
 }
 
 sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {

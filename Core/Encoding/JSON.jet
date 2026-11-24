@@ -32,6 +32,7 @@
 // process out of stack.
 use {
     core: core
+    builtin: jet_builtins
     core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits, Format, FormatError, __DecodeSource, __Decoding]
     base64: core.encoding.base64
     math: core.math
@@ -1261,7 +1262,7 @@ parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> 
 // bounded by the safe max_depth. The parameter is not spelled `T`:
 // explicit-argument inference binds by name, so a generic caller's
 // `decode<[T]>` would read as `T := [T]`.
-priv __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
+#Builtin.Role(.JSONTypedDecode) priv __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
     decode_typed_from<Target>(text, 1)
 }
 

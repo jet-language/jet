@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     core.data.[DataLimits, Query]
     core.db.[SQL, DBValue]
     sql_kernel: core.db.sql
@@ -25,7 +26,7 @@ use {
 // one WHERE value after parsing, and every referenced field must exist in the
 // all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
 // projection or grouping changes the row shape.
-priv __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
+#Builtin.Role(.ListQuery) priv __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     trees := [Dyn]{}
     loop row in rows -> trees.push(row.encode())
     spec: query_sql_spec(sql) ?? return Err(query_field_error("{err}"))

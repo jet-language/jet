@@ -1,4 +1,5 @@
 use {
+    builtin: jet_builtins
     core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, Format, FormatError]
     base64: core.encoding.base64
     core.time.[ZonedDateTime]
@@ -46,7 +47,7 @@ decode: fn(text: String) -> Dyn EncodingError! { parse_yaml(text, 1, 0, false) }
 
 // Compiler-private typed entry for `yaml.decode<T>(text)`: the document's
 // tree decodes into the target, a parse failure as one root FieldError.
-priv __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
+#Builtin.Role(.YAMLTypedDecode) priv __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
     tree: parse_yaml(text, 1, 0, false) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid YAML: {err.reason}"}})
     value: tree.decode<Target>() ?? return Err(err)
     Ok(value)

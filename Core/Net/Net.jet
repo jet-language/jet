@@ -620,11 +620,11 @@ unix_accept: fn(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetError! 
 
 // Existing Core arity rows retain the public `deadline:` label and target
 // these ordinary source entry points without changing user call syntax.
-priv __unix_connect_entry: fn(path: String) -[Net, Time.Wait]> UnixStream NetError! {
+#Builtin.Role(.UnixConnect) priv __unix_connect_entry: fn(path: String) -[Net, Time.Wait]> UnixStream NetError! {
     rt.unix_connect_host(path)
 }
 
-priv __unix_connect_deadline_entry: fn(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
+#Builtin.Role(.UnixConnectDeadline) priv __unix_connect_deadline_entry: fn(path: String, deadline: Duration) -[Net, Time.Wait]> UnixStream NetError! {
     core.net.__unix_connect_deadline_host(path, deadline)
 }
 

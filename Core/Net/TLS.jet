@@ -1,5 +1,6 @@
 use {
     core: core
+    builtin: jet_builtins
     net: core.net
     crypto: core.crypto
     ssldefs: __core_net_ssl_defs
@@ -330,16 +331,16 @@ client: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
 
 // Checked Core call rows keep the moved-stream and labeled handshake forms
 // of `client`; Sema selects one of these by argument count.
-priv __client_stream_entry: fn(stream: ^^TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
+#Builtin.Role(.TLSClientStream) priv __client_stream_entry: fn(stream: ^^TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
     tls := client_connect(stream, server_name, ClientConfig{}, forever()) ?? return Err(net_to_io(err))
     Ok(tls)
 }
 
-priv __client_deadline_entry: fn(stream: ^^TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+#Builtin.Role(.TLSClientDeadline) priv __client_deadline_entry: fn(stream: ^^TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     client_connect(stream, server_name, ClientConfig{}, deadline)
 }
 
-priv __client_config_deadline_entry: fn(stream: ^^TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+#Builtin.Role(.TLSClientConfigDeadline) priv __client_config_deadline_entry: fn(stream: ^^TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     client_connect(stream, server_name, config, deadline)
 }
 

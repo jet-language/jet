@@ -8555,7 +8555,7 @@ priv RemoteArgs: struct {
 // arguments and calls the method on a copy of the service. Queued in a call,
 // the job runs once the call commits (`transactions`); queued outside one,
 // it runs at once, on a task of its own.
-priv __enqueue: fn(name: String, args: [String], retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
+#Builtin.Role(.AppEnqueue) priv __enqueue: fn(name: String, args: [String], retries: Int, run: ^^fn(RemoteArgs) -> String [FieldError]!) Never! {
     job: CallJob{name: name, args: "[{args.join(",")}]", retries: retries, run: Shared{CallJobCall{call: run.move()}}}
     call: transactions.current() ?? return job_start(job, "", None, 0)
     transactions.enqueue(call, job)

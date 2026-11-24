@@ -191,9 +191,10 @@ dispatch until their traversal, matching, and copy-selection policies move to Je
 Terminal reads and prompt/style/progress policy likewise use source-owned
 declarations. Their registered private facts call the single existing terminal
 and stdin kernels; the Rust seed entry points retain their fault preflight.
-`take` forwards through the registered source target `__take_bytes`, preserving
-the keyword spelling without a parser exception. Jet rejects a negative count
-before the read fault probe; the existing stdin kernel performs the one raw read.
+`take` runs the Core function that fills the TermTake role (`__take_bytes`),
+preserving the keyword spelling without a parser exception. Jet rejects a
+negative count before the read fault probe; the existing stdin kernel performs
+the one raw read.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
