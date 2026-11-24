@@ -97,8 +97,10 @@ use jet_foundation.[
 ]
 
 // The rows of one module result that its function checks fill, moved out so
-// a check can fill them afresh (sema_module_body_rows_take).
+// a check can fill them afresh (sema_module_body_rows_take), with the
+// module's place in the results.
 SemaModuleBodyRows: struct {
+    module_index: Int,
     functions: [FnBody],
     call_facts: [SemaCallSiteFact],
     hardware_use: TargetHardwareUse,
@@ -243,6 +245,7 @@ sema_module_body_rows_take: fn(modules: ^[SemaGraphModuleResult], indexes: [Int]
         if next_index < indexes.len() && indexes[next_index] == modules.len() {
             taken.push(
                 SemaModuleBodyRows{
+                    module_index: modules.len(),
                     functions: result.functions.move(),
                     call_facts: result.call_facts.move(),
                     hardware_use: result.hardware_use.move(),
@@ -285,25 +288,24 @@ sema_module_body_rows_take: fn(modules: ^[SemaGraphModuleResult], indexes: [Int]
     taken
 }
 
-// Moves `rows`, one per module `indexes` names (ascending), back into those
-// modules, as sema_module_body_rows_take moved them out.
-sema_module_body_rows_put: fn(modules: ^[SemaGraphModuleResult], indexes: [Int], rows: ^^[SemaModuleBodyRows]) Never! {
+// Moves `rows` (ascending by module, as sema_module_body_rows_take returned
+// them) back into their modules, as sema_module_body_rows_take moved them
+// out.
+sema_module_body_rows_put: fn(modules: ^[SemaGraphModuleResult], rows: ^^[SemaModuleBodyRows]) Never! {
     owned := rows.move()
-    if owned.len() != indexes.len() -> panic("a local value splice lost its owner rows")
-    if indexes.len() == 0 {
+    if owned.len() == 0 {
         return
     }
+    first: owned[0].module_index
     owned.reverse()
     later := [SemaGraphModuleResult]{}
-    loop modules.len() > indexes[0] {
+    loop modules.len() > first {
         moved := modules.pop() ?? break
         later.push(moved)
     }
-    next_index := 0
     loop later.len() > 0 {
         result := later.pop() ?? break
-        if next_index < indexes.len() && indexes[next_index] == modules.len() {
-            put: owned.pop() ?? panic("a local value splice lost its owner rows")
+        if owned.len() > 0 && owned[owned.len() - 1].module_index == modules.len() && owned.pop() == .Val(put) {
             result.functions = put.functions.move()
             result.call_facts = put.call_facts.move()
             result.hardware_use = put.hardware_use.move()
@@ -320,11 +322,10 @@ sema_module_body_rows_put: fn(modules: ^[SemaGraphModuleResult], indexes: [Int],
             result.incomplete_reasons = put.incomplete_reasons.move()
             result.injected_function_keys = put.injected_function_keys.move()
             result.tests = put.tests.move()
-            next_index += 1
         }
         modules.push(result)
     }
-    if next_index != indexes.len() -> panic("a local value splice lost its owner module")
+    if owned.len() > 0 -> panic("a local value splice lost its owner module")
 }
 
 // What a splice is done with: the earlier check's rows, the pass's bodies of
@@ -432,6 +433,13 @@ sema_local_splice_slots: fn(functions: [FnBody]) -> SemaComptimeKeyRows Never! {
         if id == slots.rows.len() -> slots.rows.push(index) else -> slots.rows[id] = -1
     }
     slots
+}
+
+// A module's finalized body and, when the splice checked it again, the
+// owner body that takes its place.
+SemaLocalSpliceSlot: struct {
+    finalized: FnBody,
+    owner: FnBody?,
 }
 
 // Puts on a freshly checked `body` what the whole-program passes after the
@@ -1067,7 +1075,7 @@ sema_local_splice_owners: fn(
     if trace_sink == .Val(sink) -> sink.begin("sema.local_values.compare", "", -1, -1)
     owners = graph.core_wave_rows.move()
     graph.core_wave_rows = name_table_sized(4)
-    sema_module_body_rows_put(modules, owner_modules, held)
+    sema_module_body_rows_put(modules, held)
     // A landed local whose outcome is a run-time reason stays run-time code,
     // so it is still a site of the pass's check, as of the full recheck's;
     // only the sites that got values leave the source rows.
@@ -1107,9 +1115,15 @@ sema_local_splice_owners: fn(
         checked := rows.functions.move()
         rows.functions = [FnBody]{}
         slots: sema_local_splice_slots(modules[module_index].functions)
-        // The pass's owner bodies by slot; each takes its finalized body's
-        // place, and the finalized body goes aside.
-        spliced := loop _ in modules[module_index].functions -> FnBody?{None}
+        // The module's finalized bodies by slot, each with the pass's owner
+        // body that takes its place while the finalized body goes aside.
+        finalized := compiler_take_rows<FnBody>(modules[module_index].functions)
+        spliced := [SemaLocalSpliceSlot]{}
+        loop finalized.len() > 0 {
+            body: finalized.pop() ?? break
+            spliced.push(SemaLocalSpliceSlot{finalized: body.move(), owner: None})
+        }
+        spliced.reverse()
         loop checked.len() > 0 {
             function := checked.pop() ?? break
             if name_find(sites.owners, function.key) == None {
@@ -1118,20 +1132,18 @@ sema_local_splice_owners: fn(
             }
             slot: sema_comptime_key_row(slots, function.key) ?? -1
             if slot < 0 -> panic("a spliced local value lost its owner function")
-            if stamped -> sema_local_splice_settle(graph.interner, function, modules[module_index].functions[slot])
-            spliced[slot] = Val(function.move())
+            if stamped -> sema_local_splice_settle(graph.interner, function, spliced[slot].finalized)
+            spliced[slot].owner = Val(function.move())
         }
-        finalized := compiler_take_rows<FnBody>(modules[module_index].functions)
         kept := [FnBody]{}
-        loop finalized.len() > 0 {
-            body: finalized.pop() ?? break
-            replacement: spliced.pop() ?? panic("a spliced local value lost its owner slot")
-            if replacement == None {
-                kept.push(body.move())
+        loop spliced.len() > 0 {
+            entry: spliced.pop() ?? break
+            if entry.owner.move() == .Val(owner) {
+                aside.functions.push(entry.finalized.move())
+                kept.push(owner)
                 next
             }
-            aside.functions.push(body.move())
-            kept.push(replacement.move())
+            kept.push(entry.finalized.move())
         }
         kept.reverse()
         modules[module_index].functions = kept.move()

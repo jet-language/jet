@@ -55,17 +55,23 @@ ImpactReport: struct {
     // Preserve ordering and whitespace.
     render_text: fn(self) -> String Never! {
         out := ""
-        if !self.found {
-            out = "symbol `{self.symbol}` not found in index\n"
-            if self.references.len() != 0 || self.call_sites.len() != 0 {
-                out = "{out}partial matches from name references/calls:\n"
-            } else { return out }
-        } else {
-            out = "blast radius for `{self.symbol}`"
-            if self.definition_module == .Val(module_path) {
-                out = "{out} (defined in {module_path})"
+        if {
+            !self.found -> {
+                out = "symbol `{self.symbol}` not found in index\n"
+                if {
+                    self.references.len() != 0 || self.call_sites.len() != 0 -> {
+                        out = "{out}partial matches from name references/calls:\n"
+                    }
+                    else -> { return out }
+                }
             }
-            out = "{out}\n"
+            else -> {
+                out = "blast radius for `{self.symbol}`"
+                if self.definition_module == .Val(module_path) {
+                    out = "{out} (defined in {module_path})"
+                }
+                out = "{out}\n"
+            }
         }
         out = "{out}  references:        {self.references.len()}\n"
         out = "{out}  direct call sites: {self.call_sites.len()}\n"

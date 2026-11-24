@@ -8,6 +8,7 @@ use {
     cli_sys: core.sys
     cli_runtime: jet.runtime.sys
     cli_term: core.term
+    cli_term_runtime: jet.runtime.term
     cli_tasks: core.tasks
     cli_time: core.time
     jet_backend.[
@@ -4693,11 +4694,11 @@ jet_cli_external_fmt: fn(raw: [String], color: Bool) -> JetDriverVerbOutput {
 }
 
 // The process's stdin, stdout and stderr is-terminal host facts, as the three
-// ASCII `0`/`1` bytes the receipt context identity frames, read through the
-// compiler-private raw leaf `core.term.jet_term_is_terminal_raw`.
+// ASCII `0`/`1` bytes the receipt context identity frames, read through
+// `jet.runtime.term.is_terminal`.
 jet_cli_terminal_bits: fn() -> [U8] {
     bits := [U8]{}
-    loop fd in 0..<3 -> bits.push(if cli_term.jet_term_is_terminal_raw(fd) -> U8{49} else -> U8{48})
+    loop fd in 0..<3 -> bits.push(if cli_term_runtime.is_terminal(fd) -> U8{49} else -> U8{48})
     bits
 }
 

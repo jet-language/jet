@@ -20,6 +20,7 @@ use jet_foundation.[
     TFuncKind,
     TGenericParam,
     Type,
+    compiler_apply_order,
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_limit,
@@ -453,19 +454,14 @@ sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module:
 }
 
 // A compiler thread that checked a body also walks it for the module's
-// prelude conversion demands (sema_prelude_conversion_demands), so the
+// prelude conversion demands (sema_prelude_function_demands), so the
 // module check's demand walk (sema_inject_prelude_error_conversions) reads
-// them instead of walking that body again. The checked function moves into
-// a one-row list for the walk and back into the returned result.
+// them instead of walking that body again.
 sema_check_walk_prelude_demands: fn(checked: ^^SemaFunctionResult, module_identity: String) -> SemaFunctionResult {
     walked := checked.move()
-    if walked.value == None -> return walked
-    taken := walked.value.move()
-    walked.value = None
-    functions := [FnBody]{taken.move() ?? panic("a checked body lost its function")}
-    walked.prelude_demands = Val(sema_prelude_conversion_demands(module_identity, functions, [Int:[SemaPreludeConversionDemand]]{}))
-    function := functions.pop() ?? panic("a walked body lost its function")
-    walked.value = Val(function.move())
+    demands := [SemaPreludeConversionDemand]{}
+    if walked.value == .Val(function) -> sema_prelude_function_demands(module_identity, function, demands) else -> return walked
+    walked.prelude_demands = Val(demands.move())
     walked
 }
 
@@ -1558,22 +1554,17 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
     loop s in 0..<schedule_order.len() {
         slot_of_orig[schedule_order[s]] = s
     }
-    reordered := [[SemaStreamModuleScan]]{}
-    loop _ in 0..<selected.len() -> reordered.push([SemaStreamModuleScan]{})
-    orig_pos := scanned.len()
-    loop scanned.len() > 0 {
-        orig_pos -= 1
-        row := scanned.pop() ?? break
-        reordered[slot_of_orig[orig_pos]].push(row.move())
-    }
+    // The scanned modules in stream slot order, popped first slot first.
+    compiler_apply_order<SemaStreamModuleScan>(scanned, schedule_order)
+    scanned.reverse()
     jobs := [[SemaBodyJob]]{}
     orders := [[Int]]{}
     tops := [Int]{}
     rows := [Int]{}
     module_indexes := [Int]{}
     can_finish_rows := [Bool]{}
-    loop s in 0..<reordered.len() {
-        row := reordered[s].pop() ?? panic("a reordered body-stream module was lost")
+    loop {
+        row := scanned.pop() ?? break
         jobs.push(row.jobs.move())
         orders.push(row.order.move())
         tops.push(row.tops)

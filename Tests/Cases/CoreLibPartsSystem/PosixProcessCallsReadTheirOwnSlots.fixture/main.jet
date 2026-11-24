@@ -1,0 +1,36 @@
+// The process calls that only a forked child may make read each kernel
+// answer from its own slot: the child leads a new session, so setsid answers
+// its own id and setpgrp fails with EPERM; lock_memory either locks or meets
+// the locked-memory limit (ENOMEM). The parent reaps the child's exit status
+// with waitpid, and a second wait finds no child (ECHILD). Nothing prints
+// before the fork, so the child holds no buffered output to repeat.
+use sys: core.sys
+use process: core.process
+
+run: fn() {
+    #Unsafe("fork a child that leads its own session, and reap it") {
+        child: sys.fork() ?? panic("fork: {err}")
+        if child == 0 {
+            session: sys.setsid() ?? panic("setsid: {err}")
+            print("child leads its session: {session == sys.getpid()}")
+            print("setpgrp: {failure(sys.setpgrp())}")
+            locked: failure(sys.lock_memory())
+            print("lock_memory locks or meets the limit: {locked == "ok" || locked == "I/O error during write: Out of memory (os error 12)"}")
+            process.exit(7)
+        }
+        status: sys.waitpid(child, 0) ?? panic("waitpid: {err}")
+        print("child exit code {status / 256}, signal {status % 128}")
+        if sys.wait() == {
+            .Err(error) -> print("wait again: {error}")
+            .Ok(reaped) -> print("wait again reaped {reaped}")
+        }
+    }
+}
+
+// The error a call answered, as text, or "ok".
+failure: fn(result: IOError!) -> String {
+    if result == {
+        .Err(error) -> "{error}"
+        .Ok(_) -> "ok"
+    }
+}

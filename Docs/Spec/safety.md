@@ -235,14 +235,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1643,
+  "total": 1645,
   "counts": {
     "Compiler": 807,
-    "Core": 169,
+    "Core": 170,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 568,
+    "Tests": 569,
     "Tools": 28
   },
   "regions": [
@@ -1943,7 +1943,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Compiler",
       "file": "Compiler/JetCLI/Source/CLI/Host.jet",
-      "line": 2693,
+      "line": 2694,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -7059,6 +7059,13 @@ file in a `Tests/` tree. The ratchet refuses either.
     },
     {
       "package": "Core",
+      "file": "Core/Sys/Sys.jet",
+      "line": 2421,
+      "column": 5,
+      "reason": "the test owns the files under its temporary directory and its own process's settings, which it puts back"
+    },
+    {
+      "package": "Core",
       "file": "Core/TUI/TUI.jet",
       "line": 109,
       "column": 5,
@@ -7966,6 +7973,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 25,
       "column": 5,
       "reason": "fork a peer that shares the mapping, and reap it"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/CoreLibPartsSystem/PosixProcessCallsReadTheirOwnSlots.fixture/main.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "fork a child that leads its own session, and reap it"
     },
     {
       "package": "Tests",
@@ -11756,13 +11770,13 @@ file in a `Tests/` tree. The ratchet refuses either.
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 807 |
-| Core | 169 |
+| Core | 170 |
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 568 |
+| Tests | 569 |
 | Tools | 28 |
-| **total** | **1643** |
+| **total** | **1645** |
 
 ### Regions
 
@@ -12010,7 +12024,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2779:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2789:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2891:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2693:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCLI/Source/CLI/Host.jet | 2694:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 205:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 213:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 245:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -12741,6 +12755,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Core | Core/Sys/Sys.jet | 2080:1 | "posix kill: the caller owns or is entitled to signal the target process" |
 | Core | Core/Sys/Sys.jet | 2088:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
 | Core | Core/Sys/Sys.jet | 2093:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 2421:5 | "the test owns the files under its temporary directory and its own process's settings, which it puts back" |
 | Core | Core/TUI/TUI.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
 | Core | Core/Tasks/Tasks.jet | 116:1 | "`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once" |
 | Core | Core/Testing/Testing.jet | 1535:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
@@ -12871,6 +12886,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 43:5 | "the shelf's blocks were claimed from regions that are closed, and nothing reads them again" |
 | Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/window.jet | 6:5 | "the four Ints are fresh heap storage, every access stays inside them, and they are released once" |
 | Tests | Tests/Cases/CoreLibNet/SharedMemoryWordsOrderAcrossProcesses.fixture/main.jet | 25:5 | "fork a peer that shares the mapping, and reap it" |
+| Tests | Tests/Cases/CoreLibPartsSystem/PosixProcessCallsReadTheirOwnSlots.fixture/main.jet | 11:5 | "fork a child that leads its own session, and reap it" |
 | Tests | Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet | 1:1 | "the scalar ABI contract matches the C definition" |
 | Tests | Tests/Cases/Cross/WebBuildRefusesInlineCBeforeCodegen.fixture/main.jet | 7:5 | "call the audited inline C contract" |
 | Tests | Tests/Cases/Custom/Fixtures/FromAddrSentryIsTierParity/fixture.jet | 5:5 | "value is live on this stack frame and the pointer never escapes" |

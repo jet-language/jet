@@ -1010,7 +1010,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
     if has_stops -> stops.reverse()
     rows := [Int]{}
     loop row in 0..<count {
-        taken := outputs.pop() ?? panic("the x64 selection lost a function row")
+        taken := outputs.pop() ?? break
         stop: if has_stops -> (stops.pop() ?? "") else -> ""
         if taken.move() == .Val(compiled) {
             selected := compiled.move()

@@ -25,6 +25,9 @@ use {
     json: core.encoding.json
     rt_web: jet.runtime.web
     ui_rt: jet.runtime.ui
+    // `x.drop(…)` is the drop builtin, so the runtime's drop leaf is
+    // imported by name rather than called through `ui_rt`.
+    jet.runtime.ui.[drop]
     world_rt: jet.runtime.testing
     internal.[checksum, has_nul, without_key, without_button, leaf, backend_state, measure_tree, layout_state, mount_state, paint_state, dispatch, focus_ring, focused_text, push_scalar, float_text]
 }
@@ -2090,10 +2093,10 @@ priv internal: module {
         leaves := [UIPlaced]{}
         placed_leaves(tree, frame, leaves)
         loop leaf in leaves -> paint_leaf(state, leaf.node, leaf.frame)
-        if core.ui.__web_attached() {
+        if ui_rt.web_attached() {
             records := [String]{}
             loop leaf in leaves { records.push(scene_record(leaf.node, leaf.frame, leaf.held)) }
-            core.ui.__web_scene(records.join(""))
+            ui_rt.web_scene(records.join(""))
         }
         found := [UINode]{}
         collect_focus(tree, found)
@@ -2190,7 +2193,7 @@ priv internal: module {
                 at: ring_at(leaves, ring, x, y) ?? return false
                 focused = at
                 click: leaves[ring[at]].node.click
-                if click != 0 -> core.ui.__click(click)
+                if click != 0 -> ui_rt.click(click)
                 false
             }
             .KeyDown(key) -> {
@@ -2205,7 +2208,7 @@ priv internal: module {
                     node: leaves[index].node
                     shortcut: node.shortcut ?? next
                     if node.click != 0 && shortcut_pressed(shortcut, key, held) {
-                        core.ui.__click(node.click)
+                        ui_rt.click(node.click)
                         return false
                     }
                 }
@@ -2221,7 +2224,7 @@ priv internal: module {
                     return true
                 }
                 if node.click != 0 && held == 0 && (key == .Enter || key == .Char(' ')) {
-                    core.ui.__click(node.click)
+                    ui_rt.click(node.click)
                 }
                 false
             }
@@ -2238,8 +2241,8 @@ priv internal: module {
                 if slot == 0 -> return false
                 loop item in items {
                     if item == {
-                        .Text(value) -> { core.ui.__drop(slot, 0, value) }
-                        .URI(value) -> { core.ui.__drop(slot, 1, value) }
+                        .Text(value) -> { drop(slot, 0, value) }
+                        .URI(value) -> { drop(slot, 1, value) }
                         .File(_) -> {}
                     }
                 }
@@ -2308,7 +2311,7 @@ priv internal: module {
         change: leaves[index].node.change
         seen := 0
         tree = retyped(tree, index, seen, text)
-        if change != 0 -> core.ui.__change(change, text)
+        if change != 0 -> ui_rt.change(change, text)
     }
 
     // The index in `ring` of the leaf whose frame holds the point (x, y), in

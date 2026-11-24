@@ -640,14 +640,14 @@ Directory: struct {
     /// zero byte are `IOError.InvalidInput`. A final link is refused.
     open_raw: fn(self, name: [U8]) -[FS.Read]> FileReader IOError! {
         raw_held_name(self.path, name, false)
-        core.files.__open_reader_raw(self.handle, name)
+        rt.open_reader_raw(self.handle, name)
     }
 
     /// Create the file whose name is exactly the bytes `name`, with the same
     /// labels as `create`; `open_raw` says which names are refused.
     create_raw: fn(self, name: [U8], if_exists: CreateIfExists{.Replace}, mode: Int?{None}) -[FS.Write]> FileWriter IOError! {
         raw_held_name(self.path, name, true)
-        core.files.__open_writer_raw(self.handle, name, create_code(if_exists), mode ?? -1)
+        rt.open_writer_raw(self.handle, name, create_code(if_exists), mode ?? -1)
     }
 
     /// Hold the directory `name` inside this one.
@@ -743,7 +743,7 @@ Directory: struct {
     /// `open_raw` says which names are refused.
     remove_raw: fn(self, name: [U8]) -[FS.Write]> IOError! {
         raw_held_name(self.path, name, true)
-        core.files.__remove_at_raw(self.handle, name)
+        rt.remove_at_raw(self.handle, name)
     }
 
     /// Remove the empty directory `name`.
@@ -1673,7 +1673,7 @@ canonicalize: fn(path: Path | String, missing_last: Bool{false}) -[FS.Read]> Str
 list_dir: fn(path: Path | String, matching: String?{None}) -[FS.Read]> [DirEntry] IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    entries: core.files.__list_dir_raw(text)
+    entries: rt.list_dir_raw(text)
     pattern: matching ?? return Ok(entries)
     kept := [DirEntry]{}
     loop entry in entries {
@@ -3290,11 +3290,48 @@ priv __reader_read_line: fn(reader: ^FileReader) -[FS.Read]> String? IOError! {
             ),
         )
     }
-    bytes := core.files.__reader_line_bytes(reader)
+    bytes := rt.reader_line_bytes(reader)
     if bytes.len() == 0 -> return Ok(None)
     trim_file_line(bytes)
     text: String.from_bytes(bytes) ?? return Err(io_err("read", rt.reader_path(reader), "stream did not contain valid UTF-8"))
     Ok(Val(text))
+}
+
+#Test("raw-name calls, listing and line reads answer the bytes the host holds") {
+    root: mkdtemp("jet-files-raw-leaves") ?? panic("no temp dir: {err}")
+    directory: open_directory(root) ?? panic("cannot hold the temp dir: {err}")
+    raw: [U8]{97, 255}
+    writer := directory.create_raw(raw, mode: Val(416)) ?? panic("create_raw: {err}")
+    writer.write_all("one\r\ntwo\nlast".bytes()) ?? panic("write: {err}")
+    writer.fsync() ?? panic("fsync: {err}")
+    assert_eq((writer.stat() ?? panic("stat: {err}")).mode % 512, 416)
+    assert(directory.create_raw(raw, if_exists: .Refuse) == .Err(.AlreadyExists(_)))
+    reader := directory.open_raw(raw) ?? panic("open_raw: {err}")
+    assert_eq(raw_leaf_line(reader), "one")
+    assert_eq(raw_leaf_line(reader), "two")
+    assert_eq(raw_leaf_line(reader), "last")
+    assert_eq(raw_leaf_line(reader), "<end>")
+    write(join(root, "b.txt"), "b") ?? panic("write b.txt: {err}")
+    entries: list_dir(root) ?? panic("list_dir: {err}")
+    assert_eq(entries.len(), 2)
+    assert(entries[0].name.starts_with("a") && !entries[0].is_dir)
+    assert_eq(entries[1].name, "b.txt")
+    assert_eq(entries[1].path, join(root, "b.txt"))
+    matched: list_dir(root, matching: "*.txt") ?? panic("list_dir: {err}")
+    assert_eq(matched.len(), 1)
+    assert_eq(matched[0].name, "b.txt")
+    directory.remove_raw(raw) ?? panic("remove_raw: {err}")
+    assert(directory.open_raw(raw) == .Err(.NotFound(_)))
+    assert(directory.remove_raw(raw) == .Err(.NotFound(_)))
+    assert(list_dir(join(root, "missing")) == .Err(.NotFound(_)))
+    remove_all(root) ?? ()
+}
+
+raw_leaf_line: fn(reader: ^FileReader) -[FS.Read]> String Never! {
+    if reader.read_line() == {
+        .Ok(line) -> line ?? "<end>"
+        .Err(error) -> "error: {error}"
+    }
 }
 
 trim_file_line: fn(bytes: ^[U8]) Never! {

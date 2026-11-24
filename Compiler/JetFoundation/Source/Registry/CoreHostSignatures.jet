@@ -33,13 +33,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.crypto __ghash_blocks [u8],^[u8],[u8],Int,Int Bool
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
     core.files __list_directory Int Result<[[u8]],IOError>
-    core.files __open_reader_raw Int,[u8] Result<FileReader,IOError>
-    core.files __open_writer_raw Int,[u8],Int,Int Result<FileWriter,IOError>
-    core.files __remove_at_raw Int,[u8] Result<Unit,IOError>
     core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
     core.watcher __event WatchHandle Event<WatchEvent>
-    core.process pipeline [ProcessSpec] Result<ProcessReceipt,IOError>
-    core.process jet_process_exit_status_raw Int String?
     jet_builtins process_child_id ProcessChild Int
     jet_builtins process_child_wait ProcessChild Result<ProcessReceipt,IOError>
     jet_builtins process_child_exited ProcessChild Result<Bool,IOError>
@@ -60,22 +55,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.term take Int Result<[u8],IOError>
     core.term stdout - Stdout
     core.term stderr - Stderr
-    core.term jet_term_is_terminal_raw Int Bool
-    core.sys __times - (available:Bool,user:Int,system:Int,child_user:Int,child_system:Int,elapsed:Int,ticks:Int)
-    core.sys __rlimit Int (available:Bool,soft:Int,hard:Int,errno:Int)
-    core.sys __set_rlimit|__sched_set Int,Int,Int (available:Bool,value:Int,errno:Int)
-    core.sys __rusage Int (available:Bool,user:Int,system:Int,peak:Int,errno:Int)
-    core.sys __sched_get Int (available:Bool,policy:Int,priority:Int,errno:Int)
-    core.sys __resid Int (available:Bool,real:Int,effective:Int,saved:Int,errno:Int)
-    core.sys __set_resid Int,Int,Int,Int (available:Bool,value:Int,errno:Int)
-    core.sys __getpgid|__getsid|__getpriority|__setuid|__setgid|__reset_signal|__mlockall|__sched_rr_interval|__cpu_clock|__clock_set Int (available:Bool,value:Int,errno:Int)
-    core.sys __setpriority|__setpgid|__kill Int,Int (available:Bool,value:Int,errno:Int)
-    core.sys __fork|__setsid|__setpgrp - (available:Bool,value:Int,errno:Int)
-    core.sys __utime|__mknod String,Int,Int (available:Bool,value:Int,errno:Int)
-    core.sys __mkfifo|__initgroups String,Int (available:Bool,value:Int,errno:Int)
-    core.sys __wait - (available:Bool,value:Int,errno:Int,status:Int)
-    core.sys __waitpid Int,Int (available:Bool,value:Int,errno:Int,status:Int)
-    core.sys __pipe - (available:Bool,value:Int,errno:Int,read_fd:Int,write_fd:Int)
     core.process __spec_fields [String],Bool,String,Bool,[String],[String],[String],Bool,ProcessStreamMode,ProcessStreamMode,ProcessStreamMode,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Bool,TerminalPolicy,Bool,String ProcessSpec
     core.process __spec_parent_death ProcessSpec ProcessSpec
     core.files __directory_fd Int (available:Bool,held:Bool,fd:Int)
@@ -89,15 +68,10 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.sync map_set SyncMap,String,String SyncMap
     core.testing fake_clock Int Clock
     jet_builtins evidence_read String EvidenceRead
-    jet_builtins record_failure String,String Unit
-    jet_builtins clear_failure - Unit
-    jet_builtins skip String Unit
     jet_builtins temp_facts - TempFacts
     jet_builtins temp_join String TempPath
     jet_builtins temp_remove [U8] TempRemove
     jet_builtins temp_create [U8] TempCreate
-    jet_builtins text_window String,U64,U64 String
-    jet_builtins suite_snapshot - Test
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
     core.testing world fn(DeterministicWorld;Unit) Unit
@@ -126,23 +100,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
     core.net __ip_from_bytes ^^[u8] IPAddr
     core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr
-    core.service __host_wall_sample - (seconds:Int,nanoseconds:Int,before_epoch:Bool)
-    core.service __host_entropy Int [u8]?
-    core.service __host_sleep_ns Int -
-    core.service __host_sleep_wait_ns Int Int
-    core.service __host_path_kind String Result<Int,IOError>
-    core.service __host_stat Int,String,Bool Result<[Int],IOError>
-    core.service __host_read_bytes String Result<[u8],IOError>
-    core.service __host_append_bytes String,[u8] Result<Unit,IOError>
-    core.service __host_create_dirs String Result<Unit,IOError>
-    core.service __host_pid - Int
-    core.service __host_reserve String,String Result<Int,IOError>
-    core.service __host_finish Int,[u8],String,String Result<Unit,IOError>
-    core.service __host_rename|__host_sync_parent String,String Result<Unit,IOError>
-    core.service __host_close Int Unit
-    core.service __host_remove|__host_fsync String Result<(),IOError>
-    core.service __host_set_mode String,Int Result<(),IOError>
-    core.service __host_current_dir - Result<String,String>
     """
     core_sig_row_lookup(rows, module_name, member)
 }

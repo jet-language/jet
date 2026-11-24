@@ -1,0 +1,18 @@
+# The process calls only a forked child may make read each kernel answer from
+# its own slot: fork answers the child's id once, setsid the child's own id,
+# setpgrp EPERM, lock_memory a lock or ENOMEM; waitpid answers the child's
+# exit status and a second wait ECHILD.
+requires: os-name:linux
+fixture: PosixProcessCallsReadTheirOwnSlots.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run -A main.jet
+exit: 0
+stdout: = "child leads its session: true\nsetpgrp: I/O error during write: Operation not permitted (os error 1)\nlock_memory locks or meets the limit: true\nchild exit code 7, signal 0\nwait again: I/O error during close: No child process (os error 10)\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "child leads its session: true\nsetpgrp: I/O error during write: Operation not permitted (os error 1)\nlock_memory locks or meets the limit: true\nchild exit code 7, signal 0\nwait again: I/O error during close: No child process (os error 10)\n"
+stderr: empty

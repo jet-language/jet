@@ -1569,23 +1569,16 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
     // one's blanked source, with its place in the load's modules and the
     // program.items positions its parse fills.
     sources := [JetDriverReachSource]{}
-    // The declarations whose ready parses the load reads, in `held` order:
-    // each one's place in the load's modules, its program.items position,
-    // its name, and where its ready parse sits.
-    ready_loaded := [Int]{}
-    ready_positions := [Int]{}
-    ready_names := [String]{}
+    // Where the ready parses the load reads sit, in `held` order: each
+    // place's owner is its row in `held`, its slot the declaration's.
     ready_places := [JetDriverCoreReadyPlace]{}
-    loop row in held {
+    loop (owner, row) in held {
         if row.ready != None {
             loop (index, declaration) in row.declarations {
                 if reach.enabled && !jet_driver_reach_has(reached[row.loaded], declaration.position) {
                     next
                 }
-                ready_loaded.push(row.loaded)
-                ready_positions.push(declaration.position)
-                ready_names.push(declaration.name)
-                ready_places.push(jet_driver_core_ready_place(row.ready, index))
+                ready_places.push(jet_driver_core_ready_place(row.ready, index, owner))
             }
             next
         }
@@ -1609,14 +1602,16 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
     parts := jet_driver_core_ready_programs(request.core_interface, window, ready_places, request.compiler_threads)
     done.fragment_reads = window.reads - reads_before
     parts.reverse()
-    loop (at, loaded) in ready_loaded {
-        popped: parts.pop() ?? panic("a held declaration lost its ready parse")
-        part := popped.move() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, ready_names[at])
-        item: part.program.items.pop() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, ready_names[at])
+    loop {
+        read: parts.pop() ?? break
+        loaded: held[read.owner].loaded
+        declaration: held[read.owner].declarations[read.slot]
+        part := read.part.move() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
+        item: part.program.items.pop() ?? return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
         if part.program.items.len() > 0 {
-            return jet_driver_reach_held_missing(done, modules[loaded].module_name, ready_names[at])
+            return jet_driver_reach_held_missing(done, modules[loaded].module_name, declaration.name)
         }
-        modules[loaded].program.items[ready_positions[at]] = item.move()
+        modules[loaded].program.items[declaration.position] = item.move()
         loop span in part.program.block_spans -> modules[loaded].program.block_spans.push(span)
         loop arm in part.program.else_arms -> modules[loaded].program.else_arms.push(arm)
         loop site in part.program.debug_sites -> modules[loaded].program.debug_sites.push(site)

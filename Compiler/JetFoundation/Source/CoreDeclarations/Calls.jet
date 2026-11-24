@@ -526,19 +526,9 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
         // The CSV query reads its file.
         "core.db.query" -> if member == "query" -> Val("FS") else -> None
-        // A service file leaf names the one leaf it needs, as core.files
-        // does; the lock and workflow sleeps name Time. A service's record
-        // stamps read the wall clock, its authority tokens draw from the OS
-        // generator, and its store identity resolves against the working
-        // directory. The process id in a temporary name only avoids a collision,
-        // so, like an atomic write's, it is part of the write (host-reads.md H7).
-        "core.service" -> if member == {
-            "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes" | "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename" | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS")
-            "__host_entropy" -> Val("Rand")
-            "__host_current_dir" -> Val("Env")
-            "__host_wall_sample" | "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time")
-            else -> None
-        }
+        // A service's state store reads and writes its file. Its host
+        // leaves are jet.runtime bindings that carry their own rows.
+        "core.service" -> if member == "state_store" -> Val("FS") else -> None
         "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
@@ -547,26 +537,13 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "__heap_mark" | "fidelity" | "heap_mark" | "override_fidelity" | "reset_fidelity" -> Val("Env")
             else -> None
         }
-        // fork and setsid change the process tree, like every other child launch.
-        "core.sys" -> if member == {
-            "success" -> None
-            "__fork" | "__setsid" -> Val("Exec")
-            else -> Val("Env")
-        }
+        "core.sys" -> if member == "success" -> None else -> Val("Env")
         "core.db" | "core.jobs" -> Val("DB")
         "core.auth" -> if member == {
             "register_user" | "password_login" | "session_validate" | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish" | "tokens_login" | "tokens_refresh" | "devices" | "revoke_device" -> Val("DB")
             else -> None
         }
         "core.plugin" -> Val("Exec")
-        // A web page's scene is the browser's, so core.ui's leaves use
-        // `Browser`, but for the three the window host shares with the page:
-        // a native window routes a click, a drop or typing to its slot's
-        // handler through them, as the page does.
-        "core.ui" -> if member == {
-            "__change" | "__click" | "__drop" -> None
-            else -> Val("Browser")
-        }
         "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
         "core.crypto.vault" -> if member == {
             "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")
@@ -597,15 +574,10 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         "core.process" -> if member == {
             "__keep_open_raw" -> Val("FS.Read")
-            "run" | "pipeline" -> Val("Time.Wait")
+            "run" -> Val("Time.Wait")
             else -> None
         }
-        "core.service" -> if member == {
-            "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes" -> Val("FS.Read")
-            "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename" | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS.Write")
-            "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time.Wait")
-            else -> None
-        }
+        "core.service" -> if member == "state_store" -> Val("FS.Read") else -> None
         "core.time" -> if member == {
             "zone" | "parse_zoned" -> Val("FS.Read")
             "sleep" | "sleep_until" -> Val("Time.Wait")
@@ -617,10 +589,10 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.files" -> if member == {
-            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__reader_line_bytes" | "__open_reader_raw" | "__list_directory" | "__directory_fd" | "__list_dir_raw" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
+            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__list_directory" | "__directory_fd" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
             // The compiler-private non-blocking open only reads (RawHostKeys.jet).
-            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__open_writer_raw" | "__remove_at_raw" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
+            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
             else -> None
         }
         "core.term" -> if member == {

@@ -7679,6 +7679,44 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     files.remove_all(folder) ?? panic("clean: {err}")
 }
 
+#Test("a native window's click, typing and drop run their handlers through the runtime once each") {
+    // The input at row 0, the button at row 1.
+    script: [[ui.UIEvent]]{
+        [ui.UIEvent]{.PointerMove{x: 1, y: 1}, .PointerDown(.Left)},
+        [ui.UIEvent]{.PointerMove{x: 1, y: 0}, .PointerDown(.Left), .Text("c")},
+        [ui.UIEvent]{.Drop{x: 1, y: 0, items: [UIDropItem]{.Text{value: "dropped"}, .URI{value: "https://example.test/"}}}},
+    }
+    window: ui.headless(width: 40, height: 24, script: script) ?? panic("headless: {err}")
+    seen: Shared{AppHandlerRows{rows: [String]{}}}
+    tree := ui.box([
+        ui.text_input(
+            "ab",
+            UIIMEMode.Native,
+            on_change: fn(text: String) { seen.rows.push("change {text}") },
+            on_drop: fn(item: UIDropItem) {
+                if item == {
+                    .Text(value) -> seen.rows.push("drop text {value}")
+                    .URI(value) -> seen.rows.push("drop uri {value}")
+                    .File(_) -> seen.rows.push("drop file")
+                }
+            },
+        ),
+        ui.button("Go", fn() { seen.rows.push("click") }),
+    ])
+    focused := -1
+    loop frame in window.frames() {
+        loop event in frame.events() {
+            _: tree.__input(frame, event, focused)
+        }
+    }
+    assert_eq(seen.rows, [String]{"click", "change abc", "drop text dropped", "drop uri https://example.test/"})
+    assert(!ui_rt.web_attached())
+}
+
+priv AppHandlerRows: struct {
+    rows: [String],
+}
+
 #Test("a kept folder is found again by its key, by its path or its document portal ID, until it is gone") {
     assert_eq(app_folder_form("/srv/crew/Exports", "/run/user/1000"), "path:/srv/crew/Exports")
     assert_eq(app_folder_form("/run/user/1000/doc/4f2a/Exports", "/run/user/1000"), "doc:4f2a/Exports")

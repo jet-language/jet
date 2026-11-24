@@ -1699,9 +1699,8 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
         multi_items := [X64ObjectSection]{}
         multi_sec_indices := [Int]{}
         shstrtab_bytes := [U8]{}
-        sections.reverse()
-        loop index in 0..<sec_kinds.len() {
-            sec := sections.pop() ?? panic("lost section")
+        loop (index, row) in sections.move() {
+            sec := row
             sec_idx: index + 1
             if sec_idx == ELF64_OBJECT_SHSTRTAB {
                 shstrtab_bytes = sec.bytes.move()
