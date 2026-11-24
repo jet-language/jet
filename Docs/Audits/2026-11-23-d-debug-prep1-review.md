@@ -350,3 +350,16 @@ The repaired ballot fixes each and validates.
    unprobed. It matters only if the owner picks B.
 8. c10 says "during `jet build`", while A pauses during the build `jet
    debug --build` runs. The owner decides; C is the literal reading.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+|finding|disposition|target or reason|
+|---|---|---|
+|S1 build-time code stops under existing consoles|card|#5007 (D-DEBUG-PREP1=A build criteria c10, c11)|
+|S2 same budget and results when debugged|card|#5007 (c11)|
+|S3 a stop shows the step count|card|#6772 (c15, counted E0952 steps)|
+|S4 jet build stays non-interactive|card|#5007 (c10)|
+|S5 one engine|card|#5007 (c10)|
+|Open gaps|card|#5007 and #6772 (each gap is in the build criteria's proofs)|
+<!-- /audit-dispositions -->
