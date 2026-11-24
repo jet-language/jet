@@ -1091,8 +1091,11 @@ sema_call_static_source_owner: fn(receiver: Expr, method: String, owner_type_arg
                 symbol: sema_scope_binding_symbol(environment, scopes, index)
                 // An imported alias (`use core.encoding.hex.[HexError]`) is a
                 // module-scope binding of the alias symbol; its statics are the
-                // target's, as for the qualified spelling below.
-                if symbol.kind == SymbolKind.Type && program.registration_graph == .Val(graph) {
+                // target's, as for the qualified spelling below. An alias of a
+                // compiler-owned size (`Real: IEEE<11, 52>`) keeps its name, so
+                // its statics are that size's built-in ones (`Real.parse` is
+                // `Float.parse`, sema_call_static_aliased_builtin).
+                if symbol.kind == SymbolKind.Type && sema_call_static_aliased_builtin(name, environment, program) == None && program.registration_graph == .Val(graph) {
                     if sema_type_graph_nominal_row(graph, symbol.id) == .Val(row) {
                         if sema_call_static_alias_target(graph, row, owner_type_args) == .Val(target) {
                             return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, target.symbol), owner_type_args: target.owner_type_args})
