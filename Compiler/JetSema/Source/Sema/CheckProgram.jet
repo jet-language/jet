@@ -7498,7 +7498,9 @@ sema_name_parts_claimed: fn(shared_state: Shared<SemaNameShared>, queue: SemaNam
 // later still reports them (Rust records these edges at bundle completion,
 // before Sema, and `jet inspect structure` prints them ahead of the failure
 // diagnostics). An edge whose source is a Core module is Core's own wiring,
-// not the program's structure, so it gets no fact.
+// not the program's structure, so it gets no fact. An edge a package
+// `boundaries` policy decided keeps the loader's allowed fact instead (Rust
+// `record_import_edge_fact`, which the resolved-edge pass then skips).
 sema_name_structure_facts: fn(graph: SemaRegistrationGraph) -> [StructureFact] Never! {
     facts := [StructureFact]{}
     module_indices := [Int]{}
@@ -7508,12 +7510,24 @@ sema_name_structure_facts: fn(graph: SemaRegistrationGraph) -> [StructureFact] N
         target_index: sema_registration_cached_module_index(graph, graph.edges[edge_index].target_module_identity, module_indices) ?? next
         source: graph.modules[source_index]
         target: graph.modules[target_index]
+        span: graph.edges[edge_index].declaration.span
+        decided := -1
+        loop (index, fact) in graph.boundary_facts {
+            if fact.source == source.source_file && fact.span.start == span.start && fact.span.end == span.end {
+                decided = index
+                break
+            }
+        }
+        if decided >= 0 {
+            facts.push(graph.boundary_facts[decided])
+            next
+        }
         facts.push(
             StructureFact{
                 kind: StructureFactKind.ImportEdge,
                 subject: "{source.source_file} -> {target.source_file}",
                 source: source.source_file,
-                span: graph.edges[edge_index].declaration.span,
+                span: span,
                 status: "resolved",
                 detail: "resolved import edge",
                 gate: None,

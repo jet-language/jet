@@ -1542,9 +1542,13 @@ reference's final-link refusal and same-open-file bounds.
 
 `inspect structure` presents the compiler's published name facts and the
 structure slice of its gate ledger; it does not infer missing facts by scanning
-source text. Frontend failures can publish a structure report before the
-diagnostic report, so the machine stream can contain a successful envelope
-followed by a failed one. `--core` presents the canonical bootstrap order,
+source text. Frontend failures keep the structure facts already published: the
+text report prints ahead of the diagnostics, and `--json` writes one failed
+envelope whose `structure` field holds them beside the reports. A package
+whose manifest writes a `boundaries` rule names each of its module edges by
+package-qualified module (`app.ui -> app.db`) as `allowed` or `denied`, gated by
+`manifest rule edit`; a denied edge stops the load, yet its fact still reaches
+the report. `--core` presents the canonical bootstrap order,
 root types, and module/type export declarations of the toolchain's Core
 without compiling anything, so it needs no target or project.
 The Jet semantic pass publishes unused-import, private-function, and

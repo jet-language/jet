@@ -972,6 +972,12 @@ JetDriverLoadResult: struct {
     diagnostics: [Diagnostic],
     failed_stage: JetDriverStage?,
     complete: Bool,
+    // The import edges a package's `boundaries` policy decided
+    // (Boundaries.jet): one allowed or denied `Structure.ImportEdge` fact per
+    // module edge out of a package that writes a rule. Registration takes
+    // them in place of the plain resolved edge, and a load the policy stopped
+    // still hands them to `jet inspect structure`.
+    boundary_facts: [StructureFact]{[StructureFact]{}},
     // A load the compiler itself got wrong (a restored Core function with no
     // body, CoreInterface.jet jet_driver_core_restore_check): the compile
     // reports it as an internal compiler error.
