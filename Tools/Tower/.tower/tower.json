@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113475,
+    "rev": 113500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27227,11 +27227,11 @@
         {
           "n": 4,
           "text": "#4016: Markers `#allow` and `#wire` break the PascalCase marker law (3 criteria carried over)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-01T12:12:27.253Z"
+          "evidence": "dev 3a505c6415: ui --filter E0927 PASS 18/0 on the batch 13 compiler; the new E0927_lowercase_allow_and_wire snapshot refuses #allow (with 'Did you mean #Allow?') and #wire as unknown applied rules and accepts #Allow. MarkerRegistryCoverage every_active_row_name_is_marker_name_case passes (#4016 c2). Every #Allow( program passes on o0/o1/o2 (#4016 c3). #Wire: ab769b4114 retired #wire outright (no args, decision or uses), so #Allow is the one surviving spelling and #Wire is unknown like #wire.",
+          "at": "2026-11-24T01:04:09.973Z"
         }
       ],
       "refs": [],
@@ -27245,8 +27245,8 @@
       "parentId": "c00dtttx",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:27.253Z",
-      "updated": "2026-11-22T02:10:23.710Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-24T01:04:09.973Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c036453d",
@@ -42685,6 +42685,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Ruling on c3 (2026-11-24): SchedulerTests.jet compiles only inside the composed runtime unit, and its C host (scheduler-fixture.c) passes 7 callback addresses, so no unit-leg package can run it on a host without cc. Approach: one general runtime-dialect intrinsic yielding a named function's code address (no fixture-specific rows in ir_runtime_intrinsic_specs); an #Export(c) main in SchedulerTests.jet replaces the C host, which is deleted with the case's cc/as steps; a JetBackend/Tests #Test composes, lowers and links the unit and runs it at 1, 2 and 8 carriers and in root-panic mode. The cancel assertion counts as fixed at its root: 96a924e9f3 aligned the test with spec.md:4401-4406 (cancellation unwinds at the next wait point or check). Proof: JET=<batch jet> jet test Compiler/JetBackend/Tests --filter 'the scheduler fragment'."
+        },
+        {
           "at": "2026-11-22",
           "by": "Main",
           "text": "a0.0.46 admit (dev c137227f92, 2026-11-21): FiberLiveness/tasks_start_within_one_futex_wake_of_their_spawn FAILs with the parallel wake (5799f50925) in: causal fixture 4000 starts, 99th percentile 1328 us after spawn; fan-out 7500 starts, 509 us; one futex wake 29 us. c2 stays open; the release carries the row as a disposition naming this card."
@@ -42733,8 +42738,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T11:41:45.304Z",
-      "updated": "2026-11-22T02:10:23.715Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T01:23:48.421Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
     {
@@ -42834,6 +42839,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-21T10:25:02.593Z"
+        },
+        {
+          "n": 3,
+          "text": "Printing or interpolating a Float costs at most what Rust's shortest round-trip formatting costs per value: FloatShortest gains a fast path (Ryu or an equivalent shortest-digits algorithm) and falls back to exact arithmetic only where the fast path can't decide; today every Float takes the exact arithmetic path, about 500 ns per value (G2Regressions, 2026-11-24, batch 13 compiler). Proof: a cases row printing 1M varied Floats with output identical on O0, O1 and O2 to the current digits, plus a same-run receipt against Rust showing Jet/Rust below 1.00 for wall time and peak memory.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T01:17:50.572Z"
         }
       ],
       "refs": [],
@@ -42841,9 +42855,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-24T00:39:57.096Z",
+      "updated": "2026-11-24T01:17:50.572Z",
       "updatedBy": "Orchestrator",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0y7zq8s",
@@ -43919,6 +43933,11 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Ruling on c3 (2026-11-24): 'no slot for x' means x costs nothing at run time: no frame place, no store and no load. At O1 and O2 the IR keeps only the debugger's declaration 's1 local x: Int', which ir_x64_variables locates as X64DebugLocation.Constant, with no frame place and no code. Deleting it would remove x from an O1/O2 debugger and gain nothing (AGENTS.md: never remove a feature to meet a cost). The case asserts both facts."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Burn-down ranking (2026-11-24, by remaining workload; G2Regressions read the open criteria against dev 8a8ea0ee0b): 1-2d. c3: the IR inlines a single-use literal binding (hours, plus a new ir_inline_single_use_literal case). c1 needs cross-package inlining of runtime-routed Core leaves (days). c2 is an AsmParity perf gate."
         },
         {
@@ -43953,11 +43972,11 @@
         {
           "n": 3,
           "text": "At O1 and O2 an immutable binding of a literal used once is inlined into its use: the IR dump of `x: 3; f(x)` has no slot for x.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:48.490Z",
+          "evidence": "dev f1578c362e: cases --filter ir_inline_single_use_literal PASS on the batch 13 compiler. At O1/O2 the dump reads 'const s0 <- 30; call s2 <- f (s0)': no instruction stores or loads x, and x's only entry is its debugger record (a constant location, no frame place; see the c3 ruling log). O0 keeps the slot, and the run prints 832040 on every tier.",
+          "at": "2026-11-24T01:20:55.252Z",
           "proof": {
             "profile": "cases",
             "filter": "ir_inline_single_use_literal"
@@ -43969,7 +43988,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:31:05.067Z",
-      "updated": "2026-11-24T00:39:58.140Z",
+      "updated": "2026-11-24T01:20:55.252Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -51019,20 +51038,20 @@
         {
           "n": 5,
           "text": "A census confirms that no other lowering in Compiler/JetIR lowers user code inside a branch without saving and joining binding ownership. Proof: `jet test Tests/Guards --filter ir_branch_ownership_join`, which fails on a branch lowering that skips the shared save/restore and ir_meet_paths join. (was #6724 c3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:03:54.749Z"
+          "evidence": "dev 6783537e23: jet test Tests/Guards --filter ir_branch_ownership_join 2/2 PASS on the batch 13 compiler. The census reads 3177 ir_ functions and 192 user-code builders: 28 build user code inside an If, 25 join ownership, and 3 are reviewed with reasons (ir_refutable_bind, ir_dyn_option_encode, ir_context_get). The self-test shows the guard fails on a branch lowering that skips the join.",
+          "at": "2026-11-24T01:50:29.804Z"
         },
         {
           "n": 6,
           "text": "A trait value can hold an instantiation of a generic type that implements the trait, and a dynamic call reaches its implementation on O0, O1 and O2. On gate-p199, a [Named] list holding Pair{a: 1, b: \"two\"} (Pair: struct<A, B> with impl Named) stops with an internal compiler error, exit 101: 'ir.build unlowered: ... type ...::Pair<A, B>', because ir_trait_implementers (Compiler/JetIR/Source/BuildTraits.jet) skips every generic function, so no dispatch arm exists for an instantiation. Found by the Any audit, probe p7. Proof: jet test Compiler --profile cases --filter Traits/generic_implementer_trait_value, which prints point then pair on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:03:55.698Z"
+          "evidence": "dev b48730d1ee: cases --filter generic_implementer_trait_value PASS on the batch 13 compiler. A [Named] list holding Pair instantiations and a trait-typed argument both reach the generic impl's method, with output identical on jet run -O0, -O1 and -O2 (no ICE).",
+          "at": "2026-11-24T01:34:40.180Z"
         },
         {
           "n": 7,
@@ -51067,8 +51086,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-22T02:10:23.719Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T01:50:29.804Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 9
     },
     {
@@ -54938,11 +54957,11 @@
         {
           "n": 27,
           "text": "E0641's fix text for a union with a structural member (Int | [Int]) names the member in source spelling, never the mangled '.M__Int_ ->' (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g7_union_list_member). Proof: the updated UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T03:24:35.372Z"
+          "evidence": "batch 14 compiler, dev 1e81eab0de: cases --filter union_else_reaches_a_structural_member_on_every_tier PASS (an else over Int | [Int] | String checks clean and takes [Int] on O0, O1 and O2; no mangled .M__Int_ in any fix) (landed 8f900701dc).",
+          "at": "2026-11-24T02:11:32.207Z"
         },
         {
           "n": 28,
@@ -55077,20 +55096,20 @@
         {
           "n": 43,
           "text": "A union's named case and a qualified member may not share a last name segment: Point(Int) | geo.Point is refused with E0363, as Point(Int) | Point already is (y09b). Today it is accepted, and a bare .Point(n) arm binds the named case, leaving the member with no bare spelling (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probes y09_union_named_case_vs_member_leaf.jet and y09d_named_case_bare_arm_binds.jet in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a UI snapshot of the E0363 and a sweep of every union in the tree that the rule refuses.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T06:26:28.839Z"
+          "evidence": "batch 14 compiler, dev 1e81eab0de: ui --filter union_named_case_takes_a_member_name PASS: Point(Int) | geo.Point with an inline module geo gets E0363 alone, as Point(Int) | Point does. The tree sweep found no union the stricter rule refuses (landed 8f900701dc, 1093478972).",
+          "at": "2026-11-24T02:11:33.355Z"
         },
         {
           "n": 44,
           "text": "Writing to an arm binding over a &Item parameter is refused with a report that blames the binding: the binding is read-only, and item itself is writable. Today it gets E0205 'Cannot edit through item — it has read access only', which names the wrong thing (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probe y08_write_subject_arm.jet in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Proof: a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T06:26:31.187Z"
+          "evidence": "batch 14 compiler, dev 1e81eab0de: ui --filter arm_binding_write_blames_the_binding PASS (landed cdeb9aa6da).",
+          "at": "2026-11-24T02:11:34.384Z"
         },
         {
           "n": 45,
@@ -55118,11 +55137,11 @@
         {
           "n": 47,
           "text": "The same-named-member E0305 branch treats only member types, never a named case, as a member. Today on Point(Int) | Point it adds a second error after E0363, and its suggested fix Point1(Point(Int)) | … fails with E0003 when applied (p209, O0/O1/O2 alike; D-PRIM-ANY1 review 7, probe z07 in $JET_SCRATCH_ROOT/lanes/AnyReview7/probes, control y09b in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes). Every fix a diagnostic suggests must compile when applied. Proof: a UI snapshot of y09b showing E0363 alone, and a cases row applying the remaining suggestion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T06:50:34.552Z"
+          "evidence": "batch 14 compiler, dev 1e81eab0de: ui --filter union_named_case_takes_a_member_name PASS (E0363 alone, no second error), and cases --filter union_renamed_case_keeps_its_member_apart_on_every_tier PASS: with the suggested rename applied, both unions check clean and each arm is reached on O0, O1 and O2 (landed 8f900701dc, 1093478972).",
+          "at": "2026-11-24T02:11:35.370Z"
         },
         {
           "n": 48,
@@ -55208,11 +55227,11 @@
         {
           "n": 57,
           "text": "A bare generic name in type position (fn(b: Box) with Box: struct<T>) reports E0104 alone: one root, one report. Today it adds an E0112 at the call, '`show` wants `Box` for argument 1, but this is `Box`<Int>', whose type text puts the type arguments outside the backticks (p209, O0/O1/O2 alike; D-PRIM-ANY1 review 10, probe t03 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes). Proof: a UI snapshot showing E0104 alone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T08:07:55.581Z"
+          "evidence": "dev bb5f0f28a0 (6839-c57): ui --filter bare_generic_parameter_type PASS on the batch 13 compiler (dev bb5f0f28a0); E0104 alone.",
+          "at": "2026-11-24T01:03:44.480Z"
         },
         {
           "n": 58,
@@ -55235,11 +55254,11 @@
         {
           "n": 60,
           "text": "jet fmt keeps an `#Allow(...)` written on an assignment statement (`#Allow(jet.HiddenCopyInLoop, \"...\") counts[key] = ...`): today it drops the attribute and refuses the file with an internal compiler error (\"would change the syntax tree\"), while an `#Allow` on a loop statement is kept. Found by the #6897 c2 sweep (IfHole-6-1-sweep-check-only-tidy msg). Proof: a fmt case formatting an #Allow on an assignment, a field write and a compound assignment, idempotent and lossless, plus jet fmt --check on the sweep s allowed fixtures.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T17:44:10.203Z"
+          "evidence": "dev bb5f0f28a0 (6839-c62): cases --filter Fmt/fmt_keeps_an_allow_on_an_assignment PASS on the batch 13 compiler (dev bb5f0f28a0).",
+          "at": "2026-11-24T01:03:45.335Z"
         },
         {
           "n": 61,
@@ -55253,11 +55272,11 @@
         {
           "n": 62,
           "text": "A trait's default method compiles when a type in another package implements the trait without writing it: today a 25-line two-package program (retain_lib declares `Retain: trait { saved: fn(self) -> Bool, evictable: fn(self) -> Bool { !self.saved() } }` and `count_evictable: fn<I: Retain>(items: [I]) -> Int`; retain_app's `Rec` implements only `saved` and calls both `count_evictable(items)` and `items[0].evictable()`) exits 101 with \"ir.build unlowered: method call outside the checked program: evictable\" on the direct call and on the generic instance (batch compiler p327, dev 01b0b4b9e0). The same fault stops Compiler/JetDevServer/Tests (plan_eviction_inner<CaptureTestRecord>, c61's JetDevServer row). Sema fills default bodies only for traits the impl's own module declares (Registration/TraitImpls.jet sema_trait_impls_synthesize); within one package the inline-module form runs. Proof: a cases row with that two-package fixture prints 2 and false, and jet test Compiler/JetDevServer/Tests/LiveInspect.jet compiles.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-19T19:13:00.011Z"
+          "evidence": "dev bb5f0f28a0 (6839-c62): cases --filter Traits/trait_default_method_across_packages PASS on the batch 13 compiler (dev bb5f0f28a0).",
+          "at": "2026-11-24T01:03:46.184Z"
         },
         {
           "n": 63,
@@ -55274,7 +55293,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-24T01:03:43.256Z",
+      "updated": "2026-11-24T02:11:35.370Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 63
     },
@@ -58149,11 +58168,11 @@
         {
           "n": 7,
           "text": "IR lowers Core calls through their host-leaf declarations: JetIR's RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names, and the runtime RouteAFont, RouteAGame, RouteBrowser, RouteTerm and RouteWeb tables are deleted or keyed by declared symbols (census F04). Proof: those tables leave Tests/Guards/closed_lists/baseline.tsv and `jet test Tests/Guards --filter closed_lists` passes. (was #6151 c11)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:51.189Z"
+          "evidence": "dev bb5f0f28a0 (6852-c7): jet test Tests/Guards --filter closed_lists on the batch 13 compiler (dev bb5f0f28a0): 9 passed, 0 failed; Tests/Guards/closed_lists/baseline.tsv holds no RouteAFont, RouteAGame, RouteBrowser, RouteTerm, RouteWeb, RouteHandle or RouteBuiltin row.",
+          "at": "2026-11-24T01:03:48.737Z"
         },
         {
           "n": 8,
@@ -58200,7 +58219,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-23T23:56:41.729Z",
+      "updated": "2026-11-24T01:03:48.737Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 11
     },
@@ -59685,11 +59704,11 @@
         {
           "n": 1,
           "text": "`unix_ms(now())` equals the epoch milliseconds of the same instant: now and Instant share one identity.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:40.217Z",
+          "evidence": "dev fe5846cb32: cases --filter CoreLib/time_now_identity PASS on the batch 13 compiler (unix_ms(now()) equals the epoch milliseconds of the same instant).",
+          "at": "2026-11-24T01:46:10.387Z",
           "proof": {
             "profile": "cases",
             "filter": "CoreLib/time_now_identity"
@@ -59744,8 +59763,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-22T02:10:23.721Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T01:46:10.387Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 5
     },
     {
@@ -63805,11 +63824,11 @@
         {
           "n": 1,
           "text": "Every Tests/Cases/Fmt fixture is written in current syntax and parses: fmt_preserves_named_payload_variant_dot_brace no longer stops with E0003 at `{`, and fmt_marks_only_value_returning_braced_callables_with_an_arrow no longer uses the retired `fn` keyword (E0081). Proof: `jet test Compiler --profile cases --filter Fmt/fmt_preserves_named_payload_variant_dot_brace` and `--filter fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:04.747Z"
+          "evidence": "dev bb5f0f28a0 (6898-c1-c4): cases Fmt/fmt_preserves_named_payload_variant_dot_brace and Fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow both PASS on the batch 13 compiler (dev bb5f0f28a0).",
+          "at": "2026-11-24T01:03:47.030Z"
         },
         {
           "n": 2,
@@ -63832,11 +63851,11 @@
         {
           "n": 4,
           "text": "jet fmt writes `[K:V]` for map types in type position and leaves value spacing alone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:07.616Z",
+          "evidence": "dev bb5f0f28a0 (6898-c1-c4): cases --filter Fmt/fmt_map_type_spacing_is_canonical_and_value_spacing_stays PASS on the batch 13 compiler (dev bb5f0f28a0).",
+          "at": "2026-11-24T01:03:47.885Z",
           "proof": {
             "profile": "cases",
             "filter": "Fmt/fmt_map_type_spacing_is_canonical_and_value_spacing_stays"
@@ -64017,8 +64036,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:54.075Z",
-      "updated": "2026-11-22T02:10:23.723Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T01:03:47.885Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 20
     },
     {
@@ -67913,7 +67932,7 @@
       "track": "epoch",
       "epoch": "G4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -67932,11 +67951,11 @@
         {
           "n": 1,
           "text": "D-QUAL4=A: a value tag in type position parses directly before the type (`#PII String`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:15:04.832Z",
+          "evidence": "batch 14 compiler, dev 1e81eab0de: cases --filter Tags/d_qual4_contract PASS (landed b260424a3c).",
+          "at": "2026-11-24T02:11:26.598Z",
           "proof": {
             "profile": "cases",
             "filter": "Tags/d_qual4_contract"
@@ -67945,20 +67964,20 @@
         {
           "n": 2,
           "text": "D-TAINT1=A: tag facts propagate through branches, containers and calls, denied sinks refuse a tagged value with a registered error, and only a checked `#Scrub(Tag)` removes a tag. Proof: `jet test Compiler --profile cases --filter Tags/d_taint1_contract` and `jet test Compiler --profile ui --filter taint_denied_sink_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:15:06.357Z"
+          "evidence": "batch 14 compiler, dev 1e81eab0de: cases --filter Tags/d_taint1_contract PASS and ui --filter taint_denied_sink_ 4/4 PASS (landed b260424a3c).",
+          "at": "2026-11-24T02:11:27.569Z"
         },
         {
           "n": 3,
           "text": "The crypto secret provenance errors (the E0311 family) fire only on a real secret leak, and the nested-provenance program checks clean.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:40:53.816Z",
+          "evidence": "batch 14 compiler, dev 1e81eab0de: ui --filter crypto_secret_nested_provenance PASS (landed b260424a3c).",
+          "at": "2026-11-24T02:11:28.745Z",
           "proof": {
             "profile": "ui",
             "filter": "crypto_secret_nested_provenance"
@@ -67974,8 +67993,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:53.816Z",
-      "updated": "2026-11-24T00:39:55.975Z",
-      "updatedBy": "Orchestrator"
+      "updated": "2026-11-24T02:11:31.079Z",
+      "updatedBy": "Orchestrator",
+      "completedAt": "2026-11-24T02:11:31.079Z"
     },
     {
       "id": "c02z1dax",
@@ -71931,11 +71951,11 @@
         {
           "n": 1,
           "text": "A measured loop whose result passes only through `keep(x)` is kept at O2: the loop body is present in the release binary and its timing scales with N, on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:18:44.298Z",
+          "evidence": "dev f7d4d32022: cases --filter Testing/keep_sink_survives_o2 PASS on the batch 13 compiler. A loop whose result passes only through keep(x) runs and its time scales with N on O0, O1 and O2 and in the release binary. Note: a control without keep also passes today, because O2 deletes no dead loops; the case guards the guarantee for when it does.",
+          "at": "2026-11-24T01:46:09.458Z",
           "proof": {
             "profile": "cases",
             "filter": "Testing/keep_sink_survives_o2"
@@ -71972,7 +71992,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:08.825Z",
-      "updated": "2026-11-24T00:58:12.362Z",
+      "updated": "2026-11-24T01:46:09.458Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 3
     },
@@ -72016,11 +72036,11 @@
         {
           "n": 3,
           "text": "Owner order 2026-11-11: the script cache is off by default. `jet file.jet` and `jet run` compile live every time, and no kept program, result cache or incremental state serves a run unless the user opts in. ScriptCache.jet's default flips. The opt-in spelling goes on a ballot (a flag or an environment variable) and nothing else changes until it is ratified. CLI #Tests prove a second run of unchanged sources compiles again by default (no read or write under the scripts dir). Every in-repository caller, doc and test that assumed a cache hit is migrated in the same patch.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:18:48.047Z",
+          "evidence": "dev f72c63c513: cases --filter CLIRun/second_run_compiles_again_by_default PASS on the batch 13 compiler (a second run of the same script compiles again; no kept program serves it). Also passing: BuildEntry/default_build_opens_no_store and CLI/script_runs_directly_with_its_arguments_and_authority.",
+          "at": "2026-11-24T01:34:10.318Z",
           "proof": {
             "profile": "cases",
             "filter": "CLIRun/second_run_compiles_again_by_default"
@@ -72043,6 +72063,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:20:07.810Z"
+        },
+        {
+          "n": 6,
+          "text": "A Core library source file that the compile reads lazily and finds unreadable gives a registered diagnostic (code, what, why, fix, UI snapshot) and exit 1, not 'Stop: Jet.Panic: jet_cli_execute_compiling (spawn site 5): can't read the Core library source …' with exit 70 from Identity.jet:233 (found by TypeIDSlice3, 2026-11-24). Proof: a ui snapshot that makes one Core file unreadable.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-24T01:34:11.214Z"
         }
       ],
       "refs": [],
@@ -72054,9 +72083,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:33:26.136Z",
-      "updated": "2026-11-22T02:10:23.729Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 5
+      "updated": "2026-11-24T01:34:11.214Z",
+      "updatedBy": "Orchestrator",
+      "criteriaLastN": 6
     },
     {
       "id": "c0r1ln6j",
@@ -136742,6 +136771,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T02:11:35.370Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-24T02:11:34.384Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-24T02:11:33.355Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-24T02:11:32.207Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-24T02:11:31.079Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0qtfr3u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-24T02:11:28.745Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qtfr3u",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T02:11:27.569Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qtfr3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-24T02:11:26.598Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qtfr3u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T01:50:29.804Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0j3st66",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-24T01:46:10.387Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0blttm0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T01:46:09.458Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oymlrt",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T01:34:40.180Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0j3st66",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-24T01:34:11.214Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0wf4a3e",
+      "note": "#6 A Core library source file that the compile reads lazily and"
+    },
+    {
+      "at": "2026-11-24T01:34:10.318Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wf4a3e",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T01:23:48.421Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c00w7rum",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T01:20:55.253Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02qdoro",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-24T01:20:54.425Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c02qdoro",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T01:17:50.572Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05p5u7s",
+      "note": "#3 Printing or interpolating a Float costs at most what Rust's "
+    },
+    {
+      "at": "2026-11-24T01:04:09.973Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wcsfeo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T01:03:48.737Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-24T01:03:47.885Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t5gnhs",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-24T01:03:47.030Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t5gnhs",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-24T01:03:46.184Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-24T01:03:45.335Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-24T01:03:44.480Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0oe96sn",
+      "note": "#57"
+    },
     {
       "at": "2026-11-24T01:03:43.256Z",
       "by": "Orchestrator",
