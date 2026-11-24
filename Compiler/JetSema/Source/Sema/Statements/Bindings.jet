@@ -36,6 +36,7 @@ use jet_foundation.[
     TLetTy,
     TLetWrapper,
     TLocal,
+    TTryConvert,
     Type,
     TypeTupleField,
     ast_expr,
@@ -1176,8 +1177,12 @@ sema_stmt_note_normalized_path_text: fn(binding: Binding, init: TExpr, scopes: ^
 }
 
 // The receiver of `value` when it is the call `path.{method}()` on the
-// compiler's `Path`.
+// compiler's `Path`. Path's methods are Core declarations that fail with
+// `Never`, so the call arrives inside the try that discharges that failure.
 sema_stmt_path_method_receiver: fn(value: TExpr, method: String) -> TExpr? {
+    if value.kind == .TryWithContext(inner, _, convert, _, _, _) && convert == TTryConvert.Never {
+        return sema_stmt_path_method_receiver(inner, method)
+    }
     if value.kind == .MethodCall(receiver, reference, _, args) {
         if reference.name == method && args.len() == 0 && receiver.ty == (Type.Named{name: "Path"}) -> return Val(receiver)
     }
