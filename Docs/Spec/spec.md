@@ -136,14 +136,19 @@ vocabulary](vocabulary.md).
   CompilerCall: its written `name` (a CompilerName), its `args` in written
   order and its `receiver`, each a CompilerArg with its `label`, `type` (a
   TypeId; `_` when the argument's own check fails), `value`, the
-  `function` it names (None) and its `span`. `value` is the Dyn the
+  `function` it names and its `span`. An argument that names a declared
+  function by its bare name, as `f.reflect()` resolves it, carries that
+  function's FunctionInfo in `function`; any other argument's is None. A type
+  name (`Checkout`) checks where a `Type` is expected and is heard as that
+  `Type` value. `value` is the Dyn the
   argument's `encode()` returns when the build knows the argument (a
   literal, a module constant, also one that names another constant, or a
   struct, enum case or list literal of known parts): a Bool, an Int or
   fixed-width integer, a Float or F32, a Char or a String, a list of these,
   and a struct or enum whose Encode is the derived one with no codec option,
   its fields plain values and its cases without payload or with one value.
-  A `Path{…}` literal has no Encode and is heard as the Text of its path.
+  A `Path{…}` literal has no Encode and is heard as the Text of its path, and
+  a `Type` as the Text of the path it names (`"main.Checkout"`).
   Any other argument's `value` is None
   (an optional field, a byte list, a generic type, a written codec, a
   value only the run knows). The call's `span` runs from its name to its

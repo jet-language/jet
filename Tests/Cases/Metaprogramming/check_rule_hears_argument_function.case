@@ -1,0 +1,13 @@
+# A marker's `check` rule hears the declared function an argument names:
+# `CompilerArg.function` carries its FunctionInfo, parameters and their
+# types included. Any other argument's `function` is None.
+fixture: CheckRuleHearsArgumentFunction.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # the handler argument is heard with its FunctionInfo
+stderr: !~ "known.Unheard" # each argument names the function the rule expects
+step: jet run main.jet
+exit: 0
+stdout: = "7 /item\n" # the rule only reads; the call runs as written

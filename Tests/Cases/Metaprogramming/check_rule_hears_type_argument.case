@@ -1,0 +1,13 @@
+# A marker's `check` rule hears a type name argument (`form(Checkout, …)`)
+# as the `Type` value it is where a `Type` is expected: its `type` is `Type`
+# and its `value` the Text of the type's path.
+fixture: CheckRuleHearsTypeArgument.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # the type argument is heard as its Type value
+stderr: !~ "known.Unheard" # each argument is heard as the rule expects
+step: jet run main.jet
+exit: 0
+stdout: = "true\n" # the rule only reads; the call runs as written
