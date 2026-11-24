@@ -47,12 +47,6 @@ TEffectFacts: struct {
     context_keys: [TEffectContextKey]{[TEffectContextKey]{}},
 }
 
-TVisibility: enum {
-    Private,
-    Package,
-    Public,
-}
-
 TForeignProvenance: struct {
     language: String,
     abi: String,
@@ -157,7 +151,7 @@ TFunctionRef: struct {
     module_identity: ModuleID,
     name: String,
     span: Span,
-    visibility: TVisibility,
+    visibility: NameVisibility,
 }
 
 TCLIBinding: struct {
@@ -292,7 +286,7 @@ TTraitDef: struct {
     key: String,
     name: String,
     span: Span,
-    visibility: TVisibility,
+    visibility: NameVisibility,
     associated_types: [TAssociatedTypeDecl],
     methods: [TTraitMethod],
 }
@@ -400,7 +394,7 @@ TConstantDef: struct {
     // constant symbol names (a trait constant).
     symbol_key: String{""},
     span: Span,
-    visibility: TVisibility,
+    visibility: NameVisibility,
     ty: Type,
     is_comptime: Bool,
     is_storage: Bool,

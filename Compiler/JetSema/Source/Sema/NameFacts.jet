@@ -30,7 +30,6 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TDeclarationFacts,
-    TVisibility,
     compiler_threads_admit,
     compiler_threads_joined,
     compiler_threads_taken,
@@ -498,12 +497,6 @@ sema_name_add_item: fn(facts: ^NameFacts, module_index: Int, module_path: String
     }
 }
 
-sema_name_tree_visibility: fn(value: TVisibility) -> NameVisibility Never! {
-    if value == TVisibility.Public -> return NameVisibility.Public
-    if value == TVisibility.Package -> return NameVisibility.Package
-    NameVisibility.Private
-}
-
 sema_name_add_tree_declarations: fn(facts: ^NameFacts, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
     loop definition in declarations.type_defs {
         name := definition.name
@@ -527,7 +520,7 @@ sema_name_add_tree_declarations: fn(facts: ^NameFacts, module_index: Int, module
     loop trait_definition in declarations.traits {
         name := trait_definition.name
         path := sema_name_scoped_path(module_path, name)
-        visibility := sema_name_tree_visibility(trait_definition.visibility)
+        visibility := trait_definition.visibility
         sema_name_add_declaration(facts, module_index, name, path, "trait", trait_definition.span, visibility)
         loop method in trait_definition.methods {
             sema_name_add_declaration(facts, module_index, "{name}.{method.name}", "{path}.{method.name}", "method", method.span, visibility)

@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, NameVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -985,7 +985,7 @@ ir_program_declared: fn(type_defs: ^^[TTypeDef], impl_defs: ^^[TImplDef], consta
         }
         owner: ir_type_identity(type_rows_keys, type_rows, types, implementation.self_type)
         loop constant in implementation.constants {
-            defs.push(TConstantDef{module_identity: implementation.module_identity, key: ir_trait_constant_key(ir_short_name(trait_name), owner, constant.name), name: "{owner}.{constant.name}", span: constant.span, visibility: TVisibility.Public, ty: constant.ty.copy(), is_comptime: true, is_storage: false, value: constant.value.copy()})
+            defs.push(TConstantDef{module_identity: implementation.module_identity, key: ir_trait_constant_key(ir_short_name(trait_name), owner, constant.name), name: "{owner}.{constant.name}", span: constant.span, visibility: NameVisibility.Public, ty: constant.ty.copy(), is_comptime: true, is_storage: false, value: constant.value.copy()})
         }
     }
     // Each constant's key and name to its first row.

@@ -286,7 +286,7 @@ body_codec_put_fnbody: fn(out: ^BodyCodecOut, value: FnBody) Never! {
     body_codec_put_string(out, value.endpoint)
     body_codec_put_string(out, value.system_run)
     body_codec_put_string(out, value.role)
-    body_codec_put_tvisibility(out, value.visibility)
+    body_codec_put_namevisibility(out, value.visibility)
     body_codec_put_opt_tforeignprovenance(out, value.foreign)
     body_codec_put_list_bodyparameter(out, value.params)
     body_codec_put_list_twebparamreconstruction(out, value.web_param_reconstructions)
@@ -344,7 +344,7 @@ body_codec_get_fnbody: fn(bytes: [U8], input: ^BodyCodecIn) -> FnBody Never! {
     f11: body_codec_get_string(bytes, input)
     f12: body_codec_get_string(bytes, input)
     f13: body_codec_get_string(bytes, input)
-    f14: body_codec_get_tvisibility(bytes, input)
+    f14: body_codec_get_namevisibility(bytes, input)
     f15: body_codec_get_opt_tforeignprovenance(bytes, input)
     f16: body_codec_get_list_bodyparameter(bytes, input)
     f17: body_codec_get_list_twebparamreconstruction(bytes, input)
@@ -1331,7 +1331,7 @@ body_codec_get_webpartitionmarker: fn(bytes: [U8], input: ^BodyCodecIn) -> WebPa
     }
 }
 
-body_codec_put_tvisibility: fn(out: ^BodyCodecOut, value: TVisibility) Never! {
+body_codec_put_namevisibility: fn(out: ^BodyCodecOut, value: NameVisibility) Never! {
     if value == {
         .Private -> { body_codec_put_tag(out, 0) }
         .Package -> { body_codec_put_tag(out, 1) }
@@ -1339,12 +1339,12 @@ body_codec_put_tvisibility: fn(out: ^BodyCodecOut, value: TVisibility) Never! {
     }
 }
 
-body_codec_get_tvisibility: fn(bytes: [U8], input: ^BodyCodecIn) -> TVisibility Never! {
+body_codec_get_namevisibility: fn(bytes: [U8], input: ^BodyCodecIn) -> NameVisibility Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
-        1 -> TVisibility.Package
-        2 -> TVisibility.Public
-        else -> TVisibility.Private
+        1 -> NameVisibility.Package
+        2 -> NameVisibility.Public
+        else -> NameVisibility.Private
     }
 }
 
