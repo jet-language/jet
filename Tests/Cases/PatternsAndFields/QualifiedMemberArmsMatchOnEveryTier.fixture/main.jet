@@ -1,0 +1,48 @@
+// A union member from another module is named by its qualified path in an
+// arm: `.geo.Point(p)`, the nested `.outer.inner.Point(p)` and the file
+// module's `.geo2.Point(p)` each match their member.
+use geo2
+
+outer: module {
+    inner: module {
+        Point: struct {
+            x: Int,
+        }
+    }
+}
+
+geo: module {
+    Point: struct {
+        x: Int,
+    }
+}
+
+f: fn(v: Int | outer.inner.Point) -> Int {
+    if v == {
+        .Int(n) -> n
+        .outer.inner.Point(p) -> p.x
+    }
+}
+
+g: fn(v: Int | geo.Point) -> Int {
+    if v == {
+        .Int(n) -> n
+        .geo.Point(p) -> p.x
+    }
+}
+
+h: fn(v: Int | geo2.Point) -> Int {
+    if v == {
+        .Int(n) -> n
+        .geo2.Point(p) -> p.x
+    }
+}
+
+run: fn() {
+    print(f(outer.inner.Point{x: 3}))
+    print(f(1))
+    print(g(geo.Point{x: 4}))
+    print(g(2))
+    print(h(geo2.Point{x: 5}))
+    print(h(6))
+}
