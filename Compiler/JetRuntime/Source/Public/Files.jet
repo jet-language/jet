@@ -304,6 +304,28 @@ files: module {
 
     #Import(c) priv writer_fsync: fn(writer: &FileWriter) -[Time.Wait]> IOError! = "jet_std_file_writer_fsync"
 
+    // The compiler's `Path` handle: its text in and out, the lexical path
+    // math of RoutePath.jet, the home directory (HOME) and a recursive walk.
+    #Import(c) priv path_from: fn(text: String) -> Path = "jet_path_from"
+
+    #Import(c) priv path_home: fn() -[Env]> Path = "jet_path_home"
+
+    #Import(c) priv path_to_string: fn(path: Path) -> String = "jet_path_to_string"
+
+    #Import(c) priv path_join: fn(path: Path, other: String) -> Path = "jet_path_join"
+
+    #Import(c) priv path_parent: fn(path: Path) -> Path? = "jet_path_parent"
+
+    #Import(c) priv path_extension: fn(path: Path) -> String? = "jet_path_extension"
+
+    #Import(c) priv path_stem: fn(path: Path) -> String? = "jet_path_stem"
+
+    #Import(c) priv path_normalize: fn(path: Path) -> Path = "jet_path_normalize"
+
+    #Import(c) priv path_is_within: fn(path: Path, base: Path) -> Bool = "jet_path_is_within"
+
+    #Import(c) priv path_walk: fn(path: Path) -> [Path] = "jet_path_walk"
+
     // Whether the process may access `path` in `mode`, and the space row of
     // the filesystem holding `path`.
     #Import(c) priv access_raw: fn(path: String, mode: Int) -[FS.Read]> IOError! = "jet_std_fs_access_raw"
