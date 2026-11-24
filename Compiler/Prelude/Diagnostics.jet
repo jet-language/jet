@@ -15844,17 +15844,17 @@ MissingCoreRole: struct {
         safety_class: .Soundness,
         safety_reason: "Lowering runs a role's Core function, so with none filling it an operation that needs the role has no code to run.",
         expert_path: "none: each role has one Core function",
-        meaning: "No Core function fills a jet_builtins role",
+        meaning: "No Core function or owned trait fills a jet_builtins role",
         no_fix: .Ambiguous,
 
-        what: fn(self) -> String { "No Core function fills role `{self.role}`" }
+        what: fn(self) -> String { "No Core function or owned trait fills role `{self.role}`" }
 
         why: fn(self) -> String {
-            "The compiler runs the one Core function that fills a role, so each role is filled exactly once."
+            "The compiler runs the one Core function, or calls the one Compiler/Prelude/Traits.jet trait, that fills a role, so each role is filled exactly once."
         }
 
         fix: fn(self) -> String {
-            "Mark the Core function that does `{self.role}` with `#Builtin.Role(.{self.role})`."
+            "Mark the Core function or the Compiler/Prelude/Traits.jet trait that does `{self.role}` with `#Builtin.Role(.{self.role})`."
         }
     }
 }

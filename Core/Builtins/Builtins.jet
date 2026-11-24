@@ -32,9 +32,17 @@
 // call a binding's identity rather than an allocation. A role's name ends in
 // `Point` exactly when it is a point constructor's.
 // The compiler runs the one Core function that fills a role and never names
-// it, so the function can be private and keep any name. Each role is filled
-// exactly once (E1014 for a second filler; E1015 when `jet check Core` finds
-// one unfilled). Tests/UI/core_role_* put a probe after `RoleKind: enum {`.
+// it, so the function can be private and keep any name.
+// The rest are filled by a trait of Compiler/Prelude/Traits.jet, whose
+// `#Builtin.Role(.Add)` line gives it the role: the trait `a + b` (Add),
+// `a - b` (Sub), `a * b` (Mul) and `a / b` (Div) call, the one `==` and `!=`
+// call (Equal), the one `<=>`, `<`, `>`, `<=` and `>=` call (Compare), and
+// the ones `a[k]` (Index) and `a[k] = v` (IndexMut) call. A library type
+// takes an operator by implementing the trait, which the compiler finds
+// through its role, never through its name.
+// Each role is filled exactly once (E1014 for a second filler; E1015 when
+// `jet check Core` finds one unfilled). Tests/UI/core_role_* put a probe
+// after `RoleKind: enum {`.
 RoleKind: enum {
     AbsFloat,
     AbsF32,
@@ -51,6 +59,14 @@ RoleKind: enum {
     EventPoint,
     HookPoint,
     DecisionPoint,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Equal,
+    Compare,
+    Index,
+    IndexMut,
 }
 
 // `#Builtin.Role(.X)` on a Core function makes it the one that fills role X.

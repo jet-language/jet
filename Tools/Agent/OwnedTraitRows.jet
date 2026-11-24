@@ -16,9 +16,9 @@
 // module's `Name: trait {` block (its source per Compiler/Prelude/Core.rows),
 // in the same shape. Until the module declares the trait, the members the
 // stub writes stand in; once it does, the stub may write none. A
-// `#Builtin.Role(.Add)` line right above a trait gives it a role: what `+`
-// or `[ ]` calls is the trait that fills the role. A role fills at most one
-// trait.
+// `#Builtin.Role(.Add)` line right above a trait gives it a role, a case of
+// jet_builtins' RoleKind (Core/Builtins/Builtins.jet): what `+` or `[ ]`
+// calls is the trait that fills the role. A role fills at most one trait.
 // Usage: jet Tools/Agent/OwnedTraitRows.jet [--check|--write]
 // --check fails when a copy differs from what the declarations give it;
 // --write rewrites the copies.
@@ -37,6 +37,13 @@ CORE_ROWS_PATH: "Compiler/Prelude/Core.rows"
 PRELUDE_PATH: "Compiler/Prelude/Core/prelude.jet"
 
 CHECKED_TEXT_DECLARATION: "CheckedText: trait {{"
+
+// The jet_builtins source that declares RoleKind, whose cases are the roles.
+BUILTINS_PATH: "Core/Builtins/Builtins.jet"
+
+ROLE_KIND_OPEN: "RoleKind: enum {{"
+
+ROLE_CASE: Regex{"^    ([A-Z][A-Za-z0-9]*),$"}
 
 ROLE_MARKER: Regex{"^#Builtin\.Role\(\.([A-Z][A-Za-z0-9]*)\)$"}
 
@@ -126,7 +133,7 @@ TraitSource: struct {
     line: Int,
     // Declared inside `Literal: module`.
     literal: Bool,
-    // The role its `#Builtin.Role(.X)` names; "" for none.
+    // The RoleKind case its `#Builtin.Role(.X)` names; "" for none.
     role: String,
     facts: [TraitFact],
     associated: [String],
@@ -597,12 +604,15 @@ declared: fn(traits: [TraitSource], name: String) -> Bool Never! {
     false
 }
 
-// The facts no single trait can check: each role fills one trait, and family
-// markers that name no trait.
-check_table: fn(traits: [TraitSource]) OwnedTraitRowsError! {
+// The facts no single trait can check: each role a RoleKind case
+// (`role_kinds`) that fills one trait, and family markers that name no trait.
+check_table: fn(traits: [TraitSource], role_kinds: [String]) OwnedTraitRowsError! {
     roles := [String]{}
     loop source in traits {
         if source.role != "" {
+            if !role_kinds.contains(source.role) {
+                return Err(rows_fail("trait {source.name}: `#Builtin.Role(.{source.role})` names no case of RoleKind in {BUILTINS_PATH}"))
+            }
             if roles.contains(source.role) {
                 return Err(rows_fail("trait {source.name}: the role `{source.role}` already belongs to another trait"))
             }
@@ -638,10 +648,10 @@ homed: fn(source: TraitSource, homes: [TraitSource]) -> TraitSource OwnedTraitRo
 }
 
 // `homes` holds the declaration of each trait with a `declared_in`
-// (home_traits).
-render_rows: fn(source_text: String, checked_text_declared: Bool, homes: [TraitSource]) -> String OwnedTraitRowsError! {
+// (home_traits); `role_kinds` the cases of RoleKind (role_kinds).
+render_rows: fn(source_text: String, checked_text_declared: Bool, homes: [TraitSource], role_kinds: [String]) -> String OwnedTraitRowsError! {
     traits: read_traits(source_text) ?? return Err(err)
-    check_table(traits) ?? return Err(err)
+    check_table(traits, role_kinds) ?? return Err(err)
     rows := [String]{}
     loop source in traits {
         written: homed(source, homes) ?? return Err(err)
@@ -781,11 +791,27 @@ home_traits: fn(source_text: String) -[FS]> [TraitSource] OwnedTraitRowsError! {
     Ok(homes)
 }
 
+// The cases of the RoleKind enum `builtins` declares, in order.
+role_kinds: fn(builtins: String) -> [String] OwnedTraitRowsError! {
+    block: builtins.partition("\n{ROLE_KIND_OPEN}\n")
+    if block.sep == "" -> return Err(rows_fail("{BUILTINS_PATH} declares no `{ROLE_KIND_OPEN.remove_suffix(" {{")}`"))
+    cases := [String]{}
+    loop line in block.tail.split("\n").to_list() {
+        if line == "}}" -> return Ok(cases)
+        if line.trim() == "" || line.trim().starts_with("//") -> next
+        found: ROLE_CASE.match(line) ?? return Err(rows_fail("{BUILTINS_PATH}: expected a RoleKind case `    Name,`, found `{line}`"))
+        cases.push(found.groups[0].copy())
+    }
+    Err(rows_fail("{BUILTINS_PATH}: `{ROLE_KIND_OPEN}` is not closed"))
+}
+
 generated_files: fn() -[FS]> [TextFile] OwnedTraitRowsError! {
     source_text: read_text(SOURCE_PATH) ?? return Err(err)
     prelude: read_text(PRELUDE_PATH) ?? return Err(err)
     homes: home_traits(source_text) ?? return Err(err)
-    rows: render_rows(source_text, prelude.contains(CHECKED_TEXT_DECLARATION), homes) ?? return Err(err)
+    builtins: read_text(BUILTINS_PATH) ?? return Err(err)
+    kinds: role_kinds(builtins) ?? return Err(err)
+    rows: render_rows(source_text, prelude.contains(CHECKED_TEXT_DECLARATION), homes, kinds) ?? return Err(err)
     dictionary: read_text(DICTIONARY_PATH) ?? return Err(err)
     block: render_dictionary_rows(source_text) ?? return Err(err)
     next_dictionary: replace_dictionary_block(dictionary, block) ?? return Err(err)
@@ -820,11 +846,14 @@ run: fn() { print(owned_trait_rows_main(process.args()) ?? process.fail(1, err.m
 
 // The error text render_rows reports for `source`, or "" when it accepts it.
 rows_error: fn(source: String, homes: [TraitSource]{[TraitSource]{}}) -> String Never! {
-    if render_rows(source, true, homes) == {
+    if render_rows(source, true, homes, TEST_ROLE_KINDS) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
 }
+
+// The roles the tests' sources may name.
+TEST_ROLE_KINDS: [String]{"Add", "Index"}
 
 MINIMAL_TRAITS: "// Two traits.\n#Builtin.Role(.Add)\nAdd: trait {{\n    local: Bool{{true}},\n    Rhs: type,\n    Output: type,\n    add: fn(self, rhs: Rhs) -> Output Never!,\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}},\n    auto_derive_family: String{{\"Bundle\"}},\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!,\n    fill: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,\n    close: fn(&&self) IOError!,\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!,\n    }}\n}}\n"
 
@@ -833,7 +862,7 @@ MINIMAL_TRAITS: "// Two traits.\n#Builtin.Role(.Add)\nAdd: trait {{\n    local: 
 }
 
 #Test("a declaration renders its contract, types and facts") {
-    rendered: render_rows(MINIMAL_TRAITS, true, [TraitSource]{}) ?? panic("the minimal traits did not render: {err.message}")
+    rendered: render_rows(MINIMAL_TRAITS, true, [TraitSource]{}, TEST_ROLE_KINDS) ?? panic("the minimal traits did not render: {err.message}")
     assert(rendered.contains("OwnedTrait{{name: \"Add\", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Operator{{hook: \"add\", result: None}}, commutative: false, requires: [String]{{}},"))
     assert(rendered.contains("through_elements: false, role: \"Add\"}},"))
     assert(rendered.contains("OwnedMethod{{name: \"query\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"sql\", access: AccessConvention.Read, ty: Type.Named{{name: \"SQL\"}}}}}}, returns: Val(Type.Result{{ok: Type.List{{element: Type.Map{{key: Type.String, key_span: None, value: Type.Named{{name: \"DBValue\"}}}}}}, err: Type.Named{{name: \"DBError\"}}}})}}"))
@@ -849,7 +878,7 @@ MINIMAL_TRAITS: "// Two traits.\n#Builtin.Role(.Add)\nAdd: trait {{\n    local: 
 SINK_TRAIT: "Sink: trait {{\n    put: fn(&self, bytes: [U8]) IOError!,\n    say: fn(&self, text: String) IOError! {{\n        self.put(\"{{text}}\".bytes())\n    }}\n}}\n"
 
 #Test("a default carries its method as written, and calls no default") {
-    rendered: render_rows(SINK_TRAIT, true, [TraitSource]{}) ?? panic("the sink trait did not render: {err.message}")
+    rendered: render_rows(SINK_TRAIT, true, [TraitSource]{}, TEST_ROLE_KINDS) ?? panic("the sink trait did not render: {err.message}")
     assert(rendered.contains("OwnedMethod{{name: \"put\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"bytes\", access: AccessConvention.Read, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}}}, returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}})}},"))
     assert(rendered.contains("returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}}), default_source: Val(\"say: fn(&self, text: String) IOError! {{{{\\n    self.put(\\\"{{{{text}}}}\\\".bytes())\\n}}}}\")}},"))
     assert(rows_error(SINK_TRAIT.replace("self.put(", "self.say(")).contains("the default `say` calls `say`, which has a default"))
@@ -865,7 +894,7 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
     block: trait_block(HOME_SOURCE, "Decode")
     assert_eq(block, "Decode: trait {{\n    decode: fn(tree: Dyn) -> Self [FieldError]!,\n}}\n")
     homes: read_traits(block) ?? panic(err.message)
-    rendered: render_rows(HOMED_TRAIT, true, homes) ?? panic("the homed trait did not render: {err.message}")
+    rendered: render_rows(HOMED_TRAIT, true, homes, TEST_ROLE_KINDS) ?? panic("the homed trait did not render: {err.message}")
     assert(rendered.contains("contract: OwnedContract.Codec{{verb: \"decode\"}},"))
     assert(rendered.contains("through_elements: false, declared_in: \"core.encoding\"}},"))
     assert(rows_error(HOMED_TRAIT).contains("core.encoding declares no `Decode: trait`"))
@@ -889,8 +918,10 @@ HOME_SOURCE: "// A value read back.\nDecode: trait {{\n    decode: fn(tree: Dyn)
     assert(rows_error(traits.replace("    local: Bool{{true}},\n", "    local: Bool{{false}},\n")).contains("expected a fact column"))
     assert(rows_error(traits.replace("    local: Bool{{true}},\n", "    lokal: Bool{{true}},\n")).contains("not a flag column"))
     assert(rows_error(traits.replace("    local", "    codec: Bool{{true}},\n    local")).contains("select different contracts"))
+    assert(rows_error(traits.replace("(.Add)", "(.Plus)")).contains("names no case of RoleKind"))
     assert(rows_error(traits.replace("Driver: trait", "#Builtin.Role(.Add)\nDriver: trait")).contains("the role `Add` already belongs to another trait"))
     assert(rows_error(traits.replace("Add: trait", "// The sum.\nAdd: trait")).contains("stands above no trait"))
+    assert_eq(role_kinds("x\nRoleKind: enum {{\n    // The sum.\n    Add,\n    Index,\n}}\n") ?? panic(err.message), TEST_ROLE_KINDS)
     assert(rows_error(traits.replace("Driver: trait", "Add: trait")).contains("declared twice"))
     assert(rows_error(traits.replace("(self, rhs: Rhs)", "(self, other: Int)")).contains("an operator hook is"))
     assert(rows_error(traits.replace(" -> Output Never!", " -> Output")).contains("ends `Never!`"))

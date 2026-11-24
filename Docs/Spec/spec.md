@@ -1092,7 +1092,14 @@ module make the traits. A bare `Holds`, an argument count that differs from
 the declaration, and an argument naming a type parameter in scope are E0104:
 each use names concrete types. A trait parameter takes no bound. Core's
 operator traits keep their own form, `impl Mul(Float)`, which names the
-right operand.
+right operand. An operator's meaning comes from the role its trait carries,
+a case of jet_builtins' `RoleKind` written `#Builtin.Role(.Add)` on the
+trait's declaration: `+` calls the trait that fills `Add`, `-`, `*` and `/`
+those that fill `Sub`, `Mul` and `Div`, `==` and `!=` the one that fills
+`Equal`, `<=>`, `<`, `>`, `<=` and `>=` the one that fills `Compare`, and
+`a[k]` and `a[k] = v` those that fill `Index` and `IndexMut`. A library or
+user type takes an operator by implementing that trait; the compiler finds
+the trait through its role, never through its name.
 
 Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
 -0.0 < +0.0 < ... < +inf < NaN): `<=>`, `.compare`, sorting, a list's `max` and
