@@ -1,0 +1,36 @@
+// A program's own `Pointer` is its own nominal type, apart from the IR's
+// built-in raw-pointer type of the same name: its fields, methods, a list of
+// it, an optional of it, a union member of it and a generic box of it all keep
+// the user's struct.
+Pointer: struct {
+    x: Int,
+    y: Int,
+
+    moved: fn(self, dx: Int, dy: Int) -> Pointer { Pointer{x: self.x + dx, y: self.y + dy} }
+}
+
+Box: struct<T> {
+    item: T,
+}
+
+describe: fn(value: Pointer | Int) -> String {
+    if value == {
+        .Pointer(p) -> "pointer at {p.x},{p.y}"
+        .Int(n) -> "int {n}"
+    }
+}
+
+run: fn() {
+    start := Pointer{x: 1, y: 2}
+    next := start.moved(3, 4)
+    print("{next.x} {next.y}")
+    trail := [Pointer]{start, next}
+    print(trail.len())
+    print(trail[1].x + trail[0].y)
+    maybe: Pointer?{Val(next)}
+    if maybe == .Val(p) -> print(p.y)
+    print(describe(start))
+    print(describe(7))
+    boxed := Box<Pointer>{item: next}
+    print(boxed.item.moved(1, 1).x)
+}

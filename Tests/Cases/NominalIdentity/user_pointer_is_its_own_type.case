@@ -1,0 +1,17 @@
+# A user-declared struct named `Pointer` is its own type, apart from the
+# IR's built-in raw-pointer type (#6978 c3): its fields, a method, a list,
+# an optional, a union member and a generic box of it check clean and run the
+# same with jet run, -O1 and -O2.
+fixture: UserPointerIsItsOwnType.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run main.jet
+exit: 0
+stdout: = "4 6\n2\n6\n6\npointer at 1,2\nint 7\n5\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == o0
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == o0
