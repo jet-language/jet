@@ -13,7 +13,7 @@ use {
     core.build.[BuildGraph, BuildGraphAction]
     jet_driver.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionGeneratedModule, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildPackageSettings, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverSourceDocument, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
-    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, compiler_threads_failure_text, compiler_threads_join, compiler_threads_leave, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
+    jet_foundation.[AuthorityVerdict, BUILD_REUSE_SAVED_WORK, BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, compiler_threads_failure_text, compiler_threads_join, compiler_threads_leave, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
         ActionOutcome,
@@ -1067,7 +1067,7 @@ jet_cli_build_grants: fn(policy: JetDriverAuthorityPolicy?, workspace: OverlayPo
     allowed := [BuildEffect]{}
     effects: [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU}
     loop right in effects {
-        if jet_cli_answer(authority, right.name()) == JetCLIVerdict.Allowed -> allowed.push(right)
+        if jet_cli_answer(authority, right.name()) == AuthorityVerdict.Allowed -> allowed.push(right)
     }
     allowed
 }

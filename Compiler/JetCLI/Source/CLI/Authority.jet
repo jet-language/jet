@@ -13,6 +13,7 @@ use {
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
+        AuthorityVerdict,
         Diagnostic,
         authority_effect_action,
         authority_root,
@@ -71,12 +72,6 @@ JetCLIInvocationAuthority: struct {
 // `#!Marker` refusal is not a launch line.
 jet_cli_is_script: fn(source: String) -> Bool Never! { source.starts_with("#!/") }
 
-JetCLIVerdict: enum {
-    Allowed,
-    Denied,
-    Missing,
-}
-
 // A sorted set of the values.
 jet_cli_sorted_set: fn(values: [String]) -> [String] Never! {
     sorted := [String]{}
@@ -118,10 +113,10 @@ jet_cli_covers_any: fn(bounds: [String], right: String) -> Bool Never! {
     false
 }
 
-jet_cli_answer: fn(authority: JetCLIAuthority, right: String) -> JetCLIVerdict Never! {
-    if jet_cli_covers_any(authority.denied, right) -> return JetCLIVerdict.Denied
-    if jet_cli_covers_any(authority.granted, right) -> return JetCLIVerdict.Allowed
-    JetCLIVerdict.Missing
+jet_cli_answer: fn(authority: JetCLIAuthority, right: String) -> AuthorityVerdict Never! {
+    if jet_cli_covers_any(authority.denied, right) -> return AuthorityVerdict.Denied
+    if jet_cli_covers_any(authority.granted, right) -> return AuthorityVerdict.Allowed
+    AuthorityVerdict.Missing
 }
 
 // Canonical policy rows.
@@ -258,7 +253,7 @@ jet_cli_run_read_scope: fn(authority: JetCLIAuthority, invocation: JetCLIInvocat
 jet_cli_unacknowledged: fn(authority: JetCLIAuthority) -> [String] Never! {
     missing := [String]{}
     loop right in authority.required {
-        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing {
+        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == AuthorityVerdict.Missing {
             missing.push(right.copy())
         }
     }
@@ -268,7 +263,7 @@ jet_cli_unacknowledged: fn(authority: JetCLIAuthority) -> [String] Never! {
 jet_cli_denied_required: fn(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
-        if jet_cli_answer(authority, right) == JetCLIVerdict.Denied -> rights.push(right.copy())
+        if jet_cli_answer(authority, right) == AuthorityVerdict.Denied -> rights.push(right.copy())
     }
     jet_cli_named_once(rights)
 }
