@@ -9760,11 +9760,24 @@ sema_stmt_mark_discarded_result: fn(program: SemaProgramTables, checked: TExpr, 
 // promised type only as context (`infer_with_expected`): the value is never
 // compared against that type, handed back, or treated as a discarded result.
 // A value that only fails against the promised type is checked on its own.
+// Like a reachable last line (sema_stmt_check_return_value_typed), a value
+// may also fill the success side of a promised `T? Err!` or `T?`: the
+// closing `None` of a marker's `check` rule after an unconditional `reject`
+// is the rule's `CompilerRejection?`.
 sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(tail, return_type, environment, program, scopes, state, tail_store, context, probe_diagnostics)
     expected := Type?{None}
-    if probed != None && !sema_has_error_since(probe_diagnostics, 0) -> expected = return_type
+    candidates := [Type?]{return_type}
+    if sema_stmt_return_is_carrier(return_type) {
+        candidates.push(Val(sema_stmt_return_success_type(return_type)))
+    }
+    loop candidate in candidates {
+        probe_diagnostics := [Diagnostic]{}
+        probed: sema_probe_expression(tail, candidate, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+        if probed != None && !sema_has_error_since(probe_diagnostics, 0) {
+            expected = candidate
+            break
+        }
+    }
     sema_check_expression(tail, expected, environment, program, scopes, state, tail_store, context, diagnostics) != None
 }
 
