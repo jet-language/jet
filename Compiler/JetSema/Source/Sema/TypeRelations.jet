@@ -1340,6 +1340,59 @@ sema_type_names_undeclared: fn(graph: SemaRegistrationGraph, caller: Int, ty: Ty
     }
 }
 
+// The type parameter names of the generic nominal of a user module that
+// `name`, written bare from module row `caller`, resolves to (`[T]` for `Box`
+// with `Box: struct<T>`), or None when it names no such type.
+sema_type_bare_generic_params: fn(graph: SemaRegistrationGraph, caller: Int, name: String, generic_names: [String]) -> [String]? {
+    if generic_names.contains(name) -> return None
+    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return None
+    if module_is_core(graph.modules[row.module_index].module_identity) -> return None
+    params: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
+    if params.len() == 0 -> return None
+    Val(params)
+}
+
+// E0104 at each generic type `ty` writes bare (`b: Box` for `Box: struct<T>`):
+// a type position names one instance, so it spells the type arguments.
+sema_type_bare_generic_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
+    if ty == {
+        .Named(name) -> {
+            if sema_type_bare_generic_params(graph, caller, name, generic_names) == .Val(params) {
+                example: loop _ in params -> "Int"
+                diagnostics.push(sema_error("E0104", span, "`{name}` needs its type arguments", "`{name}<{params.join(", ")}>` is generic, and a type position names one of its instances", "write the types it holds, as in `{name}<{example.join(", ")}>`"))
+            }
+        }
+        .Apply(_, args) | .Union(args) -> {
+            loop arg in args -> sema_type_bare_generic_names(graph, caller, arg, span, generic_names, diagnostics)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> {
+            sema_type_bare_generic_names(graph, caller, inner, span, generic_names, diagnostics)
+        }
+        .Map(key, _, value) | .Result(key, value) -> {
+            sema_type_bare_generic_names(graph, caller, key, span, generic_names, diagnostics)
+            sema_type_bare_generic_names(graph, caller, value, span, generic_names, diagnostics)
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop parameter in params -> sema_type_bare_generic_names(graph, caller, parameter, span, generic_names, diagnostics)
+            if ret == .Val(value) -> sema_type_bare_generic_names(graph, caller, value, span, generic_names, diagnostics)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> sema_type_bare_generic_names(graph, caller, field.ty, span, generic_names, diagnostics)
+        }
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
+    }
+}
+
+// Whether `ty`, a parameter type an argument is checked against, writes a
+// generic type bare: its declaration reported E0104
+// (sema_type_bare_generic_names), so the argument's mismatch against it is no
+// second error.
+sema_type_names_bare_generic: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, generic_names: [String]) -> Bool {
+    found := [Diagnostic]{}
+    sema_type_bare_generic_names(graph, caller, ty, Span{start: 0, end: 0}, generic_names, found)
+    found.len() > 0
+}
+
 // Whether any module of the graph declares `name` as a nominal type or as a
 // type parameter of a nominal, function or method.
 sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) -> Bool {

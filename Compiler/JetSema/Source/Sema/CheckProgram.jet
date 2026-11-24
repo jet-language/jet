@@ -1837,6 +1837,26 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     if !sema_check_function_failure_contracts(func, updated, program, generic_names, diagnostics) {
         complete = false
     }
+    // E0104: a parameter or result type that writes a user generic type bare
+    // (`fn(b: Box)`). A trait method's signature is the trait's: a
+    // conversion's `from: fn(error: Unsent)` converts every instance.
+    if (function_kind == .TopLevel || function_kind == .Method(_, _)) && !func.compiler_generated && !module_is_core(module_identity) {
+        if program.registration_graph == .Val(graph) {
+            caller: sema_scope_caller_row(updated, graph)
+            bare_start: diagnostics.len()
+            loop param in func.params {
+                if param.name == "self" -> next
+                sema_type_bare_generic_names(graph, caller, param.ty, param.ty_span, generic_names, diagnostics)
+            }
+            if func.return_type == .Val(written_return) {
+                sema_type_bare_generic_names(graph, caller, written_return, func.return_type_span ?? func.name_span, generic_names, diagnostics)
+            }
+            if diagnostics.len() > bare_start {
+                complete = false
+                context.bare_generic_signature = true
+            }
+        }
+    }
     // E2421: the public failure carrier, read from
     // the declared signature as the Rust reference's function registration does.
     sema_check_public_failure_carrier(func, updated, program, diagnostics)

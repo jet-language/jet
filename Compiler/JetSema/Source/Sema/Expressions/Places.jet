@@ -512,6 +512,9 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
             // its methods.
             if sema_scope_declaration_struct(environment, program, owner_symbol.id) == .Val(struct_def) {
                 if struct_def.type_params.len() != owner_args.len() {
+                    // A bare generic name the signature wrote already
+                    // reported E0104 there (sema_type_bare_generic_names).
+                    if owner_args.len() == 0 && context.bare_generic_signature -> return None
                     diagnostics.push(sema_error("E0104", span, "struct `{type_name(base.ty)}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
                     return None
                 }

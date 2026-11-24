@@ -1089,6 +1089,10 @@ SemaCheckContext: struct {
     // The function being checked declares its result's owners (`-> T from
     // self | param`): a returned place read is a view of them, not a copy.
     return_view_declared: Bool{false},
+    // The function being checked writes a user generic type bare in its
+    // signature, which reported E0104 there: its body's reads through that
+    // type are the same error (sema_type_bare_generic_names).
+    bare_generic_signature: Bool{false},
     // The rows of the nodes this check built flat (sema_node): a node's
     // children are row indices of this arena (the flattener's into-arena
     // mode). A mark never truncates it, so a kept speculative result never
@@ -1874,6 +1878,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         compiler_generated: source.compiler_generated,
         fork_copy_rebuilding: source.fork_copy_rebuilding.copy(),
         return_view_declared: source.return_view_declared,
+        bare_generic_signature: source.bare_generic_signature,
         // A snapshot's check continues the arena of the check it starts
         // from: its rows follow that arena's rows, its symbol keys extend a
         // copy of that arena's, and its caller appends the rows and adopts
