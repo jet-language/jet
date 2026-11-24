@@ -103,7 +103,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0311 | UnknownMethod | Compiler/JetSema/Source/Sema/Calls/Dev.jet:21 | no opt-in calls a method the receiver does not have |
 | E0312 | EqualityNotSupported | Compiler/JetSema/Source/Sema/Calls/Data.jet:771 | compare the fields, or give the type an equality |
 | E0313 | DestructureShapeMismatch | Compiler/JetSema/Source/Sema/Patterns.jet:1004 | the target takes the value's shape |
-| E0314 | NumberFamilySize | Compiler/JetSema/Source/Sema/TypeRelations.jet:1520 | only the standard sizes exist; a range type such as `Int(0..127)` names a narrower set of values |
+| E0314 | NumberFamilySize | Compiler/JetSema/Source/Sema/TypeRelations.jet:1446 | only the standard sizes exist; a range type such as `Int(0..127)` names a narrower set of values |
 | E0315 | ListPatternLengthMismatch | Compiler/JetSema/Source/Sema/Statements.jet:4181 | the pattern takes the list's length |
 | E0316 | InvalidRangePattern | Compiler/JetSema/Source/Sema/Patterns.jet:642 | a range pattern tests an integer field |
 | E0317 | OrPatternBindingMismatch | Compiler/JetSema/Source/Sema/Patterns.jet:1660 | every alternative binds the same names with the same types |
@@ -134,7 +134,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0380 | LoopMissingBinding | Compiler/JetSema/Source/Sema/Statements.jet:10192 | a named binding says which item the body reads |
 | E0382 | InvalidMemoField | Compiler/JetSema/Source/Sema/Registration/Checked.jet:2534 | `#Memo` marks a bare computed field |
 | E0391 | UnsupportedCompileTimeValue | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3291 | bind the result inside a `#run` statement block |
-| E0394 | TypeAliasCycle | Compiler/JetSema/Source/Sema/TypeRelations.jet:1047 | a cycle has no type at its end |
+| E0394 | TypeAliasCycle | Compiler/JetSema/Source/Sema/TypeRelations.jet:1045 | a cycle has no type at its end |
 | E0395 | InvalidChannelCapacity | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:1251 | a capacity of at least 1, or an unbounded channel |
 | E0397 | SwitchConditionMismatch | Compiler/JetSema/Source/Sema/Statements.jet:11599 | `#Off` takes `.Release` and `#On` takes `.Deep` |
 | E0398 | BitLogicMixup | Compiler/JetSema/Source/Sema/Expressions.jet:5729 | `~value` flips integer bits, `!flag` negates a Bool and `!=` compares |
@@ -144,7 +144,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0404 | OkErrOutsideFallible | Compiler/JetSema/Source/Sema/Expressions/Control.jet:380 | `ok` and `err` belong to a fallible function or block |
 | E0405 | FallbackTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1594 | the fallback gives the value's type or leaves with `return` |
 | E0408 | ErrInOptionalFallback | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1830 | an optional fallback has no report to read |
-| E0409 | ErrAfterPatternMiss | Compiler/JetSema/Source/Sema/FailureLaw.jet:1972 | a shape test has no report to read |
+| E0409 | ErrAfterPatternMiss | Compiler/JetSema/Source/Sema/FailureLaw.jet:1967 | a shape test has no report to read |
 | E0414 | UnknownPrivQualifier | Compiler/JetParser/Source/Parser/Items.jet:400 | `priv` and `priv(package)` are the visibilities |
 | E0417 | PackagePrivField | Compiler/JetParser/Source/Parser/Items.jet:411 | a field is public or `priv` to its type's module |
 | E0420 | UninitializedRead | Compiler/JetSema/Source/Sema/Expressions.jet:5297 | write the storage before the first read |
@@ -546,11 +546,11 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:919 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:923 | one route per pair |
 | E2420 | UnknownAnalyticsColumn | Compiler/JetSema/Source/Sema/Calls/Data.jet:1795 | the column names a row field |
-| E2421 | PrivateFailureMemberExposed | Compiler/JetSema/Source/Sema/FailureLaw.jet:1733 | the member is public, or the contract does not expose it |
+| E2421 | PrivateFailureMemberExposed | Compiler/JetSema/Source/Sema/FailureLaw.jet:1728 | the member is public, or the contract does not expose it |
 | E2422 | NeverAsValue | Compiler/JetSema/Source/Sema/FailureLaw.jet:1320 | `Never` appears only as a return type |
-| E2423 | NeverFunctionReachesEnd | Compiler/JetSema/Source/Sema/FailureLaw.jet:1943 | every path diverges |
-| E2424 | NeverFunctionBareReturn | Compiler/JetSema/Source/Sema/FailureLaw.jet:1831 | every path diverges |
-| E2425 | NeverFunctionReturnsValue | Compiler/JetSema/Source/Sema/FailureLaw.jet:1836 | every path diverges |
+| E2423 | NeverFunctionReachesEnd | Compiler/JetSema/Source/Sema/FailureLaw.jet:1938 | every path diverges |
+| E2424 | NeverFunctionBareReturn | Compiler/JetSema/Source/Sema/FailureLaw.jet:1826 | every path diverges |
+| E2425 | NeverFunctionReturnsValue | Compiler/JetSema/Source/Sema/FailureLaw.jet:1831 | every path diverges |
 | E2426 | FunctionValueNotNever | Compiler/JetSema/Source/Sema/Expressions.jet:1457 | the function never completes |
 | E2427 | CallerSiteMisplaced | Compiler/JetSema/Source/Sema/Expressions.jet:5192 | `#caller` is a parameter default or sits in an `#Expand` macro |
 | E2474 | FormActionInputMismatch | Compiler/JetSema/Source/Sema/Calls/HTTP.jet:303 | the action accepts the form's type |
