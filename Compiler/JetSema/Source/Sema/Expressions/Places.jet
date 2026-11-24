@@ -920,7 +920,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // every function. Its site records no effect, so the read is known to need
 // none and pure code reads it too; what depends on the read follows it
 // instead: a value computed while building never reads it
-// (CheckProgram.jet sema_comptime_body_unfoldable), and a `#Memo` key holds
+// (ComptimeItems.jet sema_comptime_body_unfoldable), and a `#Memo` key holds
 // each field and key the function reaches (Effects/Checks.jet
 // sema_effect_context_reach). `deadline` is the installed absolute
 // wall-millisecond deadline (`Int?`, None outside a `#Deadline` block or
@@ -1477,7 +1477,7 @@ sema_expression_method_read_without_call: fn(owner_name: String, member: String,
 // declaration's own `__swizzleK` when it has one, so `Vec3.zyx` is a `Vec3`
 // and `F32x4.xy` a `Vec2`; otherwise they read `[T#K]` of those slots, with
 // the value evaluated once. A write is the declaration's `__swizzle_setK`,
-// else a write of the slots (Statements.jet).
+// else a write of the slots (Statements/Assignments.jet).
 SemaSwizzleSlots: struct {
     // The type as diagnostics name it.
     shown: String,

@@ -1,0 +1,1778 @@
+// Compile-time prechecks: staged value slots, the registration graph trail,
+// the compile-time module scopes, and the function walks that run before
+// compile-time values are evaluated.
+use jet_foundation.[
+    CompilerThreads,
+    Diagnostic,
+    module_index,
+    module_none,
+    module_text,
+    Item,
+    NameTable,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TComptimeValue,
+    compiler_threads_admit,
+    compiler_threads_limit,
+    compiler_threads_failure_text,
+    symbol_find,
+    symbol_key_text,
+    symbol_table_key,
+    compiler_threads_heaviest_first,
+]
+
+// A staged value's slot: its module in the high half, its constant's symbol
+// in the low.
+sema_comptime_value_slot: fn(module_identity: ModuleID, symbol: SymbolID) -> Int Never! {
+    (Int{module_identity.id} << 32) | Int{symbol.id}
+}
+
+// The constant values by slot (sema_comptime_value_slot), first row winning,
+// built once per projection or reference walk (Rust's keyed ct globals)
+// rather than scanning every value for each symbol, constant and binding.
+// A value whose key names no symbol of `symbols` has no row to type.
+sema_comptime_constant_values: fn(values: [SemaComptimeItemValue], symbols: SymbolTable) -> [Int:SemaComptimeItemValue] Never! {
+    constants := [Int:SemaComptimeItemValue]{}
+    loop value in values {
+        if value.kind != SemaComptimeItemKind.Constant -> next
+        symbol: symbol_find(symbols, value.key) ?? next
+        slot: sema_comptime_value_slot(value.module_identity, symbol)
+        if constants.get(slot) == None -> constants[slot] = value
+    }
+    constants
+}
+
+sema_comptime_value_for_symbol: fn(constants: [Int:SemaComptimeItemValue], module_identity: ModuleID, symbol: SymbolID) -> SemaComptimeItemValue? {
+    constants.get(sema_comptime_value_slot(module_identity, symbol))
+}
+
+sema_comptime_symbol_with_values: fn(symbol: ^^Symbol, module_identity: ModuleID, constants: [Int:SemaComptimeItemValue]) -> Symbol Never! {
+    updated := symbol
+    if sema_comptime_symbol_waits(updated) {
+        value: sema_comptime_value_for_symbol(constants, module_identity, updated.id) ?? return updated
+        updated.ty = Val(value.ty)
+    }
+    updated
+}
+
+// A constant still waiting for its known-time type: the only symbol a staged
+// value changes (first value wins, so a typed constant never changes again).
+sema_comptime_symbol_waits: fn(symbol: Symbol) -> Bool Never! {
+    symbol.kind == SymbolKind.Constant && symbol.ty == None
+}
+
+// Only constants still waiting for their known-time type change, so each
+// module is read in place and rewritten only when one of its rows takes a
+// value. (The old row-by-row copy cloned the whole module list for every
+// symbol it visited.)
+sema_comptime_graph_with_values: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaRegistrationGraph Never! {
+    resolved := graph.move()
+    trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(resolved, values, trail)
+    resolved
+}
+
+// The undo trail of a registration graph one compile moves through the
+// declaration pass, the comptime run and finalization instead of copying it:
+// every in-place edit of those passes (staged values typing waiting rows,
+// the failure projections and minted error types, the counting switch)
+// records what it replaced, and sema_graph_trail_undo replays the records
+// newest first, which gives back the registered graph exactly.
+SemaGraphTrail: struct {
+    entries: [SemaGraphUndo],
+    // Whether `entries` holds the nominal indexes as they were before the
+    // first minted error type (one record restores them for every mint).
+    nominal_indexes_saved: Bool,
+}
+
+// One recorded edit. The `*Type` rows were untyped (None) before a staged
+// value typed them; the others hold the replaced row.
+SemaGraphUndo: enum {
+    SymbolType(module_index: Int, position: Int),
+    ConstantType(module_index: Int, position: Int),
+    ConstantSymbolType(module_index: Int, position: Int),
+    ConstantDeclarationType(module_index: Int, position: Int),
+    ModuleImportType(module_index: Int, import_index: Int, binding: Int),
+    ItemType(module_index: Int, position: Int),
+    GraphImportType(import_index: Int, binding: Int),
+    FunctionRow(module_index: Int, row: Int, old: SemaRegistrationFunction),
+    NominalMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction),
+    ImplMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction),
+    SymbolRow(module_index: Int, position: Int, old: Symbol),
+    DeclarationRow(module_index: Int, position: Int, old: Item),
+    ProgramItemRow(module_index: Int, position: Int, old: Item),
+    ExportRow(module_index: Int, position: Int, old: SemaRegistrationExport),
+    ImportBindingRow(module_index: Int, import_index: Int, binding: Int, old: SemaRegistrationImportBinding),
+    ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String),
+    NominalIndexes(symbol_rows: [U32:SemaRegistrationRowRef], slots: NameTable, buckets: [[SemaRegistrationRowRef]]),
+    Counting(old: Bool),
+    CoreBodiesHeld(old: Bool),
+    FailureSolved(old: Bool),
+    CodecBody(module_index: Int, row: Int),
+}
+
+// Rows a minted error type appended to one module (and the name it
+// indexed): undo truncates them, without a copy of the module.
+// A generated codec body a codec wave filled (sema_codec_fill_demanded);
+// undo returns the impl to its header.
+
+sema_graph_trail_init: fn() -> SemaGraphTrail Never! {
+    SemaGraphTrail{entries: [SemaGraphUndo]{}, nominal_indexes_saved: false}
+}
+
+// The row counts of one registration module before an append
+// (SemaGraphUndo.ModuleAppend).
+SemaGraphModuleMark: struct {
+    symbols: Int,
+    declarations: Int,
+    functions: Int,
+    nominals: Int,
+    constants: Int,
+    static_roots: Int,
+    persist_roots: Int,
+    program_items: Int,
+    exports: Int,
+}
+
+sema_graph_module_mark: fn(module_row: SemaRegistrationModule) -> SemaGraphModuleMark Never! {
+    SemaGraphModuleMark{
+        symbols: module_row.symbols.len(),
+        declarations: module_row.declarations.len(),
+        functions: module_row.functions.len(),
+        nominals: module_row.nominals.len(),
+        constants: module_row.constants.len(),
+        static_roots: module_row.static_roots.len(),
+        persist_roots: module_row.persist_roots.len(),
+        program_items: module_row.program.items.len(),
+        exports: module_row.exports.len(),
+    }
+}
+
+// Drops every row appended to `module_row` since `mark` and, when a symbol
+// was appended, the position entries of its `name`, giving back the module
+// as it was at the mark.
+sema_graph_module_rollback: fn(module_row: ^SemaRegistrationModule, mark: SemaGraphModuleMark, name: String) Never! {
+    appended: module_row.symbols.len() > mark.symbols
+    loop module_row.symbols.len() > mark.symbols -> _ := module_row.symbols.pop()
+    loop module_row.symbol_nominal_rows.len() > mark.symbols {
+        _ := module_row.symbol_nominal_rows.pop()
+    }
+    loop module_row.declarations.len() > mark.declarations -> _ := module_row.declarations.pop()
+    loop module_row.functions.len() > mark.functions -> _ := module_row.functions.pop()
+    loop module_row.nominals.len() > mark.nominals -> _ := module_row.nominals.pop()
+    loop module_row.constants.len() > mark.constants -> _ := module_row.constants.pop()
+    loop module_row.static_roots.len() > mark.static_roots -> _ := module_row.static_roots.pop()
+    loop module_row.persist_roots.len() > mark.persist_roots -> _ := module_row.persist_roots.pop()
+    loop module_row.program.items.len() > mark.program_items -> _ := module_row.program.items.pop()
+    loop module_row.exports.len() > mark.exports -> _ := module_row.exports.pop()
+    if !appended || name == "" {
+        return
+    }
+    sema_registration_forget_symbol_position(module_row, name)
+}
+
+// Undoes every edit `trail` recorded on `graph`, newest first, leaving the
+// trail empty.
+sema_graph_trail_undo: fn(graph: ^SemaRegistrationGraph, trail: ^SemaGraphTrail) Never! {
+    sema_graph_trail_undo_to(graph, trail, 0)
+}
+
+// Undoes the edits `trail` recorded on `graph` after its first `kept`
+// entries, newest first, leaving those entries.
+sema_graph_trail_undo_to: fn(graph: ^SemaRegistrationGraph, trail: ^SemaGraphTrail, kept: Int) Never! {
+    loop trail.entries.len() > kept {
+        entry: trail.entries.pop() ?? break
+        if entry == {
+            .SymbolType(module_index, position) -> {
+                graph.modules[module_index].symbols[position].ty = None
+            }
+            .ConstantType(module_index, position) -> {
+                graph.modules[module_index].constants[position].ty = None
+            }
+            .ConstantSymbolType(module_index, position) -> {
+                graph.modules[module_index].constants[position].symbol.ty = None
+            }
+            .ConstantDeclarationType(module_index, position) -> {
+                graph.modules[module_index].constants[position].declaration.ty = None
+            }
+            .ModuleImportType(module_index, import_index, binding) -> {
+                graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty = None
+            }
+            .ItemType(module_index, position) -> {
+                if graph.modules[module_index].program.items[position] == .Const(definition) {
+                    restored := definition
+                    restored.ty = None
+                    graph.modules[module_index].program.items[position] = Item.Const{value: restored}
+                }
+            }
+            .GraphImportType(import_index, binding) -> {
+                graph.imports[import_index].bindings[binding].symbol.ty = None
+            }
+            .FunctionRow(module_index, row, old) -> {
+                graph.modules[module_index].functions[row] = old
+            }
+            .NominalMethodRow(module_index, owner, row, old) -> {
+                graph.modules[module_index].nominals[owner].methods[row] = old
+            }
+            .ImplMethodRow(module_index, owner, row, old) -> {
+                graph.modules[module_index].impls[owner].methods[row] = old
+            }
+            .SymbolRow(module_index, position, old) -> {
+                graph.modules[module_index].symbols[position] = old
+            }
+            .DeclarationRow(module_index, position, old) -> {
+                graph.modules[module_index].declarations[position] = old
+            }
+            .ProgramItemRow(module_index, position, old) -> {
+                graph.modules[module_index].program.items[position] = old
+            }
+            .ExportRow(module_index, position, old) -> {
+                graph.modules[module_index].exports[position] = old
+            }
+            .ImportBindingRow(module_index, import_index, binding, old) -> {
+                graph.modules[module_index].imports[import_index].bindings[binding] = old
+            }
+            .ModuleAppend(module_index, mark, name) -> {
+                sema_graph_module_rollback(graph.modules[module_index], mark, name)
+            }
+            .NominalIndexes(symbol_rows, slots, buckets) -> {
+                graph.nominal_symbol_rows = symbol_rows
+                graph.nominal_row_names = slots
+                graph.nominal_row_buckets = buckets
+                trail.nominal_indexes_saved = false
+            }
+            .Counting(old) -> { graph.counting = old }
+            .CoreBodiesHeld(old) -> { graph.core_bodies_held = old }
+            .FailureSolved(old) -> { graph.failure_solved = old }
+            .CodecBody(module_index, row) -> sema_codec_undo_body(graph, module_index, row)
+        }
+    }
+    if kept == 0 -> trail.nominal_indexes_saved = false
+}
+
+// Applies staged values to a graph in place. A row already typed by an
+// earlier value keeps it (first value wins), so a staging loop applies only
+// the values that landed since its last call instead of rebuilding the graph
+// for every item. Every row typed is recorded on `trail`.
+sema_comptime_graph_apply_values: fn(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue], trail: ^SemaGraphTrail) Never! {
+    if values.len() == 0 {
+        return
+    }
+    constants: sema_comptime_constant_values(values, graph.symbols)
+    if constants.len() == 0 {
+        return
+    }
+    loop module_index in 0..<graph.modules.len() {
+        module_name: module_text(graph.module_table, graph.modules[module_index].module_identity)
+        if !sema_comptime_module_takes_values(graph.modules[module_index], module_name, constants, graph.symbols) {
+            next
+        }
+        sema_comptime_module_apply_values(graph.modules[module_index], module_index, module_name, constants, graph.symbols, trail)
+    }
+    loop import_index in 0..<graph.imports.len() {
+        loop binding_index in 0..<graph.imports[import_index].bindings.len() {
+            if !sema_comptime_binding_takes_value(graph.imports[import_index].bindings[binding_index], constants) {
+                next
+            }
+            symbol := graph.imports[import_index].bindings[binding_index].symbol
+            updated: sema_comptime_symbol_with_values(symbol, graph.imports[import_index].bindings[binding_index].target_module_identity, constants)
+            graph.imports[import_index].bindings[binding_index].symbol = updated
+            trail.entries.push(SemaGraphUndo.GraphImportType{import_index: import_index, binding: binding_index})
+        }
+    }
+}
+
+// The rows of a graph that a staged value can type, by the slot
+// sema_comptime_constant_values keys values by (sema_comptime_value_slot):
+// waiting constant symbols, constant rows not fully typed, waiting import
+// bindings (slotted by their target module) and untyped `Const` items. A run
+// builds them once (sema_comptime_value_sites) and applies each landing
+// through them (sema_comptime_graph_apply_sites), so a landing reads only
+// its own values' rows instead of every row of every module. Staged values
+// only fill in types, so no row outside these ever takes one.
+SemaComptimeValueSites: struct {
+    sites: [Int:[SemaComptimeValueSite]],
+}
+
+SemaComptimeValueSite: enum {
+    Symbol(module_index: Int, position: Int),
+    Constant(module_index: Int, position: Int),
+    ModuleImport(module_index: Int, import_index: Int, binding: Int),
+    Item(module_index: Int, position: Int),
+    GraphImport(import_index: Int, binding: Int),
+}
+
+sema_comptime_value_site_add: fn(sites: ^[Int:[SemaComptimeValueSite]], slot: Int, site: SemaComptimeValueSite) Never! {
+    rows := sites.get(slot) ?? [SemaComptimeValueSite]{}
+    rows.push(site.copy())
+    sites[slot] = rows
+}
+
+sema_comptime_value_sites: fn(graph: SemaRegistrationGraph) -> SemaComptimeValueSites Never! {
+    sites := [Int:[SemaComptimeValueSite]]{}
+    loop module_index in 0..<graph.modules.len() {
+        module_identity: graph.modules[module_index].module_identity
+        module_name: module_text(graph.module_table, module_identity)
+        loop position in 0..<graph.modules[module_index].symbols.len() {
+            if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) {
+                sema_comptime_value_site_add(sites, sema_comptime_value_slot(module_identity, graph.modules[module_index].symbols[position].id), SemaComptimeValueSite.Symbol{module_index: module_index, position: position})
+            }
+        }
+        loop position in 0..<graph.modules[module_index].constants.len() {
+            constant: graph.modules[module_index].constants[position]
+            if constant.ty != None && constant.symbol.ty != None && constant.declaration.ty != None {
+                next
+            }
+            sema_comptime_value_site_add(sites, sema_comptime_value_slot(module_identity, constant.symbol.id), SemaComptimeValueSite.Constant{module_index: module_index, position: position})
+        }
+        loop import_index in 0..<graph.modules[module_index].imports.len() {
+            loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+                row: graph.modules[module_index].imports[import_index].bindings[binding]
+                if sema_comptime_symbol_waits(row.symbol) {
+                    sema_comptime_value_site_add(sites, sema_comptime_value_slot(row.target_module_identity, row.symbol.id), SemaComptimeValueSite.ModuleImport{module_index: module_index, import_index: import_index, binding: binding})
+                }
+            }
+        }
+        loop position in 0..<graph.modules[module_index].program.items.len() {
+            symbol: sema_comptime_constant_item_symbol(module_name, graph.modules[module_index].program.items[position], graph.symbols) ?? next
+            sema_comptime_value_site_add(sites, sema_comptime_value_slot(module_identity, symbol), SemaComptimeValueSite.Item{module_index: module_index, position: position})
+        }
+    }
+    loop import_index in 0..<graph.imports.len() {
+        loop binding in 0..<graph.imports[import_index].bindings.len() {
+            row: graph.imports[import_index].bindings[binding]
+            if sema_comptime_symbol_waits(row.symbol) {
+                sema_comptime_value_site_add(sites, sema_comptime_value_slot(row.target_module_identity, row.symbol.id), SemaComptimeValueSite.GraphImport{import_index: import_index, binding: binding})
+            }
+        }
+    }
+    SemaComptimeValueSites{sites: sites}
+}
+
+// No value sites: the placeholder a comptime run's staging holds until the
+// run's program tables exist (sema_comptime_value_sites).
+sema_comptime_value_sites_empty: fn() -> SemaComptimeValueSites Never! {
+    SemaComptimeValueSites{sites: [Int:[SemaComptimeValueSite]]{}}
+}
+
+// sema_comptime_graph_apply_values on a graph whose sites are `sites`: each
+// site of a value takes it under the same test that rewrite applies, so the
+// graph ends exactly as there. Every row typed is recorded on `trail`.
+sema_comptime_graph_apply_sites: fn(graph: ^SemaRegistrationGraph, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], trail: ^SemaGraphTrail) Never! {
+    if values.len() == 0 {
+        return
+    }
+    constants: sema_comptime_constant_values(values, graph.symbols)
+    loop (slot, value) in constants {
+        rows: sites.sites.get(slot) ?? next
+        loop site in rows {
+            if site == {
+                .Symbol(module_index, position) -> {
+                    if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) {
+                        graph.modules[module_index].symbols[position].ty = Val(value.ty)
+                        trail.entries.push(SemaGraphUndo.SymbolType{module_index: module_index, position: position})
+                    }
+                }
+                .Constant(module_index, position) -> {
+                    sema_comptime_constant_apply_value(graph.modules[module_index], module_index, position, value, trail)
+                }
+                .ModuleImport(module_index, import_index, binding) -> {
+                    if sema_comptime_symbol_waits(graph.modules[module_index].imports[import_index].bindings[binding].symbol) {
+                        graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty = Val(value.ty)
+                        trail.entries.push(SemaGraphUndo.ModuleImportType{module_index: module_index, import_index: import_index, binding: binding})
+                    }
+                }
+                .Item(module_index, position) -> {
+                    if graph.modules[module_index].program.items[position] == .Const(definition) {
+                        if definition.ty == None {
+                            updated_definition := definition
+                            updated_definition.ty = Val(value.ty)
+                            graph.modules[module_index].program.items[position] = Item.Const{value: updated_definition}
+                            trail.entries.push(SemaGraphUndo.ItemType{module_index: module_index, position: position})
+                        }
+                    }
+                }
+                .GraphImport(import_index, binding) -> {
+                    if sema_comptime_symbol_waits(graph.imports[import_index].bindings[binding].symbol) {
+                        graph.imports[import_index].bindings[binding].symbol.ty = Val(value.ty)
+                        trail.entries.push(SemaGraphUndo.GraphImportType{import_index: import_index, binding: binding})
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Types the untyped parts of constant row `position` of `module_row` (graph
+// module `module_index`) with `value`, recording each on `trail`.
+sema_comptime_constant_apply_value: fn(module_row: ^SemaRegistrationModule, module_index: Int, position: Int, value: SemaComptimeItemValue, trail: ^SemaGraphTrail) Never! {
+    if module_row.constants[position].ty == None {
+        module_row.constants[position].ty = Val(value.ty)
+        trail.entries.push(SemaGraphUndo.ConstantType{module_index: module_index, position: position})
+    }
+    if module_row.constants[position].symbol.ty == None {
+        module_row.constants[position].symbol.ty = Val(value.ty)
+        trail.entries.push(SemaGraphUndo.ConstantSymbolType{module_index: module_index, position: position})
+    }
+    if module_row.constants[position].declaration.ty == None {
+        module_row.constants[position].declaration.ty = Val(value.ty)
+        trail.entries.push(SemaGraphUndo.ConstantDeclarationType{module_index: module_index, position: position})
+    }
+}
+
+sema_comptime_symbol_takes_value: fn(symbol: Symbol, module_identity: ModuleID, constants: [Int:SemaComptimeItemValue]) -> Bool Never! {
+    sema_comptime_symbol_waits(symbol) && sema_comptime_value_for_symbol(constants, module_identity, symbol.id) != None
+}
+
+sema_comptime_binding_takes_value: fn(binding: SemaRegistrationImportBinding, constants: [Int:SemaComptimeItemValue]) -> Bool Never! {
+    sema_comptime_symbol_takes_value(binding.symbol, binding.target_module_identity, constants)
+}
+
+// The constant symbol of an untyped `Const` item of the module whose
+// identity text is `module_name`.
+sema_comptime_constant_item_symbol: fn(module_name: String, item: Item, symbols: SymbolTable) -> SymbolID? {
+    if item == .Const(definition) {
+        if definition.ty == None {
+            return symbol_find(symbols, symbol_key_text(SymbolKind.Constant, module_name, "", definition.name))
+        }
+    }
+    None
+}
+
+sema_comptime_module_takes_values: fn(module_row: SemaRegistrationModule, module_name: String, constants: [Int:SemaComptimeItemValue], symbols: SymbolTable) -> Bool Never! {
+    module_identity: module_row.module_identity
+    loop symbol in module_row.symbols {
+        if sema_comptime_symbol_takes_value(symbol, module_identity, constants) {
+            return true
+        }
+    }
+    loop constant in module_row.constants {
+        if constant.ty != None && constant.symbol.ty != None && constant.declaration.ty != None {
+            next
+        }
+        if sema_comptime_value_for_symbol(constants, module_identity, constant.symbol.id) != None {
+            return true
+        }
+    }
+    loop import_index in 0..<module_row.imports.len() {
+        loop binding in module_row.imports[import_index].bindings {
+            if sema_comptime_binding_takes_value(binding, constants) -> return true
+        }
+    }
+    loop item_index in 0..<module_row.program.items.len() {
+        symbol: sema_comptime_constant_item_symbol(module_name, module_row.program.items[item_index], symbols) ?? next
+        if sema_comptime_value_for_symbol(constants, module_identity, symbol) != None -> return true
+    }
+    false
+}
+
+// Types the module's waiting constants in place through the graph's row, so a
+// landed value never copies the whole module. Each row is read before it is
+// rewritten, and no row's rewrite changes another row's test. `module_row`
+// is graph module `module_index`, named `module_name`; every row typed is
+// recorded on `trail`.
+sema_comptime_module_apply_values: fn(module_row: ^SemaRegistrationModule, module_index: Int, module_name: String, constants: [Int:SemaComptimeItemValue], symbols: SymbolTable, trail: ^SemaGraphTrail) Never! {
+    module_identity: module_row.module_identity
+    loop symbol_index in 0..<module_row.symbols.len() {
+        if !sema_comptime_symbol_takes_value(module_row.symbols[symbol_index], module_identity, constants) {
+            next
+        }
+        symbol := module_row.symbols[symbol_index]
+        module_row.symbols[symbol_index] = sema_comptime_symbol_with_values(symbol, module_identity, constants)
+        trail.entries.push(SemaGraphUndo.SymbolType{module_index: module_index, position: symbol_index})
+    }
+    loop constant_index in 0..<module_row.constants.len() {
+        value: sema_comptime_value_for_symbol(constants, module_identity, module_row.constants[constant_index].symbol.id) ?? next
+        if module_row.constants[constant_index].ty == None {
+            module_row.constants[constant_index].ty = Val(value.ty)
+            trail.entries.push(SemaGraphUndo.ConstantType{module_index: module_index, position: constant_index})
+        }
+        if module_row.constants[constant_index].symbol.ty == None {
+            module_row.constants[constant_index].symbol.ty = Val(value.ty)
+            trail.entries.push(SemaGraphUndo.ConstantSymbolType{module_index: module_index, position: constant_index})
+        }
+        if module_row.constants[constant_index].declaration.ty == None {
+            module_row.constants[constant_index].declaration.ty = Val(value.ty)
+            trail.entries.push(SemaGraphUndo.ConstantDeclarationType{module_index: module_index, position: constant_index})
+        }
+    }
+    loop import_index in 0..<module_row.imports.len() {
+        loop binding_index in 0..<module_row.imports[import_index].bindings.len() {
+            if !sema_comptime_binding_takes_value(module_row.imports[import_index].bindings[binding_index], constants) {
+                next
+            }
+            symbol := module_row.imports[import_index].bindings[binding_index].symbol
+            module_row.imports[import_index].bindings[binding_index].symbol = sema_comptime_symbol_with_values(symbol, module_row.imports[import_index].bindings[binding_index].target_module_identity, constants)
+            trail.entries.push(SemaGraphUndo.ModuleImportType{module_index: module_index, import_index: import_index, binding: binding_index})
+        }
+    }
+    loop item_index in 0..<module_row.program.items.len() {
+        symbol: sema_comptime_constant_item_symbol(module_name, module_row.program.items[item_index], symbols) ?? next
+        value: sema_comptime_value_for_symbol(constants, module_identity, symbol) ?? next
+        if module_row.program.items[item_index] == .Const(definition) {
+            updated_definition := definition
+            updated_definition.ty = Val(value.ty)
+            module_row.program.items[item_index] = Item.Const{value: updated_definition}
+            trail.entries.push(SemaGraphUndo.ItemType{module_index: module_index, position: item_index})
+        }
+    }
+}
+
+sema_comptime_constant_has_ast_value: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, key: String) -> Bool Never! {
+    module_index: sema_registration_module_index(graph, module_identity) ?? return false
+    loop constant_index in 0..<graph.modules[module_index].constants.len() {
+        if symbol_table_key(graph.symbols, graph.modules[module_index].constants[constant_index].symbol.id) == key {
+            return graph.modules[module_index].constants[constant_index].declaration.ct != None
+        }
+    }
+    true
+}
+
+// Empty module scopes: the first sema_comptime_scopes_prepare builds one. The
+// caller that runs a series of checks owns them and lends them to each.
+sema_comptime_scopes_init: fn(host_hooks: SemaHostHookAccess?) -> SemaComptimeScopes Never! {
+    SemaComptimeScopes{slots: [SemaComptimeModuleScope]{sema_comptime_scope_unapplied(module_none())}, host_hooks: host_hooks}
+}
+
+sema_comptime_scope_unapplied: fn(module_identity: ModuleID) -> SemaComptimeModuleScope Never! {
+    SemaComptimeModuleScope{module_identity: module_identity, table: sema_scope_init(module_identity), applied: false, diagnostics: [Diagnostic]{}, constants: [SemaComptimeWaitingConstant]{}, version: -1}
+}
+
+// How many module scopes a run keeps (SemaComptimeScopes): each is a whole
+// module scope, its package's names included.
+SEMA_COMPTIME_SCOPE_SLOTS: 8
+
+// Readies the declaration scope of the environment's current module
+// (sema_scope_environment_enter_comptime_module) in `comptime_scopes`: a scope
+// kept for that module is reused, with any constant a staged value typed
+// since copied in, and anything else is rebuilt. `version` counts the staged
+// values and the types ahead of values applied to the run's graph
+// (sema_comptime_available_version): only those type waiting constants, so
+// a scope compared at the same version has nothing to copy in, and is reused
+// as it is. The caller
+// checks inside a mark on the current slot's table and rolls back, so the
+// next check finds the same scope. A rebuilt scope takes its module's old
+// slot, else an unapplied one, else a new one up to SEMA_COMPTIME_SCOPE_SLOTS,
+// else the one entered least recently.
+sema_comptime_scopes_prepare: fn(comptime_scopes: ^SemaComptimeScopes, environment: SemaScopeEnvironment, program: SemaProgramTables, version: Int) {
+    module_identity: environment.module_identity
+    if program.registration_graph == .Val(graph) {
+        comptime_scopes.entries += 1
+        same := -1
+        unapplied := -1
+        // Indexed reads: a loop name would copy each slot, table and all.
+        loop index in 0..<comptime_scopes.slots.len() {
+            if comptime_scopes.slots[index].module_identity == module_identity -> same = index
+            if !comptime_scopes.slots[index].applied && unapplied < 0 -> unapplied = index
+        }
+        if same >= 0 && comptime_scopes.slots[same].applied {
+            comptime_scopes.current = same
+            comptime_scopes.slots[same].used = comptime_scopes.entries
+            if comptime_scopes.slots[same].version == version && version >= 0 {
+                return
+            }
+            if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+                sema_comptime_scope_refresh(comptime_scopes.slots[same], graph, module_index)
+                comptime_scopes.slots[same].version = version
+                return
+            }
+        }
+        // Any other scope is rebuilt; an unapplied one always is, so it never
+        // outlives the graph state that failed it.
+        table := sema_scope_init(module_identity)
+        diagnostics := [Diagnostic]{}
+        constants := [SemaComptimeWaitingConstant]{}
+        applied: sema_registration_apply_graph_module_rows(graph, module_identity, table, diagnostics, constants)
+        rebuilt := SemaComptimeModuleScope{module_identity: module_identity, table: table, applied: applied, diagnostics: diagnostics, constants: constants, version: version, used: comptime_scopes.entries}
+        target := if same >= 0 -> same else -> unapplied
+        if target < 0 && comptime_scopes.slots.len() < SEMA_COMPTIME_SCOPE_SLOTS {
+            comptime_scopes.current = comptime_scopes.slots.len()
+            comptime_scopes.slots.push(rebuilt)
+            return
+        }
+        if target < 0 {
+            target = 0
+            loop index in 1..<comptime_scopes.slots.len() {
+                if comptime_scopes.slots[index].used < comptime_scopes.slots[target].used {
+                    target = index
+                }
+            }
+        }
+        comptime_scopes.current = target
+        comptime_scopes.slots[target] = rebuilt
+    } else {
+        comptime_scopes.slots = [SemaComptimeModuleScope]{sema_comptime_scope_unapplied(module_identity)}
+        comptime_scopes.current = 0
+    }
+}
+
+// Copies each waiting constant that a staged value has typed since the last
+// check from its graph row into its binding: exactly the rows a rebuilt table
+// would differ in. Typed constants never change again, so they leave the list.
+sema_comptime_scope_refresh: fn(slot: ^SemaComptimeModuleScope, graph: SemaRegistrationGraph, module_index: Int) Never! {
+    if slot.constants.len() == 0 {
+        return
+    }
+    waiting := [SemaComptimeWaitingConstant]{}
+    loop index in 0..<slot.constants.len() {
+        if slot.constants[index].source == {
+            .Symbol(position) -> {
+                if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) {
+                    waiting.push(slot.constants[index])
+                } else {
+                    slot.table.bindings[slot.constants[index].binding].symbol = graph.modules[module_index].symbols[position]
+                }
+            }
+            .Import(import_index, binding) -> {
+                if sema_comptime_symbol_waits(graph.modules[module_index].imports[import_index].bindings[binding].symbol) {
+                    waiting.push(slot.constants[index])
+                } else {
+                    slot.table.bindings[slot.constants[index].binding].symbol = graph.modules[module_index].imports[import_index].bindings[binding].symbol
+                }
+            }
+            .Namespace(owner, position) -> {
+                if sema_comptime_symbol_waits(graph.modules[owner].symbols[position]) {
+                    waiting.push(slot.constants[index])
+                } else {
+                    slot.table.bindings[slot.constants[index].binding].symbol = graph.modules[owner].symbols[position]
+                }
+            }
+        }
+    }
+    slot.constants = waiting
+}
+
+// A compiler thread is admitted for at least this many bytes of comptime
+// source expressions, so a precheck wave with few item checks leaves them to
+// the run (sema_comptime_precheck_items).
+SEMA_PRECHECK_MIN_BYTES_PER_THREAD: 16384
+
+// The comptime sources of graph module `module_index`, read from the
+// pass's program tables. A source's constant dependencies come from the
+// run's own check of the item
+// (sema_check_comptime_item_in, sema_comptime_dependencies_from_references);
+// no earlier check walks the expression, so each comptime expression is
+// checked once.
+sema_comptime_module_sources: fn(program: SemaProgramTables, module_index: Int) -> [SemaComptimeItemSource] {
+    if program.registration_graph == .Val(graph) {
+        sources := sema_comptime_collect_module_sources(graph, graph.modules[module_index])
+        sources.extend(sema_comptime_local_value_ahead_sources(graph, graph.modules[module_index]))
+        return sources
+    }
+    panic("the declaration pass lost its registration graph")
+}
+
+// A comptime run pass's item checks, made ahead of the pass on the compiler
+// threads. The run checks its pending items one at a time, and a
+// value that lands between two checks types only its own constant; an item
+// check reads only the constants it references, and every referenced
+// constant without a value is one of the check's `dependencies`
+// (sema_comptime_dependencies_from_references). So a check made against the
+// run's state at the start of the pass is the check the run would make at the
+// item's turn as long as no value whose key is one of its dependencies has
+// landed since (the run tests that before it takes one,
+// jet_driver_comptime_prechecked). The checks run in waves of consecutive
+// modules (sema_comptime_precheck_wave), each in its module's comptime scope
+// (sema_comptime_scopes_prepare), against the environment entered in its
+// module. The run's environment moves into the threads' shared state with the
+// program tables and back out after. Each is the one row of its slot
+// (`environments`, `programs`), so it is popped and pushed back, never
+// copied: moving a borrowed environment or program out would copy the whole
+// registration graph once per pass.
+// Host callbacks are withheld there; a check that wanted one, a checked-text
+// source (its check reads no expression), and every source of a module that
+// cannot be entered have no row (None), and the run checks them at their
+// turn. Without `seed`, neither does a source of a wave whose checks admit
+// one thread. With it, such a wave's checks are made too, on the calling
+// thread, so a small program starts no thread for them: the run's prefetch
+// walks from the checks the prechecks make (jet_driver_comptime_prefetch), so
+// a pass of small items, as a body pass of local values, still has its
+// closures' functions checked ahead. The result has one row per source. The
+// calling thread, which waits for the checking threads, builds the run's
+// function memory plan meanwhile when `memory_plan` has none yet. When it
+// makes the checks itself it leaves the plan to the run, which builds it
+// for its first function check (JetDriver jet_driver_comptime_memory_plan,
+// jet_driver_comptime_function_closure); a run whose items call no function
+// never builds it.
+sema_comptime_precheck_items: fn(environments: ^[SemaScopeEnvironment], programs: ^[SemaProgramTables], available: SemaComptimeAvailableConstants, sources: [SemaComptimeItemSource], threads: CompilerThreads, seed: Bool, memory_plan: ^[SemaFunctionMemoryPlan]) -> [SemaComptimeItemCheck?] {
+    checks := [SemaComptimeItemCheck?]{}
+    loop _ in 0..<sources.len() -> checks.push(None)
+    // The expression sources of each module, in order of first appearance;
+    // `module_rows` holds each module's row at its ModuleID row
+    // (sema_comptime_claim_module_slot).
+    module_rows := [Int]{}
+    module_identities := [ModuleID]{}
+    module_positions := [[Int]]{}
+    loop (position, source) in sources {
+        if source.checked_text != None -> next
+        row: sema_comptime_claim_module_slot(module_rows, source.module_identity, module_positions.len())
+        if row == module_positions.len() {
+            module_identities.push(source.module_identity)
+            module_positions.push([Int]{})
+        }
+        module_positions[row].push(position)
+    }
+    if module_positions.len() == 0 -> return checks
+    total := 0
+    loop row in module_positions {
+        loop position in row -> total += sources[position].span.end - sources[position].span.start
+    }
+    if !seed && compiler_threads_admit(threads, sources.len(), total, SEMA_PRECHECK_MIN_BYTES_PER_THREAD, 0, 0) <= 1 {
+        return checks
+    }
+    shared_state: Shared{SemaPrecheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, available: [SemaComptimeAvailableConstants]{available}, sources: [[SemaComptimeItemSource]]{sources}, module_environments: [SemaScopeEnvironment]{}, comptime_scopes: [SemaComptimeScopes]{}}}
+    counting: sema_comptime_precheck_fill(shared_state, environments, programs)
+    start := 0
+    loop start < module_positions.len() {
+        end: sema_comptime_precheck_wave_end(shared_state, module_identities, start)
+        sema_comptime_precheck_wave(shared_state, module_identities, module_positions, start, end, sources, sema_comptime_available_version(available), threads, seed, checks, memory_plan)
+        start = end
+    }
+    permit: shared_state.guard_edit()
+    environment := permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    program := permit.value.programs.pop() ?? panic("the precheck program tables left the threads' shared state")
+    program.registration_graph = sema_comptime_precheck_counting(program.registration_graph.move(), counting)
+    environments.push(environment)
+    programs.push(program)
+    checks
+}
+
+// A precheck wave: modules `module_identities[start..<end]` make their item
+// checks in one parallel pass instead of one pass each, so a long check
+// overlaps the other modules' checks, and a module too small to admit threads
+// of its own has its checks made too. Every module is first entered in order
+// (sema_comptime_precheck_enter), keeping a copy of the environment entered
+// in it with its comptime scope; the threads then claim the wave's checks,
+// modules with the heaviest source first and heaviest source first within a
+// module, and check each against its module's environment on the thread's
+// light copy of that module's scope. A check reads only its module's entered
+// environment, the program tables and the available constants, as a check of
+// a pass of its module alone would. Each check lands in `checks` at its
+// source's position. A wave whose checks admit one thread makes them only to
+// `seed` the run's prefetch (sema_comptime_precheck_items), on the calling
+// thread.
+SemaPrecheckEntered: struct {
+    kept: Bool,
+    scope_items: Int,
+    environment: SemaScopeEnvironment?,
+    scopes: SemaComptimeScopes?,
+}
+
+SemaPrecheckEnterBatch: struct {
+    entered: [[SemaPrecheckEntered]],
+}
+
+SemaPrecheckEnterRun: struct {
+    state: Shared<SemaPrecheckShared>,
+    out: Shared<SemaPrecheckEnterBatch>,
+}
+
+sema_comptime_precheck_enter_one: fn(run: SemaPrecheckEnterRun, module_identity: ModuleID, version: Int) -> SemaPrecheckEntered {
+    inputs: run.state.guard_read()
+    environment := inputs.value.environments[0]
+    empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
+    entered: sema_scope_environment_enter_comptime_module(environment, inputs.value.programs[0], module_identity, empty)
+    comptime_scopes := sema_comptime_scopes_init(None)
+    if entered {
+        sema_comptime_scopes_prepare(comptime_scopes, environment, inputs.value.programs[0], version)
+    }
+    kept: entered && comptime_scopes.slots[comptime_scopes.current].applied
+    if !kept {
+        return SemaPrecheckEntered{kept: false, scope_items: 0, environment: None, scopes: None}
+    }
+    scope_items := 0
+    if inputs.value.programs[0].registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+            scope_items = graph.modules[module_index].program.items.len()
+        }
+    }
+    slot := comptime_scopes.slots.pop() ?? panic("the precheck scopes lost the slot they prepared")
+    environment.module_scope = Val(slot.table.move())
+    comptime_scopes.slots.push(SemaComptimeModuleScope{module_identity: slot.module_identity, table: sema_scope_init(module_identity), applied: slot.applied, diagnostics: slot.diagnostics.move(), constants: slot.constants.move(), version: slot.version})
+    comptime_scopes.current = 0
+    SemaPrecheckEntered{kept: true, scope_items: scope_items, environment: Val(environment.move()), scopes: Val(comptime_scopes.move())}
+}
+
+sema_comptime_precheck_enter_store: fn(run: SemaPrecheckEnterRun, offset: Int, entered: ^^SemaPrecheckEntered) {
+    permit: run.out.guard_edit()
+    permit.value.entered[offset].push(entered.move())
+}
+
+sema_comptime_precheck_enter_take: fn(run: SemaPrecheckEnterRun, offset: Int) -> SemaPrecheckEntered {
+    permit: run.out.guard_edit()
+    permit.value.entered[offset].pop() ?? panic("a precheck enter cell lost its entered module")
+}
+
+sema_comptime_precheck_enter_worker: fn(run: SemaPrecheckEnterRun, module_identities: [ModuleID], start: Int, count: Int, version: Int, queue: SemaFinalizeCoreQueue) -> Int {
+    done := 0
+    loop {
+        offset: sema_finalize_core_claim(queue)
+        if offset >= count -> break
+        sema_comptime_precheck_enter_store(run, offset, sema_comptime_precheck_enter_one(run, module_identities[start + offset], version))
+        done += 1
+    }
+    done
+}
+
+sema_comptime_precheck_enter_spawn: fn(run: SemaPrecheckEnterRun, module_identities: [ModuleID], start: Int, count: Int, version: Int, queue: SemaFinalizeCoreQueue, from: Int, workers: Int) {
+    if from + 1 >= workers {
+        _ := sema_comptime_precheck_enter_worker(run, module_identities, start, count, version, queue)
+        return
+    }
+    task.group sema_precheck_enter_threads {
+        head: task sema_comptime_precheck_enter_worker(run, module_identities, start, count, version, queue)
+        sema_comptime_precheck_enter_spawn(run, module_identities, start, count, version, queue, from + 1, workers)
+        _ := head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+}
+
+sema_comptime_precheck_wave: fn(shared_state: Shared<SemaPrecheckShared>, module_identities: [ModuleID], module_positions: [[Int]], start: Int, end: Int, sources: [SemaComptimeItemSource], version: Int, threads: CompilerThreads, seed: Bool, checks: ^[SemaComptimeItemCheck?], memory_plan: ^[SemaFunctionMemoryPlan]) {
+    // Job j checks source positions[j] in entered wave module job_modules[j];
+    // firsts[k] is wave module k's first job, its last row the job count.
+    positions := [Int]{}
+    job_modules := [Int]{}
+    weights := [Int]{}
+    firsts := [Int]{}
+    heaviest := [Int]{}
+    work := 0
+    scope_items := 0
+    wave_modules: end - start
+    enter_workers := compiler_threads_limit(threads)
+    if enter_workers > wave_modules -> enter_workers = wave_modules
+    if enter_workers > 1 {
+        empty_rows := [[SemaPrecheckEntered]]{}
+        loop _ in 0..<wave_modules -> empty_rows.push([SemaPrecheckEntered]{})
+        run: SemaPrecheckEnterRun{state: shared_state, out: Shared{SemaPrecheckEnterBatch{entered: empty_rows.move()}}}
+        queue: SemaFinalizeCoreQueue{next: 0}
+        sema_comptime_precheck_enter_spawn(run, module_identities, start, wave_modules, version, queue, 0, enter_workers)
+        permit: shared_state.guard_edit()
+        loop offset in 0..<wave_modules {
+            entered := sema_comptime_precheck_enter_take(run, offset)
+            if !entered.kept -> next
+            if entered.scope_items > scope_items -> scope_items = entered.scope_items
+            permit.value.module_environments.push(entered.environment.move() ?? panic("a kept precheck module lost its environment"))
+            permit.value.comptime_scopes.push(entered.scopes.move() ?? panic("a kept precheck module lost its scopes"))
+            row: start + offset
+            wave_module: firsts.len()
+            firsts.push(positions.len())
+            module_heaviest := 0
+            loop position in module_positions[row] {
+                weight: sources[position].span.end - sources[position].span.start
+                positions.push(position)
+                job_modules.push(wave_module)
+                weights.push(weight)
+                work += weight
+                if weight > module_heaviest -> module_heaviest = weight
+            }
+            heaviest.push(module_heaviest)
+        }
+    } else {
+        loop row in start..<end {
+            module_items := 0
+            if !sema_comptime_precheck_enter(shared_state, module_identities[row], version, module_items) {
+                next
+            }
+            if module_items > scope_items -> scope_items = module_items
+            wave_module: firsts.len()
+            firsts.push(positions.len())
+            module_heaviest := 0
+            loop position in module_positions[row] {
+                weight: sources[position].span.end - sources[position].span.start
+                positions.push(position)
+                job_modules.push(wave_module)
+                weights.push(weight)
+                work += weight
+                if weight > module_heaviest -> module_heaviest = weight
+            }
+            heaviest.push(module_heaviest)
+        }
+    }
+    firsts.push(positions.len())
+    workers: compiler_threads_admit(threads, positions.len(), work, SEMA_PRECHECK_MIN_BYTES_PER_THREAD, scope_items * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
+    if positions.len() > 0 && (workers > 1 || seed) {
+        order := [Int]{}
+        loop wave_module in compiler_threads_heaviest_first(heaviest) {
+            first: firsts[wave_module]
+            module_weights := [Int]{}
+            loop job in first..<firsts[wave_module + 1] -> module_weights.push(weights[job])
+            loop index in compiler_threads_heaviest_first(module_weights) {
+                order.push(first + index)
+            }
+        }
+        plan: Shared{SemaPrecheckPlan{positions: positions.move(), modules: job_modules.move(), order: order.move(), next: 0}}
+        done := [SemaPrecheckDone]{}
+        sema_comptime_precheck_claimers(shared_state, plan, threads, 0, workers, done, memory_plan)
+        loop done.len() > 0 {
+            row := done.pop() ?? break
+            checks[row.position] = row.check.move()
+        }
+    }
+    // The wave's module scopes leave with its threads.
+    permit: shared_state.guard_edit()
+    permit.value.module_environments = [SemaScopeEnvironment]{}
+    permit.value.comptime_scopes = [SemaComptimeScopes]{}
+}
+
+// The end of the precheck wave that starts at `module_identities[start]`: it
+// holds every module's comptime scope at once, so it takes consecutive modules
+// while their scope rows stay within a body stream's bound
+// (SEMA_BODY_STREAM_SCOPE_ROWS), and at least one.
+sema_comptime_precheck_wave_end: fn(shared_state: Shared<SemaPrecheckShared>, module_identities: [ModuleID], start: Int) -> Int {
+    inputs: shared_state.guard_read()
+    rows := 0
+    end := start
+    loop end < module_identities.len() {
+        // Passed straight through: a local binding of a guarded row would copy it.
+        module_rows: sema_comptime_precheck_scope_rows(inputs.value.programs[0], module_identities[end])
+        if end > start && rows + module_rows > SEMA_BODY_STREAM_SCOPE_ROWS -> break
+        rows += module_rows
+        end += 1
+    }
+    end
+}
+
+// The scope rows of module `module_identity` (sema_check_module_scope_rows);
+// 0 for a module the graph lacks.
+sema_comptime_precheck_scope_rows: fn(program: SemaProgramTables, module_identity: ModuleID) -> Int {
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_registration_module_index(graph, module_identity) ?? return 0
+        return sema_check_module_scope_rows(graph, module_index)
+    }
+    0
+}
+
+// What every precheck thread reads: the run's environment and program
+// tables, the pass's available constants and sources, each the one row of its
+// list, and the current wave's entered module environments (each holding its
+// module's prepared comptime scope as `module_scope`) and their
+// `comptime_scopes`, one row per entered wave module.
+SemaPrecheckShared: struct {
+    environments: [SemaScopeEnvironment],
+    programs: [SemaProgramTables],
+    available: [SemaComptimeAvailableConstants],
+    sources: [[SemaComptimeItemSource]],
+    module_environments: [SemaScopeEnvironment],
+    comptime_scopes: [SemaComptimeScopes],
+}
+
+// A precheck wave's jobs (sema_comptime_precheck_wave) in claim order:
+// `order[rank]` is the job claimed at `rank`, `next` the next unclaimed rank,
+// taken with one atomic add under a read guard each thread holds for its run.
+SemaPrecheckPlan: struct {
+    positions: [Int],
+    modules: [Int],
+    order: [Int],
+    next: Atomic<Int>,
+}
+
+// One claimed precheck job: its source position and entered wave module;
+// position -1 when none is left.
+SemaPrecheckClaim: struct {
+    position: Int,
+    wave_module: Int,
+}
+
+// One check a precheck thread made, at its source's position.
+SemaPrecheckDone: struct {
+    position: Int,
+    check: SemaComptimeItemCheck?,
+}
+
+// Moves the run's environment and program tables out of their slots into the
+// precheck threads' shared state; sema_comptime_precheck_items moves them
+// back. The registration graph stops counting its lookups while it is there,
+// as in sema_finalize_graph: every lookup would take the shared counters'
+// permit and serialize the threads. The result is its old flag.
+sema_comptime_precheck_fill: fn(shared_state: Shared<SemaPrecheckShared>, environments: ^[SemaScopeEnvironment], programs: ^[SemaProgramTables]) -> Bool {
+    permit: shared_state.guard_edit()
+    environment := environments.pop() ?? panic("the run's environment left its slot")
+    program := programs.pop() ?? panic("the run's program tables left their slot")
+    counting: sema_comptime_precheck_graph_counting(program)
+    program.registration_graph = sema_comptime_precheck_counting(program.registration_graph.move(), false)
+    permit.value.environments.push(environment)
+    permit.value.programs.push(program)
+    counting
+}
+
+// The registration graph `held`, moved through, with `counting` as its
+// lookup-counting flag.
+sema_comptime_precheck_counting: fn(held: ^^SemaRegistrationGraph?, counting: Bool) -> SemaRegistrationGraph? {
+    graph := held.move() ?? return None
+    graph.counting = counting
+    Val(graph.move())
+}
+
+// Whether the registration graph of `program` counts its lookups (false
+// without a graph).
+sema_comptime_precheck_graph_counting: fn(program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) -> return graph.counting
+    false
+}
+
+// Enters the run's environment in `module_identity` and prepares the module's
+// comptime scope. When both succeed, a copy of the entered environment holding
+// that scope as its `module_scope`, where every thread reads it in place
+// through its own light copy (sema_comptime_precheck_thread_scopes), joins the
+// wave's module environments, and the module's `comptime_scopes`, which
+// keep its other prepared facts, join theirs. False when the module cannot
+// be entered or its scope not applied (the run then checks its sources at
+// their turn). `scope_items` gets the module's item count.
+sema_comptime_precheck_enter: fn(shared_state: Shared<SemaPrecheckShared>, module_identity: ModuleID, version: Int, scope_items: ^Int) -> Bool {
+    permit: shared_state.guard_edit()
+    // The environment moves out of the shared state and back, so entering
+    // never copies it.
+    environment := permit.value.environments.pop() ?? panic("the precheck environment left the threads' shared state")
+    empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
+    entered: sema_scope_environment_enter_comptime_module(environment, permit.value.programs[0], module_identity, empty)
+    comptime_scopes := sema_comptime_scopes_init(None)
+    if entered {
+        sema_comptime_scopes_prepare(comptime_scopes, environment, permit.value.programs[0], version)
+    }
+    kept: entered && comptime_scopes.slots[comptime_scopes.current].applied
+    if kept {
+        if permit.value.programs[0].registration_graph == .Val(graph) {
+            if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+                scope_items = graph.modules[module_index].program.items.len()
+            }
+        }
+        // copy: the module's checks read this entered environment while the
+        // run's environment enters the wave's next module.
+        module_environment := environment.copy()
+        // Fresh scopes hold the one slot they just prepared.
+        slot := comptime_scopes.slots.pop() ?? panic("the precheck scopes lost the slot they prepared")
+        module_environment.module_scope = Val(slot.table.move())
+        comptime_scopes.slots.push(SemaComptimeModuleScope{module_identity: slot.module_identity, table: sema_scope_init(module_identity), applied: slot.applied, diagnostics: slot.diagnostics.move(), constants: slot.constants.move(), version: slot.version})
+        comptime_scopes.current = 0
+        permit.value.module_environments.push(module_environment)
+        permit.value.comptime_scopes.push(comptime_scopes)
+    }
+    permit.value.environments.push(environment)
+    kept
+}
+
+// A precheck thread's own scopes: a light copy of the module's declaration
+// scope (the module environment's `module_scope`, whose function types the
+// copy reads in place, sema_scope_light_copy) beside the prepared scopes'
+// small rows, with host callbacks withheld through `wanted`. The copied
+// scopes are prepared for the same module and version, so a check's
+// sema_comptime_scopes_prepare keeps it as it is.
+sema_comptime_precheck_thread_scopes: fn(environment: SemaScopeEnvironment, source: SemaComptimeScopes, wanted: Shared<SemaHostHookWanted>) -> SemaComptimeScopes {
+    if environment.module_scope == .Val(table) {
+        return SemaComptimeScopes{
+            slots: [SemaComptimeModuleScope]{
+                SemaComptimeModuleScope{
+                    module_identity: source.slots[source.current].module_identity,
+                    table: sema_scope_light_copy(table),
+                    applied: source.slots[source.current].applied,
+                    diagnostics: source.slots[source.current].diagnostics,
+                    constants: source.slots[source.current].constants,
+                    version: source.slots[source.current].version,
+                },
+            },
+            host_hooks: Val(SemaHostHookAccess.Withheld{wanted: wanted}),
+        }
+    }
+    panic("the precheck module scope left its module environment")
+}
+
+// Runs claiming threads `from..<workers`, one task each, and moves every
+// check a thread returned into `done`. The calling thread, left waiting for
+// them, builds the function memory plan if `memory_plan` has none yet, its
+// walk on as many threads as `threads` admits. When one claimer is admitted,
+// the calling thread is that claimer and builds no plan.
+sema_comptime_precheck_claimers: fn(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>, threads: CompilerThreads, from: Int, workers: Int, done: ^[SemaPrecheckDone], memory_plan: ^[SemaFunctionMemoryPlan]) {
+    if workers <= 1 {
+        claimed := sema_comptime_precheck_claimed(shared_state, plan)
+        loop claimed.len() > 0 {
+            row := claimed.pop() ?? break
+            done.push(row)
+        }
+        return
+    }
+    if from >= workers {
+        if memory_plan.len() == 0 {
+            sema_comptime_precheck_memory_plan(shared_state, threads, memory_plan)
+        }
+        return
+    }
+    task.group sema_precheck_threads {
+        head: task sema_comptime_precheck_claimed(shared_state, plan)
+        sema_comptime_precheck_claimers(shared_state, plan, threads, from + 1, workers, done, memory_plan)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            row := claimed.pop() ?? break
+            done.push(row)
+        }
+    }
+}
+
+// The function memory plan of the program tables' graph, which staged values
+// never change (sema_function_memory_plan_from_graph).
+sema_comptime_precheck_memory_plan: fn(shared_state: Shared<SemaPrecheckShared>, threads: CompilerThreads, memory_plan: ^[SemaFunctionMemoryPlan]) {
+    inputs: shared_state.guard_read()
+    // Passed straight through: a local binding of a guarded row would copy it.
+    sema_comptime_precheck_memory_plan_of(inputs.value.programs[0], threads, memory_plan)
+}
+
+sema_comptime_precheck_memory_plan_of: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: ^[SemaFunctionMemoryPlan]) {
+    if program.registration_graph == .Val(graph) {
+        memory_plan.push(sema_function_memory_plan_from_graph(graph, threads))
+    }
+}
+
+// One thread: checks the jobs it claims until none is left, each against its
+// module's environment on the thread's light copy of that module's comptime
+// scope, made when the thread claims a job of a module other than its
+// previous job's; host callbacks are withheld.
+sema_comptime_precheck_claimed: fn(shared_state: Shared<SemaPrecheckShared>, plan: Shared<SemaPrecheckPlan>) -> [SemaPrecheckDone] {
+    inputs: shared_state.guard_read()
+    jobs: plan.guard_read()
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    comptime_scopes := sema_comptime_scopes_init(None)
+    current := -1
+    claimed := [SemaPrecheckDone]{}
+    loop {
+        claim: sema_comptime_precheck_claim(jobs.value)
+        if claim.position < 0 -> break
+        if claim.wave_module != current {
+            current = claim.wave_module
+            comptime_scopes = sema_comptime_precheck_thread_scopes(inputs.value.module_environments[current], inputs.value.comptime_scopes[current], wanted)
+        }
+        sema_host_hook_unwant(wanted)
+        // Passed straight through: a local binding of a guarded row would copy it.
+        check := sema_check_comptime_item_in(inputs.value.module_environments[current], inputs.value.programs[0], comptime_scopes, inputs.value.available[0], inputs.value.sources[0][claim.position])
+        if sema_host_hook_was_wanted(wanted) {
+            claimed.push(SemaPrecheckDone{position: claim.position, check: None})
+        } else {
+            check.folded = sema_comptime_precheck_fold(inputs.value.programs[0], check, inputs.value.sources[0][claim.position])
+            claimed.push(SemaPrecheckDone{position: claim.position, check: Val(check.move())})
+        }
+    }
+    claimed
+}
+
+// The literal fold of a precheck's call-free request, on its own thread, so
+// the driver's turn takes a generated table's value instead of folding it on
+// the main thread. No constant has landed for it: a request that reads one
+// does not fold here and folds at its turn.
+sema_comptime_precheck_fold: fn(program: SemaProgramTables, check: SemaComptimeItemCheck, source: SemaComptimeItemSource) -> TComptimeValue? Never! {
+    if !check.complete || check.waiting_dependencies.len() > 0 || source.kind == SemaComptimeItemKind.CheckedText {
+        return None
+    }
+    if check.request == .Val(request) {
+        if request.calls.len() == 0 {
+            return sema_comptime_fold_in(program, request.expression.tree, request.expression.root, [SemaComptimeItemValue]{}, check.type_delta)
+        }
+    }
+    None
+}
+
+// One function check a comptime run makes ahead of a pass's closures
+// (SemaComptimeWalk): function `function_key` of `module_identity`.
+SemaComptimeFunctionJob: struct {
+    module_identity: ModuleID,
+    function_key: String,
+}
+
+// A comptime run's on-demand function checks (sema_check_comptime_function),
+// made ahead of a pass's closures (jet_driver_comptime_prefetch), or of one
+// breadth-first level of a closure (jet_driver_comptime_closure_prefetch), on
+// the compiler threads as one walk. The driver queues functions
+// (sema_comptime_walk_push) while the threads check the queued ones
+// (sema_comptime_walk_run). The driver takes each check as soon as it is made
+// (sema_comptime_walk_take) and queues the functions it reaches while the
+// threads go on with the rest, so no thread waits for another thread's
+// check, only for the queue. A function check reads only the graph, the
+// constants it references and its module's comptime scope, and a value that
+// lands between two checks types only its own constant, so a check made at
+// the start of the pass that waits on no constant is the one the closure
+// would make (the driver keeps no other). The driver enters the run's
+// environment in a module the first time it queues one of the module's
+// functions, preparing the module's comptime scope
+// (sema_comptime_function_precheck_slot) in a cell of its own, which every
+// thread reads through its own light copy; it holds the scopes within a body
+// wave's bound (sema_comptime_walk_evict). Each thread checks in its own
+// environment and program tables, whose graph records demand in rows of its
+// own (sema_comptime_function_thread_program), so each check captures only
+// its own demand (sema_demand_capture_open). The closure that takes the
+// check records it into the run's graph (sema_comptime_replay_demand), where
+// its own check would have. Host callbacks are withheld. A check that wanted
+// one has no row, and neither does a function of a module that cannot be
+// entered. A function whose check loads from the Core library's check
+// (`core_held`) is not queued: a walk thread has no host hooks, so it would
+// check it from text where the closure's own check loads it, and the
+// compile would then differ with the thread count.
+SemaComptimeWalk: struct {
+    state: Shared<SemaFunctionPrecheckShared>,
+    queue: Shared<SemaComptimeWalkQueue>,
+    changed: Condition,
+    done_changed: Condition,
+    // The checking threads (sema_comptime_walk_admit).
+    workers: Int,
+    // Each module's row in the queue's `slots`, at its ModuleID row
+    // (module_index): -1 for a module not entered yet (or whose scope was
+    // dropped, sema_comptime_walk_evict), -2 for one that cannot be entered.
+    // Each prepared scope's module and scope rows by its row, and the rows
+    // of the scopes the queue still holds. Only the driver's
+    // sema_comptime_walk_push reads and writes these.
+    module_slots: [Int],
+    slot_modules: [Int],
+    slot_rows: [Int],
+    held_rows: Int,
+    // Whether the run's Core function checks load from the Core library's
+    // check (CoreBodies.jet sema_core_bodies_hold), read once as the walk
+    // opens on the driver thread, which holds the host hooks.
+    core_held: Bool,
+}
+
+SEMA_COMPTIME_WALK_SCRATCH_ROWS: 32768
+
+// The threads a walk of `jobs` may use: as many as their work admits, or,
+// when the walk `grows` (the driver queues what each check reaches, so its
+// first jobs are not its work), every thread the compiler may use. Each
+// thread holds its light copy of one module scope at a time.
+sema_comptime_walk_admit: fn(threads: CompilerThreads, program: SemaProgramTables, jobs: [SemaComptimeFunctionJob], grows: Bool) -> Int {
+    scratch: SEMA_COMPTIME_WALK_SCRATCH_ROWS * SEMA_BODY_SCOPE_BYTES_PER_BINDING
+    if grows -> return compiler_threads_admit(threads, threads.cores, threads.cores, 1, scratch, 0)
+    work := 0
+    loop job in jobs -> work += sema_comptime_function_weight(program, job.function_key)
+    compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, scratch, 0)
+}
+
+// A walk on `workers` threads over the run's environment, program tables,
+// available constants, values and memory plan, with nothing queued yet.
+// `host_hooks` are the run's own (SemaComptimeScopes.host_hooks).
+sema_comptime_walk_open: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], memory_plan: SemaFunctionMemoryPlan, host_hooks: SemaHostHookAccess?, workers: Int) -> SemaComptimeWalk {
+    core_held := false
+    if program.registration_graph == .Val(graph) -> core_held = sema_core_bodies_hold(graph, host_hooks)
+    SemaComptimeWalk{
+        state: Shared{SemaFunctionPrecheckShared{environments: [SemaScopeEnvironment]{environment}, programs: [SemaProgramTables]{program}, available: [SemaComptimeAvailableConstants]{available}, values: [[SemaComptimeItemValue]]{values}, memory_plans: [SemaFunctionMemoryPlan]{memory_plan}}},
+        queue: Shared{SemaComptimeWalkQueue{jobs: [SemaComptimeFunctionJob]{}, job_slots: [Int]{}, order: [Int]{}, next: 0, busy: 0, done: [SemaComptimeWalkDone]{}, slots: [Shared<SemaComptimeModuleScope>?]{}, pending: [Int]{}, closed: false, failed: false, slot_queues: [[Int]]{}, slot_next: [Int]{}, claimed_flags: [Bool]{}, unclaimed: 0, slot_state: [Int]{}, prep_slots: [Int]{}, prep_modules: [ModuleID]{}, prep_version: 0, prep_next: 0, prep_pending: 0}},
+        changed: Condition.new(),
+        done_changed: Condition.new(),
+        workers: workers,
+        module_slots: [Int]{},
+        slot_modules: [Int]{},
+        slot_rows: [Int]{},
+        held_rows: 0,
+        core_held: core_held,
+    }
+}
+
+// The source bytes of the function registered under `function_key`, a
+// check's weight; 1 for a foreign function or an unknown key.
+sema_comptime_function_weight: fn(program: SemaProgramTables, function_key: String) -> Int {
+    if program.registration_graph == .Val(graph) {
+        row: sema_registration_callable_row(graph, function_key) ?? return 1
+        span: if row == {
+            .Function(declaring, index) -> graph.modules[declaring].functions[index].declaration.span
+            .NominalMethod(declaring, owner, index) -> graph.modules[declaring].nominals[owner].methods[index].declaration.span
+            .ImplMethod(declaring, owner, index) -> graph.modules[declaring].impls[owner].methods[index].declaration.span
+            .Foreign(_, _) -> {
+                return 1
+            }
+        }
+        return span.end - span.start
+    }
+    1
+}
+
+// What every walk thread reads while the walk lasts: the run's environment,
+// program tables, available constants, values and memory plan, each the one
+// row of its list. Nothing writes it while the walk lasts.
+SemaFunctionPrecheckShared: struct {
+    environments: [SemaScopeEnvironment],
+    programs: [SemaProgramTables],
+    available: [SemaComptimeAvailableConstants],
+    values: [[SemaComptimeItemValue]],
+    memory_plans: [SemaFunctionMemoryPlan],
+}
+
+// A walk's queue: every job queued, each with its module scope's row in
+// `slots` at `job_slots`; the positions of the jobs in the order the threads
+// claim them, `next` of them claimed so far; how many claimed jobs have no
+// check made yet (`busy`); the checks made and not taken yet; the module
+// scopes prepared for the walk, each in a cell of its own that only the
+// threads read (None once dropped), with each one's queued jobs not claimed
+// yet at `pending`; whether the driver closed the walk, and whether a
+// thread failed (sema_comptime_walk_watched).
+SemaComptimeWalkQueue: struct {
+    jobs: [SemaComptimeFunctionJob],
+    job_slots: [Int],
+    order: [Int],
+    next: Int,
+    busy: Int,
+    done: [SemaComptimeWalkDone],
+    slots: [Shared<SemaComptimeModuleScope>?],
+    pending: [Int],
+    closed: Bool,
+    failed: Bool,
+    slot_queues: [[Int]],
+    slot_next: [Int],
+    claimed_flags: [Bool],
+    unclaimed: Int,
+    slot_state: [Int],
+    prep_slots: [Int],
+    prep_modules: [ModuleID],
+    prep_version: Int,
+    prep_next: Int,
+    prep_pending: Int,
+}
+
+// A check a walk thread made, of the queued job `job`.
+SemaComptimeWalkDone: struct {
+    job: SemaComptimeFunctionJob,
+    check: SemaComptimeFunctionResult,
+}
+
+// A job a walk thread claimed, with its module scope's row in the queue's
+// `slots` and that row's cell.
+SemaComptimeWalkClaim: struct {
+    job: SemaComptimeFunctionJob,
+    slot: Int,
+    scope: Shared<SemaComptimeModuleScope>,
+}
+
+// Enters the run's environment in `module_identity` and prepares that
+// module's comptime scope in fresh scopes, as a check of one of its functions
+// does (sema_check_comptime_function): the prepared slot, which every thread
+// reads in place through its own light copy
+// (sema_comptime_function_thread_scopes). None when the module cannot be
+// entered or its scope not applied; the run checks its functions itself.
+sema_comptime_function_precheck_slot: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, version: Int) -> SemaComptimeModuleScope? {
+    // Shared, as a check's handle (Shared facts plus length and frontier ints).
+    body_values := environment.comptime_body_publication
+    if !sema_scope_environment_enter_comptime_module(environment, program, module_identity, body_values) {
+        return None
+    }
+    comptime_scopes := sema_comptime_scopes_init(None)
+    sema_comptime_scopes_prepare(comptime_scopes, environment, program, version)
+    if !comptime_scopes.slots[comptime_scopes.current].applied -> return None
+    // Fresh scopes hold the one slot they just prepared.
+    comptime_scopes.slots.pop()
+}
+
+// A walk thread's scopes for one module (sema_comptime_walk_module): a light copy of
+// the module's prepared scope (sema_scope_light_copy) beside the slot's
+// small rows, with host callbacks withheld through `wanted`. It is prepared
+// for the same module and version, so a check's sema_comptime_scopes_prepare
+// keeps it as it is.
+sema_comptime_function_thread_scopes: fn(slot: SemaComptimeModuleScope, wanted: Shared<SemaHostHookWanted>) -> SemaComptimeScopes {
+    SemaComptimeScopes{
+        slots: [SemaComptimeModuleScope]{
+            SemaComptimeModuleScope{
+                module_identity: slot.module_identity,
+                table: sema_scope_light_copy(slot.table),
+                applied: slot.applied,
+                // Shared with the slot: a check writes only the scopes' table.
+                diagnostics: slot.diagnostics,
+                constants: slot.constants,
+                version: slot.version,
+            },
+        },
+        host_hooks: Val(SemaHostHookAccess.Withheld{wanted: wanted}),
+    }
+}
+
+// A walk thread's program tables: the run's, sharing every
+// table, whose graph records the demand of the thread's checks in rows of
+// its own, so a check's capture holds only its own demand, and counts no
+// lookups (every lookup would take the shared counters' permit and serialize
+// the threads, as in sema_comptime_precheck_fill).
+sema_comptime_function_thread_program: fn(program: SemaProgramTables) -> SemaProgramTables {
+    thread_program := program
+    thread_program.registration_graph = sema_comptime_function_thread_graph(thread_program.registration_graph.move())
+    thread_program
+}
+
+sema_comptime_function_thread_graph: fn(held: ^^SemaRegistrationGraph?) -> SemaRegistrationGraph? {
+    graph := held.move() ?? return None
+    graph.codec_demand = Shared{sema_codec_demand_new()}
+    graph.derive_demand = Shared{sema_derive_demand_new()}
+    graph.counting = false
+    Val(graph.move())
+}
+
+// Runs the walk's checking threads until the driver closes it
+// (sema_comptime_walk_close): `workers` tasks, each claiming queued jobs
+// under watch (sema_comptime_walk_watched). The result is the number of
+// checks the threads made.
+sema_comptime_walk_run: fn(walk: SemaComptimeWalk) -> Int { sema_comptime_walk_threads(walk, 0) }
+
+sema_comptime_walk_threads: fn(walk: SemaComptimeWalk, from: Int) -> Int {
+    if from >= walk.workers -> return 0
+    made := 0
+    task.group sema_comptime_walk_group {
+        head: task sema_comptime_walk_watched(walk)
+        made += sema_comptime_walk_threads(walk, from + 1)
+        made += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    made
+}
+
+// One walk thread, watched: when it fails, the walk is marked failed at
+// once, so the driver stops waiting for its checks (sema_comptime_walk_take),
+// closes the walk, and the failure reaches the driver's join.
+sema_comptime_walk_watched: fn(walk: SemaComptimeWalk) -> Int {
+    made := 0
+    task.group sema_comptime_walk_watch {
+        thread: task sema_comptime_walk_claimed(walk)
+        made = thread.join() ?? {
+            sema_comptime_walk_fail(walk)
+            panic(compiler_threads_failure_text(err))
+        }
+    }
+    made
+}
+
+sema_comptime_walk_fail: fn(walk: SemaComptimeWalk) {
+    permit: walk.queue.guard_edit()
+    permit.value.failed = true
+    walk.changed.notify_all()
+    walk.done_changed.notify_all()
+}
+
+SemaComptimeWalkStep: struct {
+    is_prep: Bool,
+    claim: SemaComptimeWalkClaim?,
+    slot: Int,
+    module_identity: ModuleID,
+    version: Int,
+}
+
+// One walk thread: checks the jobs it claims until the walk closes, in its
+// own environment and program tables (each shares the run's rows until a
+// check writes it). The result is the number of checks it made.
+sema_comptime_walk_claimed: fn(walk: SemaComptimeWalk) -> Int {
+    inputs: walk.state.guard_read()
+    environment := inputs.value.environments[0]
+    prep_env := inputs.value.environments[0]
+    program: sema_comptime_function_thread_program(inputs.value.programs[0])
+    made := 0
+    pending := sema_comptime_walk_claim(walk, prep_env, program, -1)
+    loop {
+        claim: pending ?? break
+        // Passed straight through: a local binding of a guarded row would copy it.
+        pending = sema_comptime_walk_module(walk, claim, environment, prep_env, program, inputs.value.available[0], inputs.value.memory_plans[0], inputs.value.values[0], made)
+    }
+    made
+}
+
+// Checks the claimed job `first` and each next job the thread claims of the
+// same module, on its light copy of the module's prepared scope
+// (sema_comptime_function_thread_scopes), with host callbacks withheld. The
+// light rows keep their types in the prepared scope, which a check reads in
+// place through the environment's `module_scope` (sema_scope_binding_type),
+// as an item precheck's module environment holds it. The result is the
+// thread's first claim of another module, or None once the walk is closed.
+sema_comptime_walk_module: fn(walk: SemaComptimeWalk, first: SemaComptimeWalkClaim, environment: ^SemaScopeEnvironment, prep_env: ^SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], made: ^Int) -> SemaComptimeWalkClaim? {
+    scope: first.scope.guard_read()
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    comptime_scopes := sema_comptime_function_thread_scopes(scope.value, wanted)
+    environment.module_scope = Val(scope.value.table)
+    job := first.job
+    loop {
+        sema_host_hook_unwant(wanted)
+        check := sema_comptime_function_precheck_one(environment, program, comptime_scopes, available, memory_plan, values, job)
+        if sema_host_hook_was_wanted(wanted) -> check = None
+        if check != None -> made += 1
+        sema_comptime_walk_finish(walk, job, check)
+        claim: sema_comptime_walk_claim(walk, prep_env, program, first.slot) ?? return None
+        if claim.slot != first.slot -> return Val(claim)
+        job = claim.job
+    }
+}
+
+sema_comptime_walk_stop_step: fn() -> SemaComptimeWalkStep {
+    SemaComptimeWalkStep{is_prep: false, claim: None, slot: -1, module_identity: module_none(), version: 0}
+}
+
+sema_comptime_walk_next_step: fn(walk: SemaComptimeWalk, preferred_slot: Int) -> SemaComptimeWalkStep {
+    permit: walk.queue.guard_edit()
+    permit.wait(walk.changed, fn(value) { value.unclaimed > 0 || value.prep_next < value.prep_slots.len() || value.closed }) ?? panic("a comptime walk thread could not wait for its queue")
+    if preferred_slot >= 0 && preferred_slot < permit.value.slot_queues.len() && permit.value.slot_state[preferred_slot] == 2 && permit.value.pending[preferred_slot] > 0 {
+        cursor := permit.value.slot_next[preferred_slot]
+        limit: permit.value.slot_queues[preferred_slot].len()
+        position := -1
+        loop cursor < limit {
+            candidate: permit.value.slot_queues[preferred_slot][cursor]
+            cursor += 1
+            if !permit.value.claimed_flags[candidate] {
+                position = candidate
+                break
+            }
+        }
+        permit.value.slot_next[preferred_slot] = cursor
+        if position >= 0 {
+            permit.value.claimed_flags[position] = true
+            permit.value.unclaimed -= 1
+            permit.value.busy += 1
+            permit.value.pending[preferred_slot] = permit.value.pending[preferred_slot] - 1
+            scope: permit.value.slots[preferred_slot] ?? panic("a comptime walk scope was dropped while a job of it was queued")
+            return SemaComptimeWalkStep{is_prep: false, claim: Val(SemaComptimeWalkClaim{job: permit.value.jobs[position], slot: preferred_slot, scope: scope}), slot: preferred_slot, module_identity: module_none(), version: 0}
+        }
+    }
+    if permit.value.prep_next < permit.value.prep_slots.len() {
+        prep_index: permit.value.prep_next
+        permit.value.prep_next = prep_index + 1
+        return SemaComptimeWalkStep{is_prep: true, claim: None, slot: permit.value.prep_slots[prep_index], module_identity: permit.value.prep_modules[prep_index], version: permit.value.prep_version}
+    }
+    if permit.value.unclaimed <= 0 -> return sema_comptime_walk_stop_step()
+    position := -1
+    loop permit.value.next < permit.value.order.len() {
+        candidate: permit.value.order[permit.value.next]
+        permit.value.next += 1
+        if !permit.value.claimed_flags[candidate] {
+            position = candidate
+            break
+        }
+    }
+    if position < 0 -> return sema_comptime_walk_stop_step()
+    permit.value.claimed_flags[position] = true
+    permit.value.unclaimed -= 1
+    permit.value.busy += 1
+    slot: permit.value.job_slots[position]
+    permit.value.pending[slot] = permit.value.pending[slot] - 1
+    scope: permit.value.slots[slot] ?? panic("a comptime walk scope was dropped while a job of it was queued")
+    SemaComptimeWalkStep{is_prep: false, claim: Val(SemaComptimeWalkClaim{job: permit.value.jobs[position], slot: slot, scope: scope}), slot: slot, module_identity: module_none(), version: 0}
+}
+
+sema_comptime_walk_install_slot: fn(walk: SemaComptimeWalk, slot: Int, prepared: ^^SemaComptimeModuleScope?) {
+    ready := prepared.move()
+    if ready != None {
+        cell: Shared{ready.move() ?? panic("a prepared comptime walk scope vanished")}
+        permit: walk.queue.guard_edit()
+        permit.value.slots[slot] = Val(cell)
+        permit.value.slot_state[slot] = 2
+        loop pos in permit.value.slot_queues[slot] {
+            if !permit.value.claimed_flags[pos] {
+                permit.value.order.push(pos)
+                permit.value.unclaimed += 1
+            }
+        }
+        permit.value.prep_pending -= 1
+        walk.changed.notify_all()
+        if permit.value.unclaimed <= 0 && permit.value.busy == 0 && permit.value.prep_pending == 0 {
+            walk.done_changed.notify_all()
+        }
+        return
+    }
+    permit: walk.queue.guard_edit()
+    permit.value.slot_state[slot] = 3
+    loop pos in permit.value.slot_queues[slot] {
+        permit.value.claimed_flags[pos] = true
+    }
+    permit.value.pending[slot] = 0
+    permit.value.prep_pending -= 1
+    if permit.value.unclaimed <= 0 && permit.value.busy == 0 && permit.value.prep_pending == 0 {
+        walk.done_changed.notify_all()
+    }
+    walk.changed.notify_all()
+}
+
+// The next queued job, preparing any pending module scopes on this worker
+// thread and preferring `preferred_slot` so a thread drains every queued job
+// of its current module before copying another module's scope; None once the
+// walk is closed with every job claimed.
+sema_comptime_walk_claim: fn(walk: SemaComptimeWalk, prep_env: ^SemaScopeEnvironment, program: SemaProgramTables, preferred_slot: Int) -> SemaComptimeWalkClaim? {
+    target := preferred_slot
+    loop {
+        step: sema_comptime_walk_next_step(walk, target)
+        if step.is_prep {
+            prepared := sema_comptime_function_precheck_slot(prep_env, program, step.module_identity, step.version)
+            sema_comptime_walk_install_slot(walk, step.slot, prepared)
+            target = step.slot
+            next
+        }
+        return step.claim
+    }
+}
+
+// Ends a claimed job: its check, when it made one, waits in the queue for
+// the driver (sema_comptime_walk_take).
+sema_comptime_walk_finish: fn(walk: SemaComptimeWalk, job: SemaComptimeFunctionJob, check: ^^SemaComptimeFunctionResult?) {
+    permit: walk.queue.guard_edit()
+    made := check.move()
+    if made != None {
+        permit.value.done.push(SemaComptimeWalkDone{job: job, check: made.move() ?? panic("a comptime walk check vanished")})
+    }
+    permit.value.busy -= 1
+    if permit.value.done.len() == 1 || (permit.value.unclaimed <= 0 && permit.value.busy == 0 && permit.value.prep_pending == 0) {
+        walk.done_changed.notify_all()
+    }
+}
+
+// The checks the threads made since the last take, in the order they were
+// made, waiting for one; empty once every queued job is checked or a thread
+// failed, when the walk has nothing more unless the driver queues more.
+sema_comptime_walk_take: fn(walk: SemaComptimeWalk) -> [SemaComptimeWalkDone] {
+    permit: walk.queue.guard_edit()
+    permit.wait(walk.done_changed, fn(value) { value.done.len() > 0 || value.failed || (value.unclaimed <= 0 && value.busy == 0 && value.prep_pending == 0) }) ?? panic("the comptime walk could not wait for its checks")
+    if permit.value.failed -> return [SemaComptimeWalkDone]{}
+    taken := [SemaComptimeWalkDone]{}
+    loop permit.value.done.len() > 0 {
+        row: permit.value.done.pop() ?? break
+        taken.push(row)
+    }
+    taken.reverse()
+    taken
+}
+
+// Queues `jobs` on the walk and wakes its threads without blocking the driver:
+// any missing module scope is queued for the walk's workers to prepare in
+// parallel as soon as a thread is free.
+sema_comptime_walk_push: fn(walk: ^SemaComptimeWalk, environment: ^SemaScopeEnvironment, program: SemaProgramTables, version: Int, jobs: [SemaComptimeFunctionJob]) {
+    missing_modules := [ModuleID]{}
+    missing_at := [Int]{}
+    missing_rows := [Int]{}
+    keep := [Int]{}
+    loop job_row in 0..<jobs.len() {
+        job: jobs[job_row]
+        if sema_comptime_function_loads(walk, program, job.module_identity) -> next
+        at: module_index(job.module_identity)
+        loop walk.module_slots.len() <= at -> walk.module_slots.push(-1)
+        existing: walk.module_slots[at]
+        if existing == -1 {
+            walk.module_slots[at] = -3
+            missing_modules.push(job.module_identity)
+            missing_at.push(at)
+            missing_rows.push(sema_comptime_precheck_scope_rows(program, job.module_identity))
+        } else if existing >= 0 && !keep.contains(existing) {
+            keep.push(existing)
+        }
+    }
+    new_slots := [Int]{}
+    loop index in 0..<missing_modules.len() {
+        at: missing_at[index]
+        rows: missing_rows[index]
+        sema_comptime_walk_evict(walk, rows, keep)
+        new_slot: walk.slot_modules.len()
+        walk.module_slots[at] = new_slot
+        walk.slot_modules.push(at)
+        walk.slot_rows.push(rows)
+        walk.held_rows += rows
+        keep.push(new_slot)
+        new_slots.push(new_slot)
+    }
+    // Module k of this push has scope row `slots[k]`, its jobs at
+    // `members[k]` and its heaviest job's weight at `heaviest[k]`.
+    slots := [Int]{}
+    members := [[Int]]{}
+    member_weights := [[Int]]{}
+    heaviest := [Int]{}
+    loop job_row in 0..<jobs.len() {
+        job: jobs[job_row]
+        if sema_comptime_function_loads(walk, program, job.module_identity) -> next
+        at: module_index(job.module_identity)
+        slot: walk.module_slots[at]
+        if slot < 0 -> next
+        weight: sema_comptime_function_weight(program, job.function_key)
+        group := 0
+        loop group < slots.len() && slots[group] != slot -> group += 1
+        if group == slots.len() {
+            slots.push(slot)
+            members.push([Int]{})
+            member_weights.push([Int]{})
+            heaviest.push(0)
+        }
+        members[group].push(job_row)
+        member_weights[group].push(weight)
+        if weight > heaviest[group] -> heaviest[group] = weight
+    }
+    if slots.len() == 0 && new_slots.len() == 0 {
+        return
+    }
+    permit: walk.queue.guard_edit()
+    permit.value.prep_version = version
+    loop index in 0..<new_slots.len() {
+        permit.value.slots.push(None)
+        permit.value.pending.push(0)
+        permit.value.slot_queues.push([Int]{})
+        permit.value.slot_next.push(0)
+        permit.value.slot_state.push(0)
+        permit.value.prep_slots.push(new_slots[index])
+        permit.value.prep_modules.push(missing_modules[index])
+        permit.value.prep_pending += 1
+    }
+    loop group in compiler_threads_heaviest_first(heaviest) {
+        slot: slots[group]
+        state: permit.value.slot_state[slot]
+        if state == 3 -> next
+        loop member in compiler_threads_heaviest_first(member_weights[group]) {
+            pos: permit.value.jobs.len()
+            permit.value.jobs.push(jobs[members[group][member]])
+            permit.value.job_slots.push(slot)
+            permit.value.claimed_flags.push(false)
+            permit.value.slot_queues[slot].push(pos)
+            permit.value.pending[slot] = permit.value.pending[slot] + 1
+            if state == 2 {
+                permit.value.order.push(pos)
+                permit.value.unclaimed += 1
+            }
+        }
+    }
+    walk.changed.notify_all()
+}
+
+// Whether a function check of module `module_identity` loads from the Core
+// library's check: the walk's run holds the Core bodies
+// (SemaComptimeWalk.core_held) and the module is one the Core library's
+// check captures (CoreBodies.jet sema_core_body_module). The graph's own
+// core_bodies_held is set only for a finalization's body passes, not for a
+// comptime run.
+sema_comptime_function_loads: fn(walk: SemaComptimeWalk, program: SemaProgramTables, module_identity: ModuleID) -> Bool {
+    if !walk.core_held -> return false
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, module_identity) == .Val(at) {
+            return sema_core_body_module(graph.modules[at])
+        }
+    }
+    false
+}
+
+// Drops the prepared scopes no queued job needs, oldest first, until a new
+// scope of `rows` rows fits beside the held ones within a body stream's bound
+// (SEMA_BODY_STREAM_SCOPE_ROWS), as a precheck wave holds its modules' scopes;
+// `keep` are the scopes the current push queues jobs on. A thread still
+// checking a job of a dropped scope holds its cell until it moves on, and a
+// module whose scope was dropped is entered again when the driver next
+// queues one of its functions.
+sema_comptime_walk_evict: fn(walk: ^SemaComptimeWalk, rows: Int, keep: [Int]) {
+    if walk.held_rows + rows <= SEMA_BODY_STREAM_SCOPE_ROWS {
+        return
+    }
+    permit: walk.queue.guard_edit()
+    slot := 0
+    loop slot < walk.slot_modules.len() && walk.held_rows > 0 && walk.held_rows + rows > SEMA_BODY_STREAM_SCOPE_ROWS {
+        if permit.value.slot_state[slot] == 2 && permit.value.slots[slot] != None && permit.value.pending[slot] == 0 && !keep.contains(slot) {
+            permit.value.slots[slot] = None
+            walk.held_rows -= walk.slot_rows[slot]
+            walk.module_slots[walk.slot_modules[slot]] = -1
+        }
+        slot += 1
+    }
+}
+
+// Closes the walk: its threads end once every queued job is claimed
+// (sema_comptime_walk_run).
+sema_comptime_walk_close: fn(walk: SemaComptimeWalk) {
+    permit: walk.queue.guard_edit()
+    permit.value.closed = true
+    walk.changed.notify_all()
+    walk.done_changed.notify_all()
+}
+
+sema_comptime_function_precheck_one: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], job: SemaComptimeFunctionJob) -> SemaComptimeFunctionResult? {
+    if program.registration_graph == .Val(graph) {
+        return Val(sema_check_comptime_function(graph, environment, program, comptime_scopes, available, memory_plan, values, job.module_identity, job.function_key))
+    }
+    None
+}
+
+sema_comptime_precheck_claim: fn(plan: SemaPrecheckPlan) -> SemaPrecheckClaim {
+    rank: plan.next.add(1)
+    if rank >= plan.order.len() -> return SemaPrecheckClaim{position: -1, wave_module: -1}
+    job: plan.order[rank]
+    SemaPrecheckClaim{position: plan.positions[job], wave_module: plan.modules[job]}
+}

@@ -1,0 +1,719 @@
+// View provenance of statements: the views a binding, call or return holds,
+// and the sources they borrow from.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    Binding,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Lambda,
+    OrFallback,
+    PlaceAccess,
+    Span,
+    SymbolID,
+    Type,
+    ViewProvenance,
+    ViewProvenanceEntry,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
+    expr_source_span,
+    expr_span,
+]
+
+sema_stmt_move_direct: fn(expr: Expr, state: ^SemaOwnershipState, scopes: SemaScopeTable, consumer: String, diagnostics: ^[Diagnostic]) -> Bool {
+    if expr == {
+        .Place(_, _, _, _) | .Copy(_, _, _) -> return true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    sema_ownership_mark_unmarked_move(state, expr, scopes, consumer, diagnostics)
+}
+
+sema_stmt_view_access: fn(ty: Type) -> AccessConvention? {
+    if ty == {
+        .Apply(name, _) -> {
+            if name == "View" -> return Val(AccessConvention.Read)
+            if name == "ViewMut" -> return Val(AccessConvention.Write)
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    None
+}
+
+sema_stmt_view_slot_equal: fn(left: [String], right: [String]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    index := 0
+    loop index < left.len() {
+        if left[index] != right[index] -> return false
+        index += 1
+    }
+    true
+}
+
+sema_stmt_view_source_equal: fn(left: ViewSource, right: ViewSource) -> Bool Never! {
+    if left == {
+        .Receiver -> if right == {
+            .Receiver -> true
+            .Parameter(_) | .Static(_, _) -> false
+        }
+        .Parameter(index) -> if right == {
+            .Parameter(other) -> index == other
+            .Receiver | .Static(_, _) -> false
+        }
+        .Static(module_path, name) -> if right == {
+            .Static(other_module, other_name) -> module_path == other_module && name == other_name
+            .Receiver | .Parameter(_) -> false
+        }
+    }
+}
+
+sema_stmt_view_projection_equal: fn(left: ViewSourceProjection, right: ViewSourceProjection) -> Bool Never! {
+    if left == {
+        .Field(name) -> if right == {
+            .Field(other) -> name == other
+            .Index | .Range -> false
+        }
+        .Index -> if right == {
+            .Index -> true
+            .Field(_) | .Range -> false
+        }
+        .Range -> if right == {
+            .Range -> true
+            .Field(_) | .Index -> false
+        }
+    }
+}
+
+sema_stmt_view_source_path_equal: fn(left: ViewSourcePath, right: ViewSourcePath) -> Bool Never! {
+    if !sema_stmt_view_source_equal(left.source, right.source) || left.projections.len() != right.projections.len() {
+        return false
+    }
+    index := 0
+    loop index < left.projections.len() {
+        if !sema_stmt_view_projection_equal(left.projections[index], right.projections[index]) {
+            return false
+        }
+        index += 1
+    }
+    true
+}
+
+sema_stmt_record_static_view_return: fn(provenance: ^ViewProvenanceMap, slot: [String], source: ViewSourcePath, access: AccessConvention, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+    mutable := access == AccessConvention.Write
+    entry_index := 0
+    loop entry_index < provenance.entries.len() {
+        entry: provenance.entries[entry_index]
+        if sema_stmt_view_slot_equal(entry.slot, slot) {
+            if entry.value.mutable != mutable {
+                diagnostics.push(sema_error("E2305", span, "returned view paths disagree about read or write access", "one public output slot cannot sometimes be a read view and sometimes be an exclusive write view", "return the same view access on every path"))
+                return false
+            }
+            source_index := 0
+            loop source_index < entry.value.sources.len() {
+                if sema_stmt_view_source_path_equal(entry.value.sources[source_index], source) {
+                    return true
+                }
+                source_index += 1
+            }
+            provenance.entries[entry_index].value.sources.push(source.copy())
+            return true
+        }
+        entry_index += 1
+    }
+    sources := [ViewSourcePath]{source}
+    provenance.entries.push(ViewProvenanceEntry{slot: slot, value: ViewProvenance{sources: sources, mutable: mutable}})
+    true
+}
+
+sema_stmt_call_return_views_at: fn(span: Span, context: SemaCheckContext) -> [SemaCallReturnViewFact] Never! {
+    index := context.call_return_views.len() - 1
+    loop index >= 0 {
+        row: context.call_return_views[index]
+        if row.span.start == span.start && row.span.end == span.end -> return row.facts
+        index -= 1
+    }
+    [SemaCallReturnViewFact]{}
+}
+
+sema_stmt_call_return_views_for_expr: fn(expr: Expr, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
+    if expr == {
+        .Call(call, _) -> {
+            direct: sema_stmt_call_return_views_at(call.name_span, context)
+            if direct.len() > 0 -> return direct
+            // A call through a callable local publishes at its whole span.
+            return sema_stmt_call_return_views_at(sema_expr_local_call_span(call), context)
+        }
+        .MethodCall(_, _, method_span, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _, _) -> return sema_stmt_call_return_views_at(method_span, context)
+        .CallValue(_, _, span, _) -> return sema_stmt_call_return_views_at(span, context)
+        .Paren(value, _, _) | .Place(value, _, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .OrFallback(value, _, _, _, _) -> return sema_stmt_call_return_views_for_expr(value, context)
+        // A record literal, with or without a written head: each field's call
+        // fills its own output slot, and a report names that field's value.
+        .StructLit(_, _, _, _, fields, _, _, _) -> return sema_stmt_call_return_views_for_fields(fields, context)
+        .TypedLit(_, body, _, _) -> {
+            if body == .Fields(fields) {
+                return sema_stmt_call_return_views_for_fields(fields, context)
+            }
+            return [SemaCallReturnViewFact]{}
+        }
+        .Field(base, member, _, _) | .OptField(base, member, _, _, _, _) -> {
+            source := sema_stmt_call_return_views_for_expr(base, context)
+            result := [SemaCallReturnViewFact]{}
+            index := 0
+            loop index < source.len() {
+                fact: source[index]
+                dotted: ".{member}"
+                if fact.slot.len() > 0 && (fact.slot[0] == member || fact.slot[0] == dotted) {
+                    slot := [String]{}
+                    slot_index := 1
+                    loop slot_index < fact.slot.len() {
+                        slot.push(fact.slot[slot_index])
+                        slot_index += 1
+                    }
+                    result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries})
+                }
+                index += 1
+            }
+            return result
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> [SemaCallReturnViewFact]{}
+    }
+}
+
+sema_stmt_call_return_views_for_fields: fn(fields: [ExprField], context: SemaCheckContext) -> [SemaCallReturnViewFact] {
+    result := [SemaCallReturnViewFact]{}
+    loop field in fields {
+        loop fact in sema_stmt_call_return_views_for_expr(field.value, context) {
+            slot := [String]{field.name}
+            loop part in fact.slot -> slot.push(part)
+            span: if fact.span == None -> Val(expr_source_span(field.value)) else -> fact.span
+            result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries, span: span})
+        }
+    }
+    result
+}
+
+sema_stmt_local_view_facts_for_expr: fn(expr: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
+    sema_stmt_local_view_facts_inner(expr, scopes, state, context, false)
+}
+
+sema_stmt_local_view_facts_inner: fn(expr: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: SemaCheckContext, aggregate: Bool) -> [SemaCallReturnViewFact] {
+    if expr == {
+        .Ident(name, _, _) -> {
+            index: sema_scope_resolve_index(scopes, name) ?? return [SemaCallReturnViewFact]{}
+            symbol: scopes.bindings[index].symbol
+            key: scopes.bindings[index].key
+            result := [SemaCallReturnViewFact]{}
+            loop local_fact in context.local_view_provenance {
+                if local_fact.carrier_key != key -> next
+                projected_expr := expr
+                projectable := true
+                loop part in local_fact.output_path {
+                    member := part.copy()
+                    if part.starts_with(".") -> member = part.slice(1, part.len())
+                    if part.starts_with("[") || part == "*" {
+                        projectable = false
+                        break
+                    }
+                    projected_expr = Expr.Field{base: projected_expr, member: member, span: expr_span(projected_expr), id: AST_NODE_GENERATED}
+                }
+                places := [SemaOwnershipPlace]{}
+                if projectable {
+                    places = sema_ownership_places_from_expr_in_state(projected_expr, scopes, state)
+                }
+                result.push(SemaCallReturnViewFact{slot: local_fact.output_path, access: local_fact.access, places: places, sources: local_fact.sources})
+            }
+            // A range binding records its owner in the ownership state rather
+            // than the call-provenance table. Preserve its nested output slot.
+            if aggregate && result.len() == 0 {
+                loop fact in state.views {
+                    if fact.carrier_id != symbol.id || !fact.active -> next
+                    slot := [String]{}
+                    loop part in fact.output_path {
+                        slot.push(if part.starts_with(".") -> part.slice(1, part.len()) else -> part)
+                    }
+                    result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: [SemaOwnershipPlace]{fact.source}, sources: [ViewSourcePath]{}})
+                }
+            }
+            if aggregate && result.len() == 0 && symbol.ty == .Val(ty) {
+                if sema_stmt_view_access(ty) == .Val(access) {
+                    places: sema_ownership_places_from_expr_in_state(expr, scopes, state)
+                    result.push(SemaCallReturnViewFact{slot: [String]{}, access: access, places: places, sources: [ViewSourcePath]{}})
+                }
+            }
+            return result
+        }
+        .Field(base, member, _, _) | .OptField(base, member, _, _, _, _) -> {
+            source := sema_stmt_local_view_facts_inner(base, scopes, state, context, aggregate)
+            result := [SemaCallReturnViewFact]{}
+            dotted: ".{member}"
+            loop fact in source {
+                if fact.slot.len() == 0 || (fact.slot[0] != member && fact.slot[0] != dotted) {
+                    next
+                }
+                slot := [String]{}
+                index := 1
+                loop index < fact.slot.len() {
+                    slot.push(fact.slot[index])
+                    index += 1
+                }
+                result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries, span: fact.span})
+            }
+            return result
+        }
+        .Paren(value, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) -> return sema_stmt_local_view_facts_inner(value, scopes, state, context, aggregate)
+        .Place(value, access, _, _) -> {
+            facts := sema_stmt_local_view_facts_inner(value, scopes, state, context, aggregate)
+            if aggregate && access == PlaceAccess.Write {
+                loop index in 0..<facts.len() {
+                    if facts[index].slot.len() == 0 -> facts[index].access = AccessConvention.Write
+                }
+            }
+            return facts
+        }
+        .StructLit(_, _, _, _, fields, _, _, _) -> return sema_stmt_local_view_facts_fields(fields, false, scopes, state, context)
+        // `Domain{ value: view }` with a written head: the same named fields,
+        // but only those whose declared type holds a view; any other field
+        // stores its own copy.
+        .TypedLit(_, body, _, _) -> {
+            if body == .Fields(fields) {
+                return sema_stmt_local_view_facts_fields(fields, true, scopes, state, context)
+            }
+            return [SemaCallReturnViewFact]{}
+        }
+        .Slice(_, _, _, _, _, _) -> {
+            if !aggregate -> return [SemaCallReturnViewFact]{}
+            places: sema_ownership_places_from_expr_in_state(expr, scopes, state)
+            return [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}}}
+        }
+        // A `trim`/`after`/`before` window on a `String` name stored straight
+        // into an aggregate field borrows that name (Rust `view_call_sources`).
+        // Any other call filling a view-typed field keeps the owners its view
+        // points into, as the same call returned bare does.
+        .MethodCall(_, _, _, _, _, _, _) -> {
+            if !aggregate -> return [SemaCallReturnViewFact]{}
+            places := sema_string_view_call_sources(expr, scopes, state)
+            if places.len() == 0 && sema_stmt_view_field_value(expr, context) {
+                places = sema_ownership_places_from_expr_in_state(expr, scopes, state)
+            }
+            if places.len() == 0 -> return [SemaCallReturnViewFact]{}
+            return [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}}}
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> [SemaCallReturnViewFact]{}
+    }
+}
+
+// Rust `check_aggregate_view_return`: each field of a returned literal fills
+// its own output slot, and a report names the field value that holds the view.
+// `typed` keeps only fields checked against a view type (view_field_values);
+// a `s.slice(..)` field is a view only in such a field, so it is kept the
+// same way in either literal form.
+sema_stmt_local_view_facts_fields: fn(fields: [ExprField], typed: Bool, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
+    result := [SemaCallReturnViewFact]{}
+    loop field in fields {
+        if (typed || sema_string_view_is_slice_call(field.value)) && !sema_stmt_view_field_value(field.value, context) {
+            next
+        }
+        loop fact in sema_stmt_local_view_facts_inner(field.value, scopes, state, context, true) {
+            slot := [String]{field.name}
+            loop part in fact.slot -> slot.push(part)
+            span: if fact.span == None -> Val(expr_source_span(field.value)) else -> fact.span
+            result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries, span: span})
+        }
+    }
+    result
+}
+
+sema_stmt_view_field_value: fn(value: Expr, context: SemaCheckContext) -> Bool Never! {
+    span: expr_span(value)
+    loop listed in context.view_field_values {
+        if listed.start == span.start && listed.end == span.end -> return true
+    }
+    false
+}
+
+sema_stmt_store_local_view_provenance: fn(carrier_key: String, facts: [SemaCallReturnViewFact], context: ^SemaCheckContext) Never! {
+    loop fact in facts {
+        context.local_view_provenance.push(SemaLocalViewProvenance{carrier_key: carrier_key, output_path: fact.slot, access: fact.access, sources: fact.sources})
+    }
+}
+
+sema_stmt_view_owner_path: fn(slot: [String]) -> [String] Never! {
+    result := [String]{}
+    index := 0
+    loop index < slot.len() {
+        part: slot[index]
+        if {
+            part.starts_with(".") || part.starts_with("[") || part == "*" -> {
+                result.push(part.copy())
+            }
+            else -> { result.push(".{part}") }
+        }
+        index += 1
+    }
+    result
+}
+
+sema_stmt_call_view_has_dynamic_source: fn(fact: SemaCallReturnViewFact) -> Bool Never! {
+    loop source in fact.sources {
+        if source.source == {
+            .Receiver | .Parameter(_) -> return true
+            .Static(_, _) -> {}
+        }
+    }
+    false
+}
+
+sema_stmt_record_call_view_return: fn(state: ^SemaOwnershipState, fact: SemaCallReturnViewFact, slot: [String], scopes: SemaScopeTable, context: ^SemaCheckContext, span: Span, diagnostics: ^[Diagnostic]) -> Bool {
+    provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+    valid := true
+    if {
+        fact.places.len() > 0 -> {
+            if !sema_ownership_record_view_returns(state, fact.places, fact.access, slot, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, span, diagnostics) {
+                valid = false
+            }
+        }
+        sema_stmt_call_view_has_dynamic_source(fact) || fact.sources.len() == 0 -> {
+            if !sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, fact.access, slot, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, span, diagnostics) {
+                valid = false
+            }
+        }
+    }
+    loop source in fact.sources {
+        if source.source == {
+            .Static(_, _) -> {
+                if !sema_stmt_record_static_view_return(provenance, slot, source, fact.access, span, diagnostics) {
+                    valid = false
+                }
+            }
+            .Receiver | .Parameter(_) -> {}
+        }
+    }
+    context.return_view_provenance = Val(provenance)
+    valid
+}
+
+sema_stmt_string_view_type: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Apply(name, args) -> name == "View" && args.len() == 1 && args[0] == (Type.Named{name: "str"})
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// Rust `report_temporary_view_source` at a binding or `return` that keeps a
+// returned view: every temporary source is refused, a static string literal
+// too, since the kept view outlives the statement. True when the fact names
+// a temporary.
+sema_stmt_report_temporary_view_sources: fn(fact: SemaCallReturnViewFact, string_view: Bool, diagnostics: ^[Diagnostic]) -> Bool {
+    loop span in fact.temporaries {
+        sema_call_report_temporary_view_source(span, string_view, diagnostics)
+    }
+    fact.temporaries.len() > 0
+}
+
+sema_stmt_has_struct_view_source: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .StructLit(_, _, _, _, _, _, _, _) -> true
+        .TypedLit(_, body, _, _) -> body == .Fields(_)
+        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) -> sema_stmt_has_struct_view_source(base)
+        .Paren(value, _, _) | .Place(value, _, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) -> sema_stmt_has_struct_view_source(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// The operand of `value.copy()` (or `~value`), whose views the copy holds.
+sema_stmt_copy_operand: fn(expr: Expr) -> Expr? Never! {
+    if expr == {
+        .Copy(value, _, _) -> Val(value)
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> if method == "copy" && args.len() == 0 && type_args.len() == 0 -> Val(receiver) else -> None
+        .Paren(value, _, _) -> sema_stmt_copy_operand(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+sema_stmt_record_return_views: fn(expr: Expr, ty: Type, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+    call_facts := sema_stmt_call_return_views_for_expr(expr, context)
+    if sema_stmt_has_struct_view_source(expr) {
+        loop fact in sema_stmt_local_view_facts_for_expr(expr, scopes, state, context) {
+            call_facts.push(fact)
+        }
+    }
+    if call_facts.len() > 0 {
+        valid := true
+        direct_view := sema_stmt_view_access(ty) != None
+        saw_direct := false
+        index := 0
+        loop index < call_facts.len() {
+            fact: call_facts[index]
+            if !direct_view || fact.slot.len() == 0 {
+                saw_direct = true
+                temporary: sema_stmt_report_temporary_view_sources(fact, sema_stmt_string_view_type(ty), diagnostics)
+                if temporary -> valid = false
+                if (!temporary || fact.places.len() > 0) && !sema_stmt_record_call_view_return(state, fact, fact.slot, scopes, context, fact.span ?? expr_span(expr), diagnostics) {
+                    valid = false
+                }
+            }
+            index += 1
+        }
+        if direct_view && !saw_direct {
+            access: sema_stmt_view_access(ty) ?? AccessConvention.Read
+            provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+            if !sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, expr_span(expr), diagnostics) {
+                valid = false
+            }
+            context.return_view_provenance = Val(provenance)
+        }
+        return valid
+    }
+    local_facts := sema_stmt_local_view_facts_for_expr(expr, scopes, state, context)
+    if local_facts.len() > 0 {
+        valid := true
+        direct_view := sema_stmt_view_access(ty) != None
+        saw_direct := false
+        loop fact in local_facts {
+            if !direct_view || fact.slot.len() == 0 {
+                saw_direct = true
+                if !sema_stmt_record_call_view_return(state, fact, fact.slot, scopes, context, fact.span ?? expr_span(expr), diagnostics) {
+                    valid = false
+                }
+            }
+        }
+        if direct_view && !saw_direct {
+            access: sema_stmt_view_access(ty) ?? AccessConvention.Read
+            provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+            if !sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, expr_span(expr), diagnostics) {
+                valid = false
+            }
+            context.return_view_provenance = Val(provenance)
+        }
+        return valid
+    }
+    access: sema_stmt_view_access(ty) ?? return true
+    places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
+    provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+    valid := sema_ownership_record_view_returns(state, places, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, expr_span(expr), diagnostics)
+    context.return_view_provenance = Val(provenance)
+    valid
+}
+
+sema_stmt_binding_is_place_view: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Place(_, access, _, _) -> access != PlaceAccess.Take
+        .Paren(value, _, _) -> sema_stmt_binding_is_place_view(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+sema_stmt_binding_is_write_place: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Place(_, access, _, _) -> access == PlaceAccess.Write
+        .Paren(value, _, _) -> sema_stmt_binding_is_write_place(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// A `:` binding made from `^place` is a live write window: assigning it
+// writes the place it names.
+sema_stmt_binding_is_write_window: fn(state: SemaOwnershipState, id: SymbolID) -> Bool Never! {
+    loop view in state.views {
+        if view.carrier_id == id && view.active && view.access == AccessConvention.Write {
+            return true
+        }
+    }
+    false
+}
+
+// `name: ^map[key]` binds a write window over one map value
+// (SemaScopeBinding.map_slot).
+sema_stmt_binds_map_slot: fn(statement: TStmt) -> Bool Never! {
+    if statement == .Let(_, _, init, _, _, _) {
+        if init.kind == .Borrow(place, access) {
+            if access == AccessConvention.Write && place.kind == .Index(_, _, kind, _, _, _) {
+                return kind == .Map || kind == .MapOr
+            }
+        }
+    }
+    false
+}
+
+// Rust `place_from_expr` on a range: `xs[a..b]` over a named place (through
+// fields and indexes) is the source of a read window, and so is `xs[band]`
+// when the local `band` holds a range.
+sema_stmt_is_bare_range_place: fn(expr: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
+    if expr == .Slice(_, _, _, _, _, _) {
+        return sema_ownership_places_from_expr_in_state(expr, scopes, state).len() > 0
+    }
+    // `xs[a..b]` parses as an index whose operand is the range.
+    if expr == .Index(_, index, _, _, _) {
+        if index == .Range(_, _, _, _, _) {
+            return sema_ownership_places_from_expr_in_state(expr, scopes, state).len() > 0
+        }
+        if index == .Ident(name, span, _) {
+            symbol: scopes.bindings[sema_scope_resolve_index_at(scopes, name, span) ?? return false].symbol
+            if sema_stmt_for_in_is_range(symbol.ty ?? return false) {
+                return sema_ownership_places_from_expr_in_state(expr, scopes, state).len() > 0
+            }
+        }
+    }
+    false
+}
+
+// Rust `check_return` (`bare_place`): a bare whole list place (a name or a
+// field of one) returned at a named `View<T>` boundary is a read window over
+// all of it. It is written as its full range `place[0..<place.len()]`, so it
+// takes the range-window path: typed `View<T>`, owned by the place, and
+// lowered without a copy.
+sema_stmt_whole_list_window: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState) -> Expr? {
+    if value == {
+        .Ident(_, _, _) | .Field(_, _, _, _) -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+    if sema_ownership_places_from_expr_in_state(value, scopes, state).len() == 0 -> return None
+    ty: sema_shared_access_place_type(value, environment, program, scopes) ?? return None
+    if sema_expr_unwrap_tag(ty) == {
+        .List(_) | .FixedList(_, _) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
+    }
+    span: expr_span(value)
+    // copy: the full range reads the place twice, as its base and as the receiver of its length
+    length: Expr.MethodCall{receiver: value.copy(), method: "len", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+    // The slice keeps its bounds both as `start`/`end` and inside its range,
+    // as the parser writes `xs[a..<b]`: the zero start is written for each,
+    // and the length is copied.
+    whole: Expr.Range{start: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, end: length.copy(), exclusive: true, span: span, id: AST_NODE_GENERATED}
+    Val(Expr.Slice{base: value, start: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, end: length, range: Val(whole), span: span, id: AST_NODE_GENERATED})
+}
+
+sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+    if sema_pin_record_binding(state, binding, init_ty, scopes) -> return true
+    // `_: view_call(..)` discards the value at once: no local holds the
+    // view, so there is no loan to record (and no binding to carry it).
+    if binding.name == "_" -> return true
+    // `x: arena.alloc(v)`
+    // makes `x` a scope-bound view into `arena`; a reset invalidates it
+    // (E0632) and it may not leave the region (E0631). So do
+    // `s: context.scratch`, a view of the task's scratch arena, and
+    // `x: s.alloc(v)` or `x: context.scratch.alloc(v)`, views into it.
+    if sema_ownership_is_allocator_view(Val(init_ty)) {
+        if sema_ownership_scratch_read(binding.init, scopes) {
+            return sema_ownership_record_scratch_view_fact(state, binding.name, binding.name_span, true, scopes)
+        }
+        if binding.init == .MethodCall(arena, method, _, _, _, _, _) && method == "alloc" {
+            if sema_ownership_scratch_arena(state, arena, scopes) {
+                return sema_ownership_record_scratch_view_fact(state, binding.name, binding.name_span, false, scopes)
+            }
+            if arena == .Ident(_, _, _) {
+                return sema_ownership_record_fresh_view_fact(state, binding.name, binding.name_span, arena, [String]{}, AccessConvention.Write, scopes, binding.name_span)
+            }
+        }
+    }
+    call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
+    // A copy of a value holding views carries the same views into the
+    // binding (Rust `Expr.Copy` keeps its operand's view sources).
+    copied: sema_stmt_copy_operand(binding.init)
+    if sema_stmt_has_struct_view_source(binding.init) || copied != None {
+        // A struct that stores a view is a new carrier of its places: it
+        // conflicts with another live view of them as a window would. A
+        // carrier whose open is rejected holds no loan.
+        loop fact in sema_stmt_local_view_facts_for_expr(copied ?? binding.init, scopes, state, context) {
+            if fact.places.len() > 0 && !sema_ownership_check_binding_view_conflicts(state, binding.name, binding.name_span, binding.init, fact.places, fact.access, scopes, diagnostics) {
+                return true
+            }
+            call_facts.push(fact)
+        }
+    }
+    if call_facts.len() > 0 {
+        owner_facts := [SemaOwnershipCallViewFact]{}
+        valid := true
+        loop fact in call_facts {
+            if sema_stmt_report_temporary_view_sources(fact, sema_stmt_string_view_type(init_ty), diagnostics) {
+                valid = false
+            }
+            if {
+                fact.places.len() > 0 -> {
+                    owner_facts.push(SemaOwnershipCallViewFact{output_path: sema_stmt_view_owner_path(fact.slot), access: fact.access, places: fact.places})
+                }
+                fact.temporaries.len() > 0 -> {}
+                sema_stmt_call_view_has_dynamic_source(fact) || fact.sources.len() == 0 -> {
+                    empty_provenance := ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+                    if !sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, fact.access, fact.slot, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, empty_provenance, expr_span(binding.init), diagnostics) {
+                        valid = false
+                    }
+                }
+            }
+        }
+        if owner_facts.len() > 0 && !sema_ownership_record_call_view_batch(state, binding.name, binding.name_span, owner_facts, scopes) {
+            valid = false
+        }
+        local_key: sema_scope_resolve_key(scopes, binding.name) ?? return false
+        sema_stmt_store_local_view_provenance(local_key, call_facts, context)
+        return valid
+    }
+    local_facts := sema_stmt_local_view_facts_for_expr(binding.init, scopes, state, context)
+    if local_facts.len() > 0 {
+        owner_facts := [SemaOwnershipCallViewFact]{}
+        valid := true
+        loop fact in local_facts {
+            if {
+                fact.places.len() > 0 -> {
+                    owner_facts.push(SemaOwnershipCallViewFact{output_path: sema_stmt_view_owner_path(fact.slot), access: fact.access, places: fact.places})
+                }
+                sema_stmt_call_view_has_dynamic_source(fact) || fact.sources.len() == 0 -> {
+                    empty_provenance := ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+                    if !sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, fact.access, fact.slot, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, empty_provenance, expr_span(binding.init), diagnostics) {
+                        valid = false
+                    }
+                }
+            }
+        }
+        if owner_facts.len() > 0 && !sema_ownership_record_call_view_batch(state, binding.name, binding.name_span, owner_facts, scopes) {
+            valid = false
+        }
+        local_key: sema_scope_resolve_key(scopes, binding.name) ?? return false
+        sema_stmt_store_local_view_provenance(local_key, local_facts, context)
+        return valid
+    }
+    // `x: ^place` is a write window into the place whatever the place's
+    // type: a scalar or struct place is not carried by a `ViewMut`.
+    view_access: sema_stmt_view_access(init_ty)
+    if sema_stmt_binding_is_place_view(binding.init) && (view_access != None || sema_stmt_binding_is_write_place(binding.init)) {
+        if sema_expr_place_root_ident(binding.init) == None {
+            diagnostics.push(sema_error("E0213", expr_span(binding.init), "a window must start from a place", "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying", "bind the call or temporary to a name first, then take a window into that name"))
+            return false
+        }
+        // A window whose open is rejected is still recorded, contested: it
+        // neither blocks nor is blocked by other views, so later uses of it
+        // are not judged against the conflict already reported, but it stays
+        // a window into its place, so a write through it is not a write
+        // without a marker, and a child task that captures it inside a
+        // `task.group` body is judged against its place.
+        if sema_ownership_view_producer(binding.init) == .Val(producer) {
+            producer_places: sema_ownership_places_from_expr_in_state(producer.source, scopes, state)
+            if !sema_ownership_check_binding_view_conflicts(state, binding.name, binding.name_span, producer.source, producer_places, producer.access, scopes, diagnostics) {
+                first: state.views.len()
+                recorded: sema_ownership_record_binding_view(state, binding, scopes)
+                sema_ownership_mark_views_contested(state, first)
+                return recorded
+            }
+        }
+        return sema_ownership_record_binding_view(state, binding, scopes)
+    }
+    access: view_access ?? return true
+    places := sema_ownership_places_from_expr_in_state(binding.init, scopes, state)
+    if places.len() == 0 {
+        empty_provenance := ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+        _ := sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, empty_provenance, expr_span(binding.init), diagnostics)
+        return false
+    }
+    contested := false
+    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, state) && !sema_ownership_check_binding_view_conflicts(state, binding.name, binding.name_span, binding.init, places, access, scopes, diagnostics) {
+        if !sema_taskgroup_in_group_body(context) -> return true
+        contested = true
+    }
+    first: state.views.len()
+    fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: access, places: places}
+    recorded: sema_ownership_record_call_view_batch(state, binding.name, binding.name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
+    if contested -> sema_ownership_mark_views_contested(state, first)
+    recorded
+}

@@ -1,0 +1,985 @@
+// `return` statements: the returned value against the declared return and its
+// failure carrier, returned views, and discarded call results.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    BinOp,
+    Binding,
+    Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    Expr,
+    Lambda,
+    OrFallback,
+    PlaceAccess,
+    Span,
+    Stmt,
+    SymbolID,
+    SymbolKind,
+    TFailureCarrier,
+    Type,
+    ViewProvenanceEntry,
+    ViewProvenanceMap,
+    expr_span,
+    type_identity_equal,
+    type_name,
+    TextEdit,
+    diagnostic_with_edit_grade,
+]
+
+sema_stmt_return_required_type: fn(return_type: Type?) -> Type Never! {
+    return return_type ?? Type.Named{name: "Unit"}
+}
+
+sema_stmt_return_success_type: fn(return_type: Type?) -> Type Never! {
+    required := sema_stmt_return_required_type(return_type)
+    normalized := sema_expr_unwrap_tag(required)
+    if normalized == {
+        .Result(ok, _) -> return ok
+        .Option(value) -> return value
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return normalized
+    }
+}
+
+sema_stmt_return_is_carrier: fn(return_type: Type?) -> Bool Never! {
+    normalized := sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type))
+    if normalized == {
+        .Result(_, _) | .Option(_) -> return true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
+sema_stmt_return_known_type: fn(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Type? {
+    if value == {
+        .Paren(inner, _, _) | .Tainted(inner, _, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) -> return sema_stmt_return_known_type(inner, environment, scopes)
+        .Ident(name, _, _) -> {
+            index: sema_scope_resolve_index(scopes, name) ?? return None
+            return sema_scope_binding_type(environment, scopes, index)
+        }
+        .Call(call, _) -> {
+            index: sema_scope_resolve_index(scopes, call.name) ?? return None
+            symbol_type: sema_scope_binding_type(environment, scopes, index) ?? return None
+            if symbol_type == {
+                .Fn(_, ret, _, _, _, _) -> return ret
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+            }
+        }
+        .CallValue(callee, _, _, _) -> {
+            callee_ty: sema_stmt_return_known_type(callee, environment, scopes) ?? return None
+            if callee_ty == {
+                .Fn(_, ret, _, _, _, _) -> return ret
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+            }
+        }
+        // `Matrix<M, K> * Matrix<K, N>` is the fallible `Matrix<M, N>` product.
+        .Binary(op, left, right, _, _) -> {
+            if op != BinOp.Mul -> return None
+            left_type: sema_stmt_return_known_type(left, environment, scopes) ?? return None
+            right_type: sema_stmt_return_known_type(right, environment, scopes) ?? return None
+            return sema_expr_matrix_product_type(left_type, right_type)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+    None
+}
+
+sema_stmt_return_types_are_carriers: fn(actual: Type, required: Type) -> Bool Never! {
+    normalized_actual := sema_expr_unwrap_tag(actual)
+    normalized_required := sema_expr_unwrap_tag(required)
+    if normalized_required == {
+        .Result(_, _) -> {
+            if normalized_actual == {
+                .Result(_, _) -> return true
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+            }
+        }
+        .Option(_) -> {
+            if normalized_actual == {
+                .Option(_) -> return true
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    false
+}
+
+sema_stmt_return_expr_is_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if !sema_stmt_return_is_carrier(return_type) -> return false
+    required := sema_stmt_return_required_type(return_type)
+    normalized := sema_expr_unwrap_tag(required)
+    if value == {
+        .Paren(inner, _, _) | .Tainted(inner, _, _, _) | .Copy(inner, _, _) -> return sema_stmt_return_expr_is_carrier(inner, return_type, environment, scopes)
+        // Rust `check_return_expr` checks a value `if` against the whole
+        // return type. A `T?` slot lifts each plain arm itself, so any value
+        // `if` there is checked as the carrier (an arm may be a bound `T?`
+        // local, a `Val(x)`, a `None`, or a plain `x`). A `T E!` slot checks
+        // the carrier when some decision level builds it and every other arm
+        // already has the carrier's type (Rust lifts that table into the
+        // carrier, so it is this body's own failure source); a table of plain
+        // arms and calls takes the payload route, where each call propagates.
+        .If(_, _, _, _, _, _, _) -> return normalized == .Option(_) || (sema_stmt_return_if_builds_carrier(value, return_type, environment, scopes) && sema_stmt_return_if_arms_fit_carrier(value, return_type, environment, scopes))
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    if normalized == {
+        .Result(_, error) -> {
+            // Under `Never!` no failure exists to build, so `Err(...)` is the
+            // default error value itself (an error conversion's result).
+            failure_reachable: sema_expr_unwrap_tag(error) != Type.Named{name: "Never"}
+            if value == {
+                .Ok(_, _, _) -> return true
+                .Err(_, _, _) -> return failure_reachable
+                .EnumLit(owner, variant, _, args, dot, _, _) -> {
+                    if owner == "" && dot && args.len() == 1 && args[0] == .Positional(_) {
+                        if variant == "Ok" -> return true
+                        if variant == "Err" -> return failure_reachable
+                    }
+                }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+            }
+            // (Rust `check_return`): every direct call
+            // but an unshadowed `Ok`/`Err` checks against the success slot, so
+            // its failure propagates through the transparent carrier and the
+            // payload is lifted into this carrier. Such a returned call is
+            // never this body's own failure source, and a `T Never!` callee
+            // meets a fallible slot.
+            if value == {
+                .Call(call, _) -> {
+                    if (call.name == "Ok" || failure_reachable) && sema_expression_contextual_result_call(call, Val(required), scopes) != None {
+                        return true
+                    }
+                    if failure_reachable && sema_call_default_err_candidate(call, Val(required), scopes) {
+                        return true
+                    }
+                    if call.name != "Ok" && call.name != "Err" -> return false
+                    if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
+                        if !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err") {
+                            return false
+                        }
+                    }
+                }
+                .MethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> return false
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+            }
+        }
+        .Option(_) -> {
+            if value == {
+                // An optional chain always yields the `T?` carrier itself.
+                .Present(_, _, _) | .Absent(_, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) -> return true
+                .EnumLit(owner, variant, _, args, _, _, _) -> {
+                    if owner == "" {
+                        if variant == "None" && args.len() == 0 -> return true
+                        if variant == "Val" && args.len() == 1 && args[0] == .Positional(_) {
+                            return true
+                        }
+                    }
+                }
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    known_type: sema_stmt_return_known_type(value, environment, scopes) ?? return false
+    if sema_stmt_return_types_are_carriers(known_type, required) -> return true
+    // A call root propagates its failure so a
+    // `T? E!` callee (`T? Never!` included) meets a `T?` slot with its own
+    // `T?` success, as Rust `check_return_expr` infers it against the slot.
+    if normalized == .Option(_) && sema_expression_propagating_call(value, scopes) && sema_expr_unwrap_tag(known_type) == .Result(ok, _) {
+        return sema_expr_unwrap_tag(ok) == .Option(_)
+    }
+    false
+}
+
+// A value `if` that builds the `T E!` carrier on some arm, through nested
+// decision levels and grouping.
+sema_stmt_return_if_builds_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if value == {
+        .Paren(inner, _, _) | .Tainted(inner, _, _, _) | .Copy(inner, _, _) -> return sema_stmt_return_if_builds_carrier(inner, return_type, environment, scopes)
+        .If(_, _, then_value, _, else_value, _, _) -> return sema_stmt_return_if_builds_carrier(then_value, return_type, environment, scopes) || sema_stmt_return_if_builds_carrier(else_value, return_type, environment, scopes)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes)
+}
+
+// Every arm of a value `if`, through nested decision levels and grouping, is
+// a carrier or a direct call whose own result already is the carrier. The
+// missing `else` of a covered table never runs, so it fits any slot.
+sema_stmt_return_if_arms_fit_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if value == {
+        .Paren(inner, _, _) | .Tainted(inner, _, _, _) | .Copy(inner, _, _) -> return sema_stmt_return_if_arms_fit_carrier(inner, return_type, environment, scopes)
+        .If(_, _, then_value, _, else_value, _, _) -> return sema_stmt_return_if_arms_fit_carrier(then_value, return_type, environment, scopes) && sema_stmt_return_if_arms_fit_carrier(else_value, return_type, environment, scopes)
+        .NoElse(_, _) -> return true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) -> return true
+    if !sema_expression_propagating_call(value, scopes) -> return false
+    known_type: sema_stmt_return_known_type(value, environment, scopes) ?? return false
+    required: sema_stmt_return_required_type(return_type)
+    // A `T Never!` call has no failure to bring into a fallible carrier, so
+    // Rust lifts it like a plain arm (`check_return_expr`).
+    if sema_stmt_type_is_fallible_result(required) && !sema_stmt_type_is_fallible_result(known_type) {
+        return false
+    }
+    sema_stmt_return_types_are_carriers(known_type, required)
+}
+
+// A value `if` in a `T E!` slot that builds the carrier on some arm while
+// another arm is a plain success value (`.Int(_) -> Val(n)` beside
+// `else -> Err(…)`). Rust `check_return_expr` infers the table against the
+// whole carrier and lifts each plain arm into it through `Ok`.
+sema_stmt_return_if_mixes_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if !sema_stmt_return_type_is_result(Val(sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type)))) {
+        return false
+    }
+    if value == {
+        .Paren(inner, _, _) -> return sema_stmt_return_if_mixes_carrier(inner, return_type, environment, scopes)
+        .If(_, _, _, _, _, _, _) -> return sema_stmt_return_if_builds_carrier(value, return_type, environment, scopes) && !sema_stmt_return_if_arms_fit_carrier(value, return_type, environment, scopes)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+// The table with every plain arm that reaches the merge written as `Ok(arm)`.
+sema_stmt_return_lift_if_arms: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Expr {
+    if value == {
+        // copy: `inner` is a payload of read parameter `value`, which keeps the original; the new Expr.Paren owns the lifted one
+        .Paren(inner, span, node) -> return Expr.Paren{value: sema_stmt_return_lift_if_arms(inner.copy(), return_type, environment, scopes), span: span, id: node}
+        .If(cond, then_body, then_value, else_body, else_value, span, node) -> {
+            then_lifted: sema_stmt_return_lift_arm(then_body, then_value, return_type, environment, scopes)
+            else_lifted: sema_stmt_return_lift_arm(else_body, else_value, return_type, environment, scopes)
+            // copy: `cond` and the arm bodies are payloads of read parameter `value`, which keeps the originals; the new Expr.If owns these
+            return Expr.If{cond: cond.copy(), then_body: then_body.copy(), then_value: then_lifted, else_body: else_body.copy(), else_value: else_lifted, span: span, id: node}
+        }
+        // copy: the returned Expr is a new owned value; read parameter `value` keeps the original
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return value.copy()
+    }
+}
+
+sema_stmt_return_lift_arm: fn(body: [Stmt], value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Expr {
+    nested: if value == {
+        .If(_, _, _, _, _, _, _) -> true
+        .Paren(inner, _, _) -> inner == .If(_, _, _, _, _, _, _)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+    if nested -> return sema_stmt_return_lift_if_arms(value, return_type, environment, scopes)
+    diverges: sema_stmt_block_has_no_fallthrough(body) || (body.len() > 0 && sema_stmt_definitely_returns(body[body.len() - 1]))
+    placeholder: if value == {
+        .NoElse(_, _) | .Todo(_, _, _) -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+    plain: !diverges && !placeholder && !sema_stmt_return_if_arms_fit_carrier(value, return_type, environment, scopes)
+    // copy: the arm value is a payload of the caller's read table, which keeps the original; the result owns this one
+    if !plain -> return value.copy()
+    // copy: as above; the new Expr.Ok owns the lifted arm value
+    Expr.Ok{value: value.copy(), span: expr_span(value), id: AST_NODE_GENERATED}
+}
+
+sema_stmt_check_return_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    diagnostic_start: diagnostics.len()
+    checked: sema_stmt_check_return_value_typed(value, return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+    if checked == None {
+        sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    checked
+}
+
+// L0533: a returned call of a function of this module is a
+// tail call, which reuses the caller's frame (JetIR TailCalls.jet). A value
+// with a Close cleanup that is still open in the function (a live owner, or
+// one a `defer close` takes at scope exit) closes after the call returns, so
+// the call keeps its frame; name each one.
+sema_stmt_lint_blocked_tail_call: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: ^[Diagnostic]) Never! {
+    frames := [Int]{}
+    frame := scopes.current
+    loop frame > 0 && frame < scopes.frames.len() {
+        frames.push(frame)
+        if scopes.frames[frame].owner.starts_with("lambda@") -> break
+        frame = scopes.frames[frame].parent
+    }
+    named := [SymbolID]{}
+    loop binding in scopes.bindings {
+        if !frames.contains(binding.frame) || named.contains(binding.symbol.id) || binding.symbol.id == state.close_receiver_id {
+            next
+        }
+        owned: binding.symbol.kind == SymbolKind.Local || (binding.symbol.kind == SymbolKind.Parameter && binding.access == AccessConvention.Move)
+        if !owned -> next
+        if binding.symbol.ty == .Val(ty) {
+            if !sema_ownership_type_owns_close(ty, environment, program) -> next
+            deferred := false
+            moved := false
+            loop entry in state.moved {
+                if entry.place.root_id != binding.symbol.id || entry.place.projections.len() != 0 {
+                    next
+                }
+                if entry.origin.deferred_depth == None -> moved = true else -> deferred = true
+            }
+            if moved -> next
+            named.push(SymbolID{id: binding.symbol.id.id})
+            name: binding.symbol.name
+            closes: if deferred -> "its `defer close` runs" else -> "its Close implementation runs"
+            diagnostics.push(sema_lint("L0533", span, "This tail call can't reuse the frame because `{name}` closes after it returns", "`{name}` is a `{type_name(ty)}` that is still open here, and {closes} when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack", "Close `{name}` before the call with `close({name})` (bind any argument that reads it first), or open it in a smaller block that ends before the call"))
+        }
+    }
+}
+
+// Whether `value` calls a function of this module by its name.
+sema_stmt_returns_module_call: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
+    if value == {
+        .Paren(inner, _, _) -> return sema_stmt_returns_module_call(inner, environment, program, scopes)
+        .Call(call, _) -> {
+            symbol: sema_scope_resolve(scopes, call.name) ?? return false
+            return symbol.kind == SymbolKind.Function && symbol.module_identity == environment.module_identity
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+// A returned value (a `return` or a value tail) with its ownership and view
+// obligations: the value moves out and its views must outlive the call.
+sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    if sema_stmt_never_contract_returns_err(value, value, environment, program, scopes, state, tail_store, context, diagnostics) {
+        return None
+    }
+    if sema_ownership_report_lending_view_escape(value, "be returned", scopes, context, diagnostics) {
+        // Rust `check_return` still runs the view-return check on the lent
+        // view, whose loan names no stable owner (E2305).
+        if sema_stmt_return_success_is_view(return_type) {
+            declared: return_type ?? return None
+            success: if declared == .Result(ok, _) -> ok else -> declared
+            access: sema_stmt_view_access(success) ?? AccessConvention.Read
+            provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+            _ := sema_ownership_record_view_returns(state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, provenance, expr_span(value), diagnostics)
+            context.return_view_provenance = Val(provenance)
+        }
+        return None
+    }
+    // A returned arena view would outlive the
+    // arena, which drops at scope end; `context.scratch` would outlive the
+    // borrow of the task's arena.
+    if sema_ownership_report_arena_view_escape(state, value, "be returned", scopes, diagnostics) {
+        return None
+    }
+    if sema_stmt_context_scratch(value, environment, program, scopes, context) {
+        diagnostics.push(sema_ownership_diag_scratch_escape(expr_span(value), "be returned"))
+        return None
+    }
+    // (Rust `check_return`): a bare range place is a read
+    // window at a named `View<T>` return boundary, acquired explicitly so
+    // the returned type stays a view instead of a materialized list.
+    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_is_bare_range_place(value, scopes, state) {
+        return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value), id: AST_NODE_GENERATED}, return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    if sema_stmt_return_is_view_boundary(return_type) {
+        if sema_stmt_whole_list_window(value, environment, program, scopes, state) == .Val(window) {
+            return sema_stmt_check_returned_value(window, return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+    }
+    // `Ok(place)` fills the same view success slot (Rust `check_return`):
+    // return the window itself, lifted into the success rail like any plain
+    // success value, so the payload never materializes the view.
+    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
+        payload := Expr?{None}
+        // copy: `ok_value` is a payload of read parameter `value`, which keeps the original; the local `payload` owns this one
+        if value == .Ok(ok_value, _, _) -> payload = Val(ok_value.copy())
+        if value == .Call(ok_call, _) {
+            if ok_call.name == "Ok" && ok_call.args.len() == 1 {
+                payload = Val(ok_call.args[0].expr)
+            }
+        }
+        if payload == .Val(ok_value) {
+            if sema_stmt_is_bare_range_place(ok_value, scopes, state) {
+                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+            if sema_stmt_whole_list_window(ok_value, environment, program, scopes, state) == .Val(window) {
+                return sema_stmt_check_returned_value(window, return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+        }
+    }
+    diagnostics_before: diagnostics.len()
+    checked: sema_stmt_check_return_value(value, return_type, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_stmt_report_ownerless_view_return(value, return_type, diagnostics_before, scopes, state, context, diagnostics)
+        return None
+    }
+    if sema_stmt_returns_module_call(value, environment, program, scopes) {
+        sema_stmt_lint_blocked_tail_call(expr_span(value), environment, program, scopes, state, diagnostics)
+    }
+    if !sema_stmt_return_is_view_boundary(return_type) && !context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) {
+        return None
+    }
+    if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
+        diagnostics.push(sema_error("E0201", expr_span(value), "an ExpiringSecret loan cannot be returned", "the callback parameter is valid only while `.with` is running", "return a non-secret result computed from the loan"))
+    }
+    value_is_ident := if value == {
+        .Ident(_, _, _) -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+    // Classify the value, not the enclosing Result/Option rail. The failure
+    // solver also wraps an infallible view return in `View<str> Never!`.
+    returned_success: sema_stmt_return_success_type(Val(checked.ty))
+    string_view_return := sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, scopes, state).len() > 0)
+    materialized_string_view: sema_string_view_owning_read(value, returned_success, scopes)
+    // An owning materialization returns new storage, not the source window's
+    // provenance. A view return must instead prove its original owner.
+    // An `Ok(view)` exit proves its success payload's owners; an `Err(..)`
+    // exit carries no view (Rust `check_return` `failure_exit`). A window
+    // read at the boundary, or a view binding, is lifted into the success
+    // rail, so it proves its owners as the success view it is.
+    // A `^map[key]` name returned where a `ViewMut` is expected is a one-value
+    // window over that map value (sema_expr_check_ident), bare or lifted into
+    // the success rail; it proves its owner as the window it is.
+    one_value_window: sema_stmt_is_one_value_window(checked)
+    recorded_value := value
+    recorded_ty := checked.ty
+    if sema_stmt_return_success_is_view(return_type) && checked.ty == .Result(ok_ty, _) {
+        if value == .Ok(ok_value, _, _) {
+            recorded_value = ok_value
+            recorded_ty = ok_ty
+        }
+        if value == .Place(_, _, _, _) || one_value_window -> recorded_ty = ok_ty
+        if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
+            if sema_stmt_view_access(known) != None -> recorded_ty = ok_ty
+        }
+    }
+    failure_exit := false
+    if sema_stmt_return_success_is_view(return_type) {
+        if value == .Err(_, _, _) -> failure_exit = true
+        if value == .Call(err_call, _) {
+            if err_call.name == "Err" && err_call.args.len() == 1 -> failure_exit = true
+        }
+    }
+    view_valid := materialized_string_view || failure_exit || if string_view_return -> sema_string_view_record_return(value, scopes, state, context, diagnostics) else -> sema_stmt_record_return_views(recorded_value, recorded_ty, scopes, state, context, diagnostics)
+    // A named `View<T>` boundary reads every bare place through a window
+    // (Rust wraps it before the audit), so only other returns are audited.
+    if return_type != None && !sema_stmt_return_is_view_boundary(return_type) {
+        sema_copy_site_check_borrowed_return(value, environment, program, scopes, context, diagnostics)
+    }
+    // Neither a returned window nor its owning copy moves the window's owner;
+    // nor does a one-value window over a map value.
+    moved: materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, state, scopes, "`return`", diagnostics)
+    if !view_valid || !moved -> return None
+    Val(checked)
+}
+
+// A `Never!` contract denies failure, so an `Err(…)` it returns (a `return`
+// or a value tail, `returned` as written) is a failure outside it: E2404
+// names what the `Err` fails with and offers the return type that admits
+// it. Answers whether it reported.
+sema_stmt_never_contract_returns_err: fn(value: Expr, returned: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+    if value == .Paren(inner, _, _) {
+        return sema_stmt_never_contract_returns_err(inner, returned, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    contract: scopes.return_type ?? return false
+    denied := false
+    // A success slot that holds the default error (`-> Err Never!`, `Err?`)
+    // takes `Err(…)` as its value, not as a failure.
+    if sema_expr_unwrap_tag(contract) == .Result(success, error) {
+        denied = sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) && sema_expr_expected_assignable(success, Type.Named{name: "Err"}, environment, program) != (Val(true))
+    }
+    if !denied -> return false
+    found := false
+    failure := ""
+    if value == .Err(payload, _, _) {
+        found = true
+        failure = sema_stmt_denied_err_failure(payload, environment, program, scopes, state, tail_store, context)
+    }
+    if value == .Call(call, _) {
+        if call.name != "Err" || call.args.len() != 1 || call.args[0].label != None -> return false
+        if sema_scope_resolve_index(scopes, call.name) == .Val(index) {
+            if !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err") {
+                return false
+            }
+        }
+        found = true
+        failure = sema_stmt_denied_err_failure(call.args[0].expr, environment, program, scopes, state, tail_store, context)
+    }
+    if !found -> return false
+    what: if failure == "" -> "This `Err` can't propagate into `Never` here" else -> "This `Err` fails with `{failure}`, which can't propagate into `Never` here"
+    fix: if failure == "" -> "Declare the failure type in the return type, or handle the failure here instead of returning it" else -> "Declare `{failure}!` in the return type, or handle the failure here instead of returning it"
+    diagnostic: sema_error("E2404", expr_span(returned), what, "The function is declared `Never!`, a failure contract that denies every failure, so a returned `Err` is outside it", fix)
+    if failure == "" || context.failure_repair == None {
+        diagnostics.push(diagnostic)
+        return true
+    }
+    repair: context.failure_repair ?? return true
+    diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: repair.return_span, new_text: "{type_name(repair.success)} {failure}!"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
+    true
+}
+
+// What a returned `Err(payload)` fails with: the default `Err` for a message,
+// else the payload's error type; empty when the payload's type needs the
+// contract to infer (`Err(.Empty)`).
+sema_stmt_denied_err_failure: fn(payload: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> String {
+    probe_diagnostics := [Diagnostic]{}
+    probed: sema_probe_expression(payload, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return ""
+    if sema_expr_unwrap_tag(probed.ty) == Type.String -> return "Err"
+    sema_failure_conversion_leaf(probed.ty)
+}
+
+// Whether the returned `checked` is a write borrow of a place, bare or as the
+// payload of the success rail: the one-value window a `^map[key]` name turns
+// into where a `ViewMut` is expected (sema_expr_check_ident).
+sema_stmt_is_one_value_window: fn(checked: TExpr) -> Bool Never! {
+    if checked.kind == .Ok(payload) -> return payload.kind == .Borrow(_, _)
+    checked.kind == .Borrow(_, _)
+}
+
+// Rust `check_return` audits a declared `View`/`ViewMut` return before the
+// value's type: a value that reads no place and calls no view-returning
+// function names no owner (E2305), reported ahead of its type error.
+sema_stmt_report_ownerless_view_return: fn(value: Expr, return_type: Type?, at: Int, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: SemaCheckContext, diagnostics: ^[Diagnostic]) {
+    if at >= diagnostics.len() || !sema_stmt_return_success_is_view(return_type) {
+        return
+    }
+    if sema_stmt_call_return_views_for_expr(value, context).len() > 0 || sema_ownership_places_from_expr_in_state(value, scopes, state).len() > 0 {
+        return
+    }
+    diagnostics.insert(at, sema_ownership_diag_view_return_boundary(expr_span(value)))
+}
+
+// `return value` in a callback expected with no return row (a generic
+// `map`'s `fn(T) -> U`): `return` leaves the callback, never the enclosing
+// function. The first returned value gives the callback its row, and every
+// later one must fit it; a row a propagated fallible call gave first is that
+// call's carrier, and a value fits its success. The value stays the
+// callback's result, so its caller still judges it.
+sema_stmt_check_open_callback_return: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    checked: sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if context.callback_return_row == .Val(row) {
+        // A Result row is a propagated call's carrier; a plain row is the
+        // value an earlier `return` handed back.
+        if row == .Result(success, _) {
+            if !sema_type_assignable(success, checked.ty) {
+                diagnostics.push(sema_return_value_mismatch(sema_stmt_return_owner(context), row, None, checked.ty, expr_span(value)))
+            }
+        } else if !sema_type_assignable(row, checked.ty) {
+            diagnostics.push(sema_callback_return_mismatch(row, checked.ty, expr_span(value)))
+        }
+        return Val(checked)
+    }
+    context.callback_return_row = Val(checked.ty.copy())
+    Val(checked)
+}
+
+// E0113: a callback's value disagrees with the type its first `return`
+// handed back.
+sema_callback_return_mismatch: fn(row: Type, got: Type, span: Span) -> Diagnostic {
+    sema_error("E0113", span, "this callback returns {sema_type_show(row)} elsewhere, but this value is {sema_type_show(got)}", "every `return` and the last line of a callback hand back one type", sema_return_value_fix(row, got))
+}
+
+// The declared return type is a `T E!` carrier.
+sema_stmt_return_type_is_result: fn(return_type: Type?) -> Bool Never! {
+    declared: return_type ?? return false
+    declared == .Result(_, _)
+}
+
+// The declared success type is `View<T>`, not the string view `View<str>`.
+sema_stmt_return_is_view_boundary: fn(return_type: Type?) -> Bool Never! {
+    declared: return_type ?? return false
+    success: if declared == .Result(ok, _) -> ok else -> declared
+    if success == .Apply(name, _) -> return name == "View" && !sema_stmt_string_view_type(success)
+    false
+}
+
+// The declared success type is a window, `View<T>` or `ViewMut<T>` (not the
+// string view `View<str>`), whose owners a return proves on its success rail.
+sema_stmt_return_success_is_view: fn(return_type: Type?) -> Bool Never! {
+    declared: return_type ?? return false
+    success: if declared == .Result(ok, _) -> ok else -> declared
+    if success == .Apply(name, _) {
+        return (name == "View" || name == "ViewMut") && !sema_stmt_string_view_type(success)
+    }
+    false
+}
+
+// (owner ruling): with a written return type, a value that does
+// not fit it is E0113 about the value itself (the Rust reference's
+// `check_return_expr`), replacing the generic E0108 at the value.
+sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) {
+    if sema_stmt_return_success_type(return_type) == (Type.Named{name: "Unit"}) {
+        return
+    }
+    value_span: expr_span(value)
+    mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+    // The value's own type, inferred without the return type as a target.
+    probe_diagnostics := [Diagnostic]{}
+    offered: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_return_value_mismatch(sema_stmt_return_owner(context), sema_stmt_return_required_type(return_type), context.return_alias, offered.ty, value_span)
+}
+
+// The named function a `return` here leaves, or None inside a lambda's body:
+// that body has its own frame for `return` to leave, a named function's is 0.
+sema_stmt_return_owner: fn(context: SemaCheckContext) -> String? {
+    if context.duty_scope_depth > 0 -> return None
+    Val(context.function_name.copy())
+}
+
+// Rust `check_return_expr` infers the value against the whole return type,
+// so a value whose own type already is the carrier (`list[i]` of `[T?]`,
+// `row.field` of `T E!`, `map.get(key)` or `list.pop() ?? None` of `T?`)
+// returns as-is. The syntactic carrier test above cannot see such a value's
+// type, so it is inferred here on its own. A `T E!` slot keeps method and
+// value calls on the payload route, where their failure propagates.
+sema_stmt_return_probed_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> Bool {
+    if !sema_stmt_return_is_carrier(return_type) -> return false
+    required: sema_stmt_return_required_type(return_type)
+    if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
+        // A generic callee declares its result as its own parameter (`-> T`),
+        // so only the call's inferred type shows whether it is the carrier.
+        if !(sema_stmt_return_unparen(value) == .Call(_, _)) || sema_stmt_return_types_are_carriers(known, required) {
+            return false
+        }
+    } else if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) {
+        return false
+    }
+    probe_diagnostics := [Diagnostic]{}
+    probed: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
+    sema_stmt_return_types_are_carriers(probed.ty, required)
+}
+
+sema_stmt_return_unparen: fn(value: Expr) -> Expr Never! {
+    if value == {
+        .Paren(inner, _, _) -> sema_stmt_return_unparen(inner)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> value
+    }
+}
+
+// The value shapes whose own type the return check infers before choosing
+// the carrier or the payload route. A `.copy()` has its place's type, as
+// `sema_stmt_return_known_type` reads it (`return list[i].copy()` of `[T?]`).
+sema_stmt_return_probe_shape: fn(value: Expr, optional_slot: Bool) -> Bool Never! {
+    if value == {
+        .Paren(inner, _, _) | .Place(inner, _, _, _) -> return optional_slot && sema_stmt_return_probe_shape(inner, optional_slot)
+        .Copy(inner, _, _) -> return sema_stmt_return_probe_shape(inner, optional_slot)
+        .Index(_, _, _, _, _) | .Field(_, _, _, _) -> return true
+        .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .OrFallback(_, _, _, _, _) | .CallValue(_, _, _, _) -> return optional_slot
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .OptField(_, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+sema_stmt_check_return_value_typed: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    required := sema_stmt_return_required_type(return_type)
+    if sema_stmt_return_if_mixes_carrier(value, return_type, environment, scopes) {
+        lifted: sema_stmt_return_lift_if_arms(value, return_type, environment, scopes)
+        table: sema_check_expression(lifted, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        if sema_stmt_type_is_fallible_result(table.ty) -> context.failure_direct_source = true
+        return Val(table)
+    }
+    success: sema_stmt_return_success_type(return_type)
+    widened_call: sema_stmt_return_call_widening(value, success, environment, program, scopes, state, tail_store, context)
+    if widened_call == None && (sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, scopes, state, tail_store, context)) {
+        carrier: sema_check_expression(value, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
+        // here) is this body's own failure source.
+        if !sema_stmt_is_written_carrier(value, Val(required), scopes) && sema_stmt_type_is_fallible_result(carrier.ty) {
+            context.failure_direct_source = true
+        }
+        return Val(carrier)
+    }
+    if !sema_stmt_return_is_carrier(return_type) {
+        return sema_stmt_check_return_payload(value, required, widened_call, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    payload: sema_stmt_check_return_payload(value, success, widened_call, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    normalized := sema_expr_unwrap_tag(required)
+    if normalized == {
+        .Result(_, _) -> return Val(sema_tree_node(required, TExprKind.Ok{value: payload}, expr_span(value)))
+        .Option(_) -> return Val(sema_tree_node(required, TExprKind.Present{value: payload}, expr_span(value)))
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return Val(payload)
+    }
+}
+
+// A returned call whose own success type widens losslessly into a numeric
+// success slot: the call is inferred alone, its failure propagates, and its
+// payload converts like any other widened return. A checked widening keeps
+// the slot as the call's inference target. The call's own success type.
+sema_stmt_return_call_widening: fn(value: Expr, success: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext) -> Type? {
+    if !sema_expr_is_numeric(success) || !sema_stmt_return_call_shape(value) -> return None
+    probe_diagnostics := [Diagnostic]{}
+    probe: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
+    own := probe.ty
+    unwrapped: sema_expr_unwrap_tag(probe.ty)
+    if unwrapped == .Result(ok, _) -> own = ok
+    if !sema_expr_is_numeric(own) || type_identity_equal(own, success) -> return None
+    if sema_expr_numeric_widening_to(own, success) != (Val(false)) -> return None
+    Val(own)
+}
+
+// Return-position numeric widening, exactly as at a call argument: a value
+// whose type is already known and widens into the numeric success slot is
+// checked on its own type and then converted, so every tier receives the
+// explicit conversion instead of the source bits under the slot's type.
+// Rust `widen_numeric_return` takes any widening (`numeric_widening_to` is
+// Some): a lossless one (U8 into Int) as well as a checked one. A widened
+// call (`sema_stmt_return_call_widening`) is checked on its own success type.
+sema_stmt_check_return_payload: fn(value: Expr, success: Type, call_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    known := sema_stmt_return_numeric_source(value, environment, scopes)
+    // copy: `call_type` is the caller's read parameter, which keeps its value
+    if call_type == .Val(own) -> known = Val(own.copy())
+    if known == .Val(source) && sema_expr_is_numeric(success) && !type_identity_equal(source, success) && sema_expr_numeric_widening_to(source, success) != None {
+        checked: sema_check_expression(value, call_type, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
+        return sema_expr_numeric_literal_conversion(checked, success, checked.span, line, diagnostics)
+    }
+    // Rust `string_view_return`: a `View<str>` return reads a string view as itself.
+    if sema_stmt_string_view_type(success) && sema_string_view_return_source(value, scopes, state) {
+        return sema_string_view_return_value(value, success, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    // A returned string view becomes an owned `String`.
+    if sema_string_view_owning_read(value, success, scopes) {
+        if value == .Ident(name, name_span, _) {
+            return sema_string_view_materialize(name, name_span, Val(success), environment, program, scopes, state, context, diagnostics)
+        }
+    }
+    sema_check_expression(value, Val(success), environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+sema_stmt_return_call_shape: fn(value: Expr) -> Bool Never! {
+    if value == {
+        .Paren(inner, _, _) -> sema_stmt_return_call_shape(inner)
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// Rust `widen_numeric_return` widens whatever type the value inferred to, so
+// an arithmetic value (`return n - 48` with `n: U8` under `-> Int`) widens on
+// its operand carrier: two operands of one type, or one typed operand and a
+// bare integer literal that adopts it.
+sema_stmt_return_numeric_source: fn(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Type? {
+    if value == {
+        .Paren(inner, _, _) -> return sema_stmt_return_numeric_source(inner, environment, scopes)
+        .Binary(op, left, right, _, _) -> {
+            if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Mod && op != BinOp.Rem {
+                return None
+            }
+            left_literal: left == .Int(_, _, _, _, _)
+            right_literal: right == .Int(_, _, _, _, _)
+            if left_literal && right_literal -> return None
+            if left_literal -> return sema_stmt_return_numeric_source(right, environment, scopes)
+            if right_literal -> return sema_stmt_return_numeric_source(left, environment, scopes)
+            left_type: sema_stmt_return_numeric_source(left, environment, scopes) ?? return None
+            right_type: sema_stmt_return_numeric_source(right, environment, scopes) ?? return None
+            if type_identity_equal(left_type, right_type) -> return Val(left_type)
+            return None
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return sema_stmt_return_known_type(value, environment, scopes)
+    }
+}
+
+sema_stmt_return_allows_empty: fn(return_type: Type?) -> Bool Never! {
+    if return_type == None -> return true
+    normalized := sema_expr_unwrap_tag(sema_stmt_return_required_type(return_type))
+    if normalized == {
+        .Option(_) -> return false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    if normalized == {
+        .Named(name) -> {
+            if name == "Never" -> return false
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    sema_stmt_return_success_type(return_type) == Type.Named{name: "Unit"}
+}
+
+// `return Err(…)`: the function leaves by its failure route.
+sema_stmt_return_is_failure: fn(value: Expr?) -> Bool Never! {
+    if value == .Val(returned) && returned == .Err(_, _, _) -> return true
+    false
+}
+
+// A Result whose failure is reachable.
+sema_stmt_type_is_fallible_result: fn(ty: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == {
+        .Result(_, error) -> sema_expr_unwrap_tag(error) != Type.Named{name: "Never"}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// An `Ok(…)` or `Err(…)` written at this site, through parentheses.
+sema_stmt_is_written_carrier: fn(value: Expr, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
+    if value == {
+        .Paren(inner, _, _) -> sema_stmt_is_written_carrier(inner, expected, scopes)
+        .Ok(_, _, _) | .Err(_, _, _) -> true
+        .Call(call, _) -> sema_expression_contextual_result_call(call, expected, scopes) != None || sema_call_default_err_candidate(call, expected, scopes)
+        .EnumLit(owner, variant, _, args, dot, _, _) -> owner == "" && dot && (variant == "Ok" || variant == "Err") && args.len() == 1 && args[0] == .Positional(_)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// An optional, or a Result whose failure is reachable (the Rust reference's
+// `Type.is_fallible`).
+sema_stmt_type_is_fallible: fn(ty: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == {
+        .Option(_) -> true
+        .Result(_, error) -> sema_expr_unwrap_tag(error) != Type.Named{name: "Never"}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// Rust `Expr.Try` over a call or method call: the checked form of a
+// fallible call whose failure propagates, explicitly (`?`) or implicitly.
+sema_stmt_is_propagated_call: fn(init: TExpr) -> Bool Never! {
+    value := init
+    if init.kind == {
+        .Try(inner, _, _) -> value = inner
+        .TryWithContext(inner, _, _, _, _, _) -> value = inner
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> return false
+    }
+    if value.kind == {
+        .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) -> return true
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> return false
+    }
+}
+
+// A statement value that carries nothing: `Unit`, `Never`, or the success of
+// a unit `Never!` call.
+sema_stmt_type_is_unit_success: fn(ty: Type) -> Bool Never! {
+    success: if sema_expr_unwrap_tag(ty) == {
+        .Result(ok, error) -> if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> ok else -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ty
+    }
+    success == (Type.Named{name: "Unit"}) || success == (Type.Named{name: "Never"})
+}
+
+sema_stmt_restore_statement_scopes: fn(scopes: ^SemaScopeTable, return_type: Type?, failure_carrier: TFailureCarrier?, loop_depth: Int) Never! {
+    scopes.return_type = return_type
+    scopes.failure_carrier = failure_carrier
+    scopes.loop_depth = loop_depth
+}
+
+// A callable argument's effects belong to the call site, and a write-marked
+// argument changes the caller's place, so either one gives the call a purpose
+// beyond its result.
+sema_stmt_discard_args_effectful: fn(args: [TCallArg]) -> Bool Never! {
+    loop arg in args {
+        if arg.mut_borrow -> return true
+        if arg.value.ty == {
+            .Fn(_, _, _, _, _, _) -> return true
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        }
+    }
+    false
+}
+
+// L0508 lost-tail site: a function with no written return
+// type returns nothing, so the value of its last line is lost. A `value ??
+// fallback` tail is reported from its value's span, so a method call points
+// at its method, as a bare one does.
+sema_stmt_lost_tail_diagnostic: fn(function: String, value_type: String, tail: Expr) -> Diagnostic {
+    span := expr_span(tail)
+    if tail == .OrFallback(value, _, _, _, _) {
+        span = Span{start: expr_span(value).start, end: span.end}
+    }
+    sema_lint("L0508", span, "this {value_type} value is thrown away", "`{function}` has no return type, so it returns nothing and the value of its last line is lost", "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`")
+}
+
+// A lambda stored where no type is expected follows the declaration rule: with
+// no written result it returns nothing, as a named function does, so a value
+// its body ends in is thrown away (L0508) and `square: fn(n: Int) -> Int`
+// writes the result. A failure the body passes up stays inferred.
+sema_stmt_check_stored_lambda_result: fn(binding: Binding, init: TExpr, diagnostics: ^[Diagnostic]) {
+    if binding.init == .Lambda(lambda, _) && lambda.result == None && sema_expr_unwrap_tag(init.ty) == .Fn(_, ret, _, _, _, _) {
+        result: ret ?? return
+        success: if sema_expr_unwrap_tag(result) == .Result(ok, _) -> ok else -> result
+        if sema_stmt_type_is_unit_success(success) {
+            return
+        }
+        value_type: type_name(success)
+        tail := Expr?{None}
+        if lambda.body == {
+            .Expr(value) -> { tail = Val(value) }
+            .Block(statements) -> {
+                if statements.len() > 0 && statements[statements.len() - 1] == .Expr(last) {
+                    tail = Val(last)
+                }
+            }
+        }
+        if tail == .Val(last) {
+            diagnostics.push(sema_stmt_lost_tail_diagnostic(binding.name, value_type, last))
+            return
+        }
+        diagnostics.push(sema_lint("L0508", lambda.span, "this {value_type} value is thrown away", "`{binding.name}` has no return type, so it returns nothing and the value its body gives back is lost", "if `{binding.name}` should return it, write `-> {value_type}` after its parameter list"))
+    }
+}
+
+// The call a statement drops, under an automatic or written `?` or bare, and
+// whether its checked carrier is `T Never!`. Under `?` the call still carries
+// a failure unless its callee's contract is `T Never!`
+// declared, or projected onto a callee the #3708 failure solve proves
+// infallible after this one check (`sema_failure_reconcile_infallible`).
+SemaStmtDiscardedCall: struct {
+    call: TExpr,
+    infallible: Bool,
+}
+
+sema_stmt_discarded_call: fn(checked: TExpr) -> SemaStmtDiscardedCall? Never! {
+    inner := checked
+    if checked.kind == {
+        .Try(value, _, _) -> inner = value
+        .TryWithContext(value, _, _, _, _, _) -> inner = value
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> return Val(SemaStmtDiscardedCall{call: checked, infallible: true})
+    }
+    if sema_expr_unwrap_tag(inner.ty) == .Result(_, error) {
+        return Val(SemaStmtDiscardedCall{call: inner, infallible: sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"})})
+    }
+    None
+}
+
+// L0508 candidate: the statement drops the non-Unit result of a direct,
+// static or method call. Mark the call's fact; the solved effect phase
+// reports it when the callee's row is empty (pure means an
+// empty row and nothing passed with `^`). A call whose carrier can still fail
+// waits for the failure solve.
+sema_stmt_mark_discarded_result: fn(program: SemaProgramTables, checked: TExpr, fact_start: Int, context: ^SemaCheckContext) Never! {
+    discarded: sema_stmt_discarded_call(checked) ?? return
+    call: discarded.call
+    callee: if call.kind == {
+        .Call(callee, _, args) -> if sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> sema_symbol_find(program, sema_program_decl_key(program, callee))
+        .StaticCall(_, _, method, _, args) -> if sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> Val(method.symbol)
+        .MethodCall(receiver, method, _, args) -> {
+            written: if receiver.kind == {
+                .Borrow(_, access) -> access != AccessConvention.Read
+                .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> false
+            }
+            if written || sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> Val(method.symbol)
+        }
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
+    }
+    wanted: callee ?? return
+    index := context.call_facts.len() - 1
+    loop index >= fact_start {
+        if context.call_facts[index].callee == .Val(fact_callee) {
+            if fact_callee == wanted {
+                if discarded.infallible -> context.call_facts[index].discarded = true else {
+                    context.call_facts[index].discarded_if_infallible = true
+                }
+                return
+            }
+        }
+        index -= 1
+    }
+}
+
+// Rust `check_value_tail` on an unreachable value line infers it with the
+// promised type only as context (`infer_with_expected`): the value is never
+// compared against that type, handed back, or treated as a discarded result.
+// A value that only fails against the promised type is checked on its own.
+// Like a reachable last line (sema_stmt_check_return_value_typed), a value
+// may also fill the success side of a promised `T? Err!` or `T?`: the
+// closing `None` of a marker's `check` rule after an unconditional `reject`
+// is the rule's `CompilerRejection?`.
+sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> Bool {
+    expected := Type?{None}
+    candidates := [Type?]{return_type}
+    if sema_stmt_return_is_carrier(return_type) {
+        candidates.push(Val(sema_stmt_return_success_type(return_type)))
+    }
+    loop candidate in candidates {
+        probe_diagnostics := [Diagnostic]{}
+        probed: sema_probe_expression(tail, candidate, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+        if probed != None && !sema_has_error_since(probe_diagnostics, 0) {
+            expected = candidate
+            break
+        }
+    }
+    sema_check_expression(tail, expected, environment, program, scopes, state, tail_store, context, diagnostics) != None
+}

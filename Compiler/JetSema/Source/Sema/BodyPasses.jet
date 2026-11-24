@@ -1,0 +1,2154 @@
+// Function and method body passes over a module: the parallel body jobs its
+// check prepares on compiler threads, and the streamed pass that checks each
+// module's bodies as the registered graph allows.
+use jet_foundation.[
+    FnBody,
+    CompilerThreads,
+    CompilerTraceSink,
+    DIAGNOSTIC_ERROR,
+    Diagnostic,
+    InternerDelta,
+    module_index,
+    module_is_none,
+    module_none,
+    module_text,
+    Func,
+    TargetHardwareUse,
+    name_find,
+    Span,
+    SymbolID,
+    TFuncKind,
+    TGenericParam,
+    Type,
+    compiler_take_rows,
+    compiler_threads_admit,
+    compiler_threads_limit,
+    compiler_threads_failure_text,
+    symbol_table_key,
+    compiler_threads_heaviest_first,
+]
+
+// SP15: a module's top-level function and method bodies checked on compiler
+// threads. The parallel pass (sema_check_bodies_parallel) checks every body
+// sema_check_parallel_jobs and sema_check_parallel_method_jobs select against
+// the module scope as it stands after the view summaries, each thread on its
+// own copy of that scope and all of them on the one shared environment. The
+// module's serial body loop then takes each prepared result in body-loop
+// order instead of checking the body again (sema_check_module_function). It
+// checks a body itself when the prepared result no longer applies: an
+// earlier body published a return view that changed the module scope, or the
+// check wanted a host callback, which never runs on a compiler thread.
+// Reports, facts and functions are appended in body-loop order either way,
+// so the module result is the same for any thread count.
+// `checked` is optional only so the body loop can move it out
+// (sema_check_drain_body); every prepared body has one.
+SemaParallelBody: struct {
+    job_index: Int,
+    checked: SemaFunctionResult?,
+    diagnostics: [Diagnostic],
+    call_facts: [SemaCallSiteFact],
+    comptime_requests: [SemaComptimeRequest],
+    name_references: [SemaNameReferenceFact],
+    method_input: SemaMethodInput?,
+    wanted_hooks: Bool,
+    // A top-level body's memory plan row, as the thread that checked it
+    // looked it up (memory_known), so the module pass need not look it up again.
+    memory_position: Int?{None},
+    memory_known: Bool{false},
+    // What the check demanded of the generated codecs and derived methods,
+    // when its thread recorded that apart (sema_check_body_demand_apart)
+    // or the Core library's check captured it (CoreBodies.jet); the module
+    // pass that takes the packet records it again
+    // (sema_check_body_demand_replay).
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
+}
+
+// A module's parallel body pass: the post-summary module scope (one row, or
+// none when the module checks serially) and the prepared function and method
+// bodies, each list last first, so the body loop pops them in its order.
+SemaPreparedBodies: struct {
+    scopes: [SemaScopeTable],
+    bodies: [SemaParallelBody],
+    body_deltas: [InternerDelta?]{[InternerDelta?]{}},
+    // A body stream's checks of the module's parallel method jobs
+    // (sema_check_registered_parallel_method_jobs), last first like `bodies`;
+    // `methods_prepared` when the stream selected those jobs.
+    methods: [SemaParallelBody]{[SemaParallelBody]{}},
+    method_deltas: [InternerDelta?]{[InternerDelta?]{}},
+    methods_prepared: Bool{false},
+    // The module's declaration and program checks when its pass made them
+    // ahead (sema_check_declaration_modules), else None.
+    started: SemaDeclarationCheck?{None},
+}
+
+sema_check_prepared_none: fn() -> SemaPreparedBodies Never! {
+    SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaParallelBody]{}}
+}
+
+// Consume a body's prepared check in canonical source order. A wanted host
+// callback or a changed top-level return-view scope requires the same check
+// inline; none of that provisional result's reports or facts are published.
+sema_check_take_body: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, out_delta: ^[InternerDelta]) -> SemaParallelBody? Never! {
+    loop ready.len() > 0 && ready[ready.len() - 1].job_index < job_index {
+        _ := ready.pop()
+        if ready_deltas.len() > 0 -> _ := ready_deltas.pop()
+    }
+    if ready.len() > 0 && ready[ready.len() - 1].job_index == job_index {
+        if ready_deltas.len() > 0 {
+            if ready_deltas.pop() == .Val(maybe_delta) {
+                if maybe_delta == .Val(delta) -> out_delta.push(delta)
+            }
+        }
+        return ready.pop()
+    }
+    None
+}
+
+sema_check_drain_body: fn(body: ^^SemaParallelBody, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact]) -> SemaFunctionResult {
+    packet := body.move()
+    // Moved, not copied: the packet is spent here.
+    diagnostics.extend(packet.diagnostics.move())
+    call_facts.extend(packet.call_facts.move())
+    comptime_requests.extend(packet.comptime_requests.move())
+    name_references.extend(packet.name_references.move())
+    taken := packet.checked.move()
+    packet.checked = None
+    taken.move() ?? panic("an accepted body packet has no checked result")
+}
+
+// Records again what the check of the packet `body` demanded of the
+// generated codecs and derived methods (SemaParallelBody.codec_demand), as
+// the module pass would have checking it itself.
+sema_check_body_demand_replay: fn(program: SemaProgramTables, body: SemaParallelBody) {
+    if body.codec_demand.len() == 0 && body.derive_demand.len() == 0 {
+        return
+    }
+    if program.registration_graph == .Val(graph) {
+        sema_demand_capture_replay(graph, body.codec_demand, body.derive_demand)
+    }
+}
+
+sema_check_module_function: fn(ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], job_index: Int, scopes_changed: Bool, job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: ^SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: ^[Diagnostic], call_facts: ^[SemaCallSiteFact], comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], count_work: Bool, functions_checked: ^Int) -> SemaFunctionResult {
+    prepared := sema_check_take_body(ready, ready_deltas, job_index, scopes.type_delta)
+    if prepared != None {
+        body := prepared.move() ?? panic("a prepared function packet disappeared")
+        prepared = None
+        if !scopes_changed && !body.wanted_hooks {
+            // Preserve the original method side effect.
+            if function_kind != TFuncKind.TopLevel {
+                sema_function_check_registered_name(job, module_index, memory_plan, memory_position, environment, program)
+            }
+            sema_check_body_demand_replay(program, body)
+            return sema_check_drain_body(body, diagnostics, call_facts, comptime_requests, name_references)
+        }
+        scopes.type_delta = [InternerDelta]{}
+    }
+    if count_work -> functions_checked += 1
+    sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+}
+
+// A compiler thread is admitted for at least this many bytes of function
+// source, so a small program checks its bodies on the calling thread. A
+// thread's fixed cost is its light scope copy (sema_scope_light_copy, a few
+// hundred bytes per scope row); 32 KB per thread left every Core module of
+// the self-compile (most under 64 KB of bodies) on one thread, about 6 s of
+// the pass after the entry module's parallel check.
+SEMA_BODY_MIN_BYTES_PER_THREAD: 4096
+
+// Estimated bytes of one thread's copy of the module scope, per module item.
+// The comptime prechecks' scope admission still uses this per-item estimate.
+SEMA_BODY_SCOPE_BYTES_PER_ITEM: 4096
+
+// Estimated bytes of one body thread's light copy of the module scope
+// (sema_scope_light_copy), per scope binding row. A full row measured about
+// 32 KB (one copy of the whole-compiler scope, about 25k module rows, was
+// about 0.8 GB), almost all of it the module functions' types; the light copy
+// leaves those in the shared module scope and keeps each row's identity
+// strings, span, flags and non-function type, a few hundred bytes. The
+// namespace rows still make a module scope span its whole package.
+SEMA_BODY_SCOPE_BYTES_PER_BINDING: 2048
+
+// The work one generated codec method's check counts for thread admission,
+// in bytes of function source: it has no source text of its own (its span
+// is its type's derive marker), and its check costs about what a 4 KB
+// function's does (the self-compile's 1052 codecs took 3.7 s on one thread).
+SEMA_CODEC_JOB_BYTES: 4096
+
+// The work one derived method's check counts for thread admission, like a
+// codec's (SEMA_CODEC_JOB_BYTES): its span is its type's derive marker. It
+// costs about an eighth of a codec's (the Core check's 2139 derived methods
+// took 1.15 s on one thread).
+SEMA_DERIVE_JOB_BYTES: 512
+
+// The module-level binding rows sema_registration_apply_graph_module gives
+// module `module_index`'s scope: its declarations, import bindings and
+// package namespace rows (the compiler builtins are a fixed few more).
+sema_check_module_scope_rows: fn(graph: SemaRegistrationGraph, module_index: Int) -> Int Never! {
+    rows := graph.modules[module_index].symbols.len() + graph.modules[module_index].namespace_bindings.len()
+    loop import_index in 0..<graph.modules[module_index].imports.len() {
+        rows += graph.modules[module_index].imports[import_index].bindings.len()
+    }
+    rows
+}
+
+// What every body-check thread reads: the pass environment and memory plan,
+// each moved in as the one row of its list for the pass and moved out
+// between modules, so neither is copied. A body stream's module
+// environments are its cells' (SemaStreamCells.environments).
+SemaCheckShared: struct {
+    environments: [SemaScopeEnvironment],
+    programs: [SemaProgramTables],
+    memory_plans: [SemaFunctionMemoryPlan],
+}
+
+// Addresses only: the AST, owner and trait stay in the frozen graph. Method
+// ordinals are the nominal-then-impl source order used by ordered application.
+SemaBodyJob: enum {
+    TopLevel(item_index: Int),
+    NominalMethod(ordinal: Int, nominal_index: Int, method_index: Int),
+    ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int),
+}
+
+// The body's existing shared lifecycle, absent for declaration-only checks.
+SemaMethodScheduling: struct {
+    shared_state: Shared<SemaCheckShared>,
+    threads: CompilerThreads,
+}
+
+// The canonical module checker owns these rows while it runs. Returning
+// them transports ownership back to all callers without moving from a borrow.
+SemaOwnedModuleCheck: struct {
+    module_result: SemaGraphModuleResult,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    memory_plan: SemaFunctionMemoryPlan,
+}
+
+// One thread of a module's parallel body pass: its own copy of the
+// post-summary module scope, and the bodies it checked with each one's
+// position in the pass's job list, in the order it claimed them.
+SemaBodyPart: struct {
+    scopes: SemaScopeTable,
+    bodies: [SemaParallelBody],
+    positions: [Int],
+    deltas: [InternerDelta?]{[InternerDelta?]{}},
+}
+
+// What every thread of a module's parallel body pass reads: the jobs in job
+// order and the order they are claimed in (`order[rank]` is a job position,
+// heaviest source first).
+SemaBodyPlan: struct {
+    jobs: [SemaBodyJob],
+    order: [Int],
+}
+
+// A body stream module's environment, entered in the module with its
+// post-summary scope moved in: the one row its jobs read until the module
+// check takes the scope back (none for a module without stream jobs).
+SemaStreamEnvironment: struct {
+    environments: [SemaScopeEnvironment],
+    light_scopes: [SemaScopeTable]{[SemaScopeTable]{}},
+}
+
+// The bodies a body stream module's jobs published, each with its job
+// position, in the order the threads finished them, and how many of its
+// jobs are still `left`; `ready` once its last job published (a module
+// without jobs once it opened), `failed` once a stream thread failed. The
+// stream's lead waits on these for the module it checks next
+// (sema_check_body_stream_await). `codec_demand` and `derive_demand`: what
+// its preparation demanded of the generated codecs and derived methods,
+// when its checks record that apart (sema_check_stream_module_prep), which
+// the lead records again before it checks the module
+// (sema_check_body_stream_replay).
+SemaStreamOut: struct {
+    bodies: [SemaParallelBody],
+    positions: [Int],
+    deltas: [InternerDelta?]{[InternerDelta?]{}},
+    left: Int,
+    ready: Bool,
+    failed: Bool,
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
+    started: [SemaDeclarationCheck]{[SemaDeclarationCheck]{}},
+    finished: [SemaGraphModuleResult]{[SemaGraphModuleResult]{}},
+    finish_codec_demand: [String]{[String]{}},
+    finish_derive_demand: [String]{[String]{}},
+}
+
+// Every body stream module's environment cell, published bodies and the
+// view summary jobs its declaration check found ahead, in stream module
+// order; every thread of the stream reads them for its whole run.
+SemaStreamCells: struct {
+    environments: [Shared<SemaStreamEnvironment>],
+    outs: [Shared<SemaStreamOut>],
+    view_jobs: [[Int]?],
+}
+
+// The next unclaimed rank of a parallel body pass, taken with one atomic add.
+SemaBodyQueue: struct {
+    next: Atomic<Int>,
+}
+
+// One claimed job: its position in its job list, or -1 when every job is
+// claimed, and in a body stream its stream module and that module's graph
+// module (-1 outside a stream).
+SemaBodyClaim: struct {
+    position: Int,
+    job: SemaBodyJob,
+    stream_module: Int,
+    module_index: Int,
+}
+
+// The item indexes of module `module_index`'s top-level functions a compiler
+// thread can check, in item order: not foreign (the foreign stage checks
+// those), not already checked by comptime (the body loop takes that result),
+// not waiting for demand (sema_core_demand_deferred), and not reaching an unusable
+// declaration (sema_checked_unusable_bodies); during a Core demand wave
+// (graph.core_wave_rows) only that wave's, and during a codec or derive wave
+// (graph.codec_wave_rows, graph.derive_wave_rows) none: those check methods
+// alone, nor in a module whose checks stay on the module pass's thread
+// (CoreBodies.jet sema_core_bodies_held). `weights` gets each one's source
+// bytes.
+sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] Never! {
+    source_module: graph.modules[module_index]
+    core_wave: sema_core_wave_size(graph.core_wave_rows) > 0
+    jobs := [SemaBodyJob]{}
+    if graph.codec_wave_rows.len() > 0 || graph.derive_wave_rows.len() > 0 || sema_core_bodies_held(graph, source_module) {
+        return jobs
+    }
+    item_index := 0
+    loop item in source_module.program.items {
+        if item == .Func(func) {
+            key: sema_check_top_level_key(module_text(graph.module_table, source_module.module_identity), func.name)
+            waiting: if core_wave -> name_find(graph.core_wave_rows, key) == None else -> sema_core_demand_deferred(graph, key)
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && sema_comptime_function_row(comptime_rows, source_module.module_identity, key) == None && !waiting && !sema_check_unusable_body(graph, key) {
+                jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
+                weights.push(func.span.end - func.span.start)
+            }
+        }
+        item_index += 1
+    }
+    jobs
+}
+
+// Exactly the original nominal-then-impl order, with impl lookup duplicates
+// omitted once. The same addresses select workers and drive ordered apply.
+// A generated codec impl whose body no demand has filled is skipped; during a
+// codec wave (graph.codec_wave_rows) only that wave's filled codecs are jobs.
+// A demand-checked derived method (graph.derive_method_rows) is a job only
+// once a derive wave checked it (graph.derive_checked, so a recheck keeps
+// it); during a derive wave (graph.derive_wave_rows) only that wave's are.
+// A deferred Core body (sema_core_demand_deferred) is not a job; during a
+// Core demand wave (graph.core_wave_rows) only that wave's bodies are. A
+// body that reaches an unusable declaration (sema_checked_unusable_bodies)
+// is never a job.
+sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, impl_rows_scanned: ^Int, count_work: Bool) -> [SemaBodyJob] Never! {
+    jobs := [SemaBodyJob]{}
+    codec_wave: graph.codec_wave_rows.len() > 0
+    derive_wave: graph.derive_wave_rows.len() > 0
+    core_wave: sema_core_wave_size(graph.core_wave_rows) > 0
+    if !codec_wave {
+        loop (nominal_index, nominal) in source_module.nominals {
+            // An impl method's nominal row shares its key and declaration span; a
+            // method of a nested `impl Trait { … }` block that only shares the key
+            // (a user codec beside a generated one, E0105) is still its own job.
+            // Each impl method's declaration spans (sema_core_demand_span_slot)
+            // by its SymbolID.
+            impl_method_spans := [U32:[Int]]{}
+            loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                if count_work -> impl_rows_scanned += 1
+                loop method_index in 0..<graph.modules[impl_row.module_index].impls[impl_row.row].methods.len() {
+                    impl_method: graph.modules[impl_row.module_index].impls[impl_row.row].methods[method_index]
+                    span_slot: sema_core_demand_span_slot(impl_method.declaration.span.start, impl_method.declaration.span.end)
+                    if impl_method_spans.get(impl_method.symbol.id.id) == None -> impl_method_spans[impl_method.symbol.id.id] = [Int]{}
+                    impl_method_spans[impl_method.symbol.id.id].push(span_slot)
+                }
+            }
+            loop (method_index, method) in nominal.methods {
+                method_key: symbol_table_key(graph.symbols, method.symbol.id)
+                shared_span: if impl_method_spans.get(method.symbol.id.id) == .Val(spans) -> spans.contains(sema_core_demand_span_slot(method.declaration.span.start, method.declaration.span.end)) else -> false
+                if shared_span || sema_check_unusable_body(graph, method_key) {
+                    next
+                }
+                if core_wave {
+                    if name_find(graph.core_wave_rows, method_key) == None -> next
+                } else if method.declaration.compiler_generated && graph.derive_method_rows.get(method.symbol.id.id) != None {
+                    if derive_wave {
+                        if graph.derive_wave_rows.get(method.symbol.id.id) == None -> next
+                    } else if graph.derive_checked.get(method.symbol.id.id) == None { next }
+                } else if derive_wave || sema_core_demand_deferred(graph, method_key) { next }
+                jobs.push(SemaBodyJob.NominalMethod{ordinal: jobs.len(), nominal_index: nominal_index, method_index: method_index})
+            }
+        }
+    }
+    if derive_wave -> return jobs
+    module_index: sema_registration_module_index(graph, source_module.module_identity) ?? -1
+    // A top-level impl the orphan rule refuses (E0902) checks no body.
+    coherence := SemaCheckedCoherence?{None}
+    loop (implementation_index, implementation) in source_module.impls {
+        if codec_wave {
+            if graph.codec_wave_rows.get(sema_codec_wave_slot(module_index, implementation_index)) == None -> next
+        } else if sema_codec_impl_pending(implementation) { next }
+        if implementation.declaration.trait_name != None && module_is_none(implementation.target_module_identity) {
+            if coherence == None -> coherence = Val(sema_checked_coherence_state(source_module))
+            if coherence == .Val(state) {
+                if sema_checked_impl_refused(graph, source_module, state, implementation) -> next
+            }
+        }
+        loop (method_index, method) in implementation.methods {
+            method_key: symbol_table_key(graph.symbols, method.symbol.id)
+            if sema_check_unusable_body(graph, method_key) -> next
+            if core_wave {
+                if name_find(graph.core_wave_rows, method_key) == None -> next
+            } else if sema_core_demand_deferred(graph, method_key) { next }
+            jobs.push(SemaBodyJob.ImplMethod{ordinal: jobs.len(), implementation_index: implementation_index, method_index: method_index})
+        }
+    }
+    jobs
+}
+
+// A method a compiler thread may check: not already checked by comptime, and
+// with a memory plan row. A generic owner's method is one too: its owner's
+// generic parameters come with its input (SemaMethodInput.generic_params) and
+// the thread checks it on its own copy of the environment with them set
+// (sema_function_check_registered_on_thread), as the lead does.
+sema_check_method_parallel_eligible: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, comptime_rows: SemaComptimeFunctionRows) -> Bool {
+    if sema_comptime_function_row(comptime_rows, source_module.module_identity, symbol_table_key(graph.symbols, registered.symbol.id)) != None {
+        return false
+    }
+    if memory_plan.all_plain -> return true
+    memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) != None
+}
+
+sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, generic_params: [TGenericParam], all_jobs: [SemaBodyJob], comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
+    jobs := [SemaBodyJob]{}
+    if generic_params.len() != 0 || sema_core_bodies_held(graph, source_module) -> return jobs
+    loop job in all_jobs {
+        if job == {
+            .NominalMethod(_, nominal_index, method_index) -> {
+                nominal: source_module.nominals[nominal_index]
+                method: nominal.methods[method_index]
+                if !sema_check_method_parallel_eligible(graph, source_module, memory_plan, method, nominal.ty, comptime_rows) {
+                    next
+                }
+                weights.push(method.declaration.span.end - method.declaration.span.start)
+            }
+            .ImplMethod(_, implementation_index, method_index) -> {
+                implementation: source_module.impls[implementation_index]
+                method: implementation.methods[method_index]
+                if !sema_check_method_parallel_eligible(graph, source_module, memory_plan, method, implementation.target_type, comptime_rows) {
+                    next
+                }
+                weights.push(method.declaration.span.end - method.declaration.span.start)
+            }
+            .TopLevel(_) -> panic("a top-level job entered the method wave")
+        }
+        jobs.push(job.copy())
+    }
+    jobs
+}
+
+// A compiler thread that checked a body also walks it for the module's
+// prelude conversion demands (sema_prelude_conversion_demands), so the
+// module check's demand walk (sema_inject_prelude_error_conversions) reads
+// them instead of walking that body again. The checked function moves into
+// a one-row list for the walk and back into the returned result.
+sema_check_walk_prelude_demands: fn(checked: ^^SemaFunctionResult, module_identity: String) -> SemaFunctionResult {
+    walked := checked.move()
+    if walked.value == None -> return walked
+    taken := walked.value.move()
+    walked.value = None
+    functions := [FnBody]{taken.move() ?? panic("a checked body lost its function")}
+    walked.prelude_demands = Val(sema_prelude_conversion_demands(module_identity, functions, [Int:[SemaPreludeConversionDemand]]{}))
+    function := functions.pop() ?? panic("a walked body lost its function")
+    walked.value = Val(function.move())
+    walked
+}
+
+sema_check_prepare_method_body: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ordinal: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, wanted: Shared<SemaHostHookWanted>) -> SemaParallelBody {
+    memory_position: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
+    input := sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program)
+    diagnostics := input.diagnostics.move()
+    input.diagnostics = [Diagnostic]{}
+    call_facts := [SemaCallSiteFact]{}
+    comptime_requests := [SemaComptimeRequest]{}
+    name_references := [SemaNameReferenceFact]{}
+    owner_id: sema_check_registered_function_id(job, module_index, environment, program)
+    raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
+    checked := sema_function_check_registered_on_thread(job, module_index, memory_plan, memory_position, owner_id, input.function_kind, raw_protocol_return, input.generic_params, environment, program, scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
+    checked = sema_check_walk_prelude_demands(checked, sema_check_registered_module_text(program, sema_check_registered_module_identity(environment, program, module_index)))
+    SemaParallelBody{job_index: ordinal, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: Val(input.move()), wanted_hooks: sema_host_hook_was_wanted(wanted)}
+}
+
+// One thread's checks: it claims the plan's jobs one at a time, heaviest
+// source first, until none is left, and checks each on its own scope copy.
+// The existing guard_read remains in sema_check_body_part. Both retained
+// owners stay pinned until this read-only worker returns; admission/join and
+// packet publication are unchanged. A thread whose packets carry their
+// checks' demand (sema_check_body_demand_apart) checks on a program whose
+// graph records it in rows of the thread's own
+// (sema_comptime_function_thread_program).
+sema_check_body_part_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: ^SemaBodyPart, plan: Shared<SemaBodyPlan>, queue: SemaBodyQueue, module_index: Int, trace_sink: CompilerTraceSink?) -> Int {
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    jobs: plan.guard_read()
+    checked_count := 0
+    if sema_check_body_demand_apart(program) {
+        thread_program: sema_comptime_function_thread_program(program)
+        loop {
+            claim: sema_check_body_claim(jobs.value, queue, trace_sink)
+            if claim.position < 0 -> break
+            checked_count += sema_check_body_claimed(environment, thread_program, memory_plan, part, claim, module_index, wanted)
+        }
+        return checked_count
+    }
+    loop {
+        claim: sema_check_body_claim(jobs.value, queue, trace_sink)
+        if claim.position < 0 -> break
+        checked_count += sema_check_body_claimed(environment, program, memory_plan, part, claim, module_index, wanted)
+    }
+    checked_count
+}
+
+// Whether the body threads of `program`'s check record what each check
+// demands of the generated codecs and derived methods apart, in its packet
+// (SemaParallelBody.codec_demand): in the Core library's check, which
+// captures each Core function's check with its demand (CoreBodies.jet).
+// Elsewhere the threads record it in the graph's shared rows.
+sema_check_body_demand_apart: fn(program: SemaProgramTables) -> Bool Never! {
+    if program.registration_graph == .Val(graph) -> return graph.core_seal
+    false
+}
+
+// One thread of a body stream (sema_check_body_stream): until the stream
+// stops (sema_check_body_stream_next) it prepares each stream module it
+// claims against the pass environment's copy in `shared`, with the host
+// callbacks withheld (sema_check_stream_module_prep), and checks each body
+// job it claims (sema_check_body_stream_job). A thread whose checks record
+// their demand apart (sema_check_body_demand_apart) checks and prepares on
+// a program whose graph records it in rows of the thread's own
+// (sema_comptime_function_thread_program).
+SemaStreamFinishArgs: struct {
+    values: [SemaComptimeItemValue],
+    comptime_functions: [SemaComptimeFunctionResult],
+    comptime_rows: SemaComptimeFunctionRows,
+    pending_obligations: Bool,
+}
+
+SemaStreamHandle: struct {
+    stream: Shared<SemaBodyStream>,
+    work: Condition,
+    changed: Condition,
+}
+
+sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, args: SemaStreamFinishArgs, kind: SemaWaveKind) {
+    inputs: shared.guard_read()
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}
+    current := -1
+    parallel_finish: kind == SemaWaveKind.Modules
+    own_program := SemaProgramTables?{None}
+    if sema_check_body_demand_apart(inputs.value.programs[0]) {
+        own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
+    }
+    loop {
+        step: sema_check_body_stream_next(handle, current)
+        if step.finish {
+            if own_program == {
+                .Val(program) -> {
+                    sema_check_body_stream_finish_module(inputs.value.environments[0], program, inputs.value.memory_plans[0], cells, handle, step, args, wanted, true)
+                }
+                .None -> {
+                    sema_check_body_stream_finish_module(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, step, args, wanted, false)
+                }
+            }
+            next
+        }
+        if step.action == {
+            .Body -> {
+                if own_program == {
+                    .Val(program) -> {
+                        sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, parallel_finish, step.can_finish)
+                    }
+                    // Passed straight through: a local binding of a guarded row would copy it.
+                    .None -> {
+                        sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, parallel_finish, step.can_finish)
+                    }
+                }
+            }
+            .Prep -> {
+                sema_host_hook_unwant(wanted)
+                prep := if own_program == .Val(program) -> sema_check_stream_module_prep(inputs.value.environments[0], program, Val(SemaHostHookAccess.Withheld{wanted: wanted}), inputs.value.memory_plans[0], step.module_index, step.tops, cells.view_jobs[step.stream_module], args.comptime_functions, args.comptime_rows, kind) else -> sema_check_stream_module_prep(inputs.value.environments[0], inputs.value.programs[0], Val(SemaHostHookAccess.Withheld{wanted: wanted}), inputs.value.memory_plans[0], step.module_index, step.tops, cells.view_jobs[step.stream_module], args.comptime_functions, args.comptime_rows, kind)
+                prep.wanted_hooks = sema_host_hook_was_wanted(wanted)
+                sema_check_body_stream_open(cells, handle, step.stream_module, step.tops, prep, parallel_finish, step.can_finish)
+            }
+            .Await | .Stop -> break
+        }
+    }
+}
+
+sema_check_body_stream_finish_module: fn(base_environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, cells: SemaStreamCells, handle: SemaStreamHandle, step: SemaStreamStep, args: SemaStreamFinishArgs, wanted: Shared<SemaHostHookWanted>, apart: Bool) {
+    stream_module: step.stream_module
+    bodies := sema_check_prepared_none()
+    finish_env := if step.prepared -> sema_check_body_stream_take_environment(cells, stream_module, bodies.scopes) else -> base_environment
+    if step.prepared {
+        placed := [SemaParallelBody?]{}
+        placed_deltas := [InternerDelta?]{}
+        loop _ in 0..<step.total {
+            placed.push(None)
+            placed_deltas.push(None)
+        }
+        sema_check_body_stream_place(cells.outs[stream_module], placed, placed_deltas)
+        loop placed.len() > step.tops {
+            popped := placed.pop() ?? break
+            delta := placed_deltas.pop() ?? None
+            body := popped.move() ?? next
+            bodies.methods.push(body)
+            bodies.method_deltas.push(delta)
+        }
+        bodies.methods_prepared = true
+        loop placed.len() > 0 {
+            popped := placed.pop() ?? break
+            delta := placed_deltas.pop() ?? None
+            body := popped.move() ?? next
+            bodies.bodies.push(body)
+            bodies.body_deltas.push(delta)
+        }
+    }
+    bodies.started = sema_check_body_stream_take_started(cells, stream_module)
+    sema_host_hook_unwant(wanted)
+    if apart && program.registration_graph == .Val(graph) -> _ := sema_demand_drain(graph)
+    checked := sema_check_registration_module_lent(finish_env, program, Val(SemaHostHookAccess.Withheld{wanted: wanted}), memory_plan, step.module_index, args.values, args.comptime_functions, args.comptime_rows, args.pending_obligations, bodies, "", None)
+    finish_codecs := [String]{}
+    finish_derived := [String]{}
+    if apart && program.registration_graph == .Val(graph) {
+        demand := sema_demand_drain(graph)
+        finish_codecs = compiler_take_rows<String>(demand.codecs)
+        finish_derived = compiler_take_rows<String>(demand.derived)
+    }
+    if sema_host_hook_was_wanted(wanted) {
+        sema_check_body_stream_queue_lead(handle, stream_module, true)
+        return
+    }
+    sema_check_body_stream_mark_ready(cells, stream_module, Val(checked.move()), finish_codecs, finish_derived, handle.changed)
+    sema_check_body_stream_done_slot(handle, stream_module)
+}
+
+sema_check_body_stream_take_environment: fn(cells: SemaStreamCells, stream_module: Int, scopes: ^[SemaScopeTable]) -> SemaScopeEnvironment {
+    held: cells.environments[stream_module].guard_edit()
+    held.value.light_scopes = [SemaScopeTable]{}
+    entered := held.value.environments.pop() ?? panic("a body-stream module lost its environment")
+    taken := entered.module_scope.move()
+    entered.module_scope = None
+    scopes.push(taken.move() ?? panic("a body-stream module scope left its environment"))
+    entered
+}
+
+sema_check_body_stream_take_started: fn(cells: SemaStreamCells, stream_module: Int) -> SemaDeclarationCheck? {
+    held: cells.outs[stream_module].guard_edit()
+    held.value.started.pop()
+}
+
+sema_check_body_stream_mark_ready: fn(cells: SemaStreamCells, stream_module: Int, finished: ^^SemaGraphModuleResult?, codecs: ^^[String], derived: ^^[String], changed: Condition) {
+    held: cells.outs[stream_module].guard_edit()
+    if finished.move() == .Val(module_result) {
+        held.value.finished.push(module_result)
+        held.value.finish_codec_demand = codecs.move()
+        held.value.finish_derive_demand = derived.move()
+    }
+    held.value.ready = true
+    changed.notify_all()
+}
+
+sema_check_body_stream_take_finished: fn(cells: SemaStreamCells, stream_module: Int) -> SemaGraphModuleResult? {
+    held: cells.outs[stream_module].guard_edit()
+    held.value.finished.pop()
+}
+
+// Stops a body stream: once its lead checked every module, or (`failed`)
+// once a stream thread failed, when every module's bodies are marked failed
+// too, so the lead stops waiting and the failed thread's error reaches the
+// stream's join. Wakes every waiting thread.
+sema_check_body_stream_stop: fn(cells: SemaStreamCells, handle: SemaStreamHandle, failed: Bool) {
+    sema_check_body_stream_end(handle, failed)
+    if !failed {
+        return
+    }
+    loop at in 0..<cells.outs.len() {
+        held: cells.outs[at].guard_edit()
+        held.value.failed = true
+    }
+    handle.changed.notify_all()
+}
+
+sema_check_body_stream_end: fn(handle: SemaStreamHandle, failed: Bool) {
+    held: handle.stream.guard_edit()
+    if failed -> held.value.failed = true else -> held.value.finished = true
+    handle.work.notify_all()
+}
+
+// Waits until stream module `stream_module`'s jobs are all published; false
+// when a stream thread failed first.
+sema_check_body_stream_await: fn(cells: SemaStreamCells, stream_module: Int, changed: Condition) -> Bool {
+    held: cells.outs[stream_module].guard_edit()
+    held.wait(changed, fn(value) { value.ready || value.failed }) ?? panic("a body stream's lead could not wait for its threads")
+    !held.value.failed
+}
+
+// Checks one claimed batch of body stream jobs of the same stream module
+// against its environment, on `part`'s light copy of that module's scope,
+// then publishes all bodies of the batch in one edit guard.
+sema_check_body_stream_job: fn(program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, cells: SemaStreamCells, handle: SemaStreamHandle, part: ^SemaBodyPart, current: ^Int, claims: [SemaBodyClaim], wanted: Shared<SemaHostHookWanted>, parallel_finish: Bool, can_finish: Bool) {
+    if claims.len() == 0 {
+        return
+    }
+    stream_module: claims[0].stream_module
+    _ := sema_check_body_stream_claimed_batch(cells.environments[stream_module], program, memory_plan, part, current, claims, wanted)
+    if sema_check_body_stream_publish(cells.outs[stream_module], part, claims.len(), handle.changed, parallel_finish) {
+        held: handle.stream.guard_edit()
+        if can_finish {
+            held.value.ready_finish.push(stream_module)
+        } else {
+            held.value.lead_pending.push(stream_module)
+        }
+        handle.work.notify_all()
+    }
+}
+
+sema_check_body_stream_claimed_batch: fn(cell: Shared<SemaStreamEnvironment>, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: ^SemaBodyPart, current: ^Int, claims: [SemaBodyClaim], wanted: Shared<SemaHostHookWanted>) -> Int {
+    held: cell.guard_read()
+    stream_module: claims[0].stream_module
+    if stream_module != current {
+        current = stream_module
+        saved_delta := part.scopes.type_delta.pop()
+        part.scopes = if held.value.light_scopes.len() > 0 -> sema_scope_light_copy(held.value.light_scopes[0]) else -> sema_check_body_stream_scope_copy(held.value.environments[0])
+        if saved_delta == .Val(delta) -> part.scopes.type_delta.push(delta)
+    }
+    done := 0
+    loop claim in claims {
+        done += sema_check_body_claimed(held.value.environments[0], program, memory_plan, part, claim, claim.module_index, wanted)
+    }
+    done
+}
+
+// Moves the bodies a batch left in `part` into its stream module's published
+// bodies `out`, then subtracts `count` from `left`; returns true when
+// `parallel_finish` should enqueue the module for finalization after
+// releasing `out`.
+sema_check_body_stream_publish: fn(out: Shared<SemaStreamOut>, part: ^SemaBodyPart, count: Int, changed: Condition, parallel_finish: Bool) -> Bool {
+    held: out.guard_edit()
+    loop part.bodies.len() > 0 {
+        body: part.bodies.pop() ?? break
+        position: part.positions.pop() ?? panic("a checked body has no job position")
+        delta: part.deltas.pop() ?? None
+        held.value.bodies.push(body)
+        held.value.positions.push(position)
+        held.value.deltas.push(delta)
+    }
+    held.value.left -= count
+    if held.value.left > 0 {
+        return false
+    }
+    if parallel_finish {
+        return true
+    }
+    held.value.ready = true
+    changed.notify_all()
+    false
+}
+
+// A light copy of a stream module's scope (sema_check_body_part_copy_scope),
+// read in place through the read parameter.
+sema_check_body_stream_scope_copy: fn(environment: SemaScopeEnvironment) -> SemaScopeTable {
+    if environment.module_scope == .Val(source) -> return sema_scope_light_copy(source)
+    panic("a body-stream module scope left its environment")
+}
+
+// Checks one claimed job of module `module_index` on `part`'s scope copy and
+// records its body at the claim's position; 1 when it checked a body. A
+// thread that records its checks' demand apart
+// (sema_check_body_demand_apart) puts each check's in its packet.
+sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, memory_plan: SemaFunctionMemoryPlan, part: ^SemaBodyPart, claim: SemaBodyClaim, module_index: Int, wanted: Shared<SemaHostHookWanted>) -> Int {
+    if program.registration_graph == .Val(graph) {
+        sema_host_hook_unwant(wanted)
+        apart: graph.core_seal
+        if apart -> sema_demand_capture_open(graph)
+        packet_at: part.bodies.len()
+        part.scopes.type_delta = [InternerDelta]{}
+        if claim.job == {
+            .TopLevel(item_index) -> {
+                // The function's span is read through a read parameter:
+                // a pattern over the payload binding copied the function.
+                if sema_registered_top_level_func_span(graph, module_index, item_index) == .Val(func_span) {
+                    memory_position: sema_function_memory_position(memory_plan, graph.modules[module_index].module_identity, "", sema_registered_job_function_name(graph, claim.job, module_index), func_span)
+                    diagnostics := [Diagnostic]{}
+                    call_facts := [SemaCallSiteFact]{}
+                    comptime_requests := [SemaComptimeRequest]{}
+                    name_references := [SemaNameReferenceFact]{}
+                    checked := sema_function_check_registered_on_thread(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
+                    checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
+                    part.bodies.push(SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true})
+                    part.positions.push(claim.position)
+                    part.deltas.push(part.scopes.type_delta.pop())
+                }
+            }
+            .NominalMethod(ordinal, _, _) -> {
+                part.bodies.push(sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted))
+                part.positions.push(claim.position)
+                part.deltas.push(part.scopes.type_delta.pop())
+            }
+            .ImplMethod(ordinal, _, _) -> {
+                part.bodies.push(sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted))
+                part.positions.push(claim.position)
+                part.deltas.push(part.scopes.type_delta.pop())
+            }
+        }
+        if apart {
+            demand := sema_demand_capture_close(graph)
+            if part.bodies.len() > packet_at {
+                part.bodies[packet_at].codec_demand = compiler_take_rows<String>(demand.codecs)
+                part.bodies[packet_at].derive_demand = compiler_take_rows<String>(demand.derived)
+            }
+        }
+        return 1
+    }
+    0
+}
+
+// Claims the next rank of `queue` (one atomic add) and reads its job from
+// `plan`; position -1 once every job is claimed. A thread holds read guards
+// on both for its whole run, so claiming takes no lock. The pass's calling
+// thread, which holds the trace sink, passes it: its claims report
+// `sema.bodies` progress (sema_check_body_progress), so a module whose
+// bodies the threads check shows progress inside the module; the other
+// threads pass None.
+sema_check_body_claim: fn(plan: SemaBodyPlan, queue: SemaBodyQueue, trace_sink: CompilerTraceSink?) -> SemaBodyClaim {
+    rank: queue.next.add(1)
+    total: plan.order.len()
+    if rank >= total {
+        return SemaBodyClaim{position: -1, job: SemaBodyJob.TopLevel{item_index: -1}, stream_module: -1, module_index: -1}
+    }
+    sema_check_body_progress(trace_sink, rank, 1, total)
+    position: plan.order[rank]
+    SemaBodyClaim{position: position, job: plan.jobs[position], stream_module: -1, module_index: -1}
+}
+
+// A claim of `count` jobs from rank `rank` of a body pass's `total` reports
+// its last rank as `sema.bodies` progress when it holds a multiple of
+// SEMA_CHECK_PROGRESS_STRIDE or the pass's last job. A body stream claims up
+// to 4 jobs at once from a rank the modules before it offset, so only the
+// claim's whole range is sure to meet a stride.
+sema_check_body_progress: fn(trace_sink: CompilerTraceSink?, rank: Int, count: Int, total: Int) {
+    last: rank + count - 1
+    if last - last %% SEMA_CHECK_PROGRESS_STRIDE >= rank || last + 1 >= total {
+        if trace_sink == .Val(sink) -> sink.progress("sema.bodies", last, total)
+    }
+}
+
+// The span of the top-level function item `item_index`, when it is one.
+sema_registered_top_level_func_span: fn(graph: SemaRegistrationGraph, module_index: Int, item_index: Int) -> Span? Never! {
+    if graph.modules[module_index].program.items[item_index] == .Func(func) -> return Val(func.span)
+    None
+}
+
+// Only compiler-generated nominal methods relocate their diagnostics to the
+// author-facing nominal span. Implementation methods retain their own spans.
+sema_check_generated_method_author_span: fn(job: SemaBodyJob, module_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Span? {
+    if program.registration_graph == .Val(graph) {
+        if job == {
+            .NominalMethod(_, owner, row) -> {
+                if graph.modules[module_index].nominals[owner].methods[row].declaration.compiler_generated {
+                    return Val(graph.modules[module_index].nominals[owner].symbol.span)
+                }
+                return None
+            }
+            .ImplMethod(_, _, _) -> return None
+            .TopLevel(_) -> panic("a top-level job entered method application")
+        }
+    }
+    panic("a registered Jet method lost its owning graph")
+}
+
+// Is `job` a method of a compiler-generated codec impl? Its body has no
+// author to act on advice, so it reports its errors alone, as a derived
+// body does (sema_author_facing_diagnostics); they keep their own spans.
+sema_check_generated_codec_method: fn(job: SemaBodyJob, module_index: Int, program: SemaProgramTables) -> Bool {
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        if job == .ImplMethod(_, owner, _) {
+            return graph.modules[module_index].impls[owner].compiler_generated
+        }
+        return false
+    }
+    panic("a registered Jet method lost its owning graph")
+}
+
+sema_check_apply_method_job: fn(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: ^[SemaParallelBody], ready_deltas: ^[InternerDelta?], scopes: ^SemaScopeTable, environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, diagnostics: ^[Diagnostic], functions: ^[FnBody], prelude_demands: ^[Int:[SemaPreludeConversionDemand]], type_delta: ^[InternerDelta], call_facts: ^[SemaCallSiteFact], hardware_use: ^TargetHardwareUse, comptime_requests: ^[SemaComptimeRequest], name_references: ^[SemaNameReferenceFact], comptime_body_sources: ^[SemaComptimeBodySource], compute_facts: ^[SemaComputeFunctionFacts], failure_facts: ^[SemaFunctionFailureFacts], exact_int_reachable: ^Bool, copy_events: ^[SemaCopyEvent], eval_answers: ^[SemaEvalProbeAnswer], core_bodies: ^[SemaCoreBody], reasons: ^[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+    ordinal: if job == {
+        .NominalMethod(position, _, _) -> position
+        .ImplMethod(position, _, _) -> position
+        .TopLevel(_) -> panic("a top-level job entered method application")
+    }
+    author_span: sema_check_generated_method_author_span(job, module_index, environment, program)
+    if author_span == .Val(span) {
+        generated_diagnostics := [Diagnostic]{}
+        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        sema_author_facing_diagnostics(span, generated_diagnostics, diagnostics)
+        return complete
+    }
+    if sema_check_generated_codec_method(job, module_index, program) {
+        generated_diagnostics := [Diagnostic]{}
+        complete := sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, generated_diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+        loop diagnostic in generated_diagnostics {
+            if diagnostic.severity == DIAGNOSTIC_ERROR -> diagnostics.push(diagnostic)
+        }
+        return complete
+    }
+    sema_check_registration_method(job, module_index, memory_plan, ready, ready_deltas, ordinal, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, diagnostics, functions, prelude_demands, type_delta, call_facts, hardware_use, comptime_requests, name_references, comptime_body_sources, compute_facts, failure_facts, exact_int_reachable, copy_events, eval_answers, core_bodies, reasons, keep_going, pending_obligations)
+}
+
+// The module scope the body loop of module `module_index` checks against:
+// the registered module scope after the view summaries, built as
+// sema_check_registration_module builds it (whose reports here are its own).
+// Leaves `environment` entered in the module.
+// The initial graph/scope read window closes before entering the actual
+// environment. Every summary then uses this selected module's identity/facts.
+sema_check_module_summary_scope_init: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> SemaScopeTable {
+    if program.registration_graph == .Val(graph) {
+        scopes := sema_scope_init(graph.modules[module_index].module_identity)
+        discarded := [Diagnostic]{}
+        _ := sema_registration_apply_graph_module(graph, graph.modules[module_index].module_identity, scopes, discarded)
+        return scopes.move()
+    }
+    panic("an owning registered-module pass lost its registration graph")
+}
+
+// `summary_checked` gains the view summary functions it checked
+// (sema_check_view_summaries).
+sema_check_module_summary_scopes: fn(environment: ^SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?, summary_checked: ^Int) -> SemaScopeTable {
+    scopes := sema_check_module_summary_scope_init(environment, program, module_index)
+    // copy: a handle copy (Shared facts plus length and frontier ints): the summary scopes read a
+    // frozen prefix while environment.comptime_body_publication keeps advancing.
+    body_values := environment.comptime_body_publication.copy()
+    sema_scope_environment_enter_module(environment, program, module_index, body_values)
+    summary_checked += sema_check_view_summaries(environment, program, scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
+    scopes.move()
+}
+
+// The parallel body pass of module `module_index` on `workers` threads:
+// `jobs` (sema_check_parallel_jobs) are claimed one at a time by whichever
+// thread is free, heaviest source (`weights`) first, so no thread idles
+// while jobs remain, each checked on that thread's own copy of `scopes`
+// against the environment and memory plan in `shared`. A body's check reads
+// only the frozen environment and its thread's scope copy, so it is the same
+// body whichever thread checks it and whatever was checked before it; the
+// joined bodies are placed by job position, last first, as the body loop
+// pops them.
+sema_check_bodies_parallel: fn(shared: Shared<SemaCheckShared>, module_index: Int, scopes: ^^SemaScopeTable, jobs: [SemaBodyJob], weights: [Int], workers: Int, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
+    prepared := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: [SemaParallelBody]{}}
+    plan_jobs := [SemaBodyJob]{}
+    loop position in 0..<jobs.len() { plan_jobs.push(jobs[position]) }
+    order := compiler_threads_heaviest_first(weights)
+    plan: Shared{SemaBodyPlan{jobs: [SemaBodyJob]{}, order: [Int]{}}}
+    sema_check_body_plan_fill(plan, plan_jobs, order)
+    queue: SemaBodyQueue{next: 0}
+    sema_check_shared_lend_scope(shared, scopes)
+    slots := [Shared<SemaBodyPart>]{}
+    loop _ in 0..<workers {
+        slot: Shared{SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}}
+        slots.push(slot)
+    }
+    _ := sema_check_body_parts(shared, slots, plan, queue, 0, module_index, trace_sink)
+    restored := sema_check_shared_return_scope(shared)
+    prepared.scopes.push(restored)
+    placed := [SemaParallelBody?]{}
+    placed_deltas := [InternerDelta?]{}
+    loop _ in 0..<jobs.len() {
+        placed.push(None)
+        placed_deltas.push(None)
+    }
+    loop slot in slots -> sema_check_body_part_place(slot, placed, placed_deltas)
+    loop placed.len() > 0 {
+        taken := placed.pop() ?? break
+        delta := placed_deltas.pop() ?? None
+        body := taken.move() ?? next
+        prepared.bodies.push(body)
+        prepared.body_deltas.push(delta)
+    }
+    prepared.move()
+}
+
+// Moves the pass's jobs and claim order into its shared plan.
+sema_check_body_plan_fill: fn(plan: Shared<SemaBodyPlan>, jobs: ^^[SemaBodyJob], order: ^^[Int]) {
+    permit: plan.guard_edit()
+    permit.value.jobs = jobs.move()
+    permit.value.order = order.move()
+}
+
+// The post-summary module scope is the pass's shared read-only module scope:
+// it moves into the shared environment before the threads start and back
+// out after they join. Each thread makes its own light copy of it on that
+// thread (sema_scope_light_copy) and reads the function types the copy
+// leaves out from it, so no thread copies a module function type.
+sema_check_shared_lend_scope: fn(shared: Shared<SemaCheckShared>, scopes: ^^SemaScopeTable) {
+    environment := sema_check_shared_take_environment(shared)
+    environment.module_scope = Val(scopes.move())
+    sema_check_shared_put_environment(shared, environment)
+}
+
+sema_check_shared_return_scope: fn(shared: Shared<SemaCheckShared>) -> SemaScopeTable {
+    environment := sema_check_shared_take_environment(shared)
+    taken := environment.module_scope.move()
+    environment.module_scope = None
+    sema_check_shared_put_environment(shared, environment)
+    taken.move() ?? panic("the body-check module scope left the shared environment")
+}
+
+// Gives a thread's slot its own light copy of the shared module scope, made
+// on that thread.
+sema_check_body_part_copy_scope: fn(environment: SemaScopeEnvironment, slot: Shared<SemaBodyPart>) {
+    // The shared module scope is read in place by the light copy.
+    if environment.module_scope == .Val(source) {
+        light := sema_scope_light_copy(source)
+        permit: slot.guard_edit()
+        permit.value.scopes = light.move()
+        return
+    }
+    panic("the body-check module scope left the shared environment")
+}
+
+// Moves a thread's bodies into `placed`, each at its job position.
+sema_check_body_part_place: fn(slot: Shared<SemaBodyPart>, placed: ^[SemaParallelBody?], placed_deltas: ^[InternerDelta?]) {
+    permit: slot.guard_edit()
+    loop permit.value.bodies.len() > 0 {
+        body: permit.value.bodies.pop() ?? break
+        position: permit.value.positions.pop() ?? panic("a checked body has no job position")
+        delta: permit.value.deltas.pop() ?? None
+        placed[position] = Val(body)
+        placed_deltas[position] = delta
+    }
+}
+
+// Checks on `slots[from..]`, one task per slot and the last slot on this
+// thread, the one that reports the pass's progress to `trace_sink`; returns
+// how many bodies they checked.
+sema_check_body_parts: fn(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBodyPart>], plan: Shared<SemaBodyPlan>, queue: SemaBodyQueue, from: Int, module_index: Int, trace_sink: CompilerTraceSink?) -> Int {
+    if from >= slots.len() - 1 {
+        return sema_check_body_part(shared, slots[from], plan, queue, module_index, trace_sink)
+    }
+    checked := 0
+    task.group sema_threads {
+        head: task sema_check_body_part(shared, slots[from], plan, queue, module_index, None)
+        checked = sema_check_body_parts(shared, slots, plan, queue, from + 1, module_index, trace_sink)
+        checked += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    checked
+}
+
+// What a body pass checks (sema_finalize_pass_modules): whole modules
+// (`Modules`), or, into each module's existing result, only the bodies a
+// Core demand wave names (`Core`, sema_core_demand_pass), the codecs a codec
+// wave filled (`Codec`, sema_codec_waves) or the derived methods a derive
+// wave demanded (`Derive`, sema_derive_waves).
+SemaWaveKind: enum {
+    Modules,
+    Core,
+    Codec,
+    Derive,
+}
+
+// A body stream's threads: `tasks` tasks of sema_check_body_stream_part,
+// each watched so that its failure stops the stream at once
+// (sema_check_body_stream_stop) and the lead stops waiting, and the
+// stream's lead (sema_check_body_stream_lead) on this thread, which stops
+// the threads once it checked every module.
+sema_check_body_stream_parts: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, tasks: Int, environment: ^SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, args: SemaStreamFinishArgs, kind: SemaWaveKind, phase: String, trace_sink: CompilerTraceSink?, slot_of_orig: [Int], modules: ^[SemaGraphModuleResult], checked_functions: ^Int, done: ^Int) {
+    if tasks <= 0 {
+        // Deferred so a panic of the lead stops the threads too: they would
+        // otherwise wait for work forever and the stream's join never end.
+        defer sema_check_body_stream_stop(cells, handle, false)
+        sema_check_body_stream_lead(shared, cells, handle, environment, host_hooks, args, kind, phase, trace_sink, slot_of_orig, modules, checked_functions, done)
+        return
+    }
+    task.group sema_threads {
+        head: task {
+            task.group sema_body_stream_watch {
+                thread: task sema_check_body_stream_part(shared, cells, handle, args, kind)
+                _ := thread.join() ?? {
+                    sema_check_body_stream_stop(cells, handle, true)
+                    panic(compiler_threads_failure_text(err))
+                }
+            }
+        }
+        sema_check_body_stream_parts(shared, cells, handle, tasks - 1, environment, host_hooks, args, kind, phase, trace_sink, slot_of_orig, modules, checked_functions, done)
+        _ := head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+}
+
+sema_check_body_stream_collect_parallel: fn(base_environment: SemaScopeEnvironment, program: SemaProgramTables, cells: SemaStreamCells, handle: SemaStreamHandle, phase: String, trace_sink: CompilerTraceSink?, slot_of_orig: [Int], modules: ^[SemaGraphModuleResult], checked_functions: ^Int, done: ^Int) {
+    held: handle.stream.guard_read()
+    if held.value.failed -> return
+    loop orig in 0..<slot_of_orig.len() {
+        s: slot_of_orig[orig]
+        module_index: held.value.module_indexes[s]
+        sema_check_body_stream_replay(cells, s, program)
+        if held.value.prepared[s] && trace_sink == .Val(sink) {
+            sink.progress("counters.{phase}.items_scanned", sema_check_registered_module_item_count(base_environment, program, module_index), -1)
+            sink.progress("counters.{phase}.summary_functions_checked", held.value.summaries[s], -1)
+        }
+        checked := sema_check_body_stream_take_finished(cells, s) ?? panic("a body-stream module lost its finalized result")
+        if trace_sink == .Val(sink) {
+            sema_check_module_trace_begin(program, module_index, phase, sink)
+            sink.end("sema.module", checked.functions.len())
+        }
+        checked_functions += checked.functions.len()
+        modules.push(checked)
+        done += 1
+    }
+}
+
+// The lead thread of a body stream. For `SemaWaveKind.Modules`, the lead works
+// alongside the worker threads (handling `lead_pending` fallbacks with real
+// host callbacks, parallel finalization, prep, and body jobs) with zero
+// head-of-line blocking, then collects every finalized module in strict
+// original module order. For demand waves (`Core`, `Codec`, `Derive`), it
+// collects each stream module in order.
+sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, environment: ^SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, args: SemaStreamFinishArgs, kind: SemaWaveKind, phase: String, trace_sink: CompilerTraceSink?, slot_of_orig: [Int], modules: ^[SemaGraphModuleResult], checked_functions: ^Int, done: ^Int) {
+    inputs: shared.guard_read()
+    wanted: Shared{SemaHostHookWanted{wanted: false}}
+    part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}
+    current := -1
+    stream_jobs := 0
+    // The jobs it claims check as a stream thread's do, on a program of its
+    // own when they record their demand apart (sema_check_body_stream_part).
+    own_program := SemaProgramTables?{None}
+    if sema_check_body_demand_apart(inputs.value.programs[0]) {
+        own_program = Val(sema_comptime_function_thread_program(inputs.value.programs[0]))
+    }
+    if kind == SemaWaveKind.Modules {
+        loop {
+            step: sema_check_body_stream_lead_parallel_step(handle, current)
+            if step.lead_fallback {
+                bodies := if !step.can_finish && step.prepared -> sema_check_body_stream_take(cells, step.stream_module, step.tops, step.total, step.prepared) else -> sema_check_prepared_none()
+                bodies.started = sema_check_body_stream_take_started(cells, step.stream_module)
+                checked := sema_check_registration_module_lent(environment, inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], step.module_index, args.values, args.comptime_functions, args.comptime_rows, args.pending_obligations, bodies, phase, None)
+                sema_check_body_stream_mark_ready(cells, step.stream_module, Val(checked.move()), [String]{}, [String]{}, handle.changed)
+                sema_check_body_stream_done_slot(handle, step.stream_module)
+                next
+            }
+            if step.finish {
+                if own_program == {
+                    .Val(program) -> {
+                        sema_check_body_stream_finish_module(inputs.value.environments[0], program, inputs.value.memory_plans[0], cells, handle, step, args, wanted, true)
+                    }
+                    .None -> {
+                        sema_check_body_stream_finish_module(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, step, args, wanted, false)
+                    }
+                }
+                next
+            }
+            if step.action == {
+                .Body -> {
+                    sema_check_body_progress(trace_sink, step.rank, step.claims.len(), step.total)
+                    if own_program == {
+                        .Val(program) -> {
+                            sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, true, step.can_finish)
+                        }
+                        .None -> {
+                            sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, true, step.can_finish)
+                        }
+                    }
+                }
+                .Prep -> {
+                    prep := sema_check_stream_module_prep(inputs.value.environments[0], inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], step.module_index, step.tops, cells.view_jobs[step.stream_module], args.comptime_functions, args.comptime_rows, kind)
+                    sema_check_body_stream_open(cells, handle, step.stream_module, step.tops, prep, true, step.can_finish)
+                }
+                .Await | .Stop -> break
+            }
+        }
+        sema_check_body_stream_collect_parallel(inputs.value.environments[0], inputs.value.programs[0], cells, handle, phase, trace_sink, slot_of_orig, modules, checked_functions, done)
+        return
+    }
+    loop done < cells.outs.len() {
+        step: sema_check_body_stream_lead_step(handle, done)
+        if step.action == {
+            .Body -> {
+                sema_check_body_progress(trace_sink, step.rank, step.claims.len(), step.total)
+                if own_program == {
+                    .Val(program) -> {
+                        sema_check_body_stream_job(program, inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, false, false)
+                    }
+                    // Passed straight through: a local binding of a guarded row would copy it.
+                    .None -> {
+                        sema_check_body_stream_job(inputs.value.programs[0], inputs.value.memory_plans[0], cells, handle, part, current, step.claims, wanted, false, false)
+                    }
+                }
+            }
+            .Prep -> {
+                prep := sema_check_stream_module_prep(inputs.value.environments[0], inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], step.module_index, step.tops, cells.view_jobs[step.stream_module], args.comptime_functions, args.comptime_rows, kind)
+                sema_check_body_stream_open(cells, handle, step.stream_module, step.tops, prep, false, false)
+            }
+            .Await -> {
+                if !sema_check_body_stream_await(cells, done, handle.changed) {
+                    return
+                }
+                module_index: step.module_index
+                stream_jobs += step.total
+                bodies := sema_check_body_stream_take(cells, done, step.tops, step.total, step.prepared)
+                sema_check_body_stream_replay(cells, done, inputs.value.programs[0])
+                if step.prepared && trace_sink == .Val(sink) {
+                    sink.progress("counters.{phase}.items_scanned", sema_check_registered_module_item_count(inputs.value.environments[0], inputs.value.programs[0], module_index), -1)
+                    sink.progress("counters.{phase}.summary_functions_checked", step.summary_checked, -1)
+                }
+                scopes := bodies.scopes.pop() ?? panic("a demand wave module lost its post-summary scope")
+                body_values := environment.comptime_body_publication.copy()
+                sema_scope_environment_enter_module(environment, inputs.value.programs[0], module_index, body_values)
+                if trace_sink == .Val(sink) {
+                    sema_check_module_span_begin(inputs.value.programs[0], module_index, sink)
+                }
+                demand_checked: sema_check_demand_module_lent(environment, inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], module_index, kind, scopes, bodies, args.comptime_functions, args.comptime_rows, args.pending_obligations, trace_sink, modules[module_index])
+                if trace_sink == .Val(sink) -> sink.end("sema.module", demand_checked)
+                checked_functions += demand_checked
+                done += 1
+                sema_check_body_stream_release(handle, done)
+            }
+            .Stop -> return
+        }
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.{phase}.wave_jobs", stream_jobs, -1)
+    }
+}
+
+// The prepared bodies of done stream module `stream_module`, as
+// sema_check_bodies_parallel leaves a module's: its post-summary scope taken
+// back from its environment, and its `tops` top-level and its method
+// bodies, of `total` jobs, each list in job order last first; none when
+// the stream did not prepare it.
+sema_check_body_stream_take: fn(cells: SemaStreamCells, stream_module: Int, tops: Int, total: Int, prepared: Bool) -> SemaPreparedBodies {
+    bodies := sema_check_prepared_none()
+    if !prepared -> return bodies.move()
+    bodies.scopes.push(sema_check_body_stream_take_scope(cells.environments[stream_module]))
+    placed := [SemaParallelBody?]{}
+    placed_deltas := [InternerDelta?]{}
+    loop _ in 0..<total {
+        placed.push(None)
+        placed_deltas.push(None)
+    }
+    sema_check_body_stream_place(cells.outs[stream_module], placed, placed_deltas)
+    loop placed.len() > tops {
+        popped := placed.pop() ?? break
+        delta := placed_deltas.pop() ?? None
+        body := popped.move() ?? next
+        bodies.methods.push(body)
+        bodies.method_deltas.push(delta)
+    }
+    bodies.methods_prepared = true
+    loop placed.len() > 0 {
+        popped := placed.pop() ?? break
+        delta := placed_deltas.pop() ?? None
+        body := popped.move() ?? next
+        bodies.bodies.push(body)
+        bodies.body_deltas.push(delta)
+    }
+    bodies.move()
+}
+
+// Moves a stream module's published bodies into `placed`, each at its job
+// position.
+sema_check_body_stream_place: fn(out: Shared<SemaStreamOut>, placed: ^[SemaParallelBody?], placed_deltas: ^[InternerDelta?]) {
+    held: out.guard_edit()
+    loop held.value.bodies.len() > 0 {
+        body: held.value.bodies.pop() ?? break
+        position: held.value.positions.pop() ?? panic("a checked body has no job position")
+        delta: held.value.deltas.pop() ?? None
+        placed[position] = Val(body)
+        placed_deltas[position] = delta
+    }
+}
+
+// A done stream module's post-summary scope, moved out of its environment.
+sema_check_body_stream_take_scope: fn(cell: Shared<SemaStreamEnvironment>) -> SemaScopeTable {
+    held: cell.guard_edit()
+    held.value.light_scopes = [SemaScopeTable]{}
+    entered := held.value.environments.pop() ?? panic("a body-stream module lost its environment")
+    taken := entered.module_scope.move()
+    entered.module_scope = None
+    taken.move() ?? panic("a body-stream module scope left its environment")
+}
+
+// One thread: makes its light copy of the module scope in its slot, then
+// checks the functions it claims on that copy. Host callbacks are withheld;
+// a check that wanted one is marked, and the body loop checks that function
+// again on the calling thread.
+sema_check_body_part: fn(shared: Shared<SemaCheckShared>, slot: Shared<SemaBodyPart>, plan: Shared<SemaBodyPlan>, queue: SemaBodyQueue, module_index: Int, trace_sink: CompilerTraceSink?) -> Int {
+    inputs: shared.guard_read()
+    sema_check_body_part_copy_scope(inputs.value.environments[0], slot)
+    permit := slot.guard_edit()
+    // Passed straight through: a local binding of a guarded row would copy it.
+    sema_check_body_part_in(inputs.value.environments[0], inputs.value.programs[0], inputs.value.memory_plans[0], permit.value, plan, queue, module_index, trace_sink)
+}
+
+sema_check_parallel_jobs_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int, comptime_rows: SemaComptimeFunctionRows, weights: ^[Int], phase: String, trace_sink: CompilerTraceSink?) -> [SemaBodyJob] {
+    sema_check_module_trace_begin_in_shared(shared_state, module_index, phase, trace_sink)
+    sema_check_module_jobs_in_shared(shared_state, module_index, comptime_rows, weights)
+}
+
+// Opens module `module_index`'s trace span and counts its items.
+sema_check_module_trace_begin_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int, phase: String, trace_sink: CompilerTraceSink?) {
+    if trace_sink == .Val(sink) {
+        inputs: shared_state.guard_read()
+        sema_check_module_trace_begin(inputs.value.programs[0], module_index, phase, sink)
+    }
+}
+
+sema_check_module_trace_begin: fn(program: SemaProgramTables, module_index: Int, phase: String, sink: CompilerTraceSink) {
+    sema_check_module_span_begin(program, module_index, sink)
+    if program.registration_graph == .Val(graph) {
+        sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
+    }
+}
+
+// Opens module `module_index`'s `sema.module` span alone, counting nothing:
+// a demand wave's module check, whose items the wave's setup counted.
+sema_check_module_span_begin: fn(program: SemaProgramTables, module_index: Int, sink: CompilerTraceSink) {
+    if program.registration_graph == .Val(graph) {
+        sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
+        return
+    }
+    panic("a registered-module scheduler lost its graph")
+}
+
+// Module `module_index`'s parallel body jobs (sema_check_parallel_jobs).
+sema_check_module_jobs_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int, comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
+    inputs: shared_state.guard_read()
+    sema_check_module_jobs(inputs.value.programs[0], module_index, comptime_rows, weights)
+}
+
+sema_check_module_jobs: fn(program: SemaProgramTables, module_index: Int, comptime_rows: SemaComptimeFunctionRows, weights: ^[Int]) -> [SemaBodyJob] {
+    if program.registration_graph == .Val(graph) {
+        return sema_check_parallel_jobs(graph, module_index, comptime_rows, weights)
+    }
+    panic("a registered-module scheduler lost its graph")
+}
+
+// A body stream holds the post-summary scope of every module it admitted
+// and its lead has not checked yet, so it admits the next module only while
+// their scope rows (sema_check_module_scope_rows) stay within this bound,
+// and always the lead's next module.
+SEMA_BODY_STREAM_SCOPE_ROWS: 262144
+
+// Where a body stream module stands: `Waiting` to be prepared, `Preparing`
+// on a thread, `Rescan` when a thread's preparation wanted the host
+// callbacks the threads hold withheld, so the lead prepares it again, and
+// `Open` once its jobs can be claimed.
+SemaStreamStage: enum {
+    Waiting,
+    Preparing,
+    Rescan,
+    Open,
+}
+
+// A body stream's schedule (sema_check_body_stream), edited under its one
+// lock. Stream module k is the pass's k-th selected module: graph module
+// `module_indexes[k]`, holding `rows[k]` scope rows. Its jobs are its
+// `tops[k]` top-level jobs, then the parallel method jobs its preparation
+// selects (`jobs[k]`); `orders[k][rank]` is the job position claimed at
+// `rank`, heaviest source first within each kind, and `next[k]` its next
+// unclaimed rank. `prepared[k]` when its preparation built its post-summary
+// scope, which checked `summaries[k]` view summary functions. Modules
+// before `lead` are checked, modules `lead..<admitted` admitted, holding
+// `held_rows` scope rows, modules before `prep_next` claimed for their
+// preparation, and modules before `claim_from` open with every job
+// claimed; `claimed` jobs of `job_total` (the top-level jobs and every
+// opened module's method jobs) are claimed. `finished` once the lead
+// checked every module, `failed` once a stream thread failed.
+SemaBodyStream: struct {
+    module_indexes: [Int],
+    rows: [Int],
+    jobs: [[SemaBodyJob]],
+    tops: [Int],
+    orders: [[Int]],
+    next: [Int],
+    stages: [SemaStreamStage],
+    prepared: [Bool],
+    summaries: [Int],
+    lead: Int,
+    admitted: Int,
+    held_rows: Int,
+    prep_next: Int,
+    claim_from: Int,
+    claimed: Int,
+    job_total: Int,
+    finished: Bool,
+    failed: Bool,
+    ready_finish: [Int],
+    finish_next: Int,
+    parallel_finish: Bool,
+    can_finish: [Bool],
+    released: [Bool],
+    remaining: Int,
+    lead_pending: [Int],
+    lead_pending_next: Int,
+}
+
+// What a body stream thread does next: check a claimed job (`Body`),
+// prepare a stream module (`Prep`), wait for the threads checking the jobs
+// of the module it checks next (`Await`, the lead alone), or stop.
+SemaStreamAction: enum {
+    Body,
+    Prep,
+    Await,
+    Stop,
+}
+
+// A body stream thread's next step (`action`): for `Body` the `claim`, the
+// `rank` it was claimed at among the stream's `total` jobs so far; for
+// `Prep` stream module `stream_module`, graph module `module_index`, with
+// `tops` top-level jobs; for `Await` the module's graph module, top-level
+// jobs, `total` jobs, whether it was `prepared` and the view summary
+// functions that checked; when `finish` is true, a worker finalizes
+// `stream_module`; when `lead_fallback` is true, the lead finalizes it with
+// real host callbacks.
+SemaStreamStep: struct {
+    action: SemaStreamAction,
+    claim: SemaBodyClaim,
+    claims: [SemaBodyClaim]{[SemaBodyClaim]{}},
+    rank: Int,
+    total: Int,
+    stream_module: Int,
+    module_index: Int,
+    tops: Int,
+    prepared: Bool,
+    summary_checked: Int,
+    finish: Bool{false},
+    can_finish: Bool{false},
+    lead_fallback: Bool{false},
+}
+
+sema_check_body_stream_step: fn(action: SemaStreamAction) -> SemaStreamStep {
+    SemaStreamStep{action: action, claim: SemaBodyClaim{position: -1, job: SemaBodyJob.TopLevel{item_index: -1}, stream_module: -1, module_index: -1}, rank: -1, total: 0, stream_module: -1, module_index: -1, tops: 0, prepared: false, summary_checked: 0}
+}
+
+SemaStreamModuleScan: struct {
+    module_index: Int,
+    jobs: [SemaBodyJob],
+    order: [Int],
+    tops: Int,
+    rows: Int,
+    body_work: Int,
+    job_count: Int,
+    has_work: Bool,
+    can_finish: Bool,
+}
+
+sema_check_body_stream_scan_range: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, selected: [Int], args: SemaStreamFinishArgs, kind: SemaWaveKind, method_job_bytes: Int, from: Int, to: Int) -> [SemaStreamModuleScan] {
+    out := [SemaStreamModuleScan]{}
+    loop pos in from..<to {
+        module_index: selected[pos]
+        weights := [Int]{}
+        module_jobs := sema_check_module_jobs(program, module_index, args.comptime_rows, weights)
+        method_bytes := 0
+        wave_methods: if kind != SemaWaveKind.Modules -> sema_check_registered_wave_method_jobs(environment, program, module_index, method_bytes) else -> 0
+        core_held := false
+        module_rows: sema_check_registered_module_scope_rows(environment, program, module_index, core_held)
+        module_work := 0
+        loop weight in weights -> module_work += weight
+        module_work += if kind == SemaWaveKind.Core -> method_bytes else -> wave_methods * method_job_bytes
+        tops: module_jobs.len()
+        out.push(SemaStreamModuleScan{
+            module_index: module_index,
+            jobs: module_jobs.move(),
+            order: compiler_threads_heaviest_first(weights),
+            tops: tops,
+            rows: module_rows,
+            body_work: module_work,
+            job_count: tops + wave_methods,
+            has_work: tops > 0 || wave_methods > 0,
+            can_finish: kind == SemaWaveKind.Modules && !core_held,
+        })
+    }
+    out
+}
+
+sema_check_body_stream_scan_parts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, selected: [Int], args: SemaStreamFinishArgs, kind: SemaWaveKind, method_job_bytes: Int, from: Int, workers: Int) -> [[SemaStreamModuleScan]] {
+    done := [[SemaStreamModuleScan]]{}
+    n: selected.len()
+    lo: from * n /% workers
+    hi: (from + 1) * n /% workers
+    if from + 1 >= workers {
+        done.push(sema_check_body_stream_scan_range(environment, program, selected, args, kind, method_job_bytes, lo, hi))
+        return done
+    }
+    task.group sema_stream_scan_group {
+        head: task sema_check_body_stream_scan_range(environment, program, selected, args, kind, method_job_bytes, lo, hi)
+        rest := sema_check_body_stream_scan_parts(environment, program, selected, args, kind, method_job_bytes, from + 1, workers)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop part in rest.move() -> done.push(part)
+    }
+    done
+}
+
+sema_check_body_stream_scan_in_shared: fn(shared_state: Shared<SemaCheckShared>, selected: [Int], args: SemaStreamFinishArgs, kind: SemaWaveKind, method_job_bytes: Int, threads: CompilerThreads) -> [SemaStreamModuleScan] {
+    inputs: shared_state.guard_read()
+    max_workers := compiler_threads_limit(threads)
+    cap: selected.len() /% 32
+    if max_workers > cap -> max_workers = cap
+    if max_workers <= 1 {
+        return sema_check_body_stream_scan_range(inputs.value.environments[0], inputs.value.programs[0], selected, args, kind, method_job_bytes, 0, selected.len())
+    }
+    parts := sema_check_body_stream_scan_parts(inputs.value.environments[0], inputs.value.programs[0], selected, args, kind, method_job_bytes, 0, max_workers)
+    parts.reverse()
+    out := [SemaStreamModuleScan]{}
+    loop parts.len() > 0 {
+        part := parts.pop() ?? break
+        out.extend(part.move())
+    }
+    out
+}
+
+// The body stream of a pass's selected modules: each module enters it as
+// soon as the memory bound admits it (SEMA_BODY_STREAM_SCOPE_ROWS), with no
+// barrier between modules. For `SemaWaveKind.Modules`, modules are scheduled
+// heaviest-first with immediate row release on finalization and collected in
+// strict original module order at the end. For demand waves (`Core`, `Codec`,
+// `Derive`), modules stream in selected order.
+// Returns how many functions the modules checked.
+sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, pending_obligations: Bool, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, kind: SemaWaveKind, starts: ^[SemaDeclarationCheck], modules: ^[SemaGraphModuleResult]) -> Int {
+    method_job_bytes: if {
+        kind == SemaWaveKind.Codec -> SEMA_CODEC_JOB_BYTES
+        kind == SemaWaveKind.Derive -> SEMA_DERIVE_JOB_BYTES
+        else -> 0
+    }
+    args: SemaStreamFinishArgs{values: values, comptime_functions: comptime_functions, comptime_rows: comptime_rows, pending_obligations: pending_obligations}
+    scanned := sema_check_body_stream_scan_in_shared(shared_state, selected, args, kind, method_job_bytes, threads)
+    job_count := 0
+    body_work := 0
+    scope_rows := 0
+    module_weights := [Int]{}
+    loop row in scanned {
+        if row.has_work && row.rows > scope_rows -> scope_rows = row.rows
+        body_work += row.body_work
+        job_count += row.job_count
+        module_weights.push(row.body_work)
+    }
+    workers: compiler_threads_admit(threads, job_count, body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
+    if kind != SemaWaveKind.Modules && trace_sink == .Val(sink) {
+        sink.progress("counters.{phase}.wave_workers", workers, -1)
+    }
+    checked_functions := 0
+    if workers <= 1 {
+        loop position in 0..<selected.len() {
+            module_index: selected[position]
+            if kind != SemaWaveKind.Modules {
+                checked_functions += sema_check_demand_module_in_shared(shared_state, host_hooks, module_index, kind, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, modules[module_index])
+                next
+            }
+            bodies := sema_check_prepared_none()
+            started := starts.pop() ?? panic("a body-stream module lost its declaration check")
+            if started.position != position {
+                panic("a body-stream module took another module's declaration check")
+            }
+            bodies.started = Val(started.move())
+            sema_check_module_trace_begin_in_shared(shared_state, module_index, phase, trace_sink)
+            checked := sema_check_module_in_shared(shared_state, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, bodies, threads, phase, trace_sink)
+            if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
+            checked_functions += checked.functions.len()
+            modules.push(checked)
+        }
+        return checked_functions
+    }
+    parallel_finish: kind == SemaWaveKind.Modules
+    schedule_order: if parallel_finish -> compiler_threads_heaviest_first(module_weights) else -> (loop idx in 0..<selected.len() -> idx)
+    slot_of_orig := loop _ in 0..<selected.len() -> 0
+    loop s in 0..<schedule_order.len() {
+        slot_of_orig[schedule_order[s]] = s
+    }
+    reordered := [[SemaStreamModuleScan]]{}
+    loop _ in 0..<selected.len() -> reordered.push([SemaStreamModuleScan]{})
+    orig_pos := scanned.len()
+    loop scanned.len() > 0 {
+        orig_pos -= 1
+        row := scanned.pop() ?? break
+        reordered[slot_of_orig[orig_pos]].push(row.move())
+    }
+    jobs := [[SemaBodyJob]]{}
+    orders := [[Int]]{}
+    tops := [Int]{}
+    rows := [Int]{}
+    module_indexes := [Int]{}
+    can_finish_rows := [Bool]{}
+    loop s in 0..<reordered.len() {
+        row := reordered[s].pop() ?? panic("a reordered body-stream module was lost")
+        jobs.push(row.jobs.move())
+        orders.push(row.order.move())
+        tops.push(row.tops)
+        rows.push(row.rows)
+        module_indexes.push(row.module_index)
+        can_finish_rows.push(row.can_finish)
+    }
+    // Each module's view summary jobs and declaration check, placed into its
+    // scheduled stream slot.
+    view_jobs := [[Int]?]{}
+    slot_starts := [[SemaDeclarationCheck]]{}
+    loop _ in 0..<selected.len() {
+        view_jobs.push([Int]?{None})
+        slot_starts.push([SemaDeclarationCheck]{})
+    }
+    loop starts.len() > 0 {
+        started := starts.pop() ?? break
+        if started.position < slot_of_orig.len() {
+            s: slot_of_orig[started.position]
+            view_jobs[s] = started.view_summary_jobs.move()
+            started.view_summary_jobs = None
+            if parallel_finish {
+                slot_starts[s].push(started.move())
+            }
+        }
+    }
+    next := [Int]{}
+    stages := [SemaStreamStage]{}
+    prepared := [Bool]{}
+    summaries := [Int]{}
+    released := [Bool]{}
+    environments := [Shared<SemaStreamEnvironment>]{}
+    outs := [Shared<SemaStreamOut>]{}
+    top_total := 0
+    loop s in 0..<selected.len() {
+        next.push(0)
+        stages.push(SemaStreamStage.Waiting)
+        prepared.push(false)
+        summaries.push(0)
+        released.push(false)
+        top_total += tops[s]
+        cell: Shared{SemaStreamEnvironment{environments: [SemaScopeEnvironment]{}}}
+        environments.push(cell)
+        out_started := [SemaDeclarationCheck]{}
+        if parallel_finish {
+            started := slot_starts[s].pop() ?? panic("a body-stream module lost its declaration check")
+            out_started.push(started.move())
+        }
+        out: Shared{SemaStreamOut{bodies: [SemaParallelBody]{}, positions: [Int]{}, left: 0, ready: false, failed: false, started: out_started.move()}}
+        outs.push(out)
+    }
+    cells: SemaStreamCells{environments: environments.move(), outs: outs.move(), view_jobs: view_jobs.move()}
+    handle: SemaStreamHandle{
+        stream: Shared{SemaBodyStream{module_indexes: module_indexes.move(), rows: rows.move(), jobs: jobs.move(), tops: tops.move(), orders: orders.move(), next: next.move(), stages: stages.move(), prepared: prepared.move(), summaries: summaries.move(), lead: 0, admitted: 0, held_rows: 0, prep_next: 0, claim_from: 0, claimed: 0, job_total: top_total, finished: false, failed: false, ready_finish: [Int]{}, finish_next: 0, parallel_finish: parallel_finish, can_finish: can_finish_rows.move(), released: released.move(), remaining: selected.len(), lead_pending: [Int]{}, lead_pending_next: 0}},
+        work: Condition.new(),
+        changed: Condition.new(),
+    }
+    sema_check_body_stream_release(handle, 0)
+    // The lead checks modules in the pass environment; the threads prepare
+    // them in their own copies of its copy, which `shared` holds meanwhile.
+    environment := sema_check_shared_take_environment(shared_state)
+    // copy: the preparations' pass environment, apart from the lead's.
+    prep_environment := environment.copy()
+    sema_check_shared_put_environment(shared_state, prep_environment)
+    done := 0
+    sema_check_body_stream_parts(shared_state, cells, handle, workers - 1, environment, host_hooks, args, kind, phase, trace_sink, slot_of_orig, modules, checked_functions, done)
+    if done < selected.len() -> panic("a body stream's lead left a module unchecked")
+    _ := sema_check_shared_take_environment(shared_state)
+    sema_check_shared_put_environment(shared_state, environment)
+    checked_functions
+}
+
+// The lead checked the stream modules before `lead`: their scope rows are
+// released and the modules after the admitted ones admitted while the rows
+// the unchecked admitted modules hold stay within
+// SEMA_BODY_STREAM_SCOPE_ROWS, and always the lead's next module. Wakes the
+// waiting threads.
+sema_check_body_stream_admit: fn(stream: ^SemaBodyStream) {
+    loop stream.admitted < stream.rows.len() {
+        module_rows: stream.rows[stream.admitted]
+        blocked: if stream.parallel_finish -> stream.held_rows > 0 else -> stream.admitted > stream.lead
+        if blocked && stream.held_rows + module_rows > SEMA_BODY_STREAM_SCOPE_ROWS {
+            break
+        }
+        stream.held_rows += module_rows
+        stream.admitted += 1
+    }
+}
+
+sema_check_body_stream_release: fn(handle: SemaStreamHandle, lead: Int) {
+    held: handle.stream.guard_edit()
+    loop held.value.lead < lead {
+        if !held.value.released[held.value.lead] {
+            held.value.released[held.value.lead] = true
+            held.value.held_rows -= held.value.rows[held.value.lead]
+        }
+        held.value.lead += 1
+    }
+    sema_check_body_stream_admit(held.value)
+    handle.work.notify_all()
+}
+
+sema_check_body_stream_done_slot: fn(handle: SemaStreamHandle, stream_module: Int) {
+    held: handle.stream.guard_edit()
+    if !held.value.released[stream_module] {
+        held.value.released[stream_module] = true
+        held.value.held_rows -= held.value.rows[stream_module]
+    }
+    held.value.remaining -= 1
+    if held.value.remaining <= 0 {
+        held.value.finished = true
+    } else {
+        sema_check_body_stream_admit(held.value)
+    }
+    handle.work.notify_all()
+}
+
+sema_check_body_stream_queue_lead: fn(handle: SemaStreamHandle, stream_module: Int, release_rows: Bool) {
+    held: handle.stream.guard_edit()
+    if release_rows && !held.value.released[stream_module] {
+        held.value.released[stream_module] = true
+        held.value.held_rows -= held.value.rows[stream_module]
+    }
+    held.value.stages[stream_module] = SemaStreamStage.Rescan
+    held.value.lead_pending.push(stream_module)
+    sema_check_body_stream_advance(held.value)
+    sema_check_body_stream_admit(held.value)
+    handle.work.notify_all()
+}
+
+// A body stream thread's next step: it prioritizes finalizing a module whose
+// body jobs are done (releasing scopes early), else preparing an admitted
+// module, else claiming the next open body job; stops once the stream stops.
+sema_check_body_stream_next: fn(handle: SemaStreamHandle, preferred: Int) -> SemaStreamStep {
+    held: handle.stream.guard_edit()
+    held.wait(handle.work, fn(value) { sema_check_body_stream_has_step(value) }) ?? panic("a body stream's thread could not wait for its work")
+    if held.value.failed || held.value.finished {
+        return sema_check_body_stream_step(SemaStreamAction.Stop)
+    }
+    if held.value.finish_next < held.value.ready_finish.len() {
+        stream_module: held.value.ready_finish[held.value.finish_next]
+        held.value.finish_next += 1
+        return sema_check_body_stream_finish_step(held.value, stream_module)
+    }
+    if held.value.prep_next < held.value.admitted {
+        stream_module: held.value.prep_next
+        held.value.prep_next = stream_module + 1
+        return sema_check_body_stream_prep_step(held.value, stream_module)
+    }
+    stream_module: sema_check_body_stream_open_module(held.value, preferred)
+    if stream_module < 0 -> return sema_check_body_stream_step(SemaStreamAction.Stop)
+    sema_check_body_stream_claim(held.value, stream_module)
+}
+
+sema_check_body_stream_lead_parallel_step: fn(handle: SemaStreamHandle, preferred: Int) -> SemaStreamStep {
+    held: handle.stream.guard_edit()
+    held.wait(handle.work, fn(value) { sema_check_body_stream_lead_has_step(value) }) ?? panic("a body stream's lead could not wait for its work")
+    if held.value.failed || held.value.finished {
+        return sema_check_body_stream_step(SemaStreamAction.Stop)
+    }
+    if held.value.lead_pending_next < held.value.lead_pending.len() {
+        stream_module: held.value.lead_pending[held.value.lead_pending_next]
+        held.value.lead_pending_next += 1
+        return sema_check_body_stream_lead_fallback_step(held.value, stream_module)
+    }
+    if held.value.finish_next < held.value.ready_finish.len() {
+        stream_module: held.value.ready_finish[held.value.finish_next]
+        held.value.finish_next += 1
+        return sema_check_body_stream_finish_step(held.value, stream_module)
+    }
+    if held.value.prep_next < held.value.admitted {
+        stream_module: held.value.prep_next
+        held.value.prep_next = stream_module + 1
+        return sema_check_body_stream_prep_step(held.value, stream_module)
+    }
+    stream_module: sema_check_body_stream_open_module(held.value, preferred)
+    if stream_module < 0 -> return sema_check_body_stream_step(SemaStreamAction.Stop)
+    sema_check_body_stream_claim(held.value, stream_module)
+}
+
+sema_check_body_stream_lead_has_step: fn(stream: SemaBodyStream) -> Bool {
+    if stream.lead_pending_next < stream.lead_pending.len() -> return true
+    sema_check_body_stream_has_step(stream)
+}
+
+sema_check_body_stream_lead_fallback_step: fn(stream: SemaBodyStream, stream_module: Int) -> SemaStreamStep {
+    step := sema_check_body_stream_step(SemaStreamAction.Await)
+    step.lead_fallback = true
+    step.stream_module = stream_module
+    step.module_index = stream.module_indexes[stream_module]
+    step.tops = stream.tops[stream_module]
+    step.total = stream.jobs[stream_module].len()
+    step.prepared = stream.prepared[stream_module]
+    step.summary_checked = stream.summaries[stream_module]
+    step.can_finish = stream.can_finish[stream_module]
+    step
+}
+
+sema_check_body_stream_finish_step: fn(stream: SemaBodyStream, stream_module: Int) -> SemaStreamStep {
+    step := sema_check_body_stream_step(SemaStreamAction.Await)
+    step.finish = true
+    step.stream_module = stream_module
+    step.module_index = stream.module_indexes[stream_module]
+    step.tops = stream.tops[stream_module]
+    step.total = stream.jobs[stream_module].len()
+    step.prepared = stream.prepared[stream_module]
+    step.summary_checked = stream.summaries[stream_module]
+    step
+}
+
+sema_check_body_stream_has_step: fn(stream: SemaBodyStream) -> Bool {
+    if stream.failed || stream.finished || stream.finish_next < stream.ready_finish.len() || stream.prep_next < stream.admitted {
+        return true
+    }
+    if sema_check_body_stream_open_module(stream, -1) >= 0 -> return true
+    !stream.parallel_finish && stream.claim_from >= stream.rows.len()
+}
+
+// Picks an open stream module with an unclaimed job: first `preferred` (so a
+// worker keeps its already-copied scope), then the first untouched open module
+// (so small modules are checked by one worker with one scope copy), then the
+// first busy open module (so large modules still fan out across every worker).
+sema_check_body_stream_open_module: fn(stream: SemaBodyStream, preferred: Int) -> Int {
+    if preferred >= stream.claim_from && preferred < stream.admitted {
+        if stream.stages[preferred] == SemaStreamStage.Open && stream.next[preferred] < stream.orders[preferred].len() {
+            return preferred
+        }
+    }
+    fallback := -1
+    loop stream_module in stream.claim_from..<stream.admitted {
+        if stream.stages[stream_module] == SemaStreamStage.Open && stream.next[stream_module] < stream.orders[stream_module].len() {
+            if stream.next[stream_module] == 0 -> return stream_module
+            if fallback < 0 -> fallback = stream_module
+        }
+    }
+    fallback
+}
+
+// The lead's next step for stream module `stream_module`, the one it checks
+// next, once no thread prepares it: prepare it when no thread claimed its
+// preparation or a thread's wanted the host callbacks, else claim its next
+// job, else wait for its claimed jobs.
+sema_check_body_stream_lead_step: fn(handle: SemaStreamHandle, stream_module: Int) -> SemaStreamStep {
+    held: handle.stream.guard_edit()
+    held.wait(handle.work, fn(value) { value.failed || value.stages[stream_module] != SemaStreamStage.Preparing }) ?? panic("a body stream's lead could not wait for its threads")
+    if held.value.failed -> return sema_check_body_stream_step(SemaStreamAction.Stop)
+    if held.value.stages[stream_module] == SemaStreamStage.Waiting {
+        held.value.prep_next = stream_module + 1
+        return sema_check_body_stream_prep_step(held.value, stream_module)
+    }
+    if held.value.stages[stream_module] == SemaStreamStage.Rescan {
+        return sema_check_body_stream_prep_step(held.value, stream_module)
+    }
+    if held.value.next[stream_module] < held.value.orders[stream_module].len() {
+        return sema_check_body_stream_claim(held.value, stream_module)
+    }
+    step := sema_check_body_stream_step(SemaStreamAction.Await)
+    step.module_index = held.value.module_indexes[stream_module]
+    step.tops = held.value.tops[stream_module]
+    step.total = held.value.jobs[stream_module].len()
+    step.prepared = held.value.prepared[stream_module]
+    step.summary_checked = held.value.summaries[stream_module]
+    step.can_finish = held.value.can_finish[stream_module]
+    step
+}
+
+sema_check_body_stream_prep_step: fn(stream: ^SemaBodyStream, stream_module: Int) -> SemaStreamStep {
+    stream.stages[stream_module] = SemaStreamStage.Preparing
+    step := sema_check_body_stream_step(SemaStreamAction.Prep)
+    step.stream_module = stream_module
+    step.module_index = stream.module_indexes[stream_module]
+    step.tops = stream.tops[stream_module]
+    step.can_finish = stream.can_finish[stream_module]
+    step
+}
+
+// Claims open stream module `stream_module`'s next batch of jobs (heaviest
+// functions of large modules stay single-claim so all workers share them;
+// smaller tail jobs claim up to 4 per lock to cut mutex contention).
+sema_check_body_stream_claim: fn(stream: ^SemaBodyStream, stream_module: Int) -> SemaStreamStep {
+    rank: stream.next[stream_module]
+    total_in_module: stream.orders[stream_module].len()
+    left: total_in_module - rank
+    batch_limit: if (rank < 8 && total_in_module > 32) || (rank < 2 && total_in_module > 8) -> 1 else if left < 4 -> left else -> 4
+    stream.next[stream_module] = rank + batch_limit
+    claimed: stream.claimed
+    stream.claimed = claimed + batch_limit
+    module_index: stream.module_indexes[stream_module]
+    claims := [SemaBodyClaim]{}
+    loop offset in 0..<batch_limit {
+        position: stream.orders[stream_module][rank + offset]
+        claims.push(SemaBodyClaim{position: position, job: stream.jobs[stream_module][position], stream_module: stream_module, module_index: module_index})
+    }
+    sema_check_body_stream_advance(stream)
+    step := sema_check_body_stream_step(SemaStreamAction.Body)
+    step.claim = claims[0]
+    step.claims = claims.move()
+    step.rank = claimed
+    step.total = stream.job_total
+    step.can_finish = stream.can_finish[stream_module]
+    step
+}
+
+// Moves `claim_from` past the open modules whose jobs are all claimed.
+sema_check_body_stream_advance: fn(stream: ^SemaBodyStream) {
+    loop stream.claim_from < stream.admitted {
+        at: stream.claim_from
+        if stream.stages[at] == SemaStreamStage.Rescan && stream.parallel_finish {
+            stream.claim_from = at + 1
+            next
+        }
+        if stream.stages[at] != SemaStreamStage.Open || stream.next[at] < stream.orders[at].len() {
+            return
+        }
+        stream.claim_from = at + 1
+    }
+}
+
+// Opens prepared stream module `stream_module`, whose `tops` top-level jobs
+// were listed ahead: moves its entered environment into its cell and counts
+// its jobs out (a module without jobs is ready at once, or queued for
+// finalization when `parallel_finish`), then makes its method jobs
+// claimable after its top-level ones and wakes the waiting threads. A
+// preparation that wanted the host callbacks leaves the module to the lead
+// (`Rescan`).
+sema_check_body_stream_open: fn(cells: SemaStreamCells, handle: SemaStreamHandle, stream_module: Int, tops: Int, prep: ^^SemaStreamModulePrep, parallel_finish: Bool, can_finish: Bool) {
+    taken := prep.move()
+    if taken.wanted_hooks {
+        if parallel_finish {
+            sema_check_body_stream_queue_lead(handle, stream_module, false)
+        } else {
+            sema_check_body_stream_rescan(handle, stream_module)
+        }
+        return
+    }
+    prepared: taken.environments.len() > 0
+    total_jobs: tops + taken.method_jobs.len()
+    sema_check_body_stream_enter(cells.environments[stream_module], taken.environments)
+    sema_check_body_stream_expect(cells.outs[stream_module], total_jobs, taken.codec_demand, taken.derive_demand, handle.changed, parallel_finish)
+    method_order: compiler_threads_heaviest_first(taken.weights)
+    held: handle.stream.guard_edit()
+    loop job in taken.method_jobs -> held.value.jobs[stream_module].push(job)
+    loop index in method_order -> held.value.orders[stream_module].push(tops + index)
+    held.value.prepared[stream_module] = prepared
+    held.value.summaries[stream_module] = taken.summary_checked
+    held.value.job_total += taken.method_jobs.len()
+    held.value.stages[stream_module] = SemaStreamStage.Open
+    if parallel_finish && total_jobs == 0 {
+        if can_finish {
+            held.value.ready_finish.push(stream_module)
+        } else {
+            held.value.lead_pending.push(stream_module)
+        }
+    }
+    sema_check_body_stream_advance(held.value)
+    handle.work.notify_all()
+}
+
+sema_check_body_stream_rescan: fn(handle: SemaStreamHandle, stream_module: Int) {
+    held: handle.stream.guard_edit()
+    held.value.stages[stream_module] = SemaStreamStage.Rescan
+    handle.work.notify_all()
+}
+
+// Moves a preparation's entered environment (none for a module the stream
+// checks no body of) into its stream module's cell, pre-building its light
+// scope once outside the cell lock so workers copy it in O(1).
+sema_check_body_stream_enter: fn(cell: Shared<SemaStreamEnvironment>, environments: ^^[SemaScopeEnvironment]) {
+    owned := environments.move()
+    light_scopes := [SemaScopeTable]{}
+    if owned.len() > 0 && owned[0].module_scope != None {
+        light_scopes.push(sema_check_body_stream_scope_copy(owned[0]))
+    }
+    held: cell.guard_edit()
+    held.value.environments = owned.move()
+    held.value.light_scopes = light_scopes.move()
+}
+
+// Counts a stream module's `total` jobs out before any is claimable, and
+// keeps what its preparation demanded (SemaStreamOut.codec_demand).
+sema_check_body_stream_expect: fn(out: Shared<SemaStreamOut>, total: Int, codecs: ^^[String], derived: ^^[String], changed: Condition, parallel_finish: Bool) {
+    held: out.guard_edit()
+    held.value.codec_demand = codecs.move()
+    held.value.derive_demand = derived.move()
+    held.value.left = total
+    if total > 0 || parallel_finish {
+        return
+    }
+    held.value.ready = true
+    changed.notify_all()
+}
+
+// Records again what done stream module `stream_module`'s preparation and
+// parallel finalization demanded apart (SemaStreamOut.codec_demand), before
+// the lead collects the module.
+sema_check_body_stream_replay: fn(cells: SemaStreamCells, stream_module: Int, program: SemaProgramTables) {
+    held: cells.outs[stream_module].guard_edit()
+    if held.value.codec_demand.len() == 0 && held.value.derive_demand.len() == 0 && held.value.finish_codec_demand.len() == 0 && held.value.finish_derive_demand.len() == 0 {
+        return
+    }
+    codecs: compiler_take_rows<String>(held.value.codec_demand)
+    derived: compiler_take_rows<String>(held.value.derive_demand)
+    finish_codecs: compiler_take_rows<String>(held.value.finish_codec_demand)
+    finish_derived: compiler_take_rows<String>(held.value.finish_derive_demand)
+    if program.registration_graph == .Val(graph) {
+        if codecs.len() > 0 || derived.len() > 0 {
+            sema_demand_capture_replay(graph, codecs, derived)
+        }
+        if finish_codecs.len() > 0 || finish_derived.len() > 0 {
+            sema_demand_capture_replay(graph, finish_codecs, finish_derived)
+        }
+    }
+}
+
+// A body stream module's preparation (sema_check_stream_module_prep): its
+// environment entered in the module with its post-summary scope moved in
+// (none when the stream checks no body of it), its parallel method jobs and
+// their weights, and how many view summary functions its scope checked.
+// `wanted_hooks`: a summary check wanted the host callbacks, which a
+// compiler thread holds withheld, so the stream's lead prepares it again.
+// `codec_demand` and `derive_demand`: what its summary checks demanded of
+// the generated codecs and derived methods, when they record that apart.
+SemaStreamModulePrep: struct {
+    environments: [SemaScopeEnvironment],
+    method_jobs: [SemaBodyJob],
+    weights: [Int],
+    summary_checked: Int,
+    wanted_hooks: Bool,
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
+}
+
+// Prepares module `module_index`, with `tops` top-level stream jobs, on its
+// own copy of `environment`: the method jobs the module check would hand a
+// method wave (sema_check_registration_module) and, when the stream checks
+// any body of the module, its post-summary scope
+// (sema_check_module_summary_scopes, with its declaration check's
+// `view_jobs`) with the jobs selected against the entered environment, as
+// the module check selects them. A module with methods and no top-level job
+// joins the stream too, so no module check starts a method wave of its own
+// while the stream's threads run. Entering a module replaces every module
+// field of the environment and a summary check writes only the module's
+// scope, so a preparation depends on its module alone, whatever thread
+// makes it. When the checks record their demand apart
+// (sema_check_body_demand_apart) the preparation's goes with it on the
+// stream thread's own `program` (sema_check_body_stream_part), and the lead
+// records it again before it checks the module
+// (sema_check_body_stream_replay), so none of it reaches the shared rows
+// while the lead captures a Core function's check (CoreBodies.jet).
+sema_check_stream_module_prep: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, tops: Int, view_jobs: [Int]?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, kind: SemaWaveKind) -> SemaStreamModulePrep {
+    scanned := 0
+    all_method_jobs: sema_check_registered_method_jobs(environment, program, module_index, scanned, false)
+    held := [SemaScopeEnvironment]{}
+    if kind == SemaWaveKind.Modules && tops == 0 && all_method_jobs.len() == 0 {
+        return SemaStreamModulePrep{environments: held.move(), method_jobs: [SemaBodyJob]{}, weights: [Int]{}, summary_checked: 0, wanted_hooks: false}
+    }
+    entered := environment.copy()
+    summary_checked := 0
+    apart: sema_check_body_demand_apart(program)
+    if apart && program.registration_graph == .Val(graph) -> sema_demand_capture_open(graph)
+    scopes := sema_check_module_summary_scopes(entered, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, view_jobs, "", None, summary_checked)
+    weights := [Int]{}
+    method_jobs := sema_check_registered_parallel_method_jobs(entered, program, module_index, memory_plan, all_method_jobs, comptime_rows, weights)
+    entered.module_scope = Val(scopes.move())
+    held.push(entered)
+    prep := SemaStreamModulePrep{environments: held.move(), method_jobs: method_jobs.move(), weights: weights.move(), summary_checked: summary_checked, wanted_hooks: false}
+    if apart && program.registration_graph == .Val(graph) {
+        demand := sema_demand_capture_close(graph)
+        prep.codec_demand = compiler_take_rows<String>(demand.codecs)
+        prep.derive_demand = compiler_take_rows<String>(demand.derived)
+    }
+    prep
+}
+
+sema_check_module_scope_rows_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int, core_held: ^Bool) -> Int {
+    inputs: shared_state.guard_read()
+    sema_check_registered_module_scope_rows(inputs.value.environments[0], inputs.value.programs[0], module_index, core_held)
+}
+
+sema_check_registered_module_scope_rows: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, core_held: ^Bool) -> Int {
+    if program.registration_graph == .Val(graph) {
+        core_held = sema_core_bodies_held(graph, graph.modules[module_index])
+        return sema_check_module_scope_rows(graph, module_index)
+    }
+    panic("a registered-module scheduler lost its graph")
+}
+
+sema_check_prepare_module: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, jobs: [SemaBodyJob], weights: [Int], workers: Int, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
+    if workers <= 1 -> return sema_check_prepared_none()
+    environment := sema_check_shared_take_environment(shared_state)
+    program := sema_check_shared_take_program(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    summary_checked := 0
+    scopes := sema_check_module_summary_scopes(environment, program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink, summary_checked)
+    sema_check_shared_fill(shared_state, environment, program, memory_plan)
+    sema_check_bodies_parallel(shared_state, module_index, scopes, jobs, weights, workers, trace_sink)
+}
+
+sema_check_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: SemaComptimeFunctionRows, pending_obligations: Bool, prepared: ^^SemaPreparedBodies, threads: CompilerThreads, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
+    environment := sema_check_shared_take_environment(shared_state)
+    program := sema_check_shared_take_program(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    checked := sema_check_registration_module(environment, program, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, prepared, Val(SemaMethodScheduling{shared_state: shared_state, threads: threads}), counter_phase, trace_sink)
+    restored_environment := checked.environment.move()
+    restored_program := checked.program.move()
+    restored_memory_plan := checked.memory_plan.move()
+    sema_check_shared_fill(shared_state, restored_environment, restored_program, restored_memory_plan)
+    checked.module_result.move()
+}
+
+// How many methods the current Core demand, codec or derive wave names in
+// module `module_index` (graph.core_wave_rows, graph.codec_wave_rows,
+// graph.derive_wave_rows), with their declarations' source bytes added to
+// `bytes`: the work that admits the wave's threads.
+
+sema_check_registered_wave_method_jobs: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, bytes: ^Int) -> Int {
+    scanned := 0
+    jobs: sema_check_registered_method_jobs(environment, program, module_index, scanned, false)
+    if program.registration_graph == .Val(graph) {
+        loop job in jobs {
+            if job == {
+                .NominalMethod(_, nominal_index, method_index) -> {
+                    span: graph.modules[module_index].nominals[nominal_index].methods[method_index].declaration.span
+                    bytes += span.end - span.start
+                }
+                .ImplMethod(_, implementation_index, method_index) -> {
+                    span: graph.modules[module_index].impls[implementation_index].methods[method_index].declaration.span
+                    bytes += span.end - span.start
+                }
+                .TopLevel(_) -> panic("a top-level job entered the method wave")
+            }
+        }
+    }
+    jobs.len()
+}
+
+// Moves the pass environment back into shared state alone.
+sema_check_shared_put_environment: fn(shared_state: Shared<SemaCheckShared>, environment: ^^SemaScopeEnvironment) {
+    permit: shared_state.guard_edit()
+    permit.value.environments.push(environment)
+}
+
+sema_check_shared_take_environment: fn(shared_state: Shared<SemaCheckShared>) -> SemaScopeEnvironment {
+    permit: shared_state.guard_edit()
+    permit.value.environments.pop() ?? panic("the body-check environment left the threads' shared state")
+}
+
+sema_check_shared_take_program: fn(shared_state: Shared<SemaCheckShared>) -> SemaProgramTables {
+    permit: shared_state.guard_edit()
+    permit.value.programs.pop() ?? panic("the body-check program tables left the threads' shared state")
+}
+
+sema_check_shared_take_memory_plan: fn(shared_state: Shared<SemaCheckShared>) -> SemaFunctionMemoryPlan {
+    permit: shared_state.guard_edit()
+    permit.value.memory_plans.pop() ?? panic("the body-check memory plan left the threads' shared state")
+}
+
+// Moves the pass environment, program tables and memory plan into shared state.
+sema_check_shared_fill: fn(shared_state: Shared<SemaCheckShared>, environment: ^^SemaScopeEnvironment, program: ^^SemaProgramTables, memory_plan: ^^SemaFunctionMemoryPlan) {
+    permit: shared_state.guard_edit()
+    permit.value.environments.push(environment)
+    permit.value.programs.push(program)
+    permit.value.memory_plans.push(memory_plan)
+}
+
+// Moves the program tables and memory plan alone into shared state, apart
+// from the pass environment.
+sema_check_shared_put_tables: fn(shared_state: Shared<SemaCheckShared>, program: ^^SemaProgramTables, memory_plan: ^^SemaFunctionMemoryPlan) {
+    permit: shared_state.guard_edit()
+    permit.value.programs.push(program)
+    permit.value.memory_plans.push(memory_plan)
+}

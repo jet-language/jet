@@ -184,7 +184,7 @@ sema_state_drop_met: fn(facts: ^SemaFlowFacts, id: Int) Never! {
 // declarations. Each module's walk (sema_typestate_check_module) reads it,
 // the graph and its own checked module and writes only its own findings, so
 // the walks run on compiler threads beside the side checks
-// (CheckProgram.jet sema_finalize_side_checks) and join in module order.
+// (Finalize.jet sema_finalize_side_checks) and join in module order.
 sema_state_table_of: fn(graph: SemaRegistrationGraph) -> SemaStateTable Never! {
     table := sema_state_table_new()
     loop registered in graph.modules -> sema_state_table_add_items(table, registered.program.items)

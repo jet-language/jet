@@ -1,0 +1,1433 @@
+// `loop ... in` statements: range endpoints and strides, the iterable's
+// facts and item types, and whether the body may consume or change the
+// collection it walks.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Lambda,
+    BodyTree,
+    body_each_node_kind_child,
+    body_each_stmt_child,
+    NamedSpan,
+    OrFallback,
+    PlaceAccess,
+    Span,
+    Stmt,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TForInMethod,
+    TLocal,
+    TYPE_ID_NEVER,
+    TTryConvert,
+    Type,
+    TypeTupleField,
+    diagnostic_registry_row,
+    expr_span,
+    module_is_core,
+    symbol_key_text,
+    symbol_local_keys_text,
+    symbol_table_key,
+    checked_symbol_local,
+    type_identity_key,
+    type_name,
+    TextEdit,
+    UnOp,
+    diagnostic_with_edit,
+]
+
+sema_stmt_range_integer_type: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int -> true
+        .InlineRange(_, _, _) -> true
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+sema_stmt_check_range_endpoint: fn(expr: Expr, which: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    value: sema_check_expression(expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if !sema_stmt_range_integer_type(value.ty) {
+        diagnostics.push(sema_error("E0109", expr_span(expr), "the {which} of a `for` range must be Int, not {type_name(value.ty)}", "`loop` counts whole numbers between two ends", "use Int values for both ends, like `1..10` or `0..<n`"))
+        return None
+    }
+    Val(value)
+}
+
+sema_stmt_check_range_stride: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    value: sema_check_expression(expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if !sema_stmt_range_integer_type(value.ty) {
+        diagnostics.push(sema_error("E0123", expr_span(expr), "a range loop stride must be Int, not {type_name(value.ty)}", "the stride is how far to count each turn, so it must be a whole number", "use an Int stride, like `loop i in 0..10, 2`"))
+        return None
+    }
+    if expr == {
+        .Int(n, span, _, _, _) -> {
+            if n <= 0 {
+                diagnostics.push(sema_error("E0123", span, "a range loop stride must be positive, not {n}", "a zero or negative stride would never reach the end", "use a stride of 1 or more, like `loop i in 0..10, 2 {{ ... }}`"))
+                return None
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    Val(value)
+}
+
+// A number written in the source, with an optional
+// leading minus (Rust `written_range_int`).
+sema_range_written_int: fn(expr: Expr) -> Int? {
+    if expr == {
+        .Int(value, _, _, _, _) -> Val(value)
+        .Paren(inner, _, _) -> sema_range_written_int(inner)
+        .Unary(op, operand, _, _) -> {
+            if op != UnOp.Neg -> return None
+            value: sema_range_written_int(operand) ?? return None
+            Val(0 - value)
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
+    }
+}
+
+// Written ends and step that count in opposite
+// directions are E0170 (Rust `backward_range_diagnostic`). A loop range gets
+// a fix edit for its step; a range value is taught to write its ends in order.
+sema_range_backward_diagnostic: fn(start: Expr, end: Expr, step: Expr?, exclusive: Bool, loop_range: Bool) -> Diagnostic? {
+    s: sema_range_written_int(start) ?? return None
+    e: sema_range_written_int(end) ?? return None
+    op: if exclusive -> "..<" else -> ".."
+    written_step := Int?{None}
+    if step == .Val(step_expr) -> written_step = sema_range_written_int(step_expr)
+    range_span: Span{start: expr_span(start).start, end: expr_span(end).end}
+    if s > e {
+        if step == .Val(step_expr) {
+            k: written_step ?? return None
+            if k <= 0 -> return None
+            diagnostic: sema_error("E0170", expr_span(step_expr), "this range counts down from {s} to {e} but its step {k} counts up", "a positive step moves away from {e}, so the loop would run zero times", "make the step negative: `{s}{op}{e}, -{k}`")
+            return Val(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(step_expr), new_text: "-{k}"}))
+        }
+        if !loop_range {
+            return Val(sema_error("E0170", range_span, "this range counts down from {s} to {e} and holds no numbers", "a range value always counts up from its start, so a bigger start leaves it empty", "write the smaller end first, `{e}{op}{s}`; count down in a loop with `{s}{op}{e}, -1`"))
+        }
+        diagnostic: sema_error("E0170", range_span, "this range counts down from {s} to {e} but has no step", "a range without a step counts up, so `{s}{op}{e}` would run zero times", "add the minus step: `{s}{op}{e}, -1`")
+        end_at: expr_span(end).end
+        return Val(diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: end_at, end: end_at}, new_text: ", -1"}))
+    }
+    if s < e && step == .Val(step_expr) {
+        k: written_step ?? return None
+        if k >= 0 -> return None
+        up: 0 - k
+        diagnostic: sema_error("E0170", expr_span(step_expr), "this range counts up from {s} to {e} but its step {k} counts down", "a negative step moves away from {e}, so the loop would run zero times", "make the step positive: `{s}{op}{e}, {up}`")
+        return Val(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(step_expr), new_text: "{up}"}))
+    }
+    None
+}
+
+// A loop source's step: what it walks and its item. `routed` is false when
+// an Iterable's `next` fails with a failure the enclosing body has no
+// route for (its diagnostic is reported).
+SemaForInIterableFact: struct {
+    method_kind: TForInMethod,
+    item_type: Type,
+    routed: Bool{true},
+}
+
+SemaForInPairTypes: struct {
+    first: Type,
+    second: Type,
+}
+
+sema_stmt_for_in_named_type_name: fn(ty: Type) -> String? {
+    if ty == {
+        .Named(name) -> return Val(name)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
+    }
+}
+
+sema_stmt_for_in_type_is_named: fn(ty: Type, name: String) -> Bool Never! {
+    actual: sema_stmt_for_in_named_type_name(ty) ?? return false
+    actual == name || actual.ends_with(".{name}")
+}
+
+sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Apply(name, args) -> {
+            if name == "ViewMut" -> return false
+            if name == "Task" -> return true
+            loop arg in args {
+                if sema_stmt_for_in_type_requires_owned_iteration(arg) -> return true
+            }
+            return false
+        }
+        .List(inner) | .FixedList(inner, _) -> return sema_stmt_for_in_type_requires_owned_iteration(inner)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_stmt_for_in_type_requires_owned_iteration(field.ty) -> return true
+            }
+            return false
+        }
+        .Option(inner) | .Shared(inner) -> return sema_stmt_for_in_type_requires_owned_iteration(inner)
+        .Result(ok, err) -> return sema_stmt_for_in_type_requires_owned_iteration(ok) || sema_stmt_for_in_type_requires_owned_iteration(err)
+        .Map(key, _, value) -> return sema_stmt_for_in_type_requires_owned_iteration(key) || sema_stmt_for_in_type_requires_owned_iteration(value)
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
+// The associated types and method symbol keys of the `trait_name` impl of
+// the nominal `identity` keys, and the module that writes it: a top-level
+// impl row (the last one, as the loop source reads it), else an
+// `impl Trait { … }` block in the nominal's own body, whose methods the
+// nominal registers. The associated types, parallel names and types,
+// include those the trait infers from a method's failure
+// (sema_owned_bind_failure).
+SemaForInTraitImpl: struct {
+    module_index: Int,
+    associated_names: [String],
+    associated_types: [Type],
+    method_keys: [String:String],
+}
+
+sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String, identity: String) -> SemaForInTraitImpl? {
+    found := SemaForInTraitImpl?{None}
+    loop module_index in 0..<graph.modules.len() {
+        loop implementation_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[implementation_index].trait_name != (Val(trait_name)) || graph.modules[module_index].impls[implementation_index].target_identity_key != identity {
+                next
+            }
+            names := loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.name
+            types := loop declared in graph.modules[module_index].impls[implementation_index].associated_types -> declared.declaration.ty.copy()
+            keys := [String:String]{}
+            loop method in graph.modules[module_index].impls[implementation_index].methods {
+                keys[method.declaration.name] = symbol_table_key(graph.symbols, method.symbol.id)
+                sema_owned_bind_failure(trait_name, method.declaration, names, types)
+            }
+            found = Val(SemaForInTraitImpl{module_index: module_index, associated_names: names, associated_types: types, method_keys: keys})
+        }
+    }
+    if found != None -> return found
+    loop module_index in 0..<graph.modules.len() {
+        loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
+            if graph.modules[module_index].nominals[nominal_index].identity_key != identity -> next
+            if graph.modules[module_index].nominals[nominal_index].source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    if block.trait_name != trait_name -> next
+                    keys := [String:String]{}
+                    loop method in graph.modules[module_index].nominals[nominal_index].methods {
+                        loop written in block.methods {
+                            if written.span == method.declaration.span {
+                                keys[method.declaration.name] = symbol_table_key(graph.symbols, method.symbol.id)
+                            }
+                        }
+                    }
+                    names := loop associated in block.assoc_type_impls -> associated.name
+                    types := loop associated in block.assoc_type_impls -> associated.ty
+                    loop written in block.methods {
+                        sema_owned_bind_failure(trait_name, written, names, types)
+                    }
+                    return Val(SemaForInTraitImpl{module_index: module_index, associated_names: names, associated_types: types, method_keys: keys})
+                }
+            }
+        }
+    }
+    None
+}
+
+// The step of a loop over an Iterable source. The loop header calls `next`,
+// so a failure of it passes up as an implicit fallible call's does, through
+// the same conversion (sema_expression_propagation_conversion) at the
+// header `span`.
+sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type, span: Span, scopes: ^SemaScopeTable, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaForInIterableFact? {
+    if sema_stmt_for_in_named_type_name(collection_type) == None -> return None
+    if program.registration_graph == .Val(graph) {
+        // Impls key their target by the declaring nominal's identity, so a
+        // source type and its `Iter` resolve to that nominal first (a Core
+        // type written by its bare name, `HTTPBodyChunks`, included).
+        collection_identity := type_identity_key(collection_type)
+        if sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
+            collection_identity = graph.modules[row.module_index].nominals[row.row].identity_key
+        }
+        iterable: sema_stmt_for_in_trait_impl(graph, "Iterable", collection_identity) ?? return None
+        iter_type := Type?{None}
+        loop index in 0..<iterable.associated_names.len() {
+            if iterable.associated_names[index] == "Iter" {
+                iter_type = Val(iterable.associated_types[index])
+            }
+        }
+        resolved_iter_type: iter_type ?? return None
+        if sema_stmt_for_in_named_type_name(resolved_iter_type) == None -> return None
+        iterator_identity := type_identity_key(resolved_iter_type)
+        if sema_type_resolve_nominal_row_at(graph, resolved_iter_type, iterable.module_index) == .Val(iter_row) {
+            iterator_identity = graph.modules[iter_row.module_index].nominals[iter_row.row].identity_key
+        }
+        iterator: sema_stmt_for_in_trait_impl(graph, "Iterator", iterator_identity) ?? return None
+        item_type := Type?{None}
+        error_type := Type?{None}
+        loop index in 0..<iterator.associated_names.len() {
+            if iterator.associated_names[index] == "Item" {
+                item_type = Val(iterator.associated_types[index])
+            }
+            if iterator.associated_names[index] == "Error" {
+                error_type = Val(iterator.associated_types[index])
+            }
+        }
+        item: item_type ?? return None
+        iter_key: iterable.method_keys.get("iter") ?? return None
+        next_key: iterator.method_keys.get("next") ?? return None
+        failure := TTryConvert.Never
+        routed := true
+        if error_type == .Val(error) && error != (Type.Named{name: "Never"}) {
+            // The step call the header stands for: its callee is `next`
+            // (sema_failure_call_provenance names a method call by its
+            // method), so the receiver is not read.
+            step_call: Expr.MethodCall{receiver: Expr.Unit{span: span, id: AST_NODE_GENERATED}, method: "next", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+            callee: SemaFailureCallee{key: next_key, inferable: false}
+            converted: sema_expression_propagation_conversion(Type.Result{ok: Type.Option{inner: item}, err: error}, Val(step_call), Val(callee), span, true, environment, program, scopes, context, diagnostics)
+            routed = converted != None
+            failure = converted ?? TTryConvert.Never
+        }
+        return Val(SemaForInIterableFact{
+            method_kind: TForInMethod.Iterable{coll_type: collection_identity, iter_type: iterator_identity, iter_symbol: iter_key, next_symbol: next_key, item_type: item, failure: failure},
+            item_type: item,
+            routed: routed,
+        })
+    }
+    None
+}
+
+// A Core reader, one whose `next(^self)` answers `Item? E!` (`JSONReader`,
+// `CBORReader`, `CSVReader`, ...): the loop calls that `next` each step
+// (IR ir_encoding_reader_walk), so the item is the `Item` Core declares.
+sema_stmt_for_in_reader_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
+    if program.registration_graph == .Val(graph) {
+        row: sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) ?? return None
+        if !module_is_core(graph.modules[row.module_index].nominals[row.row].symbol.module_identity) {
+            return None
+        }
+        loop method in graph.modules[row.module_index].nominals[row.row].methods {
+            if method.declaration.name != "next" -> next
+            item := sema_stmt_for_in_reader_item(method.signature) ?? next
+            if collection_type == .Apply(_, args) {
+                names: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
+                item = sema_inference_substitute_type(item, names, args)
+            }
+            reader: graph.modules[row.module_index].nominals[row.row].identity_key
+            return Val(SemaForInIterableFact{method_kind: TForInMethod.EncodingReader{reader_type: reader}, item_type: item})
+        }
+    }
+    None
+}
+
+// The `Item` of a reader step `fn(^self) -> Item? E!`, or None for any other
+// signature.
+sema_stmt_for_in_reader_item: fn(signature: Type) -> Type? {
+    if signature == .Fn(params, ret, _, _, _, _) {
+        if params.len() != 1 -> return None
+        if ret == .Val(returned) {
+            if returned == .Result(ok, _) {
+                if ok == .Option(item) -> return Val(item)
+            }
+        }
+    }
+    None
+}
+
+sema_stmt_for_in_method_kind: fn(expression: Expr, collection: TExpr) -> TForInMethod? {
+    if expression == {
+        .MethodCall(receiver_expr, method, _, _, _, _, _) -> {
+            if method == "chars" -> return Val(TForInMethod.Chars)
+            if method == "lines" {
+                receiver := TExpr?{None}
+                if collection.kind == {
+                    // copy: `value` is a payload of read parameter `collection`, which keeps the original; the Val carrier owns this one
+                    .MethodCall(value, _, _, _) -> receiver = Val(value.copy())
+                    .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
+                }
+                if receiver != None {
+                    receiver_value: receiver ?? collection
+                    if sema_stmt_for_in_type_is_named(receiver_value.ty, "FileReader") {
+                        return Val(TForInMethod.LinesFile)
+                    }
+                    if sema_stmt_for_in_type_is_named(receiver_value.ty, "StdinHandle") {
+                        return Val(TForInMethod.LinesStdin)
+                    }
+                    if receiver_expr == {
+                        .Field(_, member, _, _) -> {
+                            if member == "stdout" || member == "stderr" {
+                                if receiver_value.kind == {
+                                    .Field(base_value, _) -> {
+                                        if sema_stmt_for_in_type_is_named(base_value.ty, "ProcessChild") {
+                                            return Val(TForInMethod.LinesProcessStream)
+                                        }
+                                    }
+                                    .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
+                                }
+                            }
+                        }
+                        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+                    }
+                }
+                if sema_stmt_for_in_type_is_named(collection.ty, "FileLines") {
+                    return Val(TForInMethod.LinesFile)
+                }
+                if sema_stmt_for_in_type_is_named(collection.ty, "StdinLines") {
+                    return Val(TForInMethod.LinesStdin)
+                }
+                if sema_stmt_for_in_type_is_named(collection.ty, "ProcessLines") {
+                    return Val(TForInMethod.LinesProcessStream)
+                }
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    if collection.ty == .Apply(name, args) {
+        if name == "Receiver" && args.len() == 1 -> return Val(TForInMethod.ChannelReceiver)
+    }
+    None
+}
+
+sema_stmt_for_in_source: fn(expression: Expr, collection: TExpr, method_kind: TForInMethod?) -> TExpr Never! {
+    special_source := method_kind == (Val(TForInMethod.Chars)) || method_kind == (Val(TForInMethod.LinesFile)) || method_kind == (Val(TForInMethod.LinesStdin)) || method_kind == (Val(TForInMethod.LinesProcessStream))
+    if special_source {
+        if expression == {
+            .MethodCall(_, method, _, _, _, _, _) -> {
+                if method == "chars" || method == "lines" {
+                    if collection.kind == {
+                        // copy: `receiver` is a payload of read parameter `collection`, which keeps the original; the returned value owns this one
+                        .MethodCall(receiver, _, _, _) -> return receiver.copy()
+                        // `text.chars()` checks as the String builtin; the
+                        // loop walks its receiver's scalars, as Rust
+                        // lower_forin_collection sources `chars` from it.
+                        .BuiltinMethod(receiver, operation, _) -> {
+                            if operation == .Chars -> return receiver
+                        }
+                        // `child.stdout.lines()` checks as the process
+                        // stream's handle method; the loop reads the stream,
+                        // as Rust lower_forin_collection sources it.
+                        .HandleMethod(receiver, _, _) -> {
+                            if method_kind == (Val(TForInMethod.LinesProcessStream)) {
+                                return receiver.copy()
+                            }
+                        }
+                        .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {}
+                    }
+                }
+            }
+            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+        }
+    }
+    // copy: the for-in source is a new owned TExpr. Otherwise it equals `collection`, the caller's
+    // checked iterable (a read parameter), which the caller keeps.
+    collection.copy()
+}
+
+sema_stmt_for_in_expr_root_ident: fn(expression: Expr) -> String? {
+    if expression == {
+        .Ident(name, _, _) -> return Val(name)
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> return sema_stmt_for_in_expr_root_ident(base)
+        .Paren(value, _, _) | .Copy(value, _, _) -> return sema_stmt_for_in_expr_root_ident(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+sema_stmt_for_in_can_consume_collection: fn(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Paren(value, _, _) | .Copy(value, _, _) -> return sema_stmt_for_in_can_consume_collection(value)
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> return sema_stmt_for_in_expr_root_ident(expression) == None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return true
+    }
+}
+
+sema_stmt_for_in_is_list: fn(collection_type: Type) -> Bool Never! {
+    if collection_type == {
+        .List(_) | .FixedList(_, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// Rust `frame_owns_place`: a bare name this frame owns outright. A read or
+// write parameter and a live view name storage the caller still owns.
+sema_stmt_for_in_frame_owns: fn(expression: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Bool {
+    if expression == {
+        .Paren(value, _, _) | .Copy(value, _, _) -> return sema_stmt_for_in_frame_owns(value, scopes, state)
+        .Ident(_, _, _) -> {}
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return true
+    }
+    if sema_ownership_view_exists_for_expr(state, expression, scopes) -> return false
+    binding: sema_ownership_binding_for_expr(state, expression, scopes) ?? return true
+    !(binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write))
+}
+
+// Rust `report_borrowed_loop_consume`: a loop over task handles hands out
+// each handle itself, which takes the list; a borrowed name, a field or an
+// index cannot give the list away.
+sema_stmt_for_in_borrowed_task_list: fn(collection: Expr, collection_type: Type, scopes: SemaScopeTable, state: ^SemaOwnershipState) -> Diagnostic {
+    why: "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list"
+    place: if collection == {
+        .Paren(inner, _, _) | .Copy(inner, _, _) -> inner
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> collection
+    }
+    if place == .Ident(name, _, _) {
+        is_param: if sema_ownership_binding_for_expr(state, place, scopes) == {
+            .Val(binding) -> binding.symbol.kind == SymbolKind.Parameter
+            .None -> false
+        }
+        fix: if is_param -> "take the list: `{name}: ^^{sema_type_show(collection_type)}`, or collect the work in a canonical `task.all` or `task.group` block" else -> "move the list into a local this scope owns before the loop consumes its task handles"
+        return sema_error("E0120", expr_span(collection), "`{name}` was not moved here, so this loop can't take its handles", why, fix)
+    }
+    sema_error("E0120", expr_span(collection), "this loop can't take handles out of a field or index", why, "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs {{ … }}`")
+}
+
+// Rust `collection_root_name`: the local a loop reads, through `.chars()`.
+sema_stmt_for_in_collection_root: fn(expression: Expr) -> String? {
+    if expression == {
+        .Ident(name, _, _) -> return Val(name)
+        .MethodCall(receiver, method, _, _, _, _, _) -> {
+            if method == "chars" -> return sema_stmt_for_in_collection_root(receiver)
+            return None
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+// The collection a `loop x in xs` holds across its body (E0507). A written
+// drive (`loop x in ^items`) holds the same source as a by-value one.
+sema_stmt_for_in_driven_root: fn(expression: Expr) -> String? {
+    if expression == {
+        .Place(inner, _, _, _) -> return sema_stmt_for_in_collection_root(inner)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return sema_stmt_for_in_collection_root(expression)
+    }
+}
+
+// `loop x in xs` where `xs` is a plain place (`xs`,
+// `a.b.xs`, `xs[i]`, `xs[a..b]`, also behind a read or write drive mark)
+// rooted in a read or write parameter or in a name that reads its place in
+// place (a projection or payload binding): each loop name reads an element
+// that place's owner keeps, so an exact `x.move()` in the body would copy it. A
+// `.copy()` source or a `xs.move()` drive hands the loop owned elements.
+sema_stmt_for_in_borrowed_elements: fn(expression: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expression == .Place(_, access, _, _) {
+        if access == PlaceAccess.Take -> return false
+    }
+    source: if expression == .Place(inner, _, _, _) -> inner else -> expression
+    if !sema_stmt_for_in_plain_place(source) -> return false
+    root: sema_stmt_for_in_expr_root_ident(source) ?? return false
+    index: sema_scope_resolve_index(scopes, root) ?? return false
+    binding: scopes.bindings[index]
+    sema_ownership_binding_is_borrowed_param(binding) || binding.place_alias
+}
+
+// `loop x in xs` over a list read in place (no `xs.move()` drive) whose items hold a
+// resource (#6429): each loop name reads an element the list keeps, whoever
+// owns the list, so taking it (`x.move()`) or copying it into an owning position
+// (`out.push(x)`, `-> x`) would leave two owners closing one resource.
+sema_stmt_for_in_resource_elements: fn(expression: Expr, collection_type: Type, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool {
+    if expression == .Place(_, access, _, _) {
+        if access == PlaceAccess.Take -> return false
+    }
+    if !sema_stmt_for_in_columnar_list_type(collection_type) -> return false
+    source: if expression == .Place(inner, _, _, _) -> inner else -> expression
+    if !sema_stmt_for_in_plain_place(source) -> return false
+    if sema_ownership_type_is_copy(item_type) || item_type == .String -> return false
+    facts: sema_copy_classify(item_type, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts.complete && facts.holds_resource
+}
+
+sema_stmt_for_in_plain_place: fn(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Ident(_, _, _) -> true
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) | .Paren(base, _, _) -> sema_stmt_for_in_plain_place(base)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// #4318 §4 stable loop source: the root name of a source that is a plain
+// place, `xs` or `a.b.xs`. A user `.copy()` copy, a call, or an index is not one.
+// Rust reference lowering: `stable_loop_source_root`.
+sema_stmt_for_in_stable_root: fn(expression: Expr) -> String? {
+    if expression == {
+        .Ident(name, _, _) -> return Val(name)
+        .Field(base, _, _, _) | .Paren(base, _, _) -> return sema_stmt_for_in_stable_root(base)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+// The definition id of a stable source's root, or None when the source is
+// not a place or a write loan on the root is active at loop entry (a write
+// window or mutating capture can change it without naming it in the body).
+sema_stmt_for_in_stable_root_id: fn(expression: Expr, scopes: SemaScopeTable, state: SemaOwnershipState) -> SymbolID? {
+    root: sema_stmt_for_in_stable_root(expression) ?? return None
+    index: sema_scope_resolve_index(scopes, root) ?? return None
+    id: scopes.bindings[index].symbol.id
+    loop loan in state.loans {
+        if loan.place.root_id == id && loan.access == AccessConvention.Write -> return None
+    }
+    Val(id)
+}
+
+// True when a reference the loop body added (from `references_before` on)
+// names the definition `id`: any read, write, or move of the root.
+sema_stmt_for_in_body_mentions: fn(state: SemaOwnershipState, references_before: Int, id: SymbolID) -> Bool Never! {
+    loop index in references_before..<state.references.len() {
+        if state.references[index].def_id == id -> return true
+    }
+    false
+}
+
+// True when the checked loop body names the definition `key` on any path,
+// as Rust's syntactic test does (`block_free_var_reads(body)` in
+// the Rust reference lowering). The ownership
+// references above miss an arm that does not fall through, whose branch
+// state is dropped: `loop x in s.xs { if c { f(s, x); return } }` looked
+// stable, lowered an in-place walk, and rustc rejected the `&mut s` call
+// that also borrows `s.xs[i]` (E0502).
+// `arena` holds the rows of the body's flat nodes (sema_node).
+sema_stmt_for_in_tree_mentions: fn(statements: [TStmt], key: SymbolID, arena: BodyTree) -> Bool Never! {
+    if sema_stmt_for_in_tree_assigns(statements, key) -> return true
+    found := false
+    loop statement in statements {
+        if found -> break
+        tree_each_stmt_child(statement, fn(child: TExpr) {
+            if !found && sema_stmt_for_in_tree_expr_names(child, key, arena) -> found = true
+        })
+    }
+    found
+}
+
+sema_stmt_for_in_tree_local_is: fn(local: TLocal, key: SymbolID) -> Bool Never! {
+    symbol: local.symbol_id ?? return false
+    symbol == key
+}
+
+// A local read, an address of the whole local, or a lambda capture of it;
+// `tree_each_expr_child` covers every nested expression.
+sema_stmt_for_in_tree_expr_names: fn(value: TExpr, key: SymbolID, arena: BodyTree) -> Bool Never! {
+    if value.kind == {
+        .Flat(index) -> return sema_stmt_for_in_row_names(arena, index, key)
+        .Local(local) -> return sema_stmt_for_in_tree_local_is(local, key)
+        .RawAddressOf(place) -> {
+            if place == .Local(local) -> return sema_stmt_for_in_tree_local_is(local, key)
+        }
+        .Lambda(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tree_local_is(capture.local, key) -> return true
+            }
+        }
+        .InlineBlock(body) -> {
+            if sema_stmt_for_in_tree_assigns(body, key) -> return true
+        }
+        .IntLit(_, _) | .StrLit(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
+    }
+    found := false
+    tree_each_expr_child(value, fn(child: TExpr) {
+        if !found && sema_stmt_for_in_tree_expr_names(child, key, arena) -> found = true
+    })
+    found
+}
+
+// sema_stmt_for_in_tree_expr_names of node row `index` of `tree`.
+sema_stmt_for_in_row_names: fn(tree: BodyTree, index: Int, key: SymbolID) -> Bool Never! {
+    if tree.nodes[index - tree.node_base].kind == {
+        .Local(local) -> return sema_stmt_for_in_tree_local_is(local, key)
+        .RawAddressOf(place) -> {
+            if place == .Local(local) -> return sema_stmt_for_in_tree_local_is(local, key)
+        }
+        .Lambda(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tree_local_is(capture.local, key) -> return true
+            }
+        }
+        .InlineBlock(body) -> {
+            if sema_stmt_for_in_row_assigns(tree, body, key) -> return true
+        }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+    }
+    found := false
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
+        if !found && sema_stmt_for_in_row_names(tree, child, key) -> found = true
+    })
+    found
+}
+
+// A whole-local assignment `key = …` at any depth: its place is not an
+// expression child (`tree_each_stmt_child`).
+sema_stmt_for_in_tree_assigns: fn(statements: [TStmt], key: SymbolID) -> Bool Never! {
+    loop statement in statements {
+        if statement == {
+            .Assign(place, _, _, _, _) -> {
+                if place == .Local(local) {
+                    if sema_stmt_for_in_tree_local_is(local, key) -> return true
+                }
+            }
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+                if sema_stmt_for_in_tree_assigns(body, key) -> return true
+            }
+            .RefutableBind(_, _, fallback, _) -> {
+                if sema_stmt_for_in_tree_assigns(fallback, key) -> return true
+            }
+            .CountedLoop(_, init, _, step, _, body, _) -> {
+                if sema_stmt_for_in_tree_assigns([TStmt]{init}, key) || sema_stmt_for_in_tree_assigns(body, key) {
+                    return true
+                }
+                if step == .Val(nested) {
+                    if sema_stmt_for_in_tree_assigns([TStmt]{nested}, key) -> return true
+                }
+            }
+            .If(_, then_body, else_body, _, _) -> {
+                if sema_stmt_for_in_tree_assigns(then_body, key) -> return true
+                if else_body == .Val(else_statements) {
+                    if sema_stmt_for_in_tree_assigns(else_statements, key) -> return true
+                }
+            }
+            .Match(_, arms, _, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tree_assigns(arm.body, key) -> return true
+                }
+            }
+            .EnumMatch(_, arms, else_body, _, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tree_assigns(arm.body, key) -> return true
+                }
+                if else_body == .Val(else_statements) {
+                    if sema_stmt_for_in_tree_assigns(else_statements, key) -> return true
+                }
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tree_assigns(arm.body, key) -> return true
+                }
+                if sema_stmt_for_in_tree_assigns(else_body, key) -> return true
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tree_assigns(arm.body, key) -> return true
+                }
+                if else_body == .Val(else_statements) {
+                    if sema_stmt_for_in_tree_assigns(else_statements, key) -> return true
+                }
+            }
+            .GCEdit(_, _, _, _, _, edited, _) -> {
+                if sema_stmt_for_in_tree_assigns([TStmt]{edited}, key) -> return true
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> {}
+        }
+    }
+    false
+}
+
+// sema_stmt_for_in_tree_assigns of statement rows `statements` of `tree`.
+sema_stmt_for_in_row_assigns: fn(tree: BodyTree, statements: [Int], key: SymbolID) -> Bool Never! {
+    loop item in statements {
+        if sema_stmt_for_in_row_stmt_assigns(tree, item, key) -> return true
+    }
+    false
+}
+
+sema_stmt_for_in_row_stmt_assigns: fn(tree: BodyTree, item: Int, key: SymbolID) -> Bool Never! {
+    if tree.stmts[item - tree.stmt_base] == {
+        .Assign(place, _, _, _, _) -> {
+            if place == .Local(local) -> return sema_stmt_for_in_tree_local_is(local, key)
+            false
+        }
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> sema_stmt_for_in_row_assigns(tree, body, key)
+        .RefutableBind(_, _, fallback, _) -> sema_stmt_for_in_row_assigns(tree, fallback, key)
+        .CountedLoop(_, init, _, step, _, body, _) -> {
+            if sema_stmt_for_in_row_stmt_assigns(tree, init, key) || sema_stmt_for_in_row_assigns(tree, body, key) {
+                return true
+            }
+            if step == .Val(nested) -> return sema_stmt_for_in_row_stmt_assigns(tree, nested, key)
+            false
+        }
+        .If(_, then_body, else_body, _, _) -> {
+            if sema_stmt_for_in_row_assigns(tree, then_body, key) -> return true
+            if else_body == .Val(else_statements) {
+                return sema_stmt_for_in_row_assigns(tree, else_statements, key)
+            }
+            false
+        }
+        .Match(_, arms, _, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            false
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            if else_body == .Val(else_statements) {
+                return sema_stmt_for_in_row_assigns(tree, else_statements, key)
+            }
+            false
+        }
+        .RangeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            sema_stmt_for_in_row_assigns(tree, else_body, key)
+        }
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_for_in_row_assigns(tree, arm.body, key) -> return true
+            }
+            if else_body == .Val(else_statements) {
+                return sema_stmt_for_in_row_assigns(tree, else_statements, key)
+            }
+            false
+        }
+        .GCEdit(_, _, _, _, _, edited, _) -> sema_stmt_for_in_row_stmt_assigns(tree, edited, key)
+        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) -> false
+    }
+}
+
+// True when the loop body leaves the source root `root` unchanged, so the
+// loop may walk the source in place, as Rust's
+// reference lowering's `loop_body_keeps_source`
+// decides. A body that never names the root qualifies. A body that names it
+// qualifies only when every reference it adds to the root is a read, it
+// never assigns, write-borrows or captures the root, and it never leaves the
+// loop early or diverges (sema_stmt_for_in_tree_stays). With no early exit
+// and no diverging arm, no branch state is dropped, so the references are
+// complete; and no read of the root can become its moving last use while the
+// walk's item borrow is live.
+sema_stmt_for_in_body_keeps: fn(state: SemaOwnershipState, references_before: Int, root: SymbolID, statements: [TStmt], arena: BodyTree) -> Bool {
+    if !sema_stmt_for_in_body_mentions(state, references_before, root) && !sema_stmt_for_in_tree_mentions(statements, root, arena) {
+        return true
+    }
+    loop index in references_before..<state.references.len() {
+        reference: state.references[index]
+        if reference.def_id == root && reference.kind != SemaOwnershipReferenceKind.Read {
+            return false
+        }
+    }
+    !sema_stmt_for_in_tree_assigns(statements, root) && sema_stmt_for_in_tree_stays(statements, root, arena)
+}
+
+// True when every statement only falls through: no return, break, value
+// break or next at any depth (a nested loop's included), no statement of
+// type Never, and no expression that leaves or diverges
+// (sema_stmt_for_in_tree_expr_stays).
+sema_stmt_for_in_tree_stays: fn(statements: [TStmt], key: SymbolID, arena: BodyTree) -> Bool Never! {
+    loop statement in statements {
+        if statement == {
+            .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return false
+            .ExprStmt(value, _) -> {
+                if value.ty == (Type.Named{name: "Never"}) -> return false
+            }
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+                if !sema_stmt_for_in_tree_stays(body, key, arena) -> return false
+            }
+            .RefutableBind(_, _, fallback, _) -> {
+                if !sema_stmt_for_in_tree_stays(fallback, key, arena) -> return false
+            }
+            .CountedLoop(_, init, _, step, _, body, _) -> {
+                if !sema_stmt_for_in_tree_stays([TStmt]{init}, key, arena) || !sema_stmt_for_in_tree_stays(body, key, arena) {
+                    return false
+                }
+                if step == .Val(nested) {
+                    if !sema_stmt_for_in_tree_stays([TStmt]{nested}, key, arena) -> return false
+                }
+            }
+            .If(_, then_body, else_body, _, _) -> {
+                if !sema_stmt_for_in_tree_stays(then_body, key, arena) -> return false
+                if else_body == .Val(else_statements) {
+                    if !sema_stmt_for_in_tree_stays(else_statements, key, arena) -> return false
+                }
+            }
+            .Match(_, arms, _, _) -> {
+                loop arm in arms {
+                    if !sema_stmt_for_in_tree_stays(arm.body, key, arena) -> return false
+                }
+            }
+            .EnumMatch(_, arms, else_body, _, _) -> {
+                loop arm in arms {
+                    if !sema_stmt_for_in_tree_stays(arm.body, key, arena) -> return false
+                }
+                if else_body == .Val(else_statements) {
+                    if !sema_stmt_for_in_tree_stays(else_statements, key, arena) -> return false
+                }
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if !sema_stmt_for_in_tree_stays(arm.body, key, arena) -> return false
+                }
+                if !sema_stmt_for_in_tree_stays(else_body, key, arena) -> return false
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms {
+                    if !sema_stmt_for_in_tree_stays(arm.body, key, arena) -> return false
+                }
+                if else_body == .Val(else_statements) {
+                    if !sema_stmt_for_in_tree_stays(else_statements, key, arena) -> return false
+                }
+            }
+            .GCEdit(_, _, _, _, _, edited, _) -> {
+                if !sema_stmt_for_in_tree_stays([TStmt]{edited}, key, arena) -> return false
+            }
+            .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .DeferClose(_, _, _) | .Reactive(_, _) -> {}
+        }
+        stays := true
+        tree_each_stmt_child(statement, fn(child: TExpr) {
+            if stays && !sema_stmt_for_in_tree_expr_stays(child, key, arena) -> stays = false
+        })
+        if !stays -> return false
+    }
+    true
+}
+
+// An expression that neither leaves the loop (`?`, a diverging `??`), nor
+// diverges (type Never), nor write-borrows or captures the root `key`; an
+// inline block's statements fall through too.
+sema_stmt_for_in_tree_expr_stays: fn(value: TExpr, key: SymbolID, arena: BodyTree) -> Bool Never! {
+    if value.ty == (Type.Named{name: "Never"}) -> return false
+    if value.kind == {
+        .Flat(index) -> return sema_stmt_for_in_row_expr_stays(arena, index, key)
+        .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> return false
+        .OrFallback(_, fallback, _) -> {
+            if fallback == {
+                .Value(_) -> {}
+                .Return(_) | .Panic(_, _) | .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> return false
+            }
+        }
+        .Lambda(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tree_local_is(capture.local, key) -> return false
+            }
+        }
+        .InlineBlock(body) -> {
+            if !sema_stmt_for_in_tree_stays(body, key, arena) -> return false
+        }
+        .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
+    }
+    stays := true
+    tree_each_expr_child(value, fn(child: TExpr) {
+        if stays && !sema_stmt_for_in_tree_expr_stays(child, key, arena) -> stays = false
+    })
+    stays
+}
+
+// Whether node row `index` of `tree` has type Never.
+sema_stmt_row_is_never: fn(tree: BodyTree, index: Int) -> Bool Never! {
+    tree.expr_types[index - tree.node_base].ty.id == TYPE_ID_NEVER.id
+}
+
+// sema_stmt_for_in_tree_stays of statement rows `statements` of `tree`.
+sema_stmt_for_in_row_stays: fn(tree: BodyTree, statements: [Int], key: SymbolID) -> Bool Never! {
+    loop item in statements {
+        if !sema_stmt_for_in_row_stmt_stays(tree, item, key) -> return false
+    }
+    true
+}
+
+sema_stmt_for_in_row_stmt_stays: fn(tree: BodyTree, item: Int, key: SymbolID) -> Bool Never! {
+    if tree.stmts[item - tree.stmt_base] == {
+        .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return false
+        .ExprStmt(value, _) -> {
+            if sema_stmt_row_is_never(tree, value) -> return false
+        }
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+            if !sema_stmt_for_in_row_stays(tree, body, key) -> return false
+        }
+        .RefutableBind(_, _, fallback, _) -> {
+            if !sema_stmt_for_in_row_stays(tree, fallback, key) -> return false
+        }
+        .CountedLoop(_, init, _, step, _, body, _) -> {
+            if !sema_stmt_for_in_row_stmt_stays(tree, init, key) || !sema_stmt_for_in_row_stays(tree, body, key) {
+                return false
+            }
+            if step == .Val(nested) {
+                if !sema_stmt_for_in_row_stmt_stays(tree, nested, key) -> return false
+            }
+        }
+        .If(_, then_body, else_body, _, _) -> {
+            if !sema_stmt_for_in_row_stays(tree, then_body, key) -> return false
+            if else_body == .Val(else_statements) {
+                if !sema_stmt_for_in_row_stays(tree, else_statements, key) -> return false
+            }
+        }
+        .Match(_, arms, _, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+        }
+        .EnumMatch(_, arms, else_body, _, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+            if else_body == .Val(else_statements) {
+                if !sema_stmt_for_in_row_stays(tree, else_statements, key) -> return false
+            }
+        }
+        .RangeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+            if !sema_stmt_for_in_row_stays(tree, else_body, key) -> return false
+        }
+        .MixedSwitch(_, _, arms, else_body, _) -> {
+            loop arm in arms {
+                if !sema_stmt_for_in_row_stays(tree, arm.body, key) -> return false
+            }
+            if else_body == .Val(else_statements) {
+                if !sema_stmt_for_in_row_stays(tree, else_statements, key) -> return false
+            }
+        }
+        .GCEdit(_, _, _, _, _, edited, _) -> {
+            if !sema_stmt_for_in_row_stmt_stays(tree, edited, key) -> return false
+        }
+        .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .DeferClose(_, _, _) | .Reactive(_, _) -> {}
+    }
+    stays := true
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) {
+        if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
+    })
+    stays
+}
+
+// sema_stmt_for_in_tree_expr_stays of node row `index` of `tree`.
+sema_stmt_for_in_row_expr_stays: fn(tree: BodyTree, index: Int, key: SymbolID) -> Bool Never! {
+    if sema_stmt_row_is_never(tree, index) -> return false
+    if tree.nodes[index - tree.node_base].kind == {
+        .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> return false
+        .OrFallback(_, fallback, _) -> {
+            if fallback == {
+                .Value(_) -> {}
+                .Return(_) | .Panic(_, _) | .Break | .Continue | .BreakLabel(_) | .ContinueLabel(_) -> return false
+            }
+        }
+        .Lambda(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tree_local_is(capture.local, key) -> return false
+            }
+        }
+        .InlineBlock(body) -> {
+            if !sema_stmt_for_in_row_stays(tree, body, key) -> return false
+        }
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+    }
+    stays := true
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
+        if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
+    })
+    stays
+}
+
+sema_stmt_for_in_stable_list: fn(collection_type: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(collection_type) == {
+        .List(_) | .FixedList(_, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// Rust `collection_changed_in_loop` / `collection_changed_by_method_in_loop`
+// (E0507): a change to a collection an active loop is reading. `operation`
+// is `` `name.method()` `` or `a mutation of `name``.
+sema_collection_changed_in_loop: fn(name: String, operation: String, span: Span) -> Diagnostic {
+    sema_error("E0507", span, "While the loop is reading `{name}`, nothing may change it", "The loop reads `{name}` across its body, so {operation} can change the visited domain, element order, or termination.", "Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `{name}` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.")
+}
+
+// The root local of a written place such as `xs`, `^xs`, or `a.b[i]`.
+sema_expr_place_root_ident: fn(expression: Expr) -> String? {
+    if expression == {
+        .Place(inner, _, _, _) | .Paren(inner, _, _) -> return sema_expr_place_root_ident(inner)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return sema_stmt_for_in_expr_root_ident(expression)
+    }
+}
+
+// Rust's indexed-write gate: a Pool, ViewMut, Map, List, or fixed list slot.
+sema_stmt_index_write_is_collection: fn(ty: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == {
+        .Map(_, _, _) | .List(_) | .FixedList(_, _) -> true
+        .Apply(name, _) -> name == "Pool" || name == "ViewMut"
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+// E1108: the element name of a `[S]` whose struct is
+// `#Layout(columnar)`; v1 supports only the core read surface on it.
+sema_columnar_list_element: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? {
+    if sema_expr_unwrap_tag(ty) == .List(inner) {
+        if inner == .Named(element) && sema_stmt_for_in_columnar(environment, program, inner) {
+            return Val(element)
+        }
+    }
+    None
+}
+
+// Only the exact shape `….len()` (no args) ends a range.
+sema_stmt_range_end_len_root: fn(end: Expr) -> String? {
+    if end == .MethodCall(receiver, method, _, _, _, args, _) && method == "len" && args.len() == 0 {
+        collection: sema_stmt_for_in_collection_root(receiver)
+        if collection != None -> return collection
+        return sema_stmt_for_in_expr_root_ident(receiver)
+    }
+    None
+}
+
+// True when a statement in `body` indexes `root` with the name `index_var`.
+sema_stmt_index_root_with_stmts: fn(body: [Stmt], root: String, index_var: String) -> Bool Never! {
+    loop statement in body {
+        if sema_stmt_index_root_with_stmt(statement, root, index_var) -> return true
+    }
+    false
+}
+
+sema_stmt_index_root_with_stmt: fn(statement: Stmt, root: String, index_var: String) -> Bool Never! {
+    if statement == {
+        .Expr(value) | .DeferClose(value, _) -> sema_stmt_index_root_with_expr(value, root, index_var)
+        .Return(value, _) -> {
+            if value == .Val(returned) {
+                return sema_stmt_index_root_with_expr(returned, root, index_var)
+            }
+            false
+        }
+        .Val(binding) -> sema_stmt_index_root_with_expr(binding.init, root, index_var)
+        .Assign(target, _, _, value) -> {
+            if target == .Index(base, index, _, _) {
+                if sema_stmt_for_in_expr_root_ident(base) == (Val(root)) && sema_stmt_index_is_ident(index, index_var) {
+                    return true
+                }
+                if sema_stmt_index_root_with_expr(base, root, index_var) || sema_stmt_index_root_with_expr(index, root, index_var) {
+                    return true
+                }
+            }
+            sema_stmt_index_root_with_expr(value, root, index_var)
+        }
+        .While(cond, body, _, _, _) -> sema_stmt_index_root_with_expr(cond, root, index_var) || sema_stmt_index_root_with_stmts(body, root, index_var)
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    if sema_stmt_index_root_with_expr(start, root, index_var) || sema_stmt_index_root_with_expr(end, root, index_var) {
+                        return true
+                    }
+                    if step == .Val(stride) {
+                        if sema_stmt_index_root_with_expr(stride, root, index_var) -> return true
+                    }
+                }
+                .In(collection, step) -> {
+                    if sema_stmt_index_root_with_expr(collection, root, index_var) -> return true
+                    if step == .Val(stride) {
+                        if sema_stmt_index_root_with_expr(stride, root, index_var) -> return true
+                    }
+                }
+            }
+            sema_stmt_index_root_with_stmts(body, root, index_var)
+        }
+        .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Region(_, _, body, _) -> sema_stmt_index_root_with_stmts(body, root, index_var)
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            if sema_stmt_index_root_with_expr(init.init, root, index_var) || sema_stmt_index_root_with_expr(cond, root, index_var) {
+                return true
+            }
+            if step == .Val(step_statement) {
+                if sema_stmt_index_root_with_stmt(step_statement, root, index_var) -> return true
+            }
+            sema_stmt_index_root_with_stmts(body, root, index_var)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            if sema_stmt_index_root_with_expr(subject, root, index_var) -> return true
+            loop arm in arms {
+                if sema_stmt_index_root_with_expr(arm.cond, root, index_var) || sema_stmt_index_root_with_stmts(arm.body, root, index_var) {
+                    return true
+                }
+            }
+            if else_body == .Val(fallback) {
+                return sema_stmt_index_root_with_stmts(fallback, root, index_var)
+            }
+            false
+        }
+        .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) -> false
+    }
+}
+
+sema_stmt_index_is_ident: fn(value: Expr, name: String) -> Bool Never! {
+    if value == .Ident(found, _, _) -> return found == name
+    false
+}
+
+sema_stmt_index_root_with_args: fn(args: [CallArg], root: String, index_var: String) -> Bool Never! {
+    loop argument in args {
+        if sema_stmt_index_root_with_expr(argument.expr, root, index_var) -> return true
+    }
+    false
+}
+
+sema_stmt_index_root_with_expr: fn(value: Expr, root: String, index_var: String) -> Bool Never! {
+    if value == {
+        .Index(base, index, _, _, _) -> (sema_stmt_for_in_expr_root_ident(base) == (Val(root)) && sema_stmt_index_is_ident(index, index_var)) || sema_stmt_index_root_with_expr(base, root, index_var) || sema_stmt_index_root_with_expr(index, root, index_var)
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) && sema_stmt_index_root_with_expr(inner, root, index_var) {
+                    return true
+                }
+            }
+            false
+        }
+        .Call(call, _) -> sema_stmt_index_root_with_args(call.args, root, index_var)
+        .CallValue(callee, args, _, _) -> sema_stmt_index_root_with_expr(callee, root, index_var) || sema_stmt_index_root_with_args(args, root, index_var)
+        .MethodCall(receiver, _, _, _, _, args, _) -> sema_stmt_index_root_with_expr(receiver, root, index_var) || sema_stmt_index_root_with_args(args, root, index_var)
+        .Field(inner, _, _, _) | .Spread(inner, _, _) | .Copy(inner, _, _) | .RawOf(inner, _, _) | .Place(inner, _, _, _) | .Present(inner, _, _) | .Tainted(inner, _, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .OrFallback(inner, _, _, _, _) -> sema_stmt_index_root_with_expr(inner, root, index_var)
+        .Try(inner, _, _, note, _) -> {
+            if sema_stmt_index_root_with_expr(inner, root, index_var) -> return true
+            if note == .Val(context_note) {
+                return sema_stmt_index_root_with_expr(context_note, root, index_var)
+            }
+            false
+        }
+        .Binary(_, left, right, _, _) -> sema_stmt_index_root_with_expr(left, root, index_var) || sema_stmt_index_root_with_expr(right, root, index_var)
+        .ListLit(items, _, _) -> {
+            loop item in items {
+                if sema_stmt_index_root_with_expr(item, root, index_var) -> return true
+            }
+            false
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields {
+                if sema_stmt_index_root_with_expr(field.value, root, index_var) -> return true
+            }
+            false
+        }
+        .Slice(base, start, end, range, _, _) -> {
+            if sema_stmt_index_root_with_expr(base, root, index_var) -> return true
+            if range == .Val(window) {
+                return sema_stmt_index_root_with_expr(window, root, index_var)
+            }
+            sema_stmt_index_root_with_expr(start, root, index_var) || sema_stmt_index_root_with_expr(end, root, index_var)
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> sema_stmt_index_root_with_expr(cond, root, index_var) || sema_stmt_index_root_with_stmts(then_body, root, index_var) || sema_stmt_index_root_with_expr(then_value, root, index_var) || sema_stmt_index_root_with_stmts(else_body, root, index_var) || sema_stmt_index_root_with_expr(else_value, root, index_var)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+sema_stmt_for_in_consumes_collection: fn(collection_type: Type, item_type: Type) -> Bool Never! {
+    if collection_type == {
+        .List(_) | .FixedList(_, _) -> return sema_stmt_for_in_type_requires_owned_iteration(item_type)
+        .Apply(name, _) -> return name == "Stream" || name == "Iter" || name == "ViewIter"
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
+sema_stmt_for_in_by_value: fn(collection_type: Type, item_type: Type) -> Bool Never! {
+    if collection_type == {
+        .List(_) | .FixedList(_, _) -> return sema_stmt_for_in_type_requires_owned_iteration(item_type)
+        .Apply(name, _) -> return name == "Stream" || name == "Iter"
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
+sema_stmt_for_in_columnar_list_type: fn(collection_type: Type) -> Bool Never! {
+    if collection_type == {
+        .List(_) | .FixedList(_, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
+}
+
+sema_stmt_for_in_is_range: fn(collection_type: Type) -> Bool Never! {
+    if collection_type == {
+        .InlineRange(_, _, _) -> return true
+        .Named(name) -> return name == "Range"
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
+    }
+}
+
+sema_stmt_for_in_range_zero: fn(span: Span) -> TExpr Never! {
+    sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+}
+
+// `ty` is None when the loop source failed its own check: the loop name
+// stays in scope untyped, so reads of it in the body check to nothing and add
+// no follow-on report (the same poison as `sema_stmt_declare_unchecked_binding`).
+// The returned local carries the declared symbol and its type, so lowering
+// binds the loop name under the identity every body read resolves by. None
+// when the name could not be declared (reported here) or is untyped (the
+// loop is incomplete either way).
+sema_stmt_for_in_decl_loop_local: fn(name: String, name_span: Span, ty: Type?, owes_duty: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TLocal? {
+    owner := sema_scope_local_owner_key(scopes)
+    local_module: sema_scope_environment_module_text(environment, program)
+    key: symbol_key_text(SymbolKind.Local, local_module, owner, name)
+    symbol := Symbol{
+        id: sema_symbol_id_of(program, context, key),
+        kind: SymbolKind.Local,
+        name: name,
+        module_identity: environment.module_identity,
+        owner: Val(owner),
+        span: name_span,
+        ty: ty,
+        visibility: 0,
+    }
+    if !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) {
+        diagnostics.push(sema_already_defined(name, name_span))
+        return None
+    }
+    sema_scope_mark_loop_item(scopes, name)
+    checked_ty: ty ?? return None
+    sema_ownership_declare_binding(state, symbol, false)
+    if owes_duty -> sema_single_use_note_binding(state, symbol, environment, program)
+    Val(checked_symbol_local(name, name_span, symbol.id, checked_ty))
+}
+
+// `loop (k, v) in table.move()`: the loop takes the map, so its entries are owned.
+sema_stmt_for_in_takes_map: fn(collection: Expr, collection_type: Type) -> Bool Never! {
+    if !(collection_type == .Map(_, _, _)) -> return false
+    if collection == {
+        .Place(_, access, _, _) -> access == PlaceAccess.Take
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> method == "move" && args.len() == 0 && type_args.len() == 0 && (receiver == .Ident(_, _, _) || receiver == .Field(_, _, _, _))
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+// Rust lends each ViewMut item for one iteration; the descriptor may not
+// escape, and its source still participates in the ordinary view ledger.
+sema_stmt_for_in_lend_view_item: fn(local: TLocal?, ty: Type, collection: Expr, scopes: SemaScopeTable, state: ^SemaOwnershipState, context: ^SemaCheckContext) {
+    if ty == .Apply(lend_name, item_args) && lend_name == "ViewMut" {
+        if item_args.len() != 1 {
+            return
+        }
+    } else {
+        return
+    }
+    variable: local ?? return
+    symbol: variable.symbol_id ?? return
+    facts: sema_stmt_local_view_facts_for_expr(collection, scopes, state, context)
+    recorded := false
+    loop fact in facts {
+        if fact.slot.len() != 1 || fact.slot[0] != "[]" -> next
+        loop place in fact.places {
+            _ := sema_ownership_record_view_fact_inner(state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, scopes, -1)
+            recorded = true
+        }
+    }
+    if !recorded {
+        loop place in sema_ownership_element_places(collection, variable.span, scopes, state) {
+            _ := sema_ownership_record_view_fact_inner(state, variable.name, variable.span, place, [String]{}, AccessConvention.Write, scopes, -1)
+        }
+    }
+    // The item is a body local, keyed in the body's own symbols.
+    key: symbol_local_keys_text(context.arena.tree.symbols, symbol)
+    context.lending_view_parameter_keys.push(key)
+}
+
+sema_stmt_for_in_pair_types: fn(collection_type: Type, item_type: Type) -> SemaForInPairTypes? {
+    if collection_type == {
+        .List(_) | .FixedList(_, _) -> return Val(SemaForInPairTypes{first: Type.Int, second: item_type})
+        // copy: `key` and `value` are payloads of read parameter `collection_type`, which keeps the originals; the new SemaForInPairTypes's fields own `key` and `value`
+        .Map(key, _, value) -> return Val(SemaForInPairTypes{first: key.copy(), second: value.copy()})
+        .Apply(name, args) -> {
+            if (name == "View" || name == "ViewMut" || name == "ComputeViewMut") && args.len() == 1 {
+                return Val(SemaForInPairTypes{first: Type.Int, second: args[0]})
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    None
+}
+
+// Whether the first name of a two-name loop, which holds each item's index,
+// is a member of the source's named-tuple items (E0182). A map's entries
+// keep their key-value pair.
+sema_stmt_for_in_index_names_member: fn(collection_type: Type, item_type: Type, first: String, second: NamedSpan?) -> Bool Never! {
+    if second == None || collection_type == .Map(_, _, _) -> return false
+    if item_type == .Tuple(fields) {
+        loop field in fields {
+            if field.name == first -> return true
+        }
+    }
+    false
+}
+
+// E0182 at the index name of `loop (first, item) in rows`.
+sema_stmt_for_in_index_named_like_member: fn(first: String, first_span: Span) -> Diagnostic {
+    row: diagnostic_registry_row("E0182") ?? panic("E0182 must have a registry row")
+    sema_error("E0182", first_span, row.what.replace("{{name}}", first), row.why.replace("{{name}}", first), row.fix.replace("{{name}}", first))
+}
+
+sema_stmt_for_in_method_pair_is_supported: fn(method_kind: TForInMethod?) -> Bool Never! {
+    method_kind == None
+}
+
+sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?, iterable_item_type: Type?) -> Type? {
+    if iterable_item_type != None -> return iterable_item_type
+    if method_kind == {
+        .Val(method) -> {
+            if method == {
+                .Chars -> return Val(Type.Char)
+                .LinesFile | .LinesStdin | .LinesProcessStream -> return Val(Type.String)
+                .ChannelReceiver -> {
+                    if collection_type == {
+                        .Apply(name, args) -> {
+                            if name == "Receiver" && args.len() == 1 -> return Val(args[0])
+                        }
+                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+                    }
+                }
+                // Its item is the reader fact's (iterable_item_type).
+                .EncodingReader(_) -> return None
+                .Iterable(_, _, _, _, item_type, _) -> return Val(item_type)
+            }
+        }
+        .None -> {}
+    }
+    if collection_type == {
+        .List(inner) | .FixedList(inner, _) -> return Val(inner)
+        // copy: `key` and `value` are payloads of read parameter `collection_type`, which keeps the originals; the new TypeTupleField's fields own `key` and `value`
+        .Map(key, _, value) -> return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key.copy()}, TypeTupleField{name: "value", ty: value.copy()}}})
+        .Apply(name, args) -> {
+            if (name == "Iter" || name == "ViewIter" || name == "Stream" || name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == "Receiver") && args.len() == 1 {
+                return Val(args[0])
+            }
+        }
+        .Named(name) -> {
+            if name == "FileLines" || name == "StdinLines" || name == "ProcessLines" {
+                return Val(Type.String)
+            }
+            if name == "Range" -> return Val(Type.Int)
+        }
+        .InlineRange(_, _, _) -> return Val(Type.Int)
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    None
+}
+
+// A body pass's tables carry no checked types, so the layout comes from the
+// struct's declaration in the registration graph.
+sema_stmt_for_in_columnar: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, item_type: Type) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        nominal_row: sema_type_resolve_nominal_row(graph, item_type, environment.module_identity) ?? return false
+        nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+        if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+        if sema_registration_nominal_source_item(nominal.source) == .Val(.Struct(definition)) {
+            return definition.layout == (Val(StructLayout.Columnar))
+        }
+    }
+    false
+}
+
+sema_stmt_check_source_stride: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TExpr? {
+    value: sema_check_expression(expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if !sema_stmt_range_integer_type(value.ty) {
+        diagnostics.push(sema_error("E0123", expr_span(expr), "a source loop stride must be {sema_type_show(Type.Int)}, not {sema_type_show(value.ty)}", "the stride counts source pulls, so it must be a positive whole number", "use an Int stride of 1 or more"))
+        return None
+    }
+    if expr == {
+        .Int(number, span, _, _, _) -> {
+            if number <= 0 {
+                diagnostics.push(sema_error("E0123", span, "a source loop stride must be positive", "zero or a negative value cannot select a later source item", "use a stride of 1 or more"))
+                return None
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    Val(value)
+}
+
+// The fix names the loop labels that are reachable here.
+sema_stmt_unknown_loop_label: fn(scopes: SemaScopeTable, name: String, span: Span) -> Diagnostic {
+    choices := [String]{}
+    seen := [String]{}
+    loop label in scopes.loop_labels {
+        if seen.contains(label.name) -> next
+        seen.push(label.name)
+        choices.push("`break({label.name})` or `next({label.name})`")
+    }
+    fix := "label an enclosing loop with `name: loop {{ … }}` first"
+    if choices.len() > 0 -> fix = "use a label in scope: {choices.join(", ")}"
+    sema_error("E0987", span, "no loop labeled `{name}` is in scope", "a named `break`/`next` must name an enclosing `name: loop`", fix)
+}

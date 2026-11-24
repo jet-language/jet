@@ -1,0 +1,1562 @@
+// Refutable bindings and guard lints: `else` fallbacks and whether they exit,
+// same-subject and map-group lints, state loops, and the bounds an exit guard
+// refines.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    ASTTables,
+    AccessConvention,
+    BinOp,
+    BindName,
+    BindPattern,
+    Binding,
+    CallArg,
+    Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    Expr,
+    ExprNode,
+    LValue,
+    Lambda,
+    NodeKind,
+    NamedSpan,
+    OrFallback,
+    Pattern,
+    PlaceAccess,
+    Span,
+    Stmt,
+    StmtNode,
+    SwitchArm,
+    Symbol,
+    SymbolKind,
+    TIntegerBounds,
+    TLetTy,
+    TLocal,
+    TPatternBindingFact,
+    TPatternPosition,
+    Type,
+    ast_expr,
+    ast_stmt,
+    ast_visit_statement,
+    ast_visit_expr,
+    expr_source_span,
+    expr_span,
+    measure_literal_value,
+    symbol_key_text,
+    checked_symbol_local,
+    type_name,
+    TextEdit,
+    diagnostic_with_edit_grade,
+]
+
+SemaRefutableFallbackCheck: struct {
+    or_fallback: TOrFallback?,
+    statements: [TStmt],
+    complete: Bool,
+    ambient_err: TLocal?,
+}
+
+sema_stmt_refutable_expr_diverges: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _, _) -> return sema_stmt_refutable_expr_diverges(inner)
+        .Todo(_, _, _) | .NoElse(_, _) -> return true
+        .Call(call, _) -> return call.name == "panic"
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+sema_stmt_refutable_expr_is_true: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _, _) -> return sema_stmt_refutable_expr_is_true(inner)
+        .Bool(value, _, _) -> return value
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+sema_stmt_refutable_is_subjectless_guard: fn(subject: Expr, span: Span) -> Bool Never! {
+    if subject == {
+        .Bool(value, subject_span, _) -> return value && subject_span == span
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+// L0302: every arm of a subjectless guard table opens with a pattern test on
+// the same place, and that place is a user enum; naming the subject makes the
+// table one exhaustively checked enum switch.
+sema_stmt_lint_same_enum_guards: fn(arms: [SwitchArm], conditions: [SemaCheckedCondition?], span: Span, diagnostics: ^[Diagnostic]) Never! {
+    if arms.len() < 2 {
+        return
+    }
+    first := ""
+    loop (index, arm) in arms {
+        path: sema_stmt_leading_guard_path(arm.cond) ?? return
+        if index == 0 -> first = path else if path != first {
+            return
+        }
+    }
+    loop condition in conditions {
+        checked: condition ?? next
+        enum_name: sema_stmt_leading_guard_enum(checked.condition) ?? next
+        diagnostics.push(sema_lint("L0302", span, "These arm heads all dispatch on `{enum_name}`", "Naming the subject makes one closed enum's cases explicit and exhaustively checked", "Write `if {first} == {{ ... }}` and put each variant pattern in an arm"))
+        return
+    }
+}
+
+// L0514: three or more adjacent else-less guards that each compare one
+// stable local with literals (`if key == "rev" || key == "r" { … }`) are one
+// categorical dispatch; an ordered subject table states it once. A guard body
+// that assigns the subject makes the guards order-dependent, so it ends the run.
+sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) {
+    index := 0
+    loop index < statements.len() {
+        run_end := index + 1
+        if sema_stmt_categorical_guard_subject(statements[index]) == .Val(subject) {
+            loop run_end < statements.len() && sema_stmt_categorical_guard_subject(statements[run_end]) == (Val(subject)) {
+                run_end += 1
+            }
+            if run_end - index >= 3 && sema_stmt_guard_run_keeps_subject(statements, index, run_end, subject) {
+                diagnostic := sema_lint("L0514", sema_compiler_index_stmt_span(statements[index]), "Adjacent categorical guards over `{subject}` can be one ordered subject table", "Exclusive guards repeat one stable subject; an ordered table keeps the categories together", "Rewrite as `if {subject} == {{ … }}` and group aliases with `|`; see `Examples/Apps/Programs/Dispatch.jet`")
+                if sema_stmt_same_subject_table_edit(statements, index, run_end, subject, environment, program) == .Val(edit) {
+                    diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+                }
+                diagnostics.push(diagnostic)
+            }
+        }
+        index = run_end
+    }
+}
+
+// One group a block takes out of a Map by key and grows (L0534): the local's
+// name, the source of the Map, the key and the fallback group, and the span of
+// the take.
+SemaStmtMapGroupTake: struct {
+    name: String,
+    map: String,
+    key: String,
+    fallback: String,
+    span: Span,
+}
+
+// L0534: `group := groups.get(key) ?? fallback`, a write such as
+// `group.insert(0, item)`, then `groups[key] = group` copies the whole group
+// on every pass. The local still shares the entry's buffer when it is
+// written, so the write first makes it unique by copying it, strings and
+// all, and the store then drops the Map's old copy: a loop of these is
+// quadratic. Growing the entry in place (`groups[key].insert(0, item)`, the
+// key seeded first when it is missing) copies nothing. The fix is that
+// rewrite when the block is exactly take, one write, store, and the local is
+// not read after the store. A block the compiler already builds without the
+// copy (sema_stmt_map_group_moved) is not reported. Only a block that takes
+// a group copies the module's bytes (`String.bytes`): a copy for every block
+// makes a large module's check quadratic.
+sema_stmt_lint_map_group_round_trip: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: ^[Diagnostic]) {
+    // The graph is read in place through the `.Val(…)` pattern; binding it
+    // to a local with `??` copies the whole graph, once per block checked.
+    if program.registration_graph == .Val(graph) {
+        caller: sema_scope_caller_index(environment, graph) ?? return
+        loop index in 0..<statements.len() {
+            if !sema_stmt_map_group_takes(statements[index]) -> next
+            raw: graph.modules[caller].source.bytes()
+            taken: sema_stmt_map_group_take(statements[index], raw) ?? next
+            stored := -1
+            written := ""
+            loop later in (index + 1)..<statements.len() {
+                if sema_stmt_map_group_store(statements[later], raw, taken) {
+                    stored = later
+                    break
+                }
+                if written == "" {
+                    if sema_stmt_map_group_write(statements[later], taken.name) == .Val(method) {
+                        written = method
+                    }
+                }
+            }
+            if stored < 0 || written == "" || sema_stmt_map_group_moved(statements, index, stored, taken, raw, scopes) {
+                next
+            }
+            diagnostic := sema_lint("L0534", taken.span, "`{taken.name}` copies the whole group out of `{taken.map}` and stores it back", "`{taken.name}` still shares the entry's buffer when it is written, so the write first copies the whole group, and storing it back drops the Map's old copy; in a loop that is quadratic. The build grows the entry in place only when the Map is a variable the function declares, the statements before the store neither name it nor `break` or `next`, and nothing after the store names the group", "Grow the entry in place: `if !{taken.map}.has_key({taken.key}) -> {taken.map}[{taken.key}] = {taken.fallback}`, then `{taken.map}[{taken.key}].{written}(…)`")
+            if stored == index + 2 && sema_stmt_map_group_edit(statements, index, taken, raw) == .Val(edit) {
+                diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+            }
+            diagnostics.push(diagnostic)
+        }
+    }
+}
+
+// Whether the build grows the group in the Map's entry instead of copying
+// it (JetIR BuildMaps.jet ir_map_take_fuses): the Map is a variable the
+// function declares, not a parameter; the key is a variable or a field of
+// one, and that variable is constant or the statements between the take and
+// the store never name it; those statements never name the Map and never
+// `break` or `next`; and nothing after the store names the group. The build
+// also copies where a closure of the function names the Map or a
+// transaction holds the update, which this check does not see.
+sema_stmt_map_group_moved: fn(statements: [Stmt], index: Int, stored: Int, taken: SemaStmtMapGroupTake, raw: [U8], scopes: SemaScopeTable) -> Bool {
+    if statements[index] == .Val(binding) {
+        if binding.init == .OrFallback(value, _, _, _, _) {
+            if value == .MethodCall(receiver, _, _, _, _, args, _) {
+                map := ""
+                if receiver == .Ident(local, _, _) -> map = local.copy() else -> return false
+                if !sema_stmt_map_group_declared(statements, index, map, scopes) -> return false
+                root: sema_stmt_map_group_key_root(args[0].expr) ?? return false
+                // The statements between run from the take's end to the line
+                // of the store.
+                store: sema_compiler_index_stmt_span(statements[stored])
+                line_start := store.start
+                loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
+                between: sema_stmt_source_text(raw, Span{start: taken.span.end, end: line_start}) ?? ""
+                if sema_stmt_names_word(between, map) || sema_stmt_names_word(between, "break") || sema_stmt_names_word(between, "next") {
+                    return false
+                }
+                if sema_stmt_map_group_mutable(statements, index, root, scopes) && sema_stmt_names_word(between, root) {
+                    return false
+                }
+                block_end: sema_stmt_scan_close(raw, store.end) ?? return false
+                rest: sema_stmt_source_text(raw, Span{start: store.end, end: block_end}) ?? ""
+                return !sema_stmt_names_word(rest, taken.name)
+            }
+        }
+    }
+    false
+}
+
+// Whether `name` is a variable the function declares: one of the statements
+// before `index` binds it, or the scope does as a local, not a parameter.
+sema_stmt_map_group_declared: fn(statements: [Stmt], index: Int, name: String, scopes: SemaScopeTable) -> Bool {
+    loop earlier in 0..<index {
+        if statements[earlier] == .Val(binding) {
+            if binding.pattern == None && binding.name == name -> return true
+        }
+    }
+    found: sema_scope_resolve_index(scopes, name) ?? return false
+    if sema_scope_binding_is_light(scopes, found) -> return false
+    scopes.bindings[found].symbol.kind == .Local
+}
+
+// Whether the variable `name` may be written: the latest of the statements
+// before `index` that binds it is mutable, or the scope's binding is.
+sema_stmt_map_group_mutable: fn(statements: [Stmt], index: Int, name: String, scopes: SemaScopeTable) -> Bool {
+    earlier := index - 1
+    loop earlier >= 0 {
+        if statements[earlier] == .Val(binding) {
+            if binding.pattern == None && binding.name == name -> return binding.mutable
+        }
+        earlier -= 1
+    }
+    found: sema_scope_resolve_index(scopes, name) ?? return true
+    scopes.bindings[found].mutable
+}
+
+// The variable `key` reads when it is that variable or a field of one.
+sema_stmt_map_group_key_root: fn(key: Expr) -> String? {
+    if key == .Ident(local, _, _) -> return Val(local.copy())
+    if key == .Field(base, _, _, _) -> return sema_stmt_map_group_key_root(base)
+    None
+}
+
+// The source text of `span`, None outside `raw`.
+sema_stmt_source_text: fn(raw: [U8], span: Span) -> String? {
+    if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
+    text: String.from_bytes(raw[span.start..<span.end]) ?? return None
+    Val(text)
+}
+
+// Whether `statement` is `name := map.get(key) ?? fallback` with a mutable
+// local `name`.
+sema_stmt_map_group_takes: fn(statement: Stmt) -> Bool {
+    if statement == .Val(binding) {
+        if !binding.mutable || binding.pattern != None -> return false
+        if binding.init == .OrFallback(value, fallback, _, _, _) {
+            if value == .MethodCall(_, method, _, _, _, args, _) {
+                if method != "get" || args.len() != 1 -> return false
+                return fallback == .Value(_)
+            }
+        }
+    }
+    false
+}
+
+// The take of a statement sema_stmt_map_group_takes accepts, None when its
+// parts' source text is not in `raw`.
+sema_stmt_map_group_take: fn(statement: Stmt, raw: [U8]) -> SemaStmtMapGroupTake? {
+    if statement == .Val(binding) {
+        if !binding.mutable || binding.pattern != None -> return None
+        if binding.init == .OrFallback(value, fallback, _, span, _) {
+            if value == .MethodCall(receiver, method, _, _, _, args, _) {
+                if method != "get" || args.len() != 1 -> return None
+                if fallback == .Value(group) {
+                    map: sema_stmt_source_text(raw, expr_source_span(receiver)) ?? return None
+                    key: sema_stmt_source_text(raw, expr_source_span(args[0].expr)) ?? return None
+                    seed: sema_stmt_source_text(raw, expr_source_span(group)) ?? return None
+                    return Val(SemaStmtMapGroupTake{name: binding.name.copy(), map: map, key: key, fallback: seed, span: Span{start: binding.name_span.start, end: span.end}})
+                }
+            }
+        }
+    }
+    None
+}
+
+// `map[key] = name` or `map[key] = name.move()`, the take's Map and key
+// written as they were taken.
+sema_stmt_map_group_store: fn(statement: Stmt, raw: [U8], taken: SemaStmtMapGroupTake) -> Bool {
+    if statement == .Assign(target, op, _, value) {
+        if op != None || !sema_stmt_names_local(value, taken.name) -> return false
+        if target == .Index(base, index, _, _) {
+            return (sema_stmt_source_text(raw, expr_source_span(base)) == Val(taken.map.copy())) && (sema_stmt_source_text(raw, expr_source_span(index)) == Val(taken.key.copy()))
+        }
+    }
+    false
+}
+
+// Whether `value` is the local `name`, or `name.move()`.
+sema_stmt_names_local: fn(value: Expr, name: String) -> Bool {
+    if value == .Ident(local, _, _) -> return local == name
+    if value == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method != "move" || args.len() != 0 -> return false
+        if receiver == .Ident(local, _, _) -> return local == name
+    }
+    false
+}
+
+// The method of a statement `name.method(…)` that grows or reorders the
+// group in place; None for any other statement.
+sema_stmt_map_group_write: fn(statement: Stmt, name: String) -> String? {
+    if statement == .Expr(call) {
+        if call == .MethodCall(receiver, method, _, _, _, _, _) {
+            writes: [String]{"push", "extend", "insert", "append", "sort", "reverse"}
+            if receiver == .Ident(local, _, _) {
+                if local == name && writes.contains(method) -> return Val(method.copy())
+            }
+        }
+    }
+    None
+}
+
+// The L0534 rewrite of take, write, store: the key seeded when missing, then
+// the write through the entry. None when the rest of the block still names
+// the local.
+sema_stmt_map_group_edit: fn(statements: [Stmt], index: Int, taken: SemaStmtMapGroupTake, raw: [U8]) -> TextEdit? {
+    method: sema_stmt_map_group_write(statements[index + 1], taken.name) ?? return None
+    // A method call is spanned at its name; its arguments run from the `(`
+    // right after it to the matching `)`.
+    open: sema_compiler_index_stmt_span(statements[index + 1]).end
+    if open >= raw.len() || raw[open] != (U8{40}) -> return None
+    close: sema_stmt_scan_close(raw, open + 1) ?? return None
+    arguments: sema_stmt_source_text(raw, Span{start: open, end: close + 1}) ?? return None
+    // The take starts at its local's name (its statement span starts at `:=`).
+    start: taken.span.start
+    last: sema_compiler_index_stmt_span(statements[index + 2])
+    // A `name.move()` store is spanned at `move`; only a plain store is
+    // rewritten.
+    if statements[index + 2] == .Assign(_, _, _, value) {
+        if !(value == .Ident(_, _, _)) -> return None
+    }
+    block_end: sema_stmt_scan_close(raw, last.end) ?? return None
+    rest: sema_stmt_source_text(raw, Span{start: last.end, end: block_end}) ?? ""
+    if sema_stmt_names_word(rest, taken.name) -> return None
+    line_start := start
+    loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
+    indent := ""
+    loop _ in line_start..<start -> indent = "{indent} "
+    entry: "{taken.map}[{taken.key}]"
+    Val(TextEdit{span: Span{start: start, end: last.end}, new_text: "if !{taken.map}.has_key({taken.key}) -> {entry} = {taken.fallback}\n{indent}{entry}.{method}{arguments}"})
+}
+
+// The offset of the bracket that closes the nesting `from` sits in: the
+// first `)`, `]` or `}` outside strings with no opener of its own after
+// `from`. None when the source ends first.
+sema_stmt_scan_close: fn(raw: [U8], from: Int) -> Int? {
+    at := from
+    depth := 0
+    in_string := false
+    loop at < raw.len() {
+        byte: raw[at]
+        if in_string {
+            if byte == (U8{92}) {
+                at += 2
+                next
+            }
+            if byte == (U8{34}) -> in_string = false
+        } else if byte == (U8{34}) { in_string = true } else if byte == (U8{40}) || byte == (U8{91}) || byte == (U8{123}) {
+            depth += 1
+        } else if byte == (U8{41}) || byte == (U8{93}) || byte == (U8{125}) {
+            if depth == 0 -> return Val(at)
+            depth -= 1
+        }
+        at += 1
+    }
+    None
+}
+
+// Whether `text` names `word` as a whole identifier.
+sema_stmt_names_word: fn(text: String, word: String) -> Bool {
+    bytes: text.bytes()
+    wanted: word.bytes()
+    loop at in 0..<bytes.len() {
+        end: at + wanted.len()
+        if end > bytes.len() || bytes[at..<end] != wanted -> next
+        before: at == 0 || !sema_stmt_identifier_byte(bytes[at - 1])
+        after: end >= bytes.len() || !sema_stmt_identifier_byte(bytes[end])
+        if before && after -> return true
+    }
+    false
+}
+
+sema_stmt_identifier_byte: fn(byte: U8) -> Bool {
+    (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95}
+}
+
+// The L0514 rewrite: one `if subject == { … }` table whose arms keep the
+// guards' order, with each guard's literals as one `|` head and its body as
+// the arm body, closed by an empty `else` (a String or Int subject is open).
+sema_stmt_same_subject_table_edit: fn(statements: [Stmt], start: Int, end: Int, subject: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    first: sema_compiler_index_stmt_span(statements[start])
+    if first.start < 0 || first.start > raw.len() -> return None
+    line_start := first.start
+    loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
+    indent := ""
+    loop _ in line_start..<first.start -> indent = "{indent} "
+    text := "if {subject} == {{\n"
+    table_end := first.start
+    loop index in start..<end {
+        if statements[index] == {
+            .Switch(_, arms, _, _) -> {
+                heads := [String]{}
+                if !sema_stmt_category_heads(arms[0].cond, raw, heads) -> return None
+                body: sema_stmt_guard_body_text(raw, expr_span(arms[0].cond).end, indent) ?? return None
+                text = "{text}{indent}    {heads.join(" | ")} -> {body.text}\n"
+                table_end = body.end
+            }
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return None
+        }
+    }
+    text = "{text}{indent}    else -> {{}}\n{indent}}}"
+    Val(TextEdit{span: Span{start: first.start, end: table_end}, new_text: text})
+}
+
+// The literal source of each `subject == literal` disjunct, in order.
+sema_stmt_category_heads: fn(condition: Expr, raw: [U8], heads: ^[String]) -> Bool {
+    if condition == {
+        .Paren(inner, _, _) -> return sema_stmt_category_heads(inner, raw, heads)
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Or {
+                return sema_stmt_category_heads(left, raw, heads) && sema_stmt_category_heads(right, raw, heads)
+            }
+            span: expr_span(right)
+            if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return false
+            head: String.from_bytes(raw[span.start..<span.end]) ?? return false
+            heads.push(head)
+            return true
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+// A guard's body after its condition: an arrow body is the rest of its line,
+// a braced body with one line becomes an arrow body, and a longer braced body
+// stays braced one level deeper.
+sema_stmt_guard_body_text: fn(raw: [U8], from: Int, indent: String) -> {text: String, end: Int}? {
+    at := from
+    loop at < raw.len() && (raw[at] == (U8{32}) || raw[at] == (U8{9})) -> at += 1
+    if at + 1 < raw.len() && raw[at] == (U8{45}) && raw[at + 1] == (U8{62}) {
+        at += 2
+        loop at < raw.len() && raw[at] == (U8{32}) -> at += 1
+        line_end := at
+        loop line_end < raw.len() && raw[line_end] != (U8{10}) -> line_end += 1
+        trimmed := line_end
+        loop trimmed > at && (raw[trimmed - 1] == (U8{32}) || raw[trimmed - 1] == (U8{13})) {
+            trimmed -= 1
+        }
+        if trimmed == at -> return None
+        text: String.from_bytes(raw[at..<trimmed]) ?? return None
+        return Val({text: text, end: trimmed})
+    }
+    if at >= raw.len() || raw[at] != (U8{123}) -> return None
+    close := at + 1
+    depth := 1
+    in_string := false
+    loop close < raw.len() {
+        byte: raw[close]
+        if in_string {
+            if byte == (U8{92}) {
+                close += 2
+                next
+            }
+            if byte == (U8{34}) -> in_string = false
+        } else if byte == (U8{34}) { in_string = true } else if byte == (U8{123}) { depth += 1 } else if byte == (U8{125}) {
+            depth -= 1
+            if depth == 0 -> break
+        }
+        close += 1
+    }
+    if depth != 0 -> return None
+    inner: String.from_bytes(raw[at + 1..<close]) ?? return None
+    lines := [String]{}
+    loop line in inner.split("\n") {
+        if line.trim().len() > 0 -> lines.push(line.trim_end())
+    }
+    if lines.len() == 0 -> return Val({text: "{{}}", end: close + 1})
+    if lines.len() == 1 -> return Val({text: lines[0].trim(), end: close + 1})
+    text := "{{\n"
+    loop line in lines -> text = "{text}    {line}\n"
+    Val({text: "{text}{indent}    }}", end: close + 1})
+}
+
+// The local a classic else-less one-arm `if` compares with literals, when
+// every disjunct of its condition is `local == literal`.
+sema_stmt_categorical_guard_subject: fn(statement: Stmt) -> String? Never! {
+    if statement == {
+        .Switch(subject, arms, else_body, span) -> {
+            if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) {
+                return None
+            }
+            return sema_stmt_categorical_condition_subject(arms[0].cond)
+        }
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return None
+    }
+}
+
+sema_stmt_categorical_condition_subject: fn(condition: Expr) -> String? Never! {
+    if condition == {
+        .Paren(inner, _, _) -> return sema_stmt_categorical_condition_subject(inner)
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Or {
+                left_subject: sema_stmt_categorical_condition_subject(left) ?? return None
+                right_subject: sema_stmt_categorical_condition_subject(right) ?? return None
+                return if left_subject == right_subject -> Val(left_subject) else -> None
+            }
+            if op != BinOp.Eq -> return None
+            if left == {
+                .Ident(name, _, _) -> return if sema_stmt_is_category_literal(right) -> Val("{name}") else -> None
+                .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+sema_stmt_is_category_literal: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Str(_, _, _) | .Int(_, _, _, _, _) | .Char(_, _, _) -> return true
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
+    }
+}
+
+sema_stmt_guard_run_keeps_subject: fn(statements: [Stmt], start: Int, end: Int, subject: String) -> Bool Never! {
+    loop index in start..<end {
+        if statements[index] == {
+            .Switch(_, arms, _, _) -> {
+                loop arm in arms {
+                    loop statement in arm.body {
+                        if sema_stmt_assigned_local(statement) == (Val(subject)) -> return false
+                    }
+                }
+            }
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
+        }
+    }
+    true
+}
+
+sema_stmt_assigned_local: fn(statement: Stmt) -> String? Never! {
+    if statement == {
+        .Assign(target, _, _, _) -> {
+            if target == {
+                .Local(name, _) -> return Val("{name}")
+                .Index(_, _, _, _) | .Field(_, _, _) -> return None
+            }
+        }
+        .Expr(_) | .Val(_) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return None
+    }
+}
+
+sema_stmt_leading_guard_path: fn(condition: Expr) -> String? Never! {
+    if condition == {
+        .PatternTest(subject, _, _, _) -> return sema_stmt_guard_subject_path(subject)
+        .Binary(op, left, _, _, _) -> return if op == BinOp.And -> sema_stmt_leading_guard_path(left) else -> None
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+sema_stmt_guard_subject_path: fn(expr: Expr) -> String? Never! {
+    if expr == {
+        .Ident(name, _, _) -> return Val("{name}")
+        .Field(base, member, _, _) -> {
+            base_path: sema_stmt_guard_subject_path(base) ?? return None
+            return Val("{base_path}.{member}")
+        }
+        .Copy(inner, _, _) | .Paren(inner, _, _) -> return sema_stmt_guard_subject_path(inner)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+// The enum a checked guard head tests first, when its pattern names one.
+sema_stmt_leading_guard_enum: fn(condition: TIfCond) -> String? Never! {
+    if condition == {
+        .IfLet(pattern, subject) -> return if pattern.enum_type != None -> Val(type_name(subject.ty)) else -> None
+        .And(left, _) -> return sema_stmt_leading_guard_enum(left)
+        .Plain(_) -> return None
+    }
+}
+
+sema_stmt_refutable_loop_labels: fn(nested_labels: [String], label: NamedSpan?) -> [String] Never! {
+    labels := [String]{}
+    loop nested_label in nested_labels -> labels.push(nested_label.copy())
+    if label == {
+        .Val(value) -> { labels.push(value.name) }
+        .None -> {}
+    }
+    labels
+}
+
+// E0513: a `loop i := start, cond { … }` whose condition reads the mutable
+// header binding while neither the body nor the step writes it, and whose
+// body can return to the condition, re-tests unchanged state.
+sema_stmt_check_state_loop_unchanged: fn(tables: ASTTables, init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: ^[Diagnostic]) Never! {
+    if !init.mutable || init.name.is_empty() || !sema_stmt_expr_mentions(tables, cond, init.name) || sema_stmt_state_body_writes(tables, body, init.name) {
+        return
+    }
+    if step == .Val(step_statement) {
+        if sema_stmt_state_writes(tables, step_statement, init.name) {
+            return
+        }
+    }
+    label_name := String?{None}
+    if label == .Val(value) -> label_name = Val(value.name)
+    if !sema_stmt_state_loop_reaches_next_turn(body, label_name) {
+        return
+    }
+    diagnostics.push(sema_error("E0513", init.name_span, "The condition reads `{init.name}`, but nothing in the loop changes `{init.name}` before the next turn", "The header binding is set once, before the first turn; when neither the body nor the step writes it, every turn tests the same value, so the loop never ends or never starts", "Change `{init.name}` in the body or in a step, as in `loop i := 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test {{ break }}`"))
+}
+
+SemaStmtNameScan: struct {
+    name: String,
+    found: Bool,
+}
+
+sema_stmt_expr_mentions: fn(tables: ASTTables, expression: ExprNode, name: String) -> Bool Never! {
+    scan := SemaStmtNameScan{name: name, found: false}
+    ast_visit_expr(tables, expression, fn(value: ExprNode) { sema_stmt_note_name_mention(scan, ast_expr(tables, value)) })
+    scan.found
+}
+
+sema_stmt_note_name_mention: fn(scan: ^SemaStmtNameScan, value: Expr) Never! {
+    if value == .Ident(candidate, _, _) {
+        if candidate == scan.name -> scan.found = true
+    }
+}
+
+sema_stmt_state_body_writes: fn(tables: ASTTables, body: [StmtNode], name: String) -> Bool Never! {
+    loop statement in body {
+        if sema_stmt_state_writes(tables, statement, name) -> return true
+    }
+    false
+}
+
+// Rust statement_writes_name: an assignment rooted at `name` anywhere in the
+// statement, or an expression that writes it (a write place or argument, a
+// method call on it, or an assignment inside a lambda, `if` or fallback body).
+sema_stmt_state_writes: fn(tables: ASTTables, statement: StmtNode, name: String) -> Bool Never! {
+    view: ast_stmt(tables, statement)
+    if view == .Assign(target, _, _, _) {
+        if sema_stmt_lvalue_root_is(target, name) -> return true
+    }
+    if sema_stmt_state_nested_writes(tables, view, name) -> return true
+    scan := SemaStmtNameScan{name: name, found: false}
+    ast_visit_statement(tables, statement, fn(value: ExprNode) { sema_stmt_note_state_write(tables, scan, ast_expr(tables, value)) }, true)
+    scan.found
+}
+
+sema_stmt_lvalue_root_is: fn(target: LValue, name: String) -> Bool Never! {
+    if target == {
+        .Local(candidate, _) -> return candidate == name
+        .Field(base, _, _) -> return sema_shared_access_expr_root_is(base, name)
+        .Index(base, _, _, _) -> return sema_shared_access_expr_root_is(base, name)
+    }
+}
+
+sema_stmt_state_nested_writes: fn(tables: ASTTables, statement: Stmt, name: String) -> Bool Never! {
+    if statement == {
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_stmt_state_body_writes(tables, body, name)
+        .CountedLoop(_, _, step, body, _, _, _) -> {
+            if step == .Val(step_statement) {
+                if sema_stmt_state_writes(tables, step_statement, name) -> return true
+            }
+            return sema_stmt_state_body_writes(tables, body, name)
+        }
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_state_body_writes(tables, arm.body, name) -> return true
+            }
+            if else_body == .Val(fallback) {
+                return sema_stmt_state_body_writes(tables, fallback, name)
+            }
+            return false
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            if sema_stmt_state_body_writes(tables, then_body, name) -> return true
+            if else_body == .Val(fallback) {
+                return sema_stmt_state_body_writes(tables, fallback, name)
+            }
+            return false
+        }
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> return false
+    }
+}
+
+sema_stmt_note_state_write: fn(tables: ASTTables, scan: ^SemaStmtNameScan, value: Expr) Never! {
+    if scan.found {
+        return
+    }
+    if value == {
+        .Place(inner, access, _, _) -> {
+            if access == PlaceAccess.Write && sema_shared_access_expr_root_is(inner, scan.name) {
+                scan.found = true
+            }
+        }
+        .Call(call, _) -> {
+            if sema_stmt_args_write_name(call.args, scan.name) -> scan.found = true
+        }
+        .CallValue(_, args, _, _) -> {
+            if sema_stmt_args_write_name(args, scan.name) -> scan.found = true
+        }
+        .MethodCall(receiver, _, _, _, _, args, _) -> {
+            if sema_shared_access_expr_root_is(receiver, scan.name) || sema_stmt_args_write_name(args, scan.name) {
+                scan.found = true
+            }
+        }
+        .Lambda(lambda, _) -> {
+            if lambda.body == .Block(body) {
+                if sema_stmt_state_body_writes(tables, body, scan.name) -> scan.found = true
+            }
+        }
+        .If(_, then_body, _, else_body, _, _, _) -> {
+            if sema_stmt_state_body_writes(tables, then_body, scan.name) || sema_stmt_state_body_writes(tables, else_body, scan.name) {
+                scan.found = true
+            }
+        }
+        .OrFallback(_, fallback, _, _, _) -> {
+            if fallback == {
+                .Block(body, _, _) -> {
+                    if sema_stmt_state_body_writes(tables, body, scan.name) -> scan.found = true
+                }
+                .Panic(_, args) -> {
+                    if sema_stmt_args_write_name(args, scan.name) -> scan.found = true
+                }
+                .Value(_) | .Return(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .TupleLit(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+}
+
+sema_stmt_args_write_name: fn(args: [CallArg], name: String) -> Bool Never! {
+    loop arg in args {
+        if arg.convention == AccessConvention.Write && sema_shared_access_expr_root_is(arg.expr, name) {
+            return true
+        }
+    }
+    false
+}
+
+// Rust state_loop_can_reach_next_turn: a body that does not always exit
+// reaches the condition again; one that does reaches it only through a
+// `continue` of this loop before its first exiting statement.
+sema_stmt_state_loop_reaches_next_turn: fn(body: [Stmt], label: String?) -> Bool Never! {
+    if !sema_stmt_refutable_block_exits(body) -> return true
+    loop statement in body {
+        if sema_stmt_contains_current_continue(statement, label) -> return true
+        if sema_stmt_refutable_statement_exits(statement) -> return false
+    }
+    false
+}
+
+sema_stmt_body_contains_current_continue: fn(body: [Stmt], label: String?) -> Bool Never! {
+    loop statement in body {
+        if sema_stmt_contains_current_continue(statement, label) -> return true
+    }
+    false
+}
+
+sema_stmt_contains_current_continue: fn(statement: Stmt, label: String?) -> Bool Never! {
+    if statement == {
+        .Continue(_) -> return true
+        .ContinueLabel(name, _) -> return label == (Val(name))
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_body_contains_current_continue(arm.body, label) -> return true
+            }
+            if else_body == .Val(fallback) {
+                return sema_stmt_body_contains_current_continue(fallback, label)
+            }
+            return false
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            if sema_stmt_body_contains_current_continue(then_body, label) -> return true
+            if else_body == .Val(fallback) {
+                return sema_stmt_body_contains_current_continue(fallback, label)
+            }
+            return false
+        }
+        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_stmt_body_contains_current_continue(body, label)
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Yield(_, _) | .DeferClose(_, _) -> return false
+    }
+}
+
+sema_stmt_refutable_block_exits: fn(statements: [Stmt]) -> Bool Never! {
+    loop statement in statements {
+        if sema_stmt_refutable_statement_exits(statement) -> return true
+    }
+    false
+}
+
+sema_stmt_refutable_switch_exits: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> Bool Never! {
+    if arms.len() == 0 -> return false
+    fallback_exits := if else_body == {
+        .Val(body) -> sema_stmt_refutable_block_exits(body)
+        .None -> !sema_stmt_refutable_is_subjectless_guard(subject, span)
+    }
+    loop arm in arms {
+        if !sema_stmt_refutable_block_exits(arm.body) -> return false
+    }
+    fallback_exits
+}
+
+sema_stmt_refutable_statement_exits: fn(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) -> return true
+        .Expr(expr) -> return sema_stmt_refutable_expr_diverges(expr)
+        .Switch(subject, arms, else_body, span) -> return sema_stmt_refutable_switch_exits(subject, arms, else_body, span)
+        .Loop(body, _, _, _) -> return !sema_stmt_refutable_loop_body_can_break(body)
+        .While(cond, body, _, _, _) -> return sema_stmt_refutable_expr_is_true(cond) && !sema_stmt_refutable_loop_body_can_break(body)
+        .CountedLoop(_, cond, _, body, _, _, _) -> return sema_stmt_refutable_expr_is_true(cond) && !sema_stmt_refutable_loop_body_can_break(body)
+        .Val(_) | .Assign(_, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return false
+    }
+}
+
+sema_stmt_refutable_loop_body_can_break: fn(statements: [Stmt]) -> Bool Never! {
+    sema_stmt_refutable_loop_body_can_break_inner(statements, [String]{}, true)
+}
+
+sema_stmt_refutable_label_is_nested: fn(nested_labels: [String], name: String) -> Bool Never! {
+    loop nested_label in nested_labels {
+        if nested_label == name -> return true
+    }
+    false
+}
+
+// A `?? break` fallback leaves the enclosing loop exactly like a statement
+// `break`, so it counts as a reachable loop exit. The `break` can sit at any
+// depth of the fallback: `??` is right-associative, so `a ?? b ?? break` is
+// `a ?? (b ?? break)` with the exit in a value fallback, and a block
+// fallback's final value or a `return` value can hold a chain of its own.
+sema_stmt_refutable_fallback_can_break: fn(fallback: OrFallback, nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    if fallback == {
+        .Break(_) -> allow_unlabeled
+        .BreakLabel(name, _) -> !sema_stmt_refutable_label_is_nested(nested_labels, name)
+        .Value(value) -> sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabeled)
+        .Block(body, value, _) -> sema_stmt_refutable_loop_body_can_break_inner(body, nested_labels, allow_unlabeled) || sema_stmt_refutable_optional_expr_can_break(value, nested_labels, allow_unlabeled)
+        .Return(value, _) -> sema_stmt_refutable_optional_expr_can_break(value, nested_labels, allow_unlabeled)
+        .Panic(_, args) -> sema_stmt_refutable_args_can_break(args, nested_labels, allow_unlabeled)
+        .Continue(_) | .ContinueLabel(_, _) -> false
+    }
+}
+
+sema_stmt_refutable_optional_expr_can_break: fn(value: Expr?, nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    if value == .Val(expr) {
+        return sema_stmt_refutable_expr_can_break(expr, nested_labels, allow_unlabeled)
+    }
+    false
+}
+
+sema_stmt_refutable_exprs_can_break: fn(values: [Expr], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    loop value in values {
+        if sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabeled) -> return true
+    }
+    false
+}
+
+sema_stmt_refutable_args_can_break: fn(args: [CallArg], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    loop arg in args {
+        if sema_stmt_refutable_expr_can_break(arg.expr, nested_labels, allow_unlabeled) {
+            return true
+        }
+    }
+    false
+}
+
+sema_stmt_refutable_fields_can_break: fn(fields: [ExprField], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    loop field in fields {
+        if sema_stmt_refutable_expr_can_break(field.value, nested_labels, allow_unlabeled) {
+            return true
+        }
+    }
+    false
+}
+
+sema_stmt_refutable_pairs_can_break: fn(entries: [ExprPair], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    loop entry in entries {
+        if sema_stmt_refutable_expr_can_break(entry.key, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(entry.value, nested_labels, allow_unlabeled) {
+            return true
+        }
+    }
+    false
+}
+
+sema_stmt_refutable_lvalue_can_break: fn(target: LValue, nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    if target == {
+        .Local(_, _) -> false
+        .Index(base, index, _, _) -> sema_stmt_refutable_expr_can_break(base, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(index, nested_labels, allow_unlabeled)
+        .Field(base, _, _) -> sema_stmt_refutable_expr_can_break(base, nested_labels, allow_unlabeled)
+    }
+}
+
+// Whether a `break` that leaves the enclosing loop sits anywhere in `expr`:
+// a diverging fallback ends the loop from any operand, argument, literal
+// element or interpolation, not only from a statement's top level. A lambda
+// body is its own function, so a `break` there never leaves this loop.
+sema_stmt_refutable_expr_can_break: fn(expr: Expr, nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    if expr == {
+        .OrFallback(value, fallback, _, _, _) -> sema_stmt_refutable_fallback_can_break(fallback, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabeled)
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> sema_stmt_refutable_expr_can_break(cond, nested_labels, allow_unlabeled) || sema_stmt_refutable_loop_body_can_break_inner(then_body, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(then_value, nested_labels, allow_unlabeled) || sema_stmt_refutable_loop_body_can_break_inner(else_body, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(else_value, nested_labels, allow_unlabeled)
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) {
+                    if sema_stmt_refutable_expr_can_break(inner, nested_labels, allow_unlabeled) {
+                        return true
+                    }
+                }
+            }
+            false
+        }
+        .ListLit(elements, _, _) -> sema_stmt_refutable_exprs_can_break(elements, nested_labels, allow_unlabeled)
+        .MapLit(entries, _, _) -> sema_stmt_refutable_pairs_can_break(entries, nested_labels, allow_unlabeled)
+        .Index(left, right, _, _, _) | .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) -> sema_stmt_refutable_expr_can_break(left, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(right, nested_labels, allow_unlabeled)
+        .Slice(base, start, end, range, _, _) -> sema_stmt_refutable_expr_can_break(base, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(start, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(end, nested_labels, allow_unlabeled) || sema_stmt_refutable_optional_expr_can_break(range, nested_labels, allow_unlabeled)
+        .CompareChain(operands, _, _, _, _) -> sema_stmt_refutable_exprs_can_break(operands, nested_labels, allow_unlabeled)
+        .Call(call, _) -> sema_stmt_refutable_args_can_break(call.args, nested_labels, allow_unlabeled)
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> sema_stmt_refutable_expr_can_break(receiver, nested_labels, allow_unlabeled) || sema_stmt_refutable_args_can_break(args, nested_labels, allow_unlabeled)
+        .Paren(inner, _, _) | .MemberSpread(inner, _, _, _) | .Spread(inner, _, _) | .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Tainted(inner, _, _, _) | .PatternTest(inner, _, _, _) | .PtrFromAddr(_, _, _, inner, _, _) -> sema_stmt_refutable_expr_can_break(inner, nested_labels, allow_unlabeled)
+        .Try(inner, _, _, context, _) -> sema_stmt_refutable_expr_can_break(inner, nested_labels, allow_unlabeled) || sema_stmt_refutable_optional_expr_can_break(context, nested_labels, allow_unlabeled)
+        .StructLit(_, _, _, _, fields, _, _, _) -> sema_stmt_refutable_fields_can_break(fields, nested_labels, allow_unlabeled)
+        .TypedLit(_, body, _, _) -> if body == {
+            .Fields(fields) -> sema_stmt_refutable_fields_can_break(fields, nested_labels, allow_unlabeled)
+            .Elements(elements) -> sema_stmt_refutable_exprs_can_break(elements, nested_labels, allow_unlabeled)
+            .Entries(entries) -> sema_stmt_refutable_pairs_can_break(entries, nested_labels, allow_unlabeled)
+            .Value(value) -> sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabeled)
+            .ByteText(_) | .Empty -> false
+        }
+        .EnumLit(_, _, _, args, _, _, _) -> {
+            loop arg in args {
+                if arg == {
+                    .Positional(inner) | .Named(_, inner) -> {
+                        if sema_stmt_refutable_expr_can_break(inner, nested_labels, allow_unlabeled) {
+                            return true
+                        }
+                    }
+                }
+            }
+            false
+        }
+        .TupleLit(fields, _, _, _) -> {
+            loop field in fields {
+                if sema_stmt_refutable_expr_can_break(field.value, nested_labels, allow_unlabeled) {
+                    return true
+                }
+            }
+            false
+        }
+        .Pipe(head, steps, _, _) -> {
+            if sema_stmt_refutable_expr_can_break(head, nested_labels, allow_unlabeled) {
+                return true
+            }
+            loop step in steps {
+                if sema_stmt_refutable_expr_can_break(step.value, nested_labels, allow_unlabeled) {
+                    return true
+                }
+            }
+            false
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> false
+    }
+}
+
+sema_stmt_refutable_binding_can_break: fn(binding: Binding, nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    if binding.pattern == .Val(pattern) {
+        if pattern == {
+            .Refutable(_, fallback, _, _) -> {
+                if sema_stmt_refutable_fallback_can_break(fallback, nested_labels, allow_unlabeled) {
+                    return true
+                }
+            }
+            .Struct(_, _, _, _, _) | .List(_, _) | .Tuple(_, _) -> {}
+        }
+    }
+    sema_stmt_refutable_expr_can_break(binding.init, nested_labels, allow_unlabeled)
+}
+
+sema_stmt_refutable_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
+    loop statement in statements {
+        can_break := if statement == {
+            .Break(_) | .BreakValue(_, _) -> allow_unlabeled
+            .BreakLabel(name, _) | .BreakLabelValue(name, _, _, _) -> !sema_stmt_refutable_label_is_nested(nested_labels, name)
+            .Expr(expr) -> sema_stmt_refutable_expr_can_break(expr, nested_labels, allow_unlabeled)
+            .Assign(target, _, _, value) -> sema_stmt_refutable_lvalue_can_break(target, nested_labels, allow_unlabeled) || sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabeled)
+            .Val(binding) -> sema_stmt_refutable_binding_can_break(binding, nested_labels, allow_unlabeled)
+            .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+                found := sema_stmt_refutable_expr_can_break(subject, nested_labels, allow_unlabeled)
+                loop arm in arms {
+                    if sema_stmt_refutable_expr_can_break(arm.cond, nested_labels, allow_unlabeled) || sema_stmt_refutable_loop_body_can_break_inner(arm.body, nested_labels, allow_unlabeled) {
+                        found = true
+                    }
+                }
+                if else_body == {
+                    .Val(body) -> found || sema_stmt_refutable_loop_body_can_break_inner(body, nested_labels, allow_unlabeled)
+                    .None -> found
+                }
+            }
+            .Loop(body, _, _, label) | .While(_, body, _, _, label) | .For(_, _, _, _, body, _, _, label, _) | .CountedLoop(_, _, _, body, _, _, label) -> sema_stmt_refutable_loop_body_can_break_inner(body, sema_stmt_refutable_loop_labels(nested_labels, label), false)
+            // A marker block runs its body in line, so a `break` inside it
+            // leaves the enclosing loop as one written beside it does.
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> sema_stmt_refutable_loop_body_can_break_inner(then_body, nested_labels, allow_unlabeled) || (else_body != None && sema_stmt_refutable_loop_body_can_break_inner(else_body ?? [Stmt]{}, nested_labels, allow_unlabeled))
+            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_stmt_refutable_loop_body_can_break_inner(body, nested_labels, allow_unlabeled)
+            .Return(value, _) -> sema_stmt_refutable_optional_expr_can_break(value, nested_labels, allow_unlabeled)
+            .Yield(value, _) -> sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabeled)
+            .Continue(_) | .ContinueLabel(_, _) | .DeferClose(_, _) -> false
+        }
+        if can_break -> return true
+        if sema_stmt_refutable_statement_exits(statement) -> return false
+    }
+    false
+}
+
+sema_stmt_refutable_tree_block_has_never_expr: fn(statements: [TStmt]) -> Bool Never! {
+    loop statement in statements {
+        if statement == {
+            .ExprStmt(value, _) -> {
+                if value.ty == (Type.Named{name: "Never"}) -> return true
+            }
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        }
+    }
+    false
+}
+
+sema_stmt_refutable_contextual_pattern: fn(pattern: Pattern, subject_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Pattern Never! {
+    if pattern == {
+        .Or(alternatives, span) -> {
+            normalized := (loop item in alternatives -> sema_stmt_refutable_contextual_pattern(item, subject_ty, environment, program))
+            return Pattern.Or{alternatives: normalized, span: span}
+        }
+        .Variant(variant, slots, _, span) -> {
+            if variant == "value" && slots.len() == 1 {
+                if sema_expr_unwrap_tag(subject_ty) == {
+                    .Option(_) -> {
+                        binding: sema_pattern_normalize_contextual_binding(slots[0], span)
+                        return Pattern.Present{binding: binding.name, binding_span: binding.span, inner: None, span: span}
+                    }
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+                }
+            }
+        }
+        .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> {}
+    }
+    sema_pattern_normalize_contextual(pattern, subject_ty, environment, program)
+}
+
+sema_stmt_refutable_capture_fact: fn(facts: [TPatternBindingFact], name: BindName) -> TPatternBindingFact? {
+    local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
+    loop fact in facts {
+        if fact.name == local_name -> return Val(fact)
+    }
+    loop fact in facts {
+        if fact.name == name.name -> return Val(fact)
+    }
+    None
+}
+
+sema_stmt_refutable_capture_payload: fn(pattern: TPattern, subject_ty: Type) -> Type? {
+    if pattern.shape == {
+        .Ok(_, _, inner, _) -> {
+            if inner != None -> return None
+            if sema_expr_unwrap_tag(subject_ty) == {
+                .Result(ok, _) -> return Val(ok)
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
+            }
+        }
+        .Present(_, _, inner, _) -> {
+            if inner != None -> return None
+            if sema_expr_unwrap_tag(subject_ty) == {
+                .Option(payload) -> return Val(payload)
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
+            }
+        }
+        .Variant(_, _, _, _) | .Absent(_) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _) | .List(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> return None
+    }
+    None
+}
+
+sema_stmt_refutable_assign_capture_identity: fn(pattern: ^TPattern, name: BindName, local: TLocal) Never! {
+    local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
+    loop index in 0..<pattern.bindings.len() {
+        fact: pattern.bindings[index]
+        if fact.name == local_name || fact.name == name.name {
+            pattern.bindings[index].symbol_id = local.symbol_id
+            return
+        }
+    }
+}
+
+// The miss route runs in its own frame on the live scope table and on the
+// live ownership state (sema_ownership_fork), both rolled back at the end
+// (instead of on copies of the whole table and state).
+sema_stmt_check_refutable_fallback: fn(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> SemaRefutableFallbackCheck {
+    if sema_body_fallback_exit(fallback, context, scopes, diagnostics) {
+        return SemaRefutableFallbackCheck{or_fallback: None, statements: [TStmt]{}, complete: false, ambient_err: None}
+    }
+    before := diagnostics.len()
+    fallback_mark: sema_scope_mark(scopes)
+    fork: sema_ownership_fork(state)
+    sema_scope_enter(scopes, state, "refutable.fallback@{span.start}")
+    carrier := sema_expr_unwrap_tag(subject_ty)
+    result := SemaRefutableFallbackCheck{or_fallback: None, statements: [TStmt]{}, complete: false, ambient_err: None}
+    if carrier == {
+        .Result(_, error_ty) -> {
+            owner := sema_scope_local_owner_key(scopes)
+            local_module: sema_scope_environment_module_text(environment, program)
+            key: symbol_key_text(SymbolKind.Local, local_module, owner, "err")
+            symbol := Symbol{id: sema_symbol_id_of(program, context, key), kind: SymbolKind.Local, name: "err", module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_ty), visibility: 0}
+            frame: scopes.current
+            sema_scope_push_binding(scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+            sema_ownership_declare_ambient_binding(state, symbol)
+            result.ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_ty))
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+
+    // copy: `enclosing_err_denial` restores context.fallback_err_denial after this fallback
+    // overwrites it. Jet has no exchange on a field of the write-borrowed `context`.
+    enclosing_err_denial: context.fallback_err_denial.copy()
+    context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
+    if fallback == {
+        .Value(value) -> {
+            checked := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            if checked != None {
+                item: checked ?? sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(value))
+                result.or_fallback = Val(TOrFallback.Value{value: item})
+                result.statements.push(TStmt.ExprStmt{value: item, span: expr_span(value)})
+            }
+            diagnostics.push(sema_error("E0405", expr_span(value), "`??` must diverge after a refutable binding", "a failed pattern match cannot continue without defining the captures", "use `return`, `panic(...)`, `break`, or `next` as the fallback"))
+        }
+        .Block(body, value, block_span) -> {
+            block_mark: sema_scope_mark(scopes)
+            sema_scope_enter(scopes, state, "refutable.block@{block_span.start}")
+            // copy: `block_return_type` restores scopes.return_type after the fallback block
+            // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`.
+            block_return_type: scopes.return_type.copy()
+            block_loop_depth: scopes.loop_depth
+            checked_block := sema_check_statements(body, block_return_type, environment, program, scopes, state, tail_store, context, diagnostics, block_loop_depth)
+            if value == .Val(tail) {
+                _ := sema_check_expression(tail, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+            sema_single_use_leave_scope(scopes, state, diagnostics)
+            sema_scope_rollback(scopes, block_mark)
+            diverges := value == None && (sema_stmt_refutable_block_exits(body) || sema_stmt_refutable_tree_block_has_never_expr(checked_block.value))
+            valid := diverges && checked_block.complete
+            if value != None || !diverges {
+                diagnostics.push(sema_error("E0405", block_span, "`??` fallback blocks cannot continue after a refutable binding", "a refutable binding needs one direct diverging miss route", "end the block with `return`, `panic(...)`, `break`, or `next`"))
+            }
+            if valid {
+                block_expr := sema_tree_node(Type.Named{name: "Never"}, TExprKind.InlineBlock{body: checked_block.value}, block_span)
+                result.or_fallback = Val(TOrFallback.Value{value: block_expr})
+                result.statements = checked_block.value
+                result.complete = true
+            }
+        }
+        .Return(value, return_span) -> {
+            return_tree := TOrFallback?{None}
+            statement_value := TExpr?{None}
+            if value == {
+                .None -> {
+                    if !sema_stmt_return_allows_empty(scopes.return_type) {
+                        required := sema_stmt_return_success_type(scopes.return_type)
+                        diagnostics.push(sema_error("E0405", return_span, "`?? return` here needs a value", "this function returns {type_name(required)}, so its return route needs a value", "write `?? return <value>`"))
+                    }
+                }
+                .Val(expression) -> {
+                    if {
+                        scopes.return_type == None -> {
+                            _ := sema_check_expression(expression, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                            diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
+                        }
+                        else -> {
+                            // copy: `fallback_return_type` restores scopes.return_type after the
+                            // fallback overwrites it. Jet has no exchange on a field of the
+                            // write-borrowed `scopes`.
+                            fallback_return_type: scopes.return_type.copy()
+                            checked: sema_stmt_check_return_value(expression, fallback_return_type, environment, program, scopes, state, tail_store, context, diagnostics)
+                            if checked != None {
+                                checked_value: checked
+                                if sema_stmt_record_return_views(expression, checked_value.ty, scopes, state, context, diagnostics) && sema_stmt_move_direct(expression, state, scopes, "`return`", diagnostics) {
+                                    return_tree = Val(TOrFallback.Return{value: Val(checked_value)})
+                                    statement_value = Val(checked_value)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if value == .None && sema_stmt_return_allows_empty(scopes.return_type) {
+                return_tree = Val(TOrFallback.Return{value: None})
+            }
+            if return_tree != None {
+                result.or_fallback = return_tree
+                result.statements.push(TStmt.Return{value: statement_value, span: return_span})
+                result.complete = true
+            }
+        }
+        .Panic(name_span, args) -> {
+            if {
+                args.len() != 1 -> {
+                    diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `?? panic(\"message\")`"))
+                }
+                else -> {
+                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics)
+                    if message != None {
+                        checked: message ?? sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, name_span)
+                        location := sema_expression_panic_location(environment, program, scopes, name_span)
+                        result.or_fallback = Val(TOrFallback.Panic{message: checked, location: location})
+                        panic_expr := sema_tree_node(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: checked}, location: location, always_stops: true}, name_span)
+                        result.statements.push(TStmt.ExprStmt{value: panic_expr, span: name_span})
+                        result.complete = true
+                    }
+                }
+            }
+        }
+        .Break(route_span) -> {
+            if {
+                scopes.loop_depth <= 0 -> {
+                    diagnostics.push(sema_error("E0115", route_span, "`break` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
+                }
+                else -> {
+                    result.or_fallback = Val(TOrFallback.Break)
+                    result.statements.push(TStmt.Break{label: None, span: route_span})
+                    result.complete = true
+                }
+            }
+        }
+        .Continue(route_span) -> {
+            if {
+                scopes.loop_depth <= 0 -> {
+                    diagnostics.push(sema_error("E0115", route_span, "`next` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
+                }
+                else -> {
+                    if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) {
+                        sema_ownership_check_loop_move_backedge(state, context.loop_value_frames[frame_index], diagnostics)
+                    }
+                    result.or_fallback = Val(TOrFallback.Continue)
+                    result.statements.push(TStmt.Continue{label: None, span: route_span})
+                    result.complete = true
+                }
+            }
+        }
+        .BreakLabel(label, route_span) -> {
+            if {
+                scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) -> {
+                    diagnostics.push(sema_error("E0405", route_span, "the `?? break` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
+                }
+                else -> {
+                    result.or_fallback = Val(TOrFallback.BreakLabel{label: label})
+                    result.statements.push(TStmt.Break{label: Val(label), span: route_span})
+                    result.complete = true
+                }
+            }
+        }
+        .ContinueLabel(label, route_span) -> {
+            if {
+                scopes.loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) -> {
+                    diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
+                }
+                else -> {
+                    if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) {
+                        sema_ownership_check_loop_move_backedge(state, context.loop_value_frames[frame_index], diagnostics)
+                    }
+                    result.or_fallback = Val(TOrFallback.ContinueLabel{label: label})
+                    result.statements.push(TStmt.Continue{label: Val(label), span: route_span})
+                    result.complete = true
+                }
+            }
+        }
+    }
+    context.fallback_err_denial = enclosing_err_denial
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    sema_ownership_fork_rollback(state, fork)
+    sema_ownership_fork_close(state, fork)
+    sema_scope_rollback(scopes, fallback_mark)
+    result.complete = result.complete && diagnostics.len() == before
+    result
+}
+
+sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
+    before := diagnostics.len()
+    subject_value: sema_check_pattern_subject(binding.init, pattern, binding.ty, environment, program, scopes, state, tail_store, context, diagnostics)
+    subject: subject_value ?? {
+        sema_stmt_destructure_recover(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names, span: span}, binding.mutable, environment, program, scopes, state, context, diagnostics)
+        return None
+    }
+    checked_pattern := sema_check_pattern(subject, sema_stmt_refutable_contextual_pattern(pattern, subject.ty, environment, program), TPatternPosition.Binding, binding.mutable, false, environment, program, scopes, state, tail_store, context, diagnostics)
+    move_subject := false
+    loop fact in checked_pattern.bindings {
+        if !sema_ownership_type_is_copy(fact.ty) -> move_subject = true
+    }
+    // The fallback runs only when the pattern missed, so the subject is
+    // still whole there; the success path moves it into the captures after.
+    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, program, scopes, state, tail_store, context, diagnostics)
+    move_valid := true
+    if move_subject && !sema_stmt_move_direct(binding.init, state, scopes, "the pattern binding", diagnostics) {
+        move_valid = false
+    }
+    locals := [TLocal]{}
+    checked_pattern_tree := checked_pattern.checked
+    loop name in names {
+        fact := sema_stmt_refutable_capture_fact(checked_pattern.bindings, name)
+        // A refused hole has no binding fact; recovery must leave its
+        // existing value visible rather than declaring it a second time.
+        if fact == None && (if pattern == {
+            .StrMatch(_, _) | .BinMatch(_, _) -> true
+            .Variant(_, _, _, _) | .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Or(_, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) -> false
+        }) && !sema_pattern_hole_name_available(name.name, scopes) -> next
+        ty := if fact == {
+            .Val(value) -> value.ty
+            .None -> Type.Int
+        }
+        installed := sema_stmt_destructure_local(name, ty, binding.mutable, environment, program, scopes, state, context, diagnostics) ?? next
+        if checked_pattern_tree != None {
+            typed := checked_pattern_tree ?? next
+            sema_stmt_refutable_assign_capture_identity(typed.pattern, name, installed)
+            checked_pattern_tree = Val(typed)
+        }
+        locals.push(installed.move())
+    }
+    if diagnostics.len() != before || !checked_pattern.complete || !move_valid || !checked_fallback.complete || locals.len() != names.len() {
+        return None
+    }
+    typed: checked_pattern_tree ?? return None
+    fallback_tree: checked_fallback.or_fallback ?? return None
+    payload := sema_stmt_refutable_capture_payload(typed.pattern, typed.subject.ty)
+    if payload != None && names.len() == 1 {
+        local := locals[0]
+        initializer := sema_tree_node(payload ?? Type.Named{name: "Unit"}, TExprKind.OrFallback{value: typed.subject, fallback: fallback_tree, ambient_err: checked_fallback.ambient_err}, span)
+        return Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: initializer, gc_promotion: None, gc_transferred: false, span: Span{start: local.span.start, end: expr_span(binding.init).end}})
+    }
+    Val(TStmt.RefutableBind{pattern: typed.pattern, init: typed.subject, fallback: checked_fallback.statements, span: span})
+}
+
+// The stable Optional (an immutable local or parameter of type
+// `T?`) that a statement guard `if x == None -> …` with one arm, no `else`,
+// and a directly exiting body tests.
+sema_stmt_optional_exit_guard_name: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, scopes: SemaScopeTable) -> BindName? {
+    if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) {
+        return None
+    }
+    if !sema_stmt_refutable_block_exits(arms[0].body) -> return None
+    test: sema_expression_absent_optional_test(arms[0].cond) ?? return None
+    if sema_expression_flow_optional_payload(scopes, test.name.name) == None -> return None
+    Val(test.name)
+}
+
+// The stable Optionals the `x == None` arms of a guard table
+// test, in arm order without repeats. The table's `else` holds each payload
+// (Rust `complement_condition_bindings`).
+sema_stmt_else_presence_names: fn(arms: [SwitchArm], scopes: SemaScopeTable) -> [BindName] {
+    names := [BindName]{}
+    loop arm in arms {
+        test: sema_expression_absent_optional_test(arm.cond) ?? next
+        if sema_expression_flow_optional_payload(scopes, test.name.name) == None -> next
+        repeated := false
+        loop name in names {
+            if name.name == test.name.name -> repeated = true
+        }
+        if !repeated -> names.push(test.name)
+    }
+    names
+}
+
+// Refines the stable Optional `name` to its payload for the
+// rest of the current scope. Check `x ?? fallback` and bind the payload under
+// the same name, the operation the Rust frontend reaches through the
+// refutable binding `x == .Val(x) ?? { fallback }`.
+sema_stmt_check_optional_refinement: fn(name: BindName, fallback: OrFallback, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
+    guarded: Expr.OrFallback{value: Expr.Ident{name: name.name, span: name.span, id: AST_NODE_GENERATED}, fallback: fallback, is_option: true, span: span, id: AST_NODE_GENERATED}
+    value: sema_check_expression(guarded, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    // The refinement is a new local; its identity names the guard so it never
+    // collides with the carrier binding it shadows.
+    owner: "{sema_scope_local_owner_key(scopes)}/flow@{span.start}"
+    local_module: sema_scope_environment_module_text(environment, program)
+    key: symbol_key_text(SymbolKind.Local, local_module, owner, name.name)
+    id: sema_symbol_id_of(program, context, key)
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_identity: environment.module_identity, owner: Val(owner), span: name.span, ty: Val(value.ty), visibility: 0}
+    sema_scope_refine_local(scopes, symbol, key)
+    sema_ownership_declare_binding(state, symbol, false)
+    Val(TStmt.Let{local: checked_symbol_local(name.name, name.span, id, value.ty), let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
+}
+
+// One integer local whose interval a guard table narrows for the rest of the
+// block.
+SemaStmtBoundsRefinement: struct {
+    name: String,
+    name_span: Span,
+    bounds: TIntegerBounds,
+}
+
+// After `if i >= limit -> exit` with no `else`, the rest of the block runs
+// only where the test was false. A `:` or parameter integer whose
+// interval is already known keeps the part the false test allows:
+// `i >= n` leaves hi n-1, `i > n` leaves hi n, `i < n` leaves lo n,
+// `i <= n` leaves lo n+1, and `a || b` leaves both. `limit` is an integer
+// literal or `.len()` of a fixed-size list. Bounds are only tightened: a
+// name with no known interval gains none, so no index check becomes stricter.
+sema_stmt_exit_guard_bound_refinements: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaStmtBoundsRefinement] {
+    refinements := [SemaStmtBoundsRefinement]{}
+    if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) {
+        return refinements
+    }
+    if !sema_stmt_refutable_block_exits(arms[0].body) -> return refinements
+    sema_stmt_exit_guard_false_bounds(arms[0].cond, environment, scopes, refinements)
+    refinements
+}
+
+sema_stmt_exit_guard_false_bounds: fn(cond: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, refinements: ^[SemaStmtBoundsRefinement]) Never! {
+    if cond == {
+        .Paren(inner, _, _) -> {
+            sema_stmt_exit_guard_false_bounds(inner, environment, scopes, refinements)
+        }
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Or {
+                sema_stmt_exit_guard_false_bounds(left, environment, scopes, refinements)
+                sema_stmt_exit_guard_false_bounds(right, environment, scopes, refinements)
+                return
+            }
+            if left == .Ident(name, name_span, _) {
+                limit: sema_stmt_guard_limit(right, environment, scopes) ?? return
+                sema_stmt_note_false_bound(name, name_span, op, limit, scopes, refinements)
+                return
+            }
+            if right == .Ident(name, name_span, _) {
+                limit: sema_stmt_guard_limit(left, environment, scopes) ?? return
+                mirrored: if op == {
+                    .Lt -> BinOp.Gt
+                    .Gt -> BinOp.Lt
+                    .Le -> BinOp.Ge
+                    .Ge -> BinOp.Le
+                    .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Compare | .And | .Or -> op
+                }
+                sema_stmt_note_false_bound(name, name_span, mirrored, limit, scopes, refinements)
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+}
+
+// The constant a guard compares against: an integer literal, or `.len()` of a
+// name whose type is a fixed-size list.
+sema_stmt_guard_limit: fn(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Int? {
+    if expr == {
+        .Paren(inner, _, _) -> return sema_stmt_guard_limit(inner, environment, scopes)
+        .Int(value, _, _, _, _) -> return Val(value)
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if method != "len" || args.len() != 0 -> return None
+            if receiver == .Ident(list_name, _, _) {
+                index: sema_scope_resolve_index(scopes, list_name) ?? return None
+                if sema_scope_binding_type(environment, scopes, index) == .Val(.FixedList(_, length)) {
+                    return measure_literal_value(length)
+                }
+            }
+            return None
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return None
+    }
+}
+
+sema_stmt_note_false_bound: fn(name: String, name_span: Span, op: BinOp, limit: Int, scopes: SemaScopeTable, refinements: ^[SemaStmtBoundsRefinement]) Never! {
+    index: sema_scope_resolve_index(scopes, name) ?? return
+    if scopes.bindings[index].mutable {
+        return
+    }
+    kind: scopes.bindings[index].symbol.kind
+    if kind != SymbolKind.Local && kind != SymbolKind.Parameter {
+        return
+    }
+    known: scopes.bindings[index].integer_bounds ?? return
+    position := -1
+    loop at in 0..<refinements.len() {
+        if refinements[at].name == name -> position = at
+    }
+    current: if position >= 0 -> refinements[position].bounds else -> known
+    lo := current.lo
+    hi := current.hi
+    if op == {
+        .Ge -> {
+            if limit - 1 < hi -> hi = limit - 1
+        }
+        .Gt -> {
+            if limit < hi -> hi = limit
+        }
+        .Lt -> {
+            if limit > lo -> lo = limit
+        }
+        .Le -> {
+            if limit + 1 > lo -> lo = limit + 1
+        }
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Compare | .And | .Or -> return
+    }
+    // An empty interval means the rest of the block never runs; leave it alone.
+    if lo > hi {
+        return
+    }
+    narrowed: TIntegerBounds{lo: lo, hi: hi}
+    if position >= 0 -> refinements[position].bounds = narrowed else {
+        refinements.push(SemaStmtBoundsRefinement{name: name, name_span: name_span, bounds: narrowed})
+    }
+}
+
+// Rebinds the guarded name for the rest of the block with its narrowed
+// interval, the way sema_stmt_check_optional_refinement rebinds a payload.
+sema_stmt_check_bounds_refinement: fn(refinement: SemaStmtBoundsRefinement, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic]) -> TStmt? {
+    read: Expr.Ident{name: refinement.name, span: refinement.name_span, id: AST_NODE_GENERATED}
+    value: sema_check_expression(read, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    owner: "{sema_scope_local_owner_key(scopes)}/bounds@{span.start}"
+    local_module: sema_scope_environment_module_text(environment, program)
+    key: symbol_key_text(SymbolKind.Local, local_module, owner, refinement.name)
+    id: sema_symbol_id_of(program, context, key)
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: refinement.name, module_identity: environment.module_identity, owner: Val(owner), span: refinement.name_span, ty: Val(value.ty), visibility: 0}
+    sema_scope_refine_local(scopes, symbol, key)
+    scopes.bindings[scopes.bindings.len() - 1].integer_bounds = Val(refinement.bounds)
+    sema_ownership_declare_binding(state, symbol, false)
+    local := checked_symbol_local(refinement.name, refinement.name_span, id, value.ty)
+    local.integer_bounds = Val(refinement.bounds)
+    Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
+}
+
+// The `else` of a guard table holds the payload of every
+// stable `x == None` arm subject. Each refinement leads the block as
+// `x: x ?? <no else arm>`, as the Rust frontend prepends the dead-end
+// binding `x == .Val(x) ?? { }` (`prepend_else_presence_refinements`).
+sema_stmt_check_else_complement: fn(names: [BindName], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: ^SemaScopeTable, state: ^SemaOwnershipState, tail_store: ^SemaStatementTailStore, context: ^SemaCheckContext, diagnostics: ^[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+    sema_scope_enter(scopes, state, "if.else@{span.start}")
+    statements := [TStmt]{}
+    complete := true
+    loop name in names {
+        refined: sema_stmt_check_optional_refinement(name, OrFallback.Value{value: Expr.NoElse{span: name.span, id: AST_NODE_GENERATED}}, name.span, environment, program, scopes, state, tail_store, context, diagnostics)
+        if refined == {
+            .Val(statement) -> { statements.push(statement) }
+            .None -> complete = false
+        }
+    }
+    checked: sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    loop statement in checked.value -> statements.push(statement)
+    SemaStatementResult{value: statements, complete: complete && checked.complete}
+}
