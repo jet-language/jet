@@ -296,6 +296,7 @@ sema_name_lifted_function_paths: fn(items: [Item], paths: &[String:String]) Neve
 // generated type name: `M` (after an optional `_`) and a digit.
 sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     at := start
+    if at >= end -> return false
     if (Int{bytes[at]}) == 95 -> at += 1
     if at + 1 >= end || (Int{bytes[at]}) != 77 -> return false
     digit: Int{bytes[at + 1]}
