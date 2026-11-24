@@ -10,6 +10,7 @@ use {
         EffectRowEntry,
         FunctionCallMetadata,
         FunctionDefaultRef,
+        Item,
         Measure,
         MeasureRule,
         ParamZone,
@@ -24,6 +25,9 @@ use {
         type_union_sort,
         foundation_link_type,
         foundation_named_type,
+        FOUNDATION_SIZE_ALIASES,
+        name_find,
+        name_index,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -40,7 +44,10 @@ use {
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
+        TOKEN_KW_ENUM,
         TOKEN_KW_FN,
+        TOKEN_KW_STRUCT,
+        TOKEN_KW_TRAIT,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
@@ -59,6 +66,10 @@ use {
         TOKEN_SHR,
         TOKEN_SLASH,
         TOKEN_STAR,
+        Token,
+        TokenTables,
+        token_integer,
+        token_text,
     ]
 }
 
@@ -426,7 +437,7 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
                 empty: parser_bump(state)
                 diagnostic: diagnostic_from_registry("E0440", Val(empty.span), "`{name}<>` has an empty type-argument list", "A type's arguments go between `<` and `>`; `<>` lists none, so it only adds noise", "Write the type arguments, such as `{name}<Int>`, or drop the `<>`")
                 state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: empty.span, new_text: ""}))
-                base_ty: foundation_named_type(name)
+                base_ty: parser_named_type(state, name)
                 return ParsedType{ty: if is_link -> foundation_link_type(base_ty) else -> base_ty, span: parser_cover(start.span, empty.span)}
             }
             // E0119: a fact read `T.reflect().fact`, a build fact such as
@@ -439,12 +450,12 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
                 member: parser_bump(state)
                 read: "{name}().{parser_value(state, member)}"
                 parser_add_error_code(state, "E0119", start.span, "`{read}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
-                return ParsedType{ty: foundation_named_type(read), span: parser_cover(start.span, member.span)}
+                return ParsedType{ty: parser_named_type(state, read), span: parser_cover(start.span, member.span)}
             }
             if name.starts_with("$") || name.contains(".$") || parser_build_fact_type_path(name) {
                 parser_add_error_code(state, "E0119", head, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
             }
-            base_ty: foundation_named_type(name)
+            base_ty: parser_named_type(state, name)
             ParsedType{ty: if is_link -> foundation_link_type(base_ty) else -> base_ty, span: parser_cover(start.span, end)}
         }
     }
@@ -452,7 +463,175 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
 
 // A registered build-fact path of the compiler value `#build`.
 parser_build_fact_type_path: fn(name: String) -> Bool Never! {
-    name == "#build.target.os" || name == "#build.profile" || name.starts_with("#build.settings.") || name.starts_with("#build.stamp.") || name.starts_with("#build.cpu.")
+    name == "#build.target.os" || name == "#build.profile" || name.starts_with("#build.settings.") || name.starts_with("#build.stamp.") || name.starts_with("#build.cpu.") || name.starts_with("#build.host.")
+}
+
+// The type a written name means in this file: a size name (`U8`) is the
+// compiler's own type its Core alias names, unless the file binds that name
+// itself (`bound_size_rows`), where it stays a name Sema resolves in scope.
+parser_named_type: fn(state: &JetParserState, name: String) -> Type Never! {
+    if state.bound_size_rows != 0 {
+        loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
+            if FOUNDATION_SIZE_ALIASES[row].name == name && (state.bound_size_rows & (1 << row)) != 0 {
+                return Type.Named{name: name}
+            }
+        }
+    }
+    foundation_named_type(name)
+}
+
+// The size names (FOUNDATION_SIZE_ALIASES) `tokens` binds for itself, as a
+// mask with bit `row` set for the alias row it binds: declared
+// (`U8: struct {…}`, read as `struct U8` once its colon head is rotated),
+// imported (`use mod.[U8]`, `use U8: mod.Byte`) or taken as a type parameter
+// (`fn<U8>`, `Name<U8>: …`). Core's own alias line (`U8: Unsigned<8>`)
+// binds nothing new, and neither does a map type's key (`[U8: Int]`), whose
+// colon follows the size name too. A wider answer than the file's own
+// bindings only leaves a size name for Sema, which resolves it through the
+// same alias.
+parser_bound_size_rows: fn(tokens: [Token], tables: TokenTables) -> Int Never! {
+    bound := 0
+    ids := [Int]{}
+    rows := [Int]{}
+    loop row in 0..<FOUNDATION_SIZE_ALIASES.len() {
+        if name_find(tables.names, FOUNDATION_SIZE_ALIASES[row].name) == .Val(id) {
+            ids.push(name_index(id))
+            rows.push(row)
+        }
+    }
+    if ids.len() == 0 -> return bound
+    member_list := false
+    loop index in 0..<tokens.len() {
+        kind: tokens[index].kind
+        if kind == TOKEN_LBRACKET {
+            member_list = parser_size_code_before(tokens, index) == TOKEN_DOT
+            next
+        }
+        if kind == TOKEN_RBRACKET {
+            member_list = false
+            next
+        }
+        if kind == TOKEN_LT {
+            bound = bound | parser_size_params(tokens, index, ids, rows)
+            next
+        }
+        if kind != TOKEN_IDENT -> next
+        found: ids.index_of(name_index(tokens[index].text)) ?? next
+        before: parser_size_code_before(tokens, index)
+        after_at: parser_size_code_after(tokens, index)
+        after: if after_at < tokens.len() -> tokens[after_at].kind else -> TOKEN_EOF
+        declared: after == TOKEN_COLON && before != TOKEN_LBRACKET && !parser_size_alias_line(tokens, tables, after_at, FOUNDATION_SIZE_ALIASES[rows[found]].family, FOUNDATION_SIZE_ALIASES[rows[found]].sizes)
+        if declared || parser_size_declaring(before) || (member_list && (before == TOKEN_LBRACKET || before == TOKEN_COMMA)) {
+            bound = bound | (1 << rows[found])
+        }
+    }
+    bound
+}
+
+// A keyword whose declaration names what follows it (`struct U8`) or opens
+// its type parameters (`fn<T>`).
+parser_size_declaring: fn(kind: Int) -> Bool Never! {
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT
+}
+
+// The kind of the code token before `index` (TOKEN_EOF at the start).
+parser_size_code_before: fn(tokens: [Token], index: Int) -> Int Never! {
+    at := index - 1
+    loop at >= 0 && parser_is_trivia(tokens[at].kind) {
+        at -= 1
+    }
+    if at >= 0 -> tokens[at].kind else -> TOKEN_EOF
+}
+
+// The index of the code token after `index` (tokens.len() at the end).
+parser_size_code_after: fn(tokens: [Token], index: Int) -> Int Never! {
+    at := index + 1
+    loop at < tokens.len() && parser_is_trivia(tokens[at].kind) {
+        at += 1
+    }
+    at
+}
+
+// Whether the colon at `colon` starts Core's alias of the size name before
+// it: `: family<sizes>` and nothing else on the line's type.
+parser_size_alias_line: fn(tokens: [Token], tables: TokenTables, colon: Int, family: String, sizes: [Int]) -> Bool Never! {
+    at := parser_size_code_after(tokens, colon)
+    if at >= tokens.len() || tokens[at].kind != TOKEN_IDENT || token_text(tables, tokens[at]) != family -> return false
+    at = parser_size_code_after(tokens, at)
+    if at >= tokens.len() || tokens[at].kind != TOKEN_LT -> return false
+    loop index in 0..<sizes.len() {
+        if index > 0 {
+            at = parser_size_code_after(tokens, at)
+            if at >= tokens.len() || tokens[at].kind != TOKEN_COMMA -> return false
+        }
+        at = parser_size_code_after(tokens, at)
+        if at >= tokens.len() || tokens[at].kind != TOKEN_INT || (token_integer(tables, tokens[at]) ?? -1) != sizes[index] -> return false
+    }
+    at = parser_size_code_after(tokens, at)
+    at < tokens.len() && tokens[at].kind == TOKEN_GT
+}
+
+// The size names the angle list opening at `open` takes as its type
+// parameters, as a mask of their alias rows (0 when it is no parameter
+// list): after a declaring keyword (`fn<U8>`, `struct<…>`), after the name a
+// rotated head declares (`fn name<U8>`), or before the colon of an alias
+// (`Name<U8>: …`).
+parser_size_params: fn(tokens: [Token], open: Int, ids: [Int], rows: [Int]) -> Int Never! {
+    before_at := open - 1
+    loop before_at >= 0 && parser_is_trivia(tokens[before_at].kind) {
+        before_at -= 1
+    }
+    if before_at < 0 -> return 0
+    before: tokens[before_at].kind
+    declared: parser_size_declaring(before) || (before == TOKEN_IDENT && parser_size_declaring(parser_size_code_before(tokens, before_at)))
+    if !declared && before != TOKEN_IDENT -> return 0
+    names := 0
+    depth := 1
+    previous := TOKEN_LT
+    at := open + 1
+    loop at < tokens.len() && at < open + 256 {
+        kind: tokens[at].kind
+        if parser_is_trivia(kind) {
+            at += 1
+            next
+        }
+        if kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_SEMI || kind == TOKEN_EOF -> return 0
+        if kind == TOKEN_LT -> depth += 1
+        if kind == TOKEN_GT -> depth -= 1
+        if kind == TOKEN_SHR -> depth -= 2
+        if depth <= 0 -> break
+        if depth == 1 && kind == TOKEN_IDENT && (previous == TOKEN_LT || previous == TOKEN_COMMA) {
+            if ids.index_of(name_index(tokens[at].text)) == .Val(found) -> names = names | (1 << rows[found])
+        }
+        previous = kind
+        at += 1
+    }
+    if depth > 0 -> return 0
+    if !declared {
+        after: parser_size_code_after(tokens, at)
+        if after >= tokens.len() || tokens[after].kind != TOKEN_COLON -> return 0
+    }
+    names
+}
+
+// The type of the first parameter of `source`'s function `name`.
+parser_size_test_param_type: fn(source: String, name: String) -> Type {
+    parsed: parse_source(source.bytes())
+    loop item in parsed.program.items {
+        if item == .Func(function) && function.name == name -> return function.params[0].ty
+    }
+    panic("`{name}` is not a function of the source")
+}
+
+#Test("a size name the file binds stays a name; every other size name is its type") {
+    declared: "U8: struct {{\n    v: Int,\n}}\n\nf: fn(x: U8) -> Int {{ x.v }}\n\ng: fn(x: I8) -> I8 {{ x }}\n"
+    assert(parser_size_test_param_type(declared, "f") == Type.Named{name: "U8"})
+    assert(parser_size_test_param_type(declared, "g") == Type.IntN{signed: true, bits: 8})
+    parameter: "f: fn<U16>(x: U16) -> U16 {{ x }}\n\ng: fn(x: U8) -> U8 {{ x }}\n"
+    assert(parser_size_test_param_type(parameter, "f") == Type.Named{name: "U16"})
+    assert(parser_size_test_param_type(parameter, "g") == Type.IntN{signed: false, bits: 8})
+    keyed: "Rows: struct {{\n    at: [U32:Int],\n}}\n\nf: fn(x: U32) -> U32 {{ x }}\n"
+    assert(parser_size_test_param_type(keyed, "f") == Type.IntN{signed: false, bits: 32})
 }
 
 parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedType {

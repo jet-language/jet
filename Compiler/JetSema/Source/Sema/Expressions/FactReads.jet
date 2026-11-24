@@ -854,7 +854,8 @@ sema_fact_build_rooted: fn(base: Expr) -> Bool Never! {
 // The registered build-fact paths (Rust `Registry.build_fact_read`) and the
 // typed value each one takes from the snapshot (Rust `BuildFactSnapshot.value`).
 // `#build.target.*` reads the facts of the machine the build targets, the
-// ones `core.target` declares for each machine.
+// ones `core.target` declares for each machine; `#build.host.*` reads the
+// machine running the build.
 sema_fact_build_value: fn(path: String, facts: SemaBuildFacts, machine: TargetMachine) -> SemaFactReadValue? {
     if {
         path == "#package.name" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.package_name}})
@@ -866,6 +867,8 @@ sema_fact_build_value: fn(path: String, facts: SemaBuildFacts, machine: TargetMa
         path == "#build.stamp.toolchain" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_toolchain}})
         path == "#build.stamp.at" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_at}})
         path == "#build.cpu.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: COMPILER_BUILD_CPU_CACHE_LINE_GENERIC}})
+        path == "#build.host.os" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.host_os}})
+        path == "#build.host.arch" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.host_arch}})
         path == "#build.target.triple" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: machine.triple}})
         path == "#build.target.layout.pointer_bits" || path == "#build.target.layout.word_bits" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_pointer_size(machine.triple) * 8}})
         path == "#build.target.layout.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: jet_target_layout_cache_line(machine.triple)}})
@@ -1038,6 +1041,10 @@ sema_fact_build_read: fn(base: Expr, member: String, span: Span, expected: Type?
     path: sema_fact_path_text(base, member) ?? return sema_fact_read_unhandled()
     if module_is_core(environment.module_identity) && sema_fact_build_per_program(path) {
         diagnostics.push(sema_error("E0302", span, "Core reads `{path}`, a fact of the program being built", "Core means the same in every program built for a target, so it reads only the target's facts (`#build.target.*`)", "take the value as a parameter from the program that reads it"))
+        return sema_fact_read_failed()
+    }
+    if module_is_core(environment.module_identity) && path.starts_with("#build.host.") {
+        diagnostics.push(sema_error("E0302", span, "Core reads `{path}`, a fact of the machine running the build", "Core means the same for a target wherever it is built, so it reads only the target's facts (`#build.target.*`); a Core call that needs the machine it runs on asks that machine when it runs", "ask the running machine at run time, as `core.files` does for its path syntax"))
         return sema_fact_read_failed()
     }
     if sema_fact_build_setting_key(path) == .Val(key) {

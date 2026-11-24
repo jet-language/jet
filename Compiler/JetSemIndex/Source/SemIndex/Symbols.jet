@@ -10,6 +10,7 @@
 use {
     jet_driver.[JetDriverDocModule]
     jet_foundation.[
+        BUILTIN_NUMERIC_KINDS,
         BUILTIN_NUMERIC_SOURCES,
         DOC_COMMENT_PREFIX,
         ImportDecl,
@@ -152,9 +153,6 @@ SEMINDEX_SYMBOL_BUILTIN_METHODS: [SemSymbolBuiltin]{
     {qualified_name: "String.repeat", signature: "String.repeat(n: Int) -> String", summary: "Concatenates n copies of the string.", example: ""},
 }
 
-// The numeric conversion owners the language catalog lists.
-SEMINDEX_SYMBOL_NUMERIC_TARGETS: [String]{"I8", "I16", "I32", "I64", "Int", "U8", "U16", "U32", "U64", "F32", "F64", "Float"}
-
 semindex_symbol_builtin: fn(identity: String, name: String, qualified_name: String, owner: String?, module_name: String, kind: SemSymbolKind, signature: String, summary: String, examples: [String]) -> SemSymbol Never! {
     SemSymbol{
         identity: identity,
@@ -213,7 +211,8 @@ semindex_language_symbols: fn() -> [SemSymbol] Never! {
     symbols.push(semindex_symbol_builtin("builtin:method:Int.parse", "parse", "Int.parse", Val("Int"), "core.numeric", SemSymbolKind.Member, "Int.parse(text: String) -> Int ParseError!", "Parses text as an Int.", [String]{"Int.parse(text)"}))
     symbols.push(semindex_symbol_builtin("builtin:method:Float.parse", "parse", "Float.parse", Val("Float"), "core.numeric", SemSymbolKind.Member, "Float.parse(text: String) -> Float ParseError!", "Parses text as a Float.", [String]{"Float.parse(text)"}))
     loop source in BUILTIN_NUMERIC_SOURCES {
-        loop target in SEMINDEX_SYMBOL_NUMERIC_TARGETS {
+        loop kind in BUILTIN_NUMERIC_KINDS {
+            target: kind.name
             ret: semindex_symbol_conversion_return(target, source.method) ?? next
             result: if semindex_symbol_is_result(Val(ret)) -> "{target} String!" else -> target
             qualified_name: "{target}.{source.method}"

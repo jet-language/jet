@@ -1,0 +1,28 @@
+Order: struct {
+    state {
+        Draft -> Confirmed
+        Confirmed
+    }
+
+    id: Int,
+
+    start: fn(id: Int) -[]> Order.Draft { return Order{id: id} }
+
+    confirm: fn(self: &&Order.Draft) -[]> Order.Confirmed { return self }
+}
+
+// The confirming turn leaves the loop with `break`; the same path rule as
+// taint's meets it with the Draft path after the loop, so the states diverge.
+decide: fn(paid: Bool) {
+    order := Order.start(1)
+    loop {
+        if paid {
+            order = order.confirm()
+            break
+        }
+        break
+    }
+    print(order.id)
+}
+
+run: fn() { decide(true) }

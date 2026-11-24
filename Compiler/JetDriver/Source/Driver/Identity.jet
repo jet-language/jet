@@ -101,10 +101,13 @@ JetDriverAuthorizedSourceSnapshot: struct {
     script_dependencies: [JetDriverScriptDependency]{[JetDriverScriptDependency]{}},
 }
 
+// The machine running the compiler: `active_os` is its OS, `host_arch` its
+// architecture (`#build.host.*`); `target_triple` the triple the build is for.
 JetDriverHostFacts: struct {
     target_triple: String?,
     active_os: String?,
     compiler_identity: String?,
+    host_arch: String?{None},
     // The source key the running compiler was built from (its runtime
     // pack's IDENTITY names it), which `b.jet_built_from` compares with the
     // build tree's; None when it names none.
@@ -452,6 +455,10 @@ JetDriverCompileRequest: struct {
     // checked for in place of the host's; empty for the host.
     target_machine: String{""},
     capture_build_program: Bool{false},
+    // The compile's caller reads the captured ProgramInfo itself (`jet inspect
+    // facts --store=program`), so the program is reflected even when no
+    // source spells `program` or `compiler` (Pipeline.jet reflect_program).
+    read_build_program: Bool{false},
     capture_build_nodes: Bool{false},
     build_output_names: [String]{[String]{}},
     // A check keeps its typed cost report (`cost_report`), its sites placed
@@ -1364,12 +1371,14 @@ jet_driver_script_dependency_identity: fn(dependency: JetDriverScriptDependency)
 // #2517 package keys for the self-hosted driver, framed by
 // `package_key_*` in JetFoundation.
 // The facts self-hosted sema reads from the request for one package: the
-// active OS, the target triple and the package edition. The build clock and
-// root policy never enter.
+// host's OS and architecture (`#build.host.*`, which prep code may read), the
+// target triple and the package edition. The build clock and root policy
+// never enter.
 jet_driver_package_target_facts: fn(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
     facts := [PackageKeyTargetFact]{
         {name: "active_os", value: request.host_facts.active_os ?? ""},
         {name: "edition", value: package.edition},
+        {name: "host_arch", value: request.host_facts.host_arch ?? ""},
         {name: "target_triple", value: request.host_facts.target_triple ?? ""},
     }
     loop dependency in request.authorized_sources.script_dependencies {

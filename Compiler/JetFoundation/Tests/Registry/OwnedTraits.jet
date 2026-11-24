@@ -3,7 +3,7 @@
 // or syntax constant keeps a second list of them.
 use {
     owned_traits_files: core.files
-    jet_foundation.[MARKER_SOURCE_RULES, OWNED_TRAITS, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names]
+    jet_foundation.[OWNED_TRAITS, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_implies, owned_trait_literal, owned_trait_requirers, owned_trait_requires_listed, owned_trait_structural_names, registration_marker_rules]
 }
 
 // The one file that may list the owned trait names.
@@ -188,7 +188,7 @@ owned_traits_declared: fn(line: String) -> String? Never! {
         }
     }
     violations := [String]{}
-    loop rule in MARKER_SOURCE_RULES {
+    loop rule in registration_marker_rules() {
         if !traits.contains(rule.name) -> next
         if owned_trait(rule.name) != None && (owned_trait_auto_derive_marker(rule.name) || owned_trait_bundle(rule.name) || rule.name == "Close") {
             next

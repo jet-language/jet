@@ -1,0 +1,16 @@
+// A `check` rule rejects with a value whose type implements `Diagnostic`.
+Plain: struct {
+    path: String,
+}
+
+Route: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            reject(Plain{path: ""})
+        }
+    }
+}
+
+run: fn() {}

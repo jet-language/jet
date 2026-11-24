@@ -340,7 +340,10 @@ sema_units_inject: fn(input: &SemaRegistrationModuleInput, catalog: [UnitFamilyD
         }
     }
     loop (family_index, standard) in catalog {
-        if local_families.get(standard.family) != None || selected.get(standard.family) == None {
+        // A module's own declaration of the family's name (a unit family, or
+        // a type such as `Percent: distinct Int(0..100)`) shadows the catalog
+        // family, as an occupied member type name drops that member below.
+        if local_families.get(standard.family) != None || occupied.get(standard.family) != None || selected.get(standard.family) == None {
             next
         }
         family := standard

@@ -1,0 +1,15 @@
+#Scrub(Input) clean: fn(raw: #Input String) -> String { raw.copy() }
+
+run: fn() {
+    #Unsafe("count the unsafe region") { print("unsafe") }
+    #Impure("count the impure mark") {
+        print("impure")
+    }
+    #Nondeterministic("count the nondeterministic block") {
+        print("nondeterministic")
+    }
+    lossy: Int{9007199254740993}
+    print(approx(lossy) > Float{0.0})
+    print(clean(#Input "world"))
+    print(#build.host.os)
+}

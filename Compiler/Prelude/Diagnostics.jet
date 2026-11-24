@@ -4975,6 +4975,29 @@ DestructureShapeMismatch: struct {
     }
 }
 
+NumberFamilySize: struct {
+    written: String,
+    name: String,
+    sizes: String,
+
+    impl Diagnostic {
+        code: "E0314",
+        safety_class: .Soundness,
+        safety_reason: "No number family has that size, so the type would have no storage and no operations.",
+        expert_path: "none: only the standard sizes exist; a range type such as `Int(0..127)` names a narrower set of values",
+        stage: [.Sema],
+        meaning: "A number family written at a size it does not have",
+
+        what: fn(self) -> String { "`{self.written}` is no size of the `{self.name}` family" }
+
+        why: fn(self) -> String { "A number family has only its standard sizes: {self.sizes}" }
+
+        fix: fn(self) -> String {
+            "Use a standard size, or a range type such as `Int(0..127)` for a narrower set of values"
+        }
+    }
+}
+
 CheckedTextOutsideUnsafe: struct {
     impl Diagnostic {
         code: "E0387",
@@ -5162,14 +5185,14 @@ AliasWithoutParameters: struct {
         code: "E0324",
         safety_class: .Opinion,
         safety_reason: "A transparent alias of a plain type would name the same type and run safely, and Jet keeps aliases for generic spellings so a distinct name is a `struct`.",
-        meaning: "A type alias with no type parameters",
+        meaning: "A type alias with no type parameters over a type that is no generic application",
 
         what: fn(self) -> String {
-            "Type alias without type parameters — use `distinct` for a distinct primitive name, or give a number its value"
+            "Type alias without type parameters over a plain type — use `distinct` for a distinct primitive name, or give a number its value"
         }
 
         why: fn(self) -> String {
-            "At file level `name: Type` with no value names a type, and a transparent alias is only for shortening generic spellings"
+            "At file level `name: Type` with no value names a type, and a transparent alias is only for shortening generic spellings: one with no type parameters names one application of a generic type, such as `Ids: Set<Int>`"
         }
 
         fix: fn(self) -> String {
@@ -14758,18 +14781,18 @@ RejectOutsideTemplate: struct {
     impl Diagnostic {
         code: "E0962",
         safety_class: .Soundness,
-        safety_reason: "Outside a marker's template there is no use site to report at, so `reject` has nothing to raise.",
-        expert_path: "none: `reject` belongs in a marker's `expand` template",
-        meaning: "`reject` called outside a marker's compile-time template",
+        safety_reason: "Outside a marker's template or check rule there is no use site to report at, so `reject` has nothing to raise.",
+        expert_path: "none: `reject` belongs in a marker's `expand` template or `check` rule",
+        meaning: "`reject` called outside a marker's compile-time template or check rule",
 
-        what: fn(self) -> String { "`reject` runs only inside a marker's `expand` template." }
+        what: fn(self) -> String { "`reject` runs only inside a marker's `expand` template or `check` rule." }
 
         why: fn(self) -> String {
-            "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker; ordinary code has no use site to report at, so the call has nothing to run."
+            "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker, or at a call its `check` rule hears; ordinary code has no use site to report at, so the call has nothing to run."
         }
 
         fix: fn(self) -> String {
-            "Move the check into a marker's `expand: fn(self, target: Target)` body, or return an error value from this function instead."
+            "Move the check into a marker's `expand: fn(self, target: Target)` or `check: fn(self, call: CompilerCall)` body, or return an error value from this function instead."
         }
     }
 }

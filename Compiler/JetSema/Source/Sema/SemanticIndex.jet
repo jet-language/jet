@@ -570,13 +570,26 @@ sema_compiler_index_call: fn(call: SemaCallSiteFact, registration: SemaRegistrat
     callee: call.callee ?? return None
     // A call through a local function value names no definition.
     if symbol_is_local(callee) -> return None
+    Val(sema_compiler_call_heard(sema_compiler_identity(registration, call.caller_key), sema_compiler_identity(registration, symbol_table_key(registration.symbols, callee)), module_name, call.span, file))
+}
+
+// A CompilerCall a build watches or the semantic index lists. Its call fact
+// keeps no argument facts, so its name is the callee's own over the call's
+// span and it holds no arguments or receiver; a call a marker's `check` rule
+// hears carries all three (sema_rule_call_value).
+sema_compiler_call_heard: fn(caller: String, callee: String, module_name: String, span: Span, file: String) -> TComptimeValue Never! {
+    path: sema_compiler_identity_path(callee)
+    leaf: if path.cut_last(".") == .Val(parts) -> "{parts.after}" else -> path
     TComptimeValue.Struct{
         type_name: "CompilerCall",
         fields: [TComptimeField]{
-            TComptimeField{name: "caller", value: sema_compiler_index_string(sema_compiler_identity(registration, call.caller_key))},
-            TComptimeField{name: "callee", value: sema_compiler_index_string(sema_compiler_identity(registration, symbol_table_key(registration.symbols, callee)))},
+            TComptimeField{name: "caller", value: sema_compiler_index_string(caller)},
+            TComptimeField{name: "callee", value: sema_compiler_index_string(callee)},
             TComptimeField{name: "module", value: sema_compiler_index_string(module_name)},
-            TComptimeField{name: "span", value: sema_compiler_index_span(call.span, file)},
+            TComptimeField{name: "span", value: sema_compiler_index_span(span, file)},
+            TComptimeField{name: "name", value: TComptimeValue.Struct{type_name: "CompilerName", fields: [TComptimeField]{TComptimeField{name: "text", value: sema_compiler_index_string(leaf)}, TComptimeField{name: "span", value: sema_compiler_index_span(span, file)}}}},
+            TComptimeField{name: "args", value: TComptimeValue.List{values: [TComptimeValue]{}}},
+            TComptimeField{name: "receiver", value: sema_comptime_reflection_none(Type.Named{name: "CompilerArg"})},
         },
     }
 }

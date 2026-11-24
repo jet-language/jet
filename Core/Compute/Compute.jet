@@ -481,13 +481,13 @@ accelerator: fn<A: Accelerator>(provider: A) -[GPU]> ComputeDevice ComputeError!
 
 // The reference operands of `kernel`: 2x2 CPU matrices of positive values,
 // so log and sqrt have an answer.
-reference_operands: fn(kernel: String) -> [Tensor] Never! {
+priv reference_operands: fn(kernel: String) -> [Tensor] Never! {
     right: reference_matrix([0.5, 8.0, 0.25, 2.0])
     if kernel_arity(kernel) == 1 -> return [Tensor]{right}
     [Tensor]{reference_matrix([1.5, 2.0, 3.0, 4.0]), right}
 }
 
-reference_matrix: fn(values: &&[Float]) -> Tensor Never! {
+priv reference_matrix: fn(values: &&[Float]) -> Tensor Never! {
     Tensor{shape: [Int]{2, 2}, data: values, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
 }
 
@@ -518,7 +518,7 @@ launch: fn<A: Accelerator>(provider: A, kernel: String, operands: [Tensor]) -[GP
 }
 
 // The operand count of `kernel` in KERNEL_IR, or 0 for a name it lacks.
-kernel_arity: fn(kernel: String) -> Int Never! {
+priv kernel_arity: fn(kernel: String) -> Int Never! {
     if kernel == {
         "add" | "sub" | "mul" | "div" | "maximum" | "minimum" | "matmul" -> 2
         "negate" | "abs" | "exp" | "log" | "sqrt" -> 1
@@ -527,7 +527,7 @@ kernel_arity: fn(kernel: String) -> Int Never! {
 }
 
 // The CPU oracle's answer to `kernel` over `operands`, as many as its arity.
-kernel_reference: fn(kernel: String, operands: [Tensor]) -> Tensor ComputeError! {
+priv kernel_reference: fn(kernel: String, operands: [Tensor]) -> Tensor ComputeError! {
     if kernel_arity(kernel) == 1 -> return unary(kernel, operands[0])
     if kernel == {
         "matmul" -> matmul(operands[0], operands[1])

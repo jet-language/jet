@@ -59,7 +59,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$` | config-surface environment read `$NAME`; program source has no `$` words |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
-| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features` |
+| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features`, and the machine running the build's `#build.host.os` (`Linux`, `MacOS` or `Windows`) and `#build.host.arch` (`x86_64`, `aarch64`); a Core call made while building asks the machine running the build, as `#build.host.*` reads it, while build outputs follow the target |
 | `#package` | package site value: `#package.name`, `.version` |
 | `#phase` | compiler `Phase` value, filled in for each compiled copy |
 | `#program` | compiler authorized checked-program fact value |
@@ -2052,6 +2052,17 @@ a name that is both. `Name: distinct Base` still declares a new nominal type.
 with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
 unchanged. Core's former `Date: LocalDate` is the prelude rename
 `Date: core.time.LocalDate`.
+
+**Ruling 2026-11-23 (#6846 c12; amends D-TYPEALIAS1)**: an alias with no
+type parameters stands when its target applies a generic type to its
+arguments, written `Name<…>` or with a collection's brackets (`Ints:
+Pair<Int>`, `Scores: [String: Int]`, `Names: [String]`): it still only
+shortens a generic spelling. This holds in every package, Core included, and
+lets Core name a number family's sizes as aliases (`U8: Unsigned<8>`,
+D-CORE-NUMFAMILY1). An alias with no type parameters over a plain type
+(`Meters: Float`, `Pick: fn(Int) -> Int`) stays E0324. The snapshots are
+`Tests/UI/type_alias_of_a_generic_application` and
+`Tests/UI/type_alias_no_params`.
 
 **D-COMPUTED-ALIAS1=A — Bounded computed aliases** *(ratified 2026-11-11,
 card #3505; amends D-TYPEALIAS1)*: an alias with number parameters may choose its

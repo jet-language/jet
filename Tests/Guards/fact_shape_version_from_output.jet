@@ -1,0 +1,135 @@
+// Guard: the semantic-index version and fact shape that
+// Docs/Spec/Reference/semantic-index.md records are the ones `jet` emits.
+// The version is read from what the compiler under test writes, never spelled
+// here: the index `jet inspect semindex --json` writes, and the index the
+// compiler facade nests in `jet inspect compiler check`. The page's current
+// version, both member tables and its newest history row must match that
+// output, and every Docs/Spec page that spells a `semindex_schema_version`
+// value must spell the emitted one.
+use {
+    fsv_files: core.files
+    fsv_json: core.encoding.json
+    fsv_process: core.process
+}
+
+FSV_REFERENCE: "Docs/Spec/Reference/semantic-index.md"
+
+FSV_VERSION_LINE: "Current version: "
+
+FSV_SPELLED_VERSION: "\"semindex_schema_version\":"
+
+FSV_PROBE: "run: fn() {{ print(\"hi\") }}\n"
+
+fsv_field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+fsv_int: fn(value: Dyn) -> Int? {
+    if value == .Int(number) -> return Val(number)
+    if value == .Number(lexeme) {
+        number: Int.parse(lexeme) ?? return None
+        return Val(number)
+    }
+    None
+}
+
+fsv_keys: fn(tree: Dyn) -> [String] {
+    keys := [String]{}
+    if tree == .Object(entries) {
+        loop entry in entries -> keys.push(entry.key.copy())
+    }
+    keys
+}
+
+// The JSON document `jet <args>` writes on stdout.
+fsv_emitted: fn(jet: String, args: [String]) -> Dyn {
+    command := [String]{jet}
+    loop arg in args -> command.push(arg.copy())
+    ran: fsv_process.cmd(command).stdout(.Capture).stderr(.Capture).run() ?? panic("run jet {args.join(" ")}: {err}")
+    assert(ran.code == 0, "jet {args.join(" ")} failed: {fsv_process.combined_output(ran).trim()}")
+    fsv_json.parse(ran.output) ?? panic("jet {args.join(" ")} wrote no JSON document: {err}")
+}
+
+// The backquoted member that opens a table row, `| \`name\` | ...`.
+fsv_row_member: fn(line: String) -> String? {
+    if !line.starts_with("| `") -> return None
+    rest: line.slice(3, line.len())
+    parts: rest.split_once("`") ?? return None
+    Val(parts.before)
+}
+
+// The version that opens a history row, `| 20 | ...`.
+fsv_row_version: fn(line: String) -> Int? {
+    if !line.starts_with("| ") -> return None
+    cell: line.slice(2, line.len()).split("|").to_list()[0].trim()
+    version: Int.parse(cell) ?? return None
+    Val(version)
+}
+
+// The decimal number `text` starts with.
+fsv_leading_int: fn(text: String) -> Int? {
+    digits := [String]{}
+    loop scalar in text.chars() {
+        ch: "{scalar}"
+        if ch < "0" || ch > "9" -> break
+        digits.push(ch)
+    }
+    number: Int.parse(digits.join("")) ?? return None
+    Val(number)
+}
+
+#Test("fact_shape_version_from_output") {
+    guards_enter_root()
+    jet: md_jet()
+    scratch: fsv_files.temp_dir("jet-fact-shape-") ?? panic("create temp dir: {err}")
+    probe: "{scratch.path}/probe.jet"
+    fsv_files.write(probe, FSV_PROBE) ?? panic("write {probe}: {err}")
+
+    index: fsv_field(fsv_emitted(jet, [String]{"inspect", "semindex", "--json", probe}), "semindex")
+    emitted: fsv_int(fsv_field(index, "schema_version")) ?? panic("jet inspect semindex --json wrote no semindex.schema_version")
+    members: fsv_keys(index)
+    nested: fsv_field(fsv_field(fsv_field(fsv_emitted(jet, [String]{"inspect", "compiler", "check", probe}), "compiler"), "value"), "semantic_index")
+    facade: fsv_int(fsv_field(nested, "schema_version")) ?? panic("jet inspect compiler check wrote no compiler.value.semantic_index.schema_version")
+    assert(facade == emitted, "the compiler facade nests semantic-index version {facade}, but jet inspect semindex writes {emitted}")
+    nested_members: fsv_keys(nested)
+
+    page: fsv_files.read(FSV_REFERENCE) ?? panic("read {FSV_REFERENCE}: {err}")
+    recorded := Int?{None}
+    table := [String]{}
+    facade_table := [String]{}
+    newest := 0
+    section := ""
+    loop line in page.lines() {
+        if line.starts_with("## ") -> section = line.slice(3, line.len()).trim()
+        if line.starts_with(FSV_VERSION_LINE) {
+            number: Int.parse(line.slice(FSV_VERSION_LINE.len(), line.len()).trim()) ?? panic("{FSV_REFERENCE}: `{line}` names no version")
+            recorded = Val(number)
+        }
+        if section == "Fact shape" && fsv_row_member(line) == .Val(member) -> table.push(member)
+        if section == "Compiler facade projection" && fsv_row_member(line) == .Val(member) -> facade_table.push(member)
+        if section == "History" && fsv_row_version(line) == .Val(version) -> newest = version
+    }
+    current: recorded ?? panic("{FSV_REFERENCE} has no `{FSV_VERSION_LINE}` line")
+    assert(current == emitted, "{FSV_REFERENCE} records version {current}, but jet writes {emitted}")
+    assert(newest == emitted, "{FSV_REFERENCE}'s newest history row is version {newest}, but jet writes {emitted}; add the row for the change")
+    assert(table == members, "{FSV_REFERENCE} records the members {table.join(", ")}, but jet inspect semindex writes {members.join(", ")}")
+    assert(facade_table == nested_members, "{FSV_REFERENCE} records the facade members {facade_table.join(", ")}, but jet inspect compiler check writes {nested_members.join(", ")}")
+
+    stale := [String]{}
+    loop path in s3_truth_md_paths("Docs/Spec") {
+        text: fsv_files.read(path) ?? panic("read {path}: {err}")
+        number := 0
+        loop line in text.lines() {
+            number += 1
+            parts: line.split_once(FSV_SPELLED_VERSION) ?? next
+            spelled: fsv_leading_int(parts.after) ?? next
+            if spelled != emitted -> stale.push("{path}:{number} spells semindex_schema_version {spelled}")
+        }
+    }
+    assert(stale.len() == 0, "pages spell another semantic-index version than jet writes ({emitted}):\n{stale.join("\n")}")
+}

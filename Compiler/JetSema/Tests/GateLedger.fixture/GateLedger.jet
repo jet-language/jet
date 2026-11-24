@@ -105,7 +105,7 @@ run: fn() Never! {
             .Structure -> { structure_count += 1 }
             .PrecisionDemotion -> precision_count += 1
             .BuildFlag | .SessionFlag -> invocation_count += 1
-            .Impure | .DependencyGrant | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .Nondeterministic | .LintAllow | .CheckRemoval | .LinkOverride -> {}
+            .Impure | .DependencyGrant | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .Nondeterministic | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> {}
         }
     }
     gate_test_require(unsafe_count == 1 && structure_count == 3 && precision_count == 1 && invocation_count == 2, "source and invocation rows")
@@ -114,6 +114,24 @@ run: fn() Never! {
     refusal[0].declarations = [PolicyDeclaration{key: PolicyKey.PrecisionDemotion, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}]
     diagnostics: sema_gate_policy_diagnostics(projected, refusal, 0)
     gate_test_require(diagnostics.len() == 1 && diagnostics[0].diagnostic.code == "E3415", "new gate kinds obey owning policy")
+    host_parsed: parse_source("OS: #build.host.os\nTARGET: #build.target.os\nrun: fn() {{ print(#build.host.arch) }}\n".bytes())
+    gate_test_require(host_parsed.diagnostics.len() == 0, "host fact fixture parse")
+    host_rows := [SemaGateModule]{SemaGateModule{source: "host.jet", program: host_parsed.program}}
+    host_ledger: sema_gate_ledger_collect(host_rows, gate_test_names(), GateSet{build_flag: false, session_flag: false}, [GateEntry]{}, sema_gate_checked_text_names([host_parsed.program]))
+    host_reads := 0
+    host_os := false
+    host_arch := false
+    loop entry in host_ledger.rows {
+        if entry.kind != GateKind.HostFacts -> next
+        host_reads += 1
+        if entry.subject == "#build.host.os" -> host_os = true
+        if entry.subject == "#build.host.arch" -> host_arch = true
+    }
+    gate_test_require(host_reads == 2 && host_os && host_arch, "each host fact read is a host_facts gate, and a target fact read is none")
+    host_rows[0].declarations = [PolicyDeclaration{key: PolicyKey.HostFacts, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 0, end: 1}, target: None, source: "package.jet"}]
+    host_refusals: sema_gate_policy_diagnostics(host_ledger, host_rows, 0)
+    gate_test_require(host_refusals.len() == 2 && host_refusals[0].diagnostic.code == "E3415", "a package's host_facts .Forbid refuses each host fact read")
+    gate_test_require(gate_kind_parse("host_facts") == (Val(GateKind.HostFacts)) && gate_kind_policy_key(GateKind.HostFacts) == PolicyKey.HostFacts, "host fact gate kind")
     gate_test_require(gate_kind_parse("roundED") == (Val(GateKind.PrecisionDemotion)), "kind parsing")
     gate_test_require(gate_kind_policy_key(GateKind.LintAllow) == PolicyKey.LintAllow, "gate and policy closed sets match")
     context: SemaGateContext{

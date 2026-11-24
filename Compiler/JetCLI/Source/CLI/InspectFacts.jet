@@ -183,6 +183,7 @@ jet_cli_inspect_facts_host: fn(job: JetCLIInspectJob, source: String) -> JetDriv
         .Prepared(request, snapshot) -> {
             checking := request
             checking.capture_build_program = true
+            checking.read_build_program = true
             result := jet_driver_compile(checking)
             errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
             if errors.len() > 0 {

@@ -929,7 +929,18 @@ ir_host_route: fn(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [I
     ir_emit(b.f, IROp.StackAddress, area, 8 * count, 8, -1, b.line)
     key: ir_host_row_key(m, b, row)
     ir_emit(b.f, IROp.Store, -1, area, 0, key, b.line)
+    // The compiler reads each operand as a whole word, and a Bool, Char or
+    // narrow word stores only its own bytes: its word is zeroed first, so the
+    // rest of it is not left over from the stack (a literal `false` read
+    // back as true).
+    zero := -1
     loop (index, operand) in operands {
+        operand_row: b.f.slot_type[operand]
+        operand_kind: m.types[operand_row].kind
+        if m.types[operand_row].size < 8 && operand_kind != .Aggregate && operand_kind != .Unit {
+            if zero < 0 -> zero = ir_word_const(m, b, 0)
+            ir_emit(b.f, IROp.Store, -1, area, 8 * (index + 1), zero, b.line)
+        }
         ir_emit(b.f, IROp.Store, -1, area, 8 * (index + 1), operand, b.line)
     }
     kind_word: ir_word_const(m, b, kind)

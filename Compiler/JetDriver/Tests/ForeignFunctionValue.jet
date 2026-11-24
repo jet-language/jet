@@ -1,0 +1,30 @@
+// `alias.member` through a whole-module import resolves to an export row,
+// which leaves the declaration's type on the declaring module's symbol
+// (sema_registration_export_symbol). A C `#Import` function read as a value
+// is a Jet function type with no C ABI (E3203), never a module read as a
+// value (E0629).
+use jet_driver.[JetDriverCompileMode, jet_driver_compile]
+
+#Test("a C import function named as a value has no C ABI") {
+    source: [String]{
+        "use c: c.demo",
+        "",
+        "#Import c.demo: module {{",
+        "    #ABI(sysv64) ping: fn(x: I32) -> I32 = \"ping\"",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    callback: c.ping",
+        "    print(callback(1))",
+        "}}",
+        "",
+    }
+    request := seams_request(source.join("\n"), JetDriverCompileMode.Program)
+    request.core_sources = idiom_core_rows()
+    result: jet_driver_compile(request)
+    codes := [String]{}
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == 1 -> codes.push("{diagnostic.code} {diagnostic.what}")
+    }
+    assert(codes.len() == 1 && codes[0].starts_with("E3203 "), codes.join("; "))
+}

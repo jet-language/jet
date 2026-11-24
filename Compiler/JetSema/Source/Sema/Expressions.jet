@@ -4438,6 +4438,11 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
                 int_abs := sema_call_try_int_abs_source(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 if int_abs.handled -> return int_abs
             }
+            // A child's optional `terminal` names its unwrap (E0311).
+            if method == "resize" && receiver_value.ty == .Option(_) {
+                process := sema_call_try_process_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                if process.handled -> return process
+            }
             value_method := sema_call_try_value_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if value_method.handled -> return value_method
             builtin := sema_call_try_builtin_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -4824,6 +4829,22 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         }
         receiver_value = sema_tree_node(link_inner, TExprKind.Deref{value: receiver_value}, receiver_value.span)
     }
+    // A method call on a struct or enum that carries a marker hears that
+    // marker's `check` rule before the method resolves (Calls/CheckRules.jet).
+    rules := [SemaCallRule]{}
+    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_type(graph, receiver_value.ty, environment.module_row)
+    if rules.len() == 0 -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    hearing: sema_call_rules_hear(rules, None, method, method_span, args, Val(receiver_value.ty), sema_rule_known(receiver_value, program, context), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if hearing.rejected -> return None
+    if !hearing.staged -> return sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    held := [Diagnostic]{}
+    checked: sema_expr_check_method_on(receiver, receiver_value, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, held)
+    if sema_call_rules_hold(hearing, held, context, diagnostics) -> return None
+    checked
+}
+
+// sema_expr_check_method_call once its receiver is checked.
+sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if method == "text" {
         sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, diagnostics)
     }
@@ -7472,7 +7493,11 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Field(base, member, span, _) -> sema_expression_field(expr, base, member, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Place(value, access, span, _) -> sema_expr_check_place_expr(expr, value, access, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .TypedLit(head, body, span, _) -> sema_expression_typed_literal(head, body, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if {
+            id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            id == AST_NODE_GENERATED && type_name == "CompilerRejection" -> sema_expression_compiler_rejection_literal(fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Ok(value, span, _) -> sema_expression_result_payload(value, true, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Err(value, span, _) -> sema_expr_check_err_literal(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -7547,7 +7572,11 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             sema_expression_place(value, access, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
         .TypedLit(head, body, span, _) -> sema_expression_typed_literal(head, body, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .StructLit(type_name, type_args, _, as_trait, fields, inferred, span, id) -> if {
+            id == AST_NODE_GENERATED && type_name == "VJPRun" -> sema_expression_vjp_run_literal(type_args, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            id == AST_NODE_GENERATED && type_name == "CompilerRejection" -> sema_expression_compiler_rejection_literal(fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            else -> sema_expression_struct_literal(type_name, type_args, fields, inferred, as_trait, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> sema_expression_enum_literal(type_name, [Type]{}, variant, args, leading_dot, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Present(value, span, _) -> sema_expression_present(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Ok(value, span, _) -> sema_expression_result_payload(value, true, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -7667,6 +7696,9 @@ sema_expr_check_call_expr: fn(call: Call, expected: Type?, environment: SemaScop
     }
     if call.name == "__jet_link" && call.args.len() == 1 {
         return sema_link_check_creation(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
+    if call.name == "reject" && context.marker_check_call != None && sema_scope_resolve(scopes, "reject") == None {
+        return sema_call_check_marker_reject(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
         payload: sema_expression_result_call_payload(call, state, scopes)

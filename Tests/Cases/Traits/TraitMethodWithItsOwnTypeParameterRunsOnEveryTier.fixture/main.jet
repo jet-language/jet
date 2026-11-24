@@ -1,0 +1,31 @@
+// A trait method with its own type parameter: each implementation declares
+// it, and a call on each implementing type picks the type argument from its
+// argument.
+Tagged: trait {
+    tag: fn<T: Printable>(self, extra: T) -> String
+}
+
+Point: struct {
+    x: Int,
+
+    impl Tagged {
+        tag: fn<T: Printable>(self, extra: T) -> String { "point {self.x} with {extra}" }
+    }
+}
+
+Label: struct {
+    text: String,
+
+    impl Tagged {
+        tag: fn<T: Printable>(self, extra: T) -> String { "label {self.text} with {extra}" }
+    }
+}
+
+run: fn() {
+    p: Point{x: 1}
+    print(p.tag(3))
+    print(p.tag(true))
+    l: Label{text: "a"}
+    print(l.tag("seven"))
+    print(l.tag(-4))
+}

@@ -134,9 +134,10 @@ sema_call_unknown_function: fn(name: String, span: Span) -> Diagnostic {
 }
 
 // `reject(value)` is a marker template's report call (Registration/Derives.jet
-// `sema_derive_reject`); outside a template it names no function.
+// `sema_derive_reject`) and ends a marker's `check` rule
+// (sema_call_check_marker_reject); elsewhere it names no function.
 sema_call_reject_outside_template: fn(span: Span) -> Diagnostic {
-    sema_error("E0962", span, "`reject` runs only inside a marker's `expand` template.", "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker; ordinary code has no use site to report at, so the call has nothing to run.", "Move the check into a marker's `expand: fn(self, target: Target)` body, or return an error value from this function instead.")
+    sema_error("E0962", span, "`reject` runs only inside a marker's `expand` template or `check` rule.", "`reject(value)` raises a diagnostic at a marker's use site while the compiler expands the marker, or at a call its `check` rule hears; ordinary code has no use site to report at, so the call has nothing to run.", "Move the check into a marker's `expand: fn(self, target: Target)` or `check: fn(self, call: CompilerCall)` body, or return an error value from this function instead.")
 }
 
 // The ambient functions the readable prelude (Compiler/Prelude/Core/prelude.jet)

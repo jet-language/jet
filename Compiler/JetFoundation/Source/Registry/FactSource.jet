@@ -35,12 +35,12 @@ fact_source_direction: fn(value: String, context: String) -> String Never! {
 }
 
 // A `Gate` value, as the escape the registry row names: the word a program
-// writes, or the marker's name for `.Marker(Name)`, which must be a Prelude
-// marker rule.
-fact_source_gate: fn(value: String, context: String) -> String Never! {
+// writes, or the marker's name for `.Marker(Name)`, which must be one of the
+// Prelude marker rules `rules`.
+fact_source_gate: fn(value: String, rules: [TAppliedRule], context: String) -> String Never! {
     if value.starts_with(".Marker(") && value.ends_with(")") {
         marker: foundation_byte_text(value.bytes(), 8, value.count_bytes() - 1).trim()
-        loop rule in MARKER_SOURCE_RULES {
+        loop rule in rules {
             if rule.name == marker -> return marker
         }
         panic("`{value}` names no Prelude marker in {context}")
@@ -67,7 +67,7 @@ fact_source_gate: fn(value: String, context: String) -> String Never! {
 
 // One plane: its registry name is its `name` setting, else the struct's
 // name, and its laws are the block's `Fact` constants.
-fact_source_plane: fn(name: String, body: String) -> RegistrationFactRow Never! {
+fact_source_plane: fn(name: String, body: String, rules: [TAppliedRule]) -> RegistrationFactRow Never! {
     context: "{name}: struct"
     members: marker_source_members(body)
     if members.len() != 1 || !members[0].starts_with("impl Fact") {
@@ -87,7 +87,7 @@ fact_source_plane: fn(name: String, body: String) -> RegistrationFactRow Never! 
             }
             "safe" -> row.safe_direction = fact_source_direction(value, context)
             "gates" -> {
-                row.gates = loop item in marker_source_list(value) -> fact_source_gate(item, context)
+                row.gates = loop item in marker_source_list(value) -> fact_source_gate(item, rules, context)
             }
             "identity" -> row.identity_bearing = marker_source_flag(value, context)
             "proved_by" -> row.published_by = Val(fact_source_string(value, context))
@@ -101,12 +101,12 @@ fact_source_plane: fn(name: String, body: String) -> RegistrationFactRow Never! 
 }
 
 // Every fact plane in `source`, the text of Prelude/Facts.jet, in source
-// order.
-fact_source_read: fn(source: String) -> [RegistrationFactRow] Never! {
+// order; a `.Marker(Name)` gate names one of the marker rules `rules`.
+fact_source_read: fn(source: String, rules: [TAppliedRule]) -> [RegistrationFactRow] Never! {
     rows := [RegistrationFactRow]{}
     loop member in marker_source_members(marker_source_strip_comments(source)) {
         name: marker_source_struct_name(member) ?? panic("Prelude/Facts.jet declares `{member}`, which is not a fact plane")
-        rows.push(fact_source_plane(name, marker_source_block(member, "{name}: struct")))
+        rows.push(fact_source_plane(name, marker_source_block(member, "{name}: struct"), rules))
     }
     rows
 }

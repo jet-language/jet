@@ -97,7 +97,9 @@ foundation_core_argument_menus: fn(effect_roots: [String]) -> [TAppliedRuleArgum
         },
     )
     int_type_variants := [String]{}
-    loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
+    loop alias in FOUNDATION_SIZE_ALIASES {
+        if alias.family != "IEEE" -> int_type_variants.push(alias.name)
+    }
     menus.push(
         TAppliedRuleArgumentMenu{
             name: "IntType",

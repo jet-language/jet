@@ -41,26 +41,161 @@ Type: enum {
 // as inside an enum. Two named cases are one type when their names and
 // payloads are; a named case is only ever a union's member.
 
-// Shared primitive spelling authority for parsed types and Core call contracts.
+// Shared primitive spelling authority for parsed types and Core call
+// contracts. A size name (`U8`, `F64`) is the type its Core alias names
+// (FOUNDATION_SIZE_ALIASES).
 foundation_named_type: fn(name: String) -> Type Never! {
     if name == {
         "Int" -> Type.Int
-        "Float" | "F64" -> Type.Float
-        "F32" -> Type.Float32
+        "Float" -> Type.Float
         "Bool" -> Type.Bool
         "String" -> Type.String
         "Char" -> Type.Char
-        "I8" -> Type.IntN{signed: true, bits: 8}
-        "I16" -> Type.IntN{signed: true, bits: 16}
-        "I32" -> Type.IntN{signed: true, bits: 32}
-        "I64" -> Type.IntN{signed: true, bits: 64}
-        "U8" -> Type.IntN{signed: false, bits: 8}
-        "U16" -> Type.IntN{signed: false, bits: 16}
-        "U32" -> Type.IntN{signed: false, bits: 32}
-        "U64" -> Type.IntN{signed: false, bits: 64}
-        "Shared" -> Type.Named{name: name}
-        else -> Type.Named{name: name}
+        else -> foundation_size_alias(name) ?? Type.Named{name: name}
     }
+}
+
+// Core declares each number family once
+// (Core/Prelude/Prelude.jet): `Signed<bits>` and `Unsigned<bits>` over
+// `builtin.Word<bits>`, `IEEE<exponent, fraction>` over
+// `builtin.FloatWord<exponent, fraction>`. Only standard sizes exist. A
+// written size is the compiler's own type for it, so `Unsigned<8>` and its
+// alias `U8` are one type and every report shows `U8`. The family names are
+// read from the Prelude while the compiler builds, so no list of them is
+// written here.
+FOUNDATION_NUMBER_FAMILIES: #run foundation_number_family_rows(embed_file("toolchain:Core/Prelude/Prelude.jet"))
+
+foundation_number_family: fn(name: String) -> Bool Never! {
+    FOUNDATION_NUMBER_FAMILIES.contains(name)
+}
+
+// The number families `text` declares: each top-level `Name: struct<…> {`
+// whose first line holds its storage, `raw: builtin.Word<…>` or
+// `raw: builtin.FloatWord<…>`, in source order. A text with none stops the
+// build.
+foundation_number_family_rows: fn(text: String) -> [String] {
+    families := [String]{}
+    lines: text.split("\n").to_list()
+    loop index in 0..<lines.len() - 1 {
+        line: lines[index]
+        colon: line.find(": struct<")
+        if colon <= 0 || line.starts_with(" ") || !line.ends_with("{{") -> next
+        storage: lines[index + 1].trim()
+        if storage.starts_with("raw: builtin.Word<") || storage.starts_with("raw: builtin.FloatWord<") {
+            families.push(line.slice(0..<colon))
+        }
+    }
+    if families.len() == 0 -> panic("the text declares no number family `Name: struct<…> {{ raw: builtin.Word<…> }}`")
+    families
+}
+
+// The written sizes of a family application, when every argument is a
+// number literal (`Unsigned<8>`, `IEEE<11, 52>`). None when one is a name,
+// as inside the family's own declaration (`Unsigned<bits>`).
+foundation_family_sizes: fn(args: [Type]) -> [Int]? Never! {
+    sizes := [Int]{}
+    loop arg in args {
+        if arg == .Measure(measure) && measure == .Literal(_, value) {
+            sizes.push(value)
+        } else {
+            return None
+        }
+    }
+    Val(sizes)
+}
+
+// The type a family names at `sizes`: `Signed<8|16|32|64>` and
+// `Unsigned<8|16|32|64>` are IntN, `IEEE<8, 23>` is F32 and `IEEE<11, 52>`
+// is F64. None for any other size, which no family has.
+foundation_family_type: fn(name: String, sizes: [Int]) -> Type? Never! {
+    if (name == "Signed" || name == "Unsigned") && sizes.len() == 1 && FOUNDATION_FAMILY_WORD_BITS.contains(sizes[0]) {
+        return Val(Type.IntN{signed: name == "Signed", bits: sizes[0]})
+    }
+    if name == "IEEE" && sizes.len() == 2 {
+        if sizes[0] == 8 && sizes[1] == 23 -> return Val(Type.Float32)
+        if sizes[0] == 11 && sizes[1] == 52 -> return Val(Type.Float)
+    }
+    None
+}
+
+// The sizes a whole-number family has, in bits.
+FOUNDATION_FAMILY_WORD_BITS: [Int]{8, 16, 32, 64}
+
+// The sizes `name`'s family has, as a report lists them.
+foundation_family_size_list: fn(name: String) -> String Never! {
+    if name == "IEEE" -> "`IEEE<8, 23>` (F32) and `IEEE<11, 52>` (F64)" else -> "`{name}<8>`, `{name}<16>`, `{name}<32>` and `{name}<64>`"
+}
+
+// A size name: the alias `name: family<sizes>` Core/Prelude/Prelude.jet
+// declares at its top level (`U8: Unsigned<8>`, `F64: IEEE<11, 52>`).
+FoundationSizeAlias: struct {
+    name: String,
+    family: String,
+    sizes: [Int],
+}
+
+// The size names, read from the Prelude while the compiler builds, so the
+// parser's and Sema's spellings are the aliases Core declares and no list
+// of them is written here.
+FOUNDATION_SIZE_ALIASES: #run foundation_size_alias_rows(embed_file("toolchain:Core/Prelude/Prelude.jet"))
+
+// Each top-level line `NAME: Family<sizes>` of `text` whose family is a
+// number family `text` declares, in source order. An alias of a size no
+// family has, a name declared twice, or a text with none stops the build.
+foundation_size_alias_rows: fn(text: String) -> [FoundationSizeAlias] {
+    families: foundation_number_family_rows(text)
+    rows := [FoundationSizeAlias]{}
+    loop line in text.split("\n").to_list() {
+        colon: line.find(": ")
+        if colon <= 0 || line.starts_with(" ") || !line.ends_with(">") -> next
+        name: line.slice(0..<colon)
+        written: line.slice(colon + 2..<line.len() - 1)
+        open: written.find("<")
+        if open <= 0 -> next
+        family: written.slice(0..<open)
+        if !families.contains(family) -> next
+        sizes := [Int]{}
+        loop part in written.slice(open + 1..<written.len()).split(", ").to_list() {
+            sizes.push(Int.parse(part) ?? panic("`{line}`: a size alias names its family at number sizes"))
+        }
+        if foundation_family_type(family, sizes) == None -> panic("`{line}`: no family has that size")
+        loop row in rows {
+            if row.name == name -> panic("`{name}` is declared as a size alias twice")
+        }
+        rows.push(FoundationSizeAlias{name: name, family: family, sizes: sizes})
+    }
+    if rows.len() == 0 -> panic("the text declares no size alias `NAME: Family<sizes>`")
+    rows
+}
+
+// The type the size name `name` spells, or None when it is not one.
+foundation_size_alias: fn(name: String) -> Type? Never! {
+    loop row in FOUNDATION_SIZE_ALIASES {
+        if row.name == name -> return foundation_family_type(row.family, row.sizes)
+    }
+    None
+}
+
+#Test("the size aliases are the Prelude's, one per family size") {
+    text: "Signed: struct<bits: Int> {{\n    raw: builtin.Word<bits>,\n}}\n\nIEEE: struct<exponent: Int, fraction: Int> {{\n    raw: builtin.FloatWord<exponent, fraction>,\n}}\n\nI8: Signed<8>\nF32: IEEE<8, 23>\nBox: Pair<Int>\nU16: Unsigned<16>\n    U8: Unsigned<8>\n"
+    assert_eq(foundation_number_family_rows(text), [String]{"Signed", "IEEE"})
+    assert_eq(FOUNDATION_NUMBER_FAMILIES, [String]{"Signed", "Unsigned", "IEEE"})
+    rows: foundation_size_alias_rows(text)
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].name, "I8")
+    assert_eq(rows[1].sizes, [Int]{8, 23})
+    sized := [Type]{}
+    loop row in FOUNDATION_SIZE_ALIASES {
+        ty: foundation_family_type(row.family, row.sizes) ?? panic("`{row.name}` names no size")
+        assert(!sized.contains(ty))
+        sized.push(ty)
+    }
+    loop bits in FOUNDATION_FAMILY_WORD_BITS {
+        assert(sized.contains(Type.IntN{signed: true, bits: bits}) && sized.contains(Type.IntN{signed: false, bits: bits}))
+    }
+    assert(sized.contains(Type.Float32) && sized.contains(Type.Float))
+    assert_eq(foundation_named_type("U8"), Type.IntN{signed: false, bits: 8})
+    assert_eq(foundation_named_type("F64"), Type.Float)
 }
 
 // Canonical live-link type `@T` (`Type.Apply{name: "@", args: [T]}`), matching

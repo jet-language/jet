@@ -1,6 +1,12 @@
-// The fact registry: one row per `impl Fact` plane of Prelude/Facts.jet, read
-// while the compiler builds (FactSource.jet), so a compile never scans the
-// fact text.
+// The one registration table. Marker rules, knowledge
+// planes, rights and build facts are each one row of REGISTRATION_TABLE,
+// told apart by what they attach to: a marker rule attaches at the sites its
+// row lists, and a fact plane attaches to a value, a scope or the build. The
+// rows are read while the compiler builds, from the two Prelude texts that
+// declare them (Prelude/Markers.jet through MarkerSource.jet,
+// Prelude/Facts.jet through FactSource.jet), so a compile never scans either
+// text. Every reader of a marker rule or a fact plane reads this table; no
+// second copy of either is kept.
 
 // A copy of `FactTarget` in Core/Prelude/Prelude.jet, in its order (the
 // closed-list mirror ledger): edit `FactTarget`, then copy it here.
@@ -10,6 +16,7 @@ RegistrationFactTarget: enum {
     Build,
 }
 
+// One fact plane's laws, as its `impl Fact` block states them.
 RegistrationFactRow: struct {
     name: String,
     target: RegistrationFactTarget,
@@ -19,7 +26,65 @@ RegistrationFactRow: struct {
     published_by: String?,
 }
 
-REGISTRATION_FACT_ROWS: #run fact_source_read(FACT_SOURCE)
+// What a registration row is: a marker rule, attached at its sites, or a
+// knowledge plane (`.Value`), a right (`.Scope`) or a build fact (`.Build`),
+// attached to its target.
+RegistrationKind: enum {
+    Marker,
+    Fact,
+}
+
+// The table as columns (Docs/Spec/compiler-data.md): row `i` is of kind
+// `kinds[i]`, and its payload is `payloads[i]` in that kind's side column,
+// `markers` or `facts`. Rows are in registration order: the marker text's
+// rules, then the fact text's planes.
+RegistrationTable: struct {
+    kinds: [RegistrationKind],
+    payloads: [Int],
+    markers: [TAppliedRule],
+    facts: [RegistrationFactRow],
+}
+
+REGISTRATION_TABLE: #run registration_read(MARKER_SOURCE, FACT_SOURCE)
+
+// The registration table of the marker text `markers` then the fact text
+// `facts`, each in source order. A fact gate that names a marker must name
+// one of the marker rows read first.
+registration_read: fn(markers: String, facts: String) -> RegistrationTable Never! {
+    table := RegistrationTable{kinds: [RegistrationKind]{}, payloads: [Int]{}, markers: marker_source_read(markers), facts: [RegistrationFactRow]{}}
+    table.facts = fact_source_read(facts, table.markers)
+    loop index in 0..<table.markers.len() {
+        table.kinds.push(RegistrationKind.Marker)
+        table.payloads.push(index)
+    }
+    loop index in 0..<table.facts.len() {
+        table.kinds.push(RegistrationKind.Fact)
+        table.payloads.push(index)
+    }
+    table
+}
+
+// The registered marker rule `name`, None when no row has that name.
+registration_marker_rule: fn(name: String) -> TAppliedRule? Never! {
+    loop rule in REGISTRATION_TABLE.markers {
+        if rule.name == name -> return Val(rule)
+    }
+    None
+}
+
+// The registered fact plane `name`, None when no row has that name.
+registration_fact_row: fn(name: String) -> RegistrationFactRow? Never! {
+    loop fact in REGISTRATION_TABLE.facts {
+        if fact.name == name -> return Val(fact)
+    }
+    None
+}
+
+// Every marker rule row, in registration order.
+registration_marker_rules: fn() -> [TAppliedRule] Never! { REGISTRATION_TABLE.markers }
+
+// Every fact plane row, in registration order.
+registration_fact_rows: fn() -> [RegistrationFactRow] Never! { REGISTRATION_TABLE.facts }
 
 // `#build.cpu.cache_line`, the selected CPU's cache-line
 // size in bytes. Jet has no CPU selection, so every target is generic and

@@ -40,6 +40,7 @@ run: fn() {
     print(field_named("X-Test", "ok"))
     print(field_named("X Test", "ok"))
     print(field_named("X-Test", "a\nb"))
+    print("a new header list holds {http.Headers.new().fields.len()} fields")
 
     print(http.body_empty().bytes(1) ?? panic("empty"))
     print(http.body_bytes([0, 255]).bytes(2) ?? panic("bytes"))
@@ -49,4 +50,8 @@ run: fn() {
     print(http.body_form(["a": "b c", "x": "1&2"]).text(32) ?? panic("form"))
     print(http.body_json(42).json<Int>(16) ?? panic("json"))
     print(http.body_json([1, 2]).text(16) ?? panic("json text"))
+    // Text fields as multipart/form-data, between boundary lines no field
+    // holds; each CRLF is shown as ` / `.
+    multipart: http.body_multipart(["name": "Ada", "role": "admin"]).text(512) ?? panic("multipart")
+    print(multipart.trim().replace("\r\n", " / "))
 }

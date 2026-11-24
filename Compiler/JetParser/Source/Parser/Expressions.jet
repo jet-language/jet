@@ -47,7 +47,6 @@ use {
         expr_span,
         fact_read_kind,
         marker_registered,
-        foundation_named_type,
         pipe_value_is_name,
         pipe_value_name,
         PipeStep,
@@ -1025,7 +1024,8 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
             inner_span: Span{start: token.span.start + 1, end: token.span.end}
             base := if {
                 allow_struct_lit && parser_pascal_name(inner_name) && parser_current_kind(state) == TOKEN_LBRACE -> {
-                    parser_parse_typed_literal_body(state, Val(foundation_named_type(inner_name)), inner_span, depth + 1)
+                    head: parser_named_type(state, inner_name)
+                    parser_parse_typed_literal_body(state, Val(head), inner_span, depth + 1)
                 }
                 allow_struct_lit && parser_pascal_name(inner_name) && parser_current_kind(state) == TOKEN_LT && parser_turbofish_ahead(state, TOKEN_LBRACE) -> {
                     type_args: parser_parse_call_type_args(state, depth + 1)
@@ -1341,6 +1341,7 @@ parser_parse_interpolation: fn(state: &JetParserState, part: StringPart, depth: 
         pipe_step_names: state.pipe_step_names.copy(),
         pipe_step_reads: state.pipe_step_reads.copy(),
         in_hole: true,
+        bound_size_rows: state.bound_size_rows,
     }
     // The nested state parses with the outer tables and source; every exit
     // hands them back.
@@ -1976,7 +1977,8 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 // A typed literal's head refuses with a diagnostic, so the
                 // literal is read here, as `Box{…}` would be.
                 if expression.expr == .Ident(_, _, _) && allow_struct_lit && parser_current_kind(state) == TOKEN_LBRACE {
-                    expression = parser_parse_typed_literal_body(state, Val(foundation_named_type(written)), expression.span, depth + 1)
+                    head: parser_named_type(state, written)
+                    expression = parser_parse_typed_literal_body(state, Val(head), expression.span, depth + 1)
                     tail_done = true
                 }
                 next

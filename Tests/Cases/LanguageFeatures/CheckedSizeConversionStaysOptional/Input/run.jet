@@ -1,0 +1,48 @@
+// `checked(Size{value}) ?? fallback` is an optional conversion for every
+// standard size: beside map keys written with the size names (`[U32:Int]`),
+// and in a file that also takes each size name as a type parameter
+// (`fn<U32>`), where `Size{value}` elsewhere reads as a field shorthand.
+Keys: struct {
+    i8: [I8:Int],
+    i16: [I16:Int],
+    i32: [I32:Int],
+    i64: [I64:Int],
+    u8: [U8:Int],
+    u16: [U16:Int],
+    u32: [U32:Int],
+    u64: [U64:Int],
+}
+
+keep: fn<I8, I16, I32, I64, U8, U16, U32, U64>(a: I8, b: I16, c: I32, d: I64, e: U8, f: U16, g: U32, h: U64) -> U32 {
+    g
+}
+
+to_i8: fn(value: Int) -> I8 { checked(I8{value}) ?? I8{-1} }
+
+to_i16: fn(value: Int) -> I16 { checked(I16{value}) ?? I16{-1} }
+
+to_i32: fn(value: Int) -> I32 { checked(I32{value}) ?? I32{-1} }
+
+to_i64: fn(value: Int) -> I64 { checked(I64{value}) ?? I64{-1} }
+
+to_u8: fn(value: Int) -> U8 { checked(U8{value}) ?? U8{0} }
+
+to_u16: fn(value: Int) -> U16 { checked(U16{value}) ?? U16{0} }
+
+to_u32: fn(value: Int) -> U32 { checked(U32{value}) ?? U32{0} }
+
+to_u64: fn(value: Int) -> U64 { checked(U64{value}) ?? U64{0} }
+
+run: fn() {
+    keys := Keys{i8: [I8:Int]{}, i16: [I16:Int]{}, i32: [I32:Int]{}, i64: [I64:Int]{}, u8: [U8:Int]{}, u16: [U16:Int]{}, u32: [U32:Int]{}, u64: [U64:Int]{}}
+    keys.u32[to_u32(7)] = 1
+    print("{to_i8(100)} {to_i8(300)}")
+    print("{to_i16(30000)} {to_i16(40000)}")
+    print("{to_i32(2000000000)} {to_i32(3000000000)}")
+    print("{to_i64(-5)} {to_i64(9223372036854775807)}")
+    print("{to_u8(200)} {to_u8(-1)}")
+    print("{to_u16(60000)} {to_u16(70000)}")
+    print("{to_u32(4000000000)} {to_u32(5000000000)}")
+    print("{to_u64(5000000000)} {to_u64(-1)}")
+    print("{keys.u32.len()} {keep(1, 2, 3, 4, 5, 6, 7, 8)}")
+}

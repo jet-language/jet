@@ -1,9 +1,10 @@
-// explain_fact_row: projections of canonical declarations and corpus-truth
-// rows. Syntax/policy/build-writer queries keep their own order.
-use jet_foundation.[DiagnosticExplanation, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS]
+// explain_fact_row: projections of the registration table's fact rows
+// (REGISTRATION_TABLE) and corpus-truth rows. Syntax/policy/build-writer
+// queries keep their own order; a marker rule row answers through the syntax
+// dictionary's marker row (SyntaxDictionary.jet).
+use jet_foundation.[DiagnosticExplanation, REGISTRATION_TRUTH_ROWS, RegistrationFactRow, registration_fact_row]
 
-jet_cli_registration_fact_explanation: fn(index: Int) -> DiagnosticExplanation Never! {
-    row: REGISTRATION_FACT_ROWS[index]
+jet_cli_registration_fact_explanation: fn(row: RegistrationFactRow) -> DiagnosticExplanation Never! {
     target: if row.target == {
         .Value -> "a value"
         .Scope -> "a scope"
@@ -35,10 +36,8 @@ jet_cli_registration_truth_explanation: fn(index: Int) -> DiagnosticExplanation 
 
 jet_cli_explain_registration: fn(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     name: query.trim()
-    loop index in 0..<REGISTRATION_FACT_ROWS.len() {
-        if REGISTRATION_FACT_ROWS[index].name == name {
-            return Val(jet_cli_explanation_output(jet_cli_registration_fact_explanation(index), color, json))
-        }
+    if registration_fact_row(name) == .Val(row) {
+        return Val(jet_cli_explanation_output(jet_cli_registration_fact_explanation(row), color, json))
     }
     loop index in 0..<REGISTRATION_TRUTH_ROWS.len() {
         row: REGISTRATION_TRUTH_ROWS[index]

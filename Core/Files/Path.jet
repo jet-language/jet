@@ -244,12 +244,12 @@ priv lexical_parts: fn(path: Path) -> [String] Never! {
     parts(p)
 }
 
-/// Lexical component containment: compares normalized lexical components across
-/// separators (`/` and `\`), `.`, `..`, partial names (`/a/bc` is not within
-/// `/a/b`), and roots (`/`).
-/// This is pure lexical comparison and is not symlink truth; canonicalize both
-/// paths on the filesystem when symlink identity matters.
-is_within: fn(path: Path, base: Path) -> Bool Never! {
+// Lexical component containment: compares normalized lexical components across
+// separators (`/` and `\`), `.`, `..`, partial names (`/a/bc` is not within
+// `/a/b`), and roots (`/`). `Path.is_within` is its public spelling.
+// This is pure lexical comparison and is not symlink truth; canonicalize both
+// paths on the filesystem when symlink identity matters.
+priv is_within: fn(path: Path, base: Path) -> Bool Never! {
     path_abs: is_absolute(Path{raw: as_posix(path)})
     base_abs: is_absolute(Path{raw: as_posix(base)})
     if path_abs != base_abs -> return false

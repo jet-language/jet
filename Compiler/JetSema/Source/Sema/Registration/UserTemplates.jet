@@ -46,7 +46,12 @@ use jet_foundation.[
     import_walk_bindings,
     module_is_core,
     module_text,
+    FOUNDATION_SIZE_ALIASES,
+    foundation_family_type,
+    foundation_number_family,
+    type_name,
 ]
+use jet_parser.[parse_source]
 
 // ---------------------------------------------------------------------------
 // Reflection carrier. Reflection builds handles on the typed `TComptimeValue`
@@ -288,6 +293,99 @@ sema_derive_expand_template_loops: fn(items: &[Item], computed: &&[NamedCtValue]
         expanded.push(item.copy())
     }
     items = expanded
+}
+
+// An impl of a number family (`impl Signed.Roundable`)
+// is the family's one definition. It expands here, before registration sees
+// the items, to one impl per standard size the Prelude names
+// (FOUNDATION_SIZE_ALIASES: `impl I8.Roundable` … `impl I64.Roundable`):
+// the definition, moved out of the list and written for `Self`, is the
+// template each size expands with `Self` bound to its name. A module that
+// declares or imports a type of the family's name keeps its own. A list with
+// no family impl comes back as it was.
+sema_derive_expand_family_impls: fn(items: &&[Item], imports: [ImportDecl], diagnostics: &[Diagnostic]) -> [Item] {
+    has_family: loop item in items {
+        if item == .Impl(definition) && foundation_number_family(definition.type_name) {
+            break true
+        }
+    } ?? false
+    if !has_family {
+        return items.move()
+    }
+    taken := [String]{}
+    loop declaration in imports {
+        loop binding in import_walk_bindings(declaration) -> taken.push(binding.local)
+    }
+    loop item in items {
+        if item == .Impl(_) -> next
+        taken.push(sema_registration_root_name(item))
+    }
+    expanded := [Item]{}
+    loop item in items.move() {
+        if item == .Impl(definition) && foundation_number_family(definition.type_name) && !taken.contains(definition.type_name) {
+            template := definition
+            family: template.type_name
+            template.type_name = "Self"
+            body: [DeriveBodyItem]{DeriveBodyItem.Item{value: Item.Impl{value: template}}}
+            loop alias in FOUNDATION_SIZE_ALIASES {
+                if alias.family != family -> next
+                // F64 is Float, so its impl is written for `Float`.
+                size: foundation_family_type(alias.family, alias.sizes) ?? next
+                scope: [NamedCtValue]{NamedCtValue{name: "Self", value: CtValue.Str{value: type_name(size)}}}
+                generated: sema_derive_expand_template_body(body, scope, diagnostics) ?? next
+                loop generated_item in generated -> expanded.push(generated_item)
+            }
+            next
+        }
+        expanded.push(item)
+    }
+    expanded
+}
+
+SEMA_FAMILY_IMPLS_TRAIT: "Halve: trait {{\n    halved: fn(self) -> Self Never!,\n}}\n\n"
+
+// The items of `source` after the family impl expansion, which reports
+// nothing.
+sema_family_impls_expanded: fn(source: String) -> [Item] {
+    parsed := parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        panic("the source does not parse: {parsed.diagnostics:Debug}")
+    }
+    diagnostics := [Diagnostic]{}
+    items: sema_derive_expand_family_impls(parsed.program.items.move(), parsed.program.imports, diagnostics)
+    if diagnostics.len() > 0 -> panic("the expansion reported {diagnostics:Debug}")
+    items
+}
+
+// Each impl of `items` as `target -> return type of its first method`.
+sema_family_impls_rows: fn(items: [Item]) -> [String] {
+    rows := [String]{}
+    loop item in items {
+        if item == .Impl(definition) {
+            returned: definition.methods[0].return_type ?? panic("`{definition.type_name}.halved` has no return type")
+            rows.push("{definition.type_name} -> {type_name(returned)}")
+        }
+    }
+    rows
+}
+
+#Test("a number family's impl becomes one impl per standard size with Self written as the size") {
+    source: "{SEMA_FAMILY_IMPLS_TRAIT}impl Signed.Halve {{\n    halved: fn(self) -> Self Never! {{ Self{{self}} }}\n}}\n\nimpl IEEE.Halve {{\n    halved: fn(self) -> Self Never! {{ self }}\n}}\n"
+    items: sema_family_impls_expanded(source)
+    rows: sema_family_impls_rows(items)
+    assert_eq(rows.len(), 6)
+    loop row in ["I8 -> I8 Never!", "I16 -> I16 Never!", "I32 -> I32 Never!", "I64 -> I64 Never!", "F32 -> F32 Never!", "Float -> Float Never!"] {
+        assert(rows.contains(row))
+    }
+    loop item in items {
+        if item == .Impl(_) -> assert(!"{item:Debug}".contains("Self"))
+    }
+}
+
+#Test("a module's own type of a family's name keeps its family impl") {
+    source: "{SEMA_FAMILY_IMPLS_TRAIT}Signed: struct {{\n    bits: Int,\n}}\n\nimpl Signed.Halve {{\n    halved: fn(self) -> Self Never! {{ self }}\n}}\n"
+    rows: sema_family_impls_rows(sema_family_impls_expanded(source))
+    assert_eq(rows, ["Signed -> Self Never!"])
 }
 
 // ---------------------------------------------------------------------------

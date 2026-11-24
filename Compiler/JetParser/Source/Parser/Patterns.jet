@@ -153,6 +153,7 @@ parser_take_pattern_text_hole: fn(state: &JetParserState, part: StringPart) -> S
         pending_type_gt_span: Span{start: 0, end: 0},
         statement_start: -1,
         allow_environment_reads: state.allow_environment_reads,
+        bound_size_rows: state.bound_size_rows,
     }
     parser_lend_tables(state, nested)
     name_token: parser_expect_name(nested, "in a pattern hole")
@@ -290,6 +291,7 @@ parser_take_pattern_binary_hole: fn(state: &JetParserState, part: StringPart, li
         pending_type_gt_span: Span{start: 0, end: 0},
         statement_start: -1,
         allow_environment_reads: state.allow_environment_reads,
+        bound_size_rows: state.bound_size_rows,
     }
     name_token: parser_current(nested)
     if name_token.kind != TOKEN_IDENT {

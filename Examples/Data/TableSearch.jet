@@ -1,0 +1,29 @@
+// A table made with a `search` function keeps a word index: `search` finds
+// the rows whose text holds every word, and `get_many` reads a list of keys
+// in one go, each key once and in key order.
+package: {
+    name: "table_search"
+    authority: { allow: [DB, IO] }
+}
+
+use db: core.db
+
+Note: struct {
+    id: Int,
+    text: String,
+}
+
+note_text: fn(note: Note) -[]> String { note.text.copy() }
+
+run: fn() {
+    store: db.open_memory()
+    notes: store.table("notes", key: fn(note: Note) { note.id }, search: Val(note_text))
+    _: notes.add(Note{id: 1, text: "ship it today"}) ?? panic("add 1")
+    _: notes.add(Note{id: 2, text: "write the docs"}) ?? panic("add 2")
+    _: notes.add(Note{id: 3, text: "ship the docs"}) ?? panic("add 3")
+    found: notes.search("Ship docs") ?? panic("search")
+    rows: found.collect() ?? panic("collect")
+    print("ship docs: {rows.map(fn(note: Note) { note.id })}")
+    many: notes.get_many([3, 1, 3, 9]) ?? panic("get_many")
+    print("3, 1, 3, 9: {many.map(fn(note: Note) { note.text })}")
+}

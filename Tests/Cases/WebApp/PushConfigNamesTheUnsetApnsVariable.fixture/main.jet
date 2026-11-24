@@ -1,0 +1,14 @@
+// A server whose graph names APNs and FCM settings, with none of their
+// variables set, stops as it binds and never listens.
+use {
+    app
+    web: core.web
+}
+
+run: fn() {
+    apple: app.apns(key_env: "APNS_KEY", key_id_env: "APNS_KEY_ID", team: "TEAM1", topic: "dev.crew")
+    google: app.fcm(service_account_env: "FCM_ACCOUNT")
+    _: app.new("Crew").push(apns: apple, fcm: google)
+    _: web.app().bind("127.0.0.1:0") ?? panic("bind")
+    print("listening")
+}

@@ -1,5 +1,14 @@
 // 84 — String parsing and line splitting for *small in-memory* text
 // only. File-scale work → Text/StreamLines.jet (streaming reader).
+
+// A failed parse says why: its ParseError shows its reason.
+explain: fn(err: ParseError) -> String { "{err}" }
+
+parsed: fn(text: String) -> String {
+    n: Int.parse(text) ?? return explain(err)
+    "parsed {n}"
+}
+
 run: fn() {
     // Int.parse(text) — fallible integer parse, returns Int ParseError!.
     n: Int.parse("42") ?? -1
@@ -25,4 +34,6 @@ run: fn() {
     print(price)
     bad_num: "oops".to_int() ?? -1
     print(bad_num)
+    print(parsed("12"))
+    print(parsed("oops"))
 }

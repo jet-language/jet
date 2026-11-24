@@ -1,0 +1,40 @@
+// A rule that reads the heard call's spans and argument types lets these
+// calls through on every tier: `check`, `run` and `build` at O0, O1 and O2.
+Fraction: struct {
+    impl Diagnostic {
+        code: "tiers.Fraction",
+
+        what: fn(self) -> String { "`scale` scales whole numbers" }
+
+        why: fn(self) -> String { "the scaling rule hears each argument's type" }
+
+        fix: fn(self) -> String { "pass an Int" }
+    }
+}
+
+Spread: struct {
+    impl Diagnostic {
+        code: "tiers.Spread",
+
+        what: fn(self) -> String { "this `scale` call starts before its name" }
+
+        why: fn(self) -> String { "a heard call's span starts at its name" }
+
+        fix: fn(self) -> String { "report the span the rule heard" }
+    }
+}
+
+Measured: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            if call.span.start != call.name.span.start || call.args[0].span.start < call.name.span.end -> reject(Spread{})
+            if call.args[0].type.name != "Int" -> reject(Fraction{}, at: call.args[0])
+        }
+    }
+}
+
+#Measured scale: fn(value: Int) -> Int { value * 2 }
+
+run: fn() { print("{scale(3)} {scale(4)}") }

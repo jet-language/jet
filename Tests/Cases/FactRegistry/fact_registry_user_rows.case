@@ -1,0 +1,47 @@
+# Facts with user-visible meaning are typed registry rows (D-FACT-HOME1=A):
+# send-safety, failure attribution, `#Track` origin, view and unit-scale
+# provenance, and maturity. The schema store lists each one with the type it
+# holds, the program store answers them per declaration, and a program reads
+# each one as a typed value. Prover internals (uninitialized tracking,
+# exhaustiveness) stay inside the engine: no store lists them and no read
+# reaches them.
+fixture: FactRegistryUserRows.fixture
+env: NO_COLOR=1
+step schema: jet inspect facts --store=schema --kind=read
+exit: 0
+stdout: ~ " facts, complete" # the registry answers whole
+stdout: ~ "$sendability  Sendability" # send-safety, typed
+stdout: ~ "$movedness  Movedness" # the moved-out half of send-safety
+stdout: ~ "$attribution  Attribution" # failure attribution
+stdout: ~ "$origin  Origin" # the `#Track` origin
+stdout: ~ "$view_provenance  ViewProvenance" # view provenance
+stdout: ~ "$unit_scale_provenance  UnitScaleProvenance" # unit-scale provenance
+stdout: ~ "$maturity  Maturity" # maturity
+stdout: !~ "uninit" # uninitialized tracking stays inside the engine
+stdout: !~ "exhaust" # so does exhaustiveness
+stderr: empty
+step schema_json: jet inspect facts --store=schema --kind=read --json
+exit: 0
+stdout: ~ "{\"kind\":\"Read\",\"name\":\"$sendability\",\"scope\":[\"Sendability\"]}" # each row names the type it holds
+stdout: ~ "{\"kind\":\"Read\",\"name\":\"$origin\",\"scope\":[\"Origin\"]}" # the origin row holds an Origin
+stderr: empty
+step program: jet inspect facts --store=program --kind=read main.jet
+exit: 0
+stdout: ~ "sendability  main.send_report  main.send_report#read:sendability" # per declaration, with a stable identity
+stdout: ~ "movedness  main.send_report  main.send_report#read:movedness" # movedness of the same declaration
+stdout: ~ "origin  main.send_report  main.send_report#read:origin" # its origin
+stdout: ~ "view_provenance  main.send_report  main.send_report#read:view_provenance" # its view provenance
+stdout: ~ "maturity  main.send_report  main.send_report#read:maturity" # its maturity
+stdout: !~ "uninit" # no prover-internal row
+stdout: !~ "exhaust" # no prover-internal row
+stderr: empty
+step run: jet run main.jet
+exit: 0
+stdout: ~ "sendability known: true" # each read is a typed value
+stdout: ~ "movedness known: false" # a Bool member
+stdout: ~ "attribution source: report" # a String member
+stdout: ~ "origin tracked: false" # an untracked value has no origin
+stdout: ~ "unit scale rational: true" # a UnitScaleProvenanceKind member
+stdout: ~ "maturity experimental: true" # a Maturity member
+stdout: ~ "view provenance mutable: false" # a Bool member
+stderr: empty

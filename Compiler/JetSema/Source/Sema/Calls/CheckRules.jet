@@ -1,0 +1,748 @@
+// A marker's `check` rule (D-CORE-CHECK1=A, MarkerDecl.check) heard at
+// each call of what the marker marks: a function or method carrying it, or
+// a method called on a type carrying it. The rule runs before the call's
+// arguments bind. Its answer, a `CompilerRejection?`, is a body comptime
+// value like any `#run` site's: the first check of a body stages the call
+// (SemaComptimeBodySource.rule) and the driver runs every staged call of
+// one rule in one batch (sema_call_rule_batches), so the calls travel as
+// one prepared list. A check that finds the answer landed reads it: an
+// `.Error` rejection is the call's one diagnostic and replaces its ordinary
+// checks; no rejection leaves the call to them.
+use {
+    jet_foundation.[
+        AST_EMPTY_CALL_ARG_FLAGS,
+        AST_NODE_GENERATED,
+        AccessConvention,
+        BodyEnumPayload,
+        CallArg,
+        DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
+        Diagnostic,
+        EnumDef,
+        Expr,
+        Marker,
+        ModuleID,
+        Span,
+        StructDef,
+        SymbolID,
+        TComptimeEnumArg,
+        TComptimeField,
+        TComptimeReport,
+        TComptimeValue,
+        TUnaryOp,
+        Type,
+        codable_tag_field,
+        codable_untagged,
+        core_decl_utf8,
+        diagnostic_from_registry,
+        diagnostic_registry_row,
+        diagnostic_sentence_case_line,
+        symbol_key_leaf,
+    ]
+    jet_parser.[parse_generated_source]
+}
+
+// The prepared locals a heard call's own site declares, and the lists a
+// batch declares.
+SEMA_CALL_RULE_LOCAL: "__jet_rule"
+SEMA_CALL_RULE_CALL_LOCAL: "__jet_call"
+SEMA_CALL_RULE_RULES_LOCAL: "__jet_rules"
+SEMA_CALL_RULE_CALLS_LOCAL: "__jet_calls"
+
+// One rule a call hears: the `check` of the marker `marker`, declared in
+// `module_identity` at `span` (its `check` name), with the marker's value
+// where it is written.
+SemaCallRule: struct {
+    module_identity: ModuleID,
+    marker: String,
+    span: Span,
+    value: TComptimeValue,
+}
+
+// What hearing a call's rules decided. `rejected`: a landed `.Error`
+// rejection, whose diagnostic is pushed, replaces the call's checks.
+// `staged`: a rule has no answer yet; its site was staged from row `from` of
+// the context's body sources, and the call's errors wait for the answer
+// (sema_call_rules_hold).
+SemaCallRuleHearing: struct {
+    rejected: Bool{false},
+    staged: Bool{false},
+    from: Int{0},
+}
+
+// The rules the markers written in module `written_in` bring: each marker a
+// declared marker with a `check` resolves to. A builtin rule is bound to no
+// declaring module (sema_marker_module_bind_marker) and brings none.
+sema_call_rules: fn(graph: SemaRegistrationGraph, markers: [Marker], written_in: ModuleID) -> [SemaCallRule] {
+    rules := [SemaCallRule]{}
+    loop marker in markers {
+        if marker.negated || marker.declaration_module == None -> next
+        resolved: sema_marker_module_resolve_application(graph, written_in, marker)
+        declaration: resolved.declaration ?? next
+        span: declaration.check ?? next
+        value: sema_checked_comptime(sema_user_rule_receiver(declaration, marker)) ?? next
+        rules.push(SemaCallRule{module_identity: resolved.declaring_module_identity, marker: declaration.name, span: span, value: value})
+    }
+    rules
+}
+
+// The rules of the markers the callable registered as `callee` carries.
+sema_call_rules_of_callee: fn(graph: SemaRegistrationGraph, callee: SymbolID) -> [SemaCallRule] {
+    row: sema_registration_callable_row_of(graph, callee) ?? return [SemaCallRule]{}
+    if row == {
+        .Function(module_index, index) -> sema_call_rules(graph, graph.modules[module_index].functions[index].declaration.markers, graph.modules[module_index].module_identity)
+        .Foreign(_, _) -> [SemaCallRule]{}
+        .NominalMethod(module_index, owner, index) -> sema_call_rules(graph, graph.modules[module_index].nominals[owner].methods[index].declaration.markers, graph.modules[module_index].module_identity)
+        .ImplMethod(module_index, owner, index) -> sema_call_rules(graph, graph.modules[module_index].impls[owner].methods[index].declaration.markers, graph.modules[module_index].module_identity)
+    }
+}
+
+// The rules of the markers written on the struct or enum `ty` names from the
+// module row `caller`.
+sema_call_rules_of_type: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int) -> [SemaCallRule] {
+    row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return [SemaCallRule]{}
+    written_in: graph.modules[row.module_index].module_identity
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        if item == .Struct(definition) -> return sema_call_rules(graph, definition.type_markers, written_in)
+        if item == .Enum(definition) -> return sema_call_rules(graph, definition.type_markers, written_in)
+    }
+    [SemaCallRule]{}
+}
+
+// Whether calls checked here hear rules: a body a compile-time run checks
+// stages no sites of its own, so its calls are left to their checks.
+sema_call_rules_heard_here: fn(scopes: SemaScopeTable) -> Bool Never! {
+    scopes.comptime_execution_depth == 0
+}
+
+// Hears `rules` at the call of `callee` written `name` at `name_span` with
+// `args`, and, for a method call, the receiver of type `receiver_type`
+// written at `receiver_span`, whose value the build knows as
+// `receiver_known` (None when only the run knows it).
+sema_call_rules_hear: fn(
+    rules: [SemaCallRule],
+    callee: SymbolID?,
+    name: String,
+    name_span: Span,
+    args: [CallArg],
+    receiver_type: Type?,
+    receiver_known: TComptimeValue?,
+    receiver_span: Span,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: &SemaScopeTable,
+    state: &SemaOwnershipState,
+    tail_store: &SemaStatementTailStore,
+    context: &SemaCheckContext,
+    diagnostics: &[Diagnostic],
+) -> SemaCallRuleHearing {
+    hearing := SemaCallRuleHearing{from: context.comptime_body_sources.len()}
+    owner: sema_scope_function_owner_key(scopes)
+    end := name_span.end
+    loop argument in args -> end = argument.span.end
+    span: Span{start: name_span.start, end: end}
+    waiting := [Int]{}
+    loop index in 0..<rules.len() {
+        if sema_comptime_body_value_find(context, environment.module_identity, owner, rules[index].span, name_span) == .Val(landed) {
+            if sema_call_rule_rejects(landed.value, span, diagnostics) {
+                hearing.rejected = true
+                return hearing
+            }
+            next
+        }
+        waiting.push(index)
+    }
+    if waiting.len() == 0 -> return hearing
+    call: sema_rule_call_value(callee, name, name_span, span, args, receiver_type, receiver_known, receiver_span, owner, environment, program, scopes, state, tail_store, context)
+    loop index in waiting {
+        sema_call_rule_stage(context, environment, owner, rules[index], call, name_span)
+    }
+    hearing.staged = true
+    hearing
+}
+
+// After a staged call's ordinary checks wrote `held`: true when they failed,
+// so the call waits on its rules with the errors held back (a rejection
+// replaces them, and the recheck after the run reports them otherwise);
+// false after the held diagnostics are pushed.
+sema_call_rules_hold: fn(hearing: SemaCallRuleHearing, held: &&[Diagnostic], context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if sema_has_error_since(held, 0) {
+        loop row in hearing.from..<context.comptime_body_sources.len() {
+            if context.comptime_body_sources[row].rule != None -> context.comptime_body_sources[row].rule_held = true
+        }
+        return true
+    }
+    diagnostics.extend(held.move())
+    false
+}
+
+// Stages one rule's site at a call: the rule's marker value and the call as
+// prepared locals, read by `__jet_rule.check(__jet_call)`.
+sema_call_rule_stage: fn(context: &SemaCheckContext, environment: SemaScopeEnvironment, owner: String, rule: SemaCallRule, call: TComptimeValue, site_span: Span) Never! {
+    destination_key: sema_comptime_body_destination_key(owner, rule.span, site_span)
+    key: "{environment.module_identity.id}.{destination_key}"
+    if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
+        if sema_comptime_key_row(context.comptime_body_source_rows[slot], key) != None -> return
+    }
+    rule_local: Expr.Ident{name: SEMA_CALL_RULE_LOCAL, span: rule.span, id: AST_NODE_GENERATED}
+    call_local: Expr.Ident{name: SEMA_CALL_RULE_CALL_LOCAL, span: site_span, id: AST_NODE_GENERATED}
+    heard: CallArg{convention: AccessConvention.Read, expr: call_local, span: site_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+    sema_comptime_body_source_append(context, SemaComptimeBodySource{
+        module_identity: environment.module_identity,
+        function_key: owner,
+        source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, site_span),
+        key: key,
+        destination_key: destination_key,
+        name: "{rule.marker}.check",
+        expression: Expr.MethodCall{receiver: rule_local, method: "check", method_span: rule.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{heard}, id: AST_NODE_GENERATED},
+        expected_type: Type.Option{inner: Type.Named{name: "CompilerRejection"}},
+        span: rule.span,
+        site_span: site_span,
+        prepared: [SemaComptimePreparedLocal]{
+            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_LOCAL, ty: Type.Named{name: rule.marker}, value: rule.value, span: rule.span},
+            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_CALL_LOCAL, ty: Type.Named{name: "CompilerCall"}, value: call, span: site_span},
+        },
+        rule: Val(SemaComptimeRuleSite{module_identity: rule.module_identity, marker: rule.marker}),
+    })
+}
+
+// The CompilerCall a rule hears: its caller and callee identities, module and
+// span (from the name to the last argument), the `name` it was written with,
+// its `args` in written order and its `receiver`. An argument's `type` is
+// the type its own check gives it (`_` when that check fails), and its
+// `value` the Dyn its value encodes to when the build knows that value
+// (sema_rule_value_dyn); the `function` it names is None.
+sema_rule_call_value: fn(
+    callee: SymbolID?,
+    name: String,
+    name_span: Span,
+    span: Span,
+    args: [CallArg],
+    receiver_type: Type?,
+    receiver_known: TComptimeValue?,
+    receiver_span: Span,
+    owner: String,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    scopes: &SemaScopeTable,
+    state: &SemaOwnershipState,
+    tail_store: &SemaStatementTailStore,
+    context: &SemaCheckContext,
+) -> TComptimeValue {
+    file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
+    caller := owner
+    callee_identity := name
+    if program.registration_graph == .Val(graph) {
+        caller = sema_compiler_identity(graph, owner)
+        if callee == .Val(id) -> callee_identity = sema_compiler_identity(graph, sema_symbol_key(program, context, id))
+    }
+    values := [TComptimeValue]{}
+    loop argument in args {
+        probe_diagnostics := [Diagnostic]{}
+        probed: sema_probe_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+        ty: if probed == .Val(checked) -> checked.ty else -> Type.Named{name: "_"}
+        known: if probed == .Val(checked) -> sema_rule_known(checked, program, context) else -> TComptimeValue?{None}
+        label := String?{None}
+        if argument.label == .Val(written) -> label = Val("{written.name}")
+        values.push(sema_rule_call_arg(label, ty, known, argument.span, file, environment, program))
+    }
+    receiver: if receiver_type == .Val(ty) -> sema_comptime_reflection_some(sema_rule_call_arg(None, ty, receiver_known, receiver_span, file, environment, program)) else -> sema_comptime_reflection_none(Type.Named{name: "CompilerArg"})
+    TComptimeValue.Struct{
+        type_name: "CompilerCall",
+        fields: [TComptimeField]{
+            TComptimeField{name: "caller", value: sema_compiler_index_string(caller)},
+            TComptimeField{name: "callee", value: sema_compiler_index_string(callee_identity)},
+            TComptimeField{name: "module", value: sema_compiler_index_string(environment.module_name)},
+            TComptimeField{name: "span", value: sema_compiler_index_span(span, file)},
+            TComptimeField{name: "name", value: TComptimeValue.Struct{type_name: "CompilerName", fields: [TComptimeField]{TComptimeField{name: "text", value: sema_compiler_index_string(name)}, TComptimeField{name: "span", value: sema_compiler_index_span(name_span, file)}}}},
+            TComptimeField{name: "args", value: TComptimeValue.List{values: values}},
+            TComptimeField{name: "receiver", value: receiver},
+        },
+    }
+}
+
+// One CompilerArg of a heard call, whose value the build knows as `known`.
+sema_rule_call_arg: fn(label: String?, ty: Type, known: TComptimeValue?, span: Span, file: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue {
+    written: if label == .Val(text) -> sema_comptime_reflection_some(sema_compiler_index_string(text)) else -> sema_comptime_reflection_none(Type.String)
+    value := sema_comptime_reflection_none(Type.Named{name: "Dyn"})
+    if known == .Val(computed) && program.registration_graph == .Val(graph) {
+        if sema_rule_value_dyn(graph, environment.module_row, ty, computed, 0) == .Val(tree) -> value = sema_comptime_reflection_some(tree)
+    }
+    TComptimeValue.Struct{
+        type_name: "CompilerArg",
+        fields: [TComptimeField]{
+            TComptimeField{name: "label", value: written},
+            TComptimeField{name: "type", value: sema_comptime_reflection_type_id_in(program.registration_graph, environment.module_row, ty)},
+            TComptimeField{name: "value", value: value},
+            TComptimeField{name: "function", value: sema_comptime_reflection_none(Type.Named{name: "FunctionInfo"})},
+            TComptimeField{name: "span", value: sema_compiler_index_span(span, file)},
+        },
+    }
+}
+
+// What the build knows of a heard call's argument or receiver `value`
+// (None when only the run knows it): a literal, or a constant's value
+// (sema_expr_comptime_value), with a struct, enum case or list literal built
+// from the known values of its parts and a negated number literal its
+// negation. A known struct or case leaves its type's name empty:
+// sema_rule_value_dyn reads its type from the argument's.
+sema_rule_known: fn(value: TExpr, program: SemaProgramTables, context: SemaCheckContext) -> TComptimeValue? {
+    if value.kind == .Flat(index) -> return sema_rule_known_row(index, program, context)
+    if value.kind == .StructLit(fields) {
+        known := [TComptimeField]{}
+        loop field in fields {
+            known.push(TComptimeField{name: "{field.field.name}", value: sema_rule_known(field.value, program, context) ?? return None})
+        }
+        return Val(TComptimeValue.Struct{type_name: "", fields: known})
+    }
+    if value.kind == .EnumLit(_, variant, payload) {
+        args := [TComptimeEnumArg]{}
+        if payload == .Named(_) -> return None
+        if payload == .Positional(positional) {
+            loop argument in positional {
+                args.push(TComptimeEnumArg{name: None, value: sema_rule_known(argument.value, program, context) ?? return None})
+            }
+        }
+        return Val(TComptimeValue.Enum{type_name: "", variant: "{variant}", args: args})
+    }
+    if value.kind == .ListLit(items) -> return sema_rule_known_list(items, program, context)
+    if value.kind == .List(items, coercion) {
+        if coercion == None -> return sema_rule_known_list(items, program, context)
+        return None
+    }
+    if value.kind == .Unary(op, operand) {
+        if op != TUnaryOp.Neg -> return None
+        return sema_rule_known_negation(sema_rule_known(operand, program, context) ?? return None)
+    }
+    // `I32{5}` and `F32{1.5}`: the narrowing of a known number is that number,
+    // which sema_rule_value_dyn fits to the argument's type.
+    if value.kind == .NumericMethod(receiver, operation) {
+        if operation == .CheckedIntToFixed(_, _) || operation == .FloatNarrow -> return sema_rule_known(receiver, program, context)
+        return None
+    }
+    if value.kind == .Clone(inner, _) -> return sema_rule_known(inner, program, context)
+    if value.kind == .ExplicitCopy(inner) -> return sema_rule_known(inner, program, context)
+    sema_expr_comptime_value(value, context)
+}
+
+// sema_rule_known over the items of a list literal.
+sema_rule_known_list: fn(items: [TExpr], program: SemaProgramTables, context: SemaCheckContext) -> TComptimeValue? {
+    known := [TComptimeValue]{}
+    loop item in items {
+        known.push(sema_rule_known(item, program, context) ?? return None)
+    }
+    Val(TComptimeValue.List{values: known})
+}
+
+// The negation of known number `value`; None for anything else.
+sema_rule_known_negation: fn(value: TComptimeValue) -> TComptimeValue? Never! {
+    if value == .Int(number) -> return Val(TComptimeValue.Int{value: 0 - number})
+    if value == .Float(number, bits) -> return Val(TComptimeValue.Float{value: number * -1.0, bits: bits})
+    None
+}
+
+// sema_rule_known over arena row `index` (a Flat node, sema_node), whose
+// children are arena rows too.
+sema_rule_known_row: fn(index: Int, program: SemaProgramTables, context: SemaCheckContext) -> TComptimeValue? {
+    row: index - context.arena.tree.node_base
+    if row < 0 || row >= context.arena.tree.nodes.len() -> return None
+    if context.arena.tree.nodes[row].kind == .IntLit(number, _) -> return Val(TComptimeValue.Int{value: number})
+    if context.arena.tree.nodes[row].kind == .FloatLit(number) -> return Val(TComptimeValue.Float{value: number, bits: 64})
+    if context.arena.tree.nodes[row].kind == .BoolLit(flag) -> return Val(TComptimeValue.Bool{value: flag})
+    if context.arena.tree.nodes[row].kind == .CharLit(code) -> return Val(TComptimeValue.Char{value: code})
+    if context.arena.tree.nodes[row].kind == .StrLit(parts) {
+        text := ""
+        loop part in parts {
+            if part == .Literal(literal) -> text = "{text}{literal}" else -> return None
+        }
+        return Val(TComptimeValue.String{value: text})
+    }
+    if context.arena.tree.nodes[row].kind == .StructLit(fields) {
+        known := [TComptimeField]{}
+        loop field in fields {
+            known.push(TComptimeField{name: "{field.field.name}", value: sema_rule_known_row(field.value, program, context) ?? return None})
+        }
+        return Val(TComptimeValue.Struct{type_name: "", fields: known})
+    }
+    if context.arena.tree.nodes[row].kind == .EnumCtor(_, variant, payload) {
+        return sema_rule_known_case(symbol_key_leaf(sema_symbol_key(program, context, variant)), payload, program, context)
+    }
+    if context.arena.tree.nodes[row].kind == .EnumLit(_, variant, payload) {
+        return sema_rule_known_case("{variant}", payload, program, context)
+    }
+    if context.arena.tree.nodes[row].kind == .ListLit(items) -> return sema_rule_known_rows(items, program, context)
+    if context.arena.tree.nodes[row].kind == .List(items, coercion) {
+        if coercion == None -> return sema_rule_known_rows(items, program, context)
+        return None
+    }
+    if context.arena.tree.nodes[row].kind == .Unary(op, operand) {
+        if op != TUnaryOp.Neg -> return None
+        return sema_rule_known_negation(sema_rule_known_row(operand, program, context) ?? return None)
+    }
+    if context.arena.tree.nodes[row].kind == .NumericMethod(receiver, operation) {
+        if operation == .CheckedIntToFixed(_, _) || operation == .FloatNarrow -> return sema_rule_known_row(receiver, program, context)
+        return None
+    }
+    if context.arena.tree.nodes[row].kind == .Clone(inner, _) -> return sema_rule_known_row(inner, program, context)
+    if context.arena.tree.nodes[row].kind == .ExplicitCopy(inner) -> return sema_rule_known_row(inner, program, context)
+    None
+}
+
+// sema_rule_known_row over the items of a list literal's rows.
+sema_rule_known_rows: fn(items: [Int], program: SemaProgramTables, context: SemaCheckContext) -> TComptimeValue? {
+    known := [TComptimeValue]{}
+    loop item in items {
+        known.push(sema_rule_known_row(item, program, context) ?? return None)
+    }
+    Val(TComptimeValue.List{values: known})
+}
+
+// The enum case `variant` whose arena-row payload is `payload`, known when
+// its values are; None for a case with named fields.
+sema_rule_known_case: fn(variant: String, payload: BodyEnumPayload, program: SemaProgramTables, context: SemaCheckContext) -> TComptimeValue? {
+    args := [TComptimeEnumArg]{}
+    if payload == .Named(_) -> return None
+    if payload == .Positional(positional) {
+        loop argument in positional {
+            args.push(TComptimeEnumArg{name: None, value: sema_rule_known_row(argument.value, program, context) ?? return None})
+        }
+    }
+    Val(TComptimeValue.Enum{type_name: "", variant: variant, args: args})
+}
+
+// How deep an argument value nests before its Dyn is left None.
+SEMA_CALL_RULE_VALUE_DEPTH: 32
+
+// The largest finite F32.
+SEMA_CALL_RULE_F32_MAX: Float{340282346638528859811704183484516925440.0}
+
+// An argument's compile-time value `value`, of type `ty` as module row
+// `caller` names it, as the Dyn its `encode()` returns, so a rule reads what
+// the run would encode (D-CORE-CHECK1 `CompilerArg.value`). A Bool, an Int or
+// fixed-width integer, a Float or F32, a Char and a String are that case, a
+// Char as its Text; a list is the Array of its items, but a byte list is
+// None (Encode writes Bytes). A struct or enum counts only when its Encode is
+// the derived one with no codec option (sema_rule_value_derives_encode): a
+// struct is the Object of its encoded fields in declaration order under
+// sema_serde_items_field_key, leaving out the fields Encode leaves out
+// (sema_serde_items_drops); a case without a payload is the Text of
+// sema_serde_items_variant_key, and a case with one value the one-entry
+// Object under that key. Anything else is None: an optional field, a case
+// with named fields, a generic type, a written codec, a Map.
+sema_rule_value_dyn: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, value: TComptimeValue, depth: Int) -> TComptimeValue? {
+    if depth > SEMA_CALL_RULE_VALUE_DEPTH -> return None
+    if ty == Type.Int || ty == .IntN(_, _) {
+        number := Int?{None}
+        if value == .Int(small) -> number = Val(small)
+        if value == .BigInt(decimal) -> number = Val(Int.parse(decimal) ?? return None)
+        exact: number ?? return None
+        // A fixed width holds only its range; past it the run stops.
+        _: sema_comptime_fold_int(exact, ty) ?? return None
+        return Val(sema_rule_dyn("Int", sema_comptime_fold_int(exact, Type.Int) ?? return None))
+    }
+    if ty == Type.Float || ty == Type.Float32 {
+        if value == .Float(number, _) {
+            if ty == Type.Float -> return Val(sema_rule_dyn("Float", TComptimeValue.Float{value: number, bits: 64}))
+            // An F32 holds the nearest binary32 value, which Encode widens;
+            // a NaN or one past its range stops where it narrows.
+            if number.is_nan() || number > SEMA_CALL_RULE_F32_MAX || number < -SEMA_CALL_RULE_F32_MAX -> return None
+            narrow: F32{number}
+            return Val(sema_rule_dyn("Float", TComptimeValue.Float{value: Float{narrow}, bits: 64}))
+        }
+        return None
+    }
+    if ty == Type.Bool {
+        if value == .Bool(flag) -> return Val(sema_rule_dyn("Bool", TComptimeValue.Bool{value: flag}))
+        return None
+    }
+    if ty == Type.String {
+        if value == .String(text) -> return Val(sema_rule_dyn("Text", TComptimeValue.String{value: text}))
+        return None
+    }
+    if ty == Type.Char {
+        if value == .Char(code) {
+            text: String.from_bytes(core_decl_utf8(code)) ?? return None
+            return Val(sema_rule_dyn("Text", TComptimeValue.String{value: text}))
+        }
+        return None
+    }
+    element := Type?{None}
+    if ty == .List(inner) -> element = Val(inner)
+    if ty == .FixedList(inner, _) -> element = Val(inner)
+    if element == .Val(item_type) {
+        if item_type == (Type.IntN{signed: false, bits: 8}) -> return None
+        if value == .List(items) {
+            trees := [TComptimeValue]{}
+            loop item in items {
+                trees.push(sema_rule_value_dyn(graph, caller, item_type, item, depth + 1) ?? return None)
+            }
+            return Val(sema_rule_dyn("Array", TComptimeValue.List{values: trees}))
+        }
+        return None
+    }
+    if ty == .Named(_) {
+        row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return None
+        if graph.modules[row.module_index].nominals[row.row].generic_params.len() > 0 -> return None
+        if !sema_rule_value_derives_encode(graph, row.module_index, graph.modules[row.module_index].nominals[row.row].symbol.name) -> return None
+        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+            if item == .Struct(definition) -> return sema_rule_value_struct_dyn(graph, row.module_index, definition, value, depth)
+            if item == .Enum(definition) -> return sema_rule_value_enum_dyn(graph, row.module_index, definition, value, depth)
+        }
+    }
+    None
+}
+
+// Whether module row `module_index`'s Encode of its type `name` is the one
+// the compiler derives (SerdeItems), not a written impl.
+sema_rule_value_derives_encode: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> Bool {
+    loop index in 0..<graph.modules[module_index].impls.len() {
+        if graph.modules[module_index].impls[index].target_type_name != name -> next
+        if graph.modules[module_index].impls[index].trait_name == .Val(trait_name) && trait_name == "Encode" {
+            return graph.modules[module_index].impls[index].declaration.is_generated_serde
+        }
+    }
+    false
+}
+
+// A struct value as its derived `encode()` writes it (sema_rule_value_dyn);
+// None for a struct or field with a codec option or an optional field.
+sema_rule_value_struct_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, definition: StructDef, value: TComptimeValue, depth: Int) -> TComptimeValue? {
+    if definition.serde_markers.len() > 0 -> return None
+    if value == .Struct(_, written) {
+        entries := [TComptimeValue]{}
+        loop field in definition.fields {
+            if field.computed != None || sema_serde_items_drops(field, false) -> next
+            if field.serde_markers.len() > 0 -> return None
+            found := -1
+            loop (index, candidate) in written {
+                if candidate.name == field.name -> found = index
+            }
+            if found < 0 -> return None
+            tree: sema_rule_value_dyn(graph, module_index, field.ty, written[found].value, depth + 1) ?? return None
+            entries.push(sema_rule_dyn_entry(sema_serde_items_field_key(definition, field), tree))
+        }
+        return Val(sema_rule_dyn("Object", TComptimeValue.List{values: entries}))
+    }
+    None
+}
+
+// An enum value as its derived `encode()` writes it (sema_rule_value_dyn);
+// None for an enum or case with a codec option or a case with named fields.
+sema_rule_value_enum_dyn: fn(graph: SemaRegistrationGraph, module_index: Int, definition: EnumDef, value: TComptimeValue, depth: Int) -> TComptimeValue? {
+    if definition.serde_markers.len() > 0 || codable_tag_field(definition.type_markers) != None || codable_untagged(definition.type_markers) -> return None
+    if value == .Enum(_, written, args) {
+        loop variant in definition.variants {
+            if variant.name != written -> next
+            if variant.serde_markers.len() > 0 -> return None
+            key: sema_serde_items_variant_key(variant, sema_checked_rename_case(definition.serde_markers))
+            if variant.payload == .Unit -> return Val(sema_rule_dyn("Text", TComptimeValue.String{value: key}))
+            if variant.payload == .Single(payload, _) {
+                if args.len() != 1 -> return None
+                tree: sema_rule_value_dyn(graph, module_index, payload, args[0].value, depth + 1) ?? return None
+                return Val(sema_rule_dyn("Object", TComptimeValue.List{values: [TComptimeValue]{sema_rule_dyn_entry(key, tree)}}))
+            }
+            return None
+        }
+    }
+    None
+}
+
+// The Dyn case `variant` holding `payload`.
+sema_rule_dyn: fn(variant: String, payload: TComptimeValue) -> TComptimeValue Never! {
+    TComptimeValue.Enum{type_name: "Dyn", variant: variant, args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: payload}}}
+}
+
+// One `{key, value}` entry of a Dyn Object.
+sema_rule_dyn_entry: fn(key: String, tree: TComptimeValue) -> TComptimeValue Never! {
+    TComptimeValue.Struct{type_name: "", fields: [TComptimeField]{TComptimeField{name: "key", value: TComptimeValue.String{value: key}}, TComptimeField{name: "value", value: tree}}}
+}
+
+// A rule's landed answer, a `CompilerRejection?`. A rejection's finding is
+// pushed at its span (`fallback`, the call's, when it holds none): an
+// `.Error` one rejects the call and the result is true; a `.Tidy` one is a
+// lint and a `.Report` one no diagnostic, and neither replaces the call's
+// checks. A finding whose code is the compiler's own takes its registry row,
+// a package's code is reported as written (jet_driver_build_findings).
+sema_call_rule_rejects: fn(answer: TComptimeValue, fallback: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if answer == .Present(inner) -> return sema_call_rule_rejects(inner, fallback, diagnostics)
+    if answer == .Struct(type_name, fields) {
+        if type_name != "CompilerRejection" -> return false
+        code := ""
+        tier := ""
+        what := ""
+        why := ""
+        fix := ""
+        span := fallback
+        loop field in fields {
+            if field.name == "span" {
+                if sema_comptime_reflection_span_of(field.value) == .Val(at) -> span = at
+                next
+            }
+            if field.value == .String(text) {
+                if {
+                    field.name == "code" -> code = "{text}"
+                    field.name == "tier" -> tier = "{text}"
+                    field.name == "what" -> what = "{text}"
+                    field.name == "why" -> why = "{text}"
+                    field.name == "fix" -> fix = "{text}"
+                    else -> {}
+                }
+            }
+        }
+        if tier == "Report" -> return false
+        report := if diagnostic_registry_row(code) != None -> diagnostic_from_registry(code, Val(span), what, why, fix) else -> Diagnostic{severity: DIAGNOSTIC_ERROR, code: code, span: Val(span), what: diagnostic_sentence_case_line(what), why: diagnostic_sentence_case_line(why), fix: diagnostic_sentence_case_line(fix)}
+        rejected: tier == "Error"
+        report.severity = if rejected -> DIAGNOSTIC_ERROR else -> DIAGNOSTIC_LINT
+        diagnostics.push(report)
+        return rejected
+    }
+    false
+}
+
+// One run's calls of one rule, heard at once by the batch item keyed `key`
+// (sema_call_rule_batch_source), whose value answers each call in order;
+// `sites` are those calls' own sources, in that order, at their `rows` of
+// the pending sources.
+SemaCallRuleBatch: struct {
+    rule: SemaComptimeRuleSite,
+    span: Span,
+    key: String,
+    sites: [SemaCallRuleBatchSite],
+    rows: [Int],
+}
+
+SemaCallRuleBatchSite: struct {
+    module_identity: ModuleID,
+    key: String,
+    destination_key: String,
+}
+
+// The batches the rule sites among `pending` make: one per rule (its
+// declaring module and marker), in the order the sites were met, each
+// appended to `sources` as one item. Each site's prepared values move into
+// its batch's lists; the other sources stay as they are.
+sema_call_rule_batches: fn(graph: SemaRegistrationGraph, pending: &[SemaComptimeBodySource], pass: Int, sources: &[SemaComptimeItemSource]) -> [SemaCallRuleBatch] {
+    batches := [SemaCallRuleBatch]{}
+    loop index in 0..<pending.len() {
+        site: pending[index].rule ?? next
+        if pending[index].prepared.len() != 2 -> next
+        // A run holds few rules, so a batch is found by a scan.
+        row := 0
+        loop row < batches.len() && (batches[row].rule.module_identity != site.module_identity || batches[row].rule.marker != site.marker) -> row += 1
+        if row == batches.len() {
+            rule: SemaComptimeRuleSite{module_identity: site.module_identity, marker: "{site.marker}"}
+            batches.push(SemaCallRuleBatch{rule: rule, span: pending[index].span, key: "{site.module_identity.id}.rules.{site.marker}.{pass}", sites: [SemaCallRuleBatchSite]{}, rows: [Int]{}})
+        }
+        batches[row].rows.push(index)
+        batches[row].sites.push(SemaCallRuleBatchSite{module_identity: pending[index].module_identity, key: pending[index].key, destination_key: pending[index].destination_key})
+    }
+    loop batch in batches {
+        rules := [TComptimeValue]{}
+        calls := [TComptimeValue]{}
+        loop row in batch.rows {
+            rules.push(pending[row].prepared[0].value.move())
+            calls.push(pending[row].prepared[1].value.move())
+        }
+        sources.push(sema_call_rule_batch_source(graph, batch, pass, rules, calls))
+    }
+    batches
+}
+
+// A rule's batch item, in the rule's own module: `__jet_rules[i].check(__jet_calls[i])`
+// for each call, collected in order.
+sema_call_rule_batch_source: fn(graph: SemaRegistrationGraph, batch: SemaCallRuleBatch, pass: Int, rules: &&[TComptimeValue], calls: &&[TComptimeValue]) -> SemaComptimeItemSource {
+    file := ""
+    if sema_registration_module_index(graph, batch.rule.module_identity) == .Val(row) -> file = "{graph.modules[row].source_file}"
+    marker: Type.Named{name: batch.rule.marker}
+    call: Type.Named{name: "CompilerCall"}
+    SemaComptimeItemSource{
+        module_identity: batch.rule.module_identity,
+        key: batch.key,
+        destination_key: "rules.{batch.rule.marker}.{pass}",
+        name: "{batch.rule.marker}.check",
+        source_file: file,
+        kind: SemaComptimeItemKind.BodyExpression,
+        expression: sema_call_rule_batch_expression(),
+        expected_type: Val(Type.List{element: Type.Option{inner: Type.Named{name: "CompilerRejection"}}}),
+        span: batch.span,
+        dependencies: [String]{},
+        checked_text: None,
+        prepared: [SemaComptimePreparedLocal]{
+            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_RULES_LOCAL, ty: Type.List{element: marker}, value: TComptimeValue.List{values: rules.move()}, span: batch.span},
+            SemaComptimePreparedLocal{name: SEMA_CALL_RULE_CALLS_LOCAL, ty: Type.List{element: call}, value: TComptimeValue.List{values: calls.move()}, span: batch.span},
+        },
+    }
+}
+
+// The collecting loop a batch runs, parsed as the language writes it.
+sema_call_rule_batch_expression: fn() -> Expr {
+    text: "RULE_BATCH: loop index in 0..<{SEMA_CALL_RULE_CALLS_LOCAL}.len() -> {SEMA_CALL_RULE_RULES_LOCAL}[index].check({SEMA_CALL_RULE_CALLS_LOCAL}[index])\n"
+    parsed: parse_generated_source(text.bytes())
+    if parsed.diagnostics.len() == 0 && parsed.program.items.len() == 1 {
+        if parsed.program.items[0] == .Const(definition) -> return definition.value
+    }
+    panic("the rule batch loop does not parse")
+}
+
+// Lands each batched call's answer under its own site's key, in place of the
+// batches' own values: the batch's answer at the call's place, or, when the
+// batch has no answer for every call, a failure, which rejects nothing.
+// True when an answer is a rejection, which the recheck reports.
+sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: &[SemaComptimeItemValue]) -> Bool Never! {
+    if batches.len() == 0 -> return false
+    rejected := false
+    landed := [Bool]{}
+    loop _ in batches -> landed.push(false)
+    // Each row is popped (an owned move), so a batch's answers move into
+    // its sites' rows; the kept rows are reversed back into their order.
+    kept := [SemaComptimeItemValue]{}
+    loop values.len() > 0 {
+        row: values.pop() ?? panic("a nonempty value list failed to pop")
+        batch := 0
+        loop batch < batches.len() && batches[batch].key != row.key -> batch += 1
+        if batch == batches.len() {
+            kept.push(row)
+            next
+        }
+        answers := [TComptimeValue]{}
+        if row.value.move() == .List(list) -> answers = list.move()
+        landed[batch] = true
+        if sema_call_rule_batch_land(batches[batch], answers, kept) -> rejected = true
+    }
+    loop batch in 0..<batches.len() {
+        if landed[batch] -> next
+        unanswered := [TComptimeValue]{}
+        _ := sema_call_rule_batch_land(batches[batch], unanswered, kept)
+    }
+    kept.reverse()
+    values = kept.move()
+    rejected
+}
+
+// One batch's answers landed as its sites' values (in reverse, as the rows
+// around them are); true when one is a rejection of any tier (a `None`
+// answer or a failure is none).
+sema_call_rule_batch_land: fn(batch: SemaCallRuleBatch, answers: &[TComptimeValue], values: &[SemaComptimeItemValue]) -> Bool Never! {
+    whole: answers.len() == batch.sites.len()
+    rejected := false
+    index := batch.sites.len()
+    loop index > 0 {
+        index -= 1
+        answer: if whole -> answers.pop() ?? TComptimeValue.Unit else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: sema_call_rule_answer_type()}}
+        if answer == .Present(_) || answer == .Struct(_, _) -> rejected = true
+        values.push(SemaComptimeItemValue{module_identity: batch.sites[index].module_identity, key: batch.sites[index].key, destination_key: batch.sites[index].destination_key, kind: SemaComptimeItemKind.BodyExpression, value: answer, ty: sema_call_rule_answer_type()})
+    }
+    rejected
+}
+
+sema_call_rule_answer_type: fn() -> Type {
+    Type.Option{inner: Type.Named{name: "CompilerRejection"}}
+}
+
+// Whether a staged call among `pending` held its errors back.
+sema_call_rules_held: fn(pending: [SemaComptimeBodySource]) -> Bool Never! {
+    loop source in pending {
+        if source.rule_held -> return true
+    }
+    false
+}

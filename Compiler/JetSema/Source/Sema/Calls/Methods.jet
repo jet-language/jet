@@ -1022,6 +1022,22 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
             return None
         }
     }
+    // A method call hears the `check` rules of its method's markers before
+    // its arguments bind (Calls/CheckRules.jet).
+    rules := [SemaCallRule]{}
+    if sema_call_rules_heard_here(scopes) && program.registration_graph == .Val(graph) -> rules = sema_call_rules_of_callee(graph, candidate.method.symbol)
+    if rules.len() == 0 -> return sema_call_method_checked_visible(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
+    hearing: sema_call_rules_hear(rules, Val(candidate.method.symbol), candidate.method.name, span, args, Val(receiver_value.ty), sema_rule_known(receiver_value, program, context), receiver_value.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if hearing.rejected -> return None
+    if !hearing.staged -> return sema_call_method_checked_visible(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, diagnostics)
+    held := [Diagnostic]{}
+    checked: sema_call_method_checked_visible(state, receiver, receiver_value, candidate, args, defaults, expected, environment, program, scopes, tail_store, context, span, held)
+    if sema_call_rules_hold(hearing, held, context, diagnostics) -> return None
+    checked
+}
+
+// sema_call_method_checked_from_value past its visibility check and rules.
+sema_call_method_checked_visible: fn(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     resolved_candidate := candidate
     params := sema_call_params_from_type_after(resolved_candidate.signature, resolved_candidate.receiver_offset) ?? return None
     source_args := args

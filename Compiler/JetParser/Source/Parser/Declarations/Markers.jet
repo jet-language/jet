@@ -24,6 +24,7 @@ use {
         NamedType,
         STATE_ARROW_LABEL,
         Span,
+        Stmt,
         StructDef,
         TextEdit,
         TraitImplBlock,
@@ -92,8 +93,9 @@ parser_marker_label: fn(marker: Marker, index: Int) -> String Never! {
 }
 
 // `impl Marker { … }` in a struct body: the marker's settings as
-// `name: value`, a fixed `group: #[…]`, and the
-// `expand: fn(self, target: Target)` template. The struct's fields join as
+// `name: value`, a fixed `group: #[…]`, the
+// `expand: fn(self, target: Target)` template and the
+// `check: fn(self, call: CompilerCall)` rule. The struct's fields join as
 // the marker's parameters when the struct closes (parser_finish_marker_struct).
 // A marker that is not a group implements `Marker`: its settings are the
 // constants of that impl, which sema checks against the trait (E0933-E0937).
@@ -116,13 +118,17 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
             parser_parse_marker_setting(state, declaration, constants)
             next
         }
+        if token.kind == TOKEN_KW_FN && parser_value_at(state, 1) == "check" {
+            parser_parse_marker_check(state, value, declaration)
+            next
+        }
         if token.kind == TOKEN_KW_FN {
             span: parser_parse_marker_expand(state, declaration)
             if expand_span == None -> expand_span = Val(span)
             next
         }
         found: parser_describe_token(state, token)
-        parser_add_error(state, token.span, "expected a marker setting or `expand: fn`, found {found}", "an `impl Marker` block holds `name: value` settings, a `group: #[…]` and the `expand: fn(self, target: Target)` template", "write a setting such as `sites: [.Function]`, or `expand: fn(self, target: Target) {{ … }}`")
+        parser_add_error(state, token.span, "expected a marker setting, `expand: fn` or `check: fn`, found {found}", "an `impl Marker` block holds `name: value` settings, a `group: #[…]`, the `expand: fn(self, target: Target)` template and the `check: fn(self, call: CompilerCall)` rule", "write a setting such as `sites: [.Function]`, or `check: fn(self, call: CompilerCall) {{ … }}`")
         break
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Marker` body")
@@ -137,6 +143,40 @@ parser_parse_marker_impl: fn(state: &JetParserState, value: &StructDef) {
     }
     // The block itself prints as the marker member, so the impl is generated.
     value.trait_impls.push(TraitImplBlock{trait_name: parser_value(state, trait_token), trait_span: trait_token.span, operator_rhs: None, operator_marker: None, methods: [Func]{}, compiler_generated: true, assoc_type_impls: [NamedType]{}, constants: constants})
+}
+
+// `check: fn(self, call: CompilerCall) { … }`: the marker's rule, which the
+// compiler runs on each call of a declaration the marker marks. It is the
+// marker struct's method `check`: the parser gives it the
+// `CompilerRejection?` result and the closing `None` its body falls through
+// to, and `reject(value, at: part)` in it ends the rule with that finding
+// (sema_call_check_marker_reject). The formatter prints it as written
+// (jfmt_fmt_marker_check).
+parser_parse_marker_check: fn(state: &JetParserState, value: &StructDef, declaration: &MarkerDecl) {
+    method := parser_parse_type_method(state)
+    signature: Span{start: method.span.start, end: method.name_span.end}
+    shaped := method.params.len() == 2 && method.return_type == None && method.type_params.len() == 0 && method.declared_effects == None && !method.is_comptime
+    if shaped {
+        receiver: method.params[0]
+        call: method.params[1]
+        shaped = receiver.name == "self" && receiver.convention == AccessConvention.Read && call.convention == AccessConvention.Read && call.ty == Type.Named{name: "CompilerCall"} && call.default == None
+    }
+    if !shaped {
+        parser_add_error_code(state, "E0907", signature, "`check: fn` doesn't match the `Marker` contract", "a marker's rule reads its own value and the call it hears, and `reject` gives its one result", "write `check: fn(self, call: CompilerCall) {{ … }}`")
+        return
+    }
+    loop earlier in value.methods {
+        if earlier.marker_check {
+            parser_add_error_code(state, "E0105", method.name_span, "`check: fn` is defined twice in `impl Marker`", "`impl Marker` holds one rule", "remove one of the definitions")
+            return
+        }
+    }
+    end: Span{start: method.span.end, end: method.span.end}
+    method.return_type = Val(Type.Option{inner: Type.Named{name: "CompilerRejection"}})
+    method.body.push(Stmt.Expr{expr: Expr.EnumLit{type_name: "", variant: "None", variant_span: Val(end), args: [EnumLitArg]{}, leading_dot: false, span: end, id: parser_node_id(state)}})
+    method.marker_check = true
+    declaration.check = Val(method.name_span)
+    value.methods.push(method)
 }
 
 // `name: value` in `impl Marker`: a `Marker` constant, also kept as the
@@ -207,7 +247,8 @@ parser_parse_marker_expand: fn(state: &JetParserState, declaration: &MarkerDecl)
     }
     if !shaped {
         what: if method == "expand" -> "`expand: fn` doesn't match the `{contract}` contract" else -> "`{method}` is not a method of `{contract}`"
-        parser_add_error_code(state, "E0907", signature, what, "{block} has one method, the template the compiler expands with the marked item bound to `target`", "write `{written} {{ … }}`")
+        held: if declaration.is_derive -> "{block} has one method, the template the compiler expands with the marked item bound to `target`" else -> "{block} holds the template the compiler expands with the marked item bound to `target`, and the `check: fn(self, call: CompilerCall)` rule"
+        parser_add_error_code(state, "E0907", signature, what, held, "write `{written} {{ … }}`")
         loop parser_current_kind(state) != TOKEN_LBRACE && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
             parser_bump(state)
         }

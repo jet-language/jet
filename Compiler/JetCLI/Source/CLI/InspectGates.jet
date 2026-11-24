@@ -192,7 +192,8 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
             counts[name] = (counts.get(name) ?? 0) + 1
             entries.push(jet_cli_gates_entry_json(entry, modules))
         }
-        names.sort()
+        // The ledger is in kind order (gate_kind_order), so the counts list
+        // the security kinds first, as the text view does.
         fields: loop name in names -> jet_cli_status_field(name, jet_cli_status_int(counts.get(name) ?? 0))
         gates: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("entries", jet_cli_status_array(entries)), jet_cli_status_field("counts", jet_cli_status_object(fields))})
         return "{jet_cli_status_render("inspect.gates", true, [JetCLIStatusField]{jet_cli_status_field("gates", gates)})}\n"
@@ -260,7 +261,7 @@ jet_cli_gates_host: fn(request: JetDriverCompileRequest, args: [String], file: S
     }
     kind := GateKind?{None}
     if jet_cli_option_value(args, "--kind") == .Val(value) {
-        parsed: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, link_override, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
+        parsed: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, check_removal, link_override, impure, nondeterministic, dependency_grant, build_flag, session_flag, trust_grant, force_pin, host_facts, taint_scrub, duty_drop, state_transition, precision_demotion, structure, or lint_allow", color, json)
         kind = Val(parsed)
     }
     if !result.complete {

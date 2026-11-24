@@ -1,0 +1,12 @@
+use steps: core.build
+
+// A build action reads the host and target facts as prep code does.
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("record the machines of the build") {
+        facts: b.action(steps.action("facts", run: ["sh", "-c", "printf '%s' \"$1\" > facts.txt", "sh", "host {#build.host.os} {#build.host.arch} target {#build.target.os}"], inputs: [String]{}, outputs: ["facts.txt"], allow: [.Exec, .FS]))
+        app: b.add_executable("app", ["action.jet"], [facts])
+        b.default(app)
+    }
+}
+
+run: fn() {}

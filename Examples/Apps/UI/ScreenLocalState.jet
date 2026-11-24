@@ -1,0 +1,30 @@
+// Screen-local state: `ui.local` lives for this run, and `ui.saved` also
+// survives a restart. A screen's render pass runs between
+// `saved_scope_begin` and `saved_scope_end`, which number the screen's slots
+// by their position, so the next pass over the screen finds each slot again.
+// `saved_version` counts the updates screens made, which is how an app tells
+// a redraw is due, and `saved_clear` empties the saved store.
+use ui: core.ui
+
+// One render pass over the inbox screen: its draft, which is saved, and its
+// note, which lives for this run.
+inbox: fn() -> [ui.Local<String>] {
+    ui.saved_scope_begin("/inbox")
+    draft: ui.saved("")
+    note: ui.local("")
+    ui.saved_scope_end()
+    [ui.Local<String>]{draft, note}
+}
+
+run: fn() {
+    ui.saved_clear()
+    before: ui.saved_version()
+    first: inbox()
+    first[0].set("half-typed")
+    first[1].set("unsaved")
+    print("updates: {ui.saved_version() - before}")
+    again: inbox()
+    print("next pass: draft \"{again[0].get()}\", note \"{again[1].get()}\"")
+    ui.saved_clear()
+    print("after a clear: draft \"{inbox()[0].get()}\"")
+}

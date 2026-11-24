@@ -5,7 +5,7 @@
 // reader gives for the same text when it runs now, byte for byte in CBOR.
 use {
     cbor: core.encoding.cbor
-    jet_foundation.[MARKER_SOURCE, MARKER_SOURCE_RULES, marker_source_read]
+    jet_foundation.[MARKER_SOURCE, registration_marker_rules]
     jet_parser.[parser_line_starts]
     jet_sema.[
         SEMA_PRELUDE_DERIVE_PROVIDERS,
@@ -14,13 +14,12 @@ use {
         SEMA_PRELUDE_ERROR_PROGRAM,
         SEMA_PRELUDE_ERROR_SOURCE,
         SEMA_PRELUDE_MARKER_DECLS,
-        SEMA_PRELUDE_MARKER_RULES,
         SEMA_PRELUDE_TAGS,
         SEMA_UNITS_CATALOG,
         sema_derive_builtin_providers,
         sema_marker_module_prelude_decls,
         sema_marker_module_prelude_tags,
-        sema_marker_rules_catalog_rows,
+        sema_marker_rules_applied_row,
         sema_registration_derive_words,
         sema_registration_original_error_program,
         sema_units_catalog_read,
@@ -35,13 +34,19 @@ prelude_build_rows_same: fn<T: Encode>(built: T, read: T, what: String) {
     }
 }
 
+// The marker declarations parse to the stored rows, and each one's
+// applied-rule row, read from the parsed declaration, is the marker row the
+// registration table holds for it, in the same order.
 #Test("the build-time marker rows equal the marker source read now") {
     declarations: sema_marker_module_prelude_decls()
     assert(declarations.len() > 20, "Prelude/Markers.jet declares no markers")
     prelude_build_rows_same(SEMA_PRELUDE_MARKER_DECLS, declarations, "marker declarations")
-    rules: sema_marker_rules_catalog_rows(declarations, MARKER_SOURCE) ?? panic("the marker declarations build no applied-rule rows")
-    prelude_build_rows_same(SEMA_PRELUDE_MARKER_RULES, rules, "applied-rule rows")
-    prelude_build_rows_same(MARKER_SOURCE_RULES, marker_source_read(MARKER_SOURCE), "marker source rows")
+    rules: registration_marker_rules()
+    assert_eq(rules.len(), declarations.len())
+    loop index in 0..<declarations.len() {
+        row: sema_marker_rules_applied_row(declarations[index], MARKER_SOURCE) ?? panic("`#{declarations[index].name}` reads no applied-rule row")
+        prelude_build_rows_same(rules[index], row, "`#{row.name}` rule row")
+    }
 }
 
 #Test("the build-time value tags equal the marker source read now") {

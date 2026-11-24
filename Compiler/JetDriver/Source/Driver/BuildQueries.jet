@@ -1,12 +1,12 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, jet_target_layout_item_name, name_find, name_index, name_intern, name_table, name_table_sized, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, Marker, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_source_line, diagnostic_source_text, diagnostic_with_source_path, jet_target_layout_item_name, name_find, name_index, name_intern, name_table, name_table_sized, sha256_hex]
     jet_parser.[parse_source]
     jet_eval.[JetEvalConfig, jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
-    jet_sema.[SemaGraphResult, SemaSourceOrigin]
+    jet_sema.[SemaGraphResult, SemaSourceOrigin, sema_gate_host_reads]
     jet_build_session.[
         BuildSession,
         BuildSessionDiagnostic,
@@ -259,14 +259,17 @@ jet_driver_build_nodes_under_options: fn(owned_nodes: &&[BuildGraphNode], output
 }
 
 // `owned_nodes` (jet_driver_build_output_nodes: checks, then compiles, then
-// links) keyed under the settings each package's sources compile with, and
-// the receipt rows of every loaded package's settings. A setting whose value
-// is not its default adds one input, `setting:<name>=<value>` over its
-// SHA-256, to the check node of each source of its package; <name> is the
-// entry package's spelling (`loud`, `tool.loud`). The compile nodes over
-// those checks and their link nodes follow the new keys. Defaults add no
-// input, so a stock build keeps the plan's keys. A load that fails keeps
-// every key; the compile reports why.
+// links) keyed under the settings each package's sources compile with and
+// the host facts each source reads, and the receipt rows of every loaded
+// package's settings and host reads. A setting whose value is not its
+// default adds one input, `setting:<name>=<value>` over its SHA-256, to the
+// check node of each source of its package; <name> is the entry package's
+// spelling (`loud`, `tool.loud`). A source that reads `#build.host.os` adds
+// `host:#build.host.os=<value>` to its own check node, so a build on another
+// machine names other keys. The compile nodes over those checks and their
+// link nodes follow the new keys. Defaults add no input, so a stock build
+// keeps the plan's keys. A load that fails keeps every key; the compile
+// reports why.
 JetDriverBuildSettingNodes: struct {
     nodes: [BuildGraphNode],
     settings: [JetDriverBuildPackageSettings],
@@ -280,15 +283,26 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
     if !load.complete || jet_driver_has_errors(load.diagnostics) || root == "" {
         return {nodes: nodes.move(), settings: settings.move()}
     }
-    // The writer rows of each package's settings; the setting inputs of
-    // each package that has any; and that package's row of them for each
-    // source's check node, by a pass-local id of its subject (-1 at id 0,
-    // the empty subject).
+    // The writer rows and host reads of each package; the setting inputs of
+    // each package that has any; and, by a pass-local id of each source's
+    // subject (-1 at id 0, the empty subject), for its check node: its
+    // package's row of setting inputs, and where its host reads sit (its
+    // package's row in `settings`, then its row of that package's sources).
     package_writers := [[[JetDriverBuildSettingWriter]]]{}
+    package_sources := [[JetDriverBuildHostSource]]{}
     package_inputs := [[BuildGraphInputDigest]]{}
     subjects := name_table_sized(load.source_units.len() * 2 + 2)
     owners := [Int]{-1}
-    loop package in load.packages {
+    host_packages := [Int]{-1}
+    host_sources := [Int]{-1}
+    // The modules each source unit loaded as.
+    unit_modules := [[Int]]{}
+    loop _ in load.source_units -> unit_modules.push([Int]{})
+    loop (index, module_row) in load.modules {
+        at: module_row.source_unit_index
+        if at >= 0 && at < unit_modules.len() -> unit_modules[at].push(index)
+    }
+    loop (package_index, package) in load.packages {
         inputs := [BuildGraphInputDigest]{}
         setting_writers := [[JetDriverBuildSettingWriter]]{}
         loop setting in package.settings {
@@ -308,22 +322,49 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
             setting_writers.push(rows.move())
         }
         package_writers.push(setting_writers.move())
-        if inputs.len() == 0 -> next
-        loop unit in load.source_units {
+        owner: if inputs.len() == 0 -> -1 else -> package_inputs.len()
+        sources := [JetDriverBuildHostSource]{}
+        loop (unit_index, unit) in load.source_units {
             if unit.package_identity != package.identity || unit.source_origin != SemaSourceOrigin.Snapshot || jet_driver_unit_is_core(unit) {
                 next
             }
             subject: jet_driver_build_source_subject(request, root, unit) ?? next
+            reads := [JetDriverBuildHostRead]{}
+            source: jet_driver_source_unit_text(request, unit) ?? ""
+            if source.contains("#build.host.") {
+                text: diagnostic_source_text(source)
+                loop module_index in unit_modules[unit_index] {
+                    found: sema_gate_host_reads(subject, load.modules[module_index].program)
+                    loop read in found.move() {
+                        value: jet_driver_host_fact_value(request, read.subject)
+                        line: if read.span == .Val(span) -> diagnostic_source_line(text, span.start) else -> 0
+                        reads.push(JetDriverBuildHostRead{line: line, fact: read.subject.move(), value: value})
+                    }
+                }
+            }
+            if owner < 0 && reads.len() == 0 -> next
             id: name_index(name_intern(subjects, subject))
-            if id == owners.len() -> owners.push(package_inputs.len()) else {
-                owners[id] = package_inputs.len()
+            if id == owners.len() {
+                owners.push(-1)
+                host_packages.push(-1)
+                host_sources.push(-1)
+            }
+            owners[id] = owner
+            host_packages[id] = -1
+            host_sources[id] = -1
+            if reads.len() > 0 {
+                host_packages[id] = package_index
+                host_sources[id] = sources.len()
+                sources.push(JetDriverBuildHostSource{file: subject.move(), reads: reads.move()})
             }
         }
-        package_inputs.push(inputs.move())
+        package_sources.push(sources.move())
+        if owner >= 0 -> package_inputs.push(inputs.move())
     }
     // Each package's name and its settings' names move into its receipt
-    // rows, beside their writers.
+    // rows, beside their writers and its sources' host reads.
     package_writers.reverse()
+    package_sources.reverse()
     loop package in load.packages.move() {
         writers := package_writers.pop() ?? break
         writers.reverse()
@@ -331,9 +372,9 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
         loop setting in package.settings.move() {
             rows.push(JetDriverBuildSetting{name: setting.name.move(), writers: writers.pop() ?? break})
         }
-        settings.push(JetDriverBuildPackageSettings{package: package.name.move(), settings: rows.move()})
+        settings.push(JetDriverBuildPackageSettings{package: package.name.move(), settings: rows.move(), host_sources: package_sources.pop() ?? [JetDriverBuildHostSource]{}})
     }
-    if package_inputs.len() == 0 -> return {nodes: nodes.move(), settings: settings.move()}
+    if owners.len() == 1 -> return {nodes: nodes.move(), settings: settings.move()}
     // The row in `keyed` of each rekeyed node, by a pass-local id of the
     // input name its dependents give it (`check:<subject>`,
     // `compile:<output>`; -1 at id 0, the empty name).
@@ -342,10 +383,14 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
     keyed := [BuildGraphNode]{}
     loop node in nodes.move() {
         owner := -1
+        host := -1
+        host_source := -1
         if node.kind == "check" && name_find(subjects, node.subject) == .Val(found) {
             owner = owners[name_index(found)]
+            host = host_packages[name_index(found)]
+            host_source = host_sources[name_index(found)]
         }
-        changed := owner >= 0
+        changed := owner >= 0 || host >= 0
         loop input in node.input_digests {
             if name_find(names, input.name) != None -> changed = true
         }
@@ -356,6 +401,17 @@ jet_driver_build_nodes_under_settings: fn(owned_nodes: &&[BuildGraphNode], reque
         digests := node.input_digests.move()
         if owner >= 0 {
             loop input in package_inputs[owner] -> digests.push(input.copy())
+        }
+        // A source that reads one host fact twice names it once.
+        if host >= 0 {
+            loop read in settings[host].host_sources[host_source].reads {
+                name: "host:{read.fact}={read.value}"
+                known := false
+                loop input in digests {
+                    if input.name == name -> known = true
+                }
+                if !known -> digests.push(BuildGraphInputDigest{name: name, digest: sha256_hex("{read.fact}={read.value}")})
+            }
         }
         loop index in 0..<digests.len() {
             if name_find(names, digests[index].name) == .Val(found) {

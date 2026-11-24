@@ -68,15 +68,17 @@ held_eval_lib_source: fn() -> String {
 }
 
 held_eval_answer: fn(opened: &JetDriverHeldOpened, path: String, offset: Int, text: String) -> SemaEvalProbeAnswer? {
-    done := jet_driver_held_eval_answer(opened.eval, path, offset, text, opened.inputs.symbols.move(), opened.types.move())
+    done := jet_driver_held_eval_answer(opened.eval, path, offset, text, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move())
     opened.inputs.symbols = done.symbols.move()
+    opened.inputs.interner = done.interner.move()
     opened.types = done.types.move()
     done.answer.move()
 }
 
 held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> SemaScriptProbeChecked {
-    done := jet_driver_held_eval_check(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.types.move(), text)
+    done := jet_driver_held_eval_check(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
+    opened.inputs.interner = done.interner.move()
     opened.types = done.types.move()
     done.checked.move()
 }
@@ -85,8 +87,9 @@ held_eval_check: fn(opened: &JetDriverHeldOpened, path: String, text: String) ->
 // the checked functions where the next check finds the functions it calls.
 // Whether it was.
 held_eval_append: fn(opened: &JetDriverHeldOpened, path: String, text: String) -> Bool {
-    done := jet_driver_held_eval_append(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.types.move(), text)
+    done := jet_driver_held_eval_append(opened.eval, path, opened.inputs.functions, opened.inputs.symbols.move(), opened.inputs.interner.move(), opened.types.move(), text)
     opened.inputs.symbols = done.symbols.move()
+    opened.inputs.interner = done.interner.move()
     opened.types = done.types.move()
     appended := done.appended.move() ?? return false
     sema_eval_held_set(opened.eval.rows, appended.function.key, opened.inputs.functions.len())

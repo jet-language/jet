@@ -1172,7 +1172,7 @@ Frag: struct {
 
 // Not named `Compiler`: a program that loads this module would see this
 // type under that name instead of the build's `Compiler` type.
-PatternCompiler: struct {
+priv PatternCompiler: struct {
     nodes: [Node],
     kids: [Int],
     ops: [Int],
@@ -1734,7 +1734,7 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
 /// exact PikeVM priority order and stops walking lower-priority threads once
 /// `OP_MATCH` is reached, so greedy/lazy quantifiers and ordered alternations
 /// match the VM's exact end position from any pinned start.
-ScanDfaBuilder: struct {
+priv ScanDfaBuilder: struct {
     buckets: [Int:Int],
     chain: [Int],
     pcs: [Int],
@@ -1845,7 +1845,7 @@ ScanDfaBuilder: struct {
     }
 }
 
-build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int, dfa: &Dfa) Never! {
+priv build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int, dfa: &Dfa) Never! {
     sb := ScanDfaBuilder{
         buckets: [Int:Int]{},
         chain: [Int]{},
@@ -1943,7 +1943,7 @@ build_scan_dfa: fn(re: Regex, class: [Int], reps: [Int], width: Int, budget: Int
 /// DFA. Appends matches to `out` and returns `text.len() + 1` when finished,
 /// or a byte offset `<= text.len()` where the VM must take over (a non-ASCII
 /// byte or a pattern whose failed starts exceeded the linear work budget).
-dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: &[Run]) -> Int Never! {
+priv dfa_scan: fn(re: Regex, text: [U8], single_start: Bool, limit: Int, out: &[Run]) -> Int Never! {
     hi: text.len()
     multiline: re.flags.multiline
     start_0: re.dfa.scan_start_0

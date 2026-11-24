@@ -1425,13 +1425,7 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
     if then_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, then_path))
     if else_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, else_path))
     sema_single_use_check_paths(state, single_use_moves, diagnostics)
-    base: sema_ownership_fork_base(fork)
-    joined: if {
-        then_reaches_merge && else_reaches_merge -> sema_ownership_path_join(state, fork, then_path, else_path, true, state.share_found)
-        then_reaches_merge -> sema_ownership_path_join(state, fork, then_path, base, false, state.share_found)
-        else_reaches_merge -> sema_ownership_path_join(state, fork, else_path, base, false, state.share_found)
-        else -> sema_ownership_path_join(state, fork, base, base, false, state.share_found)
-    }
+    joined: sema_ownership_branch_join(state, fork, then_path, else_path, then_reaches_merge, else_reaches_merge, state.share_found)
     sema_ownership_fork_apply(state, joined)
     sema_ownership_fork_close(state, fork)
     // Only paths that reach the merge count (Rust `merge_paths`).

@@ -22,7 +22,7 @@ use {
         type_name,
     ]
     jet_foundation.[SourceFile, TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
-    jet_sema.[sema_call_site_detail, sema_compiler_identity, sema_comptime_reflection_type_info]
+    jet_sema.[sema_call_site_detail, sema_compiler_call_heard, sema_compiler_identity, sema_comptime_reflection_type_info]
     jet_lexer.[
         Lexed,
         TOKEN_AMP,
@@ -1152,17 +1152,7 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
                     }
                 }
                 name: callee ?? next
-                calls.push(
-                    TComptimeValue.Struct{
-                        type_name: "CompilerCall",
-                        fields: [TComptimeField]{
-                            {name: "caller", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, call.caller_key))},
-                            {name: "callee", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, name))},
-                            {name: "module", value: jet_eval_compiler_services_string(module_row.module_name)},
-                            {name: "span", value: jet_eval_compiler_services_span(call.span, module_row.source_file)},
-                        },
-                    },
-                )
+                calls.push(sema_compiler_call_heard(sema_compiler_identity(registration, call.caller_key), sema_compiler_identity(registration, name), module_row.module_name, call.span, module_row.source_file))
             }
         }
     }

@@ -1,0 +1,38 @@
+// A native app signs one device in for a pair of tokens: a short-lived
+// access token and a refresh token that makes the next pair once. The
+// tokens' display never prints either token. `devices` lists the devices
+// with a live refresh token, latest sign-in or refresh last.
+package: {
+    name: "crypto_auth_device_tokens"
+    authority: { allow: [DB, IO, Rand] }
+}
+
+use auth: core.auth
+
+ACCESS_MS: 60_000
+
+REFRESH_MS: 3_600_000
+
+// What spending `refresh` at `now_ms` gives: the new pair, or why not.
+spent: fn(refresh: String, now_ms: Int) -[DB, Rand]> String {
+    next: auth.tokens_refresh(refresh, now_ms, ACCESS_MS, REFRESH_MS) ?? return "refused: {err}"
+    "{next}"
+}
+
+// What signing `device` in with `password` at `now_ms` gives.
+signed_in: fn(password: String, device: String, now_ms: Int) -[DB, Rand]> String {
+    tokens: auth.tokens_login("ann", password, device, now_ms, ACCESS_MS, REFRESH_MS) ?? return "refused: {err}"
+    "{tokens}"
+}
+
+run: fn() {
+    auth.register_user("ann", "argon2id:demo") ?? panic("register: {err}")
+    phone: auth.tokens_login("ann", "argon2id:demo", "phone", 1_000, ACCESS_MS, REFRESH_MS) ?? panic("phone: {err}")
+    print("phone: {phone}")
+    _: auth.tokens_login("ann", "argon2id:demo", "laptop", 2_000, ACCESS_MS, REFRESH_MS) ?? panic("laptop: {err}")
+    print("devices: {auth.devices("ann", 3_000) ?? panic("devices: {err}")}")
+    print("refresh: {spent(phone.refresh, 4_000)}")
+    print("devices: {auth.devices("ann", 5_000) ?? panic("devices: {err}")}")
+    print("the same refresh again: {spent(phone.refresh, 6_000)}")
+    print("a wrong password: {signed_in("guess", "tablet", 7_000)}")
+}

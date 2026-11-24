@@ -1,0 +1,48 @@
+// Workers whose message isn't Decode, such as one that carries a function,
+// stay in memory: send_durable could never have kept their messages.
+package: {
+    name: "service_workers_in_memory"
+    authority: { allow: [Env, FS, IO, Rand, Time, Time.Wait] }
+}
+
+use {
+    service: core.service
+    time: core.time
+}
+
+Task: struct {
+    label: String,
+    work: fn(Int) -> Int,
+}
+
+double: fn(n: Int) -> Int { n * 2 }
+
+square: fn(n: Int) -> Int { n * n }
+
+apply: fn(task: Task) -> Int { task.work(3) }
+
+// The worker's state counts the tasks it has run.
+tally: fn(count: &Int, task: Task) -> Int {
+    count += 1
+    print("{task.label} is task {count}")
+    task.work(count)
+}
+
+run_all: fn(tasks: [Task]) {
+    loop task in tasks -> print("{task.label}: {task.work(4)}")
+}
+
+run: fn() {
+    tree := service.tree("in-memory")
+    plain: tree.worker("apply", apply, capacity: 8) ?? return
+    counted: tree.worker("tally", tally, state: 0, capacity: 8) ?? return
+    batched: tree.worker("run_all", run_all, batch: 2, wait: 20ms, capacity: 8) ?? return
+    tree.start() ?? return
+
+    print("apply: {tree.call(plain, Task{label: "double", work: double}) ?? 0}")
+    print("tally: {tree.call(counted, Task{label: "square", work: square}) ?? 0}")
+    tree.send(batched, Task{label: "double", work: double}) ?? return
+    tree.send(batched, Task{label: "square", work: square}) ?? return
+    time.sleep(200ms)
+    tree.stop() ?? return
+}

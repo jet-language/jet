@@ -1557,7 +1557,13 @@ class gives it, and its marker rows every marker of `Compiler/Prelude/Markers.je
 and `Compiler/Prelude/Traits.jet`; `Tools/Agent/SyntaxDictionaryRows.jet` and
 `Tools/Agent/OwnedTraitRows.jet` generate those rows, whose `--check` fails when
 they drift, and only their meanings are written by hand, on the row. A generated
-row with no written meaning explains itself plainly (``The marker `#Unsafe`.``).
+row with no written meaning explains itself plainly, and a marker row adds the
+sites its registration row attaches it at (``The marker `#Unsafe`. It attaches
+at: Function, Method, Block, Operation.``). Marker rules, knowledge planes,
+rights and build facts are rows of one registration table, told apart by what
+each attaches to: `jet explain Taint` answers ``attaches to a value.``,
+`jet explain Rights` ``attaches to a scope.`` and `jet explain Build.OS`
+``attaches to the build.``.
 A token can have several position-dependent meanings, examples, consequences,
 and related diagnostic codes. Lookup ignores ASCII case; `--verbose` adds the
 registry name and decision only in text mode. Unknown syntax-like queries
@@ -1719,11 +1725,14 @@ aliases follow the gate registry; scope matches the row's scope, domain, or
 source label case-insensitively (`all` selects every row). Filtering does not
 hide loader, obligation, or package-policy diagnostics.
 
-Human output includes provenance and operation proofs. Groups of at least
+Human output counts each kind, every security kind (unsafe, check removal,
+link override, impure, nondeterministic, grants, flags, trust, `.Force` pins
+and host-fact reads) before the knowledge-plane kinds, and includes provenance
+and operation proofs. Groups of at least
 16 non-security gates collapse to a count; security groups always retain every
 entry. JSON uses the shared `inspect.gates` status envelope, complete byte spans
-and line/column locations, nullable external locations, and alphabetically
-ordered kind counts. These are direct inspection reports, including under
+and line/column locations, nullable external locations, and kind counts in the
+same order. These are direct inspection reports, including under
 `--quiet`. Trust rows project typed records from the actual canonical trust
 store; invocation choices and package/lock facts feed the same ledger before
 its policy checks. No CLI source scan, manifest parser, or invented receipt

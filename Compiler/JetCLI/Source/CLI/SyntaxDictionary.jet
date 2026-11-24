@@ -2,7 +2,7 @@
 // of `lookup`) over SyntaxDictionaryData.jet. Shared with the Jetpack unit:
 // `jetpack explain <token>` answers from the same one table (Rust jetpack used
 // `Syntax.lookup` and `Explain.lookup`).
-use jet_foundation.[DiagnosticExplanation, diagnostic_display_name]
+use jet_foundation.[DiagnosticExplanation, diagnostic_display_name, registration_marker_rule]
 
 // ASCII lowercase (Rust `to_ascii_lowercase`).
 jet_cli_ascii_lower: fn(value: String) -> String Never! {
@@ -67,16 +67,25 @@ jet_cli_syntax_display: fn(row: JetCLISyntaxRow) -> String Never! {
 }
 
 // The plain meaning of a row's kind, which is all a generated row has until
-// prose is written on it.
+// prose is written on it. A marker's plain meaning also names the sites its
+// registration row attaches it at.
 jet_cli_syntax_kind_meaning: fn(row: JetCLISyntaxRow) -> JetCLISyntaxMeaning Never! {
     display: jet_cli_syntax_display(row)
     text: if row.kind == {
-        .Marker -> "The marker `{display}`."
+        .Marker -> "The marker `{display}`.{jet_cli_syntax_marker_sites(row.token)}"
         .Literal -> "The literal `{display}`."
         .Keyword | .Operator | .Sigil | .Type | .Builtin -> "The Jet keyword `{display}`."
     }
     example: if row.kind == JetCLISyntaxKind.Literal -> display else -> "{display} …"
     JetCLISyntaxMeaning{position: "", text: text, example: example, afterwards: "", related_codes: [String]{}}
+}
+
+// The sentence naming where the registration table's marker rule `name`
+// attaches; empty when no rule has that name (a derive marker of
+// Prelude/Traits.jet).
+jet_cli_syntax_marker_sites: fn(name: String) -> String Never! {
+    rule: registration_marker_rule(name) ?? return ""
+    " It attaches at: {rule.sites.join(", ")}."
 }
 
 jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Never! {

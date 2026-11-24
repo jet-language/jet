@@ -28,4 +28,7 @@ run: fn() {
     print("setup done: {ready.is_done()}, runs again: {ready.call(setup)}")
     done.release()
     print("free units: {done.value()}")
+    // `acquire_within` waits at most its limit: the free unit comes at once,
+    // and with none left it gives up once the limit passes.
+    print("within 20ms: {done.acquire_within(20ms)}, then: {done.acquire_within(20ms)}")
 }

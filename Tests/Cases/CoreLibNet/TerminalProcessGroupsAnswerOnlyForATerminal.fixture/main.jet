@@ -11,6 +11,13 @@ answer: fn(fd: sys.Fd) -> String {
     }
 }
 
+hand_over: fn(fd: sys.Fd, group: Int(1..2147483647)) -> String {
+    if fd.set_process_group(group) == {
+        .Ok(_) -> "handed over"
+        .Err(_) -> "refused"
+    }
+}
+
 run: fn() {
     terminal: sys.open_pseudoterminal() ?? panic("pseudoterminal: {err}")
     print(answer(terminal.primary))
@@ -18,8 +25,5 @@ run: fn() {
     ends: sys.open_socket_pair() ?? panic("socket pair: {err}")
     print(answer(ends[0]))
     own: Int(1..2147483647).from_int(sys.getpgrp()) ?? panic("process group out of range")
-    if terminal.primary.set_process_group(own) == {
-        .Ok(_) -> { print("handed over") }
-        .Err(_) -> print("refused")
-    }
+    print(hand_over(terminal.primary, own))
 }

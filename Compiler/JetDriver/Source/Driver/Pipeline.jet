@@ -891,6 +891,16 @@ jet_driver_host_os_key: fn(value: String) -> String Never! {
     ""
 }
 
+// The value a `#build.host.*` read folds to: the running machine's OS as
+// `#build.target.os` spells one (`Linux`), or its architecture (`x86_64`);
+// "" when the host names neither.
+jet_driver_host_fact_value: fn(request: JetDriverCompileRequest, path: String) -> String Never! {
+    if path == "#build.host.arch" -> return request.host_facts.host_arch ?? ""
+    if path != "#build.host.os" -> return ""
+    raw_os: request.host_facts.active_os ?? return ""
+    if target_os_parse(raw_os) == .Val(running) -> target_os_name(running) else -> ""
+}
+
 // The build snapshot sema folds `#package.*` and `build.*` from (Rust
 // `seed_build_facts_from_stamp`). A manifest package names itself; the
 // manifest-less rung uses the entry file stem and version `0.0.0`. The stamp is
@@ -945,6 +955,8 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         stamp_dirty: stamp_dirty,
         stamp_toolchain: toolchain,
         stamp_at: stamp_at,
+        host_os: jet_driver_host_fact_value(request, "#build.host.os"),
+        host_arch: jet_driver_host_fact_value(request, "#build.host.arch"),
         artifact_build: request.artifact_build,
         settings: settings.move(),
         package_settings: package_settings.move(),
@@ -6652,8 +6664,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // consumers below apply values only when they need the resolved graph.
     // The build program's reflection is snapshotted only when a source
     // outside Core spells `program` or `compiler`, the only names its
-    // readers can use.
-    reflect_program: request.capture_build_program && load.spells_program
+    // readers can use, or when the compile's caller reads it itself.
+    reflect_program: request.capture_build_program && (load.spells_program || request.read_build_program)
     doc_pages: request.mode == JetDriverCompileMode.Doc && !capture.stop_before_lowering
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.merge")
     merged: jet_driver_merge_checked_text_functions(checked_graph, registration_graph.module_table, comptime_functions)

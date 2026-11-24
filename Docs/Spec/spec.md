@@ -121,6 +121,35 @@ vocabulary](vocabulary.md).
   is `expand: fn(self, target: Target) { … }` (D-DECL-TYPES1=A,
   D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
+  The block may also hold the marker's call rule,
+  `check: fn(self, call: CompilerCall) { … }` (D-CORE-CHECK1=A). While the
+  compiler checks a program it runs the rule at each call of a function or
+  method that carries the marker, and at each method call on a type that
+  carries it, a call of a member the type lacks included. `call` is a
+  CompilerCall: its written `name` (a CompilerName), its `args` in written
+  order and its `receiver`, each a CompilerArg with its `label`, `type` (a
+  TypeId; `_` when the argument's own check fails), `value`, the
+  `function` it names (None) and its `span`. `value` is the Dyn the
+  argument's `encode()` returns when the build knows the argument (a
+  literal or a constant, a struct, enum case or list literal of known
+  parts): a Bool, an Int or fixed-width integer, a Float or F32, a Char or
+  a String, a list of these, and a struct or enum whose Encode is the
+  derived one with no codec option, its fields plain values and its cases
+  without payload or with one value. Any other argument's `value` is None
+  (an optional field, a byte list, a generic type, a written codec, a
+  value only the run knows). The call's `span` runs from its name to its
+  last argument.
+  `reject(finding, at: part)` ends the rule
+  with a value whose type implements `Diagnostic`, raised at `part`'s span:
+  the call, `call.name` or one argument, the call when `at:` is not written.
+  An `.Error` finding rejects the call, and the rejection replaces the
+  call's own errors; a `.Tidy` finding is a lint and a `.Report` finding
+  reports nothing, and neither rejects the call. A call the rule lets
+  through keeps its own checks. The calls one rule hears in a pass run as
+  one batch, so a rule costs one evaluation per pass plus its body per
+  call. Rules run with one meaning under `jet check`, `jet run` and
+  `jet build` at every tier. A `check`
+  whose signature differs is E0907, a second one E0105.
   `expand` runs at each site its `sites` names, and `target` is the record a
   derive reads there: a struct's or enum's TypeInfo, a field's FieldInfo, an
   enum case's CaseInfo, a method's MethodInfo, a function's FunctionInfo, an impl's
@@ -1357,6 +1386,18 @@ closed set, so an `else` arm is E0641. The subject must be `#build.target.os`
 (E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants, each named once
 (E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
 
+`#build.target.*` always names the machine the build is for. The machine
+running the build is `#build.host.os` (`Linux`, `MacOS` or `Windows`) and
+`#build.host.arch` (`x86_64`, `aarch64`), read the same way by a `#run` value,
+a `build: fn` and a build action's arguments; a Linux x86-64 web build reads
+`Linux`, `x86_64` and `Web`. A Core call made while building acts on the
+machine running it: `sys.name()` in a `#run` value answers the build machine's
+OS and `files.list_dir` reads its disk. Build outputs (`b.add_executable`,
+`b.add_install`, `b.action` outputs) follow the target, and Core never reads
+`#build.host.*` (E0302). The host facts enter the package's cache key, so a
+build on another machine never reuses a prepared value
+(D-BUILD-TOOLCHAIN1).
+
 Inside an `@` binding, `embed_file`, `embed_bytes`, and `find` are the only
 sanctioned build-time file operations. Their path, hash, and purity rules are
 defined in the compile-time section above.
@@ -1578,6 +1619,30 @@ size_of: fn<N: Int>(packet: Packet<N>) -> Int { N }
 
 Only `Int` makes a number parameter; any other bound declares a type
 parameter.
+
+The number types are such instances (D-CORE-NUMFAMILY1). The prelude
+declares each number family once: `Signed<bits>` and `Unsigned<bits>` for
+whole numbers, `IEEE<exponent, fraction>` for binary floats. A family has
+only its standard sizes, each with a familiar name: `Signed<8>` through
+`Signed<64>` are `I8` through `I64`, `Unsigned<8>` through `Unsigned<64>`
+are `U8` through `U64`, `IEEE<8, 23>` is `F32` and `IEEE<11, 52>` is `F64`,
+which is `Float`. A size and its name are one type, and reports use the
+name: a mismatch with `Unsigned<8>` says `U8`. Any other size, such as
+`Unsigned<24>`, is E0314; a narrower set of values is a range type such as
+`Int(0..127)`. The family names resolve like any other name: a program that
+declares or imports its own `Signed` means its own type wherever it writes
+`Signed<8>`. The size names are the prelude's aliases (`U8: Unsigned<8>`),
+so they too give way to a file's own binding: a file that declares or
+imports a `U8`, or names a type parameter `U8`, means that type by `U8`. A
+program's own alias of a size (`Byte: Unsigned<8>`) is that size, with its
+constants, statics and literal: `Byte.MAX`, `Byte{7}`.
+
+An impl of a family is that family's one definition for every size:
+`impl Signed.Roundable { … }` is the impl of `I8` through `I64`, and
+`impl IEEE.Roundable { … }` that of `F32` and `Float`. Inside it, `Self` is
+each size in turn, so `-> Self` returns an `I16` from the `I16` impl and
+`Self{x}` makes one. A program that declares or imports its own `Signed`
+implements its own type by `impl Signed.…`.
 
 ## Closures and function values
 
@@ -3507,7 +3572,8 @@ Every deliberate gate uses the same organization → package → module →
 function → block tightening ladder. The policy keys are `unsafe`, `impure`,
 `nondeterministic`, `dependency_grant`, `build_flag`, `session_flag`,
 `trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`, `state_transition`,
-`precision_demotion`, `structure`, `lint_allow`, `check_removal`, and `link_override`. The first three retain
+`precision_demotion`, `structure`, `lint_allow`, `check_removal`, `link_override`,
+and `host_facts`. The first three retain
 their existing modes; every added key accepts `.GateOnly` (the default) or
 `.Forbid`. An organization's `.Forbid` cannot be widened by a package
 `.GateOnly` or a command-line allowance. Refusal reports the gate kind, its
@@ -3532,6 +3598,16 @@ before their writer publishes state; invocation choices are checked before
 dispatch. An ordinary deliberate `jet update jet` is not a forced pin.
 See [`Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet`](../../Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet).
 (D-GATE-LAW1=A)
+
+Each `#build.host.os` or `#build.host.arch` read is a `host_facts` gate at the
+reading expression: `jet inspect gates` lists it, and a package or
+organization `policy: { host_facts: .Forbid }` refuses it with E3415 at its
+line, so a package can keep its build from depending on the machine running
+it. `jet build` of a package also records each read in
+`.jet/build/receipt.json` (`host_reads`: the source, its line, the fact and
+the value read) and adds `host:<fact>=<value>` to the reading source's check
+node, so the receipt of a build on another machine names other keys
+(D-BUILD-TOOLCHAIN1).
 
 
 ### Explicit pointer casts
@@ -6584,7 +6660,10 @@ projection adds a row rather than a new subcommand or mechanism-specific flag
 
 ## Semantic index and codemods
 
-`jet inspect semindex --json <file.jet>` emits semantic-index schema v20:
+`jet inspect semindex --json <file.jet>` emits the semantic-index document whose
+current version, fact shape and version history
+[Semantic index: current version and fact shape](Reference/semantic-index.md)
+records:
 definitions, references, call edges, effects, member facts, and typed package
 and workspace-overlay facts. Member facts unify fields, variants, inline
 methods, external inherent methods, trait methods, and trait requirements under
@@ -6810,7 +6889,7 @@ handed text's imports among the sources the calling compile holds under its
 root (`jet inspect compiler check <file>`: the sources `jet check <file>`
 holds); it never rereads them from disk. Semantic facts reuse the existing
 index schema: the `semantic_index` that `check` returns carries the
-semantic-index `schema_version` (20, see Semantic index and codemods), not the
+semantic-index `schema_version` ([Reference/semantic-index.md](Reference/semantic-index.md)), not the
 envelope's 1. The API does not return
 `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state, or sema
 internals, and modified syntax cannot be fed back into compilation

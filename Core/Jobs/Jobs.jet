@@ -1117,7 +1117,7 @@ QUEUE_CREATE_FORMAT: "CREATE TABLE jet_job_queue_format (version INTEGER NOT NUL
 
 // The format version of the queue a database holds: its format table's, 1
 // for queue tables without one, or 0 when the database holds no queue yet.
-queue_format_version: fn(driver: &db.DBDriver) -[DB]> Int ServiceError! {
+priv queue_format_version: fn(driver: &db.DBDriver) -[DB]> Int ServiceError! {
     tables: queue_query(driver, "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jet_job_queue_format', 'jet_job_queue_jobs')", [DBValue]{}, "format") ?? return Err(err)
     names := [String]{}
     loop row in tables { names.push(queue_row_text(row, "name") ?? return Err(err)) }

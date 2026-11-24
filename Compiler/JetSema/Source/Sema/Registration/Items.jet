@@ -871,6 +871,11 @@ SemaBuildFacts: struct {
     stamp_dirty: Bool,
     stamp_toolchain: String,
     stamp_at: String,
+    // The machine running the build (`#build.host.os`, `#build.host.arch`):
+    // its OS as `#build.target.os` spells one, and its architecture as a
+    // triple's first part; "" when the host names none.
+    host_os: String{""},
+    host_arch: String{""},
     // This compile produces a shipped artifact (`jet build`).
     artifact_build: Bool{false},
     // The built package's declared settings with this build's values
@@ -3344,9 +3349,12 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
 // The registration rules of the Rust
 // reference's `register_distinct` and `register_type_alias`. A distinct
 // built on a distinct declared earlier (E0129) and an alias without type
-// parameters (E0324) are not registered, unless the alias names a record
-// type (`Bounds: {min: Int, max: Int}`); a range constraint on a base other
-// than `Int` is reported and the type still registers.
+// parameters over a plain type (E0324) are not registered. An alias without
+// type parameters stands when it names a record type (`Bounds: {min: Int,
+// max: Int}`) or one application of a generic type (`Ids: Set<Int>`,
+// `Totals: [Int: Float]`, `Byte: Unsigned<8>`): it still only shortens a
+// generic spelling. A range constraint on a base other than `Int` is
+// reported and the type still registers.
 sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item: Item, diagnostics: &[Diagnostic]) -> Bool {
     if item == {
         .Distinct(definition) -> {
@@ -3365,12 +3373,12 @@ sema_registration_value_type_rules: fn(module_row: SemaRegistrationModule, item:
             }
         }
         .TypeAlias(definition) -> {
-            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) {
+            if definition.type_params.len() == 0 && !(definition.target == .Named(_)) && !sema_registration_record_type(definition.target) && !sema_registration_generic_application(definition.target) {
                 if sema_casing_alias_number_zero(definition) == .Val(zero) {
                     diagnostics.push(sema_casing_alias_number_diagnostic(definition, zero))
                     return false
                 }
-                diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `Name<T>: …`", "a transparent type alias is only for shortening generic spellings", "for a distinct type name over a primitive, use `Name: distinct BaseType` instead"))
+                diagnostics.push(sema_error("E0324", definition.name_span, "a type alias of a plain type needs type parameters — write `Name<T>: …`", "a transparent type alias is only for shortening generic spellings, so one without type parameters names a generic application such as `Set<Int>`", "for a distinct type name over a primitive, use `Name: distinct BaseType` instead"))
                 return false
             }
         }
@@ -3390,6 +3398,16 @@ sema_registration_record_type: fn(target: Type) -> Bool Never! {
         return true
     }
     false
+}
+
+// Whether `target` applies a generic type to its arguments: `Box<Int>`,
+// `Set<Int>`, `Int?`, `T E!`, `[T]`, `[T#4]`, `[K: V]` or `@T`.
+sema_registration_generic_application: fn(target: Type) -> Bool Never! {
+    if target == {
+        .Apply(_, args) -> args.len() > 0
+        .Option(_) | .Result(_, _) | .Shared(_) | .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    }
 }
 
 // Indexed reads keep each candidate row in place; a two-name walk over the
@@ -3968,6 +3986,9 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     // Root `#loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(module_row.program.items, owned.loop_values.move(), owned.loop_values_pending, diagnostics)
+    // A number family's impl becomes one impl per standard size, after the
+    // root `#loop`s so a family impl one generates expands too.
+    module_row.program.items = sema_derive_expand_family_impls(module_row.program.items.move(), module_row.program.imports, diagnostics)
     // Each `protocol` becomes its generated `.Client`/`.Server` handle types
     // and transition methods before any declaration is registered.
     sema_protocols_expand(module_row.program.items, diagnostics)
@@ -7031,7 +7052,7 @@ sema_registration_lookup_qualified: fn(graph: SemaRegistrationGraph, module_iden
                 if binding.local != alias || binding.symbol.kind != SymbolKind.Import -> next
                 core_index: binding.target_module_index ?? next
                 resolved: sema_registration_resolve_export(graph, core_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
-                return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: resolved.symbol}, source_module_identity: resolved.source_module_identity, target_module_identity: graph.modules[core_index].module_identity, visibility: resolved.visibility})
+                return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, resolved)}, source_module_identity: resolved.source_module_identity, target_module_identity: graph.modules[core_index].module_identity, visibility: resolved.visibility})
             }
         }
         if import.declaration.alias != alias || sema_registration_file_import_taken_over(module_row, import) {
@@ -7039,7 +7060,7 @@ sema_registration_lookup_qualified: fn(graph: SemaRegistrationGraph, module_iden
         }
         target_index: sema_registration_module_index(graph, import.target_module_identity) ?? return None
         resolved: sema_registration_resolve_export(graph, target_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
-        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: resolved.symbol}, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})
+        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: sema_registration_export_symbol(graph, resolved)}, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})
     }
     None
 }

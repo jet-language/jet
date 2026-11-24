@@ -1582,14 +1582,14 @@ browser_id: fn(value: Dyn) -> Int? Never! {
 // Whether `value` replies to a command whose id is below `current`: commands
 // go one at a time with rising ids (browser_next_id), so such a reply
 // answers one whose deadline passed before its reply came, and is dropped.
-browser_late_reply: fn(value: Dyn, current: Int) -> Bool Never! {
+priv browser_late_reply: fn(value: Dyn, current: Int) -> Bool Never! {
     got: browser_id(value) ?? return false
     got < current
 }
 
 // The id the next command takes; every reply below it is late
 // (browser_late_reply) while no command waits.
-browser_peek_id: fn(browser: Browser) -> Int Never! {
+priv browser_peek_id: fn(browser: Browser) -> Int Never! {
     guard: browser.__state.guard_read()
     guard.value.next_id
 }

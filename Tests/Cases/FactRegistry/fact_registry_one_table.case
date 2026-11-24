@@ -1,0 +1,27 @@
+# One registration table (D-META-REG1=A): marker rules, knowledge planes,
+# rights and build facts are rows of one table, told apart by what each
+# attaches to. `jet explain` answers every kind from its row: a marker rule
+# at its sites, a plane on a value, a right on a scope, a build fact on the
+# build; the schema store lists the marker rows of the same table.
+env: NO_COLOR=1
+step marker: jet explain Scrub
+exit: 0
+stdout: ~ "The marker `#Scrub`. It attaches at: Function, Method." # a marker rule attaches at its row's sites
+stderr: empty
+step plane: jet explain Taint
+exit: 0
+stdout: ~ "attaches to a value." # a knowledge plane attaches to a value
+stderr: empty
+step right: jet explain Rights
+exit: 0
+stdout: ~ "attaches to a scope." # a right attaches to a scope
+stderr: empty
+step build: jet explain Build.OS
+exit: 0
+stdout: ~ "attaches to the build." # a build fact attaches to the build
+stderr: empty
+step schema: jet inspect facts --store=schema --kind=marker
+exit: 0
+stdout: ~ " facts, complete" # the schema store answers from the same table
+stdout: ~ "Scrub" # the marker row the explain step read
+stderr: empty

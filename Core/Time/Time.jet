@@ -1617,7 +1617,7 @@ civil_round: fn(value: Int, unit: String, increment: Int, mode: String) -> Int N
 // does after, so `trunc` drops the smaller fields (23:59:59 truncates to
 // 23:59:00) and the half modes pick the nearer boundary. The offset into the
 // quantum is never negative, so the signed rounding sees a positive value.
-civil_round_instant: fn(value: Int, unit: String, increment: Int, mode: String) -> Int Never! {
+priv civil_round_instant: fn(value: Int, unit: String, increment: Int, mode: String) -> Int Never! {
     if increment <= 0 -> return value
     size: civil_unit_ns(unit) ?? return value
     quantum: size * increment

@@ -2,7 +2,7 @@
 // against the Jet registries that replaced the Rust ones.
 use {
     registry_coverage_files: core.files
-    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, JET_BUILD_OPTIONS, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, TARGET_CAPABILITY_ALL, TARGET_OS_ALL, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, fact_source_read, jet_target_capability_name, jet_target_machine_hosted, jet_target_provider_facts_json, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read, target_os_key, target_os_name, target_os_named]
+    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, FACT_SOURCE, JET_BUILD_OPTIONS, MARKER_SOURCE, REGISTRATION_TABLE, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, TARGET_CAPABILITY_ALL, TARGET_OS_ALL, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, fact_source_read, jet_target_capability_name, jet_target_machine_hosted, jet_target_provider_facts_json, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read, registration_fact_rows, registration_marker_rules, registration_read, target_os_key, target_os_name, target_os_named]
 }
 
 registry_coverage_is_snake_case: fn(name: String) -> Bool Never! {
@@ -164,40 +164,58 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
 // decided, and it stays a minority.
 #Test("repeatable_rows_are_declared_not_assumed") {
     repeatable := [String]{}
-    loop rule in marker_source_read(MARKER_SOURCE) {
+    loop rule in registration_marker_rules() {
         if rule.repeatable -> repeatable.push(rule.name)
     }
     assert_eq(repeatable.join(" "), "Pre Post Waive Allow")
 }
 
-// The registration rows hold every kind: written-code marker
-// rows, value planes, scope rights, build facts, corpus truths and diagnostic
-// rows; each marker row is one declaration with at least one site.
+// The one registration table holds every kind, told apart by attachment:
+// marker rules at their sites, value planes, scope rights and build facts;
+// beside it sit the corpus truths and the diagnostic rows. Each name is one
+// row, each marker row has at least one site, each row's payload is its
+// kind's next side-column entry, and the table is what its reader gives for
+// the two Prelude texts read now.
 #Test("the_one_table_holds_every_kind") {
-    rules: marker_source_read(MARKER_SOURCE)
-    assert(rules.len() > 0, "the one table holds no Marker row")
-    names := [String]{}
-    loop rule in rules {
-        assert(!registry_coverage_has(names, rule.name), "`#{rule.name}` is declared twice")
-        names.push(rule.name)
-        assert(rule.sites.len() > 0, "`#{rule.name}` targets no written code")
-    }
+    table: REGISTRATION_TABLE
+    assert_eq(table.kinds.len(), table.payloads.len())
+    assert_eq(table.kinds.len(), table.markers.len() + table.facts.len())
+    markers := 0
     values := 0
     scopes := 0
     builds := 0
-    fact_names := [String]{}
-    loop row in REGISTRATION_FACT_ROWS {
-        assert(!registry_coverage_has(fact_names, row.name), "fact `{row.name}` is registered twice")
-        fact_names.push(row.name)
-        if row.target == {
-            .Value -> { values += 1 }
-            .Scope -> { scopes += 1 }
-            .Build -> builds += 1
+    names := [String]{}
+    loop index in 0..<table.kinds.len() {
+        payload: table.payloads[index]
+        name: if table.kinds[index] == {
+            .Marker -> {
+                assert_eq(payload, markers)
+                markers += 1
+                rule: table.markers[payload]
+                assert(rule.sites.len() > 0, "`#{rule.name}` targets no written code")
+                rule.name
+            }
+            .Fact -> {
+                assert_eq(payload, values + scopes + builds)
+                fact: table.facts[payload]
+                if fact.target == {
+                    .Value -> { values += 1 }
+                    .Scope -> { scopes += 1 }
+                    .Build -> builds += 1
+                }
+                fact.name
+            }
         }
+        assert(!registry_coverage_has(names, name), "`{name}` is registered twice")
+        names.push(name)
     }
+    assert(markers > 0, "the one table holds no Marker row")
     assert(values > 0, "the one table holds no Plane row")
     assert(scopes > 0, "the one table holds no Right row")
     assert(builds > 0, "the one table holds no Fact row")
+    assert_eq(registration_read(MARKER_SOURCE, FACT_SOURCE).kinds.len(), table.kinds.len())
+    assert_eq(registration_marker_rules().len(), marker_source_read(MARKER_SOURCE).len())
+    assert_eq(registration_fact_rows().len(), table.facts.len())
     assert(REGISTRATION_TRUTH_ROWS.len() > 0, "the one table holds no Truth row")
     assert(diagnostic_registry_rows().len() > 0, "the one table holds no Diagnostic row")
 }
@@ -207,7 +225,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
 // row is read-only.
 #Test("every_row_states_the_one_way_law") {
     violations := [String]{}
-    loop row in REGISTRATION_FACT_ROWS {
+    loop row in registration_fact_rows() {
         if !registry_coverage_has(["gain", "shrink", "discharge", "none"], row.safe_direction) {
             violations.push("{row.name} states no safe direction (`{row.safe_direction}`)")
         }
@@ -258,7 +276,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
 #Test("a_prover_publishes_read_only_rows") {
     loop name in ["Sendability", "ViewProvenance", "Movedness"] {
         found := false
-        loop row in REGISTRATION_FACT_ROWS {
+        loop row in registration_fact_rows() {
             if row.name != name -> next
             found = true
             assert((row.published_by ?? "") == "ownership", "`{name}` names no prover")
@@ -275,7 +293,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
     loop name in
         ["Sendability", "Attribution", "Origin", "ViewProvenance", "UnitScaleProvenance", "Maturity"] {
         homes := 0
-        loop row in REGISTRATION_FACT_ROWS {
+        loop row in registration_fact_rows() {
             if row.name != name -> next
             homes += 1
             assert(row.target == RegistrationFactTarget.Value, "`{name}` attaches to a value")
@@ -283,7 +301,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
         assert(homes == 1, "`{name}` must have one registry home")
     }
     loop engine_fact in ["Uninit", "Exhaustiveness"] {
-        loop row in REGISTRATION_FACT_ROWS {
+        loop row in registration_fact_rows() {
             assert(row.name != engine_fact, "`{engine_fact}` is prover state, not a registered user fact plane")
         }
     }
@@ -298,11 +316,12 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
 #Test("every_registered_plane_is_reflectable") {
     violations := [String]{}
     planes := 0
-    loop row in REGISTRATION_FACT_ROWS {
+    facts: registration_fact_rows()
+    loop row in facts {
         if row.target != RegistrationFactTarget.Value -> next
         planes += 1
         homes := 0
-        loop other in REGISTRATION_FACT_ROWS {
+        loop other in facts {
             if other.name == row.name -> homes += 1
         }
         if homes != 1 -> violations.push("plane `{row.name}` has {homes} homes")
@@ -401,7 +420,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
     }
     assert_eq(cases, 16)
     registered := [String]{}
-    loop row in REGISTRATION_FACT_ROWS {
+    loop row in registration_fact_rows() {
         if row.target == RegistrationFactTarget.Build && registry_coverage_has(row.gates, "provider") {
             registered.push(row.name)
         }
@@ -445,14 +464,14 @@ registry_coverage_block_names: fn(text: String, head: String) -> [String] {
     loop constant in registry_coverage_block_names(prelude, "Fact: trait {{") {
         assert(plane.contains("\n        {constant}: "), "the probe plane sets no `{constant}`")
     }
-    rows: fact_source_read(plane)
+    rows: fact_source_read(plane, registration_marker_rules())
     assert_eq(rows[0].name, "Probe.Plane")
     assert_eq(rows[0].gates.len(), gates.len())
     assert_eq(rows[0].published_by ?? "", "probe")
     loop target in registry_coverage_block_names(prelude, "FactTarget: enum {{") {
-        _: fact_source_read(plane.replace("holds: .Value", "holds: .{target}"))
+        _: fact_source_read(plane.replace("holds: .Value", "holds: .{target}"), registration_marker_rules())
     }
     loop direction in registry_coverage_block_names(prelude, "FactDirection: enum {{") {
-        _: fact_source_read(plane.replace("safe: .Gain", "safe: .{direction}"))
+        _: fact_source_read(plane.replace("safe: .Gain", "safe: .{direction}"), registration_marker_rules())
     }
 }

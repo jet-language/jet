@@ -139,6 +139,9 @@ run: fn() {
     loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
     // Glyph shaping is the font battery's provider capability, not Core's.
     print("capability FontShaping: {font.shaping_available()}")
+    // A capability asked by its provider code: Core's own are numbered in
+    // UICapability order, so 0 is the file dialog.
+    print("capability by code 0: {host.provider_capability(0)}")
     metadata: host.accessibility("Surface", "Portable UI surface")
     if clipboard.read_text() == {
         .Ok(read) -> { print("clipboard read: {read.text}") }

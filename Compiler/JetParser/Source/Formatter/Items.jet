@@ -2292,7 +2292,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
         jfmt_fmt_marker_line(f, body.markers[member.index])
     } else if member.kind == JFMT_MEMBER_MARKER_IMPL {
         declaration: body.marker ?? return
-        jfmt_fmt_marker_impl(f, declaration, body.trait_impls, member.start, body.marker_expand_span)
+        jfmt_fmt_marker_impl(f, declaration, body.trait_impls, body.methods, member.start, body.marker_expand_span)
     } else if member.kind == JFMT_MEMBER_EFFECT_IMPL {
         declared: body.effect_impl ?? return
         jfmt_fmt_effect_impl(f, declared)
@@ -2300,12 +2300,12 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
 }
 
 // `impl Marker { … }`: the settings stack on adjacent lines with the group,
-// and the `expand` template is set off by a blank line. The struct prints the
-// fields, so only the `$` settings of the declaration print here, without
-// their sigil. A setting written twice keeps both rows: sema reports the
-// second (E0937), and the declaration holds only the first, so the second
-// comes from the block's generated `Marker` impl.
-jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplBlock], start: Int, expand: Span?) {
+// and the `expand` template and the `check` rule are each set off by a blank
+// line. The struct prints the fields, so only the `$` settings of the
+// declaration print here, without their sigil. A setting written twice keeps
+// both rows: sema reports the second (E0937), and the declaration holds only
+// the first, so the second comes from the block's generated `Marker` impl.
+jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplBlock], methods: [Func], start: Int, expand: Span?) {
     jfmt_emit_leading(f, start)
     settings := [MarkerDeclParam]{}
     loop param in declaration.params {
@@ -2327,7 +2327,11 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplB
             settings.insert(at, MarkerDeclParam{name: "${constant.name}", name_span: constant.name_span, ty: None, value: Val(constant.value.copy()), variadic: false})
         }
     }
-    if settings.len() == 0 && declaration.group == None && declaration.body == None {
+    check := Int?{None}
+    loop (index, method) in methods {
+        if method.marker_check -> check = Val(index)
+    }
+    if settings.len() == 0 && declaration.group == None && declaration.body == None && check == None {
         jfmt_write(f, "impl Marker {{}}")
         return
     }
@@ -2360,9 +2364,36 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplB
             jfmt_newline(f)
         }
         jfmt_fmt_marker_template(f, declaration, expand)
+        rows += 1
+    }
+    if check == .Val(index) {
+        if rows > 0 {
+            jfmt_newline(f)
+            jfmt_newline(f)
+        }
+        jfmt_fmt_marker_check(f, methods[index])
     }
     f.indent -= 1
     jfmt_end_block(f)
+}
+
+// A marker's `check` rule as written: the struct method
+// parser_parse_marker_check made, without the result and the closing `None`
+// the parser gave it.
+jfmt_fmt_marker_check: fn(f: &JetFmt, method: Func) {
+    jfmt_emit_leading(f, method.span.start)
+    jfmt_write(f, "check: fn(")
+    param_source: jfmt_source_list_span_after(f, method.name_span.end, JFMT_DELIM_PAREN)
+    jfmt_fmt_param_list(f, method.params, param_source)
+    jfmt_write(f, ") {{")
+    written: method.body.len() - 1
+    if written <= 0 && jfmt_empty_body_inline(f, method.span) {
+        jfmt_write(f, "}}")
+        return
+    }
+    saved_tail: jfmt_value_tail_begin(f, [Stmt]{})
+    jfmt_fmt_body(f, method.body[0..<written])
+    f.value_tail_at = saved_tail
 }
 
 // `impl Trait.Derive { expand: fn(target: Target) { … } }`: the block holds
@@ -2479,7 +2510,9 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
         if s.trait_impls[index].compiler_generated -> next
         members.push(JetFmtMember{kind: JFMT_MEMBER_TRAIT_IMPL, index: index, start: s.trait_impls[index].trait_span.start})
     }
+    // A marker's `check` rule prints in its `impl Marker` block.
     loop index in 0..<s.methods.len() {
+        if s.methods[index].marker_check -> next
         members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: s.methods[index].span.start})
     }
     // (card #506): `validate { … }` is one more body member,

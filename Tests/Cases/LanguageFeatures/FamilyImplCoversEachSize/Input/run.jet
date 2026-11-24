@@ -1,0 +1,30 @@
+// One impl of a number family is the impl of each of its sizes: inside it
+// `Self` is the size, so `-> Self` returns that size and `Self{1}` makes one.
+// A program's alias of a size (`Byte`) takes the size's impl.
+Byte: Unsigned<8>
+
+Twice: trait {
+    twice: fn(self) -> Self Never!,
+}
+
+impl Signed.Twice {
+    twice: fn(self) -> Self Never! { self + self }
+}
+
+impl Unsigned.Twice {
+    twice: fn(self) -> Self Never! { self + self + Self{1} }
+}
+
+impl IEEE.Twice {
+    twice: fn(self) -> Self Never! { Self{Float{self} * 2.0} }
+}
+
+run: fn() {
+    small: I8{3}.twice()
+    print(Int{small})
+    print(I64{-5}.twice())
+    print(U16{4}.twice())
+    print(Byte{9}.twice())
+    print(F32{1.25}.twice() == F32{2.5})
+    print(Float{0.75}.twice())
+}

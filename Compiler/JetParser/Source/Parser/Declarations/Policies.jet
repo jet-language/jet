@@ -218,7 +218,7 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
             // keys; no policy name parses to either.
             .Arithmetic | .Runtime -> panic("policy_key_parse never names a body-policy key")
             .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
-            .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride -> {
+            .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> {
                 parser_add_error_code(state, "E0355", name_span, "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`")
                 return None
             }

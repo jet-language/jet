@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, CompilerThreads, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, CompilerThreads, Diagnostic, EFFECT_VOCABULARY_ROOTS, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_is_core, module_none, owned_trait, registration_marker_rule, registration_marker_rules, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -590,7 +590,7 @@ SEMA_PRELUDE_MARKER_REGISTRY: #run sema_marker_module_canonical_registry()
 
 sema_marker_module_canonical_applied_catalog: fn() -> TAppliedRuleCatalog? {
     argument_menus: foundation_core_argument_menus(EFFECT_VOCABULARY_ROOTS) ?? return None
-    sema_marker_rules_build_catalog(SEMA_PRELUDE_MARKER_RULES, argument_menus)
+    sema_marker_rules_build_catalog(registration_marker_rules(), argument_menus)
 }
 
 sema_marker_module_canonical_registry: fn() -> SemaScopeMembersMarkerRegistry? {
@@ -627,11 +627,12 @@ sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TApplied
     foundation_core_argument_menus(effect_roots)
 }
 
-// The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
+// The prelude's applied-rule catalog (the registration table's marker rows)
+// with its argument menus.
 sema_marker_module_applied_catalog: fn(graph: SemaRegistrationGraph) -> TAppliedRuleCatalog? {
     if sema_marker_module_effect_roots_are_canonical(graph) -> return SEMA_PRELUDE_APPLIED_CATALOG
     argument_menus: sema_marker_module_argument_menus(graph) ?? return None
-    sema_marker_rules_build_catalog(SEMA_PRELUDE_MARKER_RULES, argument_menus)
+    sema_marker_rules_build_catalog(registration_marker_rules(), argument_menus)
 }
 
 // The registry of the builtin applied rules alone, without source-declared markers.
@@ -951,14 +952,6 @@ sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegist
     }
 }
 
-// The prelude's applied-rule rows (Rust `Policy.applied_rule`) of the marker
-// declarations `declarations`. SEMA_PRELUDE_MARKER_RULES (PreludeRows.jet) is
-// what this returns for SEMA_PRELUDE_MARKER_DECLS, written by
-// Compiler/Toolchain/PreludeRows.
-sema_marker_module_prelude_rules: fn(declarations: [MarkerDecl]) -> [TAppliedRule] {
-    sema_marker_rules_catalog_rows(declarations, MARKER_SOURCE) ?? panic("Prelude/Markers.jet declares a marker with no applied-rule row, or one name twice")
-}
-
 // The marker declarations of the one marker vocabulary source.
 // SEMA_PRELUDE_MARKER_DECLS (PreludeRows.jet) is what this returns, written by
 // Compiler/Toolchain/PreludeRows, so neither a compile nor the compiler's build
@@ -1006,11 +999,11 @@ sema_marker_module_prelude_declaration: fn(name: String) -> MarkerDecl? {
 // bare flag word (`published` for `published: true`) are read as written, so
 // the first argument of such a marker stages no compile-time value. A marker
 // no applied rule names keeps its first argument.
-sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: Marker) -> Bool {
+sema_marker_module_first_argument_evaluates: fn(marker: Marker) -> Bool {
     if marker.declaration_module != None -> return true
-    index: sema_marker_rules_catalog_rule_index(rules, marker.name) ?? return true
+    rule: registration_marker_rule(marker.name) ?? return true
     argument: sema_marker_rules_marker_expression(marker, 0) ?? return true
-    bindings: sema_marker_rules_marker_signature_bindings(marker, rules[index].signature) ?? return true
+    bindings: sema_marker_rules_marker_signature_bindings(marker, rule.signature) ?? return true
     loop binding in bindings {
         if binding.source_index != 0 -> next
         if binding.kind == {
@@ -1021,7 +1014,7 @@ sema_marker_module_first_argument_evaluates: fn(rules: [TAppliedRule], marker: M
                 return true
             }
             .StringOrMenu -> return !sema_marker_rules_names_menu_word(argument)
-            .Bool -> return !sema_marker_rules_bare_flag(argument, binding.parameter_index, rules[index].signature)
+            .Bool -> return !sema_marker_rules_bare_flag(argument, binding.parameter_index, rule.signature)
             .String | .Path | .Int | .DurationOrInstant -> return true
         }
     }

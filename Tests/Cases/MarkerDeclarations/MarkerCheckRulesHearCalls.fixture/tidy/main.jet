@@ -1,0 +1,27 @@
+// A `.Tidy` rejection is a lint: the call is kept and the program runs.
+Shouting: struct {
+    impl Diagnostic {
+        code: "voice.Shouting",
+        tier: .Tidy,
+
+        what: fn(self) -> String { "this call shouts" }
+
+        why: fn(self) -> String { "the voice rule prefers `say`" }
+
+        fix: fn(self) -> String { "call `say` instead" }
+    }
+}
+
+Loud: struct {
+    impl Marker {
+        sites: [.Function],
+
+        check: fn(self, call: CompilerCall) {
+            reject(Shouting{}, at: call.name)
+        }
+    }
+}
+
+#Loud shout: fn(text: String) { print(text.to_upper()) }
+
+run: fn() { shout("hi") }

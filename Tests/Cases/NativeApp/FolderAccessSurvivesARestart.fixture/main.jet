@@ -16,14 +16,20 @@ run: fn() -[Env, FS, IO, Net, Time]> {
     picked: app.open_folder()
     if picked == .Val(folder) {
         print("picked: {folder.name}")
-        folder.keep("exports")
-        folder.write("board.csv", "title,status\nFix the gate,done\n".bytes()) ?? return print("unwritten: {err}")
-        print("wrote board.csv")
-        list(folder)
+        export(folder)
         return
     }
     print("picked: none")
     loop notice in app.notices() -> print("notice: {notice.text}")
+}
+
+// Keeps access to the chosen `folder` as "exports", writes the board there
+// and lists it.
+export: fn(folder: app.PickedFolder) -[Env, FS, IO, Net, Time]> {
+    folder.keep("exports")
+    folder.write("board.csv", "title,status\nFix the gate,done\n".bytes()) ?? return print("unwritten: {err}")
+    print("wrote board.csv")
+    list(folder)
 }
 
 // The files in `folder`, by name, with their sizes.

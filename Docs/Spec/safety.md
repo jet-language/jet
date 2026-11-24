@@ -237,14 +237,14 @@ file in a `Tests/` tree. The ratchet refuses either.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1651,
+  "total": 1652,
   "counts": {
     "Compiler": 806,
     "Core": 179,
     "Docs": 18,
     "Examples": 45,
     "Jetpack": 8,
-    "Tests": 567,
+    "Tests": 568,
     "Tools": 28
   },
   "regions": [
@@ -7937,7 +7937,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Tests",
       "file": "Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet",
-      "line": 104,
+      "line": 107,
       "column": 5,
       "reason": "the reuser's kept blocks were claimed from its region, which unmaps them all"
     },
@@ -8283,6 +8283,13 @@ file in a `Tests/` tree. The ratchet refuses either.
       "line": 2,
       "column": 5,
       "reason": "test unsafe reason"
+    },
+    {
+      "package": "Tests",
+      "file": "Tests/Cases/GateLedger/InspectGatesCountsEachKindSecurityFirst.fixture/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "count the unsafe region"
     },
     {
       "package": "Tests",
@@ -11818,9 +11825,9 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Docs | 18 |
 | Examples | 45 |
 | Jetpack | 8 |
-| Tests | 567 |
+| Tests | 568 |
 | Tools | 28 |
-| **total** | **1651** |
+| **total** | **1652** |
 
 ### Regions
 
@@ -12924,7 +12931,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 10:5 | "reads the address of the graph's storage, not its bytes" |
 | Tests | Tests/Cases/ConcurrencyBoundaries/AGroupTaskReadsALentParameterInPlace.fixture/lend.jet | 29:5 | "reads the address of the graph's storage, not its bytes" |
 | Tests | Tests/Cases/Context/ContextAllocatorMemoEntryMovesToTheHeap.fixture/memo.jet | 63:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
-| Tests | Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet | 104:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
+| Tests | Tests/Cases/Context/ContextAllocatorMovesTextThatLeavesTheBlock.fixture/text.jet | 107:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
 | Tests | Tests/Cases/Context/ContextAllocatorMovesWhatLeavesTheBlock.fixture/moves.jet | 124:5 | "the reuser's kept blocks were claimed from its region, which unmaps them all" |
 | Tests | Tests/Cases/Context/ContextAllocatorPanicInAllocateStopsTheTask.fixture/refuse.jet | 38:5 | "the picky allocator's kept blocks were claimed from its region, which unmaps them all" |
 | Tests | Tests/Cases/Context/ContextAllocatorReadsBackTheUserAllocator.fixture/main.jet | 52:5 | "the counter's kept blocks were claimed from its region, which unmaps them all" |
@@ -12974,6 +12981,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 7:1 | "audited C boundary" |
 | Tests | Tests/Cases/FmtRoundTripRegressions/RawCImportsAndModuleBindingMutabilityAreByteExactAndIdempotent/Input/run.jet | 10:1 | "audited C boundary" |
 | Tests | Tests/Cases/GateLedger/Fixtures/Gates/gates.jet | 2:5 | "test unsafe reason" |
+| Tests | Tests/Cases/GateLedger/InspectGatesCountsEachKindSecurityFirst.fixture/main.jet | 4:5 | "count the unsafe region" |
 | Tests | Tests/Cases/JetTest/JetTestReportsEachFailingTestAndRunsTheRest.fixture/parked.jet | 35:5 | "the exit callback has no captured state" |
 | Tests | Tests/Cases/LanguageFeatures/CoreGroupImportNamesModuleTraitsAndTypes.fixture/main.jet | 46:5 | "the stack's kept block was claimed from its region, which unmaps it" |
 | Tests | Tests/Cases/LanguageFeatures/ImplMethodInheritsTraitEffectRowOnEveryTier.fixture/main.jet | 38:5 | "the case prints the checked text" |

@@ -1,0 +1,26 @@
+// A name an import binds is the imported type, even spelled like a size
+// name: the member rows (`sizes.[U32]`) and the alias rows
+// (`U8: sizes.Byte`), alone or in a block, each keep the file's `U8`,
+// `U16`, `U32` and `U64` as the types they import.
+use sizes: "./sizes"
+use sizes.[U32]
+use U8: sizes.Byte
+use {
+    sizes.[U64]
+    U16: sizes.Word
+}
+
+describe: fn(value: U8) -> String { value.label }
+
+word: fn(value: U16) -> String { value.label }
+
+wide: fn(value: U32) -> String { value.label }
+
+widest: fn(value: U64) -> String { value.label }
+
+run: fn() {
+    print(describe(U8{label: "byte"}))
+    print(word(U16{label: "word"}))
+    print(wide(U32{label: "wide"}))
+    print(widest(U64{label: "widest"}))
+}

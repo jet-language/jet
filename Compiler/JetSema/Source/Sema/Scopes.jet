@@ -635,6 +635,20 @@ SemaComptimeBodySource: struct {
     // An explicit `name: #run value` local: it reports what fails, and lands
     // like a local value (SemaComptimeItemSource.local_binding).
     local_binding: Bool{false},
+    // A marker's `check` rule heard at a call (Calls/CheckRules.jet): the
+    // driver runs every such site of one rule in one batch, never this
+    // source's own expression.
+    rule: SemaComptimeRuleSite?{None},
+    // The call's checks held their errors until the rule answers: a
+    // rejection replaces them.
+    rule_held: Bool{false},
+}
+
+// Which rule a heard call waits on: the `check` of `marker`, declared in the
+// module `module_identity`.
+SemaComptimeRuleSite: struct {
+    module_identity: ModuleID,
+    marker: String,
 }
 
 SemaComptimeBodyValue: struct {
@@ -868,6 +882,10 @@ SemaCheckContext: struct {
     lending_view_parameter_keys: [String],
     lambda_statement_tails: [SemaStatementTailFrame],
     call_facts: [SemaCallSiteFact],
+    // In a marker's `check` rule (Func.marker_check), the name of its heard
+    // call parameter, where `reject(finding, at: part)` ends the rule
+    // (sema_call_check_marker_reject).
+    marker_check_call: String?{None},
     // Each static route a body registers, `binding|method|pattern`, to the
     // span that registered it first.
     http_routes: SemaHTTPRouteIndex{SemaHTTPRouteIndex{}},

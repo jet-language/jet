@@ -1,4 +1,6 @@
 // Lexical containment compares normalized components.
+use path: core.files.path
+
 run: fn() {
     inside: Path.from("/srv/root/./a/../file").is_within(Path.from("/srv/root"))
     partial_name: Path.from("/srv/rooted/file").is_within(Path.from("/srv/root"))
@@ -6,4 +8,6 @@ run: fn() {
     mixed_separators: Path.from("srv\\root\\file").is_within(Path.from("srv/root"))
     root: Path.from("/").is_within(Path.from("/"))
     print("within: {inside} {partial_name} {escaped} {mixed_separators} {root}")
+    // A path the path module builds answers the same way.
+    print("module: {path.of("/srv/root/file").is_within(path.of("/srv/root"))} {path.of("/srv").is_within(path.of("/srv/root"))}")
 }

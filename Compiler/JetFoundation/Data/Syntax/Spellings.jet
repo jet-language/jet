@@ -40,7 +40,7 @@ LEXICAL_LEDGER: [LexicalEntry]{
     {spelling: "$", meaning: "config-surface environment read `$NAME`; program source has no `$` words"},
     {spelling: "#{{name}}", meaning: "template paste: `#{{method}}: fn`, `self.#{{field}}`, `.#{{left}}` splice a derive or marker template binding"},
     {spelling: "x.reflect().fact", meaning: "compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin`"},
-    {spelling: FACT_ROOT_BUILD, meaning: "compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features`"},
+    {spelling: FACT_ROOT_BUILD, meaning: "compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features`, and the machine running the build's `#build.host.os` (`Linux`, `MacOS` or `Windows`) and `#build.host.arch` (`x86_64`, `aarch64`); a Core call made while building asks the machine running the build, as `#build.host.*` reads it, while build outputs follow the target"},
     {spelling: FACT_ROOT_PACKAGE, meaning: "package site value: `#package.name`, `.version`"},
     {spelling: FACT_ROOT_PHASE, meaning: "compiler `Phase` value, filled in for each compiled copy"},
     {spelling: FACT_ROOT_PROGRAM, meaning: "compiler authorized checked-program fact value"},
@@ -240,25 +240,6 @@ METHOD_CUT_LAST: "cut_last"
 METHOD_DIV_EUCLID: "div_euclid"
 
 METHOD_REM_EUCLID: "rem_euclid"
-
-/// Compiler-owned numeric source names for.
-NUMERIC_CONVERSION_SOURCES: [{field_0: String, field_1: String}]{
-    {field_0: "from_i8", field_1: "I8"},
-    {field_0: "from_i64", field_1: "I64"},
-    {field_0: "from_i16", field_1: "I16"},
-    {field_0: "from_i32", field_1: "I32"},
-    {field_0: "from_int", field_1: "Int"},
-    {field_0: "from_u8", field_1: "U8"},
-    {field_0: "from_u16", field_1: "U16"},
-    {field_0: "from_u32", field_1: "U32"},
-    {field_0: "from_u64", field_1: "U64"},
-    {field_0: "from_f32", field_1: "F32"},
-    {field_0: "from_float", field_1: "Float"},
-    // The exact-number family uses the same
-    // destination-owned source suffix convention as fixed numerics.
-    {field_0: "from_decimal", field_1: "Decimal"},
-    {field_0: "from_fraction", field_1: "Fraction"},
-}
 
 /// (card #2310/#2312, 2026-08-28): the
 /// completeness-pack names are registered here before they enter sema or an
