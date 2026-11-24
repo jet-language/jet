@@ -51,9 +51,8 @@ use {
         PipeStep,
         QuantityKind,
         Span,
-        StrFormat,
-        StrFormatStyle,
         StrPart,
+        StrSelector,
         Stmt,
         Symbol,
         SymbolID,
@@ -68,7 +67,6 @@ use {
         TNarrowOutcome,
         TNumericOp,
         TPatternPosition,
-        TStrFormat,
         TTypedGoal,
         TUnaryOp,
         TUnitRoundingMode,
@@ -105,7 +103,8 @@ use {
         type_name,
         type_structural_family,
         type_structural_head_names,
-        str_format_style,
+        str_selector_computed,
+        str_selector_style,
         symbol_key_leaf,
         type_union_member_tag_in,
         measure_literal_value,
@@ -1756,103 +1755,6 @@ sema_expr_geometry_space: fn(ty: Type) -> Type? {
     None
 }
 
-sema_expr_geometry_dynamic: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, _) -> return sema_geometry_nominal_leaf(name) == "Point2" || sema_geometry_nominal_leaf(name) == "Delta2"
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
-}
-
-sema_expr_geometry_scalar: fn(ty: Type) -> Type Never! {
-    if ty == {
-        .Apply(_, args) -> {
-            if args.len() > 0 -> return args[0] else -> Type.Float
-        }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            Type.Float
-        }
-    }
-}
-
-sema_expr_geometry_generic: fn(name: String, source: Type) -> Type Never! {
-    Type.Apply{name: name, args: [Type]{sema_expr_geometry_scalar(source), sema_expr_geometry_space(source) ?? Type.Named{name: "Unknown"}}}
-}
-
-sema_expr_geometry_result: fn(op: BinOp, lhs: Type, rhs: Type) -> Type? {
-    result: sema_expr_geometry_result_inner(op, lhs, rhs) ?? return None
-    source: if sema_geometry_nominal_leaf(sema_expr_geometry_name(lhs)) != sema_expr_geometry_name(lhs) -> lhs else -> rhs
-    if result == (Type.Named{name: "__GeometrySpaceMismatch"}) || result == (Type.Named{name: "__GeometryUnsupported"}) {
-        return Val(result)
-    }
-    Val(sema_geometry_restore_owner(result, source))
-}
-
-sema_expr_geometry_result_inner: fn(op: BinOp, lhs: Type, rhs: Type) -> Type? {
-    left_point := sema_expr_geometry_is_point(lhs)
-    right_point := sema_expr_geometry_is_point(rhs)
-    left_delta := sema_expr_geometry_is_delta(lhs)
-    right_delta := sema_expr_geometry_is_delta(rhs)
-    if !(left_point || right_point || left_delta || right_delta) -> return None
-    left_space: sema_expr_geometry_space(lhs) ?? Type.Named{name: "Unknown"}
-    right_space: sema_expr_geometry_space(rhs) ?? Type.Named{name: "Unknown"}
-    if !type_identity_equal(left_space, right_space) {
-        return Val(Type.Named{name: "__GeometrySpaceMismatch"})
-    }
-    dynamic := sema_expr_geometry_dynamic(lhs) || sema_expr_geometry_dynamic(rhs)
-    result := Type?{None}
-    if {
-        op == BinOp.Add -> {
-            if {
-                left_point && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
-                }
-                left_delta && right_point -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", rhs) else -> rhs)
-                }
-                left_delta && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
-                }
-            }
-        }
-        op == BinOp.Sub -> {
-            if {
-                left_point && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
-                }
-                left_point && right_point -> {
-                    if {
-                        dynamic -> { result = Val(sema_expr_geometry_generic("Delta2", lhs)) }
-                        else -> {
-                            point_leaf: sema_geometry_nominal_leaf(sema_expr_geometry_name(lhs))
-                            point_name: if point_leaf == "ScreenPoint" -> "ScreenDelta" else if point_leaf == "WorldPoint" -> "WorldDelta" else if point_leaf == "ViewPoint" -> "ViewDelta" else if point_leaf == "CameraPoint" -> "CameraDelta" else if point_leaf == "DevicePoint" -> "DeviceDelta" else -> ""
-                            if point_name != "" -> result = Val(Type.Named{name: point_name})
-                        }
-                    }
-                }
-                left_delta && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
-                }
-            }
-        }
-        op == BinOp.Eq || op == BinOp.Ne -> {
-            if (left_point && right_point) || (left_delta && right_delta) -> result = Val(Type.Bool)
-        }
-    }
-    result_value: result ?? return Val(Type.Named{name: "__GeometryUnsupported"})
-    if dynamic && result_value != Type.Bool {
-        return Val(Type.Result{ok: result_value, err: Type.Named{name: "TransformError"}})
-    }
-    Val(result_value)
-}
-
-sema_expr_geometry_name: fn(ty: Type) -> String Never! {
-    if ty == {
-        .Named(name) -> return name
-        .Apply(name, _) -> return name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return type_name(ty)
-    }
-}
-
 sema_expr_geometry_diagnostic: fn(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
     expected := type_name(sema_expr_geometry_space(lhs) ?? lhs)
     actual := type_name(sema_expr_geometry_space(rhs) ?? rhs)
@@ -1863,36 +1765,22 @@ sema_expr_geometry_diagnostic: fn(op: BinOp, lhs: Type, rhs: Type, span: Span, d
     diagnostics.push(sema_error("E2520", span, "`{sema_expr_binary_name(op)}` needs `{expected}` space, got `{actual}`.", "Coordinate-space tags are ordinary type facts; combining different spaces would make a numerically valid result mean the wrong thing.", "Use a `{expected}` point or displacement, or convert it with a checked transform."))
 }
 
+// Core declares every point and displacement operator (`impl Add`,
+// `impl Sub`), and the operator hooks take each pair it declares before this
+// runs. A point or displacement pair that reaches here has no hook: `==` and
+// `!=` between two points or two displacements of one space compare them,
+// and anything else names the coordinate spaces (E2520).
 sema_expr_check_geometry_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_expr_geometry_is_point(lhs.ty) && !sema_expr_geometry_is_delta(lhs.ty) && !sema_expr_geometry_is_point(rhs.ty) && !sema_expr_geometry_is_delta(rhs.ty) {
-        return None
-    }
-    left_space: sema_expr_geometry_space(lhs.ty) ?? lhs.ty
-    right_space: sema_expr_geometry_space(rhs.ty) ?? rhs.ty
-    if !type_identity_equal(left_space, right_space) {
-        sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
-        return None
-    }
-    result: sema_expr_geometry_result(op, lhs.ty, rhs.ty) ?? {
-        sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
-        return None
-    }
-    if result == (Type.Named{name: "__GeometryUnsupported"}) {
-        sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
-        return None
-    }
-    if result == (Type.Named{name: "__GeometrySpaceMismatch"}) -> return None
-    if op == BinOp.Eq || op == BinOp.Ne {
-        test_op := TBinaryOp.Eq
-        if op == BinOp.Ne -> test_op = TBinaryOp.Ne
-        value := sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span)
-        return Val(value)
-    }
-    if op == BinOp.Add || op == BinOp.Sub {
-        function := "add"
-        if op == BinOp.Sub -> function = "sub"
-        value := sema_tree_node(result, TExprKind.MathBuiltin{type_name: sema_expr_geometry_name(lhs.ty), function: function, args: [TExpr]{lhs, rhs}}, span)
-        return Val(value)
+    left_point: sema_expr_geometry_is_point(lhs.ty)
+    right_point: sema_expr_geometry_is_point(rhs.ty)
+    left_delta: sema_expr_geometry_is_delta(lhs.ty)
+    right_delta: sema_expr_geometry_is_delta(rhs.ty)
+    if !left_point && !left_delta && !right_point && !right_delta -> return None
+    same_kind: (left_point && right_point) || (left_delta && right_delta)
+    same_space: type_identity_equal(sema_expr_geometry_space(lhs.ty) ?? lhs.ty, sema_expr_geometry_space(rhs.ty) ?? rhs.ty)
+    if (op == BinOp.Eq || op == BinOp.Ne) && same_kind && same_space {
+        test_op: if op == BinOp.Ne -> TBinaryOp.Ne else -> TBinaryOp.Eq
+        return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
     None
@@ -2845,93 +2733,263 @@ sema_expr_negative_integer: fn(value: Int, width: IntegerWidth?, expected: Type?
     sema_expr_expected(bounded, expected, environment, program, diagnostics)
 }
 
-// Interpolation check of a selector with its own meaning: padding takes a
-// String or a scalar's Display text, and `:Unit(…)` a quantity or a
-// `#UnitFamily` value; any other value is E0112 at the interpolated value. A
-// style selector is a trait call instead (sema_expr_check_format_style).
-sema_expr_check_format_selector: fn(checked: TExpr, format: StrFormat, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    ty: checked.ty
-    shown: sema_type_show(ty)
-    if format == {
-        .Pad(_, _) | .PadLeft(_, _) -> {
-            if ty == Type.String || ty == Type.Float || sema_expr_is_integer(ty) -> return true
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `{sema_expr_selector_label(format)}`", "padding interpolation formats String, integer, or Float values", "pass a `String`, an integer, or a `Float`, or use bare interpolation for this value"))
+// The checked parts of `{value:Selector(args)}`. Debug and Pretty show the
+// value's Debug text, Pad and PadLeft its Display text padded, and Unit a
+// quantity; any other selector `S` calls method `s` of trait `SFormat`
+// (sema_expr_check_format_style). The parts of the string from `first` on
+// hold the expressions of the selector's Computed arguments, in order.
+sema_expr_check_selected: fn(value: Expr, checked: &&TExpr, selector: StrSelector, parts: [StrPart], first: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TStrPart]? {
+    if selector.name == {
+        "Debug" -> sema_expr_check_debug_selector(checked, selector, environment, program, scopes, diagnostics)
+        "Pretty" -> sema_expr_check_debug_selector(checked, selector, environment, program, scopes, diagnostics)
+        "Pad" -> sema_expr_check_padded(checked, selector, parts, first, environment, program, scopes, state, tail_store, context, diagnostics)
+        "PadLeft" -> sema_expr_check_padded(checked, selector, parts, first, environment, program, scopes, state, tail_store, context, diagnostics)
+        "Unit" -> sema_expr_check_unit_selector(checked, selector, environment, program, diagnostics)
+        else -> {
+            call: sema_expr_check_format_style(value, checked, selector, parts, first, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+            Val([TStrPart]{TStrPart.Interpolation{value: call, debug: false}})
         }
-        .Unit(_) -> {
-            if sema_expr_scalable_unit_type(ty, environment, program) -> return true
-            if program.registration_graph == .Val(graph) {
-                if sema_registration_unit_member_type(graph, ty) -> return true
-            }
-            diagnostics.push(sema_error("E0112", checked.span, "{shown} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
-        }
-        .Display | .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Count -> return true
     }
+}
+
+// `{value:Debug}` shows the value's Debug text, and `:Pretty` that text
+// indented by core.text.fmt's `pretty`.
+sema_expr_check_debug_selector: fn(checked: &&TExpr, selector: StrSelector, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [TStrPart]? {
+    if selector.args.len() > 0 {
+        sema_expr_selector_shape_error(selector, "no arguments", ":{selector.name}", diagnostics)
+        return None
+    }
+    if !sema_expr_check_debuggable(checked, selector.name, environment, program, scopes, diagnostics) -> return None
+    if selector.name == "Debug" -> return Val([TStrPart]{TStrPart.Interpolation{value: checked.move(), debug: true}})
+    span: checked.span
+    debug: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: checked.move(), debug: true}}}, span)
+    call: sema_expression_core_source_call("core.text.fmt", "pretty", [TExpr]{debug}, Type.String, [Type]{}, span, environment, program) ?? return None
+    Val([TStrPart]{TStrPart.Interpolation{value: call, debug: false}})
+}
+
+// Debug and Pretty need a debuggable value, else E0112 at the value.
+sema_expr_check_debuggable: fn(checked: TExpr, selector: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_call_debug_traceable(checked.ty, environment, program) -> return true
+    if sema_call_reflection_secret_bearing(checked.ty) {
+        diagnostics.push(sema_error("E0112", checked.span, "secret-bearing `{type_name(checked.ty)}` cannot use `:{selector}`", "Debug output could copy cryptographic secret material into logs or diagnostics", "remove the interpolation; log a public operation label or key identifier instead"))
+        return false
+    }
+    // The Fix offers only spellings that compile for this value
+    // (sema_expression_interpolation_display's rule for E0915).
+    written: sema_expression_interpolation_text(checked.span, environment, program)
+    fixes := [String]{}
+    if sema_expression_displayable(checked.ty, environment, program) {
+        fixes.push("show its `Display` text with `{{{written}}}`")
+    }
+    if sema_expression_impl_allowed(checked.ty, environment, program, scopes) {
+        fixes.push("implement `Debug` for {sema_type_show(checked.ty)}")
+    }
+    fix: if fixes.len() > 0 -> fixes.join(", or ") else -> "show a debuggable part of `{written}` instead"
+    diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't be shown with :{selector} yet", "debug interpolation needs a debuggable value", fix))
     false
 }
 
-// A selector as a message writes it: `:Pad(n)`, `:Bin`.
-sema_expr_selector_label: fn(format: StrFormat) -> String Never! {
-    if format == {
-        .Fixed(_) -> ":Fixed(n)"
-        .Grouped(_) -> ":Grouped(n)"
-        .Hex(_) -> ":Hex(n)"
-        .Pad(_, _) -> ":Pad(n)"
-        .PadLeft(_, _) -> ":PadLeft(n)"
-        .Sci(_) -> ":Sci(n)"
-        .Percent(_) -> ":Percent(n)"
-        .Bin -> ":Bin"
-        .Oct -> ":Oct"
-        .Unit(_) -> ":Unit(…)"
-        .Debug -> ":Debug"
-        .Pretty -> ":Pretty"
-        .Display | .Count -> "selector"
+// `{value:Pad(n)}` and `:PadLeft(n, "fill")`: core.text.fmt's `pad` or
+// `pad_left` of a String as it is, or of an integer's or a Float's Display
+// text; any other value is E0112 at the value. The width is an Int, a
+// literal or computed after the value (the part at `first`); the fill is
+// quoted text, the formatter's space when left out.
+sema_expr_check_padded: fn(checked: &&TExpr, selector: StrSelector, parts: [StrPart], first: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TStrPart]? {
+    head: ":{selector.name}"
+    shape: "a width, then an optional quoted fill"
+    example: "{head}(8, \"0\")"
+    if selector.args.len() == 0 || selector.args.len() > 2 {
+        sema_expr_selector_shape_error(selector, shape, example, diagnostics)
+        return None
     }
+    ty: checked.ty
+    if ty != Type.String && ty != Type.Float && !sema_expr_is_integer(ty) {
+        diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(ty)} can't use `{sema_expr_selector_label(selector)}`", "padding interpolation formats String, integer, or Float values", "pass a `String`, an integer, or a `Float`, or use bare interpolation for this value"))
+        return None
+    }
+    span: checked.span
+    width: if selector.args[0] == {
+        .Number(written) -> sema_tree_node(Type.Int, TExprKind.IntLit{value: written, width: None}, span)
+        .Computed -> {
+            checked_width := TExpr?{None}
+            if parts[first] == .Interp(written, _) -> checked_width = sema_check_expression(written, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            counted: checked_width ?? return None
+            if !sema_expr_check_selector_count(counted.ty, counted.span, selector, diagnostics) -> return None
+            counted
+        }
+        .Text(_) | .Word(_) -> {
+            sema_expr_selector_shape_error(selector, shape, example, diagnostics)
+            return None
+        }
+    }
+    fill := ""
+    if selector.args.len() == 2 {
+        if selector.args[1] == {
+            .Text(written) -> fill = written
+            .Number(_) | .Word(_) | .Computed -> {
+                sema_expr_selector_shape_error(selector, shape, example, diagnostics)
+                return None
+            }
+        }
+    }
+    function: if selector.name == "Pad" -> "pad" else -> "pad_left"
+    text: if ty == Type.String -> checked.move() else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: checked.move(), debug: false}}}, span)
+    filler: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: fill}}}, span)
+    call: sema_expression_core_source_call("core.text.fmt", function, [TExpr]{text, width, filler}, Type.String, [Type]{}, span, environment, program) ?? return None
+    Val([TStrPart]{TStrPart.Interpolation{value: call, debug: false}})
 }
 
-// The number computed after the selector of part `index` (`width` in
-// `{x:Pad(width)}`), if the selector has one.
-sema_expr_selector_count: fn(parts: [StrPart], index: Int) -> Expr? {
-    if index + 1 >= parts.len() -> return None
-    if parts[index + 1] == .Interp(count, StrFormat.Count) -> return Val(count)
-    None
+// `{value:Unit(name)}` and `:Unit(bare)`: core.text.fmt's `quantity` of a
+// quantity's or a `#UnitFamily` value's magnitude; `name` writes the unit's
+// type name after it. Any other value is E0112 at the value.
+sema_expr_check_unit_selector: fn(checked: &&TExpr, selector: StrSelector, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [TStrPart]? {
+    style := ""
+    if selector.args.len() == 1 {
+        if selector.args[0] == .Word(word) -> style = word
+    }
+    if style == "" {
+        sema_expr_selector_shape_error(selector, "a style, `name` or `bare`", ":Unit(name)", diagnostics)
+        return None
+    }
+    ty: checked.ty
+    unit_type := sema_expr_scalable_unit_type(ty, environment, program)
+    if !unit_type {
+        if program.registration_graph == .Val(graph) -> unit_type = sema_registration_unit_member_type(graph, ty)
+    }
+    if !unit_type {
+        diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(ty)} can't use `:Unit(…)`", "unit formatting needs a quantity or a `#UnitFamily` value", "use bare interpolation, or pass a value that has a unit"))
+        return None
+    }
+    unit_name := ""
+    if style == "name" {
+        if sema_expr_unwrap_tag(ty) == .Named(named) -> unit_name = " {symbol_key_leaf(named)}"
+    }
+    span: checked.span
+    magnitude: sema_tree_node(Type.Float, TExprKind.NumericMethod{receiver: checked.move(), operation: TNumericOp.CastAs{dst_rust: "f64"}}, span)
+    call: sema_expression_core_source_call("core.text.fmt", "quantity", [TExpr]{magnitude}, Type.String, [Type]{}, span, environment, program) ?? return None
+    parts := [TStrPart]{TStrPart.Interpolation{value: call, debug: false}}
+    if unit_name != "" -> parts.push(TStrPart.Literal{text: unit_name})
+    Val(parts)
+}
+
+// E0112 at the selector: its arguments don't have the shape it takes.
+sema_expr_selector_shape_error: fn(selector: StrSelector, shape: String, example: String, diagnostics: &[Diagnostic]) {
+    diagnostics.push(sema_error("E0112", selector.span, "`:{selector.name}` doesn't take these arguments", "`:{selector.name}` takes {shape}", "write it as `{example}`"))
+}
+
+// A selector as a message writes it: `:Bin`, `:Hex(n)`, `:Unit(…)`.
+sema_expr_selector_label: fn(selector: StrSelector) -> String Never! {
+    if selector.name == "Unit" -> return ":Unit(…)"
+    if selector.args.len() == 0 -> return ":{selector.name}"
+    if selector.args[0] == {
+        .Number(_) | .Computed -> {
+            if selector.name == "Pad" || selector.name == "PadLeft" || selector.args.len() == 1 -> return ":{selector.name}(n)"
+        }
+        .Text(_) | .Word(_) -> {}
+    }
+    ":{selector.name}(…)"
+}
+
+// How many of the parts after an interpolated value are its selector's
+// computed arguments.
+sema_expr_selector_taken: fn(format: StrSelector?) -> Int Never! {
+    if format == .Val(selector) -> return str_selector_computed(selector)
+    0
 }
 
 // A computed selector number (`{x:Pad(width)}`) is an Int, else E0112 at
 // the number. The formatters treat a negative number as zero.
-sema_expr_check_selector_count: fn(ty: Type, span: Span, format: StrFormat, diagnostics: &[Diagnostic]) -> Bool {
+sema_expr_check_selector_count: fn(ty: Type, span: Span, selector: StrSelector, diagnostics: &[Diagnostic]) -> Bool {
     if ty == Type.Int -> return true
-    diagnostics.push(sema_error("E0112", span, "the number of `{sema_expr_selector_label(format)}` is {sema_type_show(ty)}, not Int", "a selector number is an Int, written as a literal or computed at run time", "pass an Int, such as `:Pad(width)` with `width: Int`"))
+    diagnostics.push(sema_error("E0112", span, "the number of `{sema_expr_selector_label(selector)}` is {sema_type_show(ty)}, not Int", "a selector number is an Int, written as a literal or computed at run time", "pass an Int, such as `:Pad(width)` with `width: Int`"))
     false
 }
 
-// `{value:Hex(n)}` is `value.hex(n)` of core.text.fmt's HexFormat, and each
-// style selector its own trait's method the same way: an ordinary trait
-// call, so a generic bound, an effect and a failure work as in any call. The
-// value's type implements the trait, else E0112 names the impl to write; a
-// fact tag or an integer range calls its base's impl. `count` is the number
-// computed after the selector, which runs after the value.
-sema_expr_check_format_style: fn(value: Expr, checked: TExpr, format: StrFormat, style: StrFormatStyle, count: Expr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// Whether each parameter after `self` of method `method` of the trait
+// `trait_id` names is an Int, as it declares them; empty when no registered
+// row declares it.
+sema_expr_selector_int_parameters: fn(graph: SemaRegistrationGraph, trait_id: SymbolID, method: String) -> [Bool] {
+    ints := [Bool]{}
+    row: sema_call_trait_row_for_symbol(graph, trait_id) ?? return ints
+    loop trait_method in graph.modules[row.module_index].nominals[row.row].trait_methods {
+        if trait_method.declaration.name != method -> next
+        loop parameter in trait_method.parameters {
+            if parameter.name != "self" -> ints.push(parameter.ty == Type.Int)
+        }
+        break
+    }
+    ints
+}
+
+// The parameters of method `method` of the trait `trait_id` names as an impl
+// writes them, `self` first (`self, digits: Int`).
+sema_expr_selector_signature: fn(graph: SemaRegistrationGraph, trait_id: SymbolID, method: String) -> String {
+    written := [String]{"self"}
+    row: sema_call_trait_row_for_symbol(graph, trait_id) ?? return "self"
+    loop trait_method in graph.modules[row.module_index].nominals[row.row].trait_methods {
+        if trait_method.declaration.name != method -> next
+        loop parameter in trait_method.parameters {
+            if parameter.name != "self" -> written.push("{parameter.name}: {type_name(parameter.ty)}")
+        }
+        break
+    }
+    written.join(", ")
+}
+
+// `{value:Hex(n)}` is `value.hex(n)` of core.text.fmt's HexFormat, and any
+// other selector `S` the method `s` (snake case) of the trait `SFormat` in
+// scope where the string is, a package's own the same as Core's: an ordinary
+// trait call, so a generic bound, an effect and a failure work as in any
+// call. No such trait is E0914 at the selector. The value's type implements
+// the trait, else E0112 names the impl to write; a fact tag or an integer
+// range calls its base's impl. The arguments follow the value: an Int
+// literal, a quoted text, or an expression computed after the value (the
+// parts from `first` on); one the method takes as an Int is checked as a
+// selector number.
+sema_expr_check_format_style: fn(value: Expr, checked: TExpr, selector: StrSelector, parts: [StrPart], first: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    style: str_selector_style(selector.name)
+    label: sema_expr_selector_label(selector)
     base: sema_expr_numeric_base(checked.ty)
+    ints := [Bool]{}
     if program.registration_graph == .Val(graph) {
-        implemented: sema_type_bound_satisfied_at(graph, base, style.trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
+        caller: sema_scope_caller_row(environment, graph)
+        trait_id: if sema_type_trait_identity(graph, caller, style.trait_name) == {
+            .Val(found) -> found
+            .None -> {
+                diagnostics.push(sema_error("E0914", selector.span, "unknown interpolation selector `:{selector.name}`", "`:{selector.name}` calls `{style.method}` of trait `{style.trait_name}`, and no trait of that name is in scope here", "use a Core selector such as `:Debug`, `:Pretty`, `:Fixed(n)`, `:Hex(n)`, `:Pad(n)` or `:Unit(name)`, import or declare `{style.trait_name}`, or write `{{value}}`"))
+                return None
+            }
+        }
+        ints = sema_expr_selector_int_parameters(graph, trait_id, style.method)
+        implemented: sema_type_bound_satisfied_at(graph, base, style.trait_name, caller, environment.generic_params) ?? false
         if !implemented {
-            label: sema_expr_selector_label(format)
-            parameters: if style.digits == None -> "self" else -> "self, digits: Int"
-            fix: if sema_expression_impl_allowed(base, environment, program, scopes) -> "implement it, `impl {type_name(base)}.{style.trait_name} {{ {style.method}: fn({parameters}) -> String {{ … }} }}`, or use bare interpolation for this value" else -> "use bare interpolation for this value, or convert it to a type that implements `{style.trait_name}`"
+            fix: if sema_expression_impl_allowed(base, environment, program, scopes) -> "implement it, `impl {type_name(base)}.{style.trait_name} {{ {style.method}: fn({sema_expr_selector_signature(graph, trait_id, style.method)}) -> String {{ … }} }}`, or use bare interpolation for this value" else -> "use bare interpolation for this value, or convert it to a type that implements `{style.trait_name}`"
             diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't use `{label}`", "`{label}` calls `{style.method}` of `{style.trait_name}`, which {type_name(base)} doesn't implement", fix))
             return None
         }
     }
     args := [CallArg]{}
-    if style.digits == .Val(digits) {
-        if count == .Val(computed) {
-            probe_diagnostics := [Diagnostic]{}
-            if sema_probe_expression(computed, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) == .Val(probed) {
-                if !sema_expr_check_selector_count(probed.ty, probed.span, format, diagnostics) -> return None
+    next_computed := first
+    loop (index, arg) in selector.args {
+        takes_int: index < ints.len() && ints[index]
+        argument: if arg == {
+            .Number(number) -> Expr.Int{value: number, span: checked.span, width: None, raw: None, id: AST_NODE_GENERATED}
+            .Text(text) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: checked.span, id: AST_NODE_GENERATED}
+            .Word(word) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: word}}, span: checked.span, id: AST_NODE_GENERATED}
+            .Computed -> {
+                // copy: the string's parts are the caller's; the call owns its argument.
+                expression: if parts[next_computed] == .Interp(written, _) -> written.copy() else -> return None
+                next_computed += 1
+                if takes_int {
+                    probe_diagnostics := [Diagnostic]{}
+                    if sema_probe_expression(expression, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) == .Val(probed) {
+                        if !sema_expr_check_selector_count(probed.ty, probed.span, selector, diagnostics) -> return None
+                    }
+                }
+                expression
             }
         }
-        number: count ?? Expr.Int{value: digits, span: checked.span, width: None, raw: None, id: AST_NODE_GENERATED}
-        args.push(sema_call_http_core_synthetic_arg(number, expr_span(number)))
+        args.push(sema_call_http_core_synthetic_arg(argument, expr_span(argument)))
     }
     line: sema_source_line_at(environment.source_segments, checked.span) ?? 0
     receiver: if type_identity_equal(base, checked.ty) -> checked else -> sema_expr_numeric_conversion(checked, base, checked.span, line) ?? return None
@@ -2940,33 +2998,6 @@ sema_expr_check_format_style: fn(value: Expr, checked: TExpr, format: StrFormat,
     // is inferred propagates its failure as any call does, so the text is
     // the String it returns, never its Result carrier.
     sema_expression_auto_propagate(value, call, None, environment, program, scopes, context, diagnostics)
-}
-
-// `{value:Pad(n)}`, `:PadLeft(n)`, `:Pretty` and `:Unit(…)`: the call of
-// the core.text.fmt formatter that renders the value (`pad`, `pad_left`,
-// `pretty`, `quantity`). Padding takes a String as it is and any other
-// value's Display text, Pretty the Debug text, and a unit its magnitude as a
-// Float; `width` is the computed number, else the selector's own.
-sema_expr_format_call: fn(checked: &&TExpr, format: StrFormat, width: TExpr?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
-    span: checked.span
-    if format == {
-        .Pad(written, fill) | .PadLeft(written, fill) -> {
-            function: if format == .Pad(_, _) -> "pad" else -> "pad_left"
-            text: if checked.ty == Type.String -> checked.move() else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: checked.move(), format: TStrFormat.Display}}}, span)
-            number: width ?? sema_tree_node(Type.Int, TExprKind.IntLit{value: written, width: None}, span)
-            filler: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: fill}}}, span)
-            sema_expression_core_source_call("core.text.fmt", function, [TExpr]{text, number, filler}, Type.String, [Type]{}, span, environment, program)
-        }
-        .Pretty -> {
-            debug: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: checked.move(), format: TStrFormat.Debug}}}, span)
-            sema_expression_core_source_call("core.text.fmt", "pretty", [TExpr]{debug}, Type.String, [Type]{}, span, environment, program)
-        }
-        .Unit(_) -> {
-            magnitude: sema_tree_node(Type.Float, TExprKind.NumericMethod{receiver: checked.move(), operation: TNumericOp.CastAs{dst_rust: "f64"}}, span)
-            sema_expression_core_source_call("core.text.fmt", "quantity", [TExpr]{magnitude}, Type.String, [Type]{}, span, environment, program)
-        }
-        .Display | .Debug | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Count -> None
-    }
 }
 
 sema_expr_call_callee: fn(program: SemaProgramTables, value: TExpr) -> SymbolID? {
@@ -4546,26 +4577,6 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if tree == .Val(check) {
         if check.handled -> return check
     }
-    workflow := sema_check_service_workflow_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if workflow == .Val(check) {
-        if check.handled -> return check
-    }
-    endpoint := sema_check_service_endpoint_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if endpoint == .Val(check) {
-        if check.handled -> return check
-    }
-    delivery := sema_check_delivery_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if delivery == .Val(check) {
-        if check.handled -> return check
-    }
-    delivery_state := sema_check_delivery_state_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if delivery_state == .Val(check) {
-        if check.handled -> return check
-    }
-    runtime := sema_check_service_runtime_method(method, receiver, receiver_value, args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
-    if runtime == .Val(check) {
-        if check.handled -> return check
-    }
 
     reactive := sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if reactive.handled -> return reactive
@@ -5014,6 +5025,11 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
     // and holds `b.compiler` to the root build, ahead of the declared check.
     build: sema_call_try_build_context_method(receiver, receiver_value, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if build.handled -> return build.value
+    // Core declares ServiceTree's `send` and `send_durable` over a String
+    // ServiceEndpoint; a typed Endpoint<Q, R> sends, calls and sends durably
+    // at its own Q and R ahead of the declared check.
+    typed_delivery: sema_services_typed_delivery(method, receiver, receiver_value.ty, args, expected, method_span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if typed_delivery == .Val(check) -> return check.value
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
@@ -5402,87 +5418,32 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 context.allow_string_view_read = true
                 checked_value := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 context.allow_string_view_read = previous_string_view_read
+                // The selector's computed arguments are the parts after the
+                // value; the selector takes them with it.
+                taken: sema_expr_selector_taken(format)
                 if checked_value == None {
                     // A part that doesn't check leaves the rest of the string
                     // to check, so each unknown name in it is reported.
                     failed = true
-                    index += 1
+                    index += 1 + taken
                     next
                 }
                 checked: checked_value ?? return None
-                if format == StrFormat.Count {
-                    // The number of a selector whose value didn't check; a
-                    // checked selector takes its number with it.
-                    index += 1
-                    next
-                }
                 // Formatting a value that holds an observable Clock reads ambient
                 // time (E3403 `Clock formatting` in a pure body).
                 if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
                     _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock formatting", checked.span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: checked.span}}, diagnostics)
                 }
-                if format == StrFormat.Display && !sema_expression_interpolation_display(checked, environment, program, scopes, diagnostics) {
-                    return None
-                }
-                // Rust interpolation check: bare Display uses the relation above
-                // and the Debug family uses `is_debuggable`; only the numeric and
-                // text selectors use the primitive table.
-                debug_family: format == StrFormat.Debug || format == StrFormat.Pretty
-                if debug_family && !sema_call_debug_traceable(checked.ty, environment, program) {
-                    selector: if format == StrFormat.Debug -> "Debug" else -> "Pretty"
-                    if sema_call_reflection_secret_bearing(checked.ty) {
-                        diagnostics.push(sema_error("E0112", checked.span, "secret-bearing `{type_name(checked.ty)}` cannot use `:{selector}`", "Debug output could copy cryptographic secret material into logs or diagnostics", "remove the interpolation; log a public operation label or key identifier instead"))
-                    } else {
-                        // The Fix offers only spellings that compile for this value
-                        // (sema_expression_interpolation_display's rule for E0915).
-                        written: sema_expression_interpolation_text(checked.span, environment, program)
-                        fixes := [String]{}
-                        if sema_expression_displayable(checked.ty, environment, program) {
-                            fixes.push("show its `Display` text with `{{{written}}}`")
-                        }
-                        if sema_expression_impl_allowed(checked.ty, environment, program, scopes) {
-                            fixes.push("implement `Debug` for {sema_type_show(checked.ty)}")
-                        }
-                        fix: if fixes.len() > 0 -> fixes.join(", or ") else -> "show a debuggable part of `{written}` instead"
-                        diagnostics.push(sema_error("E0112", checked.span, "{sema_type_show(checked.ty)} can't be shown with :{selector} yet", "debug interpolation needs a debuggable value", fix))
-                    }
-                    return None
-                }
-                if !debug_family && format != StrFormat.Display && !sema_expr_check_format_selector(checked, format, environment, program, diagnostics) {
-                    return None
-                }
-                count: sema_expr_selector_count(parts, index)
-                if count != None -> index += 1
-                if str_format_style(format) == .Val(style) {
-                    call: sema_expr_check_format_style(value, checked, format, style, count, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-                    tree_parts.push(TStrPart.Interpolation{value: call, format: TStrFormat.Display})
-                    index += 1
+                if format == .Val(selector) {
+                    selected: sema_expr_check_selected(value, checked, selector, parts, index + 1, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                    loop part in selected -> tree_parts.push(part)
+                    index += 1 + taken
                     next
                 }
-                if format == {
-                    .Pad(_, _) | .PadLeft(_, _) | .Pretty | .Unit(_) -> {
-                        width := TExpr?{None}
-                        if count == .Val(computed) {
-                            counted: sema_check_expression(computed, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-                            if !sema_expr_check_selector_count(counted.ty, counted.span, format, diagnostics) -> return None
-                            width = Val(counted)
-                        }
-                        // `:Unit(name)` writes the unit's type name after the number.
-                        unit_name := ""
-                        if format == .Unit(.Name) {
-                            if sema_expr_unwrap_tag(checked.ty) == .Named(unit_type) -> unit_name = " {symbol_key_leaf(unit_type)}"
-                        }
-                        call: sema_expr_format_call(checked, format, width, environment, program) ?? return None
-                        tree_parts.push(TStrPart.Interpolation{value: call, format: TStrFormat.Display})
-                        if unit_name != "" -> tree_parts.push(TStrPart.Literal{text: unit_name})
-                        index += 1
-                        next
-                    }
-                    .Display | .Debug | .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Count -> {}
-                }
-                formatted: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return None else -> checked
-                selected: if format == StrFormat.Debug -> TStrFormat.Debug else -> TStrFormat.Display
-                tree_parts.push(TStrPart.Interpolation{value: formatted, format: selected})
+                if !sema_expression_interpolation_display(checked, environment, program, scopes, diagnostics) -> return None
+                shown_span: checked.span
+                formatted: if sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.move()}, Type.String, shown_span, environment, program) ?? return None else -> checked
+                tree_parts.push(TStrPart.Interpolation{value: formatted, debug: false})
             }
         }
         index += 1
@@ -6046,8 +6007,8 @@ sema_expr_lint_fixed_cleanup: fn(receiver: Expr, receiver_type: Type, args: [Cal
         if parts.len() != 1 {
             return
         }
-        if parts[0] == .Interp(_, format) {
-            if format == .Fixed(_) {
+        if parts[0] == .Interp(_, .Val(selector)) {
+            if selector.name == "Fixed" {
                 lint: sema_lint("L0518", method_span, "Plain `Fixed(n)` output immediately removes grouping separators", "`Fixed(n)` is machine-plain; deleting this cleanup preserves the same text", "Delete `.replace(\",\", \"\")` from the `Fixed(n)` projection")
                 diagnostics.push(diagnostic_with_edit(lint, TextEdit{span: Span{start: expr_span(receiver).end, end: expr_span(args[1].expr).end + 1}, new_text: ""}))
             }
@@ -8475,14 +8436,15 @@ sema_check_expression_with_lambda_escapes: fn(expr: Expr, expected: Type?, envir
     checked
 }
 
-#Test("Source coordinates preserve the existing same-space binary oracle") {
+#Test("Source coordinates keep their coordinate space") {
     point: Type.Named{name: "<corelib>/core.math.ScreenPoint"}
     delta: Type.Named{name: "<corelib>/core.math.ScreenDelta"}
     world: Type.Named{name: "<corelib>/core.math.WorldDelta"}
     assert(sema_expr_geometry_is_point(point))
+    assert(sema_expr_geometry_is_delta(delta))
     assert_eq(sema_expr_geometry_space(point), Val(Type.Named{name: "Screen"}))
-    assert_eq(sema_expr_geometry_result(BinOp.Add, point, delta), Val(point))
-    assert_eq(sema_expr_geometry_result(BinOp.Add, point, world), Val(Type.Named{name: "__GeometrySpaceMismatch"}))
+    assert_eq(sema_expr_geometry_space(delta), sema_expr_geometry_space(point))
+    assert_eq(sema_expr_geometry_space(world), Val(Type.Named{name: "World"}))
     assert(!sema_expr_geometry_is_point(Type.Named{name: "user.ScreenPoint"}))
 }
 

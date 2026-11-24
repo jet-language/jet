@@ -3,6 +3,7 @@ use {
     core.crypto.[CryptoError]
     crypto: core.crypto
     rt: jet.runtime.files
+    entropy: jet.runtime.crypto
 }
 
 // core.crypto.random - fail-closed CSPRNG.
@@ -11,16 +12,16 @@ use {
 // fallback generator. A missing or rejected provider is `CryptoError.Unavailable`.
 //
 // This is not `core.math.random`. Math RNG is deterministic and seedable.
-// Crypto RNG is neither. The only host step is `__os_entropy` (one OS CSPRNG
-// fill); bounds, the exact-length check and the error meaning are Jet. A test
-// that names `#Test(faults: [Rand])` fails that one fill, so
+// Crypto RNG is neither. The only host step is `jet.runtime.crypto.os_entropy`
+// (one OS CSPRNG fill); bounds, the exact-length check and the error meaning
+// are Jet. A test that names `#Test(faults: [Rand])` fails that one fill, so
 // every consumer's `Unavailable` rail runs on every host and tier.
 /// `n` random bytes from the OS CSPRNG. `n` must be 0..=1048576.
 bytes: fn(n: Int) -[Rand]> [U8] CryptoError! {
     if n < 0 || n > 1048576 -> return Err(.Length)
     if n == 0 -> return Ok([U8]{})
     if rt.fault_should_fail("Rand") -> return Err(.Unavailable)
-    out: core.crypto.random.__os_entropy(n) ?? return Err(.Unavailable)
+    out: entropy.os_entropy(n) ?? return Err(.Unavailable)
     if out.len() != n -> return Err(.Unavailable)
     Ok(out)
 }

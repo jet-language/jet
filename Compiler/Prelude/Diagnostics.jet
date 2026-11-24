@@ -14148,19 +14148,19 @@ UnknownInterpolationSelector: struct {
     impl Diagnostic {
         code: "E0914",
         safety_class: .Soundness,
-        safety_reason: "An unknown selector names no format, so the interpolation has no text to produce.",
-        expert_path: "none: the selector is one the interpolation knows",
-        stage: [.Parse],
-        meaning: "An unknown format selector after `:` in an interpolation",
+        safety_reason: "A selector no trait gives a meaning names no format, so the interpolation has no text to produce.",
+        expert_path: "none: declare or import the selector's `NameFormat` trait",
+        stage: [.Sema],
+        meaning: "An interpolation selector after `:` whose `NameFormat` trait is not in scope",
 
         what: fn(self) -> String { "Unknown interpolation selector after `:`" }
 
         why: fn(self) -> String {
-            "The text after `:` in an interpolation must name one of the built-in format selectors"
+            "A selector `:Name` calls method `name` of trait `NameFormat`, and no trait of that name is in scope here"
         }
 
         fix: fn(self) -> String {
-            "Use `:Debug`, `:Pretty`, `:Fixed(n)`, `:Grouped(n)`, `:Hex(n)`, `:Pad(n[, \"fill\"])`, `:PadLeft(n[, \"fill\"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, `:Unit(name)`, or `:Unit(bare)`; bare interpolation is also valid."
+            "Use a Core selector such as `:Debug`, `:Pretty`, `:Fixed(n)`, `:Hex(n)`, `:Pad(n)` or `:Unit(name)`, import or declare the `NameFormat` trait, or use bare interpolation."
         }
     }
 }

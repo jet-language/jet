@@ -499,11 +499,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "__openapi_inputs" | "__openapi_render" -> None
             else -> Val("Browser")
         }
-        "core.mod" -> if member == {
-            "__read_context" | "__stage_context" -> Val("FS")
-            "__supported" | "__os" | "__parse_context" | "__check_context" | "__context_name" | "__context_digest" | "__exports_count" | "__export_info" | "__finish_context" -> None
-            else -> Val("Exec")
-        }
         "core.process" -> if member == {
             "__keep_open_raw" -> Val("FS")
             "status_ok" -> None
@@ -517,7 +512,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         "core.rt" -> if member == "callback" -> Val("Time") else -> None
         "core.math" -> if member == "random" -> Val("Rand") else -> None
         "core.math.random" -> if member == "rng" -> None else -> Val("Rand")
-        "core.crypto.random" -> Val("Rand")
         "core.term" -> if member == {
             "style_force" -> None
             else -> Val("IO")
@@ -527,13 +521,10 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4" | "__socket_from_parts" | "__socket_ip" | "__socket_port" | "__socket_scope" | "__udp_packet_addr" | "is_ipv6" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string" | "ready_readable" | "ready_writable" | "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code" | "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight" | "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated" -> None
             else -> Val("Net")
         }
-        // A poll reads what the watched target did since the last one: IO, as
-        // WatchHandle.poll declares.
         "core.watcher" -> if member == {
-            "files" | "__files" -> Val("FS")
-            "process_pid" | "__process_pid" -> Val("Exec")
-            "port" | "__port" -> Val("Net")
-            "__poll" -> Val("IO")
+            "files" -> Val("FS")
+            "process_pid" -> Val("Exec")
+            "port" -> Val("Net")
             else -> None
         }
         "core.browser" -> if member == {
@@ -544,11 +535,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
         // The CSV query reads its file.
         "core.db.query" -> if member == "query" -> Val("FS") else -> None
-        // The host's f32 SIMD dispatch is a fixed CPU fact read without a
-        // system call; comptime refuses it (BuildRoutes.jet
-        // ir_comptime_ambient_refusal).
-        "core.compute" -> if member == "__simd_lanes" || member == "device_cpu" -> None else -> Val("GPU")
-        "core.files.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
+        "core.compute" -> if member == "device_cpu" -> None else -> Val("GPU")
         // A service file leaf names the one leaf it needs, as core.files
         // does; the lock and workflow sleeps name Time. A service's record
         // stamps read the wall clock, its authority tokens draw from the OS
@@ -562,9 +549,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             "__host_wall_sample" | "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time")
             else -> None
         }
-        // The terminal-capability variables (COLUMNS, TERM, NO_COLOR, …)
-        // change what a TUI draws, so reading them is Env.
-        "core.tui" -> if member == "__cap_env_bytes" -> Val("Env") else -> None
         "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
@@ -626,7 +610,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
     if module_name == {
         "core.net" -> if member == {
             "gethostname" -> Val("FS.Read")
-            "socket_addr" | "socket_addrs" | "__tcp_accept" | "__tcp_connect" | "__tcp_connect_addr" | "__tcp_connect_timeout" | "__tcp_connect_happy" | "__tcp_reply" | "__udp_send_to" | "__udp_recv_from" | "__udp_send_bytes_to" | "__udp_receive" | "__unix_accept" | "__unix_read" | "__unix_write_all_bytes" | "__unix_send_fds_raw" | "__unix_receive_fds_raw" | "__unix_wait_raw" | "__unix_wait_wake_raw" | "__unix_connect_host" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "unix_wait_wake" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "__dns_a_lookup" | "__dns_aaaa_lookup" | "__dns_a_at_lookup" | "__dns_aaaa_at_lookup" | "__dns_srv_lookup" | "__dns_srv_at_lookup" -> Val("Time.Wait")
+            "socket_addr" | "socket_addrs" | "__tcp_reply" | "__unix_accept" | "__unix_read" | "__unix_write_all_bytes" | "__unix_send_fds_raw" | "__unix_receive_fds_raw" | "__unix_wait_raw" | "__unix_wait_wake_raw" | "__unix_connect_host" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "unix_wait_wake" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "__dns_a_lookup" | "__dns_aaaa_lookup" | "__dns_a_at_lookup" | "__dns_aaaa_at_lookup" | "__dns_srv_lookup" | "__dns_srv_at_lookup" -> Val("Time.Wait")
             else -> None
         }
         "core.sys" -> if member == {
@@ -642,7 +626,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         "core.service" -> if member == {
             "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes" -> Val("FS.Read")
             "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename" | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS.Write")
-            "__host_sleep_ns" | "__host_sleep_wait_ns" | "send" | "send_durable" | "receive" | "endpoint_send" | "endpoint_receive" | "workflow_sleep" | "workflow_activity_wait" | "workflow_all" -> Val("Time.Wait")
+            "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time.Wait")
             else -> None
         }
         "core.time" -> if member == {
@@ -678,11 +662,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
         }
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
         "core.db.query" -> if member == "query" -> Val("Time.Wait") else -> None
-        "core.db" -> if member == {
-            "transaction" | "__transaction" | "migrate" | "__migrate" -> Val("Time.Wait")
-            else -> None
-        }
-        "core.jobs" -> if member == "wait" || member == "poll" -> Val("Time.Wait") else -> None
         else -> None
     }
 }

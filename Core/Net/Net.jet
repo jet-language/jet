@@ -434,26 +434,26 @@ tcp_listen: fn(addr: String) -[Net]> TCPListener NetError! {
     if !valid_text(addr) {
         return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
     }
-    core.net.__tcp_listen(addr)
+    rt.tcp_listen(addr)
 }
 
 tcp_listen_addr: fn(addr: SocketAddr) -[Net]> TCPListener NetError! {
-    core.net.__tcp_listen_addr(addr)
+    rt.tcp_listen_addr(addr)
 }
 
 tcp_accept: fn(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! {
-    core.net.__tcp_accept(listener)
+    rt.tcp_accept(listener)
 }
 
 tcp_connect: fn(addr: String) -[Net, Time.Wait]> TCPStream NetError! {
     if !valid_text(addr) {
         return Err(net_err("tcp_connect", addr, "connect address is empty or contains control bytes"))
     }
-    core.net.__tcp_connect(addr)
+    rt.tcp_connect(addr)
 }
 
 tcp_connect_addr: fn(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! {
-    core.net.__tcp_connect_addr(addr)
+    rt.tcp_connect_addr(addr)
 }
 
 // The address-family race is bounded by the `#Deadline` in force alone, as
@@ -465,7 +465,7 @@ tcp_connect_happy: fn(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetE
     if !valid_port(port) {
         return Err(net_err("tcp_connect_happy", host, "port must be in 0..=65535"))
     }
-    core.net.__tcp_connect_happy(host, port, C_NO_LIMIT_MS)
+    rt.tcp_connect_happy(host, port, C_NO_LIMIT_MS)
 }
 
 create_connection: fn(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError! {
@@ -541,15 +541,15 @@ tcp_local_addr: fn(stream: TCPStream) -[Net]> String NetError! { stream.local_ad
 tcp_peer_addr: fn(stream: TCPStream) -[Net]> String NetError! { stream.peer_addr() }
 
 tcp_local_socket_addr: fn(stream: TCPStream) -[Net]> SocketAddr NetError! {
-    core.net.__tcp_local_socket_addr(stream)
+    rt.tcp_local_socket_addr(stream)
 }
 
 tcp_peer_socket_addr: fn(stream: TCPStream) -[Net]> SocketAddr NetError! {
-    core.net.__tcp_peer_socket_addr(stream)
+    rt.tcp_peer_socket_addr(stream)
 }
 
 listener_local_socket_addr: fn(listener: TCPListener) -[Net]> SocketAddr NetError! {
-    core.net.__listener_local_socket_addr(listener)
+    rt.listener_local_socket_addr(listener)
 }
 
 // One plain-text HTTP/1.1 reply, then the write half closes.
@@ -562,17 +562,17 @@ tcp_reply: fn(stream: &&TCPStream, status: String, body: String) -[Net, Time.Wai
     return conn.shutdown(NetShutdown.Write)
 }
 
-nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! { core.net.__nodelay(stream) }
+nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! { rt.nodelay(stream) }
 
 set_nodelay: fn(stream: &TCPStream, on: Bool) -[Net]> NetError! {
-    core.net.__set_nodelay(stream, on)
+    rt.set_nodelay(stream, on)
 }
 
-ttl: fn(stream: TCPStream) -[Net]> Int NetError! { core.net.__ttl(stream) }
+ttl: fn(stream: TCPStream) -[Net]> Int NetError! { rt.ttl(stream) }
 
 set_ttl: fn(stream: &TCPStream, hops: Int) -[Net]> NetError! {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
-    core.net.__set_ttl(stream, hops)
+    rt.set_ttl(stream, hops)
 }
 
 sendfile: fn(stream: &TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
@@ -586,31 +586,31 @@ udp_bind: fn(addr: String) -[Net]> UDPSocket NetError! {
     if !valid_text(addr) {
         return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
     }
-    core.net.__udp_bind(addr)
+    rt.udp_bind(addr)
 }
 
-udp_bind_addr: fn(addr: SocketAddr) -[Net]> UDPSocket NetError! { core.net.__udp_bind_addr(addr) }
+udp_bind_addr: fn(addr: SocketAddr) -[Net]> UDPSocket NetError! { rt.udp_bind_addr(addr) }
 
 udp_local_addr: fn(socket: UDPSocket) -[Net]> SocketAddr NetError! {
-    core.net.__udp_local_addr(socket)
+    rt.udp_local_addr(socket)
 }
 
 udp_send_to: fn(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
-    core.net.__udp_send_to(socket, text, addr)
+    rt.udp_send_to(socket, text, addr)
 }
 
 udp_recv_from: fn(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! {
     if limit <= 0 -> return Err(net_err("udp_recv_from", "", "receive limit must be positive"))
-    core.net.__udp_recv_from(socket, limit)
+    rt.udp_recv_from(socket, limit)
 }
 
 udp_send_bytes_to: fn(socket: UDPSocket, bytes: [U8], addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
-    core.net.__udp_send_bytes_to(socket, bytes, addr)
+    rt.udp_send_bytes_to(socket, bytes, addr)
 }
 
 udp_receive: fn(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! {
     if limit < 0 -> return Err(net_err("udp_receive", "", "receive limit must be non-negative"))
-    core.net.__udp_receive(socket, limit)
+    rt.udp_receive(socket, limit)
 }
 
 udp_packet_data: fn(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }

@@ -1801,6 +1801,20 @@ body_codec_get_expr: fn(bytes: [U8], input: &BodyCodecIn) -> Expr Never! {
     }
 }
 
+body_codec_put_opt_strselector: fn(out: &BodyCodecOut, value: StrSelector?) Never! {
+    if value == .Val(inner) {
+        body_codec_put_bool(out, true)
+        body_codec_put_strselector(out, inner)
+        return
+    }
+    body_codec_put_bool(out, false)
+}
+
+body_codec_get_opt_strselector: fn(bytes: [U8], input: &BodyCodecIn) -> StrSelector? Never! {
+    if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_strselector(bytes, input))
+    None
+}
+
 body_codec_put_strpart: fn(out: &BodyCodecOut, value: StrPart) Never! {
     if value == {
         .Lit(p0) -> {
@@ -1810,7 +1824,7 @@ body_codec_put_strpart: fn(out: &BodyCodecOut, value: StrPart) Never! {
         .Interp(p0, p1) -> {
             body_codec_put_tag(out, 1)
             body_codec_put_expr(out, p0)
-            body_codec_put_strformat(out, p1)
+            body_codec_put_opt_strselector(out, p1)
         }
         .Byte(p0) -> {
             body_codec_put_tag(out, 2)
@@ -1824,7 +1838,7 @@ body_codec_get_strpart: fn(bytes: [U8], input: &BodyCodecIn) -> StrPart Never! {
     if position == {
         1 -> {
             f0: body_codec_get_expr(bytes, input)
-            f1: body_codec_get_strformat(bytes, input)
+            f1: body_codec_get_opt_strselector(bytes, input)
             StrPart.Interp{expr: f0, format: f1}
         }
         2 -> {
@@ -1838,111 +1852,65 @@ body_codec_get_strpart: fn(bytes: [U8], input: &BodyCodecIn) -> StrPart Never! {
     }
 }
 
-body_codec_put_strformat: fn(out: &BodyCodecOut, value: StrFormat) Never! {
+body_codec_put_list_strselectorarg: fn(out: &BodyCodecOut, values: [StrSelectorArg]) Never! {
+    body_codec_put_count(out, values.len())
+    loop value in values -> body_codec_put_strselectorarg(out, value)
+}
+
+body_codec_get_list_strselectorarg: fn(bytes: [U8], input: &BodyCodecIn) -> [StrSelectorArg] Never! {
+    count: body_codec_get_count(bytes, input, 1)
+    values := [StrSelectorArg]{}
+    loop _ in 0..<count -> values.push(body_codec_get_strselectorarg(bytes, input))
+    values
+}
+
+body_codec_put_strselector: fn(out: &BodyCodecOut, value: StrSelector) Never! {
+    body_codec_put_string(out, value.name)
+    body_codec_put_span(out, value.span)
+    body_codec_put_list_strselectorarg(out, value.args)
+}
+
+body_codec_get_strselector: fn(bytes: [U8], input: &BodyCodecIn) -> StrSelector Never! {
+    f0: body_codec_get_string(bytes, input)
+    f1: body_codec_get_span(bytes, input)
+    f2: body_codec_get_list_strselectorarg(bytes, input)
+    StrSelector{name: f0, span: f1, args: f2}
+}
+
+body_codec_put_strselectorarg: fn(out: &BodyCodecOut, value: StrSelectorArg) Never! {
     if value == {
-        .Display -> { body_codec_put_tag(out, 0) }
-        .Debug -> { body_codec_put_tag(out, 1) }
-        .Pretty -> { body_codec_put_tag(out, 2) }
-        .Fixed(p0) -> {
-            body_codec_put_tag(out, 3)
+        .Number(p0) -> {
+            body_codec_put_tag(out, 0)
             body_codec_put_int(out, p0)
         }
-        .Grouped(p0) -> {
-            body_codec_put_tag(out, 4)
-            body_codec_put_int(out, p0)
+        .Text(p0) -> {
+            body_codec_put_tag(out, 1)
+            body_codec_put_string(out, p0)
         }
-        .Hex(p0) -> {
-            body_codec_put_tag(out, 5)
-            body_codec_put_int(out, p0)
+        .Word(p0) -> {
+            body_codec_put_tag(out, 2)
+            body_codec_put_string(out, p0)
         }
-        .Pad(p0, p1) -> {
-            body_codec_put_tag(out, 6)
-            body_codec_put_int(out, p0)
-            body_codec_put_string(out, p1)
-        }
-        .PadLeft(p0, p1) -> {
-            body_codec_put_tag(out, 7)
-            body_codec_put_int(out, p0)
-            body_codec_put_string(out, p1)
-        }
-        .Sci(p0) -> {
-            body_codec_put_tag(out, 8)
-            body_codec_put_int(out, p0)
-        }
-        .Percent(p0) -> {
-            body_codec_put_tag(out, 9)
-            body_codec_put_int(out, p0)
-        }
-        .Bin -> { body_codec_put_tag(out, 10) }
-        .Oct -> { body_codec_put_tag(out, 11) }
-        .Unit(p0) -> {
-            body_codec_put_tag(out, 12)
-            body_codec_put_unitformat(out, p0)
-        }
-        .Count -> body_codec_put_tag(out, 13)
+        .Computed -> body_codec_put_tag(out, 3)
     }
 }
 
-body_codec_get_strformat: fn(bytes: [U8], input: &BodyCodecIn) -> StrFormat Never! {
-    position: body_codec_get_tag(bytes, input, 14, 0)
+body_codec_get_strselectorarg: fn(bytes: [U8], input: &BodyCodecIn) -> StrSelectorArg Never! {
+    position: body_codec_get_tag(bytes, input, 4, 3)
     if position == {
-        1 -> StrFormat.Debug
-        2 -> StrFormat.Pretty
-        3 -> {
+        0 -> {
             f0: body_codec_get_int(bytes, input)
-            StrFormat.Fixed{digits: f0}
+            StrSelectorArg.Number{value: f0}
         }
-        4 -> {
-            f0: body_codec_get_int(bytes, input)
-            StrFormat.Grouped{digits: f0}
+        1 -> {
+            f0: body_codec_get_string(bytes, input)
+            StrSelectorArg.Text{value: f0}
         }
-        5 -> {
-            f0: body_codec_get_int(bytes, input)
-            StrFormat.Hex{digits: f0}
+        2 -> {
+            f0: body_codec_get_string(bytes, input)
+            StrSelectorArg.Word{name: f0}
         }
-        6 -> {
-            f0: body_codec_get_int(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            StrFormat.Pad{width: f0, fill: f1}
-        }
-        7 -> {
-            f0: body_codec_get_int(bytes, input)
-            f1: body_codec_get_string(bytes, input)
-            StrFormat.PadLeft{width: f0, fill: f1}
-        }
-        8 -> {
-            f0: body_codec_get_int(bytes, input)
-            StrFormat.Sci{digits: f0}
-        }
-        9 -> {
-            f0: body_codec_get_int(bytes, input)
-            StrFormat.Percent{digits: f0}
-        }
-        10 -> StrFormat.Bin
-        11 -> StrFormat.Oct
-        12 -> {
-            f0: body_codec_get_unitformat(bytes, input)
-            StrFormat.Unit{format: f0}
-        }
-        13 -> StrFormat.Count
-        else -> StrFormat.Display
-    }
-}
-
-body_codec_put_unitformat: fn(out: &BodyCodecOut, value: UnitFormat) Never! {
-    if value == {
-        .Symbol -> { body_codec_put_tag(out, 0) }
-        .Name -> { body_codec_put_tag(out, 1) }
-        .Bare -> body_codec_put_tag(out, 2)
-    }
-}
-
-body_codec_get_unitformat: fn(bytes: [U8], input: &BodyCodecIn) -> UnitFormat Never! {
-    position: body_codec_get_tag(bytes, input, 3, 0)
-    if position == {
-        1 -> UnitFormat.Name
-        2 -> UnitFormat.Bare
-        else -> UnitFormat.Symbol
+        else -> StrSelectorArg.Computed
     }
 }
 

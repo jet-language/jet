@@ -71,6 +71,7 @@ use {
         SerdeWireShape,
         Span,
         StructDef,
+        StructureFact,
         SYMBOL_LOCAL_BOUND,
         Symbol,
         SymbolID,
@@ -992,6 +993,11 @@ SemaRegistrationGraph: struct {
     // passes after preparation intern into.
     symbols: SymbolTable,
     edges: [SemaRegistrationImportEdge],
+    // The import edges a package's `boundaries` policy decided, as the
+    // loader recorded them (allowed or denied, gated by the manifest rule):
+    // each stands in for the plain resolved fact of its edge
+    // (sema_name_structure_facts).
+    boundary_facts: [StructureFact]{[StructureFact]{}},
     foreign_providers: [SemaForeignProviderInput],
     core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact],
     imports: [SemaRegistrationImport],

@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
     jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, Interner, JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES, ModuleID, NameTable, Span, SymbolID, TYPE_ID_UNIT, Type, TypeID, TypeKind, TypeTupleField, delta_type_intern_syntax, delta_type_kind, delta_type_syntax, interner_fork_delta, type_b_type, type_find_syntax, type_id_well_known, type_kind, type_syntax, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_identity_module, core_module_has_type, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_aggregate_size, jet_target_layout_place, measure_literal_value, module_is_core, module_none, name_column, name_column_get, name_column_set, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, type_carrier_identity, type_carrier_identity_grouped, type_name, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
-    jet_foundation.[StrFormat, TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_format_style, symbol_key_leaf, symbol_key_names]
+    jet_foundation.[TShapeFormatName, owned_operator_role, owned_trait_arithmetic, owned_trait_for_role, str_selector_style, symbol_key_leaf, symbol_key_names]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -26,7 +26,7 @@ ir_type_path_text: fn(p: IRProgram, ty: Type) -> String Never! {
 
 // `ty` with each declared type it names spelled by its TTypeDef.path, the
 // spelling Sema's `Type{…}` qualifies it by
-// (sema_comptime_reflection_qualified_type); a type that keeps its bare name
+// (sema_comptime_reflection_named_type); a type that keeps its bare name
 // is spelled by its declared name, and a nominal with no type row as
 // written. A compiler's tag names no type of its own (type_name skips it);
 // a user's tag keeps its type as written, as Sema's does.
@@ -4635,7 +4635,7 @@ ir_print_style_scalar: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, 
 
 // The Int `value` under the found print style `style`: the text of Core's
 // format trait implementation for Int that its int_base case names
-// (ir_print_base_format), or the Int's own text for Decimal, zero-padded
+// (ir_print_base_selector), or the Int's own text for Decimal, zero-padded
 // after its sign to int_min_digits digits (ir_print_zero_pad). A fresh
 // String.
 ir_print_style_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrintStyleFound, value: Int, span: Span) -> Int Never! {
@@ -4653,8 +4653,8 @@ ir_print_style_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrint
     opened := 0
     if p.types[enum_row].kind == .Enum(variants, _) {
         loop (index, variant) in variants {
-            format: ir_print_base_format(symbol_key_leaf(variant.name)) ?? next
-            row: ir_print_style_impl(p, format, Type.Int)
+            selector: ir_print_base_selector(symbol_key_leaf(variant.name)) ?? next
+            row: ir_print_style_impl(p, selector, Type.Int)
             if row < 0 -> return ir_fail_slot(b, span, "print style without the {variant.name} format implementation of Int")
             index_slot: ir_temp_like(m, b, tag)
             ir_emit(b.f, IROp.Const, index_slot, index, -1, -1, b.line)
@@ -4662,7 +4662,7 @@ ir_print_style_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrint
             ir_emit(b.f, IROp.Eq, test, tag, index_slot, -1, b.line)
             ir_open_if(b.f, test, b.line)
             // HexFormat.hex takes the digit count; BinFormat.bin and OctFormat.oct none.
-            args: if format == .Hex(_) -> [Int]{value, no_digits} else -> [Int]{value}
+            args: if selector == "Hex" -> [Int]{value, no_digits} else -> [Int]{value}
             made: ir_print_style_call(m, p, b, row, args, string_row, span)
             if ir_failed(b) || made < 0 -> return -1
             ir_store(m, p, b, text, made)
@@ -4681,7 +4681,7 @@ ir_print_style_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrint
 // set, the text of Core's FixedFormat implementation for Float at that many
 // places, else the plain text. A fresh String.
 ir_print_style_float: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, style: IRPrintStyleFound, value: Int, span: Span) -> Int Never! {
-    row: ir_print_style_impl(p, StrFormat.Fixed{digits: 0}, Type.Float)
+    row: ir_print_style_impl(p, "Fixed", Type.Float)
     if row < 0 -> return ir_fail_slot(b, span, "print style without the FixedFormat implementation of Float")
     digits: ir_print_style_field(m, p, b, style, "float_digits", span)
     if ir_failed(b) || digits < 0 -> return -1
@@ -4750,34 +4750,45 @@ ir_print_zero_pad: fn(m: &IRModule, b: &IRBuilder, text: Int, width: Int, span: 
     ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
 }
 
-// The format whose Core trait implementation for Int shows an Int in print
-// base `base` (a term.PrintBase case name): BinFormat, OctFormat or
-// HexFormat; None for Decimal, the Int's own text. Each is one of
-// IR_PRINT_STYLE_FORMATS, which a `#Context(print: …)` block roots.
-ir_print_base_format: fn(base: String) -> StrFormat? Never! {
+// The selector whose Core trait implementation for Int shows an Int in print
+// base `base` (a term.PrintBase case name): Bin, Oct or Hex, whose traits are
+// BinFormat, OctFormat and HexFormat; None for Decimal, the Int's own text.
+// Each is a print style (ir_print_style_selector), which a `#Context(print:
+// …)` block roots.
+ir_print_base_selector: fn(base: String) -> String? Never! {
     if base == {
-        "Binary" -> Val(StrFormat.Bin)
-        "Octal" -> Val(StrFormat.Oct)
-        "Hex" -> Val(StrFormat.Hex{digits: 0})
+        "Binary" -> Val("Bin")
+        "Octal" -> Val("Oct")
+        "Hex" -> Val("Hex")
         else -> None
     }
 }
 
-// The formats whose Core trait implementations print's styled text calls:
-// an Int's for each print base (ir_print_base_format), a Float's FixedFormat
-// for its places (ir_print_style_float).
-IR_PRINT_STYLE_FORMATS: [StrFormat]{StrFormat.Bin, StrFormat.Oct, StrFormat.Hex{digits: 0}, StrFormat.Fixed{digits: 0}}
-
-// The type whose Core implementation of `format` print's styled text calls.
-ir_print_style_owner: fn(format: StrFormat) -> Type Never! {
-    if format == .Fixed(_) -> Type.Float else -> Type.Int
+// The selector of the format trait method `method` when print's styled text
+// calls Core's implementations of it: an Int's for each print base
+// (ir_print_base_selector), a Float's FixedFormat for its places
+// (ir_print_style_float).
+ir_print_style_selector: fn(method: String) -> String? Never! {
+    if method == {
+        "bin" -> Val("Bin")
+        "oct" -> Val("Oct")
+        "hex" -> Val("Hex")
+        "fixed" -> Val("Fixed")
+        else -> None
+    }
 }
 
-// Whether `function` is Core's implementation for `owner` of `format`'s
+// The type whose Core implementation of `selector`'s trait print's styled
+// text calls.
+ir_print_style_owner: fn(selector: String) -> Type Never! {
+    if selector == "Fixed" -> Type.Float else -> Type.Int
+}
+
+// Whether `function` is Core's implementation for `owner` of `selector`'s
 // trait (`Hex`: core.text.fmt HexFormat.hex), by its method name and owner
 // type.
-ir_print_style_impl_of: fn(function: FnBody, format: StrFormat, owner: Type) -> Bool Never! {
-    style: str_format_style(format) ?? return false
+ir_print_style_impl_of: fn(function: FnBody, selector: String, owner: Type) -> Bool Never! {
+    style: str_selector_style(selector)
     if function.name != style.method || !module_is_core(function.module_identity) -> return false
     implemented: if function.kind == {
         .TraitMethod(_, _, owner_type, _, _) -> ir_untag(owner_type) == owner
@@ -4791,30 +4802,25 @@ ir_print_style_impl_of: fn(function: FnBody, format: StrFormat, owner: Type) -> 
 // styled text calls, which a `#Context(print: …)` block roots (CoreReach.jet
 // ir_core_reach_one_stmt_keys).
 ir_print_style_impl_used: fn(function: FnBody) -> Bool Never! {
-    loop format in IR_PRINT_STYLE_FORMATS {
-        if ir_print_style_impl_of(function, format, ir_print_style_owner(format)) -> return true
-    }
-    false
+    selector: ir_print_style_selector(function.name) ?? return false
+    ir_print_style_impl_of(function, selector, ir_print_style_owner(selector))
 }
 
 // Whether `name` is the method of a format trait print's styled text calls:
 // lowering selects Core's implementations of it by owner type
 // (CoreReach.jet ir_core_method_lowered_by_owner).
 ir_print_style_method: fn(name: String) -> Bool Never! {
-    loop format in IR_PRINT_STYLE_FORMATS {
-        if (str_format_style(format) ?? next).method == name -> return true
-    }
-    false
+    ir_print_style_selector(name) != None
 }
 
-// The function row of Core's implementation for `owner` of `format`'s trait
-// among the bound implementations, or -1 when none is lowered.
-ir_print_style_impl: fn(p: IRProgram, format: StrFormat, owner: Type) -> Int Never! {
-    style: str_format_style(format) ?? return -1
+// The function row of Core's implementation for `owner` of `selector`'s
+// trait among the bound implementations, or -1 when none is lowered.
+ir_print_style_impl: fn(p: IRProgram, selector: String, owner: Type) -> Int Never! {
+    style: str_selector_style(selector)
     slot: ir_trait_method_slot(p.trait_methods, "{style.trait_name}|{style.method}")
     if slot == 0 -> return -1
     loop row in p.trait_methods.rows[slot] {
-        if ir_print_style_impl_of(p.functions[row], format, owner) && ir_function_row(p, p.functions[row].key) == (Val(row)) {
+        if ir_print_style_impl_of(p.functions[row], selector, owner) && ir_function_row(p, p.functions[row].key) == (Val(row)) {
             return row
         }
     }

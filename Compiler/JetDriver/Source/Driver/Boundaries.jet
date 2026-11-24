@@ -2,9 +2,11 @@
 // `boundaries: { deny: [{ from: "app.ui", to: "app.db" }] }` governs its own
 // modules' import edges. Import resolution reports each denied edge (E0619) at
 // its `use`, and each rule that matches no loaded edge warns (L0619) without
-// blocking the build. The policy has no runtime representation.
+// blocking the build. Every module edge out of a package that writes a rule
+// gets a `Structure.ImportEdge` fact, allowed or denied, gated by the
+// manifest rule; the policy has no runtime representation.
 use {
-    jet_foundation.[Diagnostic, diagnostic_with_source_path]
+    jet_foundation.[Diagnostic, StructureFact, StructureFactKind, diagnostic_with_source_path]
     jet_pkg_model.[ImportBoundary, ManifestEntry, PackageParseError, pkg_manifest_diagnostic_from_row, pkg_parse_boundaries, pkg_record_body, pkg_retired_record_head_spans]
     jet_sema.[SemaRegistrationImportEdge]
 }
@@ -18,7 +20,7 @@ jet_driver_read_package_boundaries: fn(value: String) -> [ImportBoundary] Packag
     Ok(boundaries)
 }
 
-jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], imports: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) {
+jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_units: [JetDriverSourceUnit], modules: [JetDriverLoadedModule], imports: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic], facts: &[StructureFact]) {
     hits := [[Bool]]{}
     any_rule := false
     loop package in packages {
@@ -47,9 +49,11 @@ jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_
         if to_package.name == "" -> next
         from_name: jet_driver_boundary_module_name(from_package.name, from_unit.relative_path)
         to_name: jet_driver_boundary_module_name(to_package.name, to_unit.relative_path)
+        denied_under := ""
         loop (rule_index, rule) in from_package.boundaries {
             if !rule.matches(from_name, to_name) -> next
             hits[from_unit.root_index][rule_index] = true
+            denied_under = "{rule.from} -> {rule.to}"
             denied: pkg_manifest_diagnostic_from_row(
                 "E0619",
                 [ManifestEntry]{
@@ -62,6 +66,9 @@ jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_
             diagnostics.push(diagnostic_with_source_path(denied, from_unit.path, 0))
             break
         }
+        status: if denied_under == "" -> "allowed" else -> "denied"
+        detail: if denied_under == "" -> "manifest boundary policy checked" else -> "manifest boundary policy denied edge under {denied_under}"
+        facts.push(StructureFact{kind: StructureFactKind.ImportEdge, subject: "{from_name} -> {to_name}", source: from_unit.path, span: edge.declaration.span, status: status, detail: detail, gate: Val("manifest rule edit")})
     }
     loop (package_index, package) in packages {
         loop (rule_index, rule) in package.boundaries {

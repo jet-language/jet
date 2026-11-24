@@ -31,27 +31,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.crypto __sha256_blocks &[U32],[u8],Int,Int Bool
     core.crypto __aes_blocks [u8],Int,Int,&[u8],[u8],Int,Int,&[u8] Bool
     core.crypto __ghash_blocks [u8],&[u8],[u8],Int,Int Bool
-    core.db __vfs_access String,Int Int
-    core.db __vfs_chown_like Int,String Int
-    core.db __vfs_close Int Int
-    core.db __vfs_cwd - String
-    core.db __vfs_exists String,Bool Bool
-    core.db __vfs_fd_inode Int Int
-    core.db __vfs_inode String Int
-    core.db __vfs_lock Int,Int,Int,Int,Int Int
-    core.db __vfs_lstat_mode String Int
-    core.db __vfs_mode String Int
-    core.db __vfs_now_ms - Int
-    core.db __vfs_open String,Int,Int Int
-    core.db __vfs_random &[u8] Int
-    core.db __vfs_read Int,Int,&[u8],Int,Int Int
-    core.db __vfs_readlink String String
-    core.db __vfs_size Int Int
-    core.db __vfs_sleep Int Int
-    core.db __vfs_sync Int Int
-    core.db __vfs_truncate Int,Int Int
-    core.db __vfs_unlink String Int
-    core.db __vfs_write Int,Int,[u8],Int,Int Int
     core.files scope Authority FileScope
     core.files read Union<String,Path> Result<String,IOError>
     core.files read_bytes Union<String,Path> Result<[u8],IOError>
@@ -110,20 +89,11 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.files __open_writer_raw Int,[u8],Int,Int Result<FileWriter,IOError>
     core.files __remove_at_raw Int,[u8] Result<Unit,IOError>
     core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
-    core.watcher files|__files Union<String,Path> Result<WatchHandle,IOError>
-    core.watcher process_pid|__process_pid Int WatchHandle
-    core.watcher port|__port String,Int WatchHandle
-    core.watcher set|__set - WatchSet
-    core.watcher __poll WatchHandle [String]
-    core.watcher __cancel WatchHandle Unit
-    core.watcher __is_active WatchHandle Bool
-    core.watcher __target WatchHandle Int
-    core.watcher __text WatchHandle String
-    core.watcher __number WatchHandle Int
+    core.watcher files Union<String,Path> Result<WatchHandle,IOError>
+    core.watcher process_pid Int WatchHandle
+    core.watcher port String,Int WatchHandle
+    core.watcher set - WatchSet
     core.watcher __event WatchHandle Event<WatchEvent>
-    core.watcher __set_add WatchSet,WatchHandle Unit
-    core.watcher __set_len WatchSet Int
-    core.watcher __set_get WatchSet,Int WatchHandle
     core.process args - [String]
     core.process check ProcessReceipt Result<Unit,IOError>
     core.process status_ok ProcessReceipt Bool
@@ -363,8 +333,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.math.random normal|normalvariate|gauss Float,Float Float
     core.math.random exponential|expovariate Float Float
     core.math.random seed Int -
-    core.math.random __rng_state - u64
-    core.math.random __rng_try_update u64,u64 Bool
     core.math.random bytes|randbytes Int [u8]
     core.math.random getrandbits Int Int
     core.math.random randrange Int,Int Int
@@ -374,7 +342,6 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.math.random gammavariate|betavariate|lognormvariate|weibullvariate|vonmisesvariate Float,Float Float
     core.math.random paretovariate Float Float
     core.math.random rng|split Int RNG
-    core.crypto.random __os_entropy Int [u8]?
     core.crypto __wipe &[u8] -
     core.crypto __secret_keep &[u8] -
     core.time sleep Duration -

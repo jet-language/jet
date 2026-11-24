@@ -1,0 +1,16 @@
+# One type has one identity in one compile: a struct of inline module `geo`
+# reflected as a field type, as a generic argument, through a specialized
+# field and by a direct reflect reports one identity, its module's name and
+# the path its source writes (`main.geo.Point`), and its TypeId's name is that
+# source path, never the generated name it is lifted under; at O0, O1 and O2.
+fixture: OneTypeHasOneIdentityInOneCompile.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = one_type_has_one_identity_in_one_compile.stdout.expected
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = one_type_has_one_identity_in_one_compile.stdout.expected
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = one_type_has_one_identity_in_one_compile.stdout.expected

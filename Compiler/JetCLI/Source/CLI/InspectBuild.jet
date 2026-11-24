@@ -63,7 +63,7 @@ use {
     build_files: core.files
     build_math: core.math
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-    jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
+    jet_driver.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer,
         FactContribution,
@@ -401,8 +401,8 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if shadowed.move() == .Val(refusal) -> return refusal
     // Under `write_generated: on` every generated source is written; a
     // module a step reads is that step's input, promised to it, so it is
-    // written before any step runs whatever the option says (JetBuildSession
-    // Schedule.jet).
+    // written before any step runs whatever the option says (JetDriver
+    // BuildSession/Schedule.jet).
     write_all: build_options_value(selected_options, "write_generated") == "on"
     unwritten: jet_cli_generated_write(file, root, generated, graph, write_all, color)
     if unwritten.move() == .Val(refusal) -> return refusal
@@ -863,6 +863,11 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_g
     if settings == None && ((!load_generated && declared) || request.generated_modules.len() > 0) {
         return {request: request.move(), refusal: None}
     }
+    // The build generates its modules again as it runs, so the modules this
+    // request carries stay aside until it has run: loaded twice, a module
+    // would alias its own path (Loader.jet).
+    carried: request.generated_modules.move()
+    request.generated_modules = [JetDriverGeneratedModule]{}
     scope := JetDriverBuildQueryScope{next_session_id: 1}
     response := jet_driver_query_build_plan(request, scope)
     query := response.query.move()
@@ -871,6 +876,7 @@ jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, load_g
         return {request: response.request.move(), refusal: Val(failure)}
     }
     contributed := response.request.move()
+    contributed.generated_modules = carried.move()
     // The modules `build: fn` generates (`meta.add`, `meta.rewrite_body`)
     // load beside the sources of every compile of the package, so `jet run`
     // and `jet dev` run the program `jet build` builds, whether or not the

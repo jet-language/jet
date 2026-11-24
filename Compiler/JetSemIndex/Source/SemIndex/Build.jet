@@ -96,6 +96,9 @@ SemDB: struct {
     structural_ordinals: [String:Int],
     // `module_path:start:end` of each walked free (non-method) call's name.
     free_calls: [String:Bool],
+    // The same key of each method call on a bare name (`term.print`) -> the
+    // index of that name's reference in `refs`.
+    call_receivers: [String:Int],
 }
 
 // `display_prefix` is the code-module path the name ledger prints before a
@@ -147,6 +150,7 @@ semindex_db: fn() -> SemDB Never! {
         view_provenance: [String:ViewProvenanceMap]{},
         structural_ordinals: [String:Int]{},
         free_calls: [String:Bool]{},
+        call_receivers: [String:Int]{},
     }
 }
 
@@ -1458,6 +1462,10 @@ semindex_block_body: fn(slot: String, stmts: [StmtNode], db: &SemDB, ctx: &SemWa
 
 semindex_method_call: fn(receiver: ExprNode, method: String, method_span: Span, args: [CallArg], db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocModule]) {
     semindex_scalar("receiver", receiver, db, ctx, modules)
+    if ast_expr(ctx.tables, receiver) == .Ident(_, span, _) && db.refs.len() > 0 {
+        last: db.refs.len() - 1
+        if db.refs[last].span.start == span.start && db.refs[last].span.end == span.end -> db.call_receivers[semindex_site_key(ctx.module_path, method_span)] = last
+    }
     semindex_record_call(db, ctx, method, method_span)
     db.refs.push(semindex_scoped_ref(method, method_span, ctx))
     if method == "drop" {
@@ -2961,6 +2969,7 @@ semindex_build: fn(modules: [JetDriverDocModule], interner: Interner, effect_pro
     }
     semindex_call_targets(db, modules)
     semindex_align_reference_targets(db)
+    semindex_call_declarations(db, modules)
     definitions: semindex_convert_defs(db, modules)
     definition_facts: semindex_definition_facts(definitions, modules)
     // One relation holds every derivation the check made: each written

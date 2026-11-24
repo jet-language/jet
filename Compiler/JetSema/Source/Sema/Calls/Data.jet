@@ -1034,8 +1034,7 @@ sema_data_check_test_setting: fn(row: TestSettingRow, receiver: Expr, receiver_v
         }
         value: sema_data_check_argument(site, index, args[index], ty, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if index > 0 -> parts.push(TStrPart.Literal{text: "/"})
-        format: if row.kind == TestSettingKind.Levels -> TStrFormat.Debug else -> TStrFormat.Display
-        parts.push(TStrPart.Interpolation{value: value, format: format})
+        parts.push(TStrPart.Interpolation{value: value, debug: row.kind == TestSettingKind.Levels})
     }
     parts.push(TStrPart.Literal{text: "\n"})
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {

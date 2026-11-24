@@ -14,6 +14,7 @@ use {
     build_tls: core.net.tls
     client_gzip: core.archive.gzip
     rt: jet.runtime.time
+    net_rt: jet.runtime.net
     h2: __core_http_h2
 }
 
@@ -844,7 +845,7 @@ priv build_connect: fn(addresses: [[U8]], port: Int, end_ns: Int, portable: &Str
             return Err(build_fail("timed out"))
         }
         millis: remaining /% 1000000
-        if core.net.__tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
+        if net_rt.tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
             .Ok(stream) -> return Ok(stream)
             .Err(error) -> {
                 failure = "{error}"

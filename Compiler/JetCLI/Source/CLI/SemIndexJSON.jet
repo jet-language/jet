@@ -43,6 +43,7 @@ use {
         semindex_failure_contract_name,
         semindex_failure_source_name,
         semindex_policy_display,
+        semindex_structural_audit,
         semindex_zone_name,
     ]
 }
@@ -240,7 +241,7 @@ jet_cli_sem_json_ref: fn(reference: SemRef) -> String Never! {
 }
 
 jet_cli_sem_json_call: fn(call: SemCall) -> String Never! {
-    "{{\"caller\":{jet_cli_json_string(call.caller)},\"callee\":{jet_cli_json_string(call.callee)},\"module\":{jet_cli_json_string(call.module_path)},\"span\":{jet_cli_sem_json_span(call.span)}}}"
+    "{{\"caller\":{jet_cli_json_string(call.caller)},\"callee\":{jet_cli_json_string(call.callee)},\"declaration\":{jet_cli_sem_json_optional(call.declaration)},\"module\":{jet_cli_json_string(call.module_path)},\"span\":{jet_cli_sem_json_span(call.span)}}}"
 }
 
 jet_cli_sem_json_effect: fn(fact: SemEffect) -> String Never! {
@@ -310,7 +311,7 @@ jet_cli_semindex_payload: fn(index: SemIndex) -> String {
     effects: loop fact in index.effects -> jet_cli_sem_json_effect(fact)
     arithmetic: loop fact in index.arithmetic -> jet_cli_sem_json_arithmetic(fact)
     members: loop member in index.members -> jet_cli_sem_json_member(member)
-    semindex_display_text(index, "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}")
+    semindex_display_text(index, "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":{jet_cli_sem_json_package_facts(index.package_facts)},\"workspace_overlays\":{jet_cli_sem_json_workspace_overlays(index.workspace_overlays)},\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}")
 }
 
 // `SemIndex.to_status_envelope().json()`: the `inspect.semindex` status
@@ -318,6 +319,42 @@ jet_cli_semindex_payload: fn(index: SemIndex) -> String {
 // carrier writes verbatim.
 jet_cli_semindex_status_json: fn(index: SemIndex) -> String {
     jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("semindex", JetCLIStatusValue.Float{text: jet_cli_semindex_payload(index)})})
+}
+
+// `jet inspect semindex --audit <before.jet> <after.jet>`: the structural
+// audit between the two checked indexes (semindex_structural_audit), as the
+// `inspect.semindex` status line with an `audit` member, or as text. Each
+// identity is spelled through its own index's ledger paths.
+jet_cli_semindex_audit_report: fn(before_path: String, after_path: String, before: SemIndex, after: SemIndex, json: Bool) -> String Never! {
+    audit: semindex_structural_audit(before, after)
+    if json {
+        added: loop at in audit.added -> jet_cli_status_text(semindex_display_text(after, after.definition_facts[at].human_identity))
+        removed: loop at in audit.removed -> jet_cli_status_text(semindex_display_text(before, before.definition_facts[at].human_identity))
+        changed: loop at in audit.changed -> jet_cli_status_text(semindex_display_text(after, after.definition_facts[at].human_identity))
+        payload: jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("before", jet_cli_status_text(before_path)),
+                jet_cli_status_field("after", jet_cli_status_text(after_path)),
+                jet_cli_status_field("added", jet_cli_status_array(added)),
+                jet_cli_status_field("removed", jet_cli_status_array(removed)),
+                jet_cli_status_field("changed", jet_cli_status_array(changed)),
+            },
+        )
+        return "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("audit", payload)})}\n"
+    }
+    out := "Structural audit\n  Before: {before_path}\n  After:  {after_path}\n"
+    out = "{out}{jet_cli_semindex_audit_section("Added", after, audit.added)}"
+    out = "{out}{jet_cli_semindex_audit_section("Removed", before, audit.removed)}"
+    "{out}{jet_cli_semindex_audit_section("Changed", after, audit.changed)}"
+}
+
+// One audit list in text form: the identities at `positions` of `index`'s
+// definition facts.
+jet_cli_semindex_audit_section: fn(title: String, index: SemIndex, positions: [Int]) -> String Never! {
+    if positions.len() == 0 -> return "{title}: none\n"
+    out := "{title} ({positions.len()}):\n"
+    loop at in positions -> out = "{out}  {semindex_display_text(index, index.definition_facts[at].human_identity)}\n"
+    out
 }
 
 jet_cli_effect_names: fn(effects: [String]) -> String Never! {

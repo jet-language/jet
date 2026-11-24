@@ -3,7 +3,7 @@
 // Core.rows's declarations as the compiler reads them (CORE_DECLARATIONS).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverSourceDocument, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreCallRecord, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_TABLE, core_call_source_member, diagnostic_render_all, name_ledger_from_facts]
+    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreCallRecord, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateEntry, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_TABLE, core_call_source_member, diagnostic_render_all, name_ledger_from_facts]
     jet_parser.[parse_source]
     jet_sema.[sema_gate_append_structure]
 }
@@ -46,14 +46,19 @@ jet_cli_structure_facts: fn(result: JetDriverCompileResult) -> [StructureFact] N
     result.structure_facts
 }
 
+// The `structure` field of the `inspect.structure` envelope: the registry
+// rows, the facts and the structure gates.
+jet_cli_structure_value: fn(facts: [StructureFact], gates: [GateEntry]) -> JetCLIStatusValue Never! {
+    rows: loop row in jet_cli_structure_rows() -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates))})
+    fact_rows: loop fact in facts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(jet_cli_structure_kind(fact.kind))), jet_cli_status_field("registry", jet_cli_status_text(jet_cli_structure_registry(fact.kind))), jet_cli_status_field("subject", jet_cli_status_text(fact.subject)), jet_cli_status_field("source", jet_cli_status_text(fact.source)), jet_cli_status_field("span", jet_cli_structure_span(fact.span)), jet_cli_status_field("status", jet_cli_status_text(fact.status)), jet_cli_status_field("detail", jet_cli_status_text(fact.detail)), jet_cli_status_field("gate", jet_cli_status_optional_text(fact.gate))})
+    gate_rows: loop entry in gates -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("structure")), jet_cli_status_field("scope", jet_cli_status_text(entry.scope)), jet_cli_status_field("source", jet_cli_status_text(entry.source)), jet_cli_status_field("span", jet_cli_structure_span(entry.span ?? Span{start: 0, end: 0})), jet_cli_status_field("subject", jet_cli_status_text(entry.subject)), jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)), jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)), jet_cli_status_field("detail", jet_cli_status_text(entry.detail)), jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance))})
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("facts", jet_cli_status_array(fact_rows)), jet_cli_status_field("gates", jet_cli_status_array(gate_rows))})
+}
+
 jet_cli_structure_report: fn(facts: [StructureFact], ledger: GateLedger, json: Bool) -> String Never! {
     gates: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
     if json {
-        rows: loop row in jet_cli_structure_rows() -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates))})
-        fact_rows: loop fact in facts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(jet_cli_structure_kind(fact.kind))), jet_cli_status_field("registry", jet_cli_status_text(jet_cli_structure_registry(fact.kind))), jet_cli_status_field("subject", jet_cli_status_text(fact.subject)), jet_cli_status_field("source", jet_cli_status_text(fact.source)), jet_cli_status_field("span", jet_cli_structure_span(fact.span)), jet_cli_status_field("status", jet_cli_status_text(fact.status)), jet_cli_status_field("detail", jet_cli_status_text(fact.detail)), jet_cli_status_field("gate", jet_cli_status_optional_text(fact.gate))})
-        gate_rows: loop entry in gates -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("structure")), jet_cli_status_field("scope", jet_cli_status_text(entry.scope)), jet_cli_status_field("source", jet_cli_status_text(entry.source)), jet_cli_status_field("span", jet_cli_structure_span(entry.span ?? Span{start: 0, end: 0})), jet_cli_status_field("subject", jet_cli_status_text(entry.subject)), jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)), jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)), jet_cli_status_field("detail", jet_cli_status_text(entry.detail)), jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance))})
-        structure: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("facts", jet_cli_status_array(fact_rows)), jet_cli_status_field("gates", jet_cli_status_array(gate_rows))})
-        return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", structure)})}\n"
+        return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", jet_cli_structure_value(facts, gates))})}\n"
     }
     output := "Structure\n"
     loop row in jet_cli_structure_rows() {
@@ -211,18 +216,24 @@ jet_cli_structure_result: fn(file: String, color: Bool, json: Bool, result: JetD
         ledger = GateLedger{}
         names: name_ledger_from_facts(NameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
         sema_gate_append_structure(ledger, names)
-        // Rust preserves any published structure facts on frontend failure.
-        stdout := if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, json) else -> ""
-        stderr := ""
+        // Rust preserves any published structure facts on frontend failure:
+        // the text report prints ahead of the diagnostics, and the one JSON
+        // failure envelope carries them in its `structure` field.
         if json {
             source: jet_cli_inspection_source(result, snapshot, file)
-            stdout = "{stdout}{jet_cli_status_render_with_reports("inspect.structure", false, jet_cli_reports_json(jet_cli_report_base(file), file, source, diagnostics), [JetCLIStatusField]{})}"
-        } else {
-            loop error in diagnostics {
-                origin: if error.origin == .Val(value) -> value.display else -> file
-                source: if error.origin == .Val(value) -> value.source else -> jet_cli_inspection_source(result, snapshot, origin)
-                stderr = "{stderr}{diagnostic_render_all(origin, source, [Diagnostic]{error}, color)}"
+            fields := [JetCLIStatusField]{}
+            if facts.len() > 0 {
+                gates: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
+                fields.push(jet_cli_status_field("structure", jet_cli_structure_value(facts, gates)))
             }
+            return JetDriverVerbOutput{stdout: jet_cli_status_render_with_reports("inspect.structure", false, jet_cli_reports_json(jet_cli_report_base(file), file, source, diagnostics), fields), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+        stdout: if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, false) else -> ""
+        stderr := ""
+        loop error in diagnostics {
+            origin: if error.origin == .Val(value) -> value.display else -> file
+            source: if error.origin == .Val(value) -> value.source else -> jet_cli_inspection_source(result, snapshot, origin)
+            stderr = "{stderr}{diagnostic_render_all(origin, source, [Diagnostic]{error}, color)}"
         }
         return JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

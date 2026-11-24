@@ -196,9 +196,11 @@ sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> 
     // key of no registered module is cut at the last `.` before its name.
     declaring := ""
     owner := ""
+    declared_row := Int?{None}
     if symbol_key_parts(key, fn(text: String) { sema_registration_module_index_text(registration, text) != None }) == .Val(parts) {
         if sema_registration_module_index_text(registration, parts.module_identity) == .Val(row) {
             declaring = registration.modules[row].module_name.copy()
+            declared_row = Val(row)
         }
         owner = parts.owner
     } else {
@@ -214,6 +216,14 @@ sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> 
         kind == "constant" -> "const"
         kind == "parameter" -> "param"
         else -> kind
+    }
+    // A type lifted from an inline module, and each member it holds, reads by
+    // the path its source writes (`M3GeoPoint` is `geo.Point`), as its
+    // TypeInfo's identity does (sema_comptime_reflection_declared_identity).
+    if declared_row == .Val(row) && declaring != "" && !nested {
+        items: registration.modules[row].program.items
+        if owner == "" -> return "{word}:{sema_name_type_path(declaring, items, name)}"
+        return "{word}:{sema_name_type_path(declaring, items, owner)}.{name}"
     }
     scope: if {
         owner == "" -> declaring

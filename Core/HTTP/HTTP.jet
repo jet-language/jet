@@ -743,6 +743,7 @@ headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
 /// and its sibling verbs register typed handlers, `dispatch` answers a
 /// request without a listener, and `web.openapi(router)` renders the same
 /// routes. Copies share the one route table; routes match as an App's do.
+#StaticRoutes
 HTTPRouter: struct {
     __mux: HTTPMux,
     __state: Shared<HTTPRouterState>,
@@ -758,6 +759,40 @@ HTTPRouter: struct {
         routes.route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { router_call(state, index, request) }), contract, at)
         guard := self.__state.guard_edit()
         guard.value.handlers.push(HTTPRouterHandler{call: handler.move()})
+    }
+}
+
+// The rule of a route table checked while building: each method call on a
+// marked value is heard, and a custom route whose path is known then must
+// name its method with a value known then too (E2808). Only an App takes a
+// method known when the program runs.
+priv StaticRoutes: struct {
+    impl Marker {
+        sites: [.Type],
+
+        check: fn(self, call: CompilerCall) {
+            if call.name.text == "custom" && call.args.len() == 3 {
+                if call.args[1].value != None && call.args[0].value == None {
+                    reject(RouteMethodNotStatic{}, at: call.args[0])
+                }
+            }
+        }
+    }
+}
+
+// E2808: a router's custom route names its method with a value only the run
+// knows.
+priv RouteMethodNotStatic: struct {
+    impl Diagnostic {
+        code: "E2808",
+
+        what: fn(self) -> String { "HTTPRouter custom route method must be a static String" }
+
+        why: fn(self) -> String {
+            "router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers"
+        }
+
+        fix: fn(self) -> String { "use a literal or compile-time String constant, or register the route on a `web.app()`" }
     }
 }
 

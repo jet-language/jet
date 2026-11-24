@@ -13,6 +13,7 @@ use {
     tui_sys: core.sys
     core: core
     rt: jet.runtime.term
+    tui_rt: jet.runtime.tui
     ui: core.ui
     core.ui.[Rect, UINode]
     core.color.[Color]
@@ -106,7 +107,7 @@ TUICapabilityInputs: struct {
 capability_env_bytes: fn(name: String) -> [U8]? Never! {
     result := [U8]?{None}
     #Unsafe("Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption") {
-        result = core.tui.__cap_env_bytes(name)
+        result = tui_rt.cap_env_bytes(name)
     }
     result
 }

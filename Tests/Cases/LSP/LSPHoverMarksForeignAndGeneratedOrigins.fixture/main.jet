@@ -1,0 +1,16 @@
+extern rust "std" {
+    rust_max: fn(a: Int, b: Int) -> Int = "std::cmp::max"
+}
+
+build: fn(b: Build) {
+    b.generate("made") {
+        generated_value: fn() -> String { "hi" }
+    }
+    app: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])
+    b.default(app)
+}
+
+run: fn() {
+    print(generated_value())
+    print(rust_max(1, 2))
+}

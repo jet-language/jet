@@ -12,6 +12,7 @@ package: {
 use {
     core: core
     parse: core.text.parse
+    rt: jet.runtime.mod
 }
 
 // core.mod — a compiled Jet unit loaded under an explicit read grant.
@@ -37,35 +38,35 @@ priv LoadContext: struct {
     handle: Int,
 
     impl Close {
-        close: fn(&&self) { core.mod.__close_context(self.handle) }
+        close: fn(&&self) { rt.close_context(self.handle) }
     }
 }
 
 load: fn(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
-    if !core.mod.__supported() {
-        return Err(ModError.Unsupported("Mod.load is not supported on target `{core.mod.__os()}`"))
+    if !rt.supported() {
+        return Err(ModError.Unsupported("Mod.load is not supported on target `{rt.os()}`"))
     }
-    handle: core.mod.__read_context(path, grant.read) ?? return Err(mod_error(err))
+    handle: rt.read_context(path, grant.read) ?? return Err(mod_error(err.message))
     context: LoadContext{handle: handle}
-    core.mod.__parse_context(handle) ?? return Err(ModError.Invalid(err))
-    core.mod.__check_context(handle) ?? return Err(mod_error(err))
-    if !core.mod.__context_digest(handle) {
-        return Err(ModError.Invalid("cannot map library payload: `{core.mod.__context_name(handle)}` has a content digest that does not match its metadata"))
+    rt.parse_context(handle) ?? return Err(ModError.Invalid(err.message))
+    rt.check_context(handle) ?? return Err(mod_error(err.message))
+    if !rt.context_digest(handle) {
+        return Err(ModError.Invalid("cannot map library payload: `{rt.context_name(handle)}` has a content digest that does not match its metadata"))
     }
-    core.mod.__stage_context(handle) ?? return Err(ModError.Invalid(err))
+    rt.stage_context(handle) ?? return Err(ModError.Invalid(err.message))
     // A target without a native loader refuses as Unsupported.
-    core.mod.__open_context(handle) ?? return Err(if err.starts_with("Unsupported: ") -> mod_error(err) else -> ModError.Invalid("cannot map library payload: {err}"))
+    rt.open_context(handle) ?? return Err(if err.message.starts_with("Unsupported: ") -> mod_error(err.message) else -> ModError.Invalid("cannot map library payload: {err.message}"))
     text_exports := false
-    loop index in 0..<core.mod.__exports_count(handle) {
-        info: core.mod.__export_info(handle, index)
+    loop index in 0..<rt.exports_count(handle) {
+        info: rt.export_info(handle, index)
         text_exports = text_exports || info.text
-        core.mod.__resolve_export(handle, index) ?? return Err(ModError.Invalid("Jet.InvalidLibraryOutput: library `{core.mod.__context_name(handle)}` metadata names `{info.name}`, but the payload has no `{info.symbol}` export: {err}"))
+        rt.resolve_export(handle, index) ?? return Err(ModError.Invalid("Jet.InvalidLibraryOutput: library `{rt.context_name(handle)}` metadata names `{info.name}`, but the payload has no `{info.symbol}` export: {err.message}"))
     }
     if text_exports {
-        core.mod.__resolve_symbol(handle, "jet_text_free") ?? return Err(ModError.Invalid("Jet.InvalidLibraryOutput: library `{core.mod.__context_name(handle)}` has Text exports but no `jet_text_free` allocator release export: {err}"))
+        rt.resolve_symbol(handle, "jet_text_free") ?? return Err(ModError.Invalid("Jet.InvalidLibraryOutput: library `{rt.context_name(handle)}` has Text exports but no `jet_text_free` allocator release export: {err.message}"))
     }
     // Finish consumes the raw owner; the lexical Close sees an empty slot.
-    Ok(core.mod.__finish_context(handle))
+    Ok(rt.finish_context(handle))
 }
 
 CompiledModule: struct {

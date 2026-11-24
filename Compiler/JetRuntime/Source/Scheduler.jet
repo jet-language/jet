@@ -2197,7 +2197,13 @@ scheduler_rings_waiting: fn(root: I64) -> Bool {
 // (scheduler_idle_spin), `busy_since` the time it last left an idle wait or
 // started. A ring is filled without the lock: counted idle, the carrier
 // looks at the rings once more and, should one hold a job, leaves the idle
-// count again to steal it (scheduler_ring_push).
+// count again to steal it (scheduler_ring_push). Before it sleeps, it returns
+// its cached blocks to their slabs and shelves its kept large mappings
+// (alloc_carrier_rest): a sleeping carrier allocates nothing, and a block it
+// held would keep its slab from emptying, a mapping from the threads still
+// running. Held across each quiet spell, they made a process that compiles
+// in turns (`jet repl`) map fresh slabs for every next turn while the
+// pinned ones sat mostly empty.
 scheduler_carrier_idle: fn(root: I64, record: I64, busy_since: I64) {
     deadline: scheduler_idle_enter(root, record)
     if scheduler_rings_waiting(root) {
@@ -2207,6 +2213,7 @@ scheduler_carrier_idle: fn(root: I64, record: I64, busy_since: I64) {
     sync_thread_unlock(root)
     word: wrapping(record + SCHEDULER_CARRIER_WAKE)
     if !scheduler_idle_spin(word, busy_since, deadline) {
+        alloc_carrier_rest()
         _ := sync_futex_wait(word, I64{0}, deadline)
     }
     sync_thread_lock(root)

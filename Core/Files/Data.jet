@@ -20,6 +20,7 @@ use {
     core.encoding.csv.[CSVReader]
     encoding_stream: __core_encoding_stream
     rt: jet.runtime.encoding
+    data_rt: jet.runtime.data
 }
 
 /// Read a local file loader's file as its payload; `core.data.snapshot` then
@@ -273,7 +274,7 @@ bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
         loop b in tool.bytes() -> directory.push(b)
         is_file := false
         #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
-            is_file = core.files.data.__host_path_is_file(directory) ?? false
+            is_file = data_rt.host_path_is_file(directory) ?? false
         }
         if is_file -> return true
         if at_end -> break

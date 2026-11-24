@@ -18,6 +18,7 @@ use {
     core.service.[ServiceError, ServiceEndpoint]
     files: core.files
     rt: jet.runtime.time
+    db_rt: jet.runtime.db
 }
 
 // One durable queue. Source owns the storage/lease/receipt transactions;
@@ -281,7 +282,7 @@ JobQueue: struct {
             remaining: queue_saturating_sub(deadline, queue_now())
             delay: if remaining < 1 -> 1 else if remaining > 25 -> 25 else -> remaining
             #Unsafe("match the queue's existing raw wall-clock wait without advancing controlled scheduler time") {
-                core.jobs.__sleep_ms(delay)
+                db_rt.job_sleep_ms(delay)
             }
         }
     }
@@ -602,7 +603,7 @@ queue_publish_transition: fn(observation: QueueTransition) Never! {
     fields: queue_transition_fields(observation)
     timestamp: if observation.timestamp_ms < 0 -> 0 else -> observation.timestamp_ms
     #Unsafe("publish already committed queue observations through the existing validated Devtools event/sink boundary") {
-        core.jobs.__publish_parts(timestamp, "job-runtime", "Job", observation.job_id, fields)
+        db_rt.job_publish_parts(timestamp, "job-runtime", "Job", observation.job_id, fields)
     }
 }
 
@@ -620,7 +621,7 @@ queue_publish_status: fn(status: JobQueueStatus) -[DB, Time]> Never! {
     now: queue_now()
     timestamp: if now < 0 -> 0 else -> now
     #Unsafe("publish source-projected queue status through the existing validated Devtools event/sink boundary") {
-        core.jobs.__publish_parts(timestamp, "job-runtime", "Job", entity, fields)
+        db_rt.job_publish_parts(timestamp, "job-runtime", "Job", entity, fields)
     }
 }
 

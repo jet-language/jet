@@ -173,73 +173,10 @@ TYPE_ORDERING: "Ordering"
 /// Variant order is the shared scalar carrier order for the built-in enum.
 ORDERING_VARIANTS: [String]{"Less", "Equal", "Greater"}
 
+/// The styles `{value:Unit(style)}` takes. Every other selector is open: a
+/// selector `:Name(args)` calls method `name` of trait `NameFormat`
+/// (JetFoundation AST StrSelector).
 INTERPOLATION_UNIT_STYLES: [String]{"name", "bare"}
-
-/// The arguments a selector takes in its parentheses; `UnitStyle` carries the accepted styles.
-InterpolationSelectorArguments: enum {
-    Precision,
-    Width,
-    WidthFill,
-    UnitStyle(styles: [String]),
-}
-
-/// `arguments` is None for a selector that takes none.
-InterpolationSelector: struct {
-    name: String,
-    arguments: InterpolationSelectorArguments?,
-}
-
-/// The sole interpolation-selector registry.
-INTERPOLATION_SELECTORS: [InterpolationSelector]{
-    {
-        name: "Debug",
-        arguments: .None,
-    },
-    {
-        name: "Pretty",
-        arguments: .None,
-    },
-    {
-        name: "Fixed",
-        arguments: InterpolationSelectorArguments.Precision,
-    },
-    {
-        name: "Grouped",
-        arguments: InterpolationSelectorArguments.Precision,
-    },
-    {
-        name: "Hex",
-        arguments: InterpolationSelectorArguments.Width,
-    },
-    {
-        name: "Pad",
-        arguments: InterpolationSelectorArguments.WidthFill,
-    },
-    {
-        name: "PadLeft",
-        arguments: InterpolationSelectorArguments.WidthFill,
-    },
-    {
-        name: "Sci",
-        arguments: InterpolationSelectorArguments.Precision,
-    },
-    {
-        name: "Percent",
-        arguments: InterpolationSelectorArguments.Precision,
-    },
-    {
-        name: "Bin",
-        arguments: .None,
-    },
-    {
-        name: "Oct",
-        arguments: .None,
-    },
-    {
-        name: "Unit",
-        arguments: InterpolationSelectorArguments.UnitStyle{styles: INTERPOLATION_UNIT_STYLES},
-    },
-}
 
 /// Canonical interpolation selector rail.
 INTERPOLATION_SELECTOR_RAIL: ":"

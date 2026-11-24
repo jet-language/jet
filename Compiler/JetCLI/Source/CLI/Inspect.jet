@@ -1761,6 +1761,9 @@ jet_cli_inspect_finish: fn(job: JetCLIInspectJob, output: &&JetDriverVerbOutput)
 jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "replay" -> return jet_cli_inspect_replay_host(job)
     if job.action == "provenance" -> return jet_cli_inspect_provenance_host(job)
+    // The structural audit and the semantic blame check their own revisions.
+    if job.action == "semindex-audit" -> return jet_cli_semindex_audit(job.subject ?? "", job.file, job.color, job.json)
+    if job.action == "semindex-blame" -> return jet_cli_semindex_blame(job.file, job.color, job.json)
     // Structure prints any retained partial facts ahead of failing diagnostics,
     // so it skips the generic check preflight below.
     if job.action == "structure" {

@@ -44,6 +44,7 @@ use {
         PolicyValue,
         Program,
         Span,
+        StructureFact,
         ast_program,
         compiler_threads_admit,
         compiler_threads_beside,
@@ -6649,8 +6650,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.load.core_bodies_parsed", bodies_parsed, -1)
     }
-    // Each package's denied edges (E0619) and unused rules (L0619).
-    jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics)
+    // Each package's denied edges (E0619) and unused rules (L0619), and the
+    // import-edge facts its boundary policy decided.
+    boundary_facts := [StructureFact]{}
+    jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics, boundary_facts)
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
@@ -6685,6 +6688,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         diagnostics: diagnostics,
         failed_stage: failed_stage,
         complete: complete,
+        boundary_facts: boundary_facts,
         internal_problem: internal_problem.move(),
         run_member_paths: run_member_paths,
         spells_program: spells_program,

@@ -1553,7 +1553,7 @@ INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)
 
 RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
 
-IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*struct(?:<[^>]*>)?)\s*\x7B"}
+IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*(?:struct|enum)(?:<[^>]*>)?)\s*\x7B"}
 
 METHOD_HEADER: Regex{"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\x7B"}
 
@@ -1687,7 +1687,7 @@ brace_delta: fn(line: String) -> Int Never! {
 }
 
 // The public methods a Core source declares on a type: `name: fn(…) {`
-// members of its struct body and of its `impl` blocks, trait implementations
+// members of its struct or enum body and of its `impl` blocks, trait implementations
 // included. A member without a body is a field of function type.
 core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [String] LedgerError! {
     methods := [String]{}

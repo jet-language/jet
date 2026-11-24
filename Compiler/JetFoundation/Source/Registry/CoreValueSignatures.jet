@@ -32,9 +32,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
     }
 
     if module_name == "core.files.data" {
-        if member == "__host_path_is_file" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(core_sig_result(Type.Bool, core_sig_named("EncodingCause")))))
-        }
         if member == "status" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.List{element: core_sig_named("DataStatus")})))
         }
@@ -117,22 +114,12 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         }
     }
 
-    if module_name == "core.compute" && member == "__simd_lanes" {
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
-    }
-
     if module_name == "core.service" {
         service_tree: core_sig_named("ServiceTree")
         service_error: core_sig_named("ServiceError")
         service_endpoint: core_sig_named("ServiceEndpoint")
-        service_workflow: core_sig_named("ServiceWorkflow")
-        task_status: core_sig_named("TaskStatus")
-        task_outcome: core_sig_named("TaskOutcome")
         if member == "tree" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(service_tree)))
-        }
-        if member == "tree_show" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(Type.String)))
         }
         if member == "runtime" {
             return Val(core_sig(
@@ -154,28 +141,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         if core_sig_one_of(member, [String]{"delivery_at_most_once", "delivery_durable"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("ServiceDelivery"))))
         }
-        if member == "set_restart" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(core_sig_named("ServiceRestart"), read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if member == "set_delivery" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(core_sig_named("ServiceDelivery"), read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
         if member == "worker" {
             return Val(core_sig(
                 module_name,
@@ -189,262 +154,6 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
                 },
                 Val(core_sig_result(service_endpoint, service_error)),
             ))
-        }
-        if member == "group" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(list_string, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"start", "stop"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(unit, service_error))))
-        }
-        if member == "send" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(service_endpoint, read),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if member == "send_durable" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(service_endpoint, read),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(core_sig_named("Delivery"), service_error)),
-            ))
-        }
-        if member == "receive" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(service_endpoint, read),
-                },
-                Val(core_sig_result(Type.String, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"mailbox_depth", "restarts"}) {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, read),
-                    core_sig_positional(service_endpoint, read),
-                },
-                Val(core_sig_result(Type.Int, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"fail_worker", "drain_worker", "partition_worker", "reconcile_worker"}) {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(service_endpoint, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"dead_letter_count", "event_count", "directory_generation"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(Type.Int)))
-        }
-        if member == "drain_dead_letters" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(Type.Int, service_error))))
-        }
-        if member == "set_state_empty" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(unit, service_error))))
-        }
-        if core_sig_one_of(member, [String]{"set_state_snapshot", "set_state_event_log"}) {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(core_sig_named("ServiceStateStore"), read),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(Type.Int, read),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"commit_snapshot", "append_event"}) {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if member == "restore_snapshot" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(core_sig_result(Type.String, service_error))))
-        }
-        if core_sig_one_of(member, [String]{"replay_events", "observe"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(Type.String)))
-        }
-        if member == "workflow_start" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(Type.Int, read),
-                },
-                Val(core_sig_result(service_workflow, service_error)),
-            ))
-        }
-        if member == "workflow_sleep" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_workflow, read),
-                    core_sig_positional(core_sig_named("Duration"), read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if member == "workflow_activity_wait" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_workflow, read),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(Type.String, service_error)),
-            ))
-        }
-        if member == "workflow_all" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_workflow, read),
-                    core_sig_positional(list_string, read),
-                },
-                Val(core_sig_result(list_string, service_error)),
-            ))
-        }
-        if member == "workflow_step" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.Int, read),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if member == "workflow_activity" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.Int, read),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(Type.Int, read),
-                },
-                Val(core_sig_result(task_status, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"workflow_activity_retry", "workflow_activity_complete"}) {
-            result: if member == "workflow_activity_retry" -> task_status else -> task_outcome
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.Int, read),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(task_outcome, read),
-                },
-                Val(core_sig_result(result, service_error)),
-            ))
-        }
-        if member == "workflow_history" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, read),
-                    core_sig_positional(Type.Int, read),
-                },
-                Val(core_sig_result(Type.String, service_error)),
-            ))
-        }
-        if member == "workflow_outcome" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, read),
-                    core_sig_positional(Type.Int, read),
-                },
-                Val(core_sig_result(task_outcome, service_error)),
-            ))
-        }
-        if member == "directory_register" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, write),
-                    core_sig_positional(Type.String, read),
-                    core_sig_positional(service_endpoint, read),
-                },
-                Val(core_sig_result(unit, service_error)),
-            ))
-        }
-        if member == "directory_resolve" {
-            return Val(core_sig(
-                module_name,
-                member,
-                [CoreCallTypedParameter]{
-                    core_sig_positional(service_tree, read),
-                    core_sig_positional(Type.String, read),
-                },
-                Val(core_sig_result(service_endpoint, service_error)),
-            ))
-        }
-        if core_sig_one_of(member, [String]{"handoff_generation", "rollback_generation", "chaos_fail"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, write)}, Val(core_sig_result(Type.Int, service_error))))
-        }
-        if member == "upgrade_receipt" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_tree, read)}, Val(core_sig_result(core_sig_named("ServiceUpgradeReceipt"), service_error))))
-        }
-        if member == "endpoint_show" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(service_endpoint, read)}, Val(Type.String)))
-        }
-        if member == "delivery_state_show" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("DeliveryState"), read)}, Val(Type.String)))
         }
     }
 

@@ -11,6 +11,7 @@ use {
     files: core.files
     http: core.http
     net: core.net
+    net_rt: jet.runtime.net
     process: core.process
     time: core.time
 }
@@ -2380,7 +2381,7 @@ server_wait_ready: fn(url: String, timeout_ms: Int) -[Net, Time, Time.Wait]> Bro
         remaining: timeout_ms - started.elapsed_millis()
         if remaining <= 0 -> return Err(BrowserError{kind: "timeout"})
         probe: if remaining < 100 -> remaining else -> 100
-        if core.net.__tcp_connect_happy(target.host, target.port, probe) == .Ok(_) -> return Ok()
+        if net_rt.tcp_connect_happy(target.host, target.port, probe) == .Ok(_) -> return Ok()
         time.sleep(10ms)
     }
 }

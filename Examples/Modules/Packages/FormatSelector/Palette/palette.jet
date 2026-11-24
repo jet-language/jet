@@ -1,0 +1,27 @@
+// The palette package's own interpolation selectors. `{value:Color}` calls
+// `color` of ColorFormat and `{value:Shade(n, "label")}` calls `shade` of
+// ShadeFormat, as Core's `{value:Hex(n)}` calls `hex` of HexFormat: a
+// selector is its trait, so a package adds one with no compiler change.
+ColorFormat: trait {
+    color: fn(self) -> String,
+}
+
+ShadeFormat: trait {
+    shade: fn(self, percent: Int, label: String) -> String,
+}
+
+RGB: struct {
+    red: Int,
+    green: Int,
+    blue: Int,
+}
+
+impl RGB.ColorFormat {
+    color: fn(self) -> String Never! { "#{self.red:Hex(2)}{self.green:Hex(2)}{self.blue:Hex(2)}" }
+}
+
+impl RGB.ShadeFormat {
+    shade: fn(self, percent: Int, label: String) -> String Never! {
+        "{label} rgb({self.red * percent /% 100}, {self.green * percent /% 100}, {self.blue * percent /% 100})"
+    }
+}

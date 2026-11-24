@@ -1484,7 +1484,23 @@ parser_collect_used_import_names: fn(tokens: [Token], tables: TokenTables, index
         loop part in tables.literals[token.literal].string_parts {
             if part.kind == STRING_PART_INTERPOLATION {
                 parser_collect_used_import_names(part.tokens, tables, indexed_spans, candidate_ids, used_ids, used)
+                parser_collect_selector_import_names(part.tokens, tables, candidate_ids, used_ids, used)
             }
+        }
+    }
+}
+
+// A hole's format selector `:Name` calls trait `NameFormat`, so it uses an
+// import of that trait the file never spells.
+parser_collect_selector_import_names: fn(tokens: [Token], tables: TokenTables, candidate_ids: [Bool], used_ids: &[Bool], used: &[String]) Never! {
+    loop index in 1..<tokens.len() {
+        if tokens[index - 1].kind != TOKEN_COLON || tokens[index].kind != TOKEN_IDENT -> next
+        trait_name: "{token_decoded(tables, tokens[index])}Format"
+        name: name_find(tables.names, trait_name) ?? next
+        id: name_index(name)
+        if id < candidate_ids.len() && candidate_ids[id] && !used_ids[id] {
+            used_ids[id] = true
+            used.push(trait_name)
         }
     }
 }

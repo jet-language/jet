@@ -4958,7 +4958,11 @@ quoted delimiters, redacted lists, incomplete fragments, and trailing text
 remain unchanged.
 
 Exact integer formatting also uses the public `Fixed`, `Grouped`, `Hex`,
-`Bin`, and `Oct` interpolation selectors. The `quantity`, `fixed_int`,
+`Bin`, and `Oct` interpolation selectors. Each is a trait here:
+`{value:Hex(4)}` calls `value.hex(4)` of `HexFormat`, and so on for
+`FixedFormat`, `GroupedFormat`, `SciFormat`, `PercentFormat`, `BinFormat` and
+`OctFormat`. A package declares its own selector the same way: a trait
+`ColorFormat { color: fn(self) -> String }` in scope gives `{value:Color}`. The `quantity`, `fixed_int`,
 `grouped_int_fixed`, and `*_decimal` source helpers support compiler lowering;
 they are not exported application APIs. Their lexical-policy witnesses live
 with the source helpers, while application examples use public formatting.
@@ -7226,8 +7230,13 @@ runs, so a setting computed by a call or read from a name is E2811.
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
-The high-level `web.form` value keeps its compiler-owned typed-model identity
-and `.set`/`.render` interface. Its model is a struct marked with the web
+`web.form(Model, action: handler)` derives the model's typed inputs at compile
+time and returns a `WebFormTyped`, whose methods core.web.forms declares. The
+ones that change the form (`set`, `set_async_validator`, `blur`, `focus`,
+`cancel`, `submit` and `no_script`) take `&self`, so a form that is filled in
+is bound with `:=`. `form.validate(.field, on:, with:)` names a model field
+with a leading-dot selector and returns a `WebFormValidationChain`, whose
+`render()` reports that field's result. Its model is a struct marked with the web
 module's `#Form` (`#Web.Form Checkout: struct { … }`); an unmarked model is
 E2474. The source `core.web.forms.typed` API remains
 separate for callers that explicitly supply `WebFormInput` and an action name.
@@ -7727,14 +7736,14 @@ their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
 moving public validation into Jet does not widen the authority contract.
 TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
 writes it with the stream's own `write_bytes`, then shuts down the write half.
-TCP option access and UDP bind enter their Jet public functions before the
-corresponding reserved `__set_*`, `__nodelay`, `__ttl`, and `__udp_bind*`
-leaves. Raw leaves retain existing native error mapping, borrow/move
-conventions, and interpreter-route availability.
-UDP address, timeout, send, and receive operations and Unix listen, accept,
-read, byte-write, shutdown, and close also enter Jet source first. Their
-reserved raw leaves preserve exactly the public operation's existing effect
-row and supported interpreter/native tiers.
+TCP listen, accept, connect, address and option access, and UDP bind,
+address, send, and receive enter their Jet public functions, which call the
+matching `jet.runtime.net` leaves (`tcp_listen`, `set_nodelay`, `udp_bind`,
+and so on). Each leaf declares the public operation's effect row and keeps the
+existing native error mapping and borrow/move conventions.
+Unix listen, accept, read, byte-write, shutdown, and close also enter Jet
+source first. Their reserved raw leaves preserve exactly the public
+operation's existing effect row and supported interpreter/native tiers.
 The HTTP client is Jet end to end: `get`, `post`, `request`, and `send` build
 an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
 and decode the status line, headers, chunked/length framing, and gzip into an
@@ -8385,6 +8394,15 @@ A bounded mailbox makes admission visible. Delivery transitions are
 recovery. A restart strategy controls which siblings are restarted after a
 worker failure. A service handler must report or persist its outcome according
 to the selected delivery policy rather than assuming retries are free.
+
+The tree, workflow, endpoint, delivery and runtime operations are methods of
+their Core types (`tree.group(name, workers)`, `tree.workflow_start(id,
+version)`, `workflow.sleep(duration)`, `endpoint.receive()`,
+`delivery.wait()`, `runtime.send(endpoint, message, key: k)`). Core's own
+`check:` rules hold the builder shape at the call (E0112): a tree name the build
+knows, and every group, workflow and directory name, is non-blank visible text
+of at most 256 bytes; a group lists a non-empty literal list of such worker
+names; and a known workflow version is positive.
 
 ### `core.archive` — byte containers and checksummed compression
 

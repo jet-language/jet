@@ -65,7 +65,6 @@ use {
         PipeStep,
         Span,
         Stmt,
-        StrFormat,
         StrMatchPart,
         StrPart,
         StructDef,
@@ -538,7 +537,7 @@ sema_derive_static_str: fn(expansion: SemaDeriveExpansion, parts: [StrPart]) -> 
             next
         }
         if part == .Interp(inner, format) {
-            if format != StrFormat.Display -> return None
+            if format != None -> return None
             value: sema_derive_static_value(expansion, inner) ?? return None
             rendered: sema_derive_static_text(value) ?? return None
             text = "{text}{rendered}"
@@ -1762,10 +1761,7 @@ sema_derive_test_static_name: fn(name_expr: Expr?) -> String? Never! {
             if part == {
                 .Lit(piece) -> text = "{text}{piece}"
                 .Interp(value, format) -> {
-                    if format == {
-                        .Display -> {}
-                        .Debug | .Pretty | .Fixed(_) | .Grouped(_) | .Hex(_) | .Pad(_, _) | .PadLeft(_, _) | .Sci(_) | .Percent(_) | .Bin | .Oct | .Unit(_) | .Count -> return None
-                    }
+                    if format != None -> return None
                     if value == {
                         .Int(number, _, _, _, _) -> text = "{text}{number}"
                         .Bool(flag, _, _) -> text = "{text}{flag}"

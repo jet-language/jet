@@ -59,14 +59,21 @@ vocabulary](vocabulary.md).
   starts with `/*` and ends with the matching `*/`; block comments nest. An
   unbalanced block comment is E0002 (S5).
 - A single-line string uses `"..."`. Its only escapes are `\n`, `\t`, `\"`,
-  and `\\`; another escape is E0001. Interpolation uses `{expr}`. The format
-  selector rail is closed: `{value:Debug}`, `{value:Pretty}`,
-  `{value:Fixed(2)}`, `{value:Grouped(2)}`, and `{value:Unit(name|bare)}` are
-  the registered forms. The number of a numbered selector (`Pad`, `PadLeft`,
-  `Fixed`, `Grouped`, `Sci`, `Percent`, `Hex`) is any `Int` expression, such as
-  `{name:Pad(width)}`; another type is E0112. It runs after the value, and a
-  negative number acts as zero; an integer literal stays a constant
-  (D-SCRIPT-LOCAL-CLOCK1=A). `{{` and `}}` produce literal braces; an unmatched
+  and `\\`; another escape is E0001. Interpolation uses `{expr}`. A format
+  selector `{value:Name}` or `{value:Name(args)}` calls method `name` (the
+  selector in snake case) of trait `NameFormat` in scope at the string, with
+  the value as receiver and the arguments after it (D-FORMAT-TRAIT1=A): Core's
+  `{value:Fixed(2)}`, `{value:Grouped(2)}`, `{value:Hex(4)}` and their siblings
+  are `FixedFormat`, `GroupedFormat` and `HexFormat` in `core.text.fmt`, and a
+  package declaring `ColorFormat` gets `{value:Color}` with no compiler change.
+  `{value:Debug}`, `{value:Pretty}`, `{value:Pad(n)}`, `{value:PadLeft(n)}` and
+  `{value:Unit(name|bare)}` keep their own meanings. A selector whose trait is
+  not in scope is E0914; arguments the method does not take, or a type the
+  value does not implement the trait for, are E0112. A selector argument is an
+  `Int` literal, a quoted text, or any expression, such as
+  `{name:Pad(width)}`; an `Int` parameter given another type is E0112. A
+  computed argument runs after the value, and a negative number acts as zero;
+  an integer literal stays a constant (D-SCRIPT-LOCAL-CLOCK1=A). `{{` and `}}` produce literal braces; an unmatched
   brace is E0001 (S8, S20).
 - A run of N backticks opens a raw ordinary `String`; the next maximal run of
   exactly N backticks closes it. Other runs remain text. Raw text has no
@@ -6718,6 +6725,28 @@ stable owner order. Resolved references carry definition identity; unresolved
 or ambiguous references carry no target. Structural `expr`, `stmt`, `item`,
 and written `type` boundaries support refactoring without spelling guesses
 (D-SEMINDEX1, D-WD2).
+
+`jet inspect semindex --audit <before.jet> <after.jet>` checks both revisions
+of one program and prints the structural audit between their indexes: the
+declarations `after.jet` added, removed, or changed the structural signature
+of. A declaration is matched by its human identity (`fn:audit.score`), and it
+changed when its `signature_id` did; moving it within the file, editing its
+body or reformatting it changes nothing. Each list is sorted by identity.
+Under `--json` the audit is the `audit` member (`before`, `after`, `added`,
+`removed`, `changed`) of the `inspect.semindex` status line. A revision that
+fails its check stops the command with that revision's report. A file's name
+is part of its identities, so the two revisions are one module at two paths,
+such as `base/main.jet` and `head/main.jet`.
+
+`jet inspect semindex --blame <file.jet>` checks the file and names, for each
+definition, the recorded semantic operation that gave it its meaning: the
+first codemod or `jet fix` receipt under `.jet/codemods` that is bound to the
+file's current or previous source hash and names the definition, through a
+recorded target or a rename's new name. A hand edit records no operation, so
+a definition no receipt names shows none, and a file edited by hand after its
+last recorded operation no longer matches any receipt. Under `--json` the
+report is the `blame` member (`file`, `definitions` with `stable_id`,
+`identity`, `kind` and `operation`) of the `inspect.semindex` status line.
 
 The registry exposes semantic projections through `semindex`, `output`, and
 related inspect actions; it has no dossier route. Tools consume the checked

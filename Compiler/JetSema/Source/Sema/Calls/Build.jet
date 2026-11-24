@@ -146,7 +146,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
 // package declares, each checked as the setting's declared type (E3541,
 // E3542). The host call takes the argument slots, an unwritten list as
 // empty and an unwritten toolchain or signing identity as `None`, then a
-// (key, value) pair per setting (JetBuildSession build_session_add_target).
+// (key, value) pair per setting (the build session's build_session_add_target).
 sema_call_build_output: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     positional := 0
@@ -464,11 +464,11 @@ sema_build_code_statements: fn(statements: [Stmt]) -> String {
 
 // A call on the root's `Compiler` value. `meta.add(code, scope: name)` adds
 // a `Code` value's items as the generated module `name` of the value's
-// target, checked with the program like hand-written code (JetBuildSession
-// `compiler.add`). `meta.rewrite_body(f, code)` replaces the body of the
-// function `f` with a `Code` value's statements (JetBuildSession
+// target, checked with the program like hand-written code (the build
+// session's `compiler.add`). `meta.rewrite_body(f, code)` replaces the body of
+// the function `f` with a `Code` value's statements (the build session's
 // `compiler.rewrite_body`). `meta.allow_rewrite(package: name)` lets the
-// value rewrite that dependency's functions (JetBuildSession
+// value rewrite that dependency's functions (the build session's
 // `compiler.allow_rewrite`). `meta.events(watch: .Functions{marked: m},
 // handler)` hands the handler each checked function carrying `m`'s marker,
 // and `meta.events(watch: .Calls{to: f}, handler)` each checked call of `f`.
@@ -1433,7 +1433,7 @@ sema_call_compiler_stages: fn(receiver: Expr, receiver_value: TExpr, args: [Call
 }
 
 // The name in a package identity (`package:<length>:<name>:…`), as the build
-// session reads it (JetBuildSession build_session_package_dir); the identity
+// session reads it (build_session_package_dir); the identity
 // itself when it has none.
 sema_build_package_name: fn(identity: String) -> String Never! {
     parts: identity.split(":").to_list()

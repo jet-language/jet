@@ -2,6 +2,7 @@ use {
     core: core
     core.ui.host.[UIHostError, UIShortcut, UIShortcutBinding, UIShortcutDispatch, UIShortcutModifiers]
     internal.[dispatched, key_claims, lookup, shortcut_failure]
+    rt: jet.runtime.ui
 }
 
 // core.ui.host.shortcuts — the process's shortcut registry. Core owns it and
@@ -30,7 +31,7 @@ binding: fn(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostErr
 // claims its key from the provider first, so a browser page
 // cancels the default action of bound keys only.
 register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
-    if !core.ui.host.__capability(4) {
+    if !rt.capability(4) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     }
     if binding.action.len() == 0 {
@@ -42,7 +43,7 @@ register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
         return Err(UIHostError.ShortcutConflict{shortcut: binding.shortcut.copy(), existing_action: existing.action.copy()})
     }
     loop claim in key_claims(binding.shortcut) {
-        if !core.ui.host.__key_claim(claim) {
+        if !rt.key_claim(claim) {
             return Err(shortcut_failure("the provider could not claim key `{claim}`"))
         }
     }
@@ -51,7 +52,7 @@ register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
 }
 
 dispatch: fn(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
-    if !core.ui.host.__capability(4) {
+    if !rt.capability(4) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     }
     Ok(dispatched(lookup(shortcut)))
@@ -63,10 +64,10 @@ dispatch: fn(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
 // exactly one of Control and Meta also matches a command binding. An empty
 // record is the provider's mark that its queue overflowed and dropped events.
 poll: fn() -[IO]> UIShortcutDispatch? UIHostError! {
-    if !core.ui.host.__capability(4) {
+    if !rt.capability(4) {
         return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     }
-    raw: core.ui.host.__event_pop(2) ?? return Ok(None)
+    raw: rt.event_pop(2) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "Shortcuts"})
     fields: core.ui.host.provider_record_fields(raw) ?? return Err(shortcut_failure("a key event is not a provider record"))
     if fields.len() != 3 {

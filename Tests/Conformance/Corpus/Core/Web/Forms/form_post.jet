@@ -1,0 +1,9 @@
+// core-conformance: core.web.forms.WebFormTyped.post
+use api: core.web.forms
+
+posted: fn(form: api.WebFormTyped) -> String Never! { form.post("jet") ?? "refused" }
+
+run: fn() {
+    form: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    print(posted(form))
+}

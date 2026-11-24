@@ -1,0 +1,94 @@
+// The package facts and workspace overlay policy an index carries beside its
+// checked facts. The package model owns discovery, composition and lock
+// validation; the index records what it found for the entry it was built
+// from, and a package or lock it cannot trust is a diagnostic, never a
+// silently partial index.
+use {
+    jet_foundation.[Diagnostic]
+    jet_pkg_model.[
+        AuthorityResolver,
+        ManifestError,
+        OverlayPolicy,
+        PackageFacts,
+        WorkspaceDeclarationCache,
+        WorkspacePlan,
+        pkg_lock_e1202_workspace,
+        pkg_lock_looks_like_workspace_lock,
+        pkg_package_facts_for_entry,
+        pkg_path_parent,
+        pkg_workspace_lock_load_checked_file,
+    ]
+    jetpack_foundation.[UNIFIED_LOCK_FILE]
+}
+
+// The overlay policy of the nearest workspace around `entry`. The walk stops
+// at the first workspace source, even when its lock is missing, is not a
+// workspace lock or holds an empty policy; None when no workspace is found.
+semindex_workspace_overlay_policy_for_entry: fn(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> OverlayPolicy? ManifestError! {
+    if entry == "" || entry == "/" -> return Ok(None)
+    first: AuthorityResolver.open(pkg_path_parent(entry)) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
+    dir := first.root
+    loop {
+        resolver: AuthorityResolver.open(dir) ?? return Err(ManifestError{diagnostic: err.diagnostic()})
+        found: if resolver.resolve_workspace_source(cache) == {
+            .Ok(source) -> source != None
+            .Err(error) -> return Err(ManifestError{diagnostic: error.workspace_diagnostic()})
+        }
+        if found {
+            if semindex_workspace_lock_at(cache, resolver) == {
+                .Ok(plan) -> {
+                    loaded: plan ?? return Ok(None)
+                    if loaded.overlay_policy.is_empty() -> return Ok(None)
+                    return Ok(Val(loaded.overlay_policy))
+                }
+                .Err(error) -> return Err(error)
+            }
+        }
+        if dir == "/" || dir == "" -> return Ok(None)
+        parent: pkg_path_parent(dir)
+        if parent == dir -> return Ok(None)
+        dir = parent
+    }
+}
+
+// The workspace plan the lock under `resolver` holds. None when there is no
+// lock, or the lock is a package lock; a workspace lock that is malformed or
+// no longer matches its sources is Jet.StaleLockFile, and never sends the
+// walk outward.
+semindex_workspace_lock_at: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan? ManifestError! {
+    lock_file: if resolver.checked_file(UNIFIED_LOCK_FILE) == {
+        .Ok(file) -> file
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    raw: lock_file.text() ?? return Err(ManifestError{diagnostic: err.diagnostic()})
+    if !pkg_lock_looks_like_workspace_lock(raw) -> return Ok(None)
+    lock_path: lock_file.path
+    if pkg_workspace_lock_load_checked_file(cache, resolver, lock_file) == {
+        .Val(plan) -> Ok(Val(plan))
+        .None -> Err(ManifestError{diagnostic: pkg_lock_e1202_workspace(lock_path)})
+    }
+}
+
+// Attach the package facts and the workspace overlay policy of `entry` to
+// `index`. The package facts are its `package.jet`, its inline Package block
+// or a parent's stock inline Package it inherits, None for a standalone file.
+// The package comes first, and a package the model cannot compose is the
+// model's own diagnostic; a workspace failure is reported rather than
+// leaving the index half attached.
+semindex_attach_package_facts: fn(index: &SemIndex, entry: String) -[FS, Env]> Diagnostic? {
+    cache := WorkspaceDeclarationCache.new()
+    facts: if pkg_package_facts_for_entry(cache, entry) == {
+        .Ok(found) -> found
+        .Err(error) -> return Val(error.diagnostic)
+    }
+    policy: if semindex_workspace_overlay_policy_for_entry(cache, entry) == {
+        .Ok(found) -> found
+        .Err(error) -> return Val(error.diagnostic)
+    }
+    index.package_facts = facts
+    index.workspace_overlays = policy
+    None
+}

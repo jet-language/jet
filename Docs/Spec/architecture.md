@@ -1014,8 +1014,7 @@ packages live under `Jetpack/`.
 | `JetBackend` | native code generation, object and image writing | **never** (a failure is an ICE, R5) |
 | `JetEval` | compile-time execution: compiles comptime code to x86-64 at O0 and runs it in a child of the compiler | no user-facing surface by itself |
 | `JetRuntime` | the native runtime linked into every program | no |
-| `JetDriver` | front-end orchestration and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
-| `JetBuildSession` | build sessions over the driver | no new diagnostics |
+| `JetDriver` | front-end orchestration, build sessions and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
 | `JetQueries` | demand cache for incremental inputs and derived query values | no |
 | `JetSemIndex` | the one stable semantic index over checked programs (`semindex_build`) and its symbol catalog (`semindex_build_symbols`), read by `JetCLI`'s inspect, docs, codemod and review commands and by tooling | no new diagnostics |
 | `JetImpact` | blast-radius reports over `JetSemIndex` | no |

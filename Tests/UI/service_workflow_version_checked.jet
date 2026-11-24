@@ -1,0 +1,9 @@
+// E0112: service workflow version is outside the checked builder shape
+// why: workflow versions must be positive
+// fix: use a positive literal workflow version
+use service: core.service
+
+run: fn() {
+    tree := service.tree("checked")
+    _: tree.workflow_start("checkout", 0) ?? return
+}

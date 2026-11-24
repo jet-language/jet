@@ -64,7 +64,6 @@ use jet_foundation.[
     TPatternBindingFact,
     TPatternPosition,
     TStaticOwner,
-    TStrFormat,
     TTextPatternPart,
     TTransactionSnapshot,
     TTryConvert,
@@ -87,7 +86,10 @@ use jet_foundation.[
 
 TStrPart: enum {
     Literal(text: String),
-    Interpolation(value: TExpr, format: TStrFormat),
+    // `debug`: the value shows its Debug text, else its Display text. Every
+    // selector is already a call by then (a style trait's method or a
+    // core.text.fmt formatter) whose String shows through Display.
+    Interpolation(value: TExpr, debug: Bool),
 }
 
 TCallArg: struct {
@@ -555,19 +557,6 @@ THandleOp: enum {
     GameAssetsSound,
     GameInputBind,
     GameInputPressed,
-    RNGInt,
-    RNGFloat,
-    RNGFloatRange,
-    RNGBool,
-    RNGBoolP,
-    RNGNormal,
-    RNGExponential,
-    RNGBytes,
-    RNGSplit,
-    RNGPick,
-    RNGWeightedPick,
-    RNGSample,
-    RNGShuffle,
     DurationIn,
     DurationIsZero,
     DurationTotalSeconds,

@@ -1,0 +1,32 @@
+# Semantic blame names the recorded operation that gave each definition of a
+# file its meaning. After a codemod renames `report` to `summarize`, its
+# receipt is bound to the file's new hash and names `summarize`; `greet` and
+# `run`, which no recorded operation touched, have none. A later hand edit
+# records nothing, so the receipt no longer binds and no definition is blamed.
+fixture: SemanticBlame.fixture
+env: NO_COLOR=1
+write: rename.codemod.json object.template
+step: jet inspect semindex --blame Examples/main.jet
+exit: 0
+stdout: ~ "Semantic blame\n" # the heading
+stdout: ~ "report: no recorded operation\n" # nothing was recorded yet
+stdout: !~ "rename" # no receipt exists before the codemod
+step: jet inspect codemod apply rename.codemod.json
+exit: 0
+file: Examples/main.jet ~ "summarize: fn" # the codemod applied
+step: jet inspect semindex --blame Examples/main.jet
+exit: 0
+stdout: ~ "summarize: rename report -> summarize" # the receipt names the renamed definition
+stdout: ~ "greet: no recorded operation\n" # an untouched definition has none
+stdout: ~ "run: no recorded operation\n" # a caller the rename edited is not renamed itself
+step: jet inspect semindex --blame Examples/main.jet --json
+exit: 0
+json: stdout doc $.action = "inspect.semindex"
+stdout: ~ "\"operation\":{\"kind\":\"rename\",\"rule_id\":" # the summarize row carries the receipt's operation
+stdout: ~ "\"from\":\"report\",\"to\":\"summarize\"" # the operation's rename pair
+stdout: ~ "\"operation\":null" # greet and run carry none
+write: Examples/main.jet = "summarize: fn() { print(\"ok!\") }\n\ngreet: fn() { print(\"hi\") }\n\nrun: fn() {\n    summarize()\n    greet()\n}\n"
+step: jet inspect semindex --blame Examples/main.jet
+exit: 0
+stdout: ~ "summarize: no recorded operation\n" # a hand edit unbinds the receipt
+stdout: !~ "rename" # and manufactures no operation

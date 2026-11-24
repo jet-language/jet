@@ -26,7 +26,6 @@ use jet_foundation.[
     NamedSpan,
     OrFallback,
     Stmt,
-    StrFormat,
     StrPart,
     Span,
     SymbolID,
@@ -1391,7 +1390,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
         .Val(declared) -> sema_app_typed_failure(sema_type_resolve_declared(graph, declared, function.symbol.module_identity))
         .None -> false
     }
-    failure_text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "the `{name}` handler failed: "}, StrPart.Interp{expr: sema_app_ident("err", span), format: StrFormat.Display}}, span: span, id: AST_NODE_GENERATED}
+    failure_text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "the `{name}` handler failed: "}, StrPart.Interp{expr: sema_app_ident("err", span), format: None}}, span: span, id: AST_NODE_GENERATED}
     failed: sema_app_call_method(call, "__failed", [Type]{}, [CallArg]{sema_app_arg(failure_text, AccessConvention.Read, span)}, span)
     handler_call: if typed_failure -> Expr.OrFallback{value: direct_call, fallback: OrFallback.Return{value: Val(Expr.Ok{value: failed, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED} else -> direct_call
     reply := sema_app_call_method(call, "__done", [Type]{}, [CallArg]{}, span)
@@ -2087,7 +2086,6 @@ sema_call_builtin_method_arities: fn(receiver: Type, method: String) -> [Int] Ne
             "Duration" -> sema_time_duration_result(method, arity) != None || (method == "round" && arity >= 1)
             "Decimal" | "Fraction" -> sema_value_method_precise_result(owner, method, arity) != None
             "DeterministicWorld" -> sema_time_world_contract(method, arity) != None
-            "RNG" -> sema_time_rng_fixed_signature(method, arity) != None || ((method == "pick" || method == "shuffle") && arity == 1) || ((method == "weighted_pick" || method == "sample") && arity == 2)
             "Clock" -> (method == "now" && arity == 0) || ((method == "tick" || method == "advance" || method == "wait") && arity == 1)
             "Task" -> ((method == "join" || method == "detach" || method == "resume" || method == "cancel" || method == "trace") && arity == 0) || (method == "pause" && arity < 2)
             else -> false
@@ -2111,9 +2109,6 @@ sema_call_builtin_method_pool: fn(receiver: Type) -> [String] Never! {
             pool = [String]{"add", "sub", "mul", "div", "numerator", "denominator", "rounded", "to_string", "to_float", "is_zero", "equal"}
         }
         "DeterministicWorld" -> pool = [String]{"now", "advance", "wait_idle", "history"}
-        "RNG" -> {
-            pool = [String]{"int", "float", "float_range", "bool", "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample", "shuffle"}
-        }
         "Clock" -> pool = [String]{"now", "tick", "advance", "wait"}
         "Task" -> pool = [String]{"join", "detach", "pause", "resume", "cancel", "trace"}
         else -> {
@@ -2362,6 +2357,8 @@ SEMA_METHOD_IDIOMS: [SemaMethodIdiom]{
     {receiver: "List", foreign: "as_mut_ptr", note: "Jet has no raw pointers; a list's elements are written in place by index", spelling: "value[index] = item", witness: "run: fn() {{\n    value := [U8]{{1, 2}}\n    index: 0\n    item: U8{{5}}\n    value[index] = item\n    print(value)\n}}\n"},
     {receiver: "List", foreign: "length", note: "a Jet list's length is the method `len`", spelling: "value.len()", rename: "len", witness: "run: fn() {{\n    value: [1, 2, 3]\n    print(value.len())\n}}\n"},
     {receiver: "List", foreign: "append", note: "a Jet list grows with `push`", spelling: "value.push(item)", rename: "push", witness: "run: fn() {{\n    value := [1, 2]\n    item: 3\n    value.push(item)\n    print(value)\n}}\n"},
+    {receiver: "List", foreign: "size", note: "a Jet list's length is the method `len`", spelling: "value.len()", rename: "len", witness: "run: fn() {{\n    value: [1, 2, 3]\n    print(value.len())\n}}\n"},
+    {receiver: "List", foreign: "push_back", note: "a Jet list grows at its end with `push`", spelling: "value.push(item)", rename: "push", witness: "run: fn() {{\n    value := [1, 2]\n    item: 3\n    value.push(item)\n    print(value)\n}}\n"},
     {receiver: "String", foreign: "length", note: "a Jet string's length is the method `len`", spelling: "value.len()", rename: "len", witness: "run: fn() {{\n    value: \"ada\"\n    print(value.len())\n}}\n"},
     {receiver: "String", foreign: "toUpperCase", note: "Jet spells JavaScript's `toUpperCase` as `to_upper`", spelling: "value.to_upper()", rename: "to_upper", witness: "run: fn() {{\n    value: \"ada\"\n    print(value.to_upper())\n}}\n"},
     {receiver: "String", foreign: "toLowerCase", note: "Jet spells JavaScript's `toLowerCase` as `to_lower`", spelling: "value.to_lower()", rename: "to_lower", witness: "run: fn() {{\n    value: \"ADA\"\n    print(value.to_lower())\n}}\n"},

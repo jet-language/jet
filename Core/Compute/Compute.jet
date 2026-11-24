@@ -26,6 +26,7 @@ use {
     core.compute.[VJPRun]
     autodiff.[ad_backward, ad_backward_seeded, ad_binary, ad_depth, ad_fill, ad_record, ad_tape, ad_unary]
     math: core.math
+    rt: jet.runtime.sys
 }
 
 // The native compute provider reports a failure by its position.
@@ -387,7 +388,7 @@ dot_f32: fn(left: [Float], l: Int, right: [Float], r: Int, count: Int, lanes: In
 // The f32 lanes the host executes (core-library.md:4289-4291): 8 is avx2, 4
 // is sse2 and 1 the scalar loop, decided by the runtime from cpuid as Rust
 // std_detect decides it.
-simd_lanes: fn() -> Int Never! { core.compute.__simd_lanes() }
+simd_lanes: fn() -> Int Never! { rt.simd_lanes() }
 
 simd_name: fn(lanes: Int) -> String Never! {
     if lanes == 8 -> return "avx2"
