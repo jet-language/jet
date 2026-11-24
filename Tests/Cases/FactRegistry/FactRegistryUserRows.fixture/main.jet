@@ -1,0 +1,31 @@
+// Each fact with user-visible meaning is a typed row a program reads.
+#Numeric
+Severity: distinct Int(0..10)
+
+#UnitFamily(Length, dimension) { meter }
+
+send_report: fn() {}
+
+SENDABILITY: #run Severity.reflect().sendability
+
+MOVEDNESS: #run Severity.reflect().movedness
+
+ATTRIBUTION: #run report.reflect().attribution
+
+ORIGIN: #run Severity.reflect().origin
+
+VIEW_PROVENANCE: #run send_report.reflect().view_provenance
+
+UNIT_SCALE: #run Meter.reflect().unit_scale_provenance
+
+MATURITY: #run send_report.reflect().maturity
+
+run: fn() {
+    print("sendability known: {SENDABILITY.known}")
+    print("movedness known: {MOVEDNESS.known}")
+    print("attribution source: {ATTRIBUTION.source}")
+    print("origin tracked: {ORIGIN.tracked}")
+    print("unit scale rational: {UNIT_SCALE.kind == .Rational}")
+    print("maturity experimental: {MATURITY.level == .Experimental}")
+    print("view provenance mutable: {VIEW_PROVENANCE.mutable}")
+}
