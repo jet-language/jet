@@ -1429,8 +1429,9 @@ priv alloc_cache_drain: fn(row: I64, count: I64) {
     if (held != I64{0}) { alloc_unlock(held) }
 }
 
-// Return every cached block of the calling thread: thread exit, and the
-// fixtures that inspect slab metadata. A thread without a TCB holds none.
+// Return every cached block of the calling thread: thread exit, a carrier
+// going to sleep (alloc_carrier_rest), and the fixtures that inspect slab
+// metadata. A thread without a TCB holds none.
 alloc_cache_flush: fn() {
     base: thread_base()
     if (base == I64{0}) {
@@ -1445,6 +1446,15 @@ alloc_cache_flush: fn() {
         row = wrapping(row + I64{16})
         index = wrapping(index + I64{1})
     }
+}
+
+// A pool carrier about to sleep (Scheduler.jet scheduler_carrier_idle):
+// returns every block it cached and shelves every mapping it kept, so the
+// threads still running take them while it sleeps. Its next allocation
+// refills the cache as a fresh thread's does.
+alloc_carrier_rest: fn() {
+    alloc_cache_flush()
+    alloc_large_rows_flush()
 }
 
 // A blocked row's count: its head is 0, so the fast allocation finds no
@@ -1589,7 +1599,7 @@ ALLOC_LARGE_CACHE_BYTES: I64{16777216}
 // ALLOC_LARGE_CACHE_BYTES bounds both; that word is atomic. A
 // mapping is reachable from exactly one TCB or one class list: a fiber takes
 // its carrier's rows while it runs (alloc_cache_lend, alloc_cache_reclaim),
-// and thread exit shelves them (alloc_large_rows_flush).
+// and thread exit or a carrier's sleep shelves them (alloc_large_rows_flush).
 ALLOC_LARGE_ROWS: I64{504}
 
 ALLOC_LARGE_ROW_COUNT: I64{8}
@@ -1694,7 +1704,8 @@ alloc_large_row_put: fn(row: I64, mapping: I64, bytes: I64) {
 }
 
 // Shelves every mapping the calling thread kept (still counted): thread
-// exit, before its TCB goes away. A thread without a TCB keeps none.
+// exit, before its TCB goes away, and a carrier going to sleep
+// (alloc_carrier_rest). A thread without a TCB keeps none.
 alloc_large_rows_flush: fn() {
     rows: alloc_large_rows()
     if (rows == I64{0}) {
