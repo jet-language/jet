@@ -1,12 +1,15 @@
 // Completion from the checked symbols: after `receiver.` the receiver's
 // members (or a module's declarations), elsewhere the names in scope at the
-// cursor, the language's types and keywords included. In a marked block the
-// `lsp.completion` hooks of its marker's package come first.
+// cursor, the language's types and keywords included. After a value, a word
+// another language spells for one of its methods completes to the Jet
+// method. In a marked block the `lsp.completion` hooks of its marker's
+// package come first.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[Span, TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
     jet_lexer.[Lexed, Token, TOKEN_DOT, TOKEN_IDENT]
     jet_semindex.[SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
+    jet_sema.[SEMA_METHOD_IDIOMS, SemaMethodIdiom]
 }
 
 // The most items one answer carries; a longer list is marked incomplete so
@@ -133,6 +136,23 @@ lsp_scope_candidate: fn(symbol: SemSymbol, module_path: String?, offset: Int) ->
     true
 }
 
+// The item `idiom`'s foreign word completes to after a value of `owner`: the
+// Jet method the row renames the word to, found by the foreign word, whose
+// edit writes the Jet name over `range`, the word written so far. The rows
+// are the ones E0311's Fix names for the same receiver, so the editor and the
+// checker map a foreign word to one name. None when the row is for another
+// receiver, renames nothing, or names a method `owner` lacks.
+lsp_completion_foreign_item: fn(view: LSPView, owner: String, idiom: SemaMethodIdiom, range: String) -> String? Never! {
+    if idiom.receiver != owner || idiom.rename == "" -> return None
+    loop symbol in view.checked.symbols {
+        if symbol.name != idiom.rename || (symbol.owner ?? "") != owner -> next
+        name: foundation_json_quote(symbol.name)
+        note: foundation_json_quote("`{idiom.foreign}` is `{idiom.rename}` in Jet: {idiom.note}.")
+        return Val("{{\"label\":{name},\"kind\":{lsp_completion_item_kind(symbol.kind)},\"detail\":{foundation_json_quote(symbol.signature)},\"filterText\":{foundation_json_quote(idiom.foreign)},\"textEdit\":{{\"range\":{range},\"newText\":{name}}},\"documentation\":{{\"kind\":\"markdown\",\"value\":{note}}}}}")
+    }
+    None
+}
+
 lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
     position: lsp_params_position(params) ?? return lsp_response(id, "null")
@@ -169,6 +189,17 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
             break
         }
         items.push(lsp_completion_item_json(symbol))
+    }
+    // A foreign word completes only once a word is written, and only to a
+    // method no item already offers.
+    if member == .Val(scope) && scope == .Owner(owner) && prefix != "" && !incomplete {
+        range: lsp_range_json(lsp_byte_span_to_range(view.doc.text, Span{start: start, end: offset}))
+        loop idiom in SEMA_METHOD_IDIOMS {
+            if !idiom.foreign.starts_with(prefix) || seen.has_key("{idiom.rename}:2") -> next
+            item: lsp_completion_foreign_item(view, owner, idiom, range) ?? next
+            seen["{idiom.rename}:2"] = true
+            items.push(item)
+        }
     }
     lsp_response(id, "{{\"isIncomplete\":{incomplete},\"items\":[{items.join(",")}]}}")
 }

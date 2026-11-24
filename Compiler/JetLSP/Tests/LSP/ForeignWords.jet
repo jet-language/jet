@@ -1,0 +1,123 @@
+// Completion after a value maps a method word another language spells to
+// the Jet method, through the rows E0311's Fix reads for a missing method
+// (SEMA_METHOD_IDIOMS). The editor and the checker read one table, so a row
+// cannot reach one and not the other.
+use {
+    core.encoding.[Dyn]
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_lsp.[LSPChecked, LSPChecker, lsp_member, lsp_server]
+    jet_sema.[SEMA_METHOD_IDIOMS]
+    jet_semindex.[SemAnchor, SemRef]
+}
+
+LSP_FOREIGN_URI: "file:///w/words.jet"
+
+// Line 1 is `    value.<word>`: the word starts at character 10.
+lsp_foreign_source: fn(receiver: String, word: String) -> String Never! {
+    written: if receiver == "List" -> "[Int]" else -> receiver
+    "grow: fn(value: {written}) {{\n    value.{word}\n}}\n"
+}
+
+// The fixture checker, with the receiver `value` on line 1 resolved to the
+// parameter, as the checker's name references resolve it: the fixture runs
+// no name resolution of its own.
+LSPForeignChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            checked := LSPFixtureChecker{}.check(entry, overlays)
+            index := checked.index ?? return checked
+            source := ""
+            loop overlay in overlays {
+                if overlay.path == entry -> source = overlay.source
+            }
+            receiver: source.find("\n") + 5
+            loop definition in index.definitions {
+                def: definition.def
+                if def.name == "value" && def.kind == .Param(_) {
+                    index.references.push(SemRef{name: "value", span: Span{start: receiver, end: receiver + 5}, module_path: def.module_path, scope_identity: None, target: Val(SemAnchor{module_path: def.module_path, kind: "param", def_span: def.def_span, semantic_identity: None}), fact: None})
+                }
+            }
+            checked.index = Val(index)
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+
+        canonical: fn(self, _path: String) -[FS]> String? Never! { None }
+    }
+}
+
+// The completion items after `value.<word>` on a value of `receiver`.
+lsp_foreign_items: fn(receiver: String, word: String) -> [Dyn] {
+    server := lsp_server(LSPForeignChecker{})
+    lsp_test_open(server, LSP_FOREIGN_URI, lsp_foreign_source(receiver, word))
+    result: lsp_test_result(server, "textDocument/completion", lsp_test_at(LSP_FOREIGN_URI, 1, 10 + word.len()))
+    lsp_test_rows(lsp_test_field(result, "items"))
+}
+
+// Each item a foreign word completes to, as `label/filterText/newText/range`.
+lsp_foreign_completions: fn(items: [Dyn]) -> [String] Never! {
+    found := [String]{}
+    loop item in items {
+        if lsp_member(item, "filterText") == None -> next
+        edit: lsp_test_field(item, "textEdit")
+        found.push("{lsp_test_text(item, "label")}/{lsp_test_text(item, "filterText")}/{lsp_test_text(edit, "newText")}/{lsp_test_range(lsp_test_field(edit, "range"))}")
+    }
+    found
+}
+
+// The labels of `items`.
+lsp_foreign_labels: fn(items: [Dyn]) -> [String] Never! {
+    labels := [String]{}
+    loop item in items -> labels.push(lsp_test_text(item, "label"))
+    labels
+}
+
+#Test("completion_rows_match_e0311") {
+    // Every row that renames a method completes, by its foreign word, to
+    // exactly the method it renames to, and the edit writes that name over
+    // the word; a row whose receiver or method the editor cannot offer fails.
+    rows := 0
+    loop idiom in SEMA_METHOD_IDIOMS {
+        if idiom.receiver == "" || idiom.rename == "" -> next
+        rows += 1
+        found: lsp_foreign_completions(lsp_foreign_items(idiom.receiver, idiom.foreign))
+        want: "{idiom.rename}/{idiom.foreign}/{idiom.rename}/1:10-1:{10 + idiom.foreign.len()}"
+        assert(found == [String]{want}, "`{idiom.foreign}` on {idiom.receiver} completes to {found}, not {want}")
+    }
+    assert(rows >= 4, "the method rows are read")
+}
+
+#Test("completion offers the Jet method for a foreign word as it is written") {
+    // `nums.app` on a list completes to `push`, found by `append`.
+    assert_eq(lsp_foreign_completions(lsp_foreign_items("List", "app")), [String]{"push/append/push/1:10-1:13"})
+    assert_eq(lsp_foreign_completions(lsp_foreign_items("List", "si")), [String]{"len/size/len/1:10-1:12"})
+    assert_eq(lsp_foreign_completions(lsp_foreign_items("List", "push_")), [String]{"push/push_back/push/1:10-1:15"})
+    // `le` offers `len` itself, so `length` adds no second `len`.
+    items: lsp_foreign_items("List", "le")
+    assert_eq(lsp_foreign_completions(items), [String]{})
+    labels: lsp_foreign_labels(items)
+    assert(labels.contains("len"), "`len` completes as written: {labels}")
+}
+
+#Test("completion with no foreign row is the ordinary prefix completion") {
+    // `fi` offers the list's own methods and nothing else.
+    items: lsp_foreign_items("List", "fi")
+    assert_eq(lsp_foreign_completions(items), [String]{})
+    assert_eq(lsp_foreign_labels(items), [String]{"filter", "filter_map", "find", "first"})
+    // `append` is a list's word, not a string's.
+    assert_eq(lsp_foreign_completions(lsp_foreign_items("String", "app")), [String]{})
+    // With no word written, only the value's own methods are offered.
+    assert_eq(lsp_foreign_completions(lsp_foreign_items("List", "")), [String]{})
+}
