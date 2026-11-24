@@ -442,17 +442,6 @@ Query: struct<T> {
         Query<T>{__steps: query_steps(self.__steps, "limit"), __one_shot: self.__one_shot, __limits: self.__limits.copy(), __state: self.__state.copy(), __cell: self.__cell.copy(), __take: Val(most)}
     }
 
-    // The rows, in the query's order; more than `max_output_rows` is a
-    // Limit error.
-    collect: fn(self) -> [T] DataError! { __query_collect<T>(self) }
-
-    // The steps the query runs, from its source on (`"scan"`, `"filter"`,
-    // `"sql"`, …).
-    plan: fn(self) -> [String] Never! { __query_plan<T>(self) }
-
-    // A stable sort by the String key, bounded by `max_sort_rows`.
-    sort_by: fn(self, key: ^^fn(T) -> String) -> Query<T> Never! { __query_sort_by<T>(self, key) }
-
     // Grouped row counts over an `Int` key: runs a single SQL `GROUP BY` query
     // when `column` names a table's field column and the source supports SQL
     // grouping, otherwise reads the query's rows and counts in memory.
@@ -576,9 +565,6 @@ DataGroupedQuery: struct<T, K> {
 
 DataTracked: struct<T, K> {
     snapshot: DataSnapshot<[T]>,
-
-    // A reusable scan of the tracked snapshot rows.
-    query: fn(self) -> Query<T> Never! { __query_tracked<T, K>(self) }
 }
 
 DataWatch: struct<T> {
