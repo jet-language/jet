@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113575,
+    "rev": 113600,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25491,12 +25491,12 @@
         },
         {
           "n": 9,
-          "text": "`jet test Compiler --profile packages --filter PackageFacts` passes with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://...\"}` and the rejection of the old equals form, and `JET=jet jet Jetpack/Bootstrap/Check.jet --area PackageModel --deps-from-head` exits 0.",
+          "text": "PackageFacts claims hold for `tls: Bool{true}` and `api_base: String{\"https://...\"}`, the old equals form is rejected, and the PackageModel bootstrap check passes from head. Proof: `jet test Compiler --profile packages --filter PackageFacts` passes, and `jet Jetpack/Bootstrap/Check.jet --area PackageModel --deps-from-head` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:53:18.382Z"
+          "at": "2026-11-24T02:40:26.320Z"
         },
         {
           "n": 10,
@@ -25557,8 +25557,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:57:27.055Z",
-      "updated": "2026-11-22T02:10:23.709Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T02:40:26.320Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 13
     },
     {
@@ -28381,57 +28381,81 @@
         },
         {
           "n": 165,
-          "text": "Every owned default project-generated output, build products and generated source included, goes under the one top-level `.jet` root (D-GENERATED-STORAGE2=B), with no default build/, .jet-build/ or per-input-file .jet debris. Proof: `jet test Tests/Guards --filter generated_storage_root`. (was #3421 c1)",
+          "text": "Every owned default project-generated output, build products and generated source included, goes under the one top-level `.jet` root (D-GENERATED-STORAGE2=B), with no default build/, .jet-build/ or per-input-file .jet debris.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:47.750Z"
+          "at": "2026-11-24T02:40:27.267Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "generated_storage_root"
+            ]
+          }
         },
         {
           "n": 166,
-          "text": "Project and target identities separate standalone files, workspaces, symlinks, toolchains and profiles, targets and concurrent users, so final artifacts never collide or escape (today `bin_path` keys on the file stem only). Proof: `jet test Compiler --profile cases --filter ProjectRoot/artifact_identity_`. (was #3421 c2)",
+          "text": "Project and target identities separate standalone files, workspaces, symlinks, toolchains and profiles, targets and concurrent users, so final artifacts never collide or escape (today `bin_path` keys on the file stem only).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:48.677Z"
+          "at": "2026-11-24T02:40:28.244Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ProjectRoot/artifact_identity_"
+          }
         },
         {
           "n": 167,
-          "text": "Saved portable data, mandatory audit and sensitive roots and their references stay protected and readable after the migration. Proof: `jet test Compiler --profile cases --filter ProjectRoot/migration_keeps_saved_data`. (was #3421 c3)",
+          "text": "Saved portable data, mandatory audit and sensitive roots and their references stay protected and readable after the migration.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:49.962Z"
+          "at": "2026-11-24T02:40:29.446Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ProjectRoot/migration_keeps_saved_data"
+          }
         },
         {
           "n": 168,
-          "text": "Every affected reader, writer and cleanup path uses the new root, with no compatibility reader, duplicate disposable layout or blanket deletion. Proof: `jet test Tests/Guards --filter project_state_dir_single` (also c10's guard). (was #3421 c4)",
+          "text": "Every affected reader, writer and cleanup path uses the new root, with no compatibility reader, duplicate disposable layout or blanket deletion. Proof: `jet test Tests/Guards --filter project_state_dir_single` (also c10's guard).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:50.896Z"
+          "at": "2026-11-24T02:40:30.781Z"
         },
         {
           "n": 169,
-          "text": "Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts and selective cleanup each have a real-command case. Proof: `jet test Compiler --profile cases --filter ProjectRoot/`. (was #3421 c5)",
+          "text": "Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts and selective cleanup each have a real-command case.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:51.815Z"
+          "at": "2026-11-24T02:40:31.841Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ProjectRoot/"
+          }
         },
         {
           "n": 170,
-          "text": "A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each), and one shared longest-dependency-root helper attributes modules to packages. Proof: `jet test Compiler --profile cases --filter Policy/path_dependency_not_root_policy`. (was #6425 c14)",
+          "text": "A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each), and one shared longest-dependency-root helper attributes modules to packages.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:54:52.755Z"
+          "at": "2026-11-24T02:40:32.837Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Policy/path_dependency_not_root_policy"
+          }
         },
         {
           "n": 171,
@@ -28454,7 +28478,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:54.174Z",
-      "updated": "2026-11-24T02:26:29.901Z",
+      "updated": "2026-11-24T02:40:32.837Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 171
     },
@@ -32144,21 +32168,21 @@
         },
         {
           "n": 3,
-          "text": "Compiler-generated calls pass. A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605. Proof via seam 4: user `list.sort_by(f)` lowers to the Core collections sort kernel, now moved into a `priv(toolchain) module`. Examples golden collections sort rows pass on o0/o1/o2, and Tests/UI/sort_kernel_user_call.{jet,stderr} shows E0605.",
+          "text": "A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605: user `list.sort_by(f)` lowers to the Core collections sort kernel inside a `priv(toolchain) module`. Proof: `jet test Compiler --profile golden --filter Collections/Sort` on O0, O1 and O2, and `jet test Compiler --profile ui --filter sort_kernel_user_call` shows E0605.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:55:46.814Z"
+          "at": "2026-11-24T02:40:33.715Z"
         },
         {
           "n": 4,
-          "text": "Registry/spec/chain. Syntax-decisions S18 gains the `priv(toolchain)` line (Spellings ledger regenerated, `lexical-ledger.mjs --check` clean). spec.md visibility section and the E0414/E0605/E0609 rows name `priv(toolchain)`, and the diagnostic pages for those codes are regenerated. Chain FIXED_POINT; suites lose no row.",
+          "text": "Syntax-decisions S18 gains the `priv(toolchain)` line with the Spellings ledger regenerated, and spec.md's visibility section and the E0414, E0605 and E0609 rows name `priv(toolchain)`, with their diagnostic pages regenerated. Proof: `jet test Tests/Guards --filter syntax_ratification` and `jet Tools/Agent/DiagnosticRows.jet --check` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-01T19:05:11.793Z"
+          "at": "2026-11-24T02:40:34.677Z"
         },
         {
           "n": 5,
@@ -32171,12 +32195,12 @@
         },
         {
           "n": 6,
-          "text": "D-EMBED-TOOLCHAIN1=A table cutover, part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: reads, their copies and generator modes are deleted, and the declaration parser lives in one package. Walked and data-named reads use computed embed_file and find paths (D-EMBED-WALK1=A). The comptime cost of CoreCallRows (896 KB) against the generator run is recorded in the card log. Proof: the five generated files are absent from `git ls-files Compiler` and `jet test Compiler --profile ui --filter comptime_embed_` passes. (was #6151 c53)",
+          "text": "D-EMBED-TOOLCHAIN1=A table cutover, part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: reads, their copies and generator modes are deleted, and the declaration parser lives in one package. Walked and data-named reads use computed embed_file and find paths (D-EMBED-WALK1=A). The comptime cost of CoreCallRows (896 KB) against the generator run is recorded in the card log. Proof: the five generated files are absent from `git ls-files Compiler` and `jet test Compiler --profile ui --filter comptime_embed_` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:04.157Z"
+          "at": "2026-11-24T02:40:35.710Z"
         }
       ],
       "refs": [],
@@ -32191,8 +32215,8 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-10-08T11:29:02.821Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T02:40:35.710Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 6
     },
     {
@@ -32942,34 +32966,46 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:03:14.885Z"
+          "at": "2026-11-24T02:40:36.658Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "PackageCommands/add_path_and_git_dependency_builds"
+          }
         },
         {
           "n": 2,
-          "text": "`jet fetch` and `jet update` work for path and git dependencies; a second run leaves the lock bytes unchanged.",
+          "text": "`jet fetch` and `jet update` work for path and git dependencies, and a second run leaves the lock bytes unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:03:16.025Z"
+          "at": "2026-11-24T02:40:37.615Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "PackageCommands/fetch_and_update_are_idempotent"
+          }
         },
         {
           "n": 3,
-          "text": "A missing or silent package engine is reported as missing or broken with the fix; E1227 \"disagree\" appears only when both sides answer with different protocol versions. UI snapshots cover all three cases.",
+          "text": "A missing or silent package engine is reported as missing or broken with the fix, and E1227 \"disagree\" appears only when both sides answer with different protocol versions. Proof: `jet test Compiler --profile ui --filter package_engine_`, one snapshot per case (missing, silent, version disagreement).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:03:17.336Z"
+          "at": "2026-11-24T02:40:38.482Z"
         },
         {
           "n": 4,
-          "text": "Package commands run only the engine shipped beside the running `jet` (toolchain root); a fake `jetpack` placed earlier on PATH is never executed (test).",
+          "text": "Package commands run only the engine shipped beside the running `jet` (toolchain root), and a fake `jetpack` placed earlier on PATH never runs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T11:03:39.306Z"
+          "at": "2026-11-24T02:40:39.763Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "PackageCommands/engine_from_toolchain_root_not_path"
+          }
         }
       ],
       "refs": [],
@@ -32981,8 +33017,8 @@
       "parentId": "c0uwol3w",
       "needsAcceptance": false,
       "created": "2026-10-10T00:28:18.961Z",
-      "updated": "2026-11-22T02:10:23.712Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-24T02:40:39.763Z",
+      "updatedBy": "Orchestrator"
     },
     {
       "id": "c0acg7c2",
@@ -35505,66 +35541,74 @@
         },
         {
           "n": 2,
-          "text": "Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Proof: `tower decision show <id>` ratified, then `jet test Compiler --profile packages --filter Graft/recorded_applied_reconciled`. (was #5458 c1)",
+          "text": "Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Proof: `tower decision show <id>` ratified, then `jet test Compiler --profile packages --filter Graft/recorded_applied_reconciled`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:09.269Z"
+          "at": "2026-11-24T02:40:41.010Z"
         },
         {
           "n": 3,
-          "text": "Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the next run (D-AUTH-DEFAULT1=A); `--locked` refuses the update with a registered error, and a written authority row is a ceiling. Proof: `jet test Compiler --profile packages --filter CapabilityDiff/widened_effect_on_update` against a fixture registry. (was #5459 c1)",
+          "text": "Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the next run (D-AUTH-DEFAULT1=A); `--locked` refuses the update with a registered error, and a written authority row is a ceiling. Proof: `jet test Compiler --profile packages --filter CapabilityDiff/widened_effect_on_update` against a fixture registry.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:10.224Z"
+          "at": "2026-11-24T02:40:42.005Z"
         },
         {
           "n": 4,
-          "text": "Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust root, so a silently re-published package is detected. Proof: `jet test Compiler --profile packages --filter Reproducibility/republish_detected`. (was #5460 c1)",
+          "text": "Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust root, so a silently re-published package is detected.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:11.369Z"
+          "at": "2026-11-24T02:40:42.909Z",
+          "proof": {
+            "profile": "packages",
+            "filter": "Reproducibility/republish_detected"
+          }
         },
         {
           "n": 5,
-          "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen). Proof: `jet test Compiler --profile packages --filter AuditTrail/imperative_change_written_back`. (was #5462 c1)",
+          "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:12.354Z"
+          "at": "2026-11-24T02:40:43.823Z",
+          "proof": {
+            "profile": "packages",
+            "filter": "AuditTrail/imperative_change_written_back"
+          }
         },
         {
           "n": 6,
-          "text": "The final generated security report and its canonical evidence are committed, and the report lists exactly the 134 original candidate IDs, each with one final disposition. Proof: the committed report under Docs/Audits/security-final-<date>/, with a count of 134 unique IDs and 134 dispositions. (was #1387 c4)",
+          "text": "The final generated security report and its canonical evidence are committed, and the report lists exactly the 134 original candidate IDs, each with one final disposition. Proof: the committed report under Docs/Audits/security-final-<date>/, with a count of 134 unique IDs and 134 dispositions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:13.720Z"
+          "at": "2026-11-24T02:40:44.752Z"
         },
         {
           "n": 7,
-          "text": "The security-scan procedure is a committed Jet tool under Tools/ (the deleted scripts/agent/security-scan.mjs is not restored, by the greenfield rule), and its finalize step at the integration HEAD exits 0 with zero unresolved reportable findings, zero deferred items and zero open questions, and publishes Docs/Audits/security-final-<date>/. Proof: the tool's finalize run on a clean checkout, recorded in the report's gate section. (was #1387 c6)",
+          "text": "The security-scan procedure is a committed Jet tool under Tools/ (the deleted scripts/agent/security-scan.mjs is not restored, by the greenfield rule), and its finalize step at the integration HEAD exits 0 with zero unresolved reportable findings, zero deferred items and zero open questions, and publishes Docs/Audits/security-final-<date>/. Proof: the tool's finalize run on a clean checkout, recorded in the report's gate section.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:14.650Z"
+          "at": "2026-11-24T02:40:45.623Z"
         },
         {
           "n": 8,
-          "text": "Each release ships a compliance bundle: an SBOM, SLSA provenance and an air-gap install runbook, generated by the release gate. Proof: `jet test Tests/Guards --filter release_compliance_bundle` and the bundle files in the release receipt. (was #2199 c25)",
+          "text": "Each release ships a compliance bundle: an SBOM, SLSA provenance and an air-gap install runbook, generated by the release gate. Proof: `jet test Tests/Guards --filter release_compliance_bundle` and the bundle files in the release receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:15.984Z"
+          "at": "2026-11-24T02:40:46.548Z"
         }
       ],
       "refs": [],
@@ -35572,8 +35616,8 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:33.234Z",
-      "updated": "2026-11-22T02:10:23.713Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T02:40:46.548Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     },
     {
@@ -37518,39 +37562,47 @@
         },
         {
           "n": 4,
-          "text": "Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one workspace root, and shared cache goes under ~/.cache. Proof: `jet test Tests/Guards --filter project_state_dir_single`. (was #3421 c7)",
+          "text": "Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one workspace root, and shared cache goes under ~/.cache.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:51.706Z"
+          "at": "2026-11-24T02:40:47.438Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "Tests/Guards",
+              "--filter",
+              "project_state_dir_single"
+            ]
+          }
         },
         {
           "n": 5,
-          "text": "After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter ProjectRoot/workspace_has_one_state_dir` (counts with `find . -name .jet -type d`). (was #3421 c9)",
+          "text": "After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter ProjectRoot/workspace_has_one_state_dir` (counts with `find . -name .jet -type d`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:52.620Z"
+          "at": "2026-11-24T02:40:48.367Z"
         },
         {
           "n": 6,
-          "text": "One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test Tests/Guards --filter project_state_dir_single` over Compiler/, Core/ and Jetpack/. (was #3421 c10)",
+          "text": "One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test Tests/Guards --filter project_state_dir_single` over Compiler/, Core/ and Jetpack/.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:57:53.573Z"
+          "at": "2026-11-24T02:40:49.410Z"
         },
         {
           "n": 7,
-          "text": "Tracked fixture inputs that lived under nested `.jet` directories are migrated with their consumers, so no tracked file sits under a nested `.jet` and no canonical source silently disappears. Proof: `git ls-files '*/.jet/*'` lists only files under the workspace root `.jet`, and the consumers' cases pass. (was #3421 c14)",
+          "text": "Tracked fixture inputs that lived under nested `.jet` directories are migrated with their consumers, so no tracked file sits under a nested `.jet` and no canonical source silently disappears. Proof: `git ls-files '*/.jet/*'` lists only files under the workspace root `.jet`, and the consumers' cases pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:11:39.853Z"
+          "at": "2026-11-24T02:40:50.319Z"
         }
       ],
       "refs": [],
@@ -37562,8 +37614,8 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:18.786Z",
-      "updated": "2026-11-22T02:10:23.713Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-24T02:40:50.319Z",
+      "updatedBy": "Orchestrator",
       "criteriaLastN": 7
     },
     {
@@ -137420,6 +137472,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T02:40:50.319Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Tracked fixture inputs that lived under nested `.jet` directories are migrated with their consumers, so no tracked file sits under a nested `.jet` and no canonical source silently disappears. Proof: `"
+    },
+    {
+      "at": "2026-11-24T02:40:49.411Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: One function returns the project state directory (the workspace root, else the package root), and no other code joins a `.jet` path by hand. Proof: `jet test Tests/Guards --filter project_state_dir_si"
+    },
+    {
+      "at": "2026-11-24T02:40:48.367Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#5: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: After build, test and run inside each member of a three-member workspace, exactly one `.jet` directory exists, at the workspace root. Proof: `jet test Compiler --profile cases --filter ProjectRoot/wor"
+    },
+    {
+      "at": "2026-11-24T02:40:47.438Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c05i2uiq",
+      "note": "#4: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every remaining per-package or cwd-relative `.jet/` writer (build/deps, lock unless a ratified package-scoped lock, cache/api, cache/schema, codemods, game-*, jobs, state/jobs.db) writes to the one wo"
+    },
+    {
+      "at": "2026-11-24T02:40:46.548Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#8: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Each release ships a compliance bundle: an SBOM, SLSA provenance and an air-gap install runbook, generated by the release gate. Proof: `jet test Tests/Guards --filter release_compliance_bundle` and th"
+    },
+    {
+      "at": "2026-11-24T02:40:45.623Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#7: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The security-scan procedure is a committed Jet tool under Tools/ (the deleted scripts/agent/security-scan.mjs is not restored, by the greenfield rule), and its finalize step at the integration HEAD ex"
+    },
+    {
+      "at": "2026-11-24T02:40:44.752Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: The final generated security report and its canonical evidence are committed, and the report lists exactly the 134 original candidate IDs, each with one final disposition. Proof: the committed report "
+    },
+    {
+      "at": "2026-11-24T02:40:43.823Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#5: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen). Proof: `jet test Compi"
+    },
+    {
+      "at": "2026-11-24T02:40:42.909Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#4: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust"
+    },
+    {
+      "at": "2026-11-24T02:40:42.005Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#3: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the "
+    },
+    {
+      "at": "2026-11-24T02:40:41.010Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0nr5mre",
+      "note": "#2: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Pro"
+    },
+    {
+      "at": "2026-11-24T02:40:39.763Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0vthf2x",
+      "note": "#4: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: Package commands run only the engine shipped beside the running `jet` (toolchain root); a fake `jetpack` placed earlier on PATH is never executed (test)."
+    },
+    {
+      "at": "2026-11-24T02:40:38.482Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0vthf2x",
+      "note": "#3: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: A missing or silent package engine is reported as missing or broken with the fix; E1227 \"disagree\" appears only when both sides answer with different protocol versions. UI snapshots cover all three ca"
+    },
+    {
+      "at": "2026-11-24T02:40:37.615Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0vthf2x",
+      "note": "#2: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: `jet fetch` and `jet update` work for path and git dependencies; a second run leaves the lock bytes unchanged."
+    },
+    {
+      "at": "2026-11-24T02:40:36.658Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0vthf2x",
+      "note": "#1: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: In a fresh `jet new` project with no `jetpack` binary on PATH, `jet add ../geometry` (path) and `jet add git+<url>#<rev>` (git) write the dependency to package.jet and the lock, and `jet build` resolv"
+    },
+    {
+      "at": "2026-11-24T02:40:35.710Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r8y1nt",
+      "note": "#6: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: D-EMBED-TOOLCHAIN1=A table cutover, part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: r"
+    },
+    {
+      "at": "2026-11-24T02:40:34.677Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r8y1nt",
+      "note": "#4: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: Registry/spec/chain. Syntax-decisions S18 gains the `priv(toolchain)` line (Spellings ledger regenerated, `lexical-ledger.mjs --check` clean). spec.md visibility section and the E0414/E0605/E0609 rows"
+    },
+    {
+      "at": "2026-11-24T02:40:33.715Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0r8y1nt",
+      "note": "#3: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: Compiler-generated calls pass. A call the compiler lowers into a toolchain-private module is admitted, while the same name written in user source is E0605. Proof via seam 4: user `list.sort_by(f)` low"
+    },
+    {
+      "at": "2026-11-24T02:40:32.837Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#170: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: A path dependency under the project folder is not checked against the root's policy.unsafe, policy.effects or policy.expert (one fixture each), and one shared longest-dependency-root helper attributes"
+    },
+    {
+      "at": "2026-11-24T02:40:31.841Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#169: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Read-only sources, unwritable required and optional destinations, explicit outputs, concurrency, moved checkouts and selective cleanup each have a real-command case. Proof: `jet test Compiler --profil"
+    },
+    {
+      "at": "2026-11-24T02:40:30.781Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#168: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every affected reader, writer and cleanup path uses the new root, with no compatibility reader, duplicate disposable layout or blanket deletion. Proof: `jet test Tests/Guards --filter project_state_di"
+    },
+    {
+      "at": "2026-11-24T02:40:29.446Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#167: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Saved portable data, mandatory audit and sensitive roots and their references stay protected and readable after the migration. Proof: `jet test Compiler --profile cases --filter ProjectRoot/migration_"
+    },
+    {
+      "at": "2026-11-24T02:40:28.244Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#166: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Project and target identities separate standalone files, workspaces, symlinks, toolchains and profiles, targets and concurrent users, so final artifacts never collide or escape (today `bin_path` keys "
+    },
+    {
+      "at": "2026-11-24T02:40:27.267Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0jm0xjt",
+      "note": "#165: Strip the stale (was #N) provenance tag; the text is unchanged otherwise (#6568 c3).; was: Every owned default project-generated output, build products and generated source included, goes under the one top-level `.jet` root (D-GENERATED-STORAGE2=B), with no default build/, .jet-build/ or pe"
+    },
+    {
+      "at": "2026-11-24T02:40:26.321Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#9: Replace the Rust-era proof command with the Jet suite filter that proves the same outcome (#6568 c3).; was: `jet test Compiler --profile packages --filter PackageFacts` passes with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://...\"}` and the rejection of the old equals form, and `JET"
+    },
     {
       "at": "2026-11-24T02:37:23.768Z",
       "by": "Orchestrator",
