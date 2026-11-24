@@ -6646,7 +6646,10 @@ projection adds a row rather than a new subcommand or mechanism-specific flag
 
 ## Semantic index and codemods
 
-`jet inspect semindex --json <file.jet>` emits semantic-index schema v20:
+`jet inspect semindex --json <file.jet>` emits the semantic-index document whose
+current version, fact shape and version history
+[Semantic index: current version and fact shape](Reference/semantic-index.md)
+records:
 definitions, references, call edges, effects, member facts, and typed package
 and workspace-overlay facts. Member facts unify fields, variants, inline
 methods, external inherent methods, trait methods, and trait requirements under
@@ -6872,7 +6875,7 @@ handed text's imports among the sources the calling compile holds under its
 root (`jet inspect compiler check <file>`: the sources `jet check <file>`
 holds); it never rereads them from disk. Semantic facts reuse the existing
 index schema: the `semantic_index` that `check` returns carries the
-semantic-index `schema_version` (20, see Semantic index and codemods), not the
+semantic-index `schema_version` ([Reference/semantic-index.md](Reference/semantic-index.md)), not the
 envelope's 1. The API does not return
 `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state, or sema
 internals, and modified syntax cannot be fed back into compilation
