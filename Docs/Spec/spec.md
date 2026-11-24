@@ -6537,6 +6537,20 @@ The server's protocol loop accepts JSON-RPC requests and emits framed
 The LSP coverage is in `Compiler/JetLSP/Tests/LSP/` and
 `Tests/Cases/LSP/`.
 
+A name the check cannot resolve (E0102, E0107) gets one quick-fix per
+declaration the document's module may reach under that name, each titled
+with the identity the name then resolves to (`geo.area`): written through
+the document's own import of the declaring module (`geo.area`), or added as
+a `module.[name]` row to the document's imports. A re-export resolves to the
+declaration it names. Which declarations a module may reach comes from the
+check's name facts, never from the source text: a private declaration of
+another package, a member, and a compiler-generated name are never offered,
+and a name of the document's own package needs no import. The
+`source.organizeImports` action drops the import rows and members the check
+reports unused (L0103), keeps every other row as written, and keeps a row an
+unresolved name's quick-fix writes through. A code action request whose
+`context.only` names kinds gets the actions of those kinds alone.
+
 The VS Code/Cursor client in `Tools/Editors/Vscode/` provides the TextMate grammar
 and LSP transport. `install.sh` packages the extension. Server discovery uses
 `jet.executablePath`, then the legacy `jet.languageServerPath`, then `jet` on

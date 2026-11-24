@@ -1,5 +1,8 @@
-// Code actions: each fix a diagnostic in the requested range offers, then the
-// marker-placement rewrites of the declaration under the cursor.
+// Code actions: each fix a diagnostic in the requested range offers, the
+// import repairs of each name in it the check could not resolve, then the
+// marker-placement rewrites of the declaration under the cursor, and
+// organize-imports over the whole document. A request whose `context.only`
+// names kinds gets the actions of those kinds alone.
 use {
     core.encoding.[Dyn]
     jet_foundation.[Diagnostic, TextEdit, DiagnosticFixApplicability, foundation_json_quote]
@@ -14,24 +17,41 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
     // A range past the document's end covers the rest of the document.
     start: lsp_clamped_offset_bytes(table, bytes, range.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
     end: lsp_clamped_offset_bytes(table, bytes, range.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    document: lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text)
+    // Organize-imports reads every diagnostic of the document, so it runs
+    // before the ones in the range move into their fixes.
+    organized: if lsp_code_action_wanted(params, "source.organizeImports") -> lsp_organize_imports_edits(view, document) else -> [TextEdit]{}
     diagnostics := [Diagnostic]{}
-    loop diagnostic in lsp_retain_document_diagnostics(view.checked.diagnostics, view.doc.path, view.doc.text) {
+    loop diagnostic in document.move() {
         span: diagnostic.span ?? next
         if span.start <= end && start <= span.end -> diagnostics.push(diagnostic)
     }
     actions := [String]{}
-    fixes := lsp_fixes_from_diagnostics(diagnostics.move())
-    loop fix in fixes.move() {
-        preferred: fix.applicability == DiagnosticFixApplicability.Safe
-        whole := [TextEdit]{fix.edit.move()}
-        whole.extend(fix.edits.move())
-        actions.push(lsp_action_json(view, fix.title, "quickfix", whole, document_changes: server.document_changes, preferred: preferred))
+    if lsp_code_action_wanted(params, "quickfix") {
+        loop diagnostic in diagnostics {
+            repairs: lsp_import_actions(view, diagnostic)
+            loop repair in repairs {
+                actions.push(lsp_action_json(view, repair.title, "quickfix", repair.edits, document_changes: server.document_changes, preferred: repairs.len() == 1))
+            }
+        }
+        fixes := lsp_fixes_from_diagnostics(diagnostics.move())
+        loop fix in fixes.move() {
+            preferred: fix.applicability == DiagnosticFixApplicability.Safe
+            whole := [TextEdit]{fix.edit.move()}
+            whole.extend(fix.edits.move())
+            actions.push(lsp_action_json(view, fix.title, "quickfix", whole, document_changes: server.document_changes, preferred: preferred))
+        }
     }
-    if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {
-        actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
+    if lsp_code_action_wanted(params, "refactor.rewrite") {
+        if parser_marker_placement_edit_at(bytes, start, false) == .Val(edit) {
+            actions.push(lsp_action_json(view, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
+        }
+        if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
+            actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
+        }
     }
-    if parser_marker_placement_edit_at(bytes, start, true) == .Val(edit) {
-        actions.push(lsp_action_json(view, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}, document_changes: server.document_changes, preferred: false))
+    if organized.len() > 0 {
+        actions.push(lsp_action_json(view, "Organize imports", "source.organizeImports", organized, document_changes: server.document_changes, preferred: false))
     }
     lsp_response(id, "[{actions.join(",")}]")
 }

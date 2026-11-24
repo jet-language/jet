@@ -1,0 +1,256 @@
+// Import repairs and organize-imports read the checked name ledger. The
+// fixture checker runs no name check, so this checker gives the open
+// documents the ledger and the reports a check of these packages would:
+// `run` (package `app`) calls `area`, `squared` and `volume` and imports
+// only `geo`; `geo` declares `area` and the private `volume` and re-exports
+// `shapes.area` as `squared`; `shapes` declares `area` and a `Box.area`
+// method; `helpers` (package `app`) and a compiler-generated module also
+// declare `area`. Visibility is the ledger's, never the source's.
+use {
+    core.encoding.[Dyn]
+    jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
+    jet_foundation.[Diagnostic, NameAlias, NameDeclaration, NameFacts, NameModule, NameVisibility, Span, name_ledger_from_facts]
+    jet_lsp.[LSPChecked, LSPChecker, LSPServer, lsp_member, lsp_server]
+}
+
+LSP_IMPORTS_RUN_URI: "file:///w/run.jet"
+
+LSP_IMPORTS_GEO_URI: "file:///w/geo.jet"
+
+LSP_IMPORTS_SHAPES_URI: "file:///w/shapes.jet"
+
+LSP_IMPORTS_TIDY_URI: "file:///w/tidy.jet"
+
+LSP_IMPORTS_FRESH_URI: "file:///w/fresh.jet"
+
+LSP_IMPORTS_LISTED_URI: "file:///w/listed.jet"
+
+LSP_IMPORTS_RUN: `use geo
+
+run: fn() {
+    print(area(2))
+    print(squared(2))
+    print(volume(2))
+}
+`
+
+LSP_IMPORTS_GEO: `use shapes
+
+squared: shapes.area
+
+area: fn(side: Int) -> Int {
+    side * side
+}
+
+priv volume: fn(side: Int) -> Int {
+    side * side * side
+}
+`
+
+LSP_IMPORTS_SHAPES: `area: fn(side: Int) -> Int {
+    side * 2
+}
+`
+
+LSP_IMPORTS_TIDY: `use {
+    geo
+    shapes
+}
+
+tidy: fn() -> Int {
+    shapes.area(1)
+}
+`
+
+LSP_IMPORTS_FRESH: `fresh: fn() -> Int {
+    area(1)
+}
+`
+
+LSP_IMPORTS_LISTED: `use shapes.[Box]
+
+listed: fn() -> Int {
+    area(1)
+}
+`
+
+// The ledger's module of each fixture document, in the order of
+// lsp_imports_facts.
+LSP_IMPORTS_MODULES: [String]{"/w/run.jet", "/w/geo.jet", "/w/shapes.jet", "/w/tidy.jet", "/w/fresh.jet", "/w/listed.jet"}
+
+lsp_imports_span: fn() -> Span Never! { Span{start: 0, end: 0} }
+
+lsp_imports_declaration: fn(module_index: Int, module_path: String, name: String, visibility: NameVisibility) -> NameDeclaration Never! {
+    NameDeclaration{module_index: module_index, name: name, path: "{module_path}.{name}", kind: "function", span: lsp_imports_span(), visibility: visibility}
+}
+
+lsp_imports_alias: fn(module_index: Int, name: String, target: String, target_module: Int, visibility: NameVisibility) -> NameAlias Never! {
+    NameAlias{module_index: module_index, name: name, target: target, target_module: Val(target_module), span: lsp_imports_span(), visibility: visibility}
+}
+
+lsp_imports_facts: fn() -> NameFacts Never! {
+    NameFacts{
+        modules: [NameModule]{
+            NameModule{alias: "run", path: "run", package: "app", namespace: Val("app")},
+            NameModule{alias: "geo", path: "geo", package: "geo", namespace: Val("geo")},
+            NameModule{alias: "shapes", path: "shapes", package: "shapes", namespace: Val("shapes")},
+            NameModule{alias: "tidy", path: "tidy", package: "app", namespace: Val("app")},
+            NameModule{alias: "fresh", path: "fresh", package: "app", namespace: Val("app")},
+            NameModule{alias: "listed", path: "listed", package: "app", namespace: Val("app")},
+            NameModule{alias: "helpers", path: "helpers", package: "app", namespace: Val("app")},
+            NameModule{alias: "__jet_generated", path: "__jet_generated", package: "generated"},
+        },
+        declarations: [NameDeclaration]{
+            lsp_imports_declaration(1, "geo", "area", NameVisibility.Public),
+            lsp_imports_declaration(1, "geo", "volume", NameVisibility.Private),
+            lsp_imports_declaration(2, "shapes", "area", NameVisibility.Public),
+            lsp_imports_declaration(2, "shapes", "Box", NameVisibility.Public),
+            lsp_imports_declaration(2, "shapes", "Box.area", NameVisibility.Public),
+            lsp_imports_declaration(6, "helpers", "area", NameVisibility.Private),
+            lsp_imports_declaration(7, "__jet_generated", "area", NameVisibility.Public),
+        },
+        aliases: [NameAlias]{
+            lsp_imports_alias(0, "geo", "geo", 1, NameVisibility.Private),
+            lsp_imports_alias(1, "shapes", "shapes", 2, NameVisibility.Private),
+            lsp_imports_alias(1, "squared", "shapes", 2, NameVisibility.Public),
+            lsp_imports_alias(3, "geo", "geo", 1, NameVisibility.Private),
+            lsp_imports_alias(3, "shapes", "shapes", 2, NameVisibility.Private),
+            lsp_imports_alias(5, "shapes", "shapes", 2, NameVisibility.Private),
+            lsp_imports_alias(5, "Box", "shapes.Box", 2, NameVisibility.Private),
+        },
+        references: [],
+        structure_facts: [],
+    }
+}
+
+// A check report over `word` where `text` first writes it after `before`.
+lsp_imports_report: fn(text: String, before: String, word: String, code: String, what: String) -> Diagnostic? Never! {
+    at: text.find("{before}{word}")
+    if at < 0 -> return None
+    start: at + before.count_bytes()
+    Val(Diagnostic{severity: 1, code: code, span: Val(Span{start: start, end: start + word.count_bytes()}), what: what, why: "", fix: ""})
+}
+
+// What a check reports in the fixture `entry`: each call of a name nothing
+// in scope declares (E0102), and the `geo` import of `run` and `tidy` as
+// unused (L0103).
+lsp_imports_reports: fn(entry: String, text: String) -> [Diagnostic] Never! {
+    reports := [Diagnostic]{}
+    loop called in ([String]{"area", "squared", "volume"}) {
+        what: "Nothing named `{called}` exists here"
+        if lsp_imports_report(text, "    print(", called, "E0102", what) == .Val(report) {
+            reports.push(report)
+        }
+        if lsp_imports_report(text, "\n    ", "{called}(", "E0102", what) != None {
+            reports.push(lsp_imports_report(text, "\n    ", called, "E0102", what) ?? panic("`{called}` is not called"))
+        }
+    }
+    if entry == "/w/run.jet" || entry == "/w/tidy.jet" {
+        reports.push(lsp_imports_report(text, "", "geo", "L0103", "Import `geo` is never used.") ?? panic("no `geo` import"))
+    }
+    reports
+}
+
+LSPImportsChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never! {
+            checked := LSPFixtureChecker{}.check(entry, overlays)
+            ledger: Shared{name_ledger_from_facts(lsp_imports_facts())}
+            loop index in 0..<checked.modules.len() {
+                loop (slot, path) in LSP_IMPORTS_MODULES {
+                    if checked.modules[index].path == path {
+                        checked.modules[index].name_ledger = Val(ledger)
+                        checked.modules[index].name_module_index = slot
+                    }
+                }
+            }
+            loop overlay in overlays {
+                if overlay.path == entry {
+                    checked.diagnostics.extend(lsp_imports_reports(entry, overlay.source))
+                }
+            }
+            checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[JetDriverSourceDocument], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
+        }
+
+        failure_marks: fn(self, entry: String, overlays: &&[JetDriverSourceDocument]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [Int] Never! {
+            LSPFixtureChecker{}.failure_marks(entry, overlays)
+        }
+
+        sources: fn(self, root: String) -[FS]> [JetDriverSourceDocument] Never! {
+            LSPFixtureChecker{}.sources(root)
+        }
+    }
+}
+
+lsp_imports_server: fn() -> LSPServer Never! {
+    server := lsp_server(LSPImportsChecker{})
+    lsp_test_open(server, LSP_IMPORTS_RUN_URI, LSP_IMPORTS_RUN)
+    lsp_test_open(server, LSP_IMPORTS_GEO_URI, LSP_IMPORTS_GEO)
+    lsp_test_open(server, LSP_IMPORTS_SHAPES_URI, LSP_IMPORTS_SHAPES)
+    lsp_test_open(server, LSP_IMPORTS_TIDY_URI, LSP_IMPORTS_TIDY)
+    lsp_test_open(server, LSP_IMPORTS_FRESH_URI, LSP_IMPORTS_FRESH)
+    lsp_test_open(server, LSP_IMPORTS_LISTED_URI, LSP_IMPORTS_LISTED)
+    server
+}
+
+// The actions of the kinds `only` for the whole of line `line`, each as
+// `title|kind|preferred|range newText` per edit.
+lsp_imports_actions: fn(server: &LSPServer, uri: String, line: Int, only: String) -> [String] {
+    params: "{{{lsp_test_text_document(uri)},\"range\":{{\"start\":{{\"line\":{line},\"character\":0}},\"end\":{{\"line\":{line + 1},\"character\":0}}}},\"context\":{{\"diagnostics\":[],\"only\":[\"{only}\"]}}}}"
+    shown := [String]{}
+    loop action in lsp_test_rows(lsp_test_result(server, "textDocument/codeAction", params)) {
+        preferred := false
+        if lsp_member(action, "isPreferred") == .Val(value) -> preferred = value == Dyn.Bool(true)
+        edits := [String]{}
+        loop edit in lsp_test_rows(lsp_test_field(lsp_test_field(lsp_test_field(action, "edit"), "changes"), uri)) {
+            edits.push("{lsp_test_range(lsp_test_field(edit, "range"))} {lsp_test_text(edit, "newText")}")
+        }
+        shown.push("{lsp_test_text(action, "title")}|{lsp_test_text(action, "kind")}|{preferred}|{edits.join(";")}")
+    }
+    shown
+}
+
+#Test("an unresolved name's repairs name each accessible declaration it can resolve to") {
+    server := lsp_imports_server()
+    // `area`: geo's through the document's `geo` import, and shapes' through
+    // a new row. The private `helpers.area` of the document's own package, a
+    // generated module's `area` and the `Box.area` method are never offered.
+    assert_eq(
+        lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 3, "quickfix"),
+        [String]{
+            "Write `geo.area` (geo.area)|quickfix|false|3:10-3:14 geo.area",
+            "Import `area` from `shapes` (shapes.area)|quickfix|false|0:0-0:7 use {{\n    geo\n    shapes.[area]\n}}",
+        },
+    )
+    // A re-export resolves to the declaration it names.
+    assert_eq(lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 4, "quickfix"), [String]{"Write `geo.squared` (shapes.area)|quickfix|true|4:10-4:17 geo.squared"})
+    // A private declaration of another package is no repair.
+    assert_eq(lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 5, "quickfix"), [String]{})
+}
+
+#Test("an import repair writes the row where the document's imports are") {
+    server := lsp_imports_server()
+    // No import yet: a `use` line at the top.
+    assert_eq(
+        lsp_imports_actions(server, LSP_IMPORTS_FRESH_URI, 1, "quickfix"),
+        [String]{"Import `area` from `geo` (geo.area)|quickfix|false|0:0-0:0 use geo.[area]\n", "Import `area` from `shapes` (shapes.area)|quickfix|false|0:0-0:0 use shapes.[area]\n"},
+    )
+    // A member list of the module: the name joins it.
+    assert_eq(
+        lsp_imports_actions(server, LSP_IMPORTS_LISTED_URI, 3, "quickfix"),
+        [String]{"Import `area` from `geo` (geo.area)|quickfix|false|0:0-0:16 use {{\n    shapes.[Box]\n    geo.[area]\n}}", "Import `area` from `shapes` (shapes.area)|quickfix|false|0:15-0:15 , area"},
+    )
+}
+
+#Test("organize imports drops only the rows the check reports unused") {
+    server := lsp_imports_server()
+    assert_eq(lsp_imports_actions(server, LSP_IMPORTS_TIDY_URI, 6, "source"), [String]{"Organize imports|source.organizeImports|false|0:0-3:1 use shapes"})
+    // `geo` is reported unused, but the `area` repair writes through it.
+    assert_eq(lsp_imports_actions(server, LSP_IMPORTS_RUN_URI, 3, "source.organizeImports"), [String]{})
+    // A request for other kinds gets no organize-imports.
+    assert_eq(lsp_imports_actions(server, LSP_IMPORTS_TIDY_URI, 6, "quickfix"), [String]{})
+}
