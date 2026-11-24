@@ -94,11 +94,9 @@ ir_opt_return_slots: fn(m: ^IRModule, threads: CompilerThreads) -> Int Never! {
         return made
     }
     rewritten := ir_opt_slot_rebuild_touched(m, touched, plan, results, calls, workers)
-    at := touched.len() - 1
-    loop at >= 0 {
-        rebuilt: rewritten.pop() ?? panic("the IR optimizer lost a return-slot rewrite")
-        m.functions[touched[at]] = rebuilt.move()
-        at -= 1
+    loop {
+        rebuilt: rewritten.pop() ?? break
+        m.functions[rebuilt.id] = rebuilt.function.move()
     }
     made
 }
@@ -163,17 +161,23 @@ ir_opt_slot_touched_ranges: fn(m: IRModule, bounds: [Int], plan: IROptSlotPlan, 
     done
 }
 
-ir_opt_slot_rebuild_range: fn(m: IRModule, touched: [Int], start: Int, end: Int, plan: IROptSlotPlan, results: [Int], calls: [Int]) -> [IRFunction] Never! {
-    out := [IRFunction]{}
+// A touched function's rewrite and the function id it replaces.
+IROptSlotRebuilt: struct {
+    id: Int,
+    function: IRFunction,
+}
+
+ir_opt_slot_rebuild_range: fn(m: IRModule, touched: [Int], start: Int, end: Int, plan: IROptSlotPlan, results: [Int], calls: [Int]) -> [IROptSlotRebuilt] Never! {
+    out := [IROptSlotRebuilt]{}
     out.try_reserve(end - start) ?? ()
     loop at in start..<end {
         id: touched[at]
-        out.push(ir_opt_slot_rebuild(m.functions[id], plan, results, id, calls[2], calls[3]))
+        out.push(IROptSlotRebuilt{id: id, function: ir_opt_slot_rebuild(m.functions[id], plan, results, id, calls[2], calls[3])})
     }
     out
 }
 
-ir_opt_slot_rebuild_touched: fn(m: IRModule, touched: [Int], plan: IROptSlotPlan, results: [Int], calls: [Int], workers: Int) -> [IRFunction] Never! {
+ir_opt_slot_rebuild_touched: fn(m: IRModule, touched: [Int], plan: IROptSlotPlan, results: [Int], calls: [Int], workers: Int) -> [IROptSlotRebuilt] Never! {
     total: touched.len()
     parts: if workers > total -> total else -> workers
     if parts <= 1 -> return ir_opt_slot_rebuild_range(m, touched, 0, total, plan, results, calls)
@@ -183,13 +187,13 @@ ir_opt_slot_rebuild_touched: fn(m: IRModule, touched: [Int], plan: IROptSlotPlan
     ir_opt_slot_rebuild_parts(m, touched, bounds, plan, results, calls, 0)
 }
 
-ir_opt_slot_rebuild_parts: fn(m: IRModule, touched: [Int], bounds: [Int], plan: IROptSlotPlan, results: [Int], calls: [Int], at: Int) -> [IRFunction] Never! {
+ir_opt_slot_rebuild_parts: fn(m: IRModule, touched: [Int], bounds: [Int], plan: IROptSlotPlan, results: [Int], calls: [Int], at: Int) -> [IROptSlotRebuilt] Never! {
     last: bounds.len() - 2
-    if at > last -> return [IRFunction]{}
+    if at > last -> return [IROptSlotRebuilt]{}
     if at == last {
         return ir_opt_slot_rebuild_range(m, touched, bounds[at], bounds[at + 1], plan, results, calls)
     }
-    done := [IRFunction]{}
+    done := [IROptSlotRebuilt]{}
     task.group ir_opt_slot_rebuild_group {
         head: task ir_opt_slot_rebuild_range(m, touched, bounds[at], bounds[at + 1], plan, results, calls)
         rest: ir_opt_slot_rebuild_parts(m, touched, bounds, plan, results, calls, at + 1)

@@ -7077,30 +7077,26 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         heaps = sema_effect_heap_bounds(nodes, called)
         stacks = sema_effect_stack_bounds(stack, frames, nodes, called)
     }
-    stamped_tfacts := sema_effect_build_tfacts_parallel(modules, inputs, function_nodes, nodes, solved, threads)
-    stamped_tfacts.reverse()
-    loop (input_position, module_row) in inputs {
-        target: module_row.module_index
-        module_tfacts := stamped_tfacts.pop() ?? panic("missing parallel TEffectFacts")
-        module_tfacts.reverse()
-        loop function_index in 0..<modules[target].functions.len() {
-            node_index: function_nodes[input_position][function_index]
-            if node_index < 0 -> next
-            effects := module_tfacts.pop() ?? panic("missing parallel function TEffectFacts")
-            capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
-            frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
-            modules[target].functions[function_index].effects = effects.move()
-            if capped {
-                modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
-            }
-            if heaps[node_index] != "" {
-                modules[target].functions[function_index].heap = heaps[node_index].copy()
-            }
-            if stacks[node_index] != "" {
-                modules[target].functions[function_index].stack = stacks[node_index].copy()
-            }
-            modules[target].functions[function_index].frame_bound = frame_bound
+    stamps := sema_effect_build_tfacts_parallel(modules, inputs, function_nodes, nodes, solved, threads)
+    stamps.reverse()
+    loop {
+        stamp: stamps.pop() ?? break
+        target: stamp.module_index
+        function_index: stamp.function_index
+        node_index: stamp.node_index
+        capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
+        frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
+        modules[target].functions[function_index].effects = stamp.effects.move()
+        if capped {
+            modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
         }
+        if heaps[node_index] != "" {
+            modules[target].functions[function_index].heap = heaps[node_index].copy()
+        }
+        if stacks[node_index] != "" {
+            modules[target].functions[function_index].stack = stacks[node_index].copy()
+        }
+        modules[target].functions[function_index].frame_bound = frame_bound
     }
     // e3401 names the first impure call and its chain; the reached row is the
     // report when no single call carries it.
@@ -7326,26 +7322,33 @@ sema_effect_check_module_passes_parallel: fn(modules: [SemaGraphModuleResult], i
     diagnostics.extend(call_diags.move())
 }
 
-sema_effect_build_tfacts_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], from: Int, to: Int) -> [[TEffectFacts]] {
-    out := [[TEffectFacts]]{}
+// A function's stamped effect facts: the function at `function_index` of
+// module `module_index`, whose effect node is `node_index`.
+SemaEffectStamp: struct {
+    module_index: Int,
+    function_index: Int,
+    node_index: Int,
+    effects: TEffectFacts,
+}
+
+sema_effect_build_tfacts_range: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], from: Int, to: Int) -> [SemaEffectStamp] {
+    out := [SemaEffectStamp]{}
     loop input_position in from..<to {
         target: inputs[input_position].module_index
-        module_tfacts := [TEffectFacts]{}
         loop function_index in 0..<modules[target].functions.len() {
             node_index: function_nodes[input_position][function_index]
             if node_index < 0 -> next
             effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
             memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
             if memoized -> sema_effect_context_reach(nodes, node_index, effects)
-            module_tfacts.push(effects.move())
+            out.push(SemaEffectStamp{module_index: target, function_index: function_index, node_index: node_index, effects: effects.move()})
         }
-        out.push(module_tfacts.move())
     }
     out
 }
 
-sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], bounds: [Int], at: Int) -> [[[TEffectFacts]]] {
-    done := [[[TEffectFacts]]]{}
+sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], bounds: [Int], at: Int) -> [[SemaEffectStamp]] {
+    done := [[SemaEffectStamp]]{}
     if at + 1 >= bounds.len() -> return done
     from: bounds[at]
     to: bounds[at + 1]
@@ -7362,7 +7365,7 @@ sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [Se
     done
 }
 
-sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], threads: CompilerThreads) -> [[TEffectFacts]] {
+sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], function_nodes: [[Int]], nodes: [SemaEffectNode], solved: [[String]], threads: CompilerThreads) -> [SemaEffectStamp] {
     weights := [Int]{}
     work := 0
     loop input_position in 0..<inputs.len() {
@@ -7376,7 +7379,7 @@ sema_effect_build_tfacts_parallel: fn(modules: [SemaGraphModuleResult], inputs: 
     }
     parts := sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, compiler_threads_partition(weights, workers), 0)
     parts.reverse()
-    out := [[TEffectFacts]]{}
+    out := [SemaEffectStamp]{}
     loop parts.len() > 0 {
         part := parts.pop() ?? break
         out.extend(part.move())
@@ -7700,6 +7703,7 @@ SemaEffectCollectReport: struct {
 
 // One unit's collected node row and its functions' nonempty reports.
 SemaEffectCollected: struct {
+    unit: Int,
     node: SemaEffectNode,
     reports: [SemaEffectCollectReport],
 }
@@ -7715,9 +7719,9 @@ SemaEffectCollectedPart: struct {
 sema_effect_collect_place: fn(nodes: ^[SemaEffectNode], jobs: SemaEffectCollectJobs, bounds: [Int], parts: ^[[SemaEffectCollected]], inputs: [SemaEffectModuleInput], diagnostics: ^[Diagnostic]) {
     reports := [SemaEffectCollectReport]{}
     loop part in 0..<bounds.len() - 1 {
-        loop unit in bounds[part]..<bounds[part + 1] {
-            collected := parts[part].pop() ?? panic("a collected effect node left its part")
-            nodes[jobs.unit_nodes[unit]] = collected.node.move()
+        loop {
+            collected := parts[part].pop() ?? break
+            nodes[jobs.unit_nodes[collected.unit]] = collected.node.move()
             loop collected.reports.len() > 0 {
                 report := collected.reports.pop() ?? break
                 reports.push(report)
@@ -7772,7 +7776,7 @@ sema_effect_collect_claimed: fn(modules: [SemaGraphModuleResult], nodes: [SemaEf
                 job = jobs.job_next[job]
             }
             node := own.pop() ?? panic("a collected effect node left its unit")
-            collected.push(SemaEffectCollected{node: node.move(), reports: reports.move()})
+            collected.push(SemaEffectCollected{unit: unit, node: node.move(), reports: reports.move()})
         }
         collected.reverse()
         claimed.push(SemaEffectCollectedPart{part: part, collected: collected.move()})

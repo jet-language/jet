@@ -225,13 +225,19 @@ SemaOwnedModuleCheck: struct {
 }
 
 // One thread of a module's parallel body pass: its own copy of the
-// post-summary module scope, and the bodies it checked with each one's
-// position in the pass's job list, in the order it claimed them.
+// post-summary module scope, and the bodies it checked, in the order it
+// claimed them.
 SemaBodyPart: struct {
     scopes: SemaScopeTable,
-    bodies: [SemaParallelBody],
-    positions: [Int],
-    deltas: [InternerDelta?]{[InternerDelta?]{}},
+    bodies: [SemaClaimedBody],
+}
+
+// A body a thread checked, with its position in the pass's job list and the
+// interner delta its check left on the thread's scope.
+SemaClaimedBody: struct {
+    body: SemaParallelBody,
+    position: Int,
+    delta: InternerDelta?,
 }
 
 // What every thread of a module's parallel body pass reads: the jobs in job
@@ -250,10 +256,10 @@ SemaStreamEnvironment: struct {
     light_scopes: [SemaScopeTable]{[SemaScopeTable]{}},
 }
 
-// The bodies a body stream module's jobs published, each with its job
-// position, in the order the threads finished them, and how many of its
-// jobs are still `left`; `ready` once its last job published (a module
-// without jobs once it opened), `failed` once a stream thread failed. The
+// The bodies a body stream module's jobs published, in the order the threads
+// finished them, and how many of its jobs are still `left`; `ready` once its
+// last job published (a module without jobs once it opened), `failed` once a
+// stream thread failed. The
 // stream's lead waits on these for the module it checks next
 // (sema_check_body_stream_await). `codec_demand` and `derive_demand`: what
 // its preparation demanded of the generated codecs and derived methods,
@@ -261,9 +267,7 @@ SemaStreamEnvironment: struct {
 // the lead records again before it checks the module
 // (sema_check_body_stream_replay).
 SemaStreamOut: struct {
-    bodies: [SemaParallelBody],
-    positions: [Int],
-    deltas: [InternerDelta?]{[InternerDelta?]{}},
+    bodies: [SemaClaimedBody],
     left: Int,
     ready: Bool,
     failed: Bool,
@@ -543,7 +547,7 @@ SemaStreamHandle: struct {
 sema_check_body_stream_part: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, args: SemaStreamFinishArgs, kind: SemaWaveKind) {
     inputs: shared.guard_read()
     wanted: Shared{SemaHostHookWanted{wanted: false}}
-    part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}
+    part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}}
     current := -1
     parallel_finish: kind == SemaWaveKind.Modules
     own_program := SemaProgramTables?{None}
@@ -736,13 +740,9 @@ sema_check_body_stream_claimed_batch: fn(cell: Shared<SemaStreamEnvironment>, pr
 // releasing `out`.
 sema_check_body_stream_publish: fn(out: Shared<SemaStreamOut>, part: ^SemaBodyPart, count: Int, changed: Condition, parallel_finish: Bool) -> Bool {
     held: out.guard_edit()
-    loop part.bodies.len() > 0 {
-        body: part.bodies.pop() ?? break
-        position: part.positions.pop() ?? panic("a checked body has no job position")
-        delta: part.deltas.pop() ?? None
-        held.value.bodies.push(body)
-        held.value.positions.push(position)
-        held.value.deltas.push(delta)
+    loop {
+        claimed: part.bodies.pop() ?? break
+        held.value.bodies.push(claimed)
     }
     held.value.left -= count
     if held.value.left > 0 {
@@ -786,27 +786,24 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
                     name_references := [SemaNameReferenceFact]{}
                     checked := sema_function_check_registered_on_thread(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted}), diagnostics, call_facts, comptime_requests, name_references)
                     checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
-                    part.bodies.push(SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true})
-                    part.positions.push(claim.position)
-                    part.deltas.push(part.scopes.type_delta.pop())
+                    body: SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), memory_position: memory_position, memory_known: true}
+                    part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
                 }
             }
             .NominalMethod(ordinal, _, _) -> {
-                part.bodies.push(sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted))
-                part.positions.push(claim.position)
-                part.deltas.push(part.scopes.type_delta.pop())
+                body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+                part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
             }
             .ImplMethod(ordinal, _, _) -> {
-                part.bodies.push(sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted))
-                part.positions.push(claim.position)
-                part.deltas.push(part.scopes.type_delta.pop())
+                body: sema_check_prepare_method_body(claim.job, module_index, memory_plan, ordinal, environment, program, part.scopes, wanted)
+                part.bodies.push(SemaClaimedBody{body: body.move(), position: claim.position, delta: part.scopes.type_delta.pop()})
             }
         }
         if apart {
             demand := sema_demand_capture_close(graph)
             if part.bodies.len() > packet_at {
-                part.bodies[packet_at].codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
-                part.bodies[packet_at].derive_demand = compiler_take_rows<String>(demand.derived)
+                part.bodies[packet_at].body.codec_demand = compiler_take_rows<SemaCodecWant>(demand.codecs)
+                part.bodies[packet_at].body.derive_demand = compiler_take_rows<String>(demand.derived)
             }
         }
         return 1
@@ -954,7 +951,7 @@ sema_check_bodies_parallel: fn(shared: Shared<SemaCheckShared>, module_index: In
     sema_check_shared_lend_scope(shared, scopes)
     slots := [Shared<SemaBodyPart>]{}
     loop _ in 0..<workers {
-        slot: Shared{SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}}
+        slot: Shared{SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}}}
         slots.push(slot)
     }
     _ := sema_check_body_parts(shared, slots, plan, queue, 0, module_index, trace_sink)
@@ -1019,12 +1016,11 @@ sema_check_body_part_copy_scope: fn(environment: SemaScopeEnvironment, slot: Sha
 // Moves a thread's bodies into `placed`, each at its job position.
 sema_check_body_part_place: fn(slot: Shared<SemaBodyPart>, placed: ^[SemaParallelBody?], placed_deltas: ^[InternerDelta?]) {
     permit: slot.guard_edit()
-    loop permit.value.bodies.len() > 0 {
-        body: permit.value.bodies.pop() ?? break
-        position: compiler_threads_taken(permit.value.positions)
-        delta: permit.value.deltas.pop() ?? None
-        placed[position] = Val(body)
-        placed_deltas[position] = delta
+    loop {
+        claimed: permit.value.bodies.pop() ?? break
+        position: claimed.position
+        placed[position] = Val(claimed.body.move())
+        placed_deltas[position] = claimed.delta.move()
     }
 }
 
@@ -1115,7 +1111,7 @@ sema_check_body_stream_collect_parallel: fn(base_environment: SemaScopeEnvironme
 sema_check_body_stream_lead: fn(shared: Shared<SemaCheckShared>, cells: SemaStreamCells, handle: SemaStreamHandle, environment: ^SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, args: SemaStreamFinishArgs, kind: SemaWaveKind, phase: String, trace_sink: CompilerTraceSink?, slot_of_orig: [Int], modules: ^[SemaGraphModuleResult], checked_functions: ^Int, done: ^Int) {
     inputs: shared.guard_read()
     wanted: Shared{SemaHostHookWanted{wanted: false}}
-    part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaParallelBody]{}, positions: [Int]{}}
+    part := SemaBodyPart{scopes: sema_scope_init(module_none()), bodies: [SemaClaimedBody]{}}
     current := -1
     stream_jobs := 0
     // The jobs it claims check as a stream thread's do, on a program of its
@@ -1257,12 +1253,11 @@ sema_check_body_stream_take: fn(cells: SemaStreamCells, stream_module: Int, tops
 // position.
 sema_check_body_stream_place: fn(out: Shared<SemaStreamOut>, placed: ^[SemaParallelBody?], placed_deltas: ^[InternerDelta?]) {
     held: out.guard_edit()
-    loop held.value.bodies.len() > 0 {
-        body: held.value.bodies.pop() ?? break
-        position: compiler_threads_taken(held.value.positions)
-        delta: held.value.deltas.pop() ?? None
-        placed[position] = Val(body)
-        placed_deltas[position] = delta
+    loop {
+        claimed: held.value.bodies.pop() ?? break
+        position: claimed.position
+        placed[position] = Val(claimed.body.move())
+        placed_deltas[position] = claimed.delta.move()
     }
 }
 
@@ -1627,7 +1622,7 @@ sema_check_body_stream: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Se
             started := slot_starts[s].pop() ?? panic("a body-stream module lost its declaration check")
             out_started.push(started.move())
         }
-        out: Shared{SemaStreamOut{bodies: [SemaParallelBody]{}, positions: [Int]{}, left: 0, ready: false, failed: false, started: out_started.move()}}
+        out: Shared{SemaStreamOut{bodies: [SemaClaimedBody]{}, left: 0, ready: false, failed: false, started: out_started.move()}}
         outs.push(out)
     }
     cells: SemaStreamCells{environments: environments.move(), outs: outs.move(), view_jobs: view_jobs.move()}
