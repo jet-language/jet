@@ -120,14 +120,18 @@ lsp_publish_diagnostics: fn(uri: String, src: String, version: Int?, diagnostics
 // `src`, the text whose SHA-256 its origin holds, and its code and message.
 lsp_diagnostic_json: fn(diagnostic: Diagnostic, src: String, uri: String, diagnostics: [Diagnostic]) -> String Never! {
     record: lsp_diagnostic_record(diagnostic)
-    warning: record.severity == "lint" && (diagnostic_tier_word(diagnostic) ?? "") == "warning"
-    severity: if warning -> 2 else -> 1
+    severity: if lsp_record_is_warning(record, diagnostic) -> 2 else -> 1
     range: if record.span == {
         .Val(span) -> lsp_byte_span_to_range(src, lsp_clamped_span(src, Span{start: span.start, end: span.end}))
         .None -> lsp_full_document_range(src)
     }
     related: lsp_related_information_json(diagnostic, uri, src, diagnostics)
     "{{\"range\":{lsp_range_json(range)},\"severity\":{severity},\"code\":{foundation_json_quote(record.code)},\"source\":\"jet\",\"message\":{foundation_json_quote(record.message)},\"codeDescription\":{{\"href\":{foundation_json_quote(lsp_diagnostic_explanation_uri(record.code))}}}{related}}}"
+}
+
+// A warning-tier lint; every other diagnostic is an error.
+lsp_record_is_warning: fn(record: DiagnosticRecord, diagnostic: Diagnostic) -> Bool Never! {
+    record.severity == "lint" && (diagnostic_tier_word(diagnostic) ?? "") == "warning"
 }
 
 // The record of a checked diagnostic, named by the physical path of the file

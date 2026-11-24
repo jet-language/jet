@@ -17,6 +17,9 @@ LSPServer: struct {
     initialized: Bool,
     shutdown: Bool,
     exited: Bool,
+    // The client applies versioned `documentChanges` edits
+    // (`workspace.workspaceEdit.documentChanges` in `initialize`).
+    document_changes: Bool,
 
     // Every open document is overlaid, so a check sees unsaved imports too.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
@@ -52,7 +55,7 @@ LSPServer: struct {
 }
 
 lsp_server: fn(checker: &&LSPChecker) -> LSPServer Never! {
-    LSPServer{diagnostic_state: lsp_diagnostic_state(), checker: checker, published: [String:LSPChecked]{}, initialized: false, shutdown: false, exited: false}
+    LSPServer{diagnostic_state: lsp_diagnostic_state(), checker: checker, published: [String:LSPChecked]{}, initialized: false, shutdown: false, exited: false, document_changes: false}
 }
 
 // An inline package block is masked first, as the loader does, so its manifest

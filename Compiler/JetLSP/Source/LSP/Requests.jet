@@ -10,7 +10,11 @@ use {
 // answers MethodNotFound.
 lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -> String {
     if method == {
-        "initialize" -> lsp_initialize_response(id)
+        "initialize" -> {
+            workspace: lsp_member(lsp_param(params, "capabilities") ?? Dyn.Null, "workspace") ?? Dyn.Null
+            server.document_changes = lsp_bool_member(lsp_member(workspace, "workspaceEdit") ?? Dyn.Null, "documentChanges")
+            lsp_initialize_response(id)
+        }
         "shutdown" -> {
             server.shutdown = true
             lsp_response(id, "null")

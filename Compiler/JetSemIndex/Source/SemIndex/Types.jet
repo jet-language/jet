@@ -374,3 +374,11 @@ semindex_callable: fn(definition: SemDef) -> SemCallable? Never! {
     if definition.kind == .Function(callable) -> return Val(callable.copy())
     None
 }
+
+// The human identity `fact` has once its definition is named `to`.
+semindex_renamed_identity: fn(fact: SemDefinitionFact, to: String) -> String Never! {
+    if fact.human_identity.ends_with(fact.name) {
+        return "{fact.human_identity.slice(0, fact.human_identity.len() - fact.name.len())}{to}"
+    }
+    "{fact.module_path}.{to}"
+}

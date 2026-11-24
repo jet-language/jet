@@ -5,7 +5,7 @@ use {
     jet_driver.[jet_driver_layout_line, jet_driver_layout_summary]
     jet_foundation.[Span, Type, derivation_record_line, derivation_record_notable, derivation_store_subject, foundation_byte_text, foundation_json_quote, type_name]
     jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
-    jet_semindex.[SemDef, SemIndex, SemSymbolKind]
+    jet_semindex.[SemDef, SemIndex, SemSymbolKind, semindex_renamed_identity]
 }
 
 // The view, the byte offset a positional request names, and its 0-based line.
@@ -244,6 +244,10 @@ lsp_valid_identifier: fn(name: String) -> Bool Never! {
     lexed.tokens.len() == 1 || lexed.tokens[1].span.start >= name.count_bytes()
 }
 
+// The rename's edits, one file each, bound to the document versions the check
+// read, and its semantic operation: the checked identity it renames. A program
+// with errors may hold a use the check could not resolve, so its rename is
+// refused rather than offered as complete.
 lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     at: lsp_at(server, params) ?? return lsp_response(id, "null")
     new_name: lsp_text_member(params ?? return lsp_response(id, "null"), "newName") ?? return lsp_error_response(id, -32602, "rename needs a string newName")
@@ -257,24 +261,64 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         }
     }
     index: at.view.checked.index ?? return lsp_response(id, "null")
+    errors := 0
+    loop diagnostic in at.view.checked.diagnostics {
+        if !lsp_record_is_warning(lsp_diagnostic_record(diagnostic), diagnostic) -> errors += 1
+    }
+    if errors > 0 {
+        counted: if errors == 1 -> "1 error" else -> "{errors} errors"
+        return lsp_error_response(id, -32803, "the program has {counted}, so the check may have missed a use of `{target.def.name}`; fix them, then rename")
+    }
     by_uri := [String:[String]]{}
+    versions := [String:String]{}
     order := [String]{}
     loop occurrence in lsp_occurrences(index, LSPTarget{module_path: target.def.module_path, span: target.def.def_span}, declaration: true) {
-        location: lsp_location(at.view.checked, occurrence.module_path, occurrence.span) ?? next
-        span: lsp_name_span(location.source, occurrence.span, target.def.name)
-        if span.end > location.source.count_bytes() || foundation_byte_text(location.source.bytes(), span.start, span.end) != target.def.name {
+        module_ref: at.view.checked.modules[lsp_module_index(at.view.checked, occurrence.module_path) ?? next]
+        if module_ref.physical_path == "" -> next
+        source: module_ref.source
+        span: lsp_name_span(source, occurrence.span, target.def.name)
+        if span.end > source.count_bytes() || foundation_byte_text(source.bytes(), span.start, span.end) != target.def.name {
             next
         }
-        if !by_uri.has_key(location.uri) {
-            by_uri[location.uri] = [String]{}
-            order.push(location.uri)
+        uri: lsp_path_to_uri(module_ref.physical_path)
+        fresh: !by_uri.has_key(uri)
+        if fresh {
+            // An open document's edits apply only to the version the check
+            // read; a file no editor holds is the one on disk.
+            version := "null"
+            loop (_, doc) in server.diagnostic_state.docs {
+                if !lsp_source_paths_equal(doc.path, module_ref.physical_path) -> next
+                if doc.text != source {
+                    return lsp_error_response(id, -32801, "`{module_ref.physical_path}` changed after the check; rename again")
+                }
+                version = "{doc.version}"
+            }
+            by_uri[uri] = [String]{}
+            versions[uri] = version
         }
-        by_uri[location.uri].push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(location.source, span))},\"newText\":{foundation_json_quote(new_name)}}}")
+        by_uri[uri].push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(source, span))},\"newText\":{foundation_json_quote(new_name)}}}")
+        if fresh -> order.push(uri)
     }
     order.sort()
     files := [String]{}
-    loop uri in order -> files.push("{foundation_json_quote(uri)}:[{by_uri[uri].join(",")}]")
-    lsp_response(id, "{{\"changes\":{{{files.join(",")}}}}}")
+    loop uri in order {
+        edits: by_uri[uri].join(",")
+        files.push(if server.document_changes -> "{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{versions[uri]}}},\"edits\":[{edits}]}}" else -> "{foundation_json_quote(uri)}:[{edits}]")
+    }
+    edit: if server.document_changes -> "\"documentChanges\":[{files.join(",")}]" else -> "\"changes\":{{{files.join(",")}}}"
+    lsp_response(id, "{{{edit},\"semantic_ops\":[{lsp_rename_semantic_op(index, target.def, new_name)}]}}")
+}
+
+// The rename as a semantic operation, the shape `jet codemod` receipts record:
+// the checked definition it renames, before and after. A local has no
+// definition fact, so its operation names no target.
+lsp_rename_semantic_op: fn(index: SemIndex, def: SemDef, to: String) -> String Never! {
+    targets := [String]{}
+    loop fact in index.definition_facts {
+        if fact.human_identity != def.identity -> next
+        targets.push("{{\"stable_id\":{foundation_json_quote(fact.stable_id)},\"before\":{foundation_json_quote(fact.human_identity)},\"after\":{foundation_json_quote(semindex_renamed_identity(fact, to))},\"kind\":{foundation_json_quote(fact.kind)},\"module_path\":{foundation_json_quote(fact.module_path)}}}")
+    }
+    "{{\"kind\":\"rename\",\"rule_id\":\"lsp.rename\",\"from\":{foundation_json_quote(def.name)},\"to\":{foundation_json_quote(to)},\"targets\":[{targets.join(",")}],\"files\":[]}}"
 }
 
 // The call whose argument list holds the cursor: the callee's name token and

@@ -29,6 +29,7 @@ use {
         SemNode,
         semindex_build,
         semindex_definition_kind,
+        semindex_renamed_identity,
     ]
 }
 
@@ -1490,16 +1491,8 @@ jet_cli_codemod_definition_fact: fn(index: SemIndex, def: SemDef) -> SemDefiniti
     Val(index.definition_facts[at].copy())
 }
 
-// Rust renamed_identity.
-jet_cli_codemod_renamed_identity: fn(fact: SemDefinitionFact, to: String) -> String Never! {
-    if fact.human_identity.ends_with(fact.name) {
-        return "{fact.human_identity.slice(0, fact.human_identity.len() - fact.name.len())}{to}"
-    }
-    "{fact.module_path}.{to}"
-}
-
 jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTarget Never! {
-    JetCLISemOpTarget{stable_id: fact.stable_id.copy(), before: fact.human_identity.copy(), after: jet_cli_codemod_renamed_identity(fact, to), kind: fact.kind.copy(), module_path: fact.module_path.copy()}
+    JetCLISemOpTarget{stable_id: fact.stable_id.copy(), before: fact.human_identity.copy(), after: semindex_renamed_identity(fact, to), kind: fact.kind.copy(), module_path: fact.module_path.copy()}
 }
 
 // Rust apply_rule `Rule.Rename`.
