@@ -1639,6 +1639,16 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     }
     actual_accesses: loop argument in args -> argument.convention
     signature := sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
+        // A source-owned row with no fixed table entry takes its signature
+        // from its Core declaration: the call is checked against it.
+        if canonical_record.symbol == CoreCallSymbol.SourceOwned && canonical_record.source_role == None {
+            if sema_call_core_module_identity(environment, program, canonical_record.module_name) == .Val(identity) {
+                declared_member: canonical_record.source_target ?? canonical_record.member
+                if sema_call_core_source_target(environment, program, identity, declared_member, type_args, span, true, diagnostics) == .Val(target) {
+                    return sema_call_core_check_source_owned(target, "{canonical_record.module_name}.{declared_member}", type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
+            }
+        }
         diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))
         return None
     }
