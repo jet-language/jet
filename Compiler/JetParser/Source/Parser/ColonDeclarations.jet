@@ -574,9 +574,9 @@ parser_colon_resolve_named_instances: fn(chunk_count: Int, candidates: [ParserCo
     name_ids := [Int]{}
     target_ids := [Int]{}
     chosen := [Bool]{}
-    name_ids.try_reserve(candidates.len()) ?? panic("reserve failed")
-    target_ids.try_reserve(candidates.len()) ?? panic("reserve failed")
-    chosen.try_reserve(candidates.len()) ?? panic("reserve failed")
+    name_ids.try_reserve(candidates.len()) ?? ()
+    target_ids.try_reserve(candidates.len()) ?? ()
+    chosen.try_reserve(candidates.len()) ?? ()
     loop candidate in candidates {
         name_ids.push(name_index(name_intern(names, candidate.name)))
         target_ids.push(name_index(name_intern(names, candidate.target)))
@@ -608,7 +608,7 @@ parser_colon_insert_module_heads: fn(input: ^^[Token], chosen_heads: [Int]) -> [
     tokens := input.move()
     if chosen_heads.len() == 0 -> return tokens
     marked := [Token]{}
-    marked.try_reserve(tokens.len() + chosen_heads.len()) ?? panic("reserve failed")
+    marked.try_reserve(tokens.len() + chosen_heads.len()) ?? ()
     next_chosen := 0
     loop index in 0..<tokens.len() {
         loop next_chosen < chosen_heads.len() && chosen_heads[next_chosen] < index {
@@ -636,7 +636,7 @@ parser_colon_declarations_local: fn(tokens: ^[Token], tables: TokenTables) -> Pa
     run_id: parser_colon_find_name(tables, "#run")
     has_marker_words: marker_id >= 0 || derive_id >= 0 || expand_id >= 0
     saved := [ParserColonSaved]{}
-    saved.try_reserve(16) ?? panic("reserve failed")
+    saved.try_reserve(16) ?? ()
     frame := PARSER_COLON_FRAME_MODULE
     // Whether the current frame is an `impl Marker` body.
     marker_body := false

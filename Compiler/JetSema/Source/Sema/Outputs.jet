@@ -613,10 +613,10 @@ sema_output_resolve: fn(graph: ^SemaRegistrationGraph, intent: SemaOutputIntent,
     // clone. Publication writes commute; reverse the reference drain once to
     // retain the original module/item/alias/function order.
     references := [SemaNameReferenceFact]{}
-    loop rows.len() > 0 {
-        row := rows.pop() ?? panic("checked Output publication lost its row")
-        loop row.references.len() > 0 {
-            reference := row.references.pop() ?? panic("checked Output alias publication lost its row")
+    loop {
+        row := rows.pop() ?? break
+        loop {
+            reference := row.references.pop() ?? break
             references.push(reference)
         }
         declaration_span := Span{start: 0, end: 0}

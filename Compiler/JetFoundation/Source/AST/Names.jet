@@ -45,7 +45,7 @@ name_table_sized: fn(slots: Int) -> NameTable Never! {
     loop capacity < slots -> capacity *= 2
     mask: capacity - 1
     initial := [Int]{}
-    initial.try_reserve(capacity) ?? panic("reserve failed")
+    initial.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> initial.push(0)
     initial[NAME_EMPTY_HASH & mask] = (NAME_EMPTY_HASH << 32) | 1
     NameTable{texts: [String]{""}, bytes: [U8]{}, ends: [Int]{0}, hashes: [Int]{NAME_EMPTY_HASH}, slots: initial, mask: mask}
@@ -217,7 +217,7 @@ name_table_grow: fn(table: ^NameTable) Never! {
     capacity: (table.mask + 1) * 2
     mask: capacity - 1
     slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
+    slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     loop id in 0..<table.texts.len() {
         hash: table.hashes[id]
@@ -313,7 +313,7 @@ NAME_POINTER: Name{id: U32{8}}
 name_table_merge: fn(into: ^NameTable, from: NameTable, first: Int) -> [Name] Never! {
     ids := [Name]{}
     count: from.texts.len() - first
-    if count > 0 -> ids.try_reserve(count) ?? panic("reserve failed")
+    if count > 0 -> ids.try_reserve(count) ?? ()
     loop id in first..<from.texts.len() {
         start: name_start(from, id)
         end: from.ends[id]
@@ -426,7 +426,7 @@ NAME_COLUMN_UNBOUND: -4611686018427387904
 // An empty column for a table expected to hold about `expected` keys.
 name_column: fn(expected: Int{0}) -> [Int] Never! {
     rows := [Int]{}
-    if expected > 0 -> rows.try_reserve(expected + 1) ?? panic("reserve failed")
+    if expected > 0 -> rows.try_reserve(expected + 1) ?? ()
     rows.push(NAME_COLUMN_UNBOUND)
     rows
 }

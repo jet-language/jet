@@ -545,7 +545,7 @@ ir_opt_bodies_partitioned: fn(view: IRModule, functions: ^[IRFunction], weights:
         rows := [IRFunction]{}
         rows.try_reserve(functions.len() - bounds[part]) ?? ()
         loop functions.len() > bounds[part] {
-            row: functions.pop() ?? panic("the IR optimizer lost a function")
+            row: functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -939,7 +939,7 @@ ir_opt_prepare: fn(functions: ^[IRFunction], weights: [Int], glue: ^^[Int], ligh
     loop part >= 0 {
         rows := [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row := functions.pop() ?? panic("the IR optimizer lost a function to prepare")
+            row := functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -1039,7 +1039,7 @@ ir_opt_split_module: fn(m: ^IRModule, functions: ^[IRFunction], threads: Compile
     loop part >= 0 {
         rows := [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row := functions.pop() ?? panic("the IR optimizer lost a function to split")
+            row := functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()

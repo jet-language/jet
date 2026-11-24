@@ -104,7 +104,7 @@ lex_chunks_threads: fn(source: [U8], config_surface: Bool, allow_reserved_identi
     outputs := lexer_lex_source_chunks(source, config_surface, allow_reserved_identifiers, threads)
     has_fences := false
     chunks := [LexedChunk]{}
-    chunks.try_reserve(outputs.len()) ?? panic("reserve failed")
+    chunks.try_reserve(outputs.len()) ?? ()
     loop output in outputs.move() {
         if output.tables.has_fences -> has_fences = true
         chunks.push(LexedChunk{start: output.start, end: output.end, tokens: output.tokens.move(), tables: output.tables.move(), diagnostics: output.diagnostics.move(), bidi_diagnostics: output.bidi_diagnostics.move(), terminator_diagnostics: output.terminator_diagnostics.move(), line_starts: output.line_starts.move()})
@@ -123,7 +123,7 @@ lexed_threads_single: fn(source: [U8], config_surface: Bool, allow_reserved_iden
 // `first` (the range starts the source), then one past every newline.
 lexer_line_starts: fn(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Never! {
     starts := [Int]{}
-    if to > from -> starts.try_reserve((to - from) /% 32 + 2) ?? panic("reserve failed")
+    if to > from -> starts.try_reserve((to - from) /% 32 + 2) ?? ()
     if first -> starts.push(0)
     index := from
     loop index + 4 <= to {
@@ -259,8 +259,8 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
     chunk_count: parts.len()
     clean_flags := [Bool]{}
     bodies_flags := [Bool]{}
-    clean_flags.try_reserve(chunk_count) ?? panic("reserve failed")
-    bodies_flags.try_reserve(chunk_count) ?? panic("reserve failed")
+    clean_flags.try_reserve(chunk_count) ?? ()
+    bodies_flags.try_reserve(chunk_count) ?? ()
     loop part in parts {
         reads: part.guard_read()
         is_clean: reads.value.outputs.len() == 1 && reads.value.outputs[0].clean
@@ -271,7 +271,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
     }
     if all_clean {
         outputs := [LexerChunkOutput]{}
-        outputs.try_reserve(chunk_count) ?? panic("reserve failed")
+        outputs.try_reserve(chunk_count) ?? ()
         loop part in parts -> outputs.push(lexer_chunk_part_take(part))
         return outputs
     }
@@ -344,7 +344,7 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     // order (`name_table_merge`) assigns exactly those ids. Literal rows follow
     // in the same order.
     parts := [Shared<LexerChunkPart>]{}
-    parts.try_reserve(chunks.len()) ?? panic("reserve failed")
+    parts.try_reserve(chunks.len()) ?? ()
     loop chunk in chunks.move() {
         start: chunk.start
         end: chunk.end
@@ -369,16 +369,16 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     }
     _ := lexer_remap_chunk_parts(parts, 1)
     tokens := first.tokens.move()
-    tokens.try_reserve(total_tokens - tokens.len()) ?? panic("reserve failed")
+    tokens.try_reserve(total_tokens - tokens.len()) ?? ()
     if total_literals > tables.literals.len() {
-        tables.literals.try_reserve(total_literals - tables.literals.len()) ?? panic("reserve failed")
+        tables.literals.try_reserve(total_literals - tables.literals.len()) ?? ()
     }
     diagnostics := first.diagnostics.move()
     bidi_diagnostics := first.bidi_diagnostics.move()
     terminator_diagnostics := first.terminator_diagnostics.move()
     line_starts := first.line_starts.move()
     if total_line_starts > line_starts.len() {
-        line_starts.try_reserve(total_line_starts - line_starts.len()) ?? panic("reserve failed")
+        line_starts.try_reserve(total_line_starts - line_starts.len()) ?? ()
     }
     runs := [Int]{0}
     loop chunk in 1..<parts.len() {

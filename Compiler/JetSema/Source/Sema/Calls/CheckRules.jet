@@ -1202,8 +1202,8 @@ sema_call_rule_batches_land: fn(batches: [SemaCallRuleBatch], values: ^[SemaComp
     // Each row is popped (an owned move), so a batch's answers move into
     // its sites' rows; the kept rows are reversed back into their order.
     kept := [SemaComptimeItemValue]{}
-    loop values.len() > 0 {
-        row: values.pop() ?? panic("a nonempty value list failed to pop")
+    loop {
+        row: values.pop() ?? break
         batch := 0
         loop batch < batches.len() && batches[batch].key != row.key -> batch += 1
         if batch == batches.len() {

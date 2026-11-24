@@ -521,7 +521,7 @@ lex_payload_from_facts_range: fn(source: [U8], facts: [Int], events: [Int], conf
     fact_count: facts.len() /% 4
     event_count: events.len() /% 3
     tokens := [Token]{}
-    tokens.try_reserve(fact_count + event_count) ?? panic("reserve failed")
+    tokens.try_reserve(fact_count + event_count) ?? ()
     diagnostics := [Diagnostic]{}
     cursor := from
     index := 0
@@ -628,7 +628,7 @@ lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: ^[
 // An interpolation's nested source: payload only, no terminator pass.
 lex_payload_at_depth: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: ^TokenTables) -> LexedTokens {
     facts := [Int]{}
-    if source.len() > 16 -> facts.try_reserve(source.len()) ?? panic("reserve failed")
+    if source.len() > 16 -> facts.try_reserve(source.len()) ?? ()
     scanned: raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     if scanned.has_paste -> tables.has_paste = true
     unused := [Diagnostic]{}

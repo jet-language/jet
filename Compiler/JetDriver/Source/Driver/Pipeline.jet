@@ -1803,6 +1803,8 @@ jet_driver_comptime_function_closure: fn(
             jet_driver_comptime_memory_plan_ensure(program, threads, memory_plan)
         }
         checked := if {
+            // Unreachable stop: `settled_foreign` holds only when this node's
+            // `foreign` is not None.
             settled_foreign -> index.nodes[node].foreign ?? panic("a settled foreign closure node lost its check")
             reused_row >= 0 -> checked_functions[reused_row]
             waiting_row >= 0 -> index.waiting_functions[waiting_row]
@@ -3607,7 +3609,7 @@ jet_driver_run_comptime_carried: fn(
     environment.boxed_edges = [U32:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
     // The run sets `sites` once it has items to check.
-    staging := if carried_staging.len() > 0 -> carried_staging.pop() ?? panic("carried staging slot lost") else -> JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
+    staging := carried_staging.pop() ?? JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
     staging.declared = declared.move()
     staging.sites = sema_comptime_value_sites_empty()
     // Each in a one-row slot: a pass's prechecks move them into the threads'
@@ -7496,6 +7498,8 @@ jet_driver_held_eval_check: fn(held: ^JetDriverHeldEval, path: String, functions
         held.probe.program.registration_graph = back.graph.move()
         held.probe.program.checked_types = [TTypeDef]{}
         if checked.complete && checked.function != None {
+            // Unreachable stop: the condition above holds only when
+            // `checked.function` is not None.
             function := checked.function.move() ?? panic("a held check's function went missing")
             by_key: held.rows
             sema_eval_held_failure_settle(function, candidate, checked.failure.move(), functions, by_key)

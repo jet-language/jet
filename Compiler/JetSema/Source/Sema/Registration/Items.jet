@@ -2889,8 +2889,8 @@ sema_registration_original_error_program: fn() -> Program {
     program := parsed.program.move()
     declarations := [Item]{}
     marked := 0
-    loop program.items.len() > 0 {
-        item := program.items.pop() ?? panic("the original Prelude item drain lost a row")
+    loop {
+        item := program.items.pop() ?? break
         if item.move() == .Struct(source_definition) {
             definition := source_definition.move()
             if definition.name == "Err" {

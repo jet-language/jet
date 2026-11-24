@@ -19,10 +19,10 @@
 // place and popped, and its emptied buffer is released at once, so a
 // transfer never holds a third buffer of rows.
 compiler_transfer_rows: fn<T>(to: ^[T], from: ^[T]) Never! {
-    to.try_reserve(from.len()) ?? panic("cannot reserve {from.len()} compiler rows: {err}")
+    to.try_reserve(from.len()) ?? ()
     from.reverse()
-    loop from.len() > 0 {
-        row := from.pop() ?? panic("a nonempty compiler row source failed to pop")
+    loop {
+        row := from.pop() ?? break
         to.push(row)
     }
     from = [T]{}
@@ -55,11 +55,11 @@ compiler_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
     loop index in 0..<count -> destinations[order[index]] = index
     loop rows.len() > 0 {
         original: rows.len() - 1
-        row := rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        row := rows.pop() ?? break
         slots[count - 1 - destinations[original]] = Val(row.move())
     }
-    loop slots.len() > 0 {
-        slot := slots.pop() ?? panic("a nonempty compiler slot list failed to pop")
+    loop {
+        slot := slots.pop() ?? break
         row := slot.move() ?? panic("a compiler row permutation left an empty slot")
         rows.push(row)
     }
@@ -72,9 +72,9 @@ compiler_apply_order: fn<T>(rows: ^[T], order: [Int]) Never! {
 // of a borrowed owner into a binding would copy every row.
 compiler_take_rows: fn<T>(rows: ^[T]) -> [T] Never! {
     taken := [T]{}
-    taken.try_reserve(rows.len()) ?? panic("cannot reserve {rows.len()} compiler rows: {err}")
-    loop rows.len() > 0 {
-        row := rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+    taken.try_reserve(rows.len()) ?? ()
+    loop {
+        row := rows.pop() ?? break
         taken.push(row)
     }
     rows = [T]{}

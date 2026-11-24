@@ -1230,13 +1230,13 @@ delta_type_id_fn_plain: fn(shared: Interner, delta: ^InternerDelta, params: [Typ
 // returning each own row's 1-based side index in `(shared, into)`.
 delta_sides_merge: fn<T: Equatable>(shared: TypeSides<T>, into: ^TypeSides<T>, from: ^TypeSides<T>, base_mark: Int) -> [U32] Never! {
     own := [T]{}
-    loop from.rows.len() > 0 {
-        value: from.rows.pop() ?? panic("a nonempty delta side table failed to pop")
+    loop {
+        value: from.rows.pop() ?? break
         own.push(value)
     }
     rows := [U32]{}
-    loop own.len() > 0 {
-        value: own.pop() ?? panic("a nonempty delta side list failed to pop")
+    loop {
+        value: own.pop() ?? break
         hash: from.hashes[rows.len()]
         shared_slot: type_sides_slot(shared, value, hash)
         shared_entry: shared.slots[shared_slot]

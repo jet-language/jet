@@ -48,7 +48,7 @@ link_debug_bytes: fn(c: ^LinkContext, debug: LinkDebug, pieces: ^LinkPieces, tex
             c.errors.extend(pieces.errors[row])
         } else {
             if debug.sizes[group] > 0 {
-                bytes.try_reserve(debug.sizes[group]) ?? panic("reserve failed")
+                bytes.try_reserve(debug.sizes[group]) ?? ()
             }
             loop row in rows {
                 link_pad_to(bytes, c.live_addr[row], 0)
@@ -731,8 +731,8 @@ link_jetline_block: fn(linked: ^[U8], table: [U8], records: Int, count: Int, str
     live := [Int]{}
     starts := [Int]{}
     if count > 64 {
-        live.try_reserve(count) ?? panic("reserve failed")
-        starts.try_reserve(count) ?? panic("reserve failed")
+        live.try_reserve(count) ?? ()
+        starts.try_reserve(count) ?? ()
     }
     sorted := true
     prev_start := -1
@@ -749,12 +749,12 @@ link_jetline_block: fn(linked: ^[U8], table: [U8], records: Int, count: Int, str
     if live.len() == 0 -> return true
     order: if sorted -> live.move() else -> link_sort_by(live, starts)
     texts := [U8]{}
-    if rows > strings -> texts.try_reserve(rows - strings) ?? panic("reserve failed")
+    if rows > strings -> texts.try_reserve(rows - strings) ?? ()
     // The string offsets, old to new: each string is kept once.
     moved := [Int:Int]{}
     if !link_jetline_string(texts, moved, table, strings, rows) -> return false
     body := [U8]{}
-    if end > rows -> body.try_reserve(end - rows + order.len() * 16) ?? panic("reserve failed")
+    if end > rows -> body.try_reserve(end - rows + order.len() * 16) ?? ()
     base: link_debug_addr(table, order[0])
     previous := base
     loop record in order {

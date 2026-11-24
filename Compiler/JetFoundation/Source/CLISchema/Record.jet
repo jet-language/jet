@@ -140,14 +140,14 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
         return Err(RecordDecodeError.Malformed{why: "too many inputs"})
     }
     inputs := [CLIInputSchema]{}
-    inputs.try_reserve(count) ?? panic("CLI metadata input allocation failed")
+    inputs.try_reserve(count) ?? ()
     loop _ in 0..<count -> inputs.push(cli_schema_decode_input(cursor))
     command_count: cursor.u32()
     if command_count > CLI_SCHEMA_MAX_INPUTS {
         return Err(RecordDecodeError.Malformed{why: "too many commands"})
     }
     commands := [CLISubcommandSchema]{}
-    commands.try_reserve(command_count) ?? panic("CLI metadata command allocation failed")
+    commands.try_reserve(command_count) ?? ()
     loop _ in 0..<command_count {
         name: cursor.string()
         command_description: cursor.optional_string()
@@ -156,7 +156,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
             return Err(RecordDecodeError.Malformed{why: "too many command inputs"})
         }
         command_inputs := [CLIInputSchema]{}
-        command_inputs.try_reserve(input_count) ?? panic("CLI metadata command input allocation failed")
+        command_inputs.try_reserve(input_count) ?? ()
         loop _ in 0..<input_count -> command_inputs.push(cli_schema_decode_input(cursor))
         commands.push(CLISubcommandSchema{name: name, description: command_description, inputs: command_inputs.move()})
     }
@@ -165,7 +165,7 @@ decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
         return Err(RecordDecodeError.Malformed{why: "too many jobs"})
     }
     jobs := [JobFact]{}
-    jobs.try_reserve(job_count) ?? panic("CLI metadata job allocation failed")
+    jobs.try_reserve(job_count) ?? ()
     loop _ in 0..<job_count -> jobs.push(cli_schema_decode_job(cursor))
     if cursor.at != cursor.bytes.len() {
         return Err(RecordDecodeError.Malformed{why: "trailing payload bytes"})
@@ -234,7 +234,7 @@ cli_schema_decode_strings: fn(cursor: ^CLIRecordCursor, maximum: Int, refusal: S
     count: cursor.u32()
     if count > maximum -> return Err(RecordDecodeError.Malformed{why: refusal})
     values := [String]{}
-    values.try_reserve(count) ?? panic("CLI metadata string allocation failed")
+    values.try_reserve(count) ?? ()
     loop _ in 0..<count -> values.push(cursor.string())
     Ok(values)
 }
@@ -263,7 +263,7 @@ cli_schema_decode_job: fn(cursor: ^CLIRecordCursor) -> JobFact RecordDecodeError
         return Err(RecordDecodeError.Malformed{why: "too many job arguments"})
     }
     arguments := [JobArgumentSchema]{}
-    arguments.try_reserve(argument_count) ?? panic("CLI metadata job argument allocation failed")
+    arguments.try_reserve(argument_count) ?? ()
     loop _ in 0..<argument_count {
         argument_name: cursor.string()
         label: cursor.string()
@@ -469,7 +469,7 @@ encode_record: fn(schema: CLICommandSchema) -> [U8] Never! {
     cli_schema_put_u32(payload, schema.jobs.len())
     loop job in schema.jobs -> cli_schema_encode_job(payload, job)
     record := [U8]{}
-    record.try_reserve(46 + payload.len()) ?? panic("CLI metadata record allocation failed")
+    record.try_reserve(46 + payload.len()) ?? ()
     record.extend(CLI_SCHEMA_MAGIC)
     record.push(U8{Int{RECORD_VERSION} & 255})
     record.push(U8{Int{RECORD_VERSION} >> 8})

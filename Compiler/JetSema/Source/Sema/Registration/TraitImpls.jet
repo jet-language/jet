@@ -392,8 +392,8 @@ sema_trait_impl_owned_defaults: fn(trait_name: String, at: Span, methods: [Func]
     extras := [Func]{}
     if item.move() == .Trait(source_definition) {
         definition := source_definition.move()
-        loop definition.methods.len() > 0 {
-            sig: definition.methods.pop() ?? panic("the defaults Traits.jet gives `{trait_name}` lost a method")
+        loop {
+            sig: definition.methods.pop() ?? break
             function := sema_trait_impl_method(sig)
             if sig.default_body.move() == .Val(body) {
                 function.body = body.move()

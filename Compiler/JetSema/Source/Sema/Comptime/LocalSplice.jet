@@ -607,7 +607,7 @@ sema_local_splice_hold_all: fn(interner: Interner, modules: [SemaGraphModuleResu
     part_index := workers - 1
     loop rows.len() > 0 {
         loop rows.len() <= bounds[part_index] -> part_index -= 1
-        parts[part_index].rows.push(rows.pop() ?? panic("a local value splice lost an owner module's rows"))
+        parts[part_index].rows.push(rows.pop() ?? break)
     }
     done := sema_local_splice_hold_parts(interner, modules, owner_modules, sites, after, into, parts)
     holds := [SemaLocalSpliceHold]{}
