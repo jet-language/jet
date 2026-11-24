@@ -39,8 +39,8 @@ ir_opt_stops_after_calls: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never!
         if k == site + 1 || !ir_opt_stops_any_poll(f, poll, turn, k) -> next
         if ir_opt_dead_end(f, k + 1) < 0 -> next
         if !moved {
-            poll_of.try_reserve(count) ?? panic("reserve failed")
-            after.try_reserve(count) ?? panic("reserve failed")
+            poll_of.try_reserve(count) ?? ()
+            after.try_reserve(count) ?? ()
             loop _ in 0..<count {
                 poll_of.push(-1)
                 after.push(-1)
@@ -167,7 +167,7 @@ ir_opt_stops_hand_off: fn(f: ^IRFunction, m: IRModule) Never! {
             br: ir_opt_stops_handing(f, poll, trap, turn, edge, end)
             if br >= 0 {
                 if !handed {
-                    into.try_reserve(count) ?? panic("reserve failed")
+                    into.try_reserve(count) ?? ()
                     loop _ in 0..<count -> into.push(-1)
                     handed = true
                 }

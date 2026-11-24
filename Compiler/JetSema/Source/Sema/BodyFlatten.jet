@@ -133,11 +133,11 @@ body_flat_function: fn(value: ^^TFunc, arena: ^^BodyTree, arena_syntax: ^^[Type]
     reserved_stmts: owned_arena.stmts.len()
     out_tree := body_tree_new()
     if reserved_nodes > 0 {
-        out_tree.nodes.try_reserve(reserved_nodes) ?? panic("reserve failed")
-        out_tree.expr_types.try_reserve(reserved_nodes) ?? panic("reserve failed")
+        out_tree.nodes.try_reserve(reserved_nodes) ?? ()
+        out_tree.expr_types.try_reserve(reserved_nodes) ?? ()
     }
     if reserved_stmts > 0 {
-        out_tree.stmts.try_reserve(reserved_stmts) ?? panic("reserve failed")
+        out_tree.stmts.try_reserve(reserved_stmts) ?? ()
     }
     flat := BodyFlat{tree: out_tree.move(), arena: owned_arena.move(), into_arena: false}
     params: body_flat_list_parameter(owned_value.params, flat)

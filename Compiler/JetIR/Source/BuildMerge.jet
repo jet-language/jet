@@ -245,8 +245,8 @@ ir_merge_with: fn(built: ^^[IRModule], prepared: ^^[IRMergePrep], roots: [IRMerg
 
 ir_merge_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMerge, roots: [IRMergeRoot], entry: Int, part_remaps: [InternerRemap]) Never! {
     if entry >= 0 -> out.entry = g.sides[roots[entry].part].function_new[roots[entry].local]
-    out.types.try_reserve(g.type_part.len()) ?? panic("reserve failed")
-    out.type_keys.try_reserve(g.type_part.len()) ?? panic("reserve failed")
+    out.types.try_reserve(g.type_part.len()) ?? ()
+    out.type_keys.try_reserve(g.type_part.len()) ?? ()
     loop (row, part) in g.type_part {
         local: g.type_local[row]
         ty_row := parts[part].types[local].copy()
@@ -322,9 +322,9 @@ ir_merge_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMerge, roots: [IRMerg
             out.variant_lists.push(found.move())
         }
     }
-    out.names.try_reserve(g.name_part.len()) ?? panic("reserve failed")
+    out.names.try_reserve(g.name_part.len()) ?? ()
     loop (row, part) in g.name_part -> out.names.push(parts[part].names[g.name_local[row]].copy())
-    out.data.try_reserve(g.data_part.len()) ?? panic("reserve failed")
+    out.data.try_reserve(g.data_part.len()) ?? ()
     loop (row, part) in g.data_part {
         local: g.data_local[row]
         out.data.push(parts[part].data[local].copy())
@@ -639,7 +639,7 @@ ir_merge_grouped: fn(runs: ^^[[{key: String, local: Int}]], later: ^^[[{key: Str
 
 ir_merge_unset: fn(count: Int) -> [Int] Never! {
     rows := [Int]{}
-    if count > 0 -> rows.try_reserve(count) ?? panic("reserve failed")
+    if count > 0 -> rows.try_reserve(count) ?? ()
     loop _ in 0..<count -> rows.push(-1)
     rows
 }
@@ -663,7 +663,7 @@ ir_merge_group: fn(runs: [[{key: String, local: Int}]], groups: ^[[Int]], keys: 
             if rlen > max_run -> max_run = rlen
         }
     }
-    if max_run > 0 -> keys.try_reserve(keys.len() + max_run) ?? panic("reserve failed")
+    if max_run > 0 -> keys.try_reserve(keys.len() + max_run) ?? ()
     if nparts <= 62 {
         loop active.len() > 0 {
             least := active[0]
@@ -923,10 +923,10 @@ ir_merge_drop_dead: fn(dead: ^^IRMergeDead) -> Int Never! {
 ir_merge_recursive: fn(g: IRMerge) -> [Bool] Never! {
     count: g.function_part.len()
     calls := OptCalls{start: [Int]{}, to: [Int]{}}
-    calls.start.try_reserve(count + 2) ?? panic("reserve failed")
+    calls.start.try_reserve(count + 2) ?? ()
     taken := [Int]{}
     taken_seen := [Bool]{}
-    taken_seen.try_reserve(count) ?? panic("reserve failed")
+    taken_seen.try_reserve(count) ?? ()
     loop _ in 0..<count -> taken_seen.push(false)
     loop id in 0..<count {
         part: g.function_part[id]
@@ -1006,7 +1006,7 @@ ir_merge_take_functions_and_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMe
         taken = ir_merge_rewrite_parts(lists, g.sides, ids, recursive, out.stop_points)
         ir_merge_rows(out, parts, g, roots, entry, part_remaps)
     }
-    out.functions.try_reserve(count) ?? panic("reserve failed")
+    out.functions.try_reserve(count) ?? ()
     loop _ in 0..<count -> out.functions.push(ir_function_new("", "", "", "", 0))
     loop taken.len() > 0 {
         part_taken := taken.pop() ?? panic("a nonempty merged part list failed to pop")
@@ -1094,7 +1094,7 @@ ir_merge_rewrite_part: fn(functions: ^^[IRFunction], side: IRMergeSide, ids: ^^[
         if id >= 0 -> kept += 1
     }
     taken := [IRMergeTaken]{}
-    taken.try_reserve(kept) ?? panic("reserve failed")
+    taken.try_reserve(kept) ?? ()
     do_recursion: recursive.len() > 0
     loop rows.len() > 0 {
         id: row_ids[rows.len() - 1]

@@ -1656,7 +1656,7 @@ sema_registration_signature_metadata: fn(signature: Type) -> FunctionCallMetadat
 sema_registration_function_parameters: fn(func: Func, signature: Type) -> [SemaRegistrationParameter] Never! {
     parameters := [SemaRegistrationParameter]{}
     if func.params.len() == 0 -> return parameters
-    parameters.try_reserve(func.params.len()) ?? panic("reserve failed")
+    parameters.try_reserve(func.params.len()) ?? ()
     has_defaults := false
     loop parameter in func.params {
         if parameter.default != None {

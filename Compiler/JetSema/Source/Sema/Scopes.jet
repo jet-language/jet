@@ -3383,8 +3383,8 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     bindings := [SemaScopeBinding]{}
     light := [Bool]{}
     if count > 0 {
-        bindings.try_reserve(count) ?? panic("reserve failed")
-        light.try_reserve(count) ?? panic("reserve failed")
+        bindings.try_reserve(count) ?? ()
+        light.try_reserve(count) ?? ()
     }
     loop i in 0..<count {
         function_type: source.bindings[i].symbol.ty == .Val(.Fn(_, _, _, _, _, _))

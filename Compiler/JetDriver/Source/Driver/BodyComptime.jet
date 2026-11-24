@@ -208,6 +208,8 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: ^[Diagnostic], incoming: [D
         }
         if row == 0 -> break
         row -= 1
+        // Unreachable: `row` counts down from `earlier.len()` and this pop runs
+        // once per step, so it pops exactly the rows `earlier` holds.
         merged.push(earlier.pop() ?? panic("a diagnostic row failed to pop"))
     }
     merged.reverse()

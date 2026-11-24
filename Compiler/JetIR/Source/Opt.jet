@@ -543,7 +543,7 @@ ir_opt_bodies_partitioned: fn(view: IRModule, functions: ^[IRFunction], weights:
     part := workers - 1
     loop part >= 0 {
         rows := [IRFunction]{}
-        rows.try_reserve(functions.len() - bounds[part]) ?? panic("reserve failed")
+        rows.try_reserve(functions.len() - bounds[part]) ?? ()
         loop functions.len() > bounds[part] {
             row: functions.pop() ?? panic("the IR optimizer lost a function")
             rows.push(row)
@@ -1490,7 +1490,7 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
     count: reads.value.cells.len()
     once: reads.value.options.level >= 2 && ir_opt_enabled(reads.value.options, "once")
     callees := [[IRFunction]]{}
-    callees.try_reserve(count) ?? panic("reserve failed")
+    callees.try_reserve(count) ?? ()
     loop _ in 0..<count -> callees.push([IRFunction]{})
     ready := [Int]{}
     id := ir_opt_claim(reads.value.queue, reads.value.changed, reads.value.ranks)
@@ -2023,12 +2023,12 @@ OptTarjan: struct {
 ir_opt_bottom_up: fn(calls: OptCalls) -> OptOrder Never! {
     count: calls.start.len() - 1
     t := OptTarjan{index: [Int]{}, low: [Int]{}, on_stack: [Bool]{}, stack: [Int]{}, next_index: 0, order: [Int]{}, recursive: [Bool]{}}
-    t.index.try_reserve(count) ?? panic("reserve failed")
-    t.low.try_reserve(count) ?? panic("reserve failed")
-    t.on_stack.try_reserve(count) ?? panic("reserve failed")
-    t.recursive.try_reserve(count) ?? panic("reserve failed")
-    t.order.try_reserve(count) ?? panic("reserve failed")
-    t.stack.try_reserve(count) ?? panic("reserve failed")
+    t.index.try_reserve(count) ?? ()
+    t.low.try_reserve(count) ?? ()
+    t.on_stack.try_reserve(count) ?? ()
+    t.recursive.try_reserve(count) ?? ()
+    t.order.try_reserve(count) ?? ()
+    t.stack.try_reserve(count) ?? ()
     loop _ in 0..<count {
         t.index.push(-1)
         t.low.push(0)

@@ -41,4 +41,9 @@ fix_require: fn(ok: Bool, detail: String) Never! {
         overlap = first == Span{start: 10, end: 20} && second == Span{start: 15, end: 25}
     }
     fix_require(overlap, "overlap rejected before bounds clamping")
+    boundary := false
+    if jet_driver_apply_edits("héllo", [TextEdit]{TextEdit{span: Span{start: 2, end: 3}, new_text: "e"}}) == .Err(.Boundary(span)) {
+        boundary = span == Span{start: 2, end: 3}
+    }
+    fix_require(boundary, "a span inside one UTF-8 character is refused, not a stop")
 }

@@ -4240,6 +4240,9 @@ jet_driver_inline_top_level_package_threads: fn(bytes: [U8], from: Int, threads:
 // A part's output row, after its thread joined.
 jet_driver_inline_part_take: fn(part: Shared<JetDriverInlinePart>) -> JetDriverInlineScan {
     permit: part.guard_edit()
+    // Unreachable: the one caller takes each part once, after
+    // jet_driver_inline_scan_parts joined it, and its thread pushed one output
+    // (a thread that stops stops that join first).
     permit.value.outputs.pop() ?? panic("an item scan thread left no output")
 }
 
@@ -4928,12 +4931,17 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: ^^Lexed, runs: [Int
 // The lexed unit, back from the shared inputs after the join.
 jet_driver_demand_shared_take: fn(inputs: Shared<JetDriverDemandShared>) -> Lexed {
     permit: inputs.guard_edit()
+    // Unreachable: the demand scan makes `inputs` with the one lexed unit, and
+    // its threads only read it; this take runs once, after every join.
     permit.value.lexed.pop() ?? panic("the demand scan left the lexed unit in its shared inputs")
 }
 
 // A part's output row, after its thread joined.
 jet_driver_demand_part_take: fn(part: Shared<JetDriverDemandPart>) -> JetDriverCoreIdentifierDemand {
     permit: part.guard_edit()
+    // Unreachable: the one caller takes each part once, after
+    // jet_driver_demand_scan_parts joined it, and its thread pushed one output
+    // (a thread that stops stops that join first).
     permit.value.outputs.pop() ?? panic("a demand scan thread left no output")
 }
 
@@ -6146,7 +6154,7 @@ jet_driver_fill_line_starts: fn(request: JetDriverCompileRequest, source_units: 
 
 jet_driver_line_starts_range: fn(texts: [String], start: Int, end: Int) -> [[Int]] Never! {
     out := [[Int]]{}
-    out.try_reserve(end - start) ?? panic("reserve failed")
+    out.try_reserve(end - start) ?? ()
     loop i in start..<end -> out.push(parser_line_starts(texts[i].bytes()))
     out
 }

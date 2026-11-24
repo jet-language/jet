@@ -1069,7 +1069,7 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
     core_roles := [Int]{}
     decl_parts := [IRBindDeclPart]{}
     check_boxed := [Bool]{}
-    check_boxed.try_reserve(owned.len()) ?? panic("reserve failed")
+    check_boxed.try_reserve(owned.len()) ?? ()
     loop index in 0..<owned.len() {
         check_boxed.push(owned[index].generic_params.len() == 0 && ir_owner_binders(p, owned[index]).len() == 0)
     }
@@ -1579,7 +1579,7 @@ ir_type_identity: fn(type_rows_keys: NameTable, type_rows: [Int], types: [TTypeD
 ir_body_scan_collect: fn(functions: [FnBody], check_boxed: [Bool], interner: Interner, threads: CompilerThreads) -> IRBodyScanPart Never! {
     count: functions.len()
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     total := 0
     loop index in 0..<count {
         nodes: 1 + functions[index].tree.nodes.len()
@@ -1644,7 +1644,7 @@ ir_program_scan_bodies_apply: fn(p: ^IRProgram, spawns: [IRBodyScanSpawn], candi
 ir_program_scan_bodies: fn(p: ^IRProgram, threads: CompilerThreads) Never! {
     count: p.functions.len()
     check_boxed := [Bool]{}
-    check_boxed.try_reserve(count) ?? panic("reserve failed")
+    check_boxed.try_reserve(count) ?? ()
     loop index in 0..<count {
         check_boxed.push(p.functions[index].generic_params.len() == 0 && ir_owner_binders(p, p.functions[index]).len() == 0)
     }
@@ -3898,7 +3898,7 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
     count: m.functions.len()
     checked := false
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     loop f in m.functions {
         if f.entry_check >= 0 -> checked = true
         weights.push(1 + f.op.len())
@@ -3907,7 +3907,7 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
         return
     }
     calls := OptCalls{start: [Int]{}, to: [Int]{}}
-    calls.start.try_reserve(count + 2) ?? panic("reserve failed")
+    calls.start.try_reserve(count + 2) ?? ()
     taken := [Int]{}
     bounds := [Int]{}
     if workers <= 1 {
@@ -3920,7 +3920,7 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
         scans := ir_recursion_scan_ranges(m.functions, bounds, count, 0)
         total_to := 0
         loop at in 0..<scans.len() -> total_to += scans[at].calls.len()
-        calls.to.try_reserve(total_to) ?? panic("reserve failed")
+        calls.to.try_reserve(total_to) ?? ()
         loop at in 0..<scans.len() {
             base: calls.to.len()
             from := 0
@@ -3971,7 +3971,7 @@ IRRecursionScan: struct {
 ir_recursion_scan_range: fn(functions: [IRFunction], start: Int, end: Int, count: Int) -> IRRecursionScan Never! {
     calls := [Int]{}
     ends := [Int]{}
-    ends.try_reserve(end - start) ?? panic("reserve failed")
+    ends.try_reserve(end - start) ?? ()
     taken := [Int]{}
     loop row in start..<end {
         ir_recursion_calls(functions[row], count, calls, taken)
@@ -4096,7 +4096,7 @@ ir_role_is_slot: fn(role: IRLintRole) -> Bool Never! { role == .Slot || role == 
 ir_recursion_drop_slots: fn(f: ^IRFunction, written: [Int]) Never! {
     count: f.slot_type.len()
     dropped := [Bool]{}
-    dropped.try_reserve(count) ?? panic("reserve failed")
+    dropped.try_reserve(count) ?? ()
     loop _ in 0..<count -> dropped.push(false)
     any := false
     min_w := count
@@ -4169,7 +4169,7 @@ ir_recursion_drop_slots: fn(f: ^IRFunction, written: [Int]) Never! {
         if slot >= min_w && slot <= max_w -> dropped[slot] = false
     }
     renamed := [Int]{}
-    renamed.try_reserve(count) ?? panic("reserve failed")
+    renamed.try_reserve(count) ?? ()
     kept := 0
     loop slot in 0..<count {
         if dropped[slot] {

@@ -55,8 +55,8 @@ ir_opt_return_slots: fn(m: ^IRModule, threads: CompilerThreads) -> Int Never! {
     count: m.functions.len()
     weights := [Int]{}
     results := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
-    results.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
+    results.try_reserve(count) ?? ()
     total := 0
     loop f in m.functions {
         weights.push(1 + f.op.len())
@@ -79,8 +79,8 @@ ir_opt_return_slots: fn(m: ^IRModule, threads: CompilerThreads) -> Int Never! {
     }
     bounds: compiler_threads_partition(weights, workers)
     scans := ir_opt_slot_scan_ranges(m, bounds, calls, results, 0)
-    plan.size.try_reserve(count) ?? panic("reserve failed")
-    plan.allocs.try_reserve(count) ?? panic("reserve failed")
+    plan.size.try_reserve(count) ?? ()
+    plan.allocs.try_reserve(count) ?? ()
     loop at in 0..<scans.len() {
         plan.size.extend(compiler_take_rows<Int>(scans[at].size))
         plan.allocs.extend(compiler_take_rows<[Int]>(scans[at].allocs))
@@ -112,8 +112,8 @@ IROptSlotScan: struct {
 ir_opt_slot_scan_range: fn(m: IRModule, start: Int, end: Int, calls: [Int], results: [Int]) -> IROptSlotScan Never! {
     size := [Int]{}
     allocs_list := [[Int]]{}
-    size.try_reserve(end - start) ?? panic("reserve failed")
-    allocs_list.try_reserve(end - start) ?? panic("reserve failed")
+    size.try_reserve(end - start) ?? ()
+    allocs_list.try_reserve(end - start) ?? ()
     marks := [Int]{}
     loop id in start..<end {
         allocs := [Int]{}
@@ -165,7 +165,7 @@ ir_opt_slot_touched_ranges: fn(m: IRModule, bounds: [Int], plan: IROptSlotPlan, 
 
 ir_opt_slot_rebuild_range: fn(m: IRModule, touched: [Int], start: Int, end: Int, plan: IROptSlotPlan, results: [Int], calls: [Int]) -> [IRFunction] Never! {
     out := [IRFunction]{}
-    out.try_reserve(end - start) ?? panic("reserve failed")
+    out.try_reserve(end - start) ?? ()
     loop at in start..<end {
         id: touched[at]
         out.push(ir_opt_slot_rebuild(m.functions[id], plan, results, id, calls[2], calls[3]))

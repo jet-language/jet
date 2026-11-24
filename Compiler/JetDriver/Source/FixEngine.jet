@@ -6,6 +6,8 @@ use jet_foundation.[Span, TextEdit]
 #Error
 JetDriverApplyError: enum {
     Overlap(first: Span, second: Span),
+    // An edit whose start or end falls inside one UTF-8 character of the source.
+    Boundary(span: Span),
 }
 
 jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverApplyError! {
@@ -56,16 +58,15 @@ jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverAp
         start: if edit.span.start < bytes.len() -> edit.span.start else -> bytes.len()
         bounded_end: if edit.span.end < bytes.len() -> edit.span.end else -> bytes.len()
         end: if bounded_end > start -> bounded_end else -> start
-        if start < bytes.len() && (Int{bytes[start]} & 192) == 128 {
-            panic("edit spans must be UTF-8 character boundaries")
-        }
-        if end < bytes.len() && (Int{bytes[end]} & 192) == 128 {
-            panic("edit spans must be UTF-8 character boundaries")
+        if (start < bytes.len() && (Int{bytes[start]} & 192) == 128) || (end < bytes.len() && (Int{bytes[end]} & 192) == 128) {
+            return Err(JetDriverApplyError.Boundary{span: edit.span})
         }
         loop position in cursor..<start -> out.push(bytes[position])
         loop byte in edit.new_text.bytes() -> out.push(byte)
         cursor = end
     }
     loop position in cursor..<bytes.len() -> out.push(bytes[position])
+    // Unreachable: every cut above falls on a character boundary of `src`, and
+    // each inserted text is a whole String.
     Ok(String.from_bytes(out) ?? panic("edit spans must be UTF-8 character boundaries"))
 }

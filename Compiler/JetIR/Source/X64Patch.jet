@@ -53,7 +53,7 @@ patch_grow_code: fn(p: ^IRPatchEmitter, need: Int) Never! {
     cap := p.code.len()
     if cap < 16384 -> cap = 16384
     loop cap < min_cap -> cap = cap * 2
-    p.code.try_reserve(cap) ?? panic("reserve failed")
+    p.code.try_reserve(cap) ?? ()
     loop p.code.len() < cap -> p.code.push(U8{0})
 }
 
@@ -208,7 +208,7 @@ IRPatchEmitter: struct {
 
 ir_patch_emitter_new: fn() -> IRPatchEmitter Never! {
     code := [U8]{}
-    code.try_reserve(16384) ?? panic("reserve failed")
+    code.try_reserve(16384) ?? ()
     loop _ in 0..<16384 -> code.push(U8{0})
     IRPatchEmitter{
         code: code.move(),
@@ -304,10 +304,10 @@ patch_emitter_reset: fn(p: ^IRPatchEmitter, op_count: Int, slot_count: Int) Neve
     if p.int_text_vals.len() > 0 -> p.int_text_vals.clear()
     if p.int_static_vals.len() > 0 -> p.int_static_vals.clear()
     if p.homes.len() < slot_count {
-        p.homes.try_reserve(slot_count) ?? panic("reserve failed")
-        p.const_epoch.try_reserve(slot_count) ?? panic("reserve failed")
-        p.const_val.try_reserve(slot_count) ?? panic("reserve failed")
-        p.edge_def_epoch.try_reserve(slot_count) ?? panic("reserve failed")
+        p.homes.try_reserve(slot_count) ?? ()
+        p.const_epoch.try_reserve(slot_count) ?? ()
+        p.const_val.try_reserve(slot_count) ?? ()
+        p.edge_def_epoch.try_reserve(slot_count) ?? ()
         loop p.homes.len() < slot_count {
             p.homes.push(0)
             p.const_epoch.push(0)
@@ -327,7 +327,7 @@ patch_emitter_reset: fn(p: ^IRPatchEmitter, op_count: Int, slot_count: Int) Neve
     if p.end_sites.len() > 0 -> p.end_sites.clear()
     if p.end_next.len() > 0 -> p.end_next.clear()
     if p.end_of.len() < op_count {
-        p.end_of.try_reserve(op_count) ?? panic("reserve failed")
+        p.end_of.try_reserve(op_count) ?? ()
         loop p.end_of.len() < op_count -> p.end_of.push(-1)
     }
     loop i in 0..<op_count -> p.end_of[i] = -1
@@ -3789,7 +3789,7 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     // 10. Merge call rows into line table if any.
     if !p.call_rows.is_empty() {
         merged := [X64LineRow]{}
-        merged.try_reserve(p.lines.len() + p.call_rows.len() * 2) ?? panic("reserve failed")
+        merged.try_reserve(p.lines.len() + p.call_rows.len() * 2) ?? ()
         next_row := 0
         statement := 0
         loop (k, call) in p.call_rows {
@@ -3879,7 +3879,7 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
     allocs: loop (k, reloc) in p.alloc_relocs -> X64AllocSite{at: p.relocs[reloc].at + 4, ty: p.alloc_rows[k]}
     // Materialize exact code bytes from reusable worker buffer in one memcpy.
     code_out := [U8]{}
-    code_out.try_reserve(p.pos) ?? panic("reserve failed")
+    code_out.try_reserve(p.pos) ?? ()
     code_out.extend(p.code[0..<p.pos])
     name: if {
         f.symbol != "" -> f.symbol

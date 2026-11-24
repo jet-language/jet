@@ -1075,17 +1075,17 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
     count: f.slot_type.len()
     op_count: f.op.len()
     classes := [IRX64Class]{}
-    classes.try_reserve(count) ?? panic("reserve failed")
+    classes.try_reserve(count) ?? ()
     starts := [Int]{}
-    starts.try_reserve(count) ?? panic("reserve failed")
+    starts.try_reserve(count) ?? ()
     ends := [Int]{}
-    ends.try_reserve(count) ?? panic("reserve failed")
+    ends.try_reserve(count) ?? ()
     first_writes := [Bool]{}
-    first_writes.try_reserve(count) ?? panic("reserve failed")
+    first_writes.try_reserve(count) ?? ()
     writes := [Int]{}
-    writes.try_reserve(count) ?? panic("reserve failed")
+    writes.try_reserve(count) ?? ()
     last_write := [Int]{}
-    last_write.try_reserve(count) ?? panic("reserve failed")
+    last_write.try_reserve(count) ?? ()
     loop slot in 0..<count {
         classes.push(ir_x64_row_class(m, f.slot_type[slot]))
         if slot < f.param_count {
@@ -1165,11 +1165,11 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
         }
     }
     consts := [Bool]{}
-    consts.try_reserve(count) ?? panic("reserve failed")
+    consts.try_reserve(count) ?? ()
     values := [Int]{}
-    values.try_reserve(count) ?? panic("reserve failed")
+    values.try_reserve(count) ?? ()
     addressed := [Bool]{}
-    addressed.try_reserve(count) ?? panic("reserve failed")
+    addressed.try_reserve(count) ?? ()
     has_addressed := false
     loop slot in 0..<count {
         at: last_write[slot]
@@ -1185,8 +1185,8 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
     roots := [Int]{}
     shifts := [Int]{}
     if has_addressed {
-        roots.try_reserve(count) ?? panic("reserve failed")
-        shifts.try_reserve(count) ?? panic("reserve failed")
+        roots.try_reserve(count) ?? ()
+        shifts.try_reserve(count) ?? ()
         loop slot in 0..<count {
             roots.push(if addressed[slot] -> slot else -> -1)
             shifts.push(0)
@@ -1219,9 +1219,9 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
     }
     if loop_starts.len() > 0 {
         inner := [Int]{}
-        inner.try_reserve(op_count) ?? panic("reserve failed")
+        inner.try_reserve(op_count) ?? ()
         heads := [Int]{}
-        heads.try_reserve(op_count) ?? panic("reserve failed")
+        heads.try_reserve(op_count) ?? ()
         parents := [Int]{}
         open := [Int]{}
         nested := true
@@ -1270,11 +1270,11 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
         }
     }
     regs := [Int]{}
-    regs.try_reserve(count) ?? panic("reserve failed")
+    regs.try_reserve(count) ?? ()
     xmms := [Int]{}
-    xmms.try_reserve(count) ?? panic("reserve failed")
+    xmms.try_reserve(count) ?? ()
     homes := [Int]{}
-    homes.try_reserve(count) ?? panic("reserve failed")
+    homes.try_reserve(count) ?? ()
     temp_homes := [Int]{}
     temp_ends := [Int]{}
     depth := 0
@@ -1317,7 +1317,7 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
         result_home = 0 - depth
     }
     stack := [Int]{}
-    stack.try_reserve(op_count) ?? panic("reserve failed")
+    stack.try_reserve(op_count) ?? ()
     loop at in 0..<op_count {
         disp := 0
         op: f.op[at]
@@ -1338,7 +1338,7 @@ ir_x64_allocate_fast_o0: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never
         stack.push(disp)
     }
     frames := [Int]{}
-    frames.try_reserve(count) ?? panic("reserve failed")
+    frames.try_reserve(count) ?? ()
     if has_addressed {
         loop slot in 0..<count {
             frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
@@ -1355,21 +1355,21 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     count: f.slot_type.len()
     op_count: f.op.len()
     classes := [IRX64Class]{}
-    classes.try_reserve(count) ?? panic("reserve failed")
+    classes.try_reserve(count) ?? ()
     has_float := false
     starts := [Int]{}
-    starts.try_reserve(count) ?? panic("reserve failed")
+    starts.try_reserve(count) ?? ()
     ends := [Int]{}
-    ends.try_reserve(count) ?? panic("reserve failed")
+    ends.try_reserve(count) ?? ()
     // Whether the slot's first reference (in index order) writes it.
     first_writes := [Bool]{}
-    first_writes.try_reserve(count) ?? panic("reserve failed")
+    first_writes.try_reserve(count) ?? ()
     writes := [Int]{}
-    writes.try_reserve(count) ?? panic("reserve failed")
+    writes.try_reserve(count) ?? ()
     last_write := [Int]{}
-    last_write.try_reserve(count) ?? panic("reserve failed")
+    last_write.try_reserve(count) ?? ()
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     loop slot in 0..<count {
         cls: ir_x64_row_class(m, f.slot_type[slot])
         if cls == .Float -> has_float = true
@@ -1394,11 +1394,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     loop_ends := [Int]{}
     has_stream_store := false
     around := [Int]{}
-    if !fast_o0 -> around.try_reserve(op_count) ?? panic("reserve failed")
+    if !fast_o0 -> around.try_reserve(op_count) ?? ()
     openers := [Int]{}
     arms := [Int]{}
     armed := [Bool]{}
-    if has_float -> armed.try_reserve(op_count) ?? panic("reserve failed")
+    if has_float -> armed.try_reserve(op_count) ?? ()
     if fast_o0 && !has_float {
         loop at in 0..<op_count {
             op: f.op[at]
@@ -1446,8 +1446,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     weight_at := [Int]{}
     heats := [Int]{}
     if has_loop {
-        weight_at.try_reserve(op_count) ?? panic("reserve failed")
-        if has_float -> heats.try_reserve(op_count) ?? panic("reserve failed")
+        weight_at.try_reserve(op_count) ?? ()
+        if has_float -> heats.try_reserve(op_count) ?? ()
         nesting := loop _ in 0..<(op_count + 1) -> 0
         loop row in 0..<loop_starts.len() {
             at: loop_starts[row]
@@ -1458,7 +1458,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
             }
         }
         depths := [Int]{}
-        depths.try_reserve(op_count) ?? panic("reserve failed")
+        depths.try_reserve(op_count) ?? ()
         depth_now := 0
         loop at in 0..<op_count {
             depth_now += nesting[at]
@@ -1487,7 +1487,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
             }
         }
     } else if has_float {
-        heats.try_reserve(op_count) ?? panic("reserve failed")
+        heats.try_reserve(op_count) ?? ()
         loop at in 0..<op_count -> heats.push(ir_x64_heat(0, armed[at]))
     }
     // Per slot, the hottest heat of its references and their weight there
@@ -1495,8 +1495,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     peaks := [Int]{}
     peak_weights := [Int]{}
     if has_float {
-        peaks.try_reserve(count) ?? panic("reserve failed")
-        peak_weights.try_reserve(count) ?? panic("reserve failed")
+        peaks.try_reserve(count) ?? ()
+        peak_weights.try_reserve(count) ?? ()
         loop _ in 0..<count {
             peaks.push(0)
             peak_weights.push(0)
@@ -1505,7 +1505,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     // Per instruction, whether it reads its first operand field `a` as a
     // slot (ir_x64_scan's partners).
     left_reads := [Bool]{}
-    left_reads.try_reserve(op_count) ?? panic("reserve failed")
+    left_reads.try_reserve(op_count) ?? ()
     loop at in 0..<op_count {
         w: if has_loop -> weight_at[at] else -> 1
         heat: if has_float -> heats[at] else -> 0
@@ -1552,11 +1552,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
         left_reads.push(left)
     }
     consts := [Bool]{}
-    consts.try_reserve(count) ?? panic("reserve failed")
+    consts.try_reserve(count) ?? ()
     values := [Int]{}
-    values.try_reserve(count) ?? panic("reserve failed")
+    values.try_reserve(count) ?? ()
     addressed := [Bool]{}
-    addressed.try_reserve(count) ?? panic("reserve failed")
+    addressed.try_reserve(count) ?? ()
     has_addressed := false
     loop slot in 0..<count {
         at: last_write[slot]
@@ -1576,8 +1576,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     roots := [Int]{}
     shifts := [Int]{}
     if has_addressed {
-        roots.try_reserve(count) ?? panic("reserve failed")
-        shifts.try_reserve(count) ?? panic("reserve failed")
+        roots.try_reserve(count) ?? ()
+        shifts.try_reserve(count) ?? ()
         loop slot in 0..<count {
             roots.push(if addressed[slot] -> slot else -> -1)
             shifts.push(0)
@@ -1618,9 +1618,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     // enclosing loops; otherwise it tries every loop.
     if has_loop {
         inner := [Int]{}
-        inner.try_reserve(op_count) ?? panic("reserve failed")
+        inner.try_reserve(op_count) ?? ()
         heads := [Int]{}
-        heads.try_reserve(op_count) ?? panic("reserve failed")
+        heads.try_reserve(op_count) ?? ()
         parents := [Int]{}
         open := [Int]{}
         nested := true
@@ -1692,11 +1692,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     // register, all of them holding the same value, and after it load them
     // all back.
     general := [Bool]{}
-    general.try_reserve(count) ?? panic("reserve failed")
+    general.try_reserve(count) ?? ()
     fresh := [Bool]{}
-    fresh.try_reserve(count) ?? panic("reserve failed")
+    fresh.try_reserve(count) ?? ()
     partners := [Int]{}
-    partners.try_reserve(count) ?? panic("reserve failed")
+    partners.try_reserve(count) ?? ()
     zones_active: !m.zones_stripped
     loop slot in 0..<count {
         s: starts[slot]
@@ -1737,7 +1737,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
         // Per instruction, how many before it pass more than two Float
         // arguments.
         crowded := [Int]{0}
-        crowded.try_reserve(op_count + 1) ?? panic("reserve failed")
+        crowded.try_reserve(op_count + 1) ?? ()
         loop at in 0..<op_count {
             op: f.op[at]
             floats := 0
@@ -1755,7 +1755,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
             if xmms[slot] >= 0 -> xmm_slots.push(slot)
         }
     } else {
-        xmms.try_reserve(count) ?? panic("reserve failed")
+        xmms.try_reserve(count) ?? ()
         loop _ in 0..<count -> xmms.push(-1)
     }
     // The callee-saved registers some slot ends up with (a stolen register
@@ -1777,9 +1777,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
     // loop-weighted references through its address, so a hot one sits
     // within a one-byte displacement as a hot slot's home does.
     homed := [Bool]{}
-    homed.try_reserve(count) ?? panic("reserve failed")
+    homed.try_reserve(count) ?? ()
     named := [Bool]{}
-    named.try_reserve(count) ?? panic("reserve failed")
+    named.try_reserve(count) ?? ()
     loop slot in 0..<count {
         homed.push(regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty)
         named.push(f.slot_name[slot] >= 0)
@@ -1808,11 +1808,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
             if roots[slot] >= 0 -> through[roots[slot]] = through[roots[slot]] + weights[slot]
         }
         home_starts := [Int]{}
-        home_starts.try_reserve(count + words.len()) ?? panic("reserve failed")
+        home_starts.try_reserve(count + words.len()) ?? ()
         home_ends := [Int]{}
-        home_ends.try_reserve(count + words.len()) ?? panic("reserve failed")
+        home_ends.try_reserve(count + words.len()) ?? ()
         home_weights := [Int]{}
-        home_weights.try_reserve(count + words.len()) ?? panic("reserve failed")
+        home_weights.try_reserve(count + words.len()) ?? ()
         loop slot in 0..<count {
             home_starts.push(starts[slot])
             home_ends.push(ends[slot])
@@ -1827,9 +1827,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
             named.push(true)
         }
         placed: ir_x64_homes(home_starts, home_ends, home_weights, homed, named, depth)
-        homes.try_reserve(count) ?? panic("reserve failed")
+        homes.try_reserve(count) ?? ()
         loop slot in 0..<count -> homes.push(placed[slot])
-        word_disps.try_reserve(op_count) ?? panic("reserve failed")
+        word_disps.try_reserve(op_count) ?? ()
         loop _ in 0..<op_count -> word_disps.push(0)
         loop (index, at) in words -> word_disps[at] = placed[count + index]
         loop home in placed {
@@ -1842,7 +1842,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
         result_home = 0 - depth
     }
     stack := [Int]{}
-    stack.try_reserve(op_count) ?? panic("reserve failed")
+    stack.try_reserve(op_count) ?? ()
     has_word_disps: words.len() > 0
     loop at in 0..<op_count {
         disp := if has_word_disps -> word_disps[at] else -> 0
@@ -1866,7 +1866,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction, fast_o0: Bool{false}) -> IRX64Al
         stack.push(disp)
     }
     frames := [Int]{}
-    frames.try_reserve(count) ?? panic("reserve failed")
+    frames.try_reserve(count) ?? ()
     if has_addressed {
         loop slot in 0..<count {
             frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
@@ -2068,7 +2068,7 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
     has_phis: phis.len() > 0
     has_aliases: aliases.len() > 0
     regs := [Int]{}
-    regs.try_reserve(count) ?? panic("reserve failed")
+    regs.try_reserve(count) ?? ()
     loop _ in 0..<count -> regs.push(-1)
     use_shift: count <= 16777216
     keys := [Int]{}

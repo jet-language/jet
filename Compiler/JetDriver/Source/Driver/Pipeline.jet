@@ -2258,7 +2258,7 @@ jet_driver_comptime_prefetch_refs_parallel: fn(graph: SemaRegistrationGraph, sna
     ranges.push(count)
     parts: jet_driver_comptime_prefetch_refs_ranges(graph, snapshot, done, eligible, ranges, 0)
     out := [[JetDriverComptimeFunctionRef]]{}
-    out.try_reserve(count) ?? panic("reserve failed")
+    out.try_reserve(count) ?? ()
     loop part in parts {
         loop refs in part -> out.push(refs)
     }
@@ -2284,7 +2284,7 @@ jet_driver_comptime_prefetch_refs_ranges: fn(graph: SemaRegistrationGraph, snaps
 jet_driver_comptime_prefetch_refs_chunk: fn(graph: SemaRegistrationGraph, snapshot: JetDriverComptimeRunIndex, done: [SemaComptimeWalkDone], eligible: [Int], start: Int, end: Int) -> [[JetDriverComptimeFunctionRef]] {
     local := snapshot
     out := [[JetDriverComptimeFunctionRef]]{}
-    out.try_reserve(end - start) ?? panic("reserve failed")
+    out.try_reserve(end - start) ?? ()
     loop k in start..<end {
         check: done[eligible[k]].check
         if check.function == .Val(function) {
@@ -2429,7 +2429,9 @@ jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWai
             }
         }
     }
-    // The key pushed above leaves the path for the finished list.
+    // The key pushed above leaves the path for the finished list. Unreachable
+    // pop failure: each nested call that returns false pops its own key, so
+    // this call's key is on top.
     finished.push(path.pop() ?? panic("a wait-cycle path lost its key"))
     false
 }
@@ -6889,6 +6891,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
             repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
             out.push(reg_task.join() ?? panic(compiler_threads_failure_text(err)))
         }
+        // Unreachable: the group above pushed the one joined row.
         out.pop() ?? panic("lost registered function keys")
     } else -> {
         repeated_rows = jet_driver_checked_repeated_rows(checked_graph.modules)
@@ -6913,8 +6916,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     bad_owners := if compiler_threads_admit(request.compiler_threads, checked_graph.modules.len(), checked_graph.modules.len(), 32, 0, 0) > 1 -> jet_driver_verify_owners_parallel(checked_graph.modules, registered_function_keys, request.compiler_threads) else -> jet_driver_verify_owners_chunk(checked_graph.modules, registered_function_keys, 0, checked_graph.modules.len())
     bad_cursor := 0
     total_checked := repeated_rows.len()
-    checked_functions.try_reserve(total_checked) ?? panic("reserve failed")
-    lowering_candidates.try_reserve(total_checked) ?? panic("reserve failed")
+    checked_functions.try_reserve(total_checked) ?? ()
+    lowering_candidates.try_reserve(total_checked) ?? ()
     loop graph_module_index in 0..<checked_graph.modules.len() {
         module_functions := [FnBody]{}
         compiler_transfer_rows<FnBody>(module_functions, checked_graph.modules[graph_module_index].functions)
@@ -7187,6 +7190,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: ^JetD
     // #3980: lower only the Core source bodies the program reaches.
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
     lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, interner_rows, lowering_candidates, prunable_modules, entry_roots, jet_driver_value_function_keys(comptime_values), request.compiler_threads, request.trace_sink)
+    // Unreachable: both lists hold one row here, and ir_reachable_core_rows
+    // either returns before it takes them or transfers them back.
     symbols := symbol_rows.pop() ?? panic("the run's symbol table left core reachability")
     interner := interner_rows.pop() ?? panic("the run's interner left core reachability")
     sema_functions := [FnBody]{}
@@ -8021,7 +8026,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     aliases := name_table_sized(2)
     owners := [String]{}
     rows := [Int]{}
-    rows.try_reserve(functions.len()) ?? panic("reserve failed")
+    rows.try_reserve(functions.len()) ?? ()
     task.group jet_driver_budget_prep {
         t_keys: task ir_first_function_rows(functions)
         loop loaded in load.modules {
@@ -8069,8 +8074,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             t0: task {
                 cs := [[Int]]{}
                 es := [[Int]]{}
-                cs.try_reserve(b1) ?? panic("reserve failed")
-                es.try_reserve(b1) ?? panic("reserve failed")
+                cs.try_reserve(b1) ?? ()
+                es.try_reserve(b1) ?? ()
                 loop idx in 0..<b1 {
                     c := [Int]{}
                     e := [Int]{}
@@ -8093,8 +8098,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             t1: task {
                 cs := [[Int]]{}
                 es := [[Int]]{}
-                cs.try_reserve(b2 - b1) ?? panic("reserve failed")
-                es.try_reserve(b2 - b1) ?? panic("reserve failed")
+                cs.try_reserve(b2 - b1) ?? ()
+                es.try_reserve(b2 - b1) ?? ()
                 loop idx in b1..<b2 {
                     c := [Int]{}
                     e := [Int]{}
@@ -8117,8 +8122,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             t2: task {
                 cs := [[Int]]{}
                 es := [[Int]]{}
-                cs.try_reserve(b3 - b2) ?? panic("reserve failed")
-                es.try_reserve(b3 - b2) ?? panic("reserve failed")
+                cs.try_reserve(b3 - b2) ?? ()
+                es.try_reserve(b3 - b2) ?? ()
                 loop idx in b2..<b3 {
                     c := [Int]{}
                     e := [Int]{}
@@ -8141,8 +8146,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             t3: task {
                 cs := [[Int]]{}
                 es := [[Int]]{}
-                cs.try_reserve(b4 - b3) ?? panic("reserve failed")
-                es.try_reserve(b4 - b3) ?? panic("reserve failed")
+                cs.try_reserve(b4 - b3) ?? ()
+                es.try_reserve(b4 - b3) ?? ()
                 loop idx in b3..<b4 {
                     c := [Int]{}
                     e := [Int]{}
@@ -8165,8 +8170,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             t4: task {
                 cs := [[Int]]{}
                 es := [[Int]]{}
-                cs.try_reserve(b5 - b4) ?? panic("reserve failed")
-                es.try_reserve(b5 - b4) ?? panic("reserve failed")
+                cs.try_reserve(b5 - b4) ?? ()
+                es.try_reserve(b5 - b4) ?? ()
                 loop idx in b4..<b5 {
                     c := [Int]{}
                     e := [Int]{}
@@ -8188,8 +8193,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             }
             cs5 := [[Int]]{}
             es5 := [[Int]]{}
-            cs5.try_reserve(fn_count - b5) ?? panic("reserve failed")
-            es5.try_reserve(fn_count - b5) ?? panic("reserve failed")
+            cs5.try_reserve(fn_count - b5) ?? ()
+            es5.try_reserve(fn_count - b5) ?? ()
             loop idx in b5..<fn_count {
                 c := [Int]{}
                 e := [Int]{}
@@ -8214,8 +8219,8 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             chunks.push(t4.join() ?? panic(compiler_threads_failure_text(err)))
             chunks.push(jet_driver_budget_edge_chunk(cs5.move(), es5.move()))
         }
-        callees.try_reserve(fn_count) ?? panic("reserve failed")
-        extra_edges.try_reserve(fn_count) ?? panic("reserve failed")
+        callees.try_reserve(fn_count) ?? ()
+        extra_edges.try_reserve(fn_count) ?? ()
         loop chunk in chunks.move() {
             callees.extend(chunk.callees.move())
             extra_edges.extend(chunk.extra.move())
@@ -8388,7 +8393,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
     sites := (loop _ in functions -> "")
     effect_keys := (loop _ in functions -> "")
     sited := [Int]{}
-    sited.try_reserve(order.len()) ?? panic("reserve failed")
+    sited.try_reserve(order.len()) ?? ()
     loop (index, function) in functions {
         if !reached[index] -> next
         row: rows[index]
@@ -8756,7 +8761,7 @@ JetDriverBadOwner: struct {
 jet_driver_verify_owners_parallel: fn(modules: [SemaGraphModuleResult], registered_function_keys: JetDriverRegisteredKeys, threads: CompilerThreads) -> [JetDriverBadOwner] Never! {
     count: modules.len()
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     total := 0
     loop m in modules {
         w: 1 + m.functions.len()

@@ -301,10 +301,10 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
     m.marked_inlined = true
     count: m.functions.len()
     marked := [Bool]{}
-    marked.try_reserve(count) ?? panic("reserve failed")
+    marked.try_reserve(count) ?? ()
     marked_ids := [Int]{}
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     total := 0
     loop (id, f) in m.functions {
         marked.push(f.inline_always)
@@ -318,14 +318,14 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
     }
     // Only marked callees are ever read from `bodies` under IROptInline.Marked.
     bodies := [[IRFunction]]{}
-    bodies.try_reserve(count) ?? panic("reserve failed")
+    bodies.try_reserve(count) ?? ()
     loop _ in 0..<count -> bodies.push([IRFunction]{})
     loop id in marked_ids -> bodies[id].push(m.functions[id])
     view := ir_opt_view(m, [String]{})
     state := [Int]{}
     recursive := [Bool]{}
-    state.try_reserve(count) ?? panic("reserve failed")
-    recursive.try_reserve(count) ?? panic("reserve failed")
+    state.try_reserve(count) ?? ()
+    recursive.try_reserve(count) ?? ()
     loop _ in 0..<count {
         state.push(0)
         recursive.push(false)
@@ -372,7 +372,7 @@ ir_opt_inline_marked_module: fn(m: ^IRModule, report: ^IROptReport, threads: Com
         }
     } else {
         caller_weights := [Int]{}
-        caller_weights.try_reserve(callers.len()) ?? panic("reserve failed")
+        caller_weights.try_reserve(callers.len()) ?? ()
         loop id in callers -> caller_weights.push(weights[id])
         cworkers: if workers > callers.len() -> callers.len() else -> workers
         cbounds: compiler_threads_partition(caller_weights, cworkers)
@@ -422,7 +422,7 @@ ir_opt_marked_find_ranges: fn(functions: [IRFunction], marked: [Bool], bounds: [
 
 ir_opt_marked_build_range: fn(view: IRModule, bodies: [[IRFunction]], functions: [IRFunction], callers: [Int], recursive: [Bool], start: Int, end: Int) -> [IROptMarkedRebuilt] Never! {
     built := [IROptMarkedRebuilt]{}
-    built.try_reserve(end - start) ?? panic("reserve failed")
+    built.try_reserve(end - start) ?? ()
     loop at in start..<end {
         id: callers[at]
         local := ir_opt_report(0)
@@ -455,7 +455,7 @@ ir_opt_runtime_called: fn(m: IRModule, threads: CompilerThreads) -> [Bool] Never
     name_count: m.names.len()
     fn_count: m.functions.len()
     weights := [Int]{}
-    weights.try_reserve(fn_count) ?? panic("reserve failed")
+    weights.try_reserve(fn_count) ?? ()
     total := 0
     loop f in m.functions {
         w: 1 + f.op.len()
@@ -467,7 +467,7 @@ ir_opt_runtime_called: fn(m: IRModule, threads: CompilerThreads) -> [Bool] Never
     bounds: compiler_threads_partition(weights, workers)
     parts: ir_opt_runtime_called_ranges(m.functions, bounds, name_count, 0)
     called := [Bool]{}
-    called.try_reserve(name_count) ?? panic("reserve failed")
+    called.try_reserve(name_count) ?? ()
     loop _ in 0..<name_count -> called.push(false)
     loop part in parts {
         loop (row, hit) in part {
@@ -479,7 +479,7 @@ ir_opt_runtime_called: fn(m: IRModule, threads: CompilerThreads) -> [Bool] Never
 
 ir_opt_runtime_called_range: fn(functions: [IRFunction], start: Int, end: Int, name_count: Int) -> [Bool] Never! {
     called := [Bool]{}
-    called.try_reserve(name_count) ?? panic("reserve failed")
+    called.try_reserve(name_count) ?? ()
     loop _ in 0..<name_count -> called.push(false)
     loop index in start..<end {
         f: functions[index]
@@ -515,7 +515,7 @@ ir_opt_runtime_called_ranges: fn(functions: [IRFunction], bounds: [Int], name_co
 ir_opt_marked_calls: fn(m: IRModule) -> Int Never! {
     fn_count: m.functions.len()
     marked := [Bool]{}
-    marked.try_reserve(fn_count) ?? panic("reserve failed")
+    marked.try_reserve(fn_count) ?? ()
     any := false
     loop f in m.functions {
         marked.push(f.inline_always)

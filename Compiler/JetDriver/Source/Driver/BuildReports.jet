@@ -120,9 +120,9 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
             "pkg_config" -> "PkgConfig {{ package: {build_key_debug_text(probe.value)}, min_version: None }}"
             "header" -> "HeaderCheck {{ header: {build_key_debug_text(probe.value)} }}"
             "compile_check" -> "CompileCheck {{ name: {build_key_debug_text(probe.value)}, includes: [], code: {build_key_debug_text(probe.code)} }}"
-            else -> {
-                panic("invalid checked probe kind")
-            }
+            // Unreachable: build_session_add_probe, the one writer of a
+            // session's probes, refuses every other kind before it records.
+            else -> panic("invalid checked probe kind")
         }
         reproducibility: if probe.reproducibility == "ambient" -> {
             "Ambient"

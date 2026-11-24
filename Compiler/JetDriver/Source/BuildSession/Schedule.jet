@@ -137,6 +137,8 @@ build_session_schedule_step: fn(state: BuildSessionState, name: String) -> Int N
     loop (id, action) in state.actions {
         if action.name == name -> return id
     }
+    // Unreachable: the one caller passes the names of a cycle that
+    // build_session_cycle took from `names`, every action's name.
     panic("a schedule cycle names a step of this build")
 }
 
@@ -184,6 +186,8 @@ build_session_schedule_named: fn(names: ^^[String], steps: [Int]) -> [String] Ne
     loop (id, name) in names.move() {
         if at[id] >= 0 -> slots[at[id]] = Val(name)
     }
+    // Unreachable: the one caller first returns on any step cycle, so the
+    // chain it passes walks an acyclic producer graph and never repeats a step.
     loop slot in slots.move() -> slot ?? panic("a schedule chain names each step once")
 }
 
