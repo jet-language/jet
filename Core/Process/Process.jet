@@ -14,6 +14,7 @@ use {
     core: core
     files: core.files
     rt: jet.runtime.process
+    files_rt: jet.runtime.files
 }
 
 // The catchable POSIX signals, in signal-number order.
@@ -465,7 +466,7 @@ path_is_absolute: fn(path: String) -> Bool Never! {
 
 // A PATH search follows a final link, as a shell does: package managers install tools as links.
 resolves_to_file: fn(path: String) -[FS]> Bool Never! {
-    row: core.files.__stat_at(-1, path, true) ?? return false
+    row: files_rt.stat_at(-1, path, true) ?? return false
     row[0] == 0
 }
 

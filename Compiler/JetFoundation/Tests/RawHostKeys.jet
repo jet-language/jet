@@ -41,14 +41,4 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
         row: core_call("core.files", member) ?? panic("file read leaf is registered")
         assert(row.effects == [String]{"FS.Read"})
     }
-    write_members: [String]{"__writer_refusal", "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close"}
-    loop member in write_members {
-        row: core_call("core.files", member) ?? panic("file write leaf is registered")
-        assert(row.effects == [String]{"FS.Write"})
-    }
-    inspect_members: [String]{"__path_windows", "__atomic_pid"}
-    loop member in inspect_members {
-        row: core_call("core.files", member) ?? panic("file inspection leaf is registered")
-        assert(row.effects.len() == 0)
-    }
 }

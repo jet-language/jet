@@ -16,6 +16,7 @@ use {
     process_api: core.process
     rt: jet.runtime.encoding
     sys_rt: jet.runtime.sys
+    files_rt: jet.runtime.files
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid, shared_word_valid, shared_word_fits]
@@ -2397,7 +2398,7 @@ decode: fn<T: Decode>(prefix: String, file: String, allow: [String]) -[FS, Env, 
 }
 
 __decode_tree: fn(prefix: String, file: String, allow: [String], names: [{env_name: String, key: String}]) -[FS, Env, Exec]> {tree: Dyn, origins: [{name: String, path: String}]} [FieldError]! {
-    platform: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
+    platform: if files_rt.path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path: host_path.from_text(file, platform)
     if host_path.is_absolute(path) {
         return Err(config_error("Jet.EnvDecodeFailed: Dotenv.file must be project-relative"))

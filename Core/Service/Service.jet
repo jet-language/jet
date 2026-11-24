@@ -19,6 +19,7 @@ use {
     service_actor: core.actor
     service_tasks: core.tasks
     service_time: core.time
+    service_files_rt: jet.runtime.files
     core.prelude.[TaskFailure]
 }
 
@@ -1901,9 +1902,7 @@ state_store: fn(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
 // Metadata-only raw read: Windows identity acquisition would add failures that
 // the constructor's native symlink_metadata contract never had.
 state_path_kind: fn(path: String) -[FS.Read]> Int IOError! {
-    #Unsafe("read the final path component's OS metadata kind without opening an identity handle") {
-        return core.files.__path_kind(path)
-    }
+    service_files_rt.path_kind(path)
 }
 
 restart_one_for_one: fn() -> ServiceRestart Never! { ServiceRestart.OneForOne }
@@ -1973,7 +1972,7 @@ stat_cause: fn(error: IOError) -> String Never! {
 // The path grammar of the machine running the call: a state path names a
 // file on the disk this call reads, so a call made while building follows the
 // machine running the build, never the build's target.
-state_path_windows: fn() -> Bool Never! { core.files.__path_windows() }
+state_path_windows: fn() -> Bool Never! { service_files_rt.path_windows() }
 
 StatePathPrefix: struct {
     length: Int,

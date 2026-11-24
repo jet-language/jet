@@ -3,6 +3,7 @@ use {
     host_path: __core_files_path_components
     internal.[file_dialog, granted_path, provider_record]
     rt: jet.runtime.ui
+    files_rt: jet.runtime.files
 }
 
 // core.ui.host — typed host capability leaves for dialogs and metadata.
@@ -332,7 +333,7 @@ fs_grant: fn(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
     if core.text.trim(path).len() == 0 {
         return Err(UIHostError.InvalidRequest("filesystem grant path must not be empty"))
     }
-    platform: if core.files.__path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
+    platform: if files_rt.path_windows() -> host_path.PathPlatform.Windows else -> host_path.PathPlatform.Unix
     input: host_path.from_text(path, platform)
     normalized := host_path.from_text("", platform)
     cursor := host_path.components(input)

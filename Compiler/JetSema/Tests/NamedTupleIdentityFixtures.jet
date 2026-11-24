@@ -1,8 +1,8 @@
 // Inspect the real registry metadata without invoking Core-private leaves.
-use jet_foundation.[core_platform_fixed_signature, type_identity_equal, Type, TypeTupleField]
+use jet_foundation.[core_host_fixed_signature, type_identity_equal, Type, TypeTupleField]
 
 named_tuple_identity_registry_return: fn(module_name: String, member: String) -> Type Never! {
-    signature: core_platform_fixed_signature(module_name, member) ?? panic("missing tuple signature")
+    signature: core_host_fixed_signature(module_name, member) ?? panic("missing tuple signature")
     signature.return_type ?? panic("tuple signature has no return type")
 }
 
@@ -11,13 +11,14 @@ named_tuple_identity_line_from_source: fn() -> {cause: String?, eof: Bool, line:
 }
 
 named_tuple_identity_fixture: fn() {
-    clock_type: Type.Tuple{
+    descriptor_type: Type.Tuple{
         fields: [TypeTupleField]{
-            {name: "clock_available", ty: Type.Bool},
-            {name: "nanos", ty: Type.String},
+            {name: "available", ty: Type.Bool},
+            {name: "held", ty: Type.Bool},
+            {name: "fd", ty: Type.Int},
         },
     }
-    assert(type_identity_equal(named_tuple_identity_registry_return("core.files", "__temp_clock_raw"), clock_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("core.files", "__directory_fd"), descriptor_type))
     line: named_tuple_identity_line_from_source()
     assert(!line.eof && line.line == "" && line.cause == None)
 }

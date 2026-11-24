@@ -17,7 +17,6 @@ use {
     sys_rt: jet.runtime.sys
     host_path: __core_files_path_components
     builtin: jet_builtins
-    core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
     access_codes.[access_check, advice_code, map_advice_code]
     raw_names.[raw_held_name]
     scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
@@ -334,7 +333,7 @@ AdvisoryLock: struct {
     priv handle: Int,
 
     impl Close {
-        close: fn(&&self) { core.files.__close_directory(self.handle) }
+        close: fn(&&self) { rt.close_directory(self.handle) }
     }
 }
 
@@ -521,7 +520,7 @@ Directory: struct {
     /// Hold the directory `name` inside this one.
     open_directory: fn(self, name: String) -[FS.Read]> Directory IOError! {
         held_name(self.path, name, false)
-        key: core.files.__open_directory(self.handle, name)
+        key: rt.open_directory(self.handle, name)
         Ok(Directory{stored_path: join(self.path, name), handle: key})
     }
 
@@ -529,8 +528,8 @@ Directory: struct {
     /// `IOError.AlreadyExists`.
     create_directory: fn(self, name: String, mode: Int?{None}) -[FS.Read, FS.Write]> Directory IOError! {
         held_name(self.path, name, true)
-        core.files.__create_directory(self.handle, name, mode ?? -1)
-        key: core.files.__open_directory(self.handle, name)
+        rt.create_directory(self.handle, name, mode ?? -1)
+        key: rt.open_directory(self.handle, name)
         Ok(Directory{stored_path: join(self.path, name), handle: key})
     }
 
@@ -567,21 +566,21 @@ Directory: struct {
 
     /// Describe the held directory itself.
     stat: fn(self) -[FS.Read]> Stat IOError! {
-        row: core.files.__stat_at(self.handle, "", false)
+        row: rt.stat_at(self.handle, "", false)
         Ok(stat_from_row(row))
     }
 
     /// Describe the entry `name` without following a final link.
     entry_stat: fn(self, name: String) -[FS.Read]> Stat IOError! {
         held_name(self.path, name, false)
-        row: core.files.__stat_at(self.handle, name, false)
+        row: rt.stat_at(self.handle, name, false)
         Ok(stat_from_row(row))
     }
 
     /// The text stored in the link `name`, exactly as stored.
     read_link: fn(self, name: String) -[FS.Read]> String IOError! {
         held_name(self.path, name, false)
-        core.files.__read_link_at(self.handle, name)
+        rt.read_link_at(self.handle, name)
     }
 
     /// Rename `from` to `to`, both inside this directory unless `into` names
@@ -598,13 +597,13 @@ Directory: struct {
             .None -> {}
         }
         held_name(target_path, to, true)
-        core.files.__rename_at(self.handle, from, target, to, rename_code(if_exists))
+        rt.rename_at(self.handle, from, target, to, rename_code(if_exists))
     }
 
     /// Remove the non-directory entry `name`; a link is removed, not followed.
     remove: fn(self, name: String) -[FS.Write]> IOError! {
         held_name(self.path, name, true)
-        core.files.__remove_at(self.handle, name, false)
+        rt.remove_at(self.handle, name, false)
     }
 
     /// Remove the non-directory entry whose name is exactly the bytes `name`;
@@ -617,21 +616,21 @@ Directory: struct {
     /// Remove the empty directory `name`.
     remove_directory: fn(self, name: String) -[FS.Write]> IOError! {
         held_name(self.path, name, true)
-        core.files.__remove_at(self.handle, name, true)
+        rt.remove_at(self.handle, name, true)
     }
 
     /// Flush the held directory so earlier renames inside it are durable.
-    fsync: fn(self) -[FS.Write]> IOError! { core.files.__fsync_directory(self.handle) }
+    fsync: fn(self) -[FS.Write]> IOError! { rt.fsync_directory(self.handle) }
 
     /// Acquire an exclusive, nonblocking flock on this directory's identity.
     /// An independent descriptor owns the lock until the returned owner closes,
     /// even if the directory is renamed or this Directory is closed.
     lock: fn(self) -[FS.Read, FS.Write]> AdvisoryLock IOError! {
-        key: core.files.__open_directory(self.handle, ".")
-        if core.files.__flock(key, 6) == {
+        key: rt.open_directory(self.handle, ".")
+        if rt.flock(key, 6) == {
             .Ok(_) -> Ok(AdvisoryLock{handle: key})
             .Err(error) -> {
-                core.files.__close_directory(key)
+                rt.close_directory(key)
                 Err(error)
             }
         }
@@ -643,7 +642,7 @@ Directory: struct {
     /// this one, never by path. `spec.keep_open(directory.duplicate())`
     /// keeps the directory open in a child while this handle stays usable.
     duplicate: fn(self) -[FS.Read]> Directory IOError! {
-        key: core.files.__open_directory(self.handle, ".")
+        key: rt.open_directory(self.handle, ".")
         Ok(Directory{stored_path: self.stored_path.copy(), handle: key})
     }
 
@@ -658,7 +657,7 @@ Directory: struct {
     }
 
     impl Close {
-        close: fn(&&self) { core.files.__close_directory(self.handle) }
+        close: fn(&&self) { rt.close_directory(self.handle) }
     }
 }
 
@@ -733,7 +732,7 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&Directory | FileLock | FileRea
     fd: if handle == {
         .FileReader(reader) -> rt.reader_fd(reader) ?? -1
         .FileWriter(writer) -> rt.writer_fd(writer) ?? -1
-        .FileLock(lock) -> core.files.__lock_fd(lock) ?? -1
+        .FileLock(lock) -> rt.lock_fd(lock) ?? -1
         .Directory(directory) -> {
             held: core.files.__directory_fd(directory.handle)
             if held.available && held.held -> held.fd else -> -1
@@ -829,7 +828,7 @@ __spec_keep_open: fn(spec: ProcessSpec, handle: &&Directory | FileLock | FileRea
 /// Hold the directory at `path`. The last part must be a
 /// real directory, not a link.
 open_directory: fn(path: String) -[FS.Read]> Directory IOError! {
-    key: core.files.__open_directory(-1, path)
+    key: rt.open_directory(-1, path)
     Ok(Directory{stored_path: path.copy(), handle: key})
 }
 
@@ -944,18 +943,18 @@ stat_from_row: fn(row: [Int]) -> Stat Never! {
 /// sorted order. A final link is never followed. Windows and file systems
 /// without attributes report none.
 extended_attribute_names: fn(path: String) -[FS.Read]> [String] IOError! {
-    core.files.__xattr_names(path)
+    rt.xattr_names(path)
 }
 
 /// One extended-attribute value, or None when absent.
 extended_attribute: fn(path: String, name: String) -[FS.Read]> [U8]? IOError! {
-    core.files.__xattr_get(path, name)
+    rt.xattr_get(path, name)
 }
 
 /// Write one extended-attribute value on `path` itself.
 /// Windows and file systems without attributes report `IOError.Unsupported`.
 set_extended_attribute: fn(path: String, name: String, value: [U8]) -[FS.Write]> IOError! {
-    core.files.__xattr_set(path, name, value)
+    rt.xattr_set(path, name, value)
 }
 
 io_err: fn(operation: String, path: String, message: String) -> IOError Never! {
@@ -1011,7 +1010,7 @@ file_fault: fn(operation_path: String, operation: IOOperation, path: String) IOE
 read_probe_fault: fn() -> Bool Never! { rt.fault_should_fail("FS.Read") }
 
 file_writer_refusal: fn(path: String) -[FS.Write]> IOError! {
-    if core.files.__writer_refusal(path) == {
+    if rt.writer_refusal(path) == {
         .None -> {}
         .Val(error) -> return Err(error)
     }
@@ -1041,7 +1040,7 @@ read_or: fn(path: Path | String, fallback: String) -[FS.Read]> String Never! {
 map: fn(path: Path | String) -[FS.Read]> MappedFile IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    core.files.__map_raw(text)
+    rt.map_raw(text)
 }
 
 write: fn(path: Path | String, text: String) -[FS.Write]> IOError! {
@@ -1077,12 +1076,12 @@ write_atomic: fn(path: Path | String, bytes: [U8]) -[FS.Write]> IOError! {
         .Val(extent) -> if extent.end == extent.start -> host_path.from_text(".", platform) else -> host_path.owned_span(target, extent)
     }
     parent_text: String.from_bytes(parent.encoded) ?? panic("UTF-8 path span")
-    pid: core.files.__atomic_pid()
+    pid: rt.atomic_pid()
     loop sequence in 0..<128 {
         candidate := parent.copy()
         host_path.push(candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
         candidate_text: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
-        if core.files.__atomic_reserve(destination, candidate_text) == {
+        if rt.atomic_reserve(destination, candidate_text) == {
             .Err(error) -> {
                 if error == {
                     .AlreadyExists(_) -> {}
@@ -1092,23 +1091,23 @@ write_atomic: fn(path: Path | String, bytes: [U8]) -[FS.Write]> IOError! {
                 }
             }
             .Ok(handle) -> {
-                if core.files.__atomic_finish(handle, bytes, destination, candidate_text) == {
+                if rt.atomic_finish(handle, bytes, destination, candidate_text) == {
                     .Err(error) -> {
-                        _: core.files.__atomic_remove(candidate_text)
-                        core.files.__atomic_close(handle)
+                        _: rt.atomic_remove(candidate_text)
+                        rt.atomic_close(handle)
                         return Err(error)
                     }
                     .Ok(_) -> {}
                 }
-                core.files.__atomic_close(handle)
-                if core.files.__atomic_rename(candidate_text, destination) == {
+                rt.atomic_close(handle)
+                if rt.atomic_rename(candidate_text, destination) == {
                     .Err(error) -> {
-                        _: core.files.__atomic_remove(candidate_text)
+                        _: rt.atomic_remove(candidate_text)
                         return Err(error)
                     }
                     .Ok(_) -> {}
                 }
-                return core.files.__atomic_sync_parent(parent_text, destination)
+                return rt.atomic_sync_parent(parent_text, destination)
             }
         }
     }
@@ -1156,7 +1155,7 @@ sync_filesystem: fn(path: Path | String) -[FS.Write]> IOError! {
 space: fn(path: Path | String) -[FS.Read]> DiskSpace IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
-    row: core.files.__space(text)
+    row: rt.space(text)
     Ok(DiskSpace{total: row[0], free: row[1], available: row[2]})
 }
 
@@ -1209,7 +1208,7 @@ priv access_codes: module {
 
 // A final link is followed, so a broken link does not exist; `lexists` sees the link itself.
 exists_impl: fn(path: String) -> Bool Never! {
-    row: core.files.__stat_at(-1, path, true) ?? return false
+    row: rt.stat_at(-1, path, true) ?? return false
     row[0] >= 0
 }
 
@@ -1224,7 +1223,7 @@ exists: fn(path: Path | String) -[FS]> Bool Never! {
 is_dir: fn(path: Path | String) -[FS.Read]> Bool Never! {
     if read_probe_fault() -> return false
     text: path_text(path)
-    core.files.__metadata_directory(text) ?? false
+    rt.metadata_directory(text) ?? false
 }
 
 /// Describe `path`. By default a final symbolic link is described itself;
@@ -1245,7 +1244,7 @@ stat: fn(path: Path | String, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError
         )
     }
     follow: links == .Val(.Follow)
-    info: stat_from_row(core.files.__stat_at(-1, text, follow))
+    info: stat_from_row(rt.stat_at(-1, text, follow))
     if links == .Val(.Refuse) && info.is_symlink {
         return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(text), os_code: None, cause: Val("path ends in a symbolic link")}))
     }
@@ -1489,9 +1488,9 @@ resolve: fn(path: String) -[FS, Env]> String IOError! {
 
 absolute: fn(path: Path | String) -[FS, Env]> String IOError! {
     text: path_text(path)
-    if __host_path_is_absolute(text.copy()) -> return Ok(text)
+    if rt.host_path_is_absolute(text.copy()) -> return Ok(text)
     cwd: sys.current_dir()
-    Ok(__host_path_join(cwd, text))
+    Ok(rt.host_path_join(cwd, text))
 }
 
 temp_prefix: fn(prefix: String) -> String Never! {
@@ -1507,10 +1506,10 @@ temp_prefix: fn(prefix: String) -> String Never! {
 
 mktemp: fn(prefix: String) -[FS, Env, Time]> String Never! {
     clean: temp_prefix(prefix)
-    row: __temp_path_sample()
+    row: rt.temp_path_sample()
     nanos: if row.clock_available -> row.nanos else -> "0"
     pid: sys.getpid()
-    __host_path_join(__temp_directory(), "{clean}_{pid}_{nanos}")
+    rt.host_path_join(rt.temp_directory(), "{clean}_{pid}_{nanos}")
 }
 
 #Test("temporary path prefixes replace each non-ASCII scalar once") {
@@ -1601,7 +1600,7 @@ remove_dir: fn(path: Path | String) -[FS.Write]> IOError! {
 remove_all: fn(path: Path | String) -[FS]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
-    directory: core.files.__metadata_directory(text) ?? false
+    directory: rt.metadata_directory(text) ?? false
     rt.remove_all_raw(text, directory)
 }
 
@@ -1665,7 +1664,7 @@ entries_copy_tree: fn(context: Int, directory: Int, resource: String) -[FS]> IOE
 /// and `.Swap` exchanges the two names in one step (both must exist).
 /// Follow with `fsync(dirname(to))` to make the rename durable.
 rename: fn(from: Path | String, to: Path | String, if_exists: RenameIfExists{.Replace}) -[FS.Write]> IOError! {
-    core.files.__rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
+    rt.rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
 }
 
 /// Create `link` as a symbolic link naming `original`. The link text is stored
@@ -2326,10 +2325,10 @@ mkdtemp: fn(prefix: String) -[FS]> String IOError! {
 
 files_temp_path: fn(prefix: String) -[FS]> String Never! {
     clean: temp_prefix(prefix)
-    clock: core.files.__temp_clock_raw()
+    clock: rt.temp_clock_raw()
     nanos: if clock.clock_available -> clock.nanos else -> "0"
     pid: rt.process_id_raw()
-    __host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+    rt.host_path_join(rt.temp_directory_raw(), "{clean}_{pid}_{nanos}")
 }
 
 temp_file: fn(prefix: String) -[FS]> TempFile IOError! {
@@ -2532,7 +2531,7 @@ is_absolute: fn(path: String) -> Bool Never! { is_abs(path) }
 // file is a file. A PATH search relies on this, since package managers install
 // tools as links.
 is_file_impl: fn(path: String) -> Bool Never! {
-    row: core.files.__stat_at(-1, path, true) ?? return false
+    row: rt.stat_at(-1, path, true) ?? return false
     row[0] == 0
 }
 
@@ -2543,7 +2542,7 @@ is_file: fn(path: String) -[FS]> Bool Never! {
 
 is_symlink: fn(path: String) -[FS]> Bool Never! {
     if read_probe_fault() -> return false
-    row: core.files.__stat_at(-1, path, false) ?? return false
+    row: rt.stat_at(-1, path, false) ?? return false
     row[0] == 2
 }
 
@@ -2722,7 +2721,7 @@ getsize: fn(path: String) -[FS]> Int IOError! {
 
 getmtime: fn(path: String) -[FS]> Int IOError! {
     file_fault("FS.Read", .Read, path)
-    row: core.files.__stat_at(-1, path, false)
+    row: rt.stat_at(-1, path, false)
     Ok(row[9] /% 1000000)
 }
 
@@ -2899,7 +2898,7 @@ cd: fn(path: String) -[FS, Env]> IOError! { sys.set_current_dir(path) }
 }
 
 file_path_platform: fn() -> host_path.PathPlatform Never! {
-    if core.files.__path_windows() -> .Windows else -> .Unix
+    if rt.path_windows() -> .Windows else -> .Unix
 }
 
 scope_denied: fn(path: String) -> IOError Never! {

@@ -135,11 +135,9 @@ queue: fn() -[DB, Env, FS, Rand, Time]> JobQueue ServiceError! {
     name: "default"
     queue_validate_text(name, "job queue", 256, false) ?? return Err(err)
     path: queue_default_path()
-    #Unsafe("queue preflight reads final-component metadata without following a symlink; metadata failures are ignored exactly as the SQLite provider does") {
-        if core.files.__path_kind(path) == .Ok(kind) {
-            if kind != 0 {
-                return Err(ServiceError.Policy("queue SQLite path must be a regular file, not a symlink"))
-            }
+    if files_rt.path_kind(path) == .Ok(kind) {
+        if kind != 0 {
+            return Err(ServiceError.Policy("queue SQLite path must be a regular file, not a symlink"))
         }
     }
     files_rt.create_dir_all_raw(files.dirname(path)) ?? return Err(queue_mkdir_error(err))

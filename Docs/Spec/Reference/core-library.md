@@ -140,8 +140,9 @@ The `jet.runtime.files.create_dir_all_raw` leaf calls the shared recursive
 directory-creation host operation without a second fault probe; source callers
 retain their own FS.Write preflight and the host's Write/path error context.
 Whole-file and positioned reads and writes, link reads, removal, copy, links,
-mode and owner changes, canonicalization, access checks, and the reader,
-writer, and map handle operations call their `jet.runtime.files` leaves
+mode and owner changes, canonicalization, access checks, the reader, writer,
+map and held-directory handle operations, extended attributes, atomic writes,
+temporary paths and host path facts call their `jet.runtime.files` leaves
 directly. The remaining filesystem host calls use their canonical
 `core.files.__*` names. There is no second `__files7_*` alias layer: the
 Prelude's existing registry entries provide that raw host boundary until Jet

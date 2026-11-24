@@ -258,7 +258,7 @@ jetc_temp: fn(parent: JetcParent, prefix: String) -> JetcTemp FileCryptoError! {
         if jetc_stat(file, .DestinationIO).nlink != 0 -> return Err(.DestinationIO)
         return Ok(JetcTemp{file: file.move(), path: None})
     }
-    pid: core.files.__atomic_pid()
+    pid: rt.atomic_pid()
     loop attempt in 0..<128 {
         sequence: parent.directory.fd * 128 + attempt
         name: ".{prefix}-{pid}-{sequence}"
@@ -467,7 +467,7 @@ jetc_random: fn(length: Int) -[Rand]> [U8] FileCryptoError! {
 }
 
 jetc_exists_errno: fn(errno: Int) -> Bool Never! {
-    errno == 17 || (core.files.__path_windows() && (errno == 80 || errno == 183))
+    errno == 17 || (rt.path_windows() && (errno == 80 || errno == 183))
 }
 
 jetc_cancel_checkpoint: fn() FileCryptoError! {
@@ -509,7 +509,7 @@ jetc_verify_output: fn(input: JetcFd, writer: &&jetc.Writer, length: Int) FileCr
 }
 
 #Test("JETC2 never overwrites destinations and removes unauthenticated outputs") {
-    if rt.os_family() == "unix" && !core.files.__path_windows() {
+    if rt.os_family() == "unix" && !rt.path_windows() {
         root: core.files.mktemp("jetc-source-contract")
         core.files.create_dir_all(root) ?? panic("create directory")
         source: Path.from(join(root, "source"))

@@ -486,12 +486,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
     }
     if module_name == {
-        "core.files" -> if member == {
-            "__temp_path_sample" -> Val("Time")
-            "__temp_directory" -> Val("Env")
-            "__host_path_is_absolute" | "__host_path_join" | "__path_windows" | "__atomic_pid" -> None
-            else -> Val("FS")
-        }
+        "core.files" -> Val("FS")
         "core.log" -> Val("Log")
         // core.web's OpenAPI helpers: in-process state (Core/Web/Web.jet), not a
         // browser API.
@@ -632,10 +627,10 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.files" -> if member == {
-            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__reader_line_bytes" | "__open_reader_raw" | "__open_directory" | "__close_directory" | "__list_directory" | "__stat_at" | "__path_kind" | "__read_link_at" | "__space" | "__xattr_names" | "__xattr_get" | "__metadata_directory" | "__directory_fd" | "__lock_fd" | "__map_raw" | "__list_dir_raw" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
+            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space" | "can_read" | "can_write" | "can_execute" | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute" | "__reader_line_bytes" | "__open_reader_raw" | "__list_directory" | "__directory_fd" | "__list_dir_raw" | "__walk_parallel_raw" | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
             // #3593 provider leaves behind Core/Files/files.jet.
             // The compiler-private non-blocking open only reads (RawHostKeys.jet).
-            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "__writer_refusal" | "__atomic_reserve" | "__atomic_finish" | "__atomic_remove" | "__atomic_rename" | "__atomic_sync_parent" | "__atomic_close" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__create_directory" | "__fsync_directory" | "__rename_at" | "__remove_at" | "__xattr_set" | "__flock" | "__open_writer_raw" | "__remove_at_raw" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
+            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove" | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown" | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__open_writer_raw" | "__remove_at_raw" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw" | "try_lock" -> Val("FS.Write")
             else -> None
         }
         "core.term" -> if member == {
