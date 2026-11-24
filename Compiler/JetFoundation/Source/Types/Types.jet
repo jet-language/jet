@@ -994,17 +994,18 @@ symbol_key_rows_intern: fn(rows: ^SymbolKeyRows, key: String) -> Int Never! {
 // (JET_TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
 SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender", "Event", "Hook", "DecisionHook", "AsyncEvent", "DispatchReport", "EventScope", "Subscription", "EventTrace"}
 
-SYMBOL_BUILTIN_TYPES_CHECKED: #run symbol_builtin_types_checked(SYMBOL_BUILTIN_TYPES, JET_TYPE_NAMES)
+SYMBOL_BUILTIN_TYPES_CHECKED: #run type_names_view_checked("SYMBOL_BUILTIN_TYPES", SYMBOL_BUILTIN_TYPES, JET_TYPE_NAMES)
 
-// The number of names in `view` (SYMBOL_BUILTIN_TYPES), once each is one of
-// `vocabulary`; else the build stops naming the strays.
-symbol_builtin_types_checked: fn(view: [String], vocabulary: [String]) -> Int {
+// The number of names in `view`, the subset view `view_name` of the built-in
+// type catalog, once each is one of `vocabulary` (JET_TYPE_NAMES); else the
+// build stops naming the strays.
+type_names_view_checked: fn(view_name: String, view: [String], vocabulary: [String]) -> Int {
     strays := [String]{}
     loop name in view {
         if !vocabulary.contains(name) -> strays.push(name.copy())
     }
     if strays.len() > 0 {
-        panic("SYMBOL_BUILTIN_TYPES names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
+        panic("{view_name} names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
     }
     view.len()
 }
