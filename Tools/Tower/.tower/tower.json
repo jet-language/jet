@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 7000,
-    "rev": 113940,
+    "rev": 113945,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58084,6 +58084,16 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "ContextOnStop o2 (batch 29 and 30 golden): it passes at o0, o1 and o2 in isolation on the batch 30 compiler (jet test Compiler --profile golden --filter=ContextOnStop, 3/3) and in two standalone jet builds. It fails only under the full suite's load, where the native compile-time run of core.files ReadOnlyHandle's marker check (Core/Files/Files.jet:427) returns no result and the compiler reports it as the user diagnostic Jet.InvalidStatement ('returned neither a value nor an explicit control result'). A compile-time child that ends without a result is a compiler or host failure, not a user error: under I2 it must not reach the user as a diagnostic. Open: find why the child returns empty under load (resource limit, timeout or crash) and report that cause instead."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Defects found while fixing the batch 29 regressions (G1Generation-2): (a) a marker rule declared in one module never hears calls from another: Core's StaticRoutes rule never sees App calls, so c37-b-r2's move of compile-time Jet.AmbiguousRoute into Core lost 6 UI snapshots. 6851-c37-b-fix reverts it and rides batch 31; c37-b re-lands once (a) is fixed. (b) An unhandled '(E | WebFormError)!' from FieldRef validate is reported as 'Jet.MissingDisplay: Never has no Display implementation' at the wrong span instead of an unhandled-failure diagnostic. 6851-c38-fix (dev 57dc273725) handles the failure in Examples/Apps/Web/JetWeb/run.jet; the sema misreport stays open."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "Batch 29 regression, L0517 (Tests/UILint/path_containment_string_prefix.jet emits no lint): c5-stream-b5 moved Path's methods into Core (impl Path in Core/Files/Files.jet) and rewrote sema_stmt_note_normalized_path_text (Statements.jet) to match a TExprKind .MethodCall named to_string over a .MethodCall named normalize, with receiver.ty == Type.Named{name: \"Path\"}. Under the batch 29 compiler the binding is never marked, so the Core inherent call is checked into another shape (kind or receiver type). The types display as Path. Next step: dump the checked kind of b.normalize() and match it there. The c5 stream's author is no longer running, so the orchestrator holds this."
         },
         {
@@ -58660,7 +58670,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T17:53:26.823Z",
+      "updated": "2026-11-24T18:09:35.702Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 39
     },
@@ -76424,6 +76434,21 @@
         {
           "at": "2026-11-24",
           "by": "Orchestrator",
+          "text": "Batch 31 launched on dev c658877b99 with 15 commits: C-b2 headers; L0517 path lint (#6851); B reach-stale-routes-r3; A-sweep, A-mangle, A-docs, A-retired and A-sweep-hand (rust_era 2,623 -> 92 rows); E-context-cutover (556 JetSema signatures take check: ^SemaBodyCheck); B dead-row-sweep (29 dead Core rows); F push loops (Tools/Agent/PushLoopSweep.jet, 229 sites, swept to a fixed point; every touched package's jet check matches base); G-driver (panic_ratchet 1,391 -> 1,156); c37-b-fix-r2 (#6851; the sema route checker returns on E's form); and regenerated outputs. D-handleop, D-binop and D-cenumtag conflict with E, G and F and move to batch 32, rebased by G1Generation-2. Batch 30 golden and ui: no new failures beyond DeclarationFacts, already fixed on dev 90688b83f8."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "dev c658877b99: closed_lists guard passes again (9/9). Today's landings added 7 hand-written closed lists without a disposition; each now has a kernel row. The Core/Web __AppReply baseline row is gone; CLOSED_LIST_BASELINE 940 -> 937. D follow-up: SEMA_PRECISE_TYPES (PreciseBind.jet) and SEMA_CORE_MATH_F32_SOURCES (Calls/Core.jet) restate core.math facts and should become views derived from core.math's declarations; their kernel rows say so. copy_ratchet is also failing on dev: 14 files over their ceilings from today's LSP, c38, c13 and 6998 landings. It went to TypeIDSlice3-3 as the top F item. In flight: Tools/Agent/PushLoopSweep.jet (F), which turns the four-line push loop into a collecting loop; dry run finds 223 sites in 141 Compiler files, each vetted by jet check on the seed."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
+          "text": "Batch 30 landed on dev (1faf385414; master 22a6ffc7cb): B c18-c/c18-d/sig-value/sig-web, C-b headers, E-split of CheckProgram and Statements, A JetSema comments r2, and the panic ratchet re-seeded at the same 1,391 calls in 222 files. C-b2 (every remaining generated committed source, 75 files, states why it stays committed; Core and runtime Unicode, collation and XKB tables say no build step runs their generator) is queued for batch 31 as 6999-C-b2-headers. Each generator's --check passes, and the RuntimeGenerators (22) and JetpackSyntax (6) tests pass, including two stale tests fixed in it. Examples fixed directly on dev: JetWeb (57dc273725) and DeclarationFacts (90688b83f8, TypeKind is a closed set)."
+        },
+        {
+          "at": "2026-11-24",
+          "by": "Orchestrator",
           "text": "G-ratchet landed on dev at b7c15263e0: Tools/Agent/PanicRatchet.jet and the guard Tests/Guards/panic_ratchet.jet, with a per-file baseline Tests/Guards/panic_ratchet.tsv (1,391 panic or unreachable calls in 213 files of the phase packages; comments and #Test blocks excluded). It only falls. Proof: jet test Tests/Guards --filter=panic_ratchet passed. Remaining G work: convert the calls to keep-going census rows. Batch 30 (building): the batch 30 patches plus B c18-c/d-r2, B-sig-value, B-sig-web, C-b headers (with a fix for RuntimeGenerators' priv __dyn_kind marker, broken on dev since every Core __ item became priv), E-split, dev's H, A-ratchet and C1, and A-comments-JetSema-r2 (JetSema 1000 to 0, repo 3,623 to 2,623). B-reach-stale-routes-r2 was reverted from the batch: dropping core.mem.mapped and core.mem.unmapping from the routes broke the runtime pack (MemoryOperationOutsideUnsafe in Core/Mem/Mem.jet); it went back for -r3."
         },
         {
@@ -76569,7 +76594,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-24T17:01:07.086Z",
-      "updated": "2026-11-24T17:51:42.672Z",
+      "updated": "2026-11-24T18:51:34.644Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 8
     }
@@ -141054,6 +141079,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T18:51:34.644Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T18:35:03.177Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T18:09:35.702Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T18:07:38.449Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0mhrplj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-24T18:03:02.659Z",
+      "by": "Orchestrator",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-24T17:53:26.823Z",
       "by": "Orchestrator",
