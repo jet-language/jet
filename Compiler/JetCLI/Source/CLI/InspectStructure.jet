@@ -3,7 +3,7 @@
 // Core.rows's declarations as the compiler reads them (CORE_DECLARATIONS).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreCallRecord, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_ROWS, core_call_source_member, diagnostic_render_all, name_ledger_from_facts]
+    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreCallRecord, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_TABLE, core_call_source_member, diagnostic_render_all, name_ledger_from_facts]
     jet_parser.[parse_source]
     jet_sema.[sema_gate_append_structure]
 }
@@ -28,11 +28,7 @@ jet_cli_structure_registry: fn(kind: StructureFactKind) -> String Never! {
 
 // The `Structure.*` fact rows of the registration table, in table order.
 jet_cli_structure_rows: fn() -> [RegistrationFactRow] Never! {
-    rows := [RegistrationFactRow]{}
-    loop row in REGISTRATION_ROWS {
-        if row == .Fact(fact) && fact.name.starts_with("Structure.") -> rows.push(fact)
-    }
-    rows
+    loop row in REGISTRATION_TABLE.facts if row.name.starts_with("Structure.") -> row
 }
 
 jet_cli_structure_span: fn(span: Span) -> JetCLIStatusValue Never! {

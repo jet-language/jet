@@ -1,7 +1,7 @@
 use frt_files: core.files
 
 // One registration table (D-META-REG1=A): marker rules, knowledge planes,
-// rights and build facts are rows of JetFoundation's REGISTRATION_ROWS, told
+// rights and build facts are rows of JetFoundation's REGISTRATION_TABLE, told
 // apart by what each attaches to. A module constant anywhere else that holds
 // marker rule rows or fact plane rows (a literal of either row type, or a
 // `#run` of a reader of either Prelude text or a projection of the table) is
@@ -13,14 +13,14 @@ FRT_SKIPPED: [String]{"target", "node_modules"}
 FRT_HOME: "Compiler/JetFoundation/Source/Registry/RegistrationFacts.jet"
 
 // The one constant, as its home spells it.
-FRT_TABLE: "REGISTRATION_ROWS: #run registration_read(MARKER_SOURCE, FACT_SOURCE)"
+FRT_TABLE: "REGISTRATION_TABLE: #run registration_read(MARKER_SOURCE, FACT_SOURCE)"
 
 // What a second table's initializer would spell: a row-list literal, a
 // reader of a Prelude registration text, or a projection of the table.
 FRT_TABLE_SPELLINGS: [String]{
     "[TAppliedRule]{{",
     "[RegistrationFactRow]{{",
-    "[RegistrationRow]{{",
+    "RegistrationTable{{",
     "marker_source_read(",
     "fact_source_read(",
     "registration_read(",
@@ -87,6 +87,6 @@ frt_tables: fn(path: String, out: &[String]) -[FS]> {
     // The matcher sees module constants only.
     assert(frt_constant("MARKER_RULES: #run marker_source_read(MARKER_SOURCE)"))
     assert(!frt_constant("    rules: marker_source_read(MARKER_SOURCE)"))
-    assert(!frt_constant("registration_read: fn(markers: String, facts: String) -> [RegistrationRow] Never! {{"))
+    assert(!frt_constant("registration_read: fn(markers: String, facts: String) -> RegistrationTable Never! {{"))
     assert(!frt_constant("// MARKER_RULES: a comment"))
 }

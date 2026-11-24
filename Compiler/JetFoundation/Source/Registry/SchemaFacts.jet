@@ -1,5 +1,5 @@
 // The toolchain's executable schema as fact rows: its marker rules (the
-// marker rows of the registration table, REGISTRATION_ROWS) and its typed
+// marker rows of the registration table, REGISTRATION_TABLE) and its typed
 // fact reads (FOUNDATION_FACT_READ_ROWS), in that canonical order. This is
 // the one reader of those registries for fact queries: `compiler.schema()`
 // (JetDriver ComptimeCompiler.jet) issues these rows as a
@@ -43,10 +43,8 @@ CORE_COMPILER_SCOPE_ID: "<corelib>/core.compiler.ScopeID"
 // each readable `$` member with its planes.
 schema_fact_rows: fn() -> [SchemaFactRow] Never! {
     rows := [SchemaFactRow]{}
-    loop row in REGISTRATION_ROWS {
-        if row == .Marker(rule) {
-            rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_MARKER, name: rule.name.copy(), scope: rule.sites.copy()})
-        }
+    loop rule in REGISTRATION_TABLE.markers {
+        rows.push(SchemaFactRow{kind: SCHEMA_FACT_KIND_MARKER, name: rule.name.copy(), scope: rule.sites.copy()})
     }
     loop row in FOUNDATION_FACT_READ_ROWS {
         if row.member == .Val(member) {
