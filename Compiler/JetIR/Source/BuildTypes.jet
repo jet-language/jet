@@ -2076,7 +2076,7 @@ ir_render_has_display: fn(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slo
 // owner is the value's nominal type, checked as a TraitMethod or, when Debug
 // does not resolve in the implementing module, as the owner's plain Method).
 ir_render_debug_impl: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, slot: Int) -> Int Never! {
-    debug_impls: ir_trait_method_slot(p.trait_methods, "Debug|debug")
+    debug_impls: ir_trait_method_slot(p.trait_methods, "Debug", "debug")
     if debug_impls == 0 -> return -1
     candidates: p.trait_methods.rows[debug_impls]
     receiver_ty: ir_row_ty(m, p, b.f.slot_type[slot])
@@ -4869,7 +4869,7 @@ ir_print_style_method: fn(name: String) -> Bool Never! {
 // trait among the bound implementations, or -1 when none is lowered.
 ir_print_style_impl: fn(p: IRProgram, selector: String, owner: Type) -> Int Never! {
     style: str_selector_style(selector)
-    slot: ir_trait_method_slot(p.trait_methods, "{style.trait_name}|{style.method}")
+    slot: ir_trait_method_slot(p.trait_methods, style.trait_name, style.method)
     if slot == 0 -> return -1
     loop row in p.trait_methods.rows[slot] {
         if ir_print_style_impl_of(p.functions[row], selector, owner) && ir_function_row(p, p.functions[row].key) == (Val(row)) {

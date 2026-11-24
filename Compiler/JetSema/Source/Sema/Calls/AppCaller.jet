@@ -20,7 +20,7 @@ use jet_foundation.[
     body_each_stmt_child,
     body_node,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     module_is_core,
     symbol_find,
@@ -292,7 +292,7 @@ sema_app_caller_scans: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModul
     task.group sema_app_caller_scan_threads {
         head: task sema_app_caller_scan(graph, modules, places, from, to, caller, read)
         rest: sema_app_caller_scans(graph, modules, places, bounds, at + 1, caller, read)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

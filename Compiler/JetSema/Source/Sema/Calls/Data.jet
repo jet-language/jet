@@ -834,7 +834,10 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                 route: sema_call_core_resolve_route(environment, program, "core.testing", "__suite_run", [Type]{}, 2, false, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
                 target: if route == {
                     .Source(source) -> source
-                    .Core(_) | .SharedSite(_) -> panic("Test.suite must resolve its canonical Jet source body")
+                    .Core(_) | .SharedSite(_) -> {
+                        check.context.incomplete_reasons.push("Test.suite must resolve its canonical Jet source body")
+                        return SemaMethodSpecialCheck{handled: true, value: None}
+                    }
                 }
                 // `fn(TestRows)`, as `__suite_run` declares its body.
                 rows_type: if target.signature == .Fn(params, _, _, _, _, _) && params.len() == 2 -> params[1].copy() else -> panic("core.testing.__suite_run must take a name and a body")

@@ -20,7 +20,7 @@ use jet_foundation.[
     body_node,
     body_stmt,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_single,
     compiler_transfer_rows,
     decl_table_find_symbol,
@@ -105,7 +105,7 @@ jet_driver_recursion_must_threads: fn(functions: [FnBody], bodies: [Int?], decls
     task.group driver_recursion_must {
         head: task jet_driver_recursion_must_range(functions, bodies, decls, groups, cyclic, starts[at], ends[at])
         rest := jet_driver_recursion_must_threads(functions, bodies, decls, groups, cyclic, starts, ends, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         compiler_transfer_rows<JetDriverRecursionMustPart>(out, rest)
     }
     out

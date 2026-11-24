@@ -13,7 +13,7 @@ use jet_foundation.[
     Span,
     SymbolKind,
     Type,
-    diagnostic_registry_row,
+    diagnostic_registry_row_of,
     expr_span,
 ]
 
@@ -236,13 +236,13 @@ sema_field_error_fields_text: fn(graph: SemaRegistrationGraph, rows: [SemaRegist
 
 // E2813: `path` names no field the path can reach from `rows`.
 sema_field_error_unknown: fn(graph: SemaRegistrationGraph, path: String, rows: [SemaRegistrationRowRef], span: Span) -> Diagnostic {
-    entry: diagnostic_registry_row(SEMA_FIELD_ERROR_CODE) ?? panic("E2813 must have a registry row")
+    entry: diagnostic_registry_row_of(SEMA_FIELD_ERROR_CODE)
     sema_error(SEMA_FIELD_ERROR_CODE, span, entry.what.replace("{{path}}", path), entry.why, entry.fix.replace("{{fields}}", sema_field_error_fields_text(graph, rows)))
 }
 
 // E2813 for an `at:` path computed at run time beyond a `[…]` index, which
 // no check can place.
 sema_field_error_computed: fn(graph: SemaRegistrationGraph, rows: [SemaRegistrationRowRef], span: Span) -> Diagnostic {
-    entry: diagnostic_registry_row(SEMA_FIELD_ERROR_CODE) ?? panic("E2813 must have a registry row")
+    entry: diagnostic_registry_row_of(SEMA_FIELD_ERROR_CODE)
     sema_error(SEMA_FIELD_ERROR_CODE, span, "`app.field_error` takes an `at:` path computed beyond a `[…]` index, which names no field the compiler can check.", entry.why, entry.fix.replace("{{fields}}", sema_field_error_fields_text(graph, rows)))
 }

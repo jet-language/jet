@@ -1,5 +1,5 @@
 use {
-    jet_foundation.[CompilerThreads, Item, ModuleID, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
+    jet_foundation.[CompilerThreads, Item, ModuleID, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_joined, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
     jet_parser.[parse_generated_source]
 }
 
@@ -270,7 +270,7 @@ sema_units_scanners: fn(shared_state: Shared<SemaUnitsScanShared>, queue: SemaUn
     task.group sema_units_scan_threads {
         head: task sema_units_scan_claimed(shared_state, queue)
         sema_units_scanners(shared_state, queue, from + 1, workers, rows)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
             rows[done.module_index] = done.mentions.move()

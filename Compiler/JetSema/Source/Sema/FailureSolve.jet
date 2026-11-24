@@ -16,7 +16,7 @@ use jet_foundation.[
     SymbolKind,
     Type,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     symbol_find,
     symbol_is_local,
@@ -121,7 +121,7 @@ sema_failure_candidate_parts: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     task.group sema_failure_candidate_threads {
         head: task sema_failure_candidate_part(graph, modules, address_taken, bounds[at], bounds[at + 1])
         rest: sema_failure_candidate_parts(graph, modules, address_taken, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

@@ -41,7 +41,7 @@
 // it at link time and the library's calls reach the program's definition.
 use {
     core.collections.[Rows]
-    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
+    jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
 }
 
 ELF64_SECTION_HEADER_SIZE: 64
@@ -452,7 +452,7 @@ x64_object_text_parts: fn(inputs: Shared<X64ObjectTextShared>, parts: [Shared<X6
     task.group x64_object_text_threads {
         head: task x64_object_text_part(inputs, parts[from])
         built = x64_object_text_parts(inputs, parts, from + 1)
-        built += head.join() ?? panic(compiler_threads_failure_text(err))
+        built += compiler_threads_joined(head)
     }
     built
 }
@@ -476,7 +476,7 @@ x64_object_text_finalize_items: fn(items: ^^[X64ObjectTextFinalize]) -> [X64Obje
     task.group x64_object_text_finalize_threads {
         done_head: task x64_object_text_finalize_one(head)
         rest := x64_object_text_finalize_items(owned)
-        first: done_head.join() ?? panic(compiler_threads_failure_text(err))
+        first: compiler_threads_joined(done_head)
         out.push(first)
         loop row in rest.move() -> out.push(row)
     }
@@ -532,7 +532,7 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     runtime_symbols: reads.value.runtime_symbols
     rt_local_of := [Int]{}
     if runtime_symbols.len() > 0 {
-        rt_local_of.try_reserve(runtime_symbols.len()) ?? panic("reserve failed")
+        rt_local_of.try_reserve(runtime_symbols.len()) ?? ()
         loop _ in 0..<runtime_symbols.len() -> rt_local_of.push(-1)
     }
     own: function_symbols.len() > 0
@@ -541,7 +541,7 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     if !own && start < end {
         part_base = reads.value.offsets[start]
         part_len: reads.value.offsets[end - 1] + reads.value.sizes[end - 1] - part_base
-        if part_len > 0 -> merged_text.try_reserve(part_len) ?? panic("reserve failed")
+        if part_len > 0 -> merged_text.try_reserve(part_len) ?? ()
     }
     loop index in start..<end {
         offset: reads.value.offsets[index]
@@ -658,16 +658,16 @@ x64_object_take_codes: fn(functions: ^[X64CompiledFunction]) -> [[U8]] Never! {
     count: functions.len()
     codes := [[U8]]{}
     kept := [X64CompiledFunction]{}
-    codes.try_reserve(count) ?? panic("reserve failed")
-    kept.try_reserve(count) ?? panic("reserve failed")
-    loop functions.len() > 0 {
-        function := functions.pop() ?? panic("a nonempty function list failed to pop")
+    codes.try_reserve(count) ?? ()
+    kept.try_reserve(count) ?? ()
+    loop {
+        function := functions.pop() ?? break
         codes.push(function.code.move())
         function.code = [U8]{}
         kept.push(function)
     }
-    loop kept.len() > 0 {
-        function: kept.pop() ?? panic("a nonempty function list failed to pop")
+    loop {
+        function: kept.pop() ?? break
         functions.push(function)
     }
     codes.reverse()
@@ -734,7 +734,7 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: ^[Bool], order: ^[I
 // run reads its data from few pages, with no stop's report between them.
 x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], data_rows: [Int], placed: ^[Bool]) -> [Int] Never! {
     order := [Int]{}
-    order.try_reserve(data.len()) ?? panic("reserve failed")
+    order.try_reserve(data.len()) ?? ()
     cold_refs := [Int]{}
     data_len: data.len()
     loop function in functions {
@@ -1013,7 +1013,7 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
             task.group x64_object_dwarf_thread {
                 dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
                 laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
-                dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
+                dwarf_rows.push(compiler_threads_joined(dwarfing))
             }
         }
         else -> {
@@ -1021,8 +1021,8 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
                 zoning: task x64_object_zone_spans(functions, offsets, false)
                 dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
                 laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
-                dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
-                zone_spans = zoning.join() ?? panic(compiler_threads_failure_text(err))
+                dwarf_rows.push(compiler_threads_joined(dwarfing))
+                zone_spans = compiler_threads_joined(zoning)
             }
         }
     }
@@ -1048,9 +1048,9 @@ x64_object_functions_threads: fn(program: ^^X64ObjectModule, compiled: ^^[X64Com
         drop_dbg: task x64_object_drop(released, 1)
         drop_prog: task x64_object_drop(released, 2)
         files.push(x64_object_file_assembled(dwarf, laid.text, text_align, laid.data, laid.data_align, laid.rodata, laid.rodata_align, laid.rela_text, laid.symtab, laid.xindex, laid.strtab, laid.first_global, laid.data_relas, exports, guard_sections, laid.own, zone_spans, true, split))
-        _: drop_fns.join() ?? panic(compiler_threads_failure_text(err))
-        _: drop_dbg.join() ?? panic(compiler_threads_failure_text(err))
-        _: drop_prog.join() ?? panic(compiler_threads_failure_text(err))
+        _: compiler_threads_joined(drop_fns)
+        _: compiler_threads_joined(drop_dbg)
+        _: compiler_threads_joined(drop_prog)
     }
     assembled := files.pop() ?? panic("the object writer lost its file")
     assembled.imports = laid.imports.move()
@@ -1113,11 +1113,11 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     rodata_align := 1
     data_count: program.data.len()
     data_offsets := [Int]{}
-    data_offsets.try_reserve(data_count) ?? panic("reserve failed")
+    data_offsets.try_reserve(data_count) ?? ()
     loop _ in program.data -> data_offsets.push(0)
     placed := [Bool]{}
     if !own_sections {
-        placed.try_reserve(data_count) ?? panic("reserve failed")
+        placed.try_reserve(data_count) ?? ()
         loop _ in program.data -> placed.push(false)
         order: x64_object_data_order(program.data, functions, data_rows, placed)
         rodata_est := 0
@@ -1128,8 +1128,8 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
                 rodata_est += program.data[index].bytes.len() + align
             } else { data_est += program.data[index].bytes.len() + align }
         }
-        if rodata_est > 0 -> rodata.try_reserve(rodata_est) ?? panic("reserve failed")
-        if data_est > 0 -> data.try_reserve(data_est) ?? panic("reserve failed")
+        if rodata_est > 0 -> rodata.try_reserve(rodata_est) ?? ()
+        if data_est > 0 -> data.try_reserve(data_est) ?? ()
         loop index in order {
             align: program.data[index].align
             if x64_object_read_only(program.data[index]) {
@@ -1259,7 +1259,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         mine := [[U8]]{}
         if own_sections {
             loop codes.len() > bounds[part] {
-                code: codes.pop() ?? panic("the object writer lost a function's code")
+                code: codes.pop() ?? break
                 mine.push(code)
             }
             mine.reverse()
@@ -1454,7 +1454,7 @@ x64_object_release_programs: fn(released: Shared<X64ObjectReleased>) -> [X64Obje
 x64_object_encode_relas: fn(relas: [X64ObjectRela]) -> [U8] Never! {
     out := [U8]{}
     if relas.len() > 0 {
-        out.try_reserve(ELF64_RELA_SIZE * relas.len()) ?? panic("reserve failed")
+        out.try_reserve(ELF64_RELA_SIZE * relas.len()) ?? ()
         loop row in relas -> x64_object_rela_put(out, row.at, row.symbol, row.kind, row.addend)
     }
     out
@@ -1478,7 +1478,7 @@ x64_object_materialize_one: fn(section: ^^X64ObjectSection) -> [U8] Never! {
     }
     size: x64_object_section_size(s)
     out := [U8]{}
-    if size > 0 -> out.try_reserve(size) ?? panic("reserve failed")
+    if size > 0 -> out.try_reserve(size) ?? ()
     x64_object_section_write(out, 0, s)
     out
 }
@@ -1492,7 +1492,7 @@ x64_object_materialize_parallel: fn(items: ^^[X64ObjectSection]) -> [[U8]] Never
     task.group x64_object_materialize_threads {
         done_head: task ^^head { x64_object_materialize_one(head) }
         rest := x64_object_materialize_parallel(owned)
-        first: done_head.join() ?? panic(compiler_threads_failure_text(err))
+        first: compiler_threads_joined(done_head)
         out.push(first)
         loop row in rest.move() -> out.push(row)
     }
@@ -1522,7 +1522,7 @@ x64_object_split_flatten: fn(header: ^^[U8], split_bufs: [[U8]], split_sec_buf: 
     loop end % 8 != 0 -> end += 1
     new_shoff: end
     out := [U8]{}
-    out.try_reserve(new_shoff + ELF64_SECTION_HEADER_SIZE * count) ?? panic("the object file: {err}")
+    out.try_reserve(new_shoff + ELF64_SECTION_HEADER_SIZE * count) ?? ()
     out.extend(header[0..<ELF64_HEADER_SIZE])
     loop shift in 0..<8 -> out[40 + shift] = U8{(new_shoff >> (8 * shift)) & 255}
     loop k in 1..<count {
@@ -1566,11 +1566,11 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
             t_line: task x64_object_encode_relas(dwarf.line_relas)
             t_jet: task x64_object_encode_relas(dwarf.jet_line_relas)
             b_addr := x64_object_encode_relas(dwarf.addr_relas)
-            b_data := t_data.join() ?? panic(compiler_threads_failure_text(err))
-            b_eh := t_eh.join() ?? panic(compiler_threads_failure_text(err))
-            b_info := t_info.join() ?? panic(compiler_threads_failure_text(err))
-            b_line := t_line.join() ?? panic(compiler_threads_failure_text(err))
-            b_jet := t_jet.join() ?? panic(compiler_threads_failure_text(err))
+            b_data := compiler_threads_joined(t_data)
+            b_eh := compiler_threads_joined(t_eh)
+            b_info := compiler_threads_joined(t_info)
+            b_line := compiler_threads_joined(t_line)
+            b_jet := compiler_threads_joined(t_jet)
             rela_data_sec = x64_object_rela_bytes_section(".rela.data", b_data, ELF64_OBJECT_DATA)
             rela_eh_sec = x64_object_rela_bytes_section(".rela.eh_frame", b_eh, ELF64_OBJECT_EH_FRAME)
             rela_info_sec = x64_object_rela_bytes_section(".rela.debug_info", b_info, ELF64_OBJECT_DEBUG_INFO)
@@ -1754,7 +1754,7 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
         shoff := shstrtab_off + shstrtab_bytes.len()
         loop shoff % 8 != 0 -> shoff += 1
         header := [U8]{}
-        header.try_reserve(shoff + ELF64_SECTION_HEADER_SIZE * count) ?? panic("the object header: {err}")
+        header.try_reserve(shoff + ELF64_SECTION_HEADER_SIZE * count) ?? ()
         ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
         loop byte in ident -> header.push(U8{byte})
         elf64_u16(header, 1)
@@ -1797,7 +1797,7 @@ x64_object_file_assembled: fn(dwarf: X64DwarfSections, text: [X64ObjectPiece], t
     loop end % 8 != 0 -> end += 1
     shoff: end
     bytes := [U8]{}
-    bytes.try_reserve(shoff + ELF64_SECTION_HEADER_SIZE * count) ?? panic("the object file: {err}")
+    bytes.try_reserve(shoff + ELF64_SECTION_HEADER_SIZE * count) ?? ()
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> bytes.push(U8{byte})
     elf64_u16(bytes, 1)

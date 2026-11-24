@@ -359,7 +359,7 @@ ends_statement_at: fn(facts: [Int], index: Int) -> Bool Never! {
 terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
     facts_len: facts.len()
     events := [Int]{}
-    if facts_len > 64 -> events.try_reserve(facts_len /% 8) ?? panic("reserve failed")
+    if facts_len > 64 -> events.try_reserve(facts_len /% 8) ?? ()
     last_code := -1
     index := 0
     loop index * 4 < facts_len {
@@ -456,7 +456,7 @@ terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_i
 lex_with_terminators: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
     tables := token_tables()
     facts := [Int]{}
-    if source.len() > 16 -> facts.try_reserve(source.len()) ?? panic("reserve failed")
+    if source.len() > 16 -> facts.try_reserve(source.len()) ?? ()
     scanned: raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     tables.has_paste = scanned.has_paste
     events: terminator_events(source, facts)

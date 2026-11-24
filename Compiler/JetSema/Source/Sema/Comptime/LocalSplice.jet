@@ -90,7 +90,7 @@ use jet_foundation.[
     Type,
     compiler_take_rows,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     compiler_transfer_rows,
 ]
@@ -607,7 +607,7 @@ sema_local_splice_hold_all: fn(interner: Interner, modules: [SemaGraphModuleResu
     part_index := workers - 1
     loop rows.len() > 0 {
         loop rows.len() <= bounds[part_index] -> part_index -= 1
-        parts[part_index].rows.push(rows.pop() ?? panic("a local value splice lost an owner module's rows"))
+        parts[part_index].rows.push(rows.pop() ?? break)
     }
     done := sema_local_splice_hold_parts(interner, modules, owner_modules, sites, after, into, parts)
     holds := [SemaLocalSpliceHold]{}
@@ -631,7 +631,7 @@ sema_local_splice_hold_parts: fn(interner: Interner, modules: [SemaGraphModuleRe
     task.group sema_local_splice_hold_threads {
         head: task sema_local_splice_hold_part(interner, modules, owner_modules, sites, after, into, last.move())
         done = sema_local_splice_hold_parts(interner, modules, owner_modules, sites, after, into, rest.move())
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
     }
     done
 }

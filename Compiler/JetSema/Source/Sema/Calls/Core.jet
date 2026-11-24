@@ -25,14 +25,12 @@ use jet_foundation.[
     Diagnostic,
     InternalTag,
     EffectRowEntry,
-    EnumLitArg,
     Expr,
     ExprField,
     FunctionDefaultRef,
     NodeKind,
     SharedLifetime,
     Span,
-    StrPart,
     SymbolID,
     SymbolKind,
     TFailureCarrier,
@@ -1368,22 +1366,6 @@ sema_call_core_record_effects_as: fn(record: CoreCallRecord, api: String, span: 
 
 sema_call_core_default_expr: fn(default: CoreCallDefault, span: Span) -> Expr Never! {
     if default == {
-        .Bool(value) -> Expr.Bool{value: value, span: span, id: AST_NODE_GENERATED}
-        .Int(value) -> Expr.Int{value: value, span: span, width: None, raw: Val("{value}"), id: AST_NODE_GENERATED}
-        .Float(value) -> Expr.Float{value: value, span: span, is_f32: false, raw: Val("{value}"), id: AST_NODE_GENERATED}
-        .String(value) -> Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span, id: AST_NODE_GENERATED}
-        .EmptyList -> Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}
-        .Absent -> Expr.Absent{span: span, id: AST_NODE_GENERATED}
-        .StaticCall(type_name, method) -> Expr.Call{
-            call: Call{
-                name: "{type_name}.{method}",
-                name_span: span,
-                type_args: [Type]{},
-                args: [CallArg]{},
-            },
-            id: AST_NODE_GENERATED,
-        }
-        .StaticEnum(type_name, variant) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
         // `{}` against the parameter's type: every field takes its default.
         .FieldDefaults -> Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{}, inferred: true, span: span, id: AST_NODE_GENERATED}
     }
@@ -1410,13 +1392,6 @@ sema_call_core_math_float_type: fn(ty: Type) -> Bool Never! {
 sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     return if constraint == {
         .Any -> true
-        .Integer -> sema_expr_is_integer(ty)
-        .Numeric -> {
-            if sema_expr_is_numeric(ty) || ty == (Type.Named{name: "Complex"}) -> return true
-            if program.registration_graph == .Val(graph) {
-                return sema_type_bound_satisfied_at(graph, ty, "Numeric", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
-            } else { return false }
-        }
         .Floating -> sema_call_core_math_float_type(ty)
         .FloatingOrExact -> sema_call_core_math_float_type(ty) || sema_call_core_math_exact_type(ty)
         .SquareRootInput -> {
@@ -1424,15 +1399,6 @@ sema_call_core_type_constraint_satisfied: fn(constraint: CoreCallTypeConstraint,
                 return true
             }
             return sema_expression_is_float_measurement(ty, environment, program)
-        }
-        .Debuggable -> {
-            if ty == {
-                .Int | .Float | .Float32 | .Bool | .String | .Char | .IntN(_, _) -> { return true }
-                .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
-            }
-            if program.registration_graph == .Val(graph) {
-                return sema_type_bound_satisfied_at(graph, ty, "Debuggable", sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
-            } else { return false }
         }
         // VaultKey is sealed to SigningKey and X25519SecretKey; a generic body
         // defers the bound to monomorphization, so a type parameter in scope
@@ -1568,11 +1534,6 @@ sema_call_core_result_type: fn(signature: CoreTypedCallSignature, type_args: [Ty
             // Unit call.
             declared: signature.return_type ?? return Val(Type.Named{name: "Unit"})
             return Val(sema_inference_substitute_type(declared, names, type_args))
-        }
-        .AbsoluteValue(parameter_index) -> {
-            if parameter_index < 0 || parameter_index >= arguments.len() -> return None
-            argument := arguments[parameter_index]
-            return Val(if argument.ty == (Type.Named{name: "Complex"}) -> Type.Float else -> argument.ty)
         }
         .FloatIfExactElseParameter(parameter_index) -> {
             if parameter_index < 0 || parameter_index >= arguments.len() -> return None
@@ -1758,7 +1719,8 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
         return None
     }
     if check.context.call_facts.len() != before + 1 {
-        panic("checked Core publication call has no effect obligation")
+        check.context.incomplete_reasons.push("checked Core publication call has no effect obligation")
+        return None
     }
     detail := sema_call_site_detail(check.context.call_facts[before])
     detail.shared_lifetime = Val(lifetime)

@@ -62,7 +62,7 @@ use jet_foundation.[
     body_node,
     body_node_index,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     compiler_transfer_rows,
     decl_id_index,
@@ -1057,7 +1057,7 @@ sema_core_demand_read_parts: fn(modules: [SemaGraphModuleResult], read_functions
     task.group sema_core_demand_read_threads {
         head: task sema_core_demand_read_part(modules, read_functions, bounds[at], bounds[at + 1])
         rest := sema_core_demand_read_parts(modules, read_functions, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         compiler_transfer_rows<SemaCoreDemandPart>(done, rest)
     }
     done
@@ -1222,7 +1222,7 @@ sema_core_demand_callees_parts: fn(graph: SemaRegistrationGraph, joined: [SemaCo
     task.group sema_core_demand_callee_threads {
         head: task sema_core_demand_callees_part(graph, joined, bounds[at], bounds[at + 1])
         rest := sema_core_demand_callees_parts(graph, joined, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         compiler_transfer_rows<[String]>(done, rest)
     }
     done

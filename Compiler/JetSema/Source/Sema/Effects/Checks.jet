@@ -90,7 +90,7 @@ use jet_foundation.[
     TTypeDef,
     Type,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     compiler_transfer_rows,
     CoreCallRecord,
@@ -2441,7 +2441,7 @@ sema_effect_function_nodes_parts: fn(modules: [SemaGraphModuleResult], inputs: [
     task.group sema_effect_function_node_threads {
         head: task sema_effect_function_nodes_part(modules, inputs, calls, from, to)
         rest: sema_effect_function_nodes_parts(modules, inputs, calls, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
@@ -2513,7 +2513,7 @@ sema_effect_resolve_edge_parts: fn(nodes: [SemaEffectNode], calls: SemaEffectCal
     task.group sema_effect_resolve_edge_threads {
         head: task sema_effect_resolve_edge_part(nodes, calls, from, to)
         rest: sema_effect_resolve_edge_parts(nodes, calls, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
@@ -5677,7 +5677,7 @@ sema_effect_stack_bodies_claimers: fn(modules: [SemaGraphModuleResult], nodes: [
     task.group sema_effect_stack_threads {
         head: task sema_effect_stack_bodies_claimed(modules, nodes, calls, types, jobs, bounds, queue)
         sema_effect_stack_bodies_claimers(modules, nodes, calls, types, jobs, bounds, queue, from + 1, workers, parts)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done: claimed.pop() ?? break
             parts[done.part] = done.bodies.move()
@@ -7070,7 +7070,7 @@ sema_effects_check_modules: fn(modules: ^[SemaGraphModuleResult], inputs: [SemaE
         task.group sema_effect_bounds {
             heaps_task: task sema_effect_heap_bounds(nodes, called)
             stacks = sema_effect_stack_bounds(stack, frames, nodes, called)
-            heaps = heaps_task.join() ?? panic(compiler_threads_failure_text(err))
+            heaps = compiler_threads_joined(heaps_task)
         }
     } else {
         heaps = sema_effect_heap_bounds(nodes, called)
@@ -7186,7 +7186,7 @@ sema_effect_check_nodes_spawn: fn(nodes: [SemaEffectNode], inputs: [SemaEffectMo
         rest_pure_nodes := [Int]{}
         rest_pure_rows := [[String]]{}
         sema_effect_check_nodes_spawn(nodes, inputs, solved, secret_reach, library_reach, dispatch_reach, part + 1, workers, rest_diags, rest_pure_nodes, rest_pure_rows)
-        done := head.join() ?? panic(compiler_threads_failure_text(err))
+        done := compiler_threads_joined(head)
         diagnostics.extend(done.diagnostics.move())
         pure_nodes.extend(done.pure_nodes.move())
         pure_rows.extend(done.pure_rows.move())
@@ -7214,8 +7214,8 @@ sema_effect_solve_reaches: fn(nodes: [SemaEffectNode], callers: [[Int]], threads
         secret_task: task sema_effect_secret_reach(nodes, callers)
         dispatch_task: task sema_effect_dispatch_reach(nodes, callers)
         library_box.push(sema_library_effect_reach(nodes, callers))
-        secret = secret_task.join() ?? panic(compiler_threads_failure_text(err))
-        dispatch = dispatch_task.join() ?? panic(compiler_threads_failure_text(err))
+        secret = compiler_threads_joined(secret_task)
+        dispatch = compiler_threads_joined(dispatch_task)
     }
     library: library_box.pop() ?? panic("library reachability disappeared")
     SemaEffectReaches{secret: secret, library: library, dispatch: dispatch}
@@ -7257,7 +7257,7 @@ sema_effect_check_trait_bounds_spawn: fn(modules: [SemaGraphModuleResult], input
         head: task sema_effect_check_trait_bounds_range(modules, inputs, source_indices, nodes, calls, solved, from, to)
         rest := [Diagnostic]{}
         sema_effect_check_trait_bounds_spawn(modules, inputs, source_indices, nodes, calls, solved, part + 1, workers, rest)
-        diagnostics.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        diagnostics.extend(compiler_threads_joined(head))
         diagnostics.extend(rest.move())
     }
 }
@@ -7302,7 +7302,7 @@ sema_effect_check_module_passes_spawn: fn(modules: [SemaGraphModuleResult], inpu
         rest_regions := [Diagnostic]{}
         rest_calls := [Diagnostic]{}
         sema_effect_check_module_passes_spawn(modules, inputs, source_indices, solved, calls, nodes, part + 1, workers, rest_regions, rest_calls)
-        got := head.join() ?? panic(compiler_threads_failure_text(err))
+        got := compiler_threads_joined(head)
         region_diags.extend(got.region_diags.move())
         region_diags.extend(rest_regions.move())
         call_diags.extend(got.call_diags.move())
@@ -7355,7 +7355,7 @@ sema_effect_build_tfacts_parts: fn(modules: [SemaGraphModuleResult], inputs: [Se
     task.group sema_effect_tfacts_group {
         head: task sema_effect_build_tfacts_range(modules, inputs, function_nodes, nodes, solved, from, to)
         rest := sema_effect_build_tfacts_parts(modules, inputs, function_nodes, nodes, solved, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
@@ -7738,7 +7738,7 @@ sema_effect_collect_claimers: fn(modules: [SemaGraphModuleResult], nodes: [SemaE
     task.group sema_effect_threads {
         head: task sema_effect_collect_claimed(modules, nodes, calls, jobs, bounds, queue)
         sema_effect_collect_claimers(modules, nodes, calls, jobs, bounds, queue, from + 1, workers, parts)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done: claimed.pop() ?? break
             parts[done.part] = done.collected.move()

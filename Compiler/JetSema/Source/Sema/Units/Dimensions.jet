@@ -1,4 +1,4 @@
-use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Name, NameTable, Span, UnitDimensionDecl, UnitFamilyDef, dimension_base, dimension_divide, dimension_multiply, name_column, name_column_get, name_column_set, name_column_table, name_count, name_find, name_index, name_intern, name_table_sized, name_text]
+use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Name, NameTable, Span, UnitDimensionDecl, UnitFamilyDef, dimension_base, dimension_divide, dimension_multiply, name_column, name_column_get, name_column_set, name_column_table, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, name_text]
 
 // `DimensionLookup` and resolve_dimension_expression.
 SemaUnitDimensionLookup: enum {
@@ -31,15 +31,23 @@ SemaUnitDimensionCandidates: struct {
 SemaUnitDimensionVisibility: struct {
     local: SemaUnitDimensionRows,
     imported: SemaUnitDimensionCandidates,
-    // `{alias}|{name}` -> the declaration index the alias's module exports.
-    qualified: SemaUnitDimensionRows,
+    // The (alias, name) pair slot over `qualified_names` (name_pair_slot)
+    // -> the declaration index the alias's module exports as `name`.
+    qualified_names: NameTable{name_table_sized(2)},
+    qualified: [Int:Int]{[Int:Int]{}},
     // The import aliases of the module.
     aliases: NameTable{name_table_sized(2)},
 }
 
+// The declaration index the module under `alias` exports as `name`.
+sema_units_dimension_qualified: fn(visible: SemaUnitDimensionVisibility, alias: String, name: String) -> Int? Never! {
+    slot: name_pair_find_slot(visible.qualified_names, alias, name) ?? return None
+    visible.qualified.get(slot)
+}
+
 sema_units_dimension_target: fn(visible: SemaUnitDimensionVisibility, qualifier: String?, name: String) -> {target: Int?, ambiguous: Bool} Never! {
     if qualifier == .Val(alias) {
-        return {ambiguous: false, target: name_column_get(visible.qualified.names, visible.qualified.rows, "{alias}|{name}")}
+        return {ambiguous: false, target: sema_units_dimension_qualified(visible, alias, name)}
     }
     if name_column_get(visible.local.names, visible.local.rows, name) == .Val(index) -> return {ambiguous: false, target: Val(index)}
     id: name_find(visible.imported.names, name) ?? return {ambiguous: false, target: Int?{None}}
@@ -132,7 +140,7 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
                         loop candidate in visible.imported.rows[name_index(candidates)] {
                             // Declaration indices belong to their import module;
                             // qualified entries encode the exact family visibility.
-                            if name_column_get(visible.qualified.names, visible.qualified.rows, "{alias}|{name}") == (Val(candidate)) {
+                            if sema_units_dimension_qualified(visible, alias, name) == (Val(candidate)) {
                                 _ := name_intern(aliases, alias)
                             }
                         }
@@ -143,7 +151,7 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
         .Field(base, name, _, _) -> {
             if base == .Ident(alias, _, _) {
                 _ := name_intern(aliases, alias)
-                if name_column_get(visible.qualified.names, visible.qualified.rows, "{alias}|{name}") == .Val(index) {
+                if sema_units_dimension_qualified(visible, alias, name) == .Val(index) {
                     dependencies[index] = true
                 }
             }
@@ -173,7 +181,7 @@ sema_units_resolve_standard: fn(prelude: ^[UnitFamilyDef]) Never! {
             if claim == .Base(_) -> known[index] = dimension_base("core.units.{family.family}")
         }
     }
-    visible: SemaUnitDimensionVisibility{local: local, imported: SemaUnitDimensionCandidates{}, qualified: SemaUnitDimensionRows{}}
+    visible: SemaUnitDimensionVisibility{local: local, imported: SemaUnitDimensionCandidates{}}
     loop {
         progress := false
         loop index in 0..<prelude.len() {
@@ -216,7 +224,7 @@ sema_units_resolve: fn(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegis
         loop id in 1..<name_count(exports[target].names) {
             name: name_text(exports[target].names, Name{id: U32{id}})
             index: exports[target].rows[id]
-            name_column_set(visibility[source].qualified.names, visibility[source].qualified.rows, "{alias}|{name}", index)
+            visibility[source].qualified[name_pair_slot(visibility[source].qualified_names, alias, name)] = index
             row: name_index(name_intern(visibility[source].imported.names, name))
             if row == visibility[source].imported.rows.len() -> visibility[source].imported.rows.push([Int]{})
             seen := false
@@ -330,7 +338,7 @@ sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], dec
                 }
             }
         }
-        visibility.push(SemaUnitDimensionVisibility{local: local.move(), imported: SemaUnitDimensionCandidates{}, qualified: SemaUnitDimensionRows{}})
+        visibility.push(SemaUnitDimensionVisibility{local: local.move(), imported: SemaUnitDimensionCandidates{}})
         exports.push(public.move())
     }
 }

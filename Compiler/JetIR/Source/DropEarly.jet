@@ -29,7 +29,7 @@
 //   - a result that is not a plain value (a raw address, String data, a view).
 // So a String whose address `mem.address_of` or a string-data leaf takes
 // lives until its block ends.
-use jet_foundation.[CompilerThreads, Type, compiler_threads_failure_text, compiler_threads_partition]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_joined, compiler_threads_partition]
 
 // One function's moved Drops: per Drop the slot, the instruction it now goes
 // before and its line; and per instruction whether it goes (a moved Drop at
@@ -119,7 +119,7 @@ ir_drop_plan_ranges: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, turn: 
     task.group ir_drop_early_group {
         head: task ir_drop_plan_range(m, bounds[at], bounds[at + 1], poll, trap, turn)
         rest: ir_drop_plan_ranges(m, bounds, poll, trap, turn, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop rows in rest.move() -> done.push(rows)
     }
     done

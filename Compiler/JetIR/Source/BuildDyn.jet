@@ -973,7 +973,7 @@ ir_dyn_encode_slot: fn(m: ^IRModule, p: IRProgram, b: ^IRBuilder, ty: Type, slot
 ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -> {key: String, args: [Type]}? Never! {
     identity: ir_trait_identity(p, concrete)
     declaration: ir_render_type_key(p.type_rows_keys, p.type_rows, p.types, concrete)
-    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{codec}|{method}")]
+    candidates: p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, codec, method)]
     loop row in candidates {
         if ir_function_row(p, p.functions[row].key) != (Val(row)) -> next
         owner := Type?{None}

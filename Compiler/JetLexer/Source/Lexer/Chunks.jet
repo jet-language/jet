@@ -14,7 +14,7 @@ use jet_foundation.[
     Diagnostic,
     Name,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_transfer_rows,
     name_index,
     name_table_merge,
@@ -104,7 +104,7 @@ lex_chunks_threads: fn(source: [U8], config_surface: Bool, allow_reserved_identi
     outputs := lexer_lex_source_chunks(source, config_surface, allow_reserved_identifiers, threads)
     has_fences := false
     chunks := [LexedChunk]{}
-    chunks.try_reserve(outputs.len()) ?? panic("reserve failed")
+    chunks.try_reserve(outputs.len()) ?? ()
     loop output in outputs.move() {
         if output.tables.has_fences -> has_fences = true
         chunks.push(LexedChunk{start: output.start, end: output.end, tokens: output.tokens.move(), tables: output.tables.move(), diagnostics: output.diagnostics.move(), bidi_diagnostics: output.bidi_diagnostics.move(), terminator_diagnostics: output.terminator_diagnostics.move(), line_starts: output.line_starts.move()})
@@ -123,7 +123,7 @@ lexed_threads_single: fn(source: [U8], config_surface: Bool, allow_reserved_iden
 // `first` (the range starts the source), then one past every newline.
 lexer_line_starts: fn(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Never! {
     starts := [Int]{}
-    if to > from -> starts.try_reserve((to - from) /% 32 + 2) ?? panic("reserve failed")
+    if to > from -> starts.try_reserve((to - from) /% 32 + 2) ?? ()
     if first -> starts.push(0)
     index := from
     loop index + 4 <= to {
@@ -259,8 +259,8 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
     chunk_count: parts.len()
     clean_flags := [Bool]{}
     bodies_flags := [Bool]{}
-    clean_flags.try_reserve(chunk_count) ?? panic("reserve failed")
-    bodies_flags.try_reserve(chunk_count) ?? panic("reserve failed")
+    clean_flags.try_reserve(chunk_count) ?? ()
+    bodies_flags.try_reserve(chunk_count) ?? ()
     loop part in parts {
         reads: part.guard_read()
         is_clean: reads.value.outputs.len() == 1 && reads.value.outputs[0].clean
@@ -271,7 +271,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
     }
     if all_clean {
         outputs := [LexerChunkOutput]{}
-        outputs.try_reserve(chunk_count) ?? panic("reserve failed")
+        outputs.try_reserve(chunk_count) ?? ()
         loop part in parts -> outputs.push(lexer_chunk_part_take(part))
         return outputs
     }
@@ -291,8 +291,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
         }
         run_start := bounds[k]
         run_end_idx := k + 1
-        if !bodies_flags[k] && accepted.len() > 0 {
-            prev := accepted.pop() ?? panic("missing previous chunk")
+        if !bodies_flags[k] && accepted.pop() == .Val(prev) {
             run_start = prev.start
         } else if run_end_idx < chunk_count {
             run_end_idx += 1
@@ -304,8 +303,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
                 k = run_end_idx
                 break
             }
-            if !merged.bodies_local && accepted.len() > 0 {
-                prev := accepted.pop() ?? panic("missing previous chunk")
+            if !merged.bodies_local && accepted.pop() == .Val(prev) {
                 run_start = prev.start
                 next
             }
@@ -313,8 +311,7 @@ lexer_lex_source_chunks: fn(source: [U8], config_surface: Bool, allow_reserved_i
                 run_end_idx += 1
                 next
             }
-            if accepted.len() > 0 {
-                prev := accepted.pop() ?? panic("missing previous chunk")
+            if accepted.pop() == .Val(prev) {
                 run_start = prev.start
                 next
             }
@@ -344,7 +341,7 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     // order (`name_table_merge`) assigns exactly those ids. Literal rows follow
     // in the same order.
     parts := [Shared<LexerChunkPart>]{}
-    parts.try_reserve(chunks.len()) ?? panic("reserve failed")
+    parts.try_reserve(chunks.len()) ?? ()
     loop chunk in chunks.move() {
         start: chunk.start
         end: chunk.end
@@ -369,16 +366,16 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     }
     _ := lexer_remap_chunk_parts(parts, 1)
     tokens := first.tokens.move()
-    tokens.try_reserve(total_tokens - tokens.len()) ?? panic("reserve failed")
+    tokens.try_reserve(total_tokens - tokens.len()) ?? ()
     if total_literals > tables.literals.len() {
-        tables.literals.try_reserve(total_literals - tables.literals.len()) ?? panic("reserve failed")
+        tables.literals.try_reserve(total_literals - tables.literals.len()) ?? ()
     }
     diagnostics := first.diagnostics.move()
     bidi_diagnostics := first.bidi_diagnostics.move()
     terminator_diagnostics := first.terminator_diagnostics.move()
     line_starts := first.line_starts.move()
     if total_line_starts > line_starts.len() {
-        line_starts.try_reserve(total_line_starts - line_starts.len()) ?? panic("reserve failed")
+        line_starts.try_reserve(total_line_starts - line_starts.len()) ?? ()
     }
     runs := [Int]{0}
     loop chunk in 1..<parts.len() {
@@ -420,7 +417,7 @@ lexer_lex_chunk_parts: fn(source: [U8], config_surface: Bool, allow_reserved_ide
     task.group lexer_chunk_threads {
         head: task lexer_lex_chunk_part(source, config_surface, allow_reserved_identifiers, parts[from])
         lexed = lexer_lex_chunk_parts(source, config_surface, allow_reserved_identifiers, parts, from + 1)
-        lexed += head.join() ?? panic(compiler_threads_failure_text(err))
+        lexed += compiler_threads_joined(head)
     }
     lexed
 }
@@ -498,7 +495,7 @@ lexer_remap_chunk_parts: fn(parts: [Shared<LexerChunkPart>], from: Int) -> Int {
     task.group lexer_remap_threads {
         head: task lexer_remap_chunk_part(parts[from])
         remapped = lexer_remap_chunk_parts(parts, from + 1)
-        remapped += head.join() ?? panic(compiler_threads_failure_text(err))
+        remapped += compiler_threads_joined(head)
     }
     remapped
 }

@@ -1,0 +1,17 @@
+// A name pair's slot: the two parts stay apart, so no joined text can make
+// two pairs collide, and a lookup never interns.
+use jet_foundation.[name_count, name_pair_find_slot, name_pair_slot, name_table]
+
+#Test("a pair slot keeps its parts apart and a lookup never interns") {
+    table := name_table()
+    joined: name_pair_slot(table, "a|b", "c")
+    split: name_pair_slot(table, "a", "b|c")
+    assert(joined != split, "a separator inside a part makes no collision")
+    assert_eq(name_pair_slot(table, "a|b", "c"), joined)
+    assert_eq(name_pair_find_slot(table, "a", "b|c"), Int?{Val(split)})
+    // The order of the parts counts.
+    assert(name_pair_slot(table, "c", "a|b") != joined, "a pair is ordered")
+    count: name_count(table)
+    assert_eq(name_pair_find_slot(table, "a", "missing"), Int?{None})
+    assert_eq(name_count(table), count)
+}

@@ -544,8 +544,14 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
     parts := [TListSpreadPart]{}
     resolved_types := [Type]{}
     loop slot in 0..<checked_parts.len() {
-        part: checked_parts[slot] ?? panic("checked list element inference left an unresolved part")
-        item_type: element_types[slot] ?? panic("checked list element inference lost its element type")
+        part: checked_parts[slot] ?? {
+            check.context.incomplete_reasons.push("checked list element inference left an unresolved part")
+            return None
+        }
+        item_type: element_types[slot] ?? {
+            check.context.incomplete_reasons.push("checked list element inference lost its element type")
+            return None
+        }
         parts.push(part.copy())
         resolved_types.push(item_type.copy())
     }
@@ -665,7 +671,10 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     if has_spread {
         element_type: if ty == {
             .List(element) -> element
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked list spread result is not a growable list")
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                check.context.incomplete_reasons.push("checked list spread result is not a growable list")
+                return None
+            }
         }
         if !sema_expression_list_check_clone(element_type, span, environment, program, check.context, diagnostics) {
             return None
@@ -676,7 +685,10 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
     loop part in checked.parts {
         if part == {
             .Element(value) -> { values.push(value) }
-            .Spread(_) -> panic("list without spread contains a spread part")
+            .Spread(_) -> {
+                check.context.incomplete_reasons.push("list without spread contains a spread part")
+                return None
+            }
         }
     }
     trait_coercion: sema_expression_list_trait_coercion(ty)

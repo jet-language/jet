@@ -24,6 +24,7 @@ use jet_foundation.[
     compiler_threads_admit,
     compiler_threads_limit,
     compiler_threads_failure_text,
+    compiler_threads_joined,
     symbol_table_key,
     compiler_threads_heaviest_first,
 ]
@@ -1040,7 +1041,7 @@ sema_check_body_parts: fn(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBo
     task.group sema_threads {
         head: task sema_check_body_part(shared, slots[from], plan, queue, module_index, None)
         checked = sema_check_body_parts(shared, slots, plan, queue, from + 1, module_index, trace_sink)
-        checked += head.join() ?? panic(compiler_threads_failure_text(err))
+        checked += compiler_threads_joined(head)
     }
     checked
 }
@@ -1081,7 +1082,7 @@ sema_check_body_stream_parts: fn(shared: Shared<SemaCheckShared>, cells: SemaStr
             }
         }
         sema_check_body_stream_parts(shared, cells, handle, tasks - 1, environment, host_hooks, args, kind, phase, trace_sink, slot_of_orig, modules, checked_functions, done)
-        _ := head.join() ?? panic(compiler_threads_failure_text(err))
+        compiler_threads_joined(head)
     }
 }
 
@@ -1483,7 +1484,7 @@ sema_check_body_stream_scan_parts: fn(environment: SemaScopeEnvironment, program
     task.group sema_stream_scan_group {
         head: task sema_check_body_stream_scan_range(environment, program, selected, args, kind, method_job_bytes, lo, hi)
         rest := sema_check_body_stream_scan_parts(environment, program, selected, args, kind, method_job_bytes, from + 1, workers)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

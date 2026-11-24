@@ -13,7 +13,7 @@
 // chosen (`web_reason`). The same edges place code at the app boundary
 // (sema_web_placement_check): JS code reaches no server resource (E2823), and
 // a method the server runs uses no `Browser` (E2824).
-use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
+use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -364,7 +364,7 @@ sema_web_resolve_parts: fn(modules: [SemaGraphModuleResult], metas: [SemaWebMeta
     task.group sema_web_threads {
         head: task sema_web_resolve_part(modules, metas, keys, meta_of, bounds[part], bounds[part + 1])
         rest: sema_web_resolve_parts(modules, metas, keys, meta_of, bounds, part + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop edges in rest.move() -> done.push(edges)
     }
     done

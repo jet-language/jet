@@ -171,8 +171,10 @@ jet_driver_record_link_validate: fn(link: JetDriverRecordLink) JetDriverRunRecei
 }
 
 jet_driver_run_receipt_link_order: fn(left: JetDriverRecordLink, right: JetDriverRecordLink) -> Ordering Never! {
-    left_rank: jet_driver_record_kind_rank(left.kind) ?? panic("validated record kind")
-    right_rank: jet_driver_record_kind_rank(right.kind) ?? panic("validated record kind")
+    // Links are validated before they are ordered (jet_driver_record_link_validate),
+    // so every kind ranks; an unknown one would sort after every known kind.
+    left_rank: jet_driver_record_kind_rank(left.kind) ?? 6
+    right_rank: jet_driver_record_kind_rank(right.kind) ?? 6
     if left_rank != right_rank -> return left_rank <=> right_rank
     left.artifact_id <=> right.artifact_id
 }

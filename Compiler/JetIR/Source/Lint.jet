@@ -50,7 +50,7 @@
 // prints (`ir.build`), and every compile-time batch and the comptime entry
 // program are linted before their x86-64 compile (`eval.batch`,
 // `eval.entry`, JetEval Native.jet).
-use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
+use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCallMetadata, IR_RUNTIME_HANDLES, Interner, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_transfer_rows, core_call_key, ir_key_index, ir_key_index_keys, ir_key_row, name_column_table, name_find, name_intern, type_name]
 
 // One finding. `function` is "name [key]" ("-" for a module row), `key`
 // the function's key ("" for a module row), `pass` where it was found,
@@ -439,7 +439,7 @@ ir_lint_module: fn(m: ^IRModule, pass: String, threads: CompilerThreads) -> [IRL
     loop part >= 0 {
         rows := [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row := functions.pop() ?? panic("IR Lint lost a function")
+            row := functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -488,7 +488,7 @@ ir_lint_threads: fn(slots: [Shared<IRLintPart>], reads: Shared<IRLintReads>, at:
     task.group ir_lint_group {
         head: task ir_lint_part(slots[at], reads)
         checked = ir_lint_threads(slots, reads, at + 1)
-        checked += head.join() ?? panic(compiler_threads_failure_text(err))
+        checked += compiler_threads_joined(head)
     }
     checked
 }

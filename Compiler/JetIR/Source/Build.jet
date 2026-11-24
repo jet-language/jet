@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 use {
     jet_backend.[X64_DEBUG_ITEMS_DROP_SYMBOL]
-    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
+    jet_foundation.[CORE_BUILTINS_MODULE, MODULE_CORE_PREFIX, CompilerThreads, CompilerTraceSink, DeclID, DeclTable, Interner, TYPE_ID_POINTER, TypeID, decl_table_find, ModuleID, SourceFile, Span, SymbolID, SymbolTable, Type, TypeTupleField, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, interner_empty, symbol_table, type_carrier_identity, type_structural_args, type_structural_head_names, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_node_index, body_stmt, body_type, body_type_id, symbol_is_local, symbol_local_keys_text, symbol_none, symbol_table_key, NameTable, name_column, name_column_get, name_column_set, name_column_set_first, name_column_table, name_column_value, name_count, name_find, name_index, name_intern, name_pair_find_slot, name_pair_slot, name_table_sized, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook, ir_host_value_name]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_substitute_type]
 }
 
@@ -550,8 +550,8 @@ IRProgram: struct {
     close_methods_keys: NameTable,
     close_methods: [Int],
     // The implementation methods a dynamic trait call may select, by
-    // "<trait>|<method>" (function rows; see ir_trait_methods).
-    trait_methods: IRTraitMethods{IRTraitMethods{keys: name_column_table(), rows: [[Int]]{[Int]{}}}},
+    // (trait, method) (function rows; see ir_trait_methods).
+    trait_methods: IRTraitMethods{IRTraitMethods{}},
     // The host target's trait implementations, read once by
     // ir_program_declared: the traits each implementing method serves, by
     // "<module>|<owner key>|<method>" (`impl_slots` rows of `impl_traits`),
@@ -878,7 +878,7 @@ ir_program_new: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolTab
         indexing: task ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols, interner)
         ir_program_bind(p, functions, decls, threads, skip_signature_unions: true)
-        index := indexing.join() ?? panic(compiler_threads_failure_text(err))
+        index := compiler_threads_joined(indexing)
         ir_program_take_sources(p, index.move())
         programs.push(p)
     }
@@ -1114,11 +1114,11 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
                 name_column_set_first(render_impls_keys, render_impls, render_key, row)
             }
         }
-        p.rows = t_rows.join() ?? panic(compiler_threads_failure_text(err))
-        p.trait_methods = t_traits.join() ?? panic(compiler_threads_failure_text(err))
-        decl_parts = t_decls.join() ?? panic(compiler_threads_failure_text(err))
-        p.intrinsics = t_intrinsics.join() ?? panic(compiler_threads_failure_text(err))
-        scanned = t_scan.join() ?? panic(compiler_threads_failure_text(err))
+        p.rows = compiler_threads_joined(t_rows)
+        p.trait_methods = compiler_threads_joined(t_traits)
+        decl_parts = compiler_threads_joined(t_decls)
+        p.intrinsics = compiler_threads_joined(t_intrinsics)
+        scanned = compiler_threads_joined(t_scan)
     }
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
     loop part in decl_parts {
@@ -1136,7 +1136,7 @@ ir_program_bind_parallel: fn(p: ^IRProgram, owned: [FnBody], decls: DeclTable, w
         if !owned_trait_arithmetic(operator_trait.name) -> next
         trait_short: operator_trait.name
         hook: owned_trait_operator_hook(trait_short) ?? next
-        loop index in p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{trait_short}|{hook}")] {
+        loop index in p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, trait_short, hook)] {
             if owned[index].params.len() != 1 -> next
             if owned[index].kind == {
                 .Method(_, owner) -> {
@@ -1220,7 +1220,7 @@ ir_program_bind: fn(p: ^IRProgram, functions: ^^[FnBody], decls: DeclTable, thre
         if !owned_trait_arithmetic(operator_trait.name) -> next
         trait_short: operator_trait.name
         hook: owned_trait_operator_hook(trait_short) ?? next
-        loop index in p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "{trait_short}|{hook}")] {
+        loop index in p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, trait_short, hook)] {
             if owned[index].params.len() != 1 -> next
             if owned[index].kind == {
                 .Method(_, owner) -> {
@@ -1388,7 +1388,7 @@ ir_bind_decl_threads: fn(functions: [FnBody], decls: DeclTable, symbols: SymbolT
     task.group ir_bind_decl_group {
         head: task ir_bind_decl_range(functions, decls, symbols, starts[at], ends[at])
         rest := ir_bind_decl_threads(functions, decls, symbols, starts, ends, at + 1)
-        out.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(head))
         compiler_transfer_rows<IRBindDeclPart>(out, rest)
     }
     out
@@ -1560,7 +1560,7 @@ ir_body_scan_parts: fn(functions: [FnBody], check_boxed: [Bool], interner: Inter
     task.group ir_body_scan_threads {
         head: task ir_body_scan_range(functions, check_boxed, interner, bounds[part], bounds[part + 1])
         rest := ir_body_scan_parts(functions, check_boxed, interner, bounds, part + 1)
-        first: head.join() ?? panic(compiler_threads_failure_text(err))
+        first: compiler_threads_joined(head)
         parts.push(first)
         loop row in rest.move() -> parts.push(row)
     }
@@ -1697,28 +1697,30 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     m
 }
 
-// The implementation methods of every trait by "<trait>|<method>": `rows`
-// at the key's id in `keys` (id 0, the empty key, holds none).
+// The implementation methods of every trait by (trait, method): `rows` at
+// the id `ids` gives the pair's slot over `names` (name_pair_slot); id 0
+// holds none.
 IRTraitMethods: struct {
-    keys: NameTable,
-    rows: [[Int]],
+    names: NameTable{name_table_sized(16)},
+    ids: [Int:Int]{[Int:Int]{}},
+    rows: [[Int]]{[[Int]]{[Int]{}}},
 }
 
-// The id of `key` in `methods`: 0, whose row is empty, when no method has
-// it.
-ir_trait_method_slot: fn(methods: IRTraitMethods, key: String) -> Int Never! {
-    found: name_find(methods.keys, key) ?? return 0
-    name_index(found)
+// The id of (`trait_name`, `method`) in `methods`: 0, whose row is empty,
+// when no method has it.
+ir_trait_method_slot: fn(methods: IRTraitMethods, trait_name: String, method: String) -> Int Never! {
+    key: name_pair_find_slot(methods.names, trait_name, method) ?? return 0
+    methods.ids.get(key) ?? 0
 }
 
-// The implementation methods of every trait by "<trait>|<method>": an
+// The implementation methods of every trait by (trait, method): an
 // implementation's method is the same-module method of that name on the
 // implementation's owner. It is checked as a TraitMethod when its trait
 // resolves in the implementing module, else as a plain Method of the owner,
 // which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
 // name the traits of; `symbols` holds the TraitMethods' trait keys.
 ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows_keys: NameTable, type_rows: [Int], types: [TTypeDef], impl_slots_keys: NameTable, impl_slots: [Int], impl_traits: [[String]]) -> IRTraitMethods Never! {
-    methods := IRTraitMethods{keys: name_column_table(), rows: [[Int]]{[Int]{}}}
+    methods := IRTraitMethods{}
     loop (index, function) in functions {
         traits := [String]{}
         if function.kind == {
@@ -1735,8 +1737,12 @@ ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows_keys: 
             .TopLevel -> {}
         }
         loop trait_short in traits {
-            id: name_index(name_intern(methods.keys, "{trait_short}|{function.name}"))
-            loop methods.rows.len() <= id -> methods.rows.push([Int]{})
+            key: name_pair_slot(methods.names, trait_short, function.name)
+            id: methods.ids.get(key) ?? methods.rows.len()
+            if id == methods.rows.len() {
+                methods.ids[key] = id
+                methods.rows.push([Int]{})
+            }
             methods.rows[id].push(index)
         }
     }
@@ -2043,7 +2049,7 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
         }
     }
     if p.checks.debug_views {
-        loop kept in p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "DebugView|debug_view")] {
+        loop kept in p.trait_methods.rows[ir_trait_method_slot(p.trait_methods, "DebugView", "debug_view")] {
             taken: p.checks.keep && p.checks.modules.get(p.functions[kept].module_identity.id) != None
             if kept != row && !taken -> kept_rows.push(kept)
         }
@@ -2077,7 +2083,7 @@ ir_build_program: fn(functions: ^^[FnBody], decls: DeclTable, symbols: ^^SymbolT
         built.program.hooks.push(IRLibraryExport{function: at, symbol: hook.symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
     }
     if waves.program.checks.debug_views {
-        loop view in waves.program.trait_methods.rows[ir_trait_method_slot(waves.program.trait_methods, "DebugView|debug_view")] {
+        loop view in waves.program.trait_methods.rows[ir_trait_method_slot(waves.program.trait_methods, "DebugView", "debug_view")] {
             at: name_column_get(built.program.function_rows_keys, built.program.function_rows, waves.program.functions[view].key) ?? next
             items: built.program.functions[at].result
             if items >= 0 && built.program.types[items].drop != "" {
@@ -3948,7 +3954,7 @@ ir_recursion_checks_parted: fn(m: ^IRModule, workers: Int) Never! {
     loop part >= 0 {
         rows := [IRFunction]{}
         loop m.functions.len() > bounds[part] {
-            row: m.functions.pop() ?? panic("the recursion checks lost a function")
+            row: m.functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -3989,7 +3995,7 @@ ir_recursion_scan_ranges: fn(functions: [IRFunction], bounds: [Int], count: Int,
     task.group ir_recursion_scan_threads {
         head: task ir_recursion_scan_range(functions, bounds[at], end, count)
         rest: ir_recursion_scan_ranges(functions, bounds, count, at + 1)
-        scans.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        scans.push(compiler_threads_joined(head))
         loop item in rest -> scans.push(item)
     }
     scans
@@ -4023,7 +4029,7 @@ ir_recursion_walks: fn(count: Int, recursive: [Bool], parts: ^^[IRRecursionPart]
     task.group ir_recursion_threads {
         head: task ir_recursion_part(count, recursive, last.move())
         done = ir_recursion_walks(count, recursive, rest.move())
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
     }
     done
 }

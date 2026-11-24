@@ -50,6 +50,7 @@ use {
         compiler_threads_admit,
         compiler_threads_beside,
         compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
         compiler_threads_single,
@@ -3601,7 +3602,7 @@ jet_driver_reach_parts: fn(inputs: Shared<JetDriverReachShared>, parts: [Shared<
     task.group reach_threads {
         head: task jet_driver_reach_part(inputs, parts[from])
         reached = jet_driver_reach_parts(inputs, parts, from + 1)
-        reached += head.join() ?? panic(compiler_threads_failure_text(err))
+        reached += compiler_threads_joined(head)
     }
     reached
 }
@@ -4254,7 +4255,7 @@ jet_driver_inline_scan_parts: fn(inputs: Shared<JetDriverInlineShared>, parts: [
     task.group inline_scan_threads {
         head: task jet_driver_inline_scan_part(inputs, parts[from])
         scanned = jet_driver_inline_scan_parts(inputs, parts, from + 1)
-        scanned += head.join() ?? panic(compiler_threads_failure_text(err))
+        scanned += compiler_threads_joined(head)
     }
     scanned
 }
@@ -4953,7 +4954,7 @@ jet_driver_demand_scan_parts: fn(inputs: Shared<JetDriverDemandShared>, parts: [
     task.group demand_scan_threads {
         head: task jet_driver_demand_scan_part(inputs, parts[from], runs)
         scanned = jet_driver_demand_scan_parts(inputs, parts, runs, from + 1)
-        scanned += head.join() ?? panic(compiler_threads_failure_text(err))
+        scanned += compiler_threads_joined(head)
     }
     scanned
 }
@@ -5702,7 +5703,7 @@ jet_driver_parse_claimers: fn(inputs: Shared<JetDriverParseInputs>, queue: JetDr
     task.group parse_threads {
         head: task jet_driver_parse_claimed(inputs, queue)
         jet_driver_parse_claimers(inputs, queue, from + 1, workers, placed, spellings)
-        thread := head.join() ?? panic(compiler_threads_failure_text(err))
+        thread := compiler_threads_joined(head)
         loop thread.claimed.len() > 0 {
             done := thread.claimed.pop() ?? break
             position: done.position
@@ -6169,7 +6170,7 @@ jet_driver_line_starts_ranges: fn(texts: [String], bounds: [Int], at: Int) -> [[
     task.group jet_driver_line_starts_threads {
         head: task jet_driver_line_starts_range(texts, bounds[at], bounds[at + 1])
         rest: jet_driver_line_starts_ranges(texts, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

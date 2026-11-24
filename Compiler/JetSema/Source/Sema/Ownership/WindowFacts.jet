@@ -25,7 +25,7 @@ use jet_foundation.[
     PlaceAccess,
     Stmt,
     compiler_threads_admit,
-    compiler_threads_failure_text,
+    compiler_threads_joined,
     compiler_threads_partition,
     name_find,
     name_index,
@@ -213,7 +213,7 @@ sema_window_collect_candidate_parts: fn(graph: SemaRegistrationGraph, rows: [Sem
     task.group sema_window_candidates_group {
         head: task sema_window_collect_candidate_range(graph, rows, positions, from, to)
         rest := sema_window_collect_candidate_parts(graph, rows, positions, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

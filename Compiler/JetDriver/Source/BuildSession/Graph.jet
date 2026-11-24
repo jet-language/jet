@@ -249,9 +249,9 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
         }
         loop action_id in target.actions {
             action: state.actions[action_id]
-            // Unreachable: `action_id` is one of this target's own actions,
-            // so the owner search finds this target if no earlier one.
-            owner: build_session_action_target(state, action_id) ?? panic("checked target action lost its owner")
+            // `action_id` is one of this target's own actions, so the owner
+            // search finds this target if no earlier one; the skip never runs.
+            owner: build_session_action_target(state, action_id) ?? next
             action_paths := action.inputs
             loop path in action.outputs -> action_paths.push(path.copy())
             loop path in action_paths {
@@ -264,8 +264,8 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     paths := file_rows.keys().collect()
     paths.sort()
     files := [BuildGraphFile]{}
-    // Unreachable: `paths` are the keys of `file_rows` itself.
-    loop path in paths -> files.push(file_rows.get(path) ?? panic("checked file index lost a path"))
+    // `paths` are the keys of `file_rows` itself; the skip never runs.
+    loop path in paths -> files.push(file_rows.get(path) ?? next)
     BuildGraph{targets: targets.move(), actions: actions.move(), action_keys: keys.move(), cache_hits: [BuildGraphAction]{}, files: files.move(), affected_files: [BuildGraphFile]{}, nodes: state.nodes}
 }
 

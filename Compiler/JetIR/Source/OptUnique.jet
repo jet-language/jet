@@ -1,4 +1,4 @@
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows]
 
 // Uniqueness hoisting (O1, O2), before inlining: a call making a local list's
 // counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
@@ -410,7 +410,7 @@ ir_opt_unique_to_callers: fn(m: ^IRModule, functions: ^[IRFunction], keys: ^[Str
     loop part >= 0 {
         rows := [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row: functions.pop() ?? panic("the IR optimizer lost a function to unique calls")
+            row: functions.pop() ?? break
             rows.push(row)
         }
         rows.reverse()
@@ -490,7 +490,7 @@ ir_opt_unique_walks: fn(m: IRModule, keys: [String], view: IROptUniqueView, part
     task.group ir_opt_unique_group {
         head: task ir_opt_unique_part(m, keys, view, last.move(), phase)
         done = ir_opt_unique_walks(m, keys, view, rest.move(), phase)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
     }
     done
 }

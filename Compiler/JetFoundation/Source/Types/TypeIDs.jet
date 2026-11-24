@@ -223,7 +223,7 @@ type_columns_sized: fn(initial_slots: Int) -> TypeColumns Never! {
     capacity := 2
     loop capacity < initial_slots -> capacity *= 2
     slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
+    slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     // Row 0 is no type.
     TypeColumns{kind: [U8]{U8{0}}, a: [U32]{U32{0}}, b: [U32]{U32{0}}, side: [U32]{U32{0}}, canonical: [U32]{U32{0}}, first: [Int]{0}, count: [Int]{0}, children: [U32]{}, hashes: [Int]{0}, slots: slots}
@@ -233,7 +233,7 @@ type_columns_empty_sized: fn(initial_slots: Int) -> TypeColumns Never! {
     capacity := 2
     loop capacity < initial_slots -> capacity *= 2
     slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
+    slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     TypeColumns{kind: [U8]{}, a: [U32]{}, b: [U32]{}, side: [U32]{}, canonical: [U32]{}, first: [Int]{}, count: [Int]{}, children: [U32]{}, hashes: [Int]{}, slots: slots}
 }
@@ -246,7 +246,7 @@ type_sides_sized: fn<T>(initial_slots: Int) -> TypeSides<T> Never! {
     capacity := 2
     loop capacity < initial_slots -> capacity *= 2
     slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
+    slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     TypeSides<T>{rows: [T]{}, hashes: [Int]{}, slots: slots}
 }
@@ -765,7 +765,7 @@ type_columns_grow_from: fn(table: ^TypeColumns, first_row: Int) Never! {
     capacity: table.slots.len() * 2
     mask: capacity - 1
     slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
+    slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     loop row in first_row..<table.kind.len() {
         hash: table.hashes[row]
@@ -817,7 +817,7 @@ type_sides_grow: fn<T>(sides: ^TypeSides<T>) Never! {
     capacity: sides.slots.len() * 2
     mask: capacity - 1
     slots := [Int]{}
-    slots.try_reserve(capacity) ?? panic("reserve failed")
+    slots.try_reserve(capacity) ?? ()
     loop _ in 0..<capacity -> slots.push(0)
     loop row in 0..<sides.rows.len() {
         hash: sides.hashes[row]
@@ -1095,12 +1095,12 @@ type_sides_merge: fn<T: Equatable>(into: ^TypeSides<T>, worker: ^TypeSides<T>, m
     // The own rows, last first.
     own := [T]{}
     loop worker.rows.len() > mark {
-        value: worker.rows.pop() ?? panic("a nonempty side table failed to pop")
+        value: worker.rows.pop() ?? break
         own.push(value)
     }
     rows := [U32]{}
-    loop own.len() > 0 {
-        value: own.pop() ?? panic("a nonempty side list failed to pop")
+    loop {
+        value: own.pop() ?? break
         hash: worker.hashes[mark + rows.len()]
         slot: type_sides_slot(into, value, hash)
         entry: into.slots[slot]

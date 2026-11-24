@@ -2487,7 +2487,7 @@ sema_scope_rollback: fn(table: ^SemaScopeTable, mark: SemaScopeMark) Never! {
     // Newest edit first: each undo row is popped and its saved binding moves
     // back into place.
     loop table.binding_undo.len() > mark.undo {
-        undo := table.binding_undo.pop() ?? panic("a scope rollback lost its undo row")
+        undo := table.binding_undo.pop() ?? break
         if undo.index < mark.bindings -> table.bindings[undo.index] = undo.binding.move()
     }
     loop table.bindings.len() > mark.bindings {

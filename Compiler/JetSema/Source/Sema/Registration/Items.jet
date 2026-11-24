@@ -94,7 +94,7 @@ use {
         ast_program,
         compiler_apply_order,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_threads_heaviest_first,
         compiler_threads_partition,
         compiler_transfer_rows,
@@ -125,6 +125,7 @@ use {
         name_index,
         name_intern,
         name_intern_hashed,
+        name_pair_slot,
         name_table,
         name_table_sized,
         name_text,
@@ -2496,7 +2497,7 @@ sema_registration_resolve_impl_traits_spawn: fn(graph: SemaRegistrationGraph, bo
         head: task sema_registration_resolve_impl_traits_range(graph, from, to)
         rest := [[SemaRegistrationImplResolved]]{}
         sema_registration_resolve_impl_traits_spawn(graph, bounds, part + 1, rest)
-        out.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.extend(compiler_threads_joined(head))
         out.extend(rest.move())
     }
 }
@@ -2889,8 +2890,8 @@ sema_registration_original_error_program: fn() -> Program {
     program := parsed.program.move()
     declarations := [Item]{}
     marked := 0
-    loop program.items.len() > 0 {
-        item := program.items.pop() ?? panic("the original Prelude item drain lost a row")
+    loop {
+        item := program.items.pop() ?? break
         if item.move() == .Struct(source_definition) {
             definition := source_definition.move()
             if definition.name == "Err" {
@@ -4028,7 +4029,7 @@ sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModul
 // `settings` are its package's declared settings (sema_build_facts_settings_at),
 // which module arguments may read. `codecs` are the codecs the graph gives the
 // types its declarations hold (sema_derive_foreign_codecs).
-sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, module_text: String, symbols: ^SymbolTable, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: NameTable, reported: ^[Diagnostic]) -> SemaRegistrationModule {
+sema_registration_prepare_module_row: fn(input: ^^SemaRegistrationModuleInput, module_text: String, symbols: ^SymbolTable, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: SemaCodecNames, reported: ^[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     owned := input.move()
     module_row := SemaRegistrationModule{
@@ -4508,7 +4509,7 @@ SemaRegistrationPrepareJob: struct {
     templates: [SemaGenericModuleSource],
     policies: [UserPolicyDecl],
     settings: [SemaBuildSetting],
-    codecs: NameTable,
+    codecs: SemaCodecNames,
 }
 
 // A prepared module row, its symbol range and the diagnostics its
@@ -4621,7 +4622,7 @@ sema_registration_preparers: fn(shared_state: Shared<SemaRegistrationPrepareShar
     task.group sema_registration_prepare_threads {
         head: task sema_registration_prepare_claimed(shared_state)
         sema_registration_preparers(shared_state, from + 1, workers, slots)
-        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        claimed := compiler_threads_joined(head)
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
             slots[done.position] = Val(done.row.move())
@@ -5957,43 +5958,38 @@ sema_registration_foreign_import_declaration: fn(edge: SemaRegistrationImportEdg
     declaration
 }
 
-// The imports registered so far, per source module by packed span key
-// (`span_aliases`, with `span_extra` for multi-alias C-library spans) and,
-// for module (qualified) imports, per source module in `aliases` (NameTable):
-// zero string formatting on the common path.
+// The imports registered so far, per source module: every alias by packed
+// span key (`span_aliases`; a C library span registers one per library),
+// and for module (qualified) imports each module-scope alias in `aliases`
+// and each inline-module alias in `scoped_aliases`, by (scope, alias) pair
+// slot over `scope_names` (name_pair_slot): zero string formatting.
 SemaRegistrationImportIndex: struct {
-    span_aliases: [[Int:String]],
-    span_extra: NameTable,
+    span_aliases: [[Int:[String]]],
     aliases: [NameTable],
+    scope_names: NameTable,
+    scoped_aliases: [[Int:Bool]],
 }
 
 sema_registration_import_index: fn(module_count: Int) -> SemaRegistrationImportIndex Never! {
-    span_aliases := [[Int:String]]{}
+    span_aliases := [[Int:[String]]]{}
     aliases := [NameTable]{}
+    scoped_aliases := [[Int:Bool]]{}
     loop _ in 0..<module_count {
-        span_aliases.push([Int:String]{})
+        span_aliases.push([Int:[String]]{})
         aliases.push(name_table_sized(8))
+        scoped_aliases.push([Int:Bool]{})
     }
-    SemaRegistrationImportIndex{span_aliases: span_aliases.move(), span_extra: name_table_sized(4), aliases: aliases.move()}
+    SemaRegistrationImportIndex{span_aliases: span_aliases.move(), aliases: aliases.move(), scope_names: name_table_sized(4), scoped_aliases: scoped_aliases.move()}
 }
 
 sema_registration_add_import: fn(graph: ^SemaRegistrationGraph, registered: ^SemaRegistrationImportIndex, source_index: Int, scope: String, declaration: ImportDecl, target_identity: ModuleID, target_package: String) {
     source_identity := graph.modules[source_index].module_identity
     source_package := graph.modules[source_index].package_identity
     visibility: sema_registration_import_visibility(declaration)
-    // The alias joins the key: one `use c.[a, b]` declaration
+    // A span registers once per alias: one `use c.[a, b]` declaration
     // registers one library-module import per C library it names.
     skey: sema_registration_span_key(declaration.span)
-    first_alias: registered.span_aliases[source_index].get(skey)
-    span_duplicate := false
-    if first_alias == .Val(prev) {
-        if prev == declaration.alias {
-            span_duplicate = true
-        } else if name_find(registered.span_extra, "{source_index}|{skey}|{declaration.alias}") != None {
-            span_duplicate = true
-        }
-    }
-    if span_duplicate {
+    if registered.span_aliases[source_index].get(skey) == .Val(span_aliases) && span_aliases.contains(declaration.alias) {
         sema_registration_push_graph_diagnostic(graph, source_index, sema_defined_twice(declaration.alias, "an import declaration must be registered once", declaration.span))
         return
     }
@@ -6001,7 +5997,7 @@ sema_registration_add_import: fn(graph: ^SemaRegistrationGraph, registered: ^Sem
     // A C library alias written in an inline module (`m: module { use lib: c.m }`)
     // lives in that module's scope: sibling modules may reuse the alias.
     if qualified {
-        alias_dup: if scope == "" -> name_find(registered.aliases[source_index], declaration.alias) != None else -> name_find(registered.aliases[source_index], "{scope}|{declaration.alias}") != None
+        alias_dup: if scope == "" -> name_find(registered.aliases[source_index], declaration.alias) != None else -> registered.scoped_aliases[source_index].get(name_pair_slot(registered.scope_names, scope, declaration.alias)) != None
         if alias_dup {
             sema_registration_push_graph_diagnostic(graph, source_index, sema_defined_twice(declaration.alias, "module imports share one namespace alias", declaration.alias_span))
             return
@@ -6011,16 +6007,13 @@ sema_registration_add_import: fn(graph: ^SemaRegistrationGraph, registered: ^Sem
             return
         }
     }
-    if first_alias == None {
-        registered.span_aliases[source_index][skey] = declaration.alias
-    } else {
-        _ := name_intern(registered.span_extra, "{source_index}|{skey}|{declaration.alias}")
-    }
+    if registered.span_aliases[source_index].get(skey) == None -> registered.span_aliases[source_index][skey] = [String]{}
+    registered.span_aliases[source_index][skey].push(declaration.alias)
     if qualified {
         if scope == "" {
             _ := name_intern(registered.aliases[source_index], declaration.alias)
         } else {
-            _ := name_intern(registered.aliases[source_index], "{scope}|{declaration.alias}")
+            registered.scoped_aliases[source_index][name_pair_slot(registered.scope_names, scope, declaration.alias)] = true
         }
     }
     graph.modules[source_index].imports.push(SemaRegistrationImport{source_module_identity: source_identity, source_package_identity: source_package, target_module_identity: target_identity, target_package_identity: target_package, declaration: declaration, visibility: visibility, bindings: [SemaRegistrationImportBinding]{}})
@@ -7109,7 +7102,7 @@ sema_registration_bind_namespace_parts: fn(graph: SemaRegistrationGraph, own_sym
     task.group sema_bind_ns_group {
         head: task sema_registration_bind_namespace_range(graph, own_symbols, templated, from, to)
         rest := sema_registration_bind_namespace_parts(graph, own_symbols, templated, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done

@@ -7917,8 +7917,7 @@ sema_expr_shared_place_call_writes: fn(receiver: Expr, method: String, method_sp
     unmarked: sema_receiver_mark_begin(check.state, receiver)
     _ := sema_expr_check_method_call(unmarked, method, method_span, owner_type_args, type_args, args, None, environment, program, scopes, check, probe_diagnostics)
     writes := false
-    if check.state.receiver_frames.len() > 0 {
-        frame: check.state.receiver_frames.pop() ?? panic("a receiver frame was pushed")
+    if check.state.receiver_frames.pop() == .Val(frame) {
         writes = frame.convention == (Val(AccessConvention.Write))
     }
     sema_ownership_fork_rollback(check.state, fork)

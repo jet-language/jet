@@ -15,7 +15,7 @@ use jet_foundation.[
     core_module_for_alias,
     diagnostic_caused_by,
     diagnostic_from_registry,
-    diagnostic_registry_row,
+    diagnostic_registry_row_of,
     diagnostic_with_edit,
     diagnostic_with_label,
     diagnostic_without_fix,
@@ -280,7 +280,7 @@ sema_lint: fn(code: String, span: Span, what: String, why: String, fix: String) 
 // source as an emission, and its gate fails on an emitted code with no row,
 // so the registry holds every code a caller can name.
 sema_diagnostic_row: fn(code: String) -> DiagnosticRegistryRow {
-    diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    diagnostic_registry_row_of(code)
 }
 
 // L0511: a user binding or parameter spelled `err`.

@@ -14,10 +14,15 @@
 // every member under that prefix is called. Each dead row is the member's
 // own: its dispatcher row and its name in its module's `exports` and `owns`
 // lists, in signature rows and in `fixed_sig` lists.
+// A signature row is also stale when its member has no Core call record (no
+// non-receiver dispatcher row and no CoreCallExtensions.jet row): the typed
+// signature lookup (core_call_typed_signature_for) and the native return
+// labels' route read a row only through a member's record, so the row is
+// read by nothing; only its name goes from the signature table.
 // Usage: jet Tools/Agent/DeadRowSweep.jet [--check|--write]
-// --check lists the dead members and fails when there is one; --write
-// deletes their rows and names each dead source-owned member, whose Core
-// declaration goes by hand.
+// --check lists the dead members and the stale signature rows and fails when
+// there is one; --write deletes their rows and names each dead source-owned
+// member, whose Core declaration goes by hand.
 use {
     files: core.files
     process: core.process
@@ -27,6 +32,8 @@ use {
 CORE_ROWS: "Compiler/Prelude/Core.rows"
 
 INVENTORY_ROWS: "Compiler/Prelude/CoreSurfaceInventory.rows"
+
+EXTENSION_ROWS: "Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet"
 
 // The row-form signature tables, each a `rows: """` block whose rows are
 // `<module> <member>|<member>... <parameters> <return>` (core_sig_row_lookup).
@@ -210,14 +217,50 @@ inventory_members: fn(text: String) -> [TableMember] Never! {
     members
 }
 
-// Every table's members.
-table_members: fn() -[FS]> [TableMember] DeadRowSweepError! {
-    rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
-    members := dispatcher_members(rows)
+// The `module member` keys of the non-receiver Core call records: Core.rows's
+// dispatcher rows (a receiver row's module is `-`) and CoreCallExtensions.jet's
+// rows (`module_name: "core.x", member: "name"`).
+record_keys: fn(rows: String, extensions: String) -> [String:Bool] Never! {
+    keys := [String:Bool]{}
+    loop member in dispatcher_members(rows) {
+        if member.module_name != "-" -> keys["{member.module_name} {member.member}"] = true
+    }
+    loop line in extensions.split("\n") {
+        module_part: line.split_once("module_name: \"") ?? next
+        module_name: module_part.after.split_once("\"") ?? next
+        member_part: module_name.after.split_once("member: \"") ?? next
+        member: member_part.after.split_once("\"") ?? next
+        keys["{module_name.before} {member.before}"] = true
+    }
+    keys
+}
+
+// The signature tables' members.
+signature_table_members: fn() -[FS]> [TableMember] DeadRowSweepError! {
+    members := [TableMember]{}
     loop path in SIGNATURE_TABLES {
         text: files.read(path) ?? return Err(sweep_fail("cannot read {path}: {err}"))
         members.extend(signature_members(path, text))
     }
+    Ok(members)
+}
+
+// The stale members of `signatures` as `module member` pairs: those with no
+// Core call record in `records`.
+stale_signatures: fn(signatures: [TableMember], records: [String:Bool]) -> [String:Bool] Never! {
+    stale := [String:Bool]{}
+    loop member in signatures {
+        key: "{member.module_name} {member.member}"
+        if records.get(key) == None -> stale[key] = true
+    }
+    stale
+}
+
+// Every table's members.
+table_members: fn() -[FS]> [TableMember] DeadRowSweepError! {
+    rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
+    members := dispatcher_members(rows)
+    members.extend(signature_table_members() ?? return Err(err))
     inventory: files.read(INVENTORY_ROWS) ?? return Err(sweep_fail("cannot read {INVENTORY_ROWS}: {err}"))
     members.extend(inventory_members(inventory))
     Ok(members)
@@ -340,7 +383,11 @@ dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadR
     }
     members: table_members() ?? return Err(err)
     dead: dead_members(members) ?? return Err(err)
-    if dead.len() == 0 -> return Ok("dead row sweep: no dead rows")
+    rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
+    extensions: files.read(EXTENSION_ROWS) ?? return Err(sweep_fail("cannot read {EXTENSION_ROWS}: {err}"))
+    signatures: signature_table_members() ?? return Err(err)
+    stale: stale_signatures(signatures, record_keys(rows, extensions))
+    if dead.len() == 0 && stale.len() == 0 -> return Ok("dead row sweep: no dead rows")
     if mode == "--check" {
         count := 0
         loop member in members {
@@ -349,24 +396,30 @@ dead_row_sweep_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> String DeadR
                 count += 1
             }
         }
-        return Err(sweep_fail("{count} dead row(s) of {dead.len()} member(s); run jet Tools/Agent/DeadRowSweep.jet --write"))
+        loop member in signatures {
+            key: "{member.module_name} {member.member}"
+            if dead.get(key) == None && stale.get(key) != None -> print("{member.place}: {key} (no call record)")
+        }
+        return Err(sweep_fail("{count} dead row(s) of {dead.len()} member(s) and {stale.len()} stale signature member(s); run jet Tools/Agent/DeadRowSweep.jet --write"))
     }
-    rows: files.read(CORE_ROWS) ?? return Err(sweep_fail("cannot read {CORE_ROWS}: {err}"))
     loop line in rows.split("\n") {
         fields: line.split(" ").to_list()
         if fields.len() > 3 && fields[0] == "dispatcher_row" && line.contains("source_owned") && dead.get("{fields[2]} {fields[3]}") != None {
             print("{fields[2]} {fields[3]} is source-owned: delete its declaration from the module's Core source")
         }
     }
+    unread := [String:Bool]{}
+    loop (key, _) in dead -> unread[key.copy()] = true
+    loop (key, _) in stale -> unread[key.copy()] = true
     written := 0
     if sweep_write(CORE_ROWS, rows, sweep_core_rows(rows, dead)) ?? return Err(err) -> written += 1
     loop path in SIGNATURE_TABLES {
         text: files.read(path) ?? return Err(sweep_fail("cannot read {path}: {err}"))
-        if sweep_write(path, text, sweep_signature_table(text, dead)) ?? return Err(err) -> written += 1
+        if sweep_write(path, text, sweep_signature_table(text, unread)) ?? return Err(err) -> written += 1
     }
     inventory: files.read(INVENTORY_ROWS) ?? return Err(sweep_fail("cannot read {INVENTORY_ROWS}: {err}"))
     if sweep_write(INVENTORY_ROWS, inventory, sweep_inventory(inventory, dead)) ?? return Err(err) -> written += 1
-    Ok("dead row sweep: deleted the rows of {dead.len()} member(s) from {written} file(s)")
+    Ok("dead row sweep: deleted the rows of {dead.len()} dead member(s) and {stale.len()} stale signature member(s) from {written} file(s)")
 }
 
 run: fn() {
@@ -416,4 +469,15 @@ run: fn() {
     assert_eq(sweep_signature_table(table, dead), "a: fn() {{\n    rows: \"\"\"\n    core.x kept Int Int\n    core.y gone Int Int\n    \"\"\"\n}}\n")
     inventory: "fixed_sig core.x {{ gone, kept }}\nfixed_sig core.x {{ lone }}\n"
     assert_eq(sweep_inventory(inventory, dead), "fixed_sig core.x {{ kept }}\n")
+}
+
+#Test("a signature member without a non-receiver call record is stale") {
+    rows: "dispatcher_row plain core.x kept | CoreCallRecord.new(\"core.x\", \"kept\", \"jet_kept\", true, &[false])\ndispatcher_row receiver - gone | CoreCallRecord.receiver_with_symbol(&[\"X\"], \"gone\", \"jet_gone\", true, &[])\n"
+    extensions: "    CoreCallRecord{{module_name: \"core.y\", member: \"added\", receiver_types: [String]{{}}}},\n"
+    records: record_keys(rows, extensions)
+    assert_eq(records.len(), 2)
+    table: "a: fn() {{\n    rows: \"\"\"\n    core.x gone|kept Int Int\n    core.y added - Unit\n    core.z lone Int Int\n    \"\"\"\n}}\n"
+    stale: stale_signatures(signature_members("a.jet", table), records)
+    assert_eq(stale.len(), 2)
+    assert(stale.get("core.x gone") != None && stale.get("core.z lone") != None)
 }

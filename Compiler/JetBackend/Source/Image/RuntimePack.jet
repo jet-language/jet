@@ -463,11 +463,11 @@ link_pack_write: fn(c: ^LinkContext, exports: [Int]) -> [U8] Never! {
     // named locals, then the globals.
     sym_count: 1 + p.sec_out.len() + p.l_name.len() + p.gl_id.len()
     symtab := [U8]{}
-    symtab.try_reserve(sym_count * 24) ?? panic("reserve failed")
+    symtab.try_reserve(sym_count * 24) ?? ()
     xindex := [U8]{}
-    if extended -> xindex.try_reserve(sym_count * 4) ?? panic("reserve failed")
+    if extended -> xindex.try_reserve(sym_count * 4) ?? ()
     strtab := [U8]{U8{0}}
-    strtab.try_reserve(1 + (p.l_name.len() + p.gl_id.len()) * 32) ?? panic("reserve failed")
+    strtab.try_reserve(1 + (p.l_name.len() + p.gl_id.len()) * 32) ?? ()
     link_pack_sym(symtab, xindex, 0, 0, 0, 0, 0)
     loop out in p.sec_out -> link_pack_sym(symtab, xindex, 0, 3, out, 0, 0)
     loop (j, name) in p.l_name {
@@ -501,7 +501,7 @@ link_pack_write: fn(c: ^LinkContext, exports: [Int]) -> [U8] Never! {
     }
     loop s in lines -> bytes_est += link_sec_size(c, link_obj_of(c, s), s) + 16
     bytes := [U8]{}
-    bytes.try_reserve(bytes_est) ?? panic("reserve failed")
+    bytes.try_reserve(bytes_est) ?? ()
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     loop byte in ident -> bytes.push(U8{byte})
     elf64_u16(bytes, 1)
@@ -744,7 +744,7 @@ link_runtime_image_finish: fn(c_in: ^^LinkContext, name: String, entry_g: Int, t
     c.g_kind[main_final] = LINK_G_LINKER
     c.g_addr[main_final] = program_base
     obj_has_main := [Bool]{}
-    obj_has_main.try_reserve(c.obj_name.len()) ?? panic("reserve failed")
+    obj_has_main.try_reserve(c.obj_name.len()) ?? ()
     loop obj in 0..<c.obj_name.len() {
         has := false
         loop k in c.obj_first_global[obj]..<c.obj_sym_count[obj] {
@@ -794,7 +794,7 @@ link_runtime_image_finish: fn(c_in: ^^LinkContext, name: String, entry_g: Int, t
         loop sz in debug.sizes -> debug_est += sz
         sym_est := 1 + c.g_name.len()
         loop obj in 0..<c.obj_name.len() -> sym_est += c.obj_first_global[obj]
-        image.try_reserve(image.len() + debug_est + sym_est * 72 + 1048576) ?? panic("reserve failed")
+        image.try_reserve(image.len() + debug_est + sym_est * 72 + 1048576) ?? ()
     }
     link_write_sections(c, image, layout, debug, pieces, false, threads)
     if c.errors.len() > 0 -> return link_image_failure(c)
@@ -850,7 +850,7 @@ x64_link_runtime_image_objects: fn(names: [String], bufs: ^^[[U8]], threads: Com
     }
     root_globals := [Int]{}
     seen_global := [Bool]{}
-    seen_global.try_reserve(c.g_name.len()) ?? panic("reserve failed")
+    seen_global.try_reserve(c.g_name.len()) ?? ()
     loop _ in 0..<c.g_name.len() -> seen_global.push(false)
     loop obj in 0..<c.obj_name.len() {
         b: c.obj_buffer[obj]
@@ -876,7 +876,7 @@ x64_link_runtime_image_objects: fn(names: [String], bufs: ^^[[U8]], threads: Com
     entry_section: link_entry_section(c, entry_g)
     if entry_section < 0 -> return link_image_failure(c)
     sections := [Int]{entry_section}
-    sections.try_reserve(1 + root_globals.len() + 3) ?? panic("reserve failed")
+    sections.try_reserve(1 + root_globals.len() + 3) ?? ()
     loop g in root_globals {
         f: link_final(c, g)
         if c.g_kind[f] == LINK_G_FILE && c.g_section[f] >= 0 -> sections.push(c.g_section[f])
@@ -995,7 +995,7 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
     }
     defined := [Int]{}
     if symtab_count > first_global {
-        defined.try_reserve(symtab_count - first_global) ?? panic("reserve failed")
+        defined.try_reserve(symtab_count - first_global) ?? ()
     }
     loop k in first_global..<symtab_count {
         if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> defined.push(k)
@@ -1003,7 +1003,7 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
     slots := 1
     loop slots < 2 * defined.len() -> slots *= 2
     table := [Int]{}
-    table.try_reserve(slots) ?? panic("reserve failed")
+    table.try_reserve(slots) ?? ()
     loop _ in 0..<slots -> table.push(0)
     mask: slots - 1
     loop k in defined {
@@ -1015,7 +1015,7 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
         table[slot] = k
     }
     out := [U8]{}
-    out.try_reserve(16 + slots * 4) ?? panic("reserve failed")
+    out.try_reserve(16 + slots * 4) ?? ()
     elf64_u64(out, LINK_IMAGE_EXPORTS_MAGIC)
     elf64_u64(out, slots)
     loop k in table -> elf64_u32(out, k)

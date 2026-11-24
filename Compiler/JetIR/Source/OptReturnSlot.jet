@@ -30,7 +30,7 @@
 // stored with a value that has a Drop keeps its boxes too: the caller's
 // Drop of the box would drop that value. Library and runtime modules
 // (no program entry) keep every convention, their exports' ABI.
-use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
+use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single]
 
 // The box size of each function whose Returns can use a return slot (-1:
 // none), the instructions whose allocations it returns, by function.
@@ -133,7 +133,7 @@ ir_opt_slot_scan_ranges: fn(m: IRModule, bounds: [Int], calls: [Int], results: [
     task.group ir_opt_slot_scan_group {
         head: task ir_opt_slot_scan_range(m, bounds[at], bounds[at + 1], calls, results)
         rest: ir_opt_slot_scan_ranges(m, bounds, calls, results, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -157,7 +157,7 @@ ir_opt_slot_touched_ranges: fn(m: IRModule, bounds: [Int], plan: IROptSlotPlan, 
     task.group ir_opt_slot_touch_group {
         head: task ir_opt_slot_touched_range(m, bounds[at], bounds[at + 1], plan)
         rest: ir_opt_slot_touched_ranges(m, bounds, plan, at + 1)
-        done.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.extend(compiler_threads_joined(head))
         done.extend(rest.move())
     }
     done
@@ -193,7 +193,7 @@ ir_opt_slot_rebuild_parts: fn(m: IRModule, touched: [Int], bounds: [Int], plan: 
     task.group ir_opt_slot_rebuild_group {
         head: task ir_opt_slot_rebuild_range(m, touched, bounds[at], bounds[at + 1], plan, results, calls)
         rest: ir_opt_slot_rebuild_parts(m, touched, bounds, plan, results, calls, at + 1)
-        done.extend(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.extend(compiler_threads_joined(head))
         done.extend(rest.move())
     }
     done

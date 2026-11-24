@@ -1141,7 +1141,10 @@ sema_call_check_expect_snapshot: fn(call: Call, args: [CallArg], type_args: [Typ
     route: sema_call_core_resolve_route(environment, program, "core.testing", "snap", [Type]{}, 2, false, call.name_span, diagnostics) ?? return None
     target: if route == {
         .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> panic("expect(value).snapshot() must resolve core.testing.snap's Jet source body")
+        .Core(_) | .SharedSite(_) -> {
+            check.context.incomplete_reasons.push("expect(value).snapshot() must resolve core.testing.snap's Jet source body")
+            return None
+        }
     }
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, check.context, "expect(value).snapshot()", call.name_span, [EffectRowEntry]{EffectRowEntry{name: "FS", span: call.name_span}, EffectRowEntry{name: "Env", span: call.name_span}}, diagnostics) {
         return None

@@ -443,8 +443,8 @@ SemaCrossingBodyWalk: struct {
 sema_ownership_crossing_body_problem: fn(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: ^SemaCheckContext) -> SemaSendabilityProblem? {
     walk := SemaCrossingWalk{active: [String]{}, finished: name_table_sized(16)}
     others := [SemaCrossingBodyWalk]{}
-    loop context.crossing_walks.len() > 0 {
-        row: context.crossing_walks.pop() ?? panic("a nonempty crossing walk list failed to pop")
+    loop {
+        row: context.crossing_walks.pop() ?? break
         if row.crossing == crossing -> walk = row.walk.move() else -> others.push(row)
     }
     context.crossing_walks = others

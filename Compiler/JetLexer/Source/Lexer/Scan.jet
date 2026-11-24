@@ -541,7 +541,7 @@ scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
 
 raw_token_facts: fn(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
-    if source.len() > 16 -> facts.try_reserve(source.len() * 3 /% 4 + 8) ?? panic("reserve failed")
+    if source.len() > 16 -> facts.try_reserve(source.len() * 3 /% 4 + 8) ?? ()
     _ := raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     facts
 }
@@ -565,7 +565,7 @@ RawScanStop: struct {
 // read at byte 0 only, and the EOF fact is emitted when the range reaches
 // the end of the source.
 raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int, previous_code: Int, facts: ^[Int]) -> RawScanStop {
-    if facts.len() <= 4 && to - from > 16 -> facts.try_reserve((to - from) * 3 /% 4 + 8) ?? panic("reserve failed")
+    if facts.len() <= 4 && to - from > 16 -> facts.try_reserve((to - from) * 3 /% 4 + 8) ?? ()
     last_code := previous_code
     fn_in_range := false
     bodies_local := true

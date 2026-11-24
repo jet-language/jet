@@ -47,7 +47,7 @@ jet_frame_types: fn(defs: ^^[TTypeDef]) -> JetFrameTypes Never! {
     }
     // -3 not yet computed, -2 generic, -1 unknown/cycle, >= 0 cached storage bytes.
     fixed := [Int]{}
-    if owned.len() > 0 -> fixed.try_reserve(owned.len()) ?? panic("reserve failed")
+    if owned.len() > 0 -> fixed.try_reserve(owned.len()) ?? ()
     loop definition in owned {
         fixed.push(if definition.generic_params.len() > 0 -> -2 else -> -3)
     }

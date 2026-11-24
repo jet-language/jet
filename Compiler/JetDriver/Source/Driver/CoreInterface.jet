@@ -63,7 +63,7 @@ use {
         body_codec_out,
         body_codec_put_program,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_threads_partition,
         compiler_threads_single,
         name_count,
@@ -236,7 +236,7 @@ jet_driver_core_interface_parts: fn(parts: ^[[JetDriverCoreInterfaceJob]], catal
     task.group core_interface_threads {
         head: task jet_driver_core_interface_part(part, catalog, compiler_threads_single())
         rest: jet_driver_core_interface_parts(parts, catalog)
-        made.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        made.push(compiler_threads_joined(head))
         loop done in rest.move() -> made.push(done)
     }
     made
@@ -611,7 +611,7 @@ jet_driver_core_ready_parts: fn(parts: ^[[JetDriverCoreReadyRecord]]) -> [[JetDr
     task.group core_ready_threads {
         head: task jet_driver_core_ready_part(part.move())
         rest: jet_driver_core_ready_parts(parts)
-        decoded.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        decoded.push(compiler_threads_joined(head))
         loop done in rest.move() -> decoded.push(done)
     }
     decoded

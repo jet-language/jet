@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 use {
-    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
+    jet_foundation.[interner_empty, CompilerThreads, CompilerTraceSink, FnBody, NameTable, TConstantDef, TImplDef, TTypeDef, Type, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_joined, compiler_threads_heaviest_first, compiler_threads_single, compiler_transfer_rows, module_none, name_find, name_index, name_intern, name_table_sized, sha256_hex, symbol_table]
     jet_sema.[sema_inline_member_module, sema_inline_member_source_name]
     jet_backend.[
         TIME_DURATION_NS,
@@ -992,7 +992,7 @@ ir_x64_compile_module_logged: fn(program: ^^IRModule, threads: CompilerThreads, 
             t.move()
         }
         ir_x64_select_rows(inputs, workers, outputs, stops)
-        tables_box.push(starting.join() ?? panic(compiler_threads_failure_text(err)))
+        tables_box.push(compiler_threads_joined(starting))
     }
     if trace_sink == .Val(sink) -> sink.end("ir.x64.select", count)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64.scatter", "", -1, -1)
@@ -1730,8 +1730,8 @@ ir_x64_write_with_release: fn(owned_in: ^^IRX64Result, program: ^^X64ObjectModul
         rest: task ir_x64_release_rest(released)
         dropped: task ir_x64_release_runs(released, -1)
         objects.push(x64_object_functions_threads(program, functions, debug, exports, data_exports, threads, debug_info, own_sections, split))
-        _: rest.join() ?? panic(compiler_threads_failure_text(err))
-        _: dropped.join() ?? panic(compiler_threads_failure_text(err))
+        _: compiler_threads_joined(rest)
+        _: compiler_threads_joined(dropped)
     }
     objects.pop() ?? panic("the object writer lost its object")
 }
@@ -1760,7 +1760,7 @@ ir_x64_object: fn(compiled: ^^IRX64Result, debug_info: Bool, split: Bool{false})
         task.group ir_x64_object_prep {
             reached: task ir_x64_reached_pair(functions.move(), debug.move(), kept_roots, has_main)
             programs.push(ir_x64_object_module(owned))
-            pair := reached.join() ?? panic(compiler_threads_failure_text(err))
+            pair := compiler_threads_joined(reached)
             functions = pair.functions.move()
             debug = pair.debug.move()
         }
@@ -2058,7 +2058,7 @@ ir_x64_release_runs: fn(released: Shared<IRX64Released>, runs: Int) -> Int Never
     task.group ir_x64_release_threads {
         head: task ir_x64_release_run(released)
         count = ir_x64_release_runs(released, runs - 1)
-        count += head.join() ?? panic(compiler_threads_failure_text(err))
+        count += compiler_threads_joined(head)
     }
     count
 }

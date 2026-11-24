@@ -224,7 +224,10 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
     route: sema_call_core_resolve_route(environment, program, "core.prelude", "option_or_err", [Type]{inner}, 2, false, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target: if route == {
         .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> panic("Option.or_err must resolve its canonical Jet source body")
+        .Core(_) | .SharedSite(_) -> {
+            check.context.incomplete_reasons.push("Option.or_err must resolve its canonical Jet source body")
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
     }
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     kind := TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(why)}}

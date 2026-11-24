@@ -86,9 +86,8 @@ use jet_foundation.[
 // after the written items. Every question is keyed on `facts`, built once over
 // the unchanged written items: O(items + types × wire fields), not a rescan per
 // type and field. `foreign` holds the codecs other modules give the types these
-// items hold ("{trait}|{leaf}"; sema_derive_foreign_codecs,
-// sema_serde_graph_codecs).
-sema_serde_expand_builtin_items: fn(items: ^[Item], foreign: NameTable) {
+// items hold (sema_derive_foreign_codecs, sema_serde_graph_codecs).
+sema_serde_expand_builtin_items: fn(items: ^[Item], foreign: SemaCodecNames) {
     facts: sema_derive_item_index(items)
     auto_encode: sema_derive_auto_selected(items, facts, "Encode", foreign)
     auto_decode: sema_derive_auto_selected(items, facts, "Decode", foreign)
@@ -2079,18 +2078,17 @@ sema_codec_type_names: fn(ty: Type, names: ^[String]) Never! {
     }
 }
 
-// The codecs the graph's registered impls give the types `items` hold
-// ("{trait}|{leaf}"), as sema_derive_foreign_codecs gives a module's own items
-// before the graph exists: the items a user template generates into a
-// registered module.
-sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> NameTable {
+// The codecs the graph's registered impls give the types `items` hold, as
+// sema_derive_foreign_codecs gives a module's own items before the graph
+// exists: the items a user template generates into a registered module.
+sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> SemaCodecNames {
     names := [String]{}
     loop item in items -> sema_derive_held_type_names(item, names)
-    codecs := name_table_sized(names.len() * 2 + 1)
+    codecs := SemaCodecNames{names: name_table_sized(names.len() + 3)}
     loop name in names {
         loop reference in sema_registration_impl_rows_named(graph, name) {
             trait_name: graph.modules[reference.module_index].impls[reference.row].trait_name ?? next
-            if owned_trait_codec(trait_name) -> _ := name_intern(codecs, "{trait_name}|{name}")
+            if owned_trait_codec(trait_name) -> sema_codec_names_add(codecs, trait_name, name)
         }
     }
     codecs

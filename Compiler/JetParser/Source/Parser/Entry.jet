@@ -29,7 +29,7 @@ use {
         WebBucket,
         ast_program,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         compiler_transfer_rows,
         expr_span,
         name_count,
@@ -271,7 +271,7 @@ parser_parse_source_lines_threads: fn(source: [U8], allow_reserved_identifiers: 
     bidi_diagnostics := [Diagnostic]{}
     terminator_diagnostics := [Diagnostic]{}
     slots := [Shared<ParserChunkSlot>]{}
-    slots.try_reserve(chunk_count) ?? panic("reserve failed")
+    slots.try_reserve(chunk_count) ?? ()
     line_base := 0
     index := 0
     loop raw_chunk in lexed_chunks.chunks.move() {
@@ -345,7 +345,7 @@ parser_parse_run_chunks: fn(input: ^^[Token], tables_input: ^^TokenTables, lexer
     byte_bounds: parser_chunk_byte_bounds(tokens, bounds, source)
     chunk_count: bounds.len() - 1
     slots := [Shared<ParserChunkSlot>]{}
-    slots.try_reserve(chunk_count) ?? panic("reserve failed")
+    slots.try_reserve(chunk_count) ?? ()
     loop chunk in 0..<chunk_count {
         line_lo: if line_starts.len() > 0 -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk]) else -> 0
         line_hi: if line_starts.len() > 0 -> if chunk + 1 == chunk_count -> line_starts.len() else -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk + 1]) else -> 0
@@ -383,7 +383,7 @@ parser_parse_expansion_threads: fn(input: ^^ParserFenceExpansion, tables_input: 
 parser_line_starts: fn(source: [U8]) -> [Int] Never! {
     count: source.len()
     starts := [Int]{}
-    if count > 0 -> starts.try_reserve(count /% 32 + 2) ?? panic("reserve failed")
+    if count > 0 -> starts.try_reserve(count /% 32 + 2) ?? ()
     starts.push(0)
     index := 0
     loop index + 4 <= count {
@@ -703,11 +703,11 @@ parser_chunk_remap_literal: fn(old_row: Int, old_tables: TokenTables, new_tables
     suffix: parser_chunk_remap_name(literal.suffix, old_tables.names, new_tables.names, name_map)
     parts := [StringPart]{}
     if literal.string_parts.len() > 0 {
-        parts.try_reserve(literal.string_parts.len()) ?? panic("reserve failed")
+        parts.try_reserve(literal.string_parts.len()) ?? ()
         loop part in literal.string_parts {
             nested := [Token]{}
             if part.tokens.len() > 0 {
-                nested.try_reserve(part.tokens.len()) ?? panic("reserve failed")
+                nested.try_reserve(part.tokens.len()) ?? ()
                 loop tok in part.tokens {
                     text: parser_chunk_remap_name(tok.text, old_tables.names, new_tables.names, name_map)
                     decoded: parser_chunk_remap_name(tok.decoded, old_tables.names, new_tables.names, name_map)
@@ -728,13 +728,13 @@ parser_chunk_remap_literal: fn(old_row: Int, old_tables: TokenTables, new_tables
 parser_slice_chunk_tokens_and_tables: fn(tokens: [Token], tok_start: Int, tok_end: Int, old_tables: TokenTables) -> {tokens: [Token], tables: TokenTables} Never! {
     count: tok_end - tok_start
     local_tokens := [Token]{}
-    if count > 0 -> local_tokens.try_reserve(count) ?? panic("reserve failed")
+    if count > 0 -> local_tokens.try_reserve(count) ?? ()
     local_tables := token_tables()
     local_tables.has_fences = old_tables.has_fences
     local_tables.has_paste = old_tables.has_paste
     total_names: name_count(old_tables.names)
     name_map := [Int]{}
-    name_map.try_reserve(total_names) ?? panic("reserve failed")
+    name_map.try_reserve(total_names) ?? ()
     loop _ in 0..<total_names -> name_map.push(-1)
     if total_names > 0 -> name_map[0] = 0
     loop index in tok_start..<tok_end {
@@ -852,7 +852,7 @@ parser_prepare_sliced_slots: fn(tokens: [Token], tables: TokenTables, source: [U
     task.group parser_prepare_slice_threads {
         head: task parser_prepare_sliced_slot(tokens, tables, source, line_starts, expect_leading_semi, slots[from])
         prepared = parser_prepare_sliced_slots(tokens, tables, source, line_starts, expect_leading_semi, slots, from + 1)
-        prepared += head.join() ?? panic(compiler_threads_failure_text(err))
+        prepared += compiler_threads_joined(head)
     }
     prepared
 }
@@ -881,7 +881,7 @@ parser_prepare_direct_slots: fn(source: [U8], slots: [Shared<ParserChunkSlot>], 
     task.group parser_prepare_direct_threads {
         head: task parser_prepare_direct_slot(source, slots[from])
         prepared = parser_prepare_direct_slots(source, slots, from + 1)
-        prepared += head.join() ?? panic(compiler_threads_failure_text(err))
+        prepared += compiler_threads_joined(head)
     }
     prepared
 }
@@ -902,7 +902,7 @@ parser_chunk_scan_imports: fn(tokens: [Token], tables: TokenTables, imports: [Im
     has_spans: indexed_spans.len() > 0
     ident_seen := [Bool]{}
     total_names: name_count(tables.names)
-    ident_seen.try_reserve(total_names) ?? panic("reserve failed")
+    ident_seen.try_reserve(total_names) ?? ()
     loop _ in 0..<total_names -> ident_seen.push(false)
     marker_qualifiers := [String]{}
     uninit_id: if name_find(tables.names, "uninit") == .Val(id) -> name_index(id) else -> -1
@@ -1013,7 +1013,7 @@ parser_parse_slot_parts: fn(marker_scopes: [ParserMarkerScope], source_end: Int,
     task.group parser_chunk_threads {
         head: task parser_parse_slot_part(marker_scopes, source_end, allow_environment_reads, slots[from])
         parsed = parser_parse_slot_parts(marker_scopes, source_end, allow_environment_reads, slots, from + 1)
-        parsed += head.join() ?? panic(compiler_threads_failure_text(err))
+        parsed += compiler_threads_joined(head)
     }
     parsed
 }
@@ -1127,7 +1127,7 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     }
     _ := parser_parse_slot_parts(marker_scopes, source_end, allow_environment_reads, slots, 0)
     outputs := [ParserChunkOutput]{}
-    outputs.try_reserve(chunk_count) ?? panic("reserve failed")
+    outputs.try_reserve(chunk_count) ?? ()
     failed := false
     total_imports := 0
     total_items := 0
@@ -1162,18 +1162,18 @@ parser_finish_prepared_slots: fn(slots: [Shared<ParserChunkSlot>], source: [U8],
     program.file_cap = file_cap.move()
     program.has_scope_member = false
     program.has_task_spawn = false
-    if total_imports > 0 -> program.imports.try_reserve(total_imports) ?? panic("reserve failed")
-    if total_items > 0 -> program.items.try_reserve(total_items) ?? panic("reserve failed")
+    if total_imports > 0 -> program.imports.try_reserve(total_imports) ?? ()
+    if total_items > 0 -> program.items.try_reserve(total_items) ?? ()
     diagnostics := [Diagnostic]{}
     loop diagnostic in lexer_diagnostics -> diagnostics.push(diagnostic.copy())
     block_spans := [Span]{}
-    if total_blocks > 0 -> block_spans.try_reserve(total_blocks) ?? panic("reserve failed")
+    if total_blocks > 0 -> block_spans.try_reserve(total_blocks) ?? ()
     else_arms := [ElseArmSpan]{}
-    if total_elses > 0 -> else_arms.try_reserve(total_elses) ?? panic("reserve failed")
+    if total_elses > 0 -> else_arms.try_reserve(total_elses) ?? ()
     block_policy_declarations := [PolicyDeclaration]{}
     statement_rules := [AppliedRuleApplication]{}
     debug_sites := [DebugTraceSite]{}
-    if total_debug > 0 -> debug_sites.try_reserve(total_debug) ?? panic("reserve failed")
+    if total_debug > 0 -> debug_sites.try_reserve(total_debug) ?? ()
     state_marker_sites := [StateMarkerSite]{}
     loop index in 0..<outputs.len() {
         if outputs[index].has_scope_member -> program.has_scope_member = true
@@ -1229,7 +1229,7 @@ parser_parse_chunked: fn(input: ^^ParserFenceExpansion, bounds: [Int], lexer_dia
     byte_bounds: parser_chunk_byte_bounds(tokens, bounds, source)
     chunk_count: bounds.len() - 1
     slots := [Shared<ParserChunkSlot>]{}
-    slots.try_reserve(chunk_count) ?? panic("reserve failed")
+    slots.try_reserve(chunk_count) ?? ()
     loop chunk in 0..<chunk_count {
         line_lo: if line_starts.len() > 0 -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk]) else -> 0
         line_hi: if line_starts.len() > 0 -> if chunk + 1 == chunk_count -> line_starts.len() else -> parser_line_starts_lower_bound(line_starts, byte_bounds[chunk + 1]) else -> 0
@@ -1537,7 +1537,7 @@ parser_collect_debug_trace_sites_at: fn(tokens: [Token], tables: TokenTables, de
     }
     if !has_call -> return
     closes := [Int]{}
-    closes.try_reserve(count) ?? panic("reserve failed")
+    closes.try_reserve(count) ?? ()
     opens := [Int]{}
     loop index in 0..<count {
         closes.push(-1)

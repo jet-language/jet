@@ -57,7 +57,7 @@
 // The other addresses (`.debug_addr`'s, the call sites', `.debug_line`'s and
 // `.debug_jetline`'s) and the section offsets are relocations against
 // section symbols, so any ELF linker can place the sections.
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single]
 
 ELF64_R_X86_64_32: 10
 
@@ -265,9 +265,9 @@ dwarf_eh_chunk: fn(debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], symb
     eh := [U8]{}
     relas := [X64ObjectRela]{}
     patches := [Int]{}
-    eh.try_reserve(count * 32) ?? panic("reserve failed")
-    relas.try_reserve(count) ?? panic("reserve failed")
-    patches.try_reserve(count) ?? panic("reserve failed")
+    eh.try_reserve(count * 32) ?? ()
+    relas.try_reserve(count) ?? ()
+    patches.try_reserve(count) ?? ()
     loop index in start..<end {
         f_start: eh.len()
         elf64_u32(eh, 0)
@@ -294,7 +294,7 @@ dwarf_eh_chunks: fn(debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], sym
     task.group dwarf_eh_threads {
         head: task dwarf_eh_chunk(debug, offsets, sizes, symbols, bounds[at], bounds[at + 1])
         rest: dwarf_eh_chunks(debug, offsets, sizes, symbols, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -321,8 +321,8 @@ dwarf_eh_frame_threads: fn(debug: [X64FunctionDebug], offsets: [Int], sizes: [In
     workers: if admitted > 8 -> 8 else -> admitted
     if workers <= 1 {
         relas := [X64ObjectRela]{}
-        relas.try_reserve(count) ?? panic("reserve failed")
-        eh.try_reserve(eh.len() + count * 32) ?? panic("reserve failed")
+        relas.try_reserve(count) ?? ()
+        eh.try_reserve(eh.len() + count * 32) ?? ()
         loop (index, size) in sizes {
             start: eh.len()
             elf64_u32(eh, 0)
@@ -348,9 +348,9 @@ dwarf_eh_frame_threads: fn(debug: [X64FunctionDebug], offsets: [Int], sizes: [In
         total_bytes += c.bytes.len()
         total_relas += c.relas.len()
     }
-    eh.try_reserve(total_bytes) ?? panic("reserve failed")
+    eh.try_reserve(total_bytes) ?? ()
     relas := [X64ObjectRela]{}
-    relas.try_reserve(total_relas) ?? panic("reserve failed")
+    relas.try_reserve(total_relas) ?? ()
     loop chunk in chunks.move() {
         base: eh.len()
         eh.extend(chunk.bytes)
@@ -1005,9 +1005,9 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
     // The address table: version 5, 8-byte addresses, no segment selector,
     // then function i's start at index i.
     addr := [U8]{}
-    addr.try_reserve(DWARF_ADDR_HEADER + 8 * functions.len()) ?? panic("reserve failed")
+    addr.try_reserve(DWARF_ADDR_HEADER + 8 * functions.len()) ?? ()
     addr_relas := [X64ObjectRela]{}
-    addr_relas.try_reserve(functions.len()) ?? panic("reserve failed")
+    addr_relas.try_reserve(functions.len()) ?? ()
     elf64_u32(addr, 0)
     elf64_u16(addr, 5)
     dwarf_u8(addr, 8)
@@ -1020,7 +1020,7 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
     sections.addr_relas = addr_relas.move()
 
     weights := [Int]{}
-    weights.try_reserve(functions.len()) ?? panic("reserve failed")
+    weights.try_reserve(functions.len()) ?? ()
     total := 0
     variables := 0
     runs := 0
@@ -1060,9 +1060,9 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
     }
     dwarf_patch_u32(info, 0, info_size - 4)
     lists := dwarf_lists_header(list_count)
-    lists.try_reserve(DWARF_LISTS_HEADER + 4 * list_count) ?? panic("reserve failed")
+    lists.try_reserve(DWARF_LISTS_HEADER + 4 * list_count) ?? ()
     ranges := dwarf_lists_header(range_count)
-    ranges.try_reserve(DWARF_LISTS_HEADER + 4 * range_count) ?? panic("reserve failed")
+    ranges.try_reserve(DWARF_LISTS_HEADER + 4 * range_count) ?? ()
     list_end := 4 * list_count
     range_end := 4 * range_count
     loop rows in taken {
@@ -1110,7 +1110,7 @@ dwarf_info: fn(sections: ^X64DwarfSections, program: X64ObjectModule, functions:
         }
         out_p
     }
-    relas.try_reserve(total_relas) ?? panic("reserve failed")
+    relas.try_reserve(total_relas) ?? ()
     patched.reverse()
     loop patched.len() > 0 {
         item := patched.pop() ?? break
@@ -1167,7 +1167,7 @@ dwarf_info_patch_parts: fn(jobs: ^[DwarfInfoPatch]) -> [DwarfInfoPatched] Never!
     task.group dwarf_info_patch_group {
         done_head: task ^^head { dwarf_info_patch_one(head) }
         rest: dwarf_info_patch_parts(jobs)
-        out.push(done_head.join() ?? panic(compiler_threads_failure_text(err)))
+        out.push(compiler_threads_joined(done_head))
         loop item in rest.move() -> out.push(item)
     }
     out
@@ -1266,7 +1266,7 @@ dwarf_info_parts: fn(inputs: Shared<DwarfInfoShared>, parts: [Shared<DwarfInfoPa
     task.group dwarf_info_threads {
         head: task dwarf_info_part(inputs, parts[from])
         built = dwarf_info_parts(inputs, parts, from + 1)
-        built += head.join() ?? panic(compiler_threads_failure_text(err))
+        built += compiler_threads_joined(head)
     }
     built
 }
@@ -1536,7 +1536,7 @@ dwarf_line: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug
 dwarf_line_range: fn(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], sizes: [Int], symbols: X64DwarfSymbols, start: Int, end: Int) -> DwarfSectionRows Never! {
     line := [U8]{}
     relas := [X64ObjectRela]{}
-    relas.try_reserve(end - start) ?? panic("reserve failed")
+    relas.try_reserve(end - start) ?? ()
     loop index in start..<end {
         facts: dwarf_function_debug(program, functions[index])
         rows: debug[index].lines
@@ -1589,7 +1589,7 @@ dwarf_line_chunks: fn(program: X64ObjectModule, functions: [X64CompiledFunction]
     task.group dwarf_line_parts {
         head: task dwarf_line_range(program, functions, debug, offsets, sizes, symbols, bounds[at], bounds[at + 1])
         rest: dwarf_line_chunks(program, functions, debug, offsets, sizes, symbols, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -1633,7 +1633,7 @@ dwarf_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunction
 
     count: functions.len()
     weights := [Int]{}
-    weights.try_reserve(count) ?? panic("reserve failed")
+    weights.try_reserve(count) ?? ()
     total_rows := 0
     loop row in debug {
         w: 1 + row.lines.len()
@@ -1660,8 +1660,8 @@ dwarf_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunction
         total_bytes += c.bytes.len()
         total_relas += c.relas.len()
     }
-    line.try_reserve(total_bytes) ?? panic("reserve failed")
-    relas.try_reserve(total_relas) ?? panic("reserve failed")
+    line.try_reserve(total_bytes) ?? ()
+    relas.try_reserve(total_relas) ?? ()
     loop chunk in chunks.move() {
         base: line.len()
         line.extend(chunk.bytes)
@@ -1701,7 +1701,7 @@ DwarfJetLineChunk: struct {
 dwarf_jet_line_chunk: fn(kept: [Int], debug: [X64FunctionDebug], start: Int, end: Int) -> DwarfJetLineChunk Never! {
     rows := [U8]{}
     lens := [Int]{}
-    lens.try_reserve(end - start) ?? panic("reserve failed")
+    lens.try_reserve(end - start) ?? ()
     loop pos in start..<end {
         from: rows.len()
         x64_jetline_rows(rows, debug[kept[pos]].lines)
@@ -1720,7 +1720,7 @@ dwarf_jet_line_chunks: fn(kept: [Int], debug: [X64FunctionDebug], bounds: [Int],
     task.group dwarf_jet_line_parts {
         head: task dwarf_jet_line_chunk(kept, debug, bounds[at], bounds[at + 1])
         rest: dwarf_jet_line_chunks(kept, debug, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop item in rest.move() -> done.push(item)
     }
     done
@@ -1735,7 +1735,7 @@ dwarf_jet_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunc
     paths := [Int]{}
     loop _ in program.debug.files -> paths.push(-1)
     kept := [Int]{}
-    kept.try_reserve(functions.len()) ?? panic("reserve failed")
+    kept.try_reserve(functions.len()) ?? ()
     weights := [Int]{}
     total_rows := 0
     loop (index, function) in functions {
@@ -1747,8 +1747,8 @@ dwarf_jet_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunc
             total_rows += w
         }
     }
-    table.try_reserve(16 + kept.len() * 32) ?? panic("reserve failed")
-    relas.try_reserve(kept.len()) ?? panic("reserve failed")
+    table.try_reserve(16 + kept.len() * 32) ?? ()
+    relas.try_reserve(kept.len()) ?? ()
     elf64_u32(table, 0)
     elf64_u32(table, kept.len())
     strings_at: table.len()
@@ -1780,10 +1780,10 @@ dwarf_jet_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunc
         bounds: compiler_threads_partition(weights, workers)
         chunks := dwarf_jet_line_chunks(kept, debug, bounds, 0)
         row_lens := [Int]{}
-        row_lens.try_reserve(kept.len()) ?? panic("reserve failed")
+        row_lens.try_reserve(kept.len()) ?? ()
         total_row_bytes := 0
         loop c in chunks -> total_row_bytes += c.rows.len()
-        rows.try_reserve(total_row_bytes) ?? panic("reserve failed")
+        rows.try_reserve(total_row_bytes) ?? ()
         loop chunk in chunks.move() {
             rows.extend(chunk.rows)
             row_lens.extend(chunk.lens)
@@ -1810,7 +1810,7 @@ dwarf_jet_line_threads: fn(program: X64ObjectModule, functions: [X64CompiledFunc
     }
     strings_start: table.len()
     dwarf_patch_u32(table, strings_at, strings_start)
-    table.try_reserve(table.len() + strings.len() + rows.len()) ?? panic("reserve failed")
+    table.try_reserve(table.len() + strings.len() + rows.len()) ?? ()
     table.extend(strings)
     rows_start: table.len()
     dwarf_patch_u32(table, rows_at, rows_start)
@@ -1873,9 +1873,9 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
                 lining: task dwarf_line_threads(program, functions, debug, offsets, sizes, symbols, threads)
                 jet_lining: task dwarf_jet_line_threads(program, functions, debug, offsets, sizes, symbols, threads)
                 dwarf_info(sections, program, functions, debug, offsets, sizes, text_size, symbols, threads)
-                frame = framing.join() ?? panic(compiler_threads_failure_text(err))
-                line = lining.join() ?? panic(compiler_threads_failure_text(err))
-                jet_line = jet_lining.join() ?? panic(compiler_threads_failure_text(err))
+                frame = compiler_threads_joined(framing)
+                line = compiler_threads_joined(lining)
+                jet_line = compiler_threads_joined(jet_lining)
             }
         }
     }

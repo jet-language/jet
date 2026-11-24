@@ -57,7 +57,7 @@
 //
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
-use jet_foundation.[CompilerThreads, Type, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set]
+use jet_foundation.[CompilerThreads, Type, compiler_threads_admit, compiler_threads_joined, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_column_set]
 
 IR_OPT_INLINE_CALLEE_O1: 40
 
@@ -414,7 +414,7 @@ ir_opt_marked_find_ranges: fn(functions: [IRFunction], marked: [Bool], bounds: [
     task.group ir_opt_marked_find_group {
         head: task ir_opt_marked_find_range(functions, marked, bounds[at], bounds[at + 1])
         rest: ir_opt_marked_find_ranges(functions, marked, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop rows in rest.move() -> done.push(rows)
     }
     done
@@ -443,7 +443,7 @@ ir_opt_marked_build_ranges: fn(view: IRModule, bodies: [[IRFunction]], functions
     task.group ir_opt_marked_build_group {
         head: task ir_opt_marked_build_range(view, bodies, functions, callers, recursive, bounds[at], bounds[at + 1])
         rest: ir_opt_marked_build_ranges(view, bodies, functions, callers, recursive, bounds, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop rows in rest.move() -> done.push(rows)
     }
     done
@@ -501,7 +501,7 @@ ir_opt_runtime_called_ranges: fn(functions: [IRFunction], bounds: [Int], name_co
     task.group ir_opt_runtime_called_group {
         head: task ir_opt_runtime_called_range(functions, bounds[at], bounds[at + 1], name_count)
         rest: ir_opt_runtime_called_ranges(functions, bounds, name_count, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop rows in rest.move() -> done.push(rows)
     }
     done

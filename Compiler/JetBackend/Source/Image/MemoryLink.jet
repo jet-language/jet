@@ -475,7 +475,7 @@ link_bind_class_headers: fn(headers: ^[LinkSectionHeader], extents: [[Int]], got
 link_bind_symbols: fn(out: ^[U8], origin: Int, headers: ^[LinkSectionHeader], locals: ^^[U8], globals: ^^[U8], symbol_names: ^^[U8], elf: ^[U8]) Never! {
     // The padding, both tables, then the section names and headers
     // (link_write_section_headers), with room to spare for the names.
-    out.try_reserve(8 + 24 + locals.len() + globals.len() + 1 + symbol_names.len() + 64 * (headers.len() + 3) + 512) ?? panic("the bound executable's symbol tables: {err}")
+    out.try_reserve(8 + 24 + locals.len() + globals.len() + 1 + symbol_names.len() + 64 * (headers.len() + 3) + 512) ?? ()
     elf64_pad(out, 8)
     symtab_at: origin + out.len()
     loop _ in 0..<24 -> out.push(U8{0})
@@ -611,7 +611,7 @@ link_bind_named_tail: fn(exe: X64Executable, image: [U8], gap_at: Int, gap: Int)
     // Each program name moves past the image's names, less the empty name.
     shift: tables[6] - 1
     tail := [U8]{}
-    tail.try_reserve(exe.tail.len() + 8 + image_end - tables[1] + program_end - program[1] + tables[6] + program[6]) ?? panic("the bound executable's symbol tables: {err}")
+    tail.try_reserve(exe.tail.len() + 8 + image_end - tables[1] + program_end - program[1] + tables[6] + program[6]) ?? ()
     tail.extend(exe.tail)
     elf64_pad(tail, 8)
     symbols_at: tail.len()

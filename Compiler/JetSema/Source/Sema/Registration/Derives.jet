@@ -100,7 +100,7 @@ use {
         build_debug_waits,
         CompilerThreads,
         compiler_threads_admit,
-        compiler_threads_failure_text,
+        compiler_threads_joined,
         comptime_walk_identifiers,
         core_record_field_types,
         core_record_literal_fields,
@@ -115,6 +115,8 @@ use {
         name_find,
         name_index,
         name_intern,
+        name_pair_find_slot,
+        name_pair_slot,
         name_table_sized,
         owned_trait_codec,
         owned_trait_implies,
@@ -2647,7 +2649,7 @@ sema_derive_has_codec_method: fn(index: SemaDeriveItemIndex, type_name: String, 
 //
 // A codec reaches across modules: a field whose type another module declares
 // qualifies when the graph's own fixed point gives that type the codec
-// (sema_derive_foreign_codecs), read from `foreign` ("{trait}|{leaf}"). The
+// (sema_derive_foreign_codecs), read from `foreign`. The
 // graph's fixed point runs over every module at once (`global`), each
 // candidate read against its own module's index (`indexes[module]`). Each
 // candidate's name is in `candidate_names`, its node at its id in
@@ -2659,8 +2661,24 @@ SemaDeriveReadiness: struct {
     candidate_names: NameTable,
     candidate_nodes: [Int],
     relied_on: [Int],
-    foreign: NameTable,
+    foreign: SemaCodecNames,
     global: Bool,
+}
+
+// Codecs by (codec trait, type leaf): each pair's slot over `names`
+// (name_pair_slot) is in `held`.
+SemaCodecNames: struct {
+    names: NameTable{name_table_sized(4)},
+    held: [Int:Bool]{[Int:Bool]{}},
+}
+
+sema_codec_names_add: fn(codecs: ^SemaCodecNames, trait_name: String, leaf: String) Never! {
+    codecs.held[name_pair_slot(codecs.names, trait_name, leaf)] = true
+}
+
+sema_codec_names_has: fn(codecs: SemaCodecNames, trait_name: String, leaf: String) -> Bool Never! {
+    slot: name_pair_find_slot(codecs.names, trait_name, leaf) ?? return false
+    codecs.held.get(slot) != None
 }
 
 // The node of the candidate named `name`.
@@ -2734,7 +2752,7 @@ sema_derive_foreign_ready: fn(readiness: ^SemaDeriveReadiness, name: String) -> 
         readiness.relied_on.push(node)
         return true
     }
-    name_find(readiness.foreign, "{readiness.trait_name}|{leaf}") != None
+    sema_codec_names_has(readiness.foreign, readiness.trait_name, leaf)
 }
 
 sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
@@ -2854,7 +2872,7 @@ sema_derive_fields_ready: fn(readiness: ^SemaDeriveReadiness, items: [Item], ite
 // A distinct type is a candidate for a codec only: it codes as its base
 // unless `#!Codable` or a package denying auto_derive refuses it.
 // The result holds the names of the selected declarations.
-sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String, foreign: NameTable) -> NameTable {
+sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String, foreign: SemaCodecNames) -> NameTable {
     readiness := SemaDeriveReadiness{indexes: [SemaDeriveItemIndex]{index}, module: 0, trait_name: trait_name, candidate_names: name_table_sized(items.len() + 1), candidate_nodes: [Int]{-1}, relied_on: [Int]{}, foreign: foreign, global: false}
     names := [String]{}
     nodes := [Item]{}
@@ -2926,7 +2944,7 @@ sema_derive_fail_dependents: fn(failed: ^[Bool], dependents: [[Int]]) {
 }
 
 // The codecs the graph gives the types its modules declare, for each module
-// the entries ("{trait}|{leaf}") of the names its declarations hold
+// the (codec, leaf) pairs of the names its declarations hold
 // (sema_derive_held_type_names): a module's structural auto-derive
 // (sema_derive_auto_selected) reads a field type another module declares as
 // the graph decides it instead of trusting it. One fixed point runs over
@@ -2965,7 +2983,7 @@ sema_derive_foreign_scan_spawn: fn(inputs: [SemaRegistrationModuleInput], part: 
         rest_indexes := [SemaDeriveItemIndex]{}
         rest_held := [[String]]{}
         sema_derive_foreign_scan_spawn(inputs, part + 1, workers, rest_indexes, rest_held)
-        got := head.join() ?? panic(compiler_threads_failure_text(err))
+        got := compiler_threads_joined(head)
         indexes.extend(got.indexes.move())
         indexes.extend(rest_indexes.move())
         held_names.extend(got.held_names.move())
@@ -2973,7 +2991,7 @@ sema_derive_foreign_scan_spawn: fn(inputs: [SemaRegistrationModuleInput], part: 
     }
 }
 
-sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: CompilerThreads) -> [NameTable] {
+sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: CompilerThreads) -> [SemaCodecNames] {
     indexes := [SemaDeriveItemIndex]{}
     held_names := [[String]]{}
     workers: compiler_threads_admit(threads, inputs.len(), inputs.len(), 32, 0, 0)
@@ -2984,17 +3002,16 @@ sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: C
     } else {
         sema_derive_foreign_scan_spawn(inputs, 0, workers, indexes, held_names)
     }
-    readiness := SemaDeriveReadiness{indexes: indexes.move(), module: 0, trait_name: "", candidate_names: name_table_sized(4), candidate_nodes: [Int]{-1}, relied_on: [Int]{}, foreign: name_table_sized(4), global: true}
-    ready := name_table_sized(inputs.len() * 4 + 4)
+    readiness := SemaDeriveReadiness{indexes: indexes.move(), module: 0, trait_name: "", candidate_names: name_table_sized(4), candidate_nodes: [Int]{-1}, relied_on: [Int]{}, foreign: SemaCodecNames{}, global: true}
+    ready := SemaCodecNames{names: name_table_sized(inputs.len() * 4 + 4)}
     codecs: [String]{"Encode", "Decode"}
     loop trait_name in codecs -> sema_derive_codec_ready(readiness, inputs, trait_name, ready)
-    tables := [NameTable]{}
+    tables := [SemaCodecNames]{}
     loop names in held_names {
-        table := name_table_sized(names.len() * 2 + 1)
+        table := SemaCodecNames{names: name_table_sized(names.len() + 3)}
         loop name in names {
             loop trait_name in codecs {
-                key: "{trait_name}|{name}"
-                if name_find(ready, key) != None -> _ := name_intern(table, key)
+                if sema_codec_names_has(ready, trait_name, name) -> sema_codec_names_add(table, trait_name, name)
             }
         }
         tables.push(table.move())
@@ -3007,11 +3024,11 @@ sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput], threads: C
 // structural auto-derive selects it over every module at once, as
 // sema_derive_auto_selected does over one, a type alias when the type it
 // names does. Each candidate's fields are read against its own module.
-sema_derive_codec_ready: fn(readiness: ^SemaDeriveReadiness, inputs: [SemaRegistrationModuleInput], trait_name: String, ready: ^NameTable) {
+sema_derive_codec_ready: fn(readiness: ^SemaDeriveReadiness, inputs: [SemaRegistrationModuleInput], trait_name: String, ready: ^SemaCodecNames) {
     readiness.trait_name = trait_name
     readiness.candidate_names = name_table_sized(inputs.len() * 4 + 4)
     readiness.candidate_nodes = [Int]{-1}
-    readiness.foreign = name_table_sized(16)
+    readiness.foreign = SemaCodecNames{names: name_table_sized(16)}
     written := [String]{}
     names := [String]{}
     node_modules := [Int]{}
@@ -3043,7 +3060,7 @@ sema_derive_codec_ready: fn(readiness: ^SemaDeriveReadiness, inputs: [SemaRegist
                 }
                 .Impl(definition) -> {
                     if (definition.trait_name ?? "") == trait_name {
-                        written.push("{trait_name}|{sema_serde_named_leaf(definition.type_name)}")
+                        written.push(sema_serde_named_leaf(definition.type_name))
                     }
                     next
                 }
@@ -3052,7 +3069,7 @@ sema_derive_codec_ready: fn(readiness: ^SemaDeriveReadiness, inputs: [SemaRegist
                 }
             }
             if asked || sema_derive_has_trait_impl(readiness.indexes[module_index], name, trait_name) {
-                written.push("{trait_name}|{name}")
+                written.push(name)
                 next
             }
             if !requested || sema_derive_candidate(readiness, name) != None || sema_derive_has_codec_method(readiness.indexes[module_index], name, trait_name) {
@@ -3064,7 +3081,7 @@ sema_derive_codec_ready: fn(readiness: ^SemaDeriveReadiness, inputs: [SemaRegist
             node_positions.push(position)
         }
     }
-    loop key in written -> _ := name_intern(readiness.foreign, key)
+    loop leaf in written -> sema_codec_names_add(readiness.foreign, trait_name, leaf)
     failed := [Bool]{}
     dependents := [[Int]]{}
     loop _ in names {
@@ -3082,9 +3099,9 @@ sema_derive_codec_ready: fn(readiness: ^SemaDeriveReadiness, inputs: [SemaRegist
     }
     sema_derive_fail_dependents(failed, dependents)
     loop (node, name) in names {
-        if !failed[node] -> _ := name_intern(ready, "{trait_name}|{name}")
+        if !failed[node] -> sema_codec_names_add(ready, trait_name, name)
     }
-    loop key in written -> _ := name_intern(ready, key)
+    loop leaf in written -> sema_codec_names_add(ready, trait_name, leaf)
 }
 
 // The nominal leaf names a declaration's stored fields, variant payloads,
@@ -3130,8 +3147,8 @@ sema_derive_expand_builtin_items: fn(items: ^[Item], diagnostics: ^[Diagnostic])
 // kept in `memo`.
 sema_derive_expand_builtin_items_with: fn(items: ^[Item], diagnostics: ^[Diagnostic], memo: ^SemaDeriveMemo) {
     facts: sema_derive_item_index(items)
-    auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", name_table_sized(4))
-    auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", name_table_sized(4))
+    auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", SemaCodecNames{})
+    auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", SemaCodecNames{})
     generated := [Item]{}
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.

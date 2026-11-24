@@ -26,7 +26,7 @@
 // steps through those short lists instead of every function's instructions;
 // a row's second use in a function finds its number already given, so the
 // numbering is the same.
-use jet_foundation.[CompilerTraceSink, Interner, InternerMarks, InternerRemap, Name, TypeID, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, delta_has_rows, interner_empty, interner_merge_delta, name_column_get, name_column_set, name_column_sorted, name_column_value, type_id_remap]
+use jet_foundation.[CompilerTraceSink, Interner, InternerMarks, InternerRemap, Name, TypeID, compiler_take_rows, compiler_threads_joined, compiler_transfer_rows, delta_has_rows, interner_empty, interner_merge_delta, name_column_get, name_column_set, name_column_sorted, name_column_value, type_id_remap]
 
 // A function the walk starts from: function `local` of part `part`.
 IRMergeRoot: struct {
@@ -237,7 +237,7 @@ ir_merge_with: fn(built: ^^[IRModule], prepared: ^^[IRMergePrep], roots: [IRMerg
     task.group ir_merge_release_group {
         dropped: task ir_merge_release(released, -1)
         ir_merge_key_rows(out, g)
-        _: dropped.join() ?? panic(compiler_threads_failure_text(err))
+        _: compiler_threads_joined(dropped)
     }
     if trace_sink == .Val(sink) -> sink.end("ir.merge.keys", -1)
     out
@@ -275,7 +275,7 @@ ir_merge_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMerge, roots: [IRMerg
         lists := compiler_take_rows<[IRMember]>(parts[part].member_lists)
         loop lists.len() > 0 {
             list: lists.len() - 1
-            members := lists.pop() ?? panic("a nonempty member list failed to pop")
+            members := lists.pop() ?? break
             row: wanted.get(list) ?? next
             loop index in 0..<members.len() {
                 members[index].ty = ir_merge_reached_type(g, part, members[index].ty)
@@ -311,7 +311,7 @@ ir_merge_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMerge, roots: [IRMerg
         described := compiler_take_rows<IRDebugVariants>(parts[part].variant_lists)
         loop described.len() > 0 {
             list: described.len() - 1
-            found := described.pop() ?? panic("a nonempty variant list failed to pop")
+            found := described.pop() ?? break
             row: shaped.get(list) ?? next
             loop variant in 0..<found.variants.len() {
                 loop index in 0..<found.variants[variant].members.len() {
@@ -401,7 +401,7 @@ ir_merge_release: fn(released: Shared<[IRModule]>, count: Int) -> Int Never! {
     task.group ir_merge_release_parts {
         head: task ir_merge_release_part(released)
         dropped = ir_merge_release(released, count - 1)
-        dropped += head.join() ?? panic(compiler_threads_failure_text(err))
+        dropped += compiler_threads_joined(head)
     }
     dropped
 }
@@ -416,8 +416,7 @@ ir_merge_release_part: fn(released: Shared<[IRModule]>) -> Int Never! {
 ir_merge_release_pop: fn(released: Shared<[IRModule]>) -> [IRModule] Never! {
     permit: released.guard_edit()
     part := [IRModule]{}
-    if permit.value.len() > 0 {
-        row := permit.value.pop() ?? panic("a nonempty released part list failed to pop")
+    if permit.value.pop() == .Val(row) {
         part.push(row)
     }
     part
@@ -467,8 +466,8 @@ ir_merge_new: fn(parts: [IRModule], prepared: ^^[IRMergePrep], roots: [IRMergeRo
     addrs := [[Int]]{}
     has_entry_check := false
     // Popped from the last part down, then put back in part order.
-    loop preps.len() > 0 {
-        prep := preps.pop() ?? panic("a nonempty part preparation list failed to pop")
+    loop {
+        prep := preps.pop() ?? break
         functions.push(prep.functions.move())
         types.push(prep.types.move())
         names.push(prep.names.move())
@@ -508,9 +507,9 @@ ir_merge_new: fn(parts: [IRModule], prepared: ^^[IRMergePrep], roots: [IRMergeRo
                 named: task ir_merge_grouped(names, [[{key: String, local: Int}]]{}, name_counts)
                 data: task ir_merge_grouped(texts, constants, data_counts)
                 ir_merge_group(functions, function_group, function_keys)
-                grouped.push(typed.join() ?? panic(compiler_threads_failure_text(err)))
-                grouped.push(named.join() ?? panic(compiler_threads_failure_text(err)))
-                grouped.push(data.join() ?? panic(compiler_threads_failure_text(err)))
+                grouped.push(compiler_threads_joined(typed))
+                grouped.push(compiler_threads_joined(named))
+                grouped.push(compiler_threads_joined(data))
             }
         }
     }
@@ -999,8 +998,8 @@ ir_merge_take_functions_and_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMe
                 ir_merge_rewrite_owned_work(work.move(), g.sides, recursive, out.stop_points)
             }
             ir_merge_rows(out, parts, g, roots, entry, part_remaps)
-            taken = rewriting.join() ?? panic(compiler_threads_failure_text(err))
-            _: dropping.join() ?? panic(compiler_threads_failure_text(err))
+            taken = compiler_threads_joined(rewriting)
+            _: compiler_threads_joined(dropping)
         }
     } else {
         taken = ir_merge_rewrite_parts(lists, g.sides, ids, recursive, out.stop_points)
@@ -1008,10 +1007,10 @@ ir_merge_take_functions_and_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMe
     }
     out.functions.try_reserve(count) ?? ()
     loop _ in 0..<count -> out.functions.push(ir_function_new("", "", "", "", 0))
-    loop taken.len() > 0 {
-        part_taken := taken.pop() ?? panic("a nonempty merged part list failed to pop")
-        loop part_taken.len() > 0 {
-            row := part_taken.pop() ?? panic("a nonempty merged function list failed to pop")
+    loop {
+        part_taken := taken.pop() ?? break
+        loop {
+            row := part_taken.pop() ?? break
             id: row.id
             out.functions[id] = row.function.move()
         }
@@ -1024,14 +1023,14 @@ ir_merge_take_functions_and_rows: fn(out: ^IRModule, parts: ^[IRModule], g: IRMe
 ir_merge_function_lists: fn(parts: ^[IRModule]) -> [[IRFunction]] Never! {
     lists := [[IRFunction]]{}
     kept := [IRModule]{}
-    loop parts.len() > 0 {
-        part := parts.pop() ?? panic("a nonempty part list failed to pop")
+    loop {
+        part := parts.pop() ?? break
         lists.push(part.functions.move())
         part.functions = [IRFunction]{}
         kept.push(part)
     }
-    loop kept.len() > 0 {
-        part: kept.pop() ?? panic("a nonempty kept part list failed to pop")
+    loop {
+        part: kept.pop() ?? break
         parts.push(part)
     }
     lists.reverse()
@@ -1067,7 +1066,7 @@ ir_merge_rewrite_parts: fn(lists: ^[[IRFunction]], sides: [IRMergeSide], ids: ^[
             ir_merge_rewrite_owned_part(part.move(), sides[at], recursive, stop_points)
         }
         taken = ir_merge_rewrite_parts(lists, sides, ids, recursive, stop_points)
-        taken.push(last.join() ?? panic(compiler_threads_failure_text(err)))
+        taken.push(compiler_threads_joined(last))
     }
     taken
 }
@@ -1098,7 +1097,7 @@ ir_merge_rewrite_part: fn(functions: ^^[IRFunction], side: IRMergeSide, ids: ^^[
     do_recursion: recursive.len() > 0
     loop rows.len() > 0 {
         id: row_ids[rows.len() - 1]
-        row := rows.pop() ?? panic("a nonempty part function list failed to pop")
+        row := rows.pop() ?? break
         if id < 0 -> next
         ir_merge_rewrite(side, row)
         if do_recursion -> ir_recursion_entry(row, recursive, id, stop_points)

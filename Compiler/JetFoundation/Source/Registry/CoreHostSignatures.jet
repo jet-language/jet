@@ -31,50 +31,13 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.crypto __sha256_blocks ^[U32],[u8],Int,Int Bool
     core.crypto __aes_blocks [u8],Int,Int,^[u8],[u8],Int,Int,^[u8] Bool
     core.crypto __ghash_blocks [u8],^[u8],[u8],Int,Int Bool
-    core.files scope Authority FileScope
-    core.files read Union<String,Path> Result<String,IOError>
-    core.files read_bytes Union<String,Path> Result<[u8],IOError>
-    core.files map Union<String,Path> Result<MappedFile,IOError>
-    core.files write|append_all Union<String,Path>,String Result<Unit,IOError>
-    core.files write_bytes Union<String,Path>,[u8] Result<Unit,IOError>
-    core.files exists|is_dir Union<String,Path> Bool
-    core.files remove|create_dir_all|remove_dir|remove_all Union<String,Path> Result<Unit,IOError>
-    core.files is_fifo|is_socket Union<String,Path> Result<Bool,IOError>
-    core.files chown Union<String,Path>,Int,Int Result<Unit,IOError>
-    core.files mkdtemp String Result<String,IOError>
-    core.files mktemp String String
-    core.files set_mode Union<String,Path>,Int Result<Unit,IOError>
-    core.files canonicalize|absolute Union<String,Path> Result<String,IOError>
-    core.files list_dir Union<String,Path> Result<[DirEntry],IOError>
-    core.files copy|copy_dir|symlink|hard_link Union<String,Path>,Union<String,Path> Result<Unit,IOError>
-    core.files read_link Union<String,Path> Result<String,IOError>
-    core.files walk|walk_files Union<String,Path>,String? Walk
-    core.files glob Union<String,Path> Result<[String],IOError>
-    core.files read_at Union<String,Path>,Int,Int Result<[u8],IOError>
-    core.files write_at Union<String,Path>,Int,[u8] Result<Unit,IOError>
-    core.files fsync Union<String,Path> Result<Unit,IOError>
-    core.files write_atomic Union<String,Path>,[u8] Result<Unit,IOError>
-    core.files temp_dir String Result<TempDir,IOError>
-    core.files temp_file String Result<TempFile,IOError>
-    core.files lock Union<String,Path>,Duration? Result<FileLock,IOError>
-    core.files try_lock Union<String,Path> Result<FileLock?,IOError>
     core.files jet_std_files_open_reader_nonblocking String Result<FileReader,IOError>
     core.files __list_directory Int Result<[[u8]],IOError>
     core.files __open_reader_raw Int,[u8] Result<FileReader,IOError>
     core.files __open_writer_raw Int,[u8],Int,Int Result<FileWriter,IOError>
     core.files __remove_at_raw Int,[u8] Result<Unit,IOError>
     core.http.client jet_http_build_resolve String,Int Result<[[u8]],String>
-    core.watcher files Union<String,Path> Result<WatchHandle,IOError>
-    core.watcher process_pid Int WatchHandle
-    core.watcher port String,Int WatchHandle
-    core.watcher set - WatchSet
     core.watcher __event WatchHandle Event<WatchEvent>
-    core.process args - [String]
-    core.process check ProcessReceipt Result<Unit,IOError>
-    core.process status_ok ProcessReceipt Bool
-    core.process exit Int Never
-    core.process on_signal ProcessSignal Unit
-    core.process cmd [String] ProcessSpec
     core.process pipeline [ProcessSpec] Result<ProcessReceipt,IOError>
     core.process jet_process_exit_status_raw Int String?
     jet_builtins process_child_id ProcessChild Int
@@ -94,33 +57,13 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins process_spec_plan ProcessSpec Result<ProcessPlan,IOError>
     jet_builtins process_spec_run|process_spec_run_checked ProcessSpec Result<ProcessReceipt,IOError>
     jet_builtins process_spec_spawn ProcessSpec Result<ProcessChild,IOError>
-    core.term confirm String Bool
-    core.term choose String,[String] Result<String,IOError>
-    core.term input_secret String Result<String,IOError>
-    core.term read_all_input|readline - Result<String,IOError>
-    core.term read_until String Result<String,IOError>
+    core.term readline - Result<String,IOError>
     core.term take Int Result<[u8],IOError>
-    core.term take_within Int,Duration Result<[u8]?,IOError>
-    core.term buffered - StdinHandle
-    core.term binread Union<String,Path> Result<[u8],IOError>
-    core.term binwrite Union<String,Path>,[u8] Result<Unit,IOError>
-    core.term stdin - StdinHandle
     core.term stdout - Stdout
     core.term stderr - Stderr
     core.term terminal_width|terminal_height - Int
     core.term jet_term_is_terminal_raw Int Bool
-    core.term style|style_force String,String String
     core.term progress String Result<Unit,IOError>
-    core.sys temp_dir - String
-    core.sys set String,String -
-    core.sys get String String?
-    core.sys unset String Result<Bool,EnvError>
-    core.sys vars - Result<[String],EnvError>
-    core.sys current_dir - Result<String,IOError>
-    core.sys home_dir - String?
-    core.sys name|family|arch|executable|hostname|username|release|version - String
-    core.sys expand String String
-    core.sys pid|getpid|cpu_count|getppid|getuid|geteuid|getgid|getegid|getpgrp - Int
     core.sys __times - (available:Bool,user:Int,system:Int,child_user:Int,child_system:Int,elapsed:Int,ticks:Int)
     core.sys __rlimit Int (available:Bool,soft:Int,hard:Int,errno:Int)
     core.sys __set_rlimit|__sched_set Int,Int,Int (available:Bool,value:Int,errno:Int)
@@ -142,54 +85,12 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.process __keep_open_raw ProcessSpec,Int,Int,Bool (spec:ProcessSpec,available:Bool,assigned_fd:Int,errno:Int)
     core.process __signal_add Int,Int,ProcessSignal (available:Bool,value:Int,errno:Int)
     core.process __signal_receiver Int Receiver<ProcessSignal>
-    core.sys umask|exitcode Int Int
-    core.sys success Int Bool
-    core.sys uptime - Float
-    core.sys getgroups - [Int]
-    core.sys loadavg|times - [Float]
-    core.sys getpgid|getsid|getpriority Int Result<Int,IOError>
-    core.sys setpriority Int,Int Result<Unit,IOError>
-    core.sys utime Union<String,Path>,Int,Int Result<Unit,IOError>
-    core.sys sync - -
-    core.sys stop Int -
-    core.sys atexit fn(;Unit) -
-    core.sys set_current_dir Union<String,Path> Result<Unit,IOError>
-    core.sys fork|setsid|wait - Result<Int,IOError>
-    core.sys waitpid Int,Int Result<Int,IOError>
-    core.sys setuid|setgid Int Result<Unit,IOError>
-    core.sys setpgrp - Result<Unit,IOError>
-    core.sys setpgid|kill Int,Int Result<Unit,IOError>
-    core.sys initgroups String,Int Result<Unit,IOError>
-    core.sys pipe - Result<[Int],IOError>
-    core.sys close_fd Int -
-    core.sys mkfifo Union<String,Path>,Int Result<Unit,IOError>
     core.crypto.vault get String String?
     core.sync text_new String,String SyncText
-    core.sync text_set SyncText,String,String SyncText
-    core.sync text_merge SyncText,SyncText SyncText
-    core.sync text_show SyncText String
-    core.sync text_edit SyncText,String,Int,Int,String SyncText
-    core.sync text_metadata SyncText String
     core.sync counter_new String,Int SyncCounter
     core.sync counter_inc SyncCounter,String,Int SyncCounter
-    core.sync counter_merge SyncCounter,SyncCounter SyncCounter
-    core.sync counter_value SyncCounter Int
-    core.sync map_new - SyncMap
-    core.sync list_new - SyncList
     core.sync map_set SyncMap,String,String SyncMap
-    core.sync map_get SyncMap,String String?
-    core.sync map_merge SyncMap,SyncMap SyncMap
-    core.sync map_show SyncMap String
-    core.sync list_push SyncList,String,String SyncList
-    core.sync list_merge SyncList,SyncList SyncList
-    core.sync list_show SyncList String
-    core.sync policy_new String,String Result<RowPolicy,String>
-    core.sync policy_allows RowPolicy,String,String Bool
-    core.sync policy_show RowPolicy String
-    core.testing snap String,String Bool
-    core.testing corpus String [String]
     core.testing fake_clock Int Clock
-    core.testing fake_rng Int RNG
     jet_builtins evidence_read String EvidenceRead
     jet_builtins record_failure String,String Unit
     jet_builtins clear_failure - Unit
@@ -203,136 +104,14 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     jet_builtins to_bits_f32 F32 Int
     jet_builtins from_bits_f32 Int F32
     core.testing world fn(DeterministicWorld;Unit) Unit
-    core.testing compare [Dyn],fn(Dyn;Dyn),fn(Dyn;Dyn),String TestComparison
-    core.testing assert_equal TestComparison Bool
-    core.testing status TestComparison String
-    core.math abs_float|log1p Float Float
-    core.math min_float|max_float|midpoint Float,Float Float
-    core.math clamp_float|hypot3 Float,Float,Float Float
-    core.math random - Float
-    core.math gcd_many|lcm_many|sum_int|prod_int [Int] Int
-    core.math powmod Int,Int,Int Int?
-    core.math abs_diff Int,Int Int
-    core.math even|odd Int Bool
-    core.math in_range Int,Int,Int Bool
-    core.math sqrt|floor|ceil|fabs|expm1 Float Float
-    core.math round Float Int
-    core.math fmod|remainder Float,Float Float
-    core.math isclose Float,Float,Float,Float Bool
-    core.math dist [Float],[Float] Float
-    core.math comb|perm Int,Int Int?
-    core.math isnan|isinf|isfinite Float Bool
-    core.math fsum [Float] Float
-    core.math sumprod [Float],[Float] Float
-    core.math prod [Int] Int
-    core.collections get Counter,String Int
-    core.collections map_set OrderedMap,String,String OrderedMap
-    core.collections map_get OrderedMap,String String?
-    core.collections chain - Chain
-    core.collections heapify [Int] [Int]
-    core.collections heappush [Int],Int [Int]
-    core.collections heappop [Int] (heap:[Int],value:Int?)
-    core.collections heappushpop [Int],Int (heap:[Int],value:Int)
-    core.collections heapreplace [Int],Int (heap:[Int],value:Int?)
-    core.collections bisect_left|bisect_right [Int],Int Int
-    core.collections insort_left|insort_right [Int],Int [Int]
-    core.collections merge_sorted [Int],[Int] [Int]
-    core.collections nsmallest|nlargest Int,[Int] [Int]
-    core.collections counter - Counter
-    core.collections counter_from [String] Counter
-    core.collections add|set_count Counter,String,Int Counter
-    core.collections inc|dec Counter,String Counter
-    core.collections total Counter Int
-    core.collections names|elements Counter [String]
-    core.collections most_common Counter,Int Counter
-    core.collections subtract|merge_add Counter,Counter Counter
-    core.collections clear_counter Counter Counter
-    core.collections ordered_map - OrderedMap
-    core.collections map_remove OrderedMap,String OrderedMap
-    core.collections map_keys|map_values OrderedMap [String]
-    core.collections map_contains OrderedMap,String Bool
-    core.collections map_len OrderedMap Int
-    core.collections chain_push Chain,[String],[String] Chain
-    core.collections chain_get Chain,String String?
-    core.collections chain_contains Chain,String Bool
-    core.collections.set remove StringSet,String StringSet?
-    core.collections.set add StringSet,String StringSet
-    core.collections.set new - StringSet
-    core.collections.set from_list [String] StringSet
-    core.collections.set discard StringSet,String StringSet
-    core.collections.set contains StringSet,String Bool
-    core.collections.set len StringSet Int
-    core.collections.set is_empty StringSet Bool
-    core.collections.set to_list StringSet [String]
-    core.collections.set clear|clone_set StringSet StringSet
-    core.collections.set union|intersection|difference|symmetric_difference StringSet,StringSet StringSet
-    core.collections.set issubset|issuperset|isdisjoint StringSet,StringSet Bool
-    core.math.stats sumprod [Float],[Float] Float?
-    core.math.stats prod [Float] Float
-    core.math.stats count [Float] Int
-    core.math.stats sum [Float] Float
-    core.math.stats cumsum|cumprod|diff|rank|zscore [Float] [Float]
-    core.math.stats moving_average [Float],Int [Float]
-    core.math.stats ewma [Float],Float [Float]
-    core.math.stats clip [Float],Float,Float [Float]
-    core.math.stats mean|fmean|geometric_mean|harmonic_mean|median|median_low|median_high|mode|pvariance|pstdev|variance|stdev|min|max|range|iqr|mad|mean_abs_deviation|skew|kurtosis [Float] Float?
-    core.math.stats median_low_int|median_high_int [Int] Int?
-    core.math.stats median_grouped|quantile|percentile [Float],Float Float?
-    core.math.stats covariance|correlation|weighted_mean|spearman|pearson|covariance_population [Float],[Float] Float?
-    core.math.stats multimode [Float] [Float]
-    core.math.stats kde|winsorize [Float],Float [Float]
-    core.math.stats kde_random [Float],Float,Int [Float]
-    core.math.stats quantiles [Float],Int [Float]
-    core.math.stats residuals [Float],[Float] [Float]
-    core.math.stats histogram [Float],Int [Int]
+    core.math sqrt|floor|ceil|fabs Float Float
+    core.math fmod Float,Float Float
     core.math __numeric_stop String Never
-    core.math.random random - Float
-    core.math.random __word - Int
-    core.math.random int|randint Int,Int Int
-    core.math.random float - Float
-    core.math.random float_range|uniform Float,Float Float
-    core.math.random bool - Bool
-    core.math.random normal|normalvariate|gauss Float,Float Float
-    core.math.random exponential|expovariate Float Float
     core.math.random seed Int -
-    core.math.random bytes|randbytes Int [u8]
-    core.math.random getrandbits Int Int
-    core.math.random randrange Int,Int Int
-    core.math.random choice [Int] Int?
-    core.math.random choices [Int],Int [Int]
-    core.math.random triangular Float,Float,Float Float
-    core.math.random gammavariate|betavariate|lognormvariate|weibullvariate|vonmisesvariate Float,Float Float
-    core.math.random paretovariate Float Float
-    core.math.random rng|split Int RNG
     core.crypto __wipe ^[u8] -
     core.crypto __secret_keep ^[u8] -
-    core.time sleep Duration -
-    core.time sleep_until Instant -
-    core.time start - Stopwatch
-    core.time instant - Instant
-    core.time now|now_utc - DateTime
-    core.time from_unix_ms|from_unix_seconds|from_unix_microseconds|from_unix_nanoseconds Int DateTime
-    core.time today - LocalDate
-    core.time parse|parse_iso_week_date String Result<LocalDate,TimeError>
-    core.time parse_rfc3339 String Result<DateTime,TimeError>
-    core.time from_iso_week Int,Int,Int Result<LocalDate,TimeError>
-    core.time parse_zoned String Result<ZonedDateTime,TimeError>
-    core.time datetime Int,Int,Int,Int,Int,Int DateTime
-    core.time time|local_time Int,Int,Int LocalTime
-    core.time days_in_month Int,Int Int
-    core.time is_leap_year Int Bool
-    core.time parse_time String Result<LocalTime,TimeError>
-    core.time period Int,Int,Int Period
-    core.time period_days|period_months|period_years Int Period
-    core.time zone String Result<Zone,TimeError>
-    core.time utc - Zone
-    core.time zoned DateTime,Zone ZonedDateTime
-    core.time zoned_local LocalDate,LocalTime,Zone,String Result<ZonedDateTime,TimeError>
     core.rt callback|__callback Int,Int,callback RealtimeStream
-    core.tasks timeout Duration Unit
-    core.tasks interval Duration Receiver<Int>
     core.tasks after Duration,T Receiver<T> T
-    core.tasks yield_now - Unit
     core.game run ^GameScene,GameReplay?,GameBackend?,Int? String
     core.event __scope_new - EventScope
     core.event __policy_sync - EventPolicy
@@ -346,18 +125,8 @@ core_host_fixed_signature: fn(module_name: String, member: String) -> CoreTypedC
     core.tasks __channel_new - (sender:Sender<T>,receiver:Receiver<T>) T
     core.tasks __channel_bounded Int (sender:Sender<T>,receiver:Receiver<T>) T
     core.prelude __receipt_attach T,String,String,String Unit T
-    core.encoding.json parse|loads|decode String Result<Dyn,EncodingError>
-    core.encoding.json to_string|to_string_pretty|dumps|dump Dyn Result<String,EncodingError>
+    core.encoding.json decode String Result<Dyn,EncodingError>
     core.encoding.json canonical Dyn String
-    core.encoding.json events Dyn String
-    core.encoding.jsonl parse|loads String Result<[Dyn],EncodingError>
-    core.encoding.jsonl to_string|dumps [Dyn] Result<String,EncodingError>
-    core.encoding.jsonl count_rows String Int
-    core.encoding.jsonl append_line String,Dyn Result<String,EncodingError>
-    core.encoding.jsonl first String Result<Dyn?,EncodingError>
-    core.encoding.csv parse String,String,Bool,Bool Result<[[String]],String>
-    core.encoding.csv to_string [[String]] String
-    core.encoding.csv rows String,String,Bool,Bool Result<[CSVRow],String>
     jet_builtins resolve_ordered String,U16 Result<[SocketAddr],ResolveError>
     core.net __ip_from_bytes ^^[u8] IPAddr
     core.net __socket_from_parts ^^IPAddr,U16,U32,U32 SocketAddr

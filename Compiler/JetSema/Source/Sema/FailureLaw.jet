@@ -53,6 +53,10 @@ use {
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
         expr_span,
+        name_index,
+        name_intern,
+        name_pair_slot,
+        name_table_sized,
         symbol_find,
         symbol_key_text,
         symbol_none,
@@ -1677,13 +1681,19 @@ sema_check_public_failure_carrier: fn(func: Func, environment: SemaScopeEnvironm
 sema_check_public_failure_carrier_graph: fn(function: String, error_type: Type, graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostics: ^[Diagnostic]) {
     pending := [String]{}
     sema_public_failure_collect_named(error_type, pending)
-    checked := [String:Bool]{}
-    reported := [String:Bool]{}
+    // Each carrier's leaf and member names; a checked carrier is its module
+    // index (high half) and its leaf's id, a reported member its (leaf,
+    // field) pair slot (name_pair_slot).
+    names := name_table_sized(8)
+    checked := [Int:Bool]{}
+    reported_types := [Int:Bool]{}
+    reported_members := [Int:Bool]{}
     loop pending.len() > 0 {
         carrier := pending.pop() ?? break
         leaf: sema_error_conversion_leaf(carrier)
         row: sema_type_resolve_nominal_row(graph, Type.Named{name: carrier}, module_identity) ?? next
-        key: "{row.module_index}|{leaf}"
+        leaf_id: name_index(name_intern(names, leaf))
+        key: (row.module_index << 32) | leaf_id
         if checked.get(key) != None -> next
         checked[key] = true
         nominal: graph.modules[row.module_index].nominals[row.row]
@@ -1694,17 +1704,17 @@ sema_check_public_failure_carrier_graph: fn(function: String, error_type: Type, 
         // its generated name; the diagnostic names it as its declaration does.
         shown: sema_public_failure_shown_name(graph.modules[row.module_index].source, nominal.symbol.span, leaf)
         if nominal.symbol.visibility < 2 {
-            if reported.get(leaf) == None {
-                reported[leaf] = true
+            if reported_types.get(leaf_id) == None {
+                reported_types[leaf_id] = true
                 diagnostics.push(sema_public_failure_diagnostic(function, shown, nominal.symbol.span, graph.modules[row.module_index].source))
             }
             next
         }
         loop field in nominal.fields {
             sema_public_failure_collect_named(field.ty, pending)
-            member: "{leaf}.{field.symbol.name}"
-            if field.symbol.visibility >= 2 || reported.get(member) != None -> next
-            reported[member] = true
+            member: name_pair_slot(names, leaf, field.symbol.name)
+            if field.symbol.visibility >= 2 || reported_members.get(member) != None -> next
+            reported_members[member] = true
             diagnostics.push(sema_public_failure_diagnostic(function, "{shown}.{field.symbol.name}", field.symbol.span, graph.modules[row.module_index].source))
         }
     }

@@ -619,7 +619,7 @@ x64_comptime_load: fn(child: ^X64ComptimeChild, code: X64ComptimeCode) -> String
     table_bytes: code.segments.len() * 48
     if child.shm_ready && code.segments.len() > 0 && table_bytes + code.bytes.len() <= X64_COMPTIME_SHM_SIZE - 8 {
         staged := [U8]{}
-        staged.try_reserve(table_bytes + code.bytes.len()) ?? panic("reserve failed")
+        staged.try_reserve(table_bytes + code.bytes.len()) ?? ()
         loop segment in code.segments {
             low: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
             end: os_page_round(segment.vaddr + segment.memory_size)

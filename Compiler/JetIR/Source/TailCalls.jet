@@ -32,7 +32,7 @@
 // would run that Drop before the callee instead of after it,
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
-use jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, name_column, name_column_set, name_column_table, name_column_value]
+use jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_joined, name_column, name_column_set, name_column_table, name_column_value]
 
 // Return.b of the Return after a tail Call: the Call is the jump.
 IR_TAIL_JUMP: 1
@@ -193,7 +193,7 @@ ir_tail_candidate_parts: fn(m: IRModule, bounds: [Int], poll: Int, trap: Int, at
     task.group ir_tail_group {
         head: task ir_tail_candidate_range(m, bounds[at], bounds[at + 1], poll, trap)
         rest: ir_tail_candidate_parts(m, bounds, poll, trap, at + 1)
-        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        done.push(compiler_threads_joined(head))
         loop part in rest.move() -> done.push(part)
     }
     done
