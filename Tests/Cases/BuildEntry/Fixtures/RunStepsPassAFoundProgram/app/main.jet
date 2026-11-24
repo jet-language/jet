@@ -9,8 +9,8 @@ build: fn(b: Build) -[Exec, FS]> {
         compile.arg("\"$0\" --version | {{ read -r line; printf '%s\\n' \"$line\" > \"$3\"; }} && \"$0\" -c \"$1\" -o \"$2\"")
         compile.file(b.found(cc))
         compile.input("answer.c")
-        compile.output("answer.o")
-        compile.output("version.txt")
+        _: compile.output("answer.o")
+        _: compile.output("version.txt")
         app: b.add_executable("app", ["main.jet"], [compile])
         b.default(app)
     }

@@ -3,7 +3,7 @@
 // closures, constants and program stops (Build.jet holds the shared state).
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, BodyNode, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_node_index, body_stmt, checked_generated_local, checked_user_local, type_carrier_identity, StmtKind]
-    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, name_column_get, name_column_set, number_argument_value, symbol_key_names, symbol_none]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, core_identity_is, function_param_writes, ir_host_value_name, name_column_get, name_column_set, number_argument_value, symbol_key_names, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
     jet_sema.[sema_type_def_instance_type]
@@ -2629,10 +2629,13 @@ ir_expr_slot_in: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, 
                 host_owner := ir_host_value_row(m, p, receiver_row)
                 // A reflection record laid out as a compiler-owned struct
                 // (FunctionInfo, EffectInfo, TypeInfo, ...) still has its
-                // methods answered by the compiler.
+                // methods answered by the compiler, and so do the `Build`
+                // calls the checker shapes itself (options, `generate`,
+                // `contribute`).
                 if host_owner == None {
                     if ir_untag(host_receiver_ty) == .Named(record) {
                         if ir_host_value_name(record) -> host_owner = Val(record.copy())
+                        if core_identity_is(record, "core.build", "Build") -> host_owner = Val("Build")
                     }
                 }
                 if host_owner == .Val(owner) {

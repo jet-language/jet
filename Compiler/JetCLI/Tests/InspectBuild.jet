@@ -320,10 +320,17 @@ inspect_build_runtime_dir: fn() -> String {
     "{parts.join("/")}/jet-runtime"
 }
 
+// A request whose `build: fn` runs natively against the Core the compiler
+// under test loads, which declares Build and its handles.
+inspect_build_native_request: fn() -> JetDriverCompileRequest {
+    request := jet_cli_driver_request(inspect_build_request().authorized_sources, inspect_build_core(), Val(1), JetDriverCompileMode.Doc)
+    request.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    request
+}
+
 #Test("inspect_build planned fn build") {
     scope := JetDriverBuildQueryScope{}
-    planned := inspect_build_request()
-    planned.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    planned := inspect_build_native_request()
     planned.authorized_sources.roots[0].files[0].source = "build: fn(b: Build) {{}}\nrun: fn() {{}}"
     planned_response := jet_driver_query_build_nodes(planned, scope)
     planned_request := planned_response.request.move()
@@ -333,7 +340,7 @@ inspect_build_runtime_dir: fn() -> String {
     inspect_build_require(planned_query.complete && planned_query.generated.len() == 0 && planned_query.nodes.len() == 3, "zero-generated plan keeps the staging check's nodes")
     // A build that generates nothing keeps the staging check's nodes; they
     // are the ones the final ordinary checked bundle would name.
-    final_check := inspect_build_request()
+    final_check := jet_cli_driver_request(inspect_build_request().authorized_sources, inspect_build_core(), Val(1), JetDriverCompileMode.Doc)
     final_check.authorized_sources.roots[0].files[0].source = "build: fn(b: Build) {{}}\nrun: fn() {{}}"
     final_check.capture_build_nodes = true
     final_check.doc_core_on_demand = true
@@ -351,8 +358,7 @@ inspect_build_runtime_dir: fn() -> String {
 // promised module declares stays an ordinary unknown name.
 #Test("inspect_build a promised module the build never made names its producer and consumer") {
     scope := JetDriverBuildQueryScope{}
-    promising := inspect_build_request()
-    promising.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    promising := inspect_build_native_request()
     promising.authorized_sources.roots[0].files[0].source = "build: fn(b: Build) {{\n    b.generate(\"facts\") {{\n        answer: fn() -> Int {{ 42 }}\n    }}\n    b.generate(\"facts\") {{\n        other: fn() -> Int {{ 1 }}\n    }}\n}}\n\nrun: fn() {{\n    print(answer())\n    print(nowhere())\n}}\n"
     response := jet_driver_query_build_plan(promising, scope)
     owner := response.request.move()
@@ -377,8 +383,7 @@ inspect_build_runtime_dir: fn() -> String {
 // the consumer, after the build's own report.
 #Test("inspect_build a promised name used outside the build's members names its producer and consumer") {
     scope := JetDriverBuildQueryScope{}
-    promising := inspect_build_request()
-    promising.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
+    promising := inspect_build_native_request()
     promising.authorized_sources.roots[0].files[0].source = "run: fn() {{\n    print(answer())\n    print(nowhere())\n}}\n"
     promising.authorized_sources.roots[0].files.push({path: "/inspect-build/package.jet", relative_path: "package.jet", identity: "build-package", source: "name: \"promise\"\nversion: \"0.1.0\"\nbuild: fn(b: Build) {{\n    b.generate(\"facts\") {{\n        answer: fn() -> Int {{ 42 }}\n    }}\n    b.generate(\"facts\") {{\n        other: fn() -> Int {{ 1 }}\n    }}\n}}\n"})
     response := jet_driver_query_build_plan(promising, scope)

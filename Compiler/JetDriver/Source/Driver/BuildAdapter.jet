@@ -19,6 +19,7 @@ use {
         build_session_call,
         build_session_diag,
         build_session_graph,
+        build_session_place,
         build_session_made_structs,
         build_session_refuse,
         build_session_set_tree_source,
@@ -108,10 +109,33 @@ JET_DRIVER_BUILD_SERVICES: [JetDriverBuildService]{
     {symbol: "Compiler", answer: jet_driver_compiler_unknown},
 }
 
-// A `build: fn` call `member` on `args` at `span` in source file `file`,
-// answered by the service row that names `member`, else by the row that
-// names its owner (the type before its first `.`); None when no row does.
+// A `build: fn` call `member` on `args` at `span` in source file `file`.
+// A `core.build` method's service import (Core/Build/Build.jet) sends the
+// method call's `at` (a SourceLocation: its file, line and column) after its
+// receiver: the call is placed where `at` names, the method's name long
+// (build_session_place), and the method's own arguments follow the
+// receiver. A call the checker shapes itself (an output's `options:`,
+// `b.generate`) is placed at its own span.
 jet_driver_build_host_call: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read]> JetEvalBuildReply? Never! {
+    if args.len() >= 2 {
+        site: jet_eval_build_field(args[1], "file") ?? TComptimeValue.Unit
+        line: jet_eval_build_field(args[1], "line") ?? TComptimeValue.Unit
+        column: jet_eval_build_field(args[1], "column") ?? TComptimeValue.Unit
+        if site == .String(text) && line == .Int(row) && column == .Int(at) {
+            placed: build_session_place(session, text, row, at, jet_driver_build_method_name(member).len())
+            rest := [TComptimeValue]{}
+            loop index in 0..<args.len() {
+                if index != 1 -> rest.push(args[index])
+            }
+            return jet_driver_build_service_call(session, host, member, rest, fallible, impure, placed, text)
+        }
+    }
+    jet_driver_build_service_call(session, host, member, args, fallible, impure, span, file)
+}
+
+// The answer of the service row that names `member`, else of the row that
+// names its owner (the type before its first `.`); None when no row does.
+jet_driver_build_service_call: fn(session: &BuildSession, host: JetDriverBuildAdapter, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span, file: String) -[FS.Read]> JetEvalBuildReply? Never! {
     loop service in JET_DRIVER_BUILD_SERVICES {
         if service.symbol == member -> return Val(service.answer(session, host, member, args, fallible, impure, span, file))
     }

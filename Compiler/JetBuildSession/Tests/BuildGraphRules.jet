@@ -199,6 +199,30 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(permit.value.targets.len(), 0)
 }
 
+// core.build's declared methods send every slot, an absent one Unit: a
+// toolchain's SDK, linker and sysroot; a probe's code, reproducibility and
+// toolchain; a step's time limit as its Duration's nanoseconds.
+#Test("declared_build_methods_send_every_slot_absent_ones_unit") {
+    session := build_graph_rules_session(90)
+    cross: build_graph_rules_value(build_session_call(session, "toolchain", [BuildSessionValue]{.Text{value: "cross"}, .Text{value: "aarch64-linux-gnu"}, .Text{value: "host"}, .Unit, .Text{value: "ld.lld"}, .Unit}, None, false, 1, 2))
+    assert(build_graph_rules_ok(build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "cc"}, .Text{value: "find_program"}, .Text{value: "cc"}, .Unit, .Unit, cross}, None, true, 3, 4)))
+    assert(build_graph_rules_ok(build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "check"}, .Text{value: "compile_check"}, .Text{value: "stdio.h"}, .Text{value: "int main(void) {{ return 0; }}"}, .Unit, .Unit}, None, true, 5, 6)))
+    assert(build_graph_rules_failed(build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "coded"}, .Text{value: "find_program"}, .Text{value: "sh"}, .Text{value: "int x;"}, .Unit, .Unit}, None, true, 7, 8)))
+    assert(build_graph_rules_failed(build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "pure"}, .Text{value: "find_program"}, .Text{value: "sh"}, .Unit, .Unit, .Unit}, None, false, 9, 10)))
+    tool: build_graph_rules_tool(session)
+    step: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text{value: "gen"}, tool, build_graph_rules_list([String]{})}, None, true, 11, 12))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "timeout", step, [BuildSessionValue]{.Int{value: 10_000_000_000}})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "timeout", step, [BuildSessionValue]{.Int{value: 1_500}})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "output", step, [BuildSessionValue]{.Text{value: "gen.txt"}, .Text{value: ""}, .Bool{value: false}})))
+    permit: session.storage.guard_read()
+    assert_eq(permit.value.toolchains[1].sdk, None)
+    assert_eq(permit.value.toolchains[1].linker, Val("ld.lld"))
+    assert_eq(permit.value.probes[0].toolchain, 1)
+    assert_eq(permit.value.probes[1].code, "int main(void) {{ return 0; }}")
+    assert_eq(permit.value.actions[0].timeout_ms, Val(10_000))
+    assert_eq(permit.value.actions[0].argv[permit.value.actions[0].argv.len() - 1], "gen.txt")
+}
+
 // An output's `options: {settings: ...}` arrive after the seven target slots,
 // absent ones Unit, as a key and value per setting; the target keeps each
 // value as the setting text the package's settings fold reads, and a key
@@ -298,21 +322,21 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     empty: build_graph_rules_list([String]{})
     app: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
     tool: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text{value: "tool"}, empty, empty}, None, false, 3, 4))
-    assert(build_graph_rules_ok(build_session_call(a, "optimize", [BuildSessionValue]{.Text{value: "optimize"}, .Text{value: "O2"}}, None, false, 5, 6)))
+    assert(build_graph_rules_ok(build_session_call(a, "option", [BuildSessionValue]{.Text{value: "optimize"}, .Text{value: "O2"}}, None, false, 5, 6)))
     first: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{app}, None, false, 7, 8))
     second: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{tool}, None, false, 9, 10))
     assert_eq(first, BuildSessionValue.Handle{type_name: "Compiler", session: 190, id: 0})
     assert_eq(second, BuildSessionValue.Handle{type_name: "Compiler", session: 190, id: 1})
-    after: build_graph_rules_failure(build_session_call(a, "bounds", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "off"}}, None, false, 11, 12)) ?? panic("bounds off after b.compiler was accepted")
+    after: build_graph_rules_failure(build_session_call(a, "option", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "off"}}, None, false, 11, 12)) ?? panic("bounds off after b.compiler was accepted")
     assert_eq(after.code, "E3503")
     assert_eq(after.what, "`b.bounds(.Off)` weakens checking in a build that holds a `Compiler` value")
     assert_eq(after.start, 11)
     pinned: build_graph_rules_failure(build_session_call(a, "pin", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "report"}}, None, false, 13, 14)) ?? panic("a pinned bounds report after b.compiler was accepted")
     assert_eq(pinned.what, "`b.pin(.bounds, .Report)` weakens checking in a build that holds a `Compiler` value")
-    assert(build_graph_rules_ok(build_session_call(a, "bounds", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "fatal"}}, None, false, 15, 16)))
+    assert(build_graph_rules_ok(build_session_call(a, "option", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "fatal"}}, None, false, 15, 16)))
     b := build_graph_rules_session(191)
     other: build_graph_rules_value(build_session_call(b, "add_executable", [BuildSessionValue]{.Text{value: "app"}, empty, empty}, None, false, 1, 2))
-    assert(build_graph_rules_ok(build_session_call(b, "bounds", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "off"}}, None, false, 3, 4)))
+    assert(build_graph_rules_ok(build_session_call(b, "option", [BuildSessionValue]{.Text{value: "bounds"}, .Text{value: "off"}}, None, false, 3, 4)))
     before: build_graph_rules_failure(build_session_call(b, "compiler", [BuildSessionValue]{other}, None, false, 5, 6)) ?? panic("b.compiler after bounds off was accepted")
     assert_eq(before.code, "E3503")
     assert_eq(before.start, 5)
@@ -372,7 +396,7 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert(build_graph_rules_ok(build_session_call(session, "signing", [BuildSessionValue]{.Text{value: "release"}, .Text{value: "developer-id:ACME"}}, None, false, 7, 8)))
     bad_probe: build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "sqlite"}, .Text{value: "pkg_config"}, .Text{value: ""}}, None, true, 9, 10)
     assert_eq(build_graph_rules_error(bad_probe), Val(BuildSessionError.EmptyProbeField{value: "sqlite"}))
-    assert(build_graph_rules_ok(build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "sqlite"}, .Text{value: "pkg_config"}, .Text{value: "sqlite3"}, toolchain}, None, true, 11, 12)))
+    assert(build_graph_rules_ok(build_session_call(session, "probe", [BuildSessionValue]{.Text{value: "sqlite"}, .Text{value: "pkg_config"}, .Text{value: "sqlite3"}, .Unit, .Unit, toolchain}, None, true, 11, 12)))
 }
 
 #Test("a_step_toolchain_and_signer_change_its_action_key") {
@@ -413,8 +437,8 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     tool: build_graph_rules_value(build_graph_rules_step(session, "output", gen, [BuildSessionValue]{.Text{value: "tool.sh"}, .Text{value: "--out="}}))
     assert_eq(build_session_call(session, "file.path", [BuildSessionValue]{tool}, None, true, 11, 12), BuildSessionReply.Value{value: BuildSessionValue.Text{value: "tool.sh"}})
     assert(build_graph_rules_failed(build_graph_rules_step(session, "file", gen, [BuildSessionValue]{tool})))
-    assert(build_graph_rules_ok(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text{value: "2min"}})))
-    assert(build_graph_rules_failed(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Text{value: "10us"}})))
+    assert(build_graph_rules_ok(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Int{value: 120_000_000_000}})))
+    assert(build_graph_rules_failed(build_graph_rules_step(session, "timeout", gen, [BuildSessionValue]{.Int{value: 10_000}})))
     made: build_graph_rules_value(build_session_call(session, "run", [BuildSessionValue]{.Text{value: "made"}, tool, caps}, None, true, 13, 14))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "reads", made, [BuildSessionValue]{.Text{value: "data.txt"}})))
     assert(build_graph_rules_ok(build_graph_rules_step(session, "writes", made, [BuildSessionValue]{.Text{value: "made.txt"}})))

@@ -5008,6 +5008,11 @@ sema_expr_check_method_on: fn(receiver: Expr, receiver_value: TExpr, method: Str
         graph_method := sema_call_app_graph_method(receiver, receiver_value, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if graph_method.handled -> return graph_method.value
     }
+    // core.build's `Build` declares its methods, but the checker shapes a
+    // build option, `b.generate`, `b.contribute` and an output's `options:`,
+    // and holds `b.compiler` to the root build, ahead of the declared check.
+    build: sema_call_try_build_context_method(receiver, receiver_value, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if build.handled -> return build.value
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.

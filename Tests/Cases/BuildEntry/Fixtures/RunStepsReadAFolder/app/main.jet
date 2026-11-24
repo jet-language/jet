@@ -8,7 +8,7 @@ build: fn(b: Build) -[Exec, FS]> {
         lines.arg("for f in \"$0\"/* \"$1\"/*; do read -r line < \"$f\"; printf '%s\\n' \"$line\"; done > \"$2\"")
         lines.file(b.folder("data"))
         lines.file(b.dependency("words").folder("lines"))
-        lines.output("lines.txt")
+        _: lines.output("lines.txt")
         app: b.add_executable("app", ["main.jet"], [lines])
         b.default(app)
     }

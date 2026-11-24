@@ -1,6 +1,6 @@
-// Private compiler service linkage, not a second public Build API. The trusted
-// build/comptime wrapper binds these symbols after ordinary checking. Handles
-// remain the compiler's Build/BuildPlan/BuildStepHandle/... nominal values.
+// The service behind core.build's `#Import(jet.build, symbol: ...)` methods,
+// not a second public Build API. Core declares Build and its handles
+// (Core/Build/Build.jet); the driver binds each import symbol to a call here.
 // Source owns session mutation, validation and projection on every tier.
 use {
     build_crypto: core.crypto
@@ -319,15 +319,17 @@ BuildSessionState: struct {
     // Each finding `meta.report` raised, in call order.
     findings: [BuildSessionFinding]{[BuildSessionFinding]{}},
     // The call being answered: its span, in source file `file`
-    // (build_session_at; "" for the build file).
+    // (build_session_at, build_session_place; "" for the build file).
     start: Int,
     end: Int,
     file: String{""},
-    // The build file's display path and the byte offset each of its lines
-    // starts at (build_session_set_source), which a generated module's and
-    // a step's `site` count from.
+    // The build file's display path (build_session_set_source), and the
+    // byte offset each line starts at of each source the driver named
+    // (build_session_add_source), by display path: a generated module's and
+    // a step's `site` count from the build file's, and a Core method's
+    // `at` is placed in its file's.
     build_file: String{""},
-    build_lines: [Int]{[Int]{}},
+    lines: [String:[Int]]{[String:[Int]]{}},
 }
 
 BuildSession: struct {
@@ -396,6 +398,21 @@ build_session_at: fn(session: &BuildSession, file: String) Never! {
     permit.value.file = file
 }
 
+// The span of the call a Core `core.build` method's `at` names, line `line`
+// and byte column `column` of source file `file`, `length` bytes long (the
+// method's name, as sema places a method call), which the next call's
+// reports are at. A file the driver named no lines of places the call at
+// its start.
+build_session_place: fn(session: &BuildSession, file: String, line: Int, column: Int, length: Int) -> Span Never! {
+    permit := session.storage.guard_edit()
+    start := 0
+    if permit.value.lines.get(file) == .Val(starts) && line >= 1 && line <= starts.len() {
+        start = starts[line - 1] + column - 1
+    }
+    permit.value.file = file
+    Span{start: start, end: start + length}
+}
+
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
 build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
@@ -437,13 +454,20 @@ build_session_set_identity: fn(session: &BuildSession, identity: String) Never! 
 // The build file's display path and source, whose lines the `site` of each
 // module `b.generate` makes and each step counts (build_session_site).
 build_session_set_source: fn(session: &BuildSession, file: String, source: String) Never! {
+    build_session_add_source(session, file, source)
     permit := session.storage.guard_edit()
     permit.value.build_file = file.copy()
+}
+
+// The lines of source file `file`, where a Core method's `at` may place a
+// call (build_session_place).
+build_session_add_source: fn(session: &BuildSession, file: String, source: String) Never! {
+    permit := session.storage.guard_edit()
     lines := [Int]{0}
     loop (index, byte) in source.bytes() {
         if byte == 10 -> lines.push(index + 1)
     }
-    permit.value.build_lines = lines.move()
+    permit.value.lines[file] = lines.move()
 }
 
 // The place of the call at byte `at` of the call being answered, `file:line`,
@@ -451,12 +475,13 @@ build_session_set_source: fn(session: &BuildSession, file: String, source: Strin
 // dependency's function's) or before the driver named the build file.
 build_session_site: fn(state: BuildSessionState, at: Int) -> String Never! {
     if state.build_file == "" || (state.file != "" && state.file != state.build_file) -> return ""
+    starts: state.lines.get(state.build_file) ?? return ""
     // The line is the count of line starts at or before `at`.
     low := 0
-    high := state.build_lines.len()
+    high := starts.len()
     loop low < high {
         middle: (low + high) /% 2
-        if state.build_lines[middle] <= at -> low = middle + 1 else -> high = middle
+        if starts[middle] <= at -> low = middle + 1 else -> high = middle
     }
     "{state.build_file}:{low}"
 }
@@ -646,9 +671,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     if method == "signing" -> return build_session_add_signing(state, args)
     if method == "probe" -> return build_session_add_probe(state, args, in_impure_gate)
     if method == "pin" -> return build_session_set_option(state, args, true, start, end)
-    if build_option_row(method) != None {
-        return build_session_set_option(state, args, false, start, end)
-    }
+    if method == "option" -> return build_session_set_option(state, args, false, start, end)
     if method == "generate" {
         if args.len() != 1 && args.len() != 2 {
             return build_session_fail(state, "`b.generate` requires a name and typed item block")
@@ -842,7 +865,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
             return build_session_fail(state, "`b.plan` accepts zero or one default target")
         }
         default := -1
-        if args.len() == 1 {
+        if args.len() == 1 && args[0] != .Unit {
             default = build_session_handle(state, args[0], "BuildTarget") ?? return build_session_fail(state, "default target does not belong to this build")
         }
         return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildPlan", session: state.id, id: default}}
@@ -884,8 +907,9 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     build_session_fail(state, "unknown build method `{method}`")
 }
 
-// `b.optimize(.O2)` (args: the row name, the value) or `b.pin(...)`: the
-// last call's value holds; a pinned value can't change in the same fn build.
+// `b.optimize(.O2)` (method "option"; args: the row name, the value) or
+// `b.pin(...)`: the last call's value holds; a pinned value can't change in
+// the same fn build. An absent `b.plan` default arrives as Unit.
 build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 2 {
         return build_session_fail(state, "a build option call takes an option and a value")
@@ -1041,32 +1065,40 @@ build_session_replace_paste: fn(source: String, paste: String, body: String) -> 
     text
 }
 
+// `b.toolchain`: its name, target triple and host triple, then its SDK,
+// linker and sysroot, each `()` when the call leaves it out.
 build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() < 2 || args.len() > 6 {
         return build_session_fail(state, "`b.toolchain` accepts two through six string arguments")
     }
-    texts := [String]{}
+    texts := [String?]{}
     loop index in 0..<args.len() {
-        texts.push(build_session_text(args, index) ?? return build_session_fail(state, "toolchain fields must be strings"))
+        if index >= 2 && args[index] == .Unit {
+            texts.push(None)
+            next
+        }
+        texts.push(Val(build_session_text(args, index) ?? return build_session_fail(state, "toolchain fields must be strings")))
     }
-    name: texts[0]
+    loop texts.len() < 6 -> texts.push(None)
+    name: texts[0] ?? ""
     if name.trim() == "" -> return build_session_error_fail(state, .EmptyToolchainName)
     loop old in state.toolchains {
         if old.name == name {
             return build_session_error_fail(state, BuildSessionError.DuplicateToolchainName{value: name})
         }
     }
-    host: if texts.len() >= 3 -> texts[2] else -> "host"
-    if texts[1].trim() == "" || host.trim() == "" {
+    target: texts[1] ?? ""
+    host: texts[2] ?? "host"
+    if target.trim() == "" || host.trim() == "" {
         return build_session_error_fail(state, BuildSessionError.EmptyToolchainTriple{value: name})
     }
-    loop index in 3..<texts.len() {
-        if texts[index].trim() == "" {
+    loop index in 3..<6 {
+        if texts[index] == .Val(text) && text.trim() == "" {
             return build_session_error_fail(state, BuildSessionError.EmptyIdentityField{value: name})
         }
     }
     id: state.toolchains.len()
-    state.toolchains.push(BuildSessionToolchain{name: name, role: "target", target_triple: texts[1], host_triple: host, sdk: if texts.len() >= 4 -> Val(texts[3]) else -> None, linker: if texts.len() >= 5 -> Val(texts[4]) else -> None, sysroot: if texts.len() >= 6 -> Val(texts[5]) else -> None})
+    state.toolchains.push(BuildSessionToolchain{name: name, role: "target", target_triple: target, host_triple: host, sdk: texts[3], linker: texts[4], sysroot: texts[5]})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildToolchain", session: state.id, id: id}}
 }
 
@@ -1088,6 +1120,9 @@ build_session_add_signing: fn(state: &BuildSessionState, args: [BuildSessionValu
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildSigningIdentity", session: state.id, id: id}}
 }
 
+// `b.probe`: its name, kind and value, then the source a `compile_check`
+// compiles, its reproducibility (`ambient` or `reproducible`) and its
+// toolchain, each `()` when the call leaves it out.
 build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue], in_impure_gate: Bool) -> BuildSessionReply {
     if args.len() < 3 || args.len() > 6 {
         return build_session_fail(state, "`b.probe` accepts three through six arguments")
@@ -1095,13 +1130,12 @@ build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue]
     name: build_session_text(args, 0) ?? return build_session_fail(state, "probe name must be a string")
     kind: build_session_text(args, 1) ?? return build_session_fail(state, "probe kind must be a string")
     value: build_session_text(args, 2) ?? return build_session_fail(state, "probe value must be a string")
-    reproducible_gate := false
-    loop index in 0..<args.len() {
-        if index + 2 >= args.len() && args[index] == .Text(text) {
-            if text.to_lower() == "reproducible" -> reproducible_gate = true
-        }
+    written_code: if args.len() > 3 && args[3] != .Unit -> Val(build_session_text(args, 3) ?? return build_session_fail(state, "compile_check source must be a string")) else -> None
+    reproducibility: if args.len() > 4 && args[4] != .Unit -> (build_session_text(args, 4) ?? "").to_lower() else -> "ambient"
+    if reproducibility != "ambient" && reproducibility != "reproducible" {
+        return build_session_fail(state, "probe reproducibility must be `ambient` or `reproducible`")
     }
-    if !reproducible_gate && !in_impure_gate -> return build_session_impure(state, "probe")
+    if reproducibility != "reproducible" && !in_impure_gate -> return build_session_impure(state, "probe")
     if name.trim() == "" -> return build_session_error_fail(state, .EmptyProbeName)
     if value.trim() == "" {
         return build_session_error_fail(state, BuildSessionError.EmptyProbeField{value: name})
@@ -1112,20 +1146,17 @@ build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue]
         }
     }
     code := ""
-    control := 3
     if kind == "compile_check" {
-        if args.len() < 4 -> return build_session_fail(state, "compile_check requires source code")
-        code = build_session_text(args, 3) ?? return build_session_fail(state, "compile_check source must be a string")
+        code = written_code ?? return build_session_fail(state, "compile_check requires source code")
         if code.trim() == "" {
             return build_session_error_fail(state, BuildSessionError.EmptyProbeField{value: name})
         }
-        control = 4
     } else {
         if !build_session_contains_string([String]{"find_program", "find_folder", "pkg_config", "header"}, kind) {
             return build_session_fail(state, "unknown typed probe kind `{kind}`")
         }
-        if args.len() > 5 {
-            return build_session_fail(state, "non-compile probes accept at most one reproducibility value and one toolchain")
+        if written_code != None {
+            return build_session_fail(state, "only a compile_check probe takes `code:`")
         }
     }
     if kind == "header" {
@@ -1142,19 +1173,9 @@ build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue]
     if kind == "find_folder" && (value.contains("/") || value == "." || value == "..") {
         return build_session_fail(state, "probe `{name}` looks for a folder holding the file `{value}`; name the file alone, as `libc.a`")
     }
-    reproducibility := "ambient"
     toolchain := 0
-    if control < args.len() {
-        if args[control] == .Text(text) {
-            reproducibility = text.to_lower()
-            if reproducibility != "ambient" && reproducibility != "reproducible" {
-                return build_session_fail(state, "probe reproducibility must be `ambient` or `reproducible`")
-            }
-            control += 1
-        }
-        if control < args.len() {
-            toolchain = build_session_handle(state, args[control], "BuildToolchain") ?? return build_session_fail(state, "probe toolchain does not belong to this build")
-        }
+    if args.len() > 5 && args[5] != .Unit {
+        toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "probe toolchain does not belong to this build")
     }
     // All source probe constructors use ambient-record provenance without a
     // lock. Rust rejects reproducible classification on these same values.

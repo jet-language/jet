@@ -10,9 +10,9 @@ build: fn(b: Build) -[Exec, FS]> {
         pack.arg("-c")
         pack.arg("[ -s \"$0\" ] && printf %s \"$0\" > \"$1\"")
         pack.file(b.image(gen))
-        pack.output("packed.txt")
+        _: pack.output("packed.txt")
         table: b.run("table", b.image(gen), ["Exec", "FS"])
-        table.output("show.jet", flag: "--out=")
+        _: table.output("show.jet", flag: "--out=")
         show: b.add_executable("show", ["show.jet"], [pack])
         b.default(show)
     }

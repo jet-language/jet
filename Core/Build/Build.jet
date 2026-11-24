@@ -150,6 +150,383 @@ BuildTimes: struct {
     rows: [BuildTime],
 }
 
+/// The build context a `build: fn` receives. Its methods declare the build's
+/// targets, steps, probes and toolchains, and `program` is the checked
+/// program it builds. Only the compiler makes one, for one build, and it
+/// expires when that build returns. Each method's work is the build host's
+/// (`#Import(jet.build, …)`), which reports a refusal at `at`, the call.
+Build: struct {
+    priv __session: Int,
+    program: ProgramInfo,
+
+    /// The executable target `name`, compiled from `sources` after `actions`
+    /// run, linked with `deps` and checked by `probes`, on `toolchain`
+    /// (the host's when None) and signed by `signing`.
+    add_executable: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_executable(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The library target `name`, declared as `add_executable` declares one.
+    add_library: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_library(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The test target `name`, declared as `add_executable` declares one.
+    add_test: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_test(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The asset bundle target `name`, declared as `add_executable` declares one.
+    add_asset_bundle: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_asset_bundle(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The documentation target `name`, declared as `add_executable` declares one.
+    add_doc: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_doc(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The install target `name`, declared as `add_executable` declares one.
+    add_install: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_install(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The package target `name`, declared as `add_executable` declares one.
+    add_package: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_package(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The publish target `name`, declared as `add_executable` declares one.
+    add_publish: fn(self, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget]{}, probes: [BuildProbe]{}, toolchain: BuildToolchain?{None}, signing: BuildSigningIdentity?{None}, *, at: SourceLocation{#caller}) -> BuildTarget BuildError! {
+        __build_add_publish(self, at, name, sources, actions, deps, probes, toolchain, signing)
+    }
+
+    /// The toolchain `name` for `target` triples, built on `host`, with its
+    /// SDK, linker and sysroot when given.
+    toolchain: fn(self, name: String, target: String, host: String{"host"}, sdk: String?{None}, linker: String?{None}, sysroot: String?{None}, *, at: SourceLocation{#caller}) -> BuildToolchain BuildError! {
+        __build_toolchain(self, at, name, target, host, sdk, linker, sysroot)
+    }
+
+    /// The signing identity `name` with the keychain label `label`.
+    signing: fn(self, name: String, label: String, *, at: SourceLocation{#caller}) -> BuildSigningIdentity BuildError! {
+        __build_signing(self, at, name, label)
+    }
+
+    /// The probe `name` of `kind` (`find_program`, `find_folder`,
+    /// `pkg_config`, `header` or `compile_check`) for `value`, on `toolchain`
+    /// (the host's when None). A `compile_check` probe compiles `code`.
+    probe: fn(self, name: String, kind: String, value: String, toolchain: BuildToolchain?{None}, *, code: String?{None}, reproducibility: String?{None}, at: SourceLocation{#caller}) -> BuildProbe BuildError! {
+        __build_probe(self, at, name, kind, value, code, reproducibility, toolchain)
+    }
+
+    /// The step `name` that runs `tool` with the effects `effects`.
+    run: fn(self, name: String, tool: BuildFile, effects: [String], *, at: SourceLocation{#caller}) -> BuildStepHandle BuildError! {
+        __build_run(self, at, name, tool, effects)
+    }
+
+    /// The step a `BuildAction` describes, declared as the `run` step its
+    /// command, files and effects spell.
+    action: fn(self, step: BuildAction, *, at: SourceLocation{#caller}) -> BuildStepHandle BuildError! {
+        __build_action(self, at, step)
+    }
+
+    /// The program a `find_program` probe finds, or the folder a
+    /// `find_folder` probe chooses.
+    found: fn(self, probe: BuildProbe, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_found(self, at, probe)
+    }
+
+    /// The executable `target` built for the machine running the build.
+    host: fn(self, target: BuildTarget, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_host(self, at, target)
+    }
+
+    /// The executable `target` built for the build's selected platform.
+    image: fn(self, target: BuildTarget, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_image(self, at, target)
+    }
+
+    /// The compiler running the build, as a tool.
+    jet: fn(self, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_jet(self, at)
+    }
+
+    /// `jet()` when the running compiler was built from the sources of the
+    /// toolchain tree that holds the build, else `host(target)`.
+    jet_built_from: fn(self, target: BuildTarget, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_jet_built_from(self, at, target)
+    }
+
+    /// The source key of the toolchain tree that holds the build.
+    source_key: fn(self, *, at: SourceLocation{#caller}) -> String Never! {
+        __build_source_key(self, at)
+    }
+
+    /// The folder of the package package.jet lists as `name`.
+    dependency: fn(self, name: String, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_dependency(self, at, name)
+    }
+
+    /// The folder at `path` in the build's package.
+    folder: fn(self, path: String, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_folder(self, at, path)
+    }
+
+    /// The project's own build rule failure `code` at `span`.
+    error: fn(self, span: SourceSpan, code: String, what: String, why: String, fix: String, *, at: SourceLocation{#caller}) Never! {
+        __build_error(self, at, span, code, what, why, fix)
+    }
+
+    /// The target `jet build` builds when it names none.
+    default: fn(self, target: BuildTarget, *, at: SourceLocation{#caller}) Never! {
+        __build_default(self, at, target)
+    }
+
+    /// The `Compiler` value that acts on `target`. Only the root package's
+    /// own build source makes one (E0776).
+    compiler: fn(self, target: BuildTarget, *, at: SourceLocation{#caller}) -> Compiler Never! {
+        __build_compiler(self, at, target)
+    }
+
+    /// The words after `--` on the command line.
+    args: fn(self, *, at: SourceLocation{#caller}) -> [String] Never! {
+        __build_args(self, at)
+    }
+
+    /// The build's one plan, building `default` when `jet build` names no
+    /// target.
+    plan: fn(self, default: BuildTarget?{None}, *, at: SourceLocation{#caller}) -> BuildPlan BuildError! {
+        __build_plan(self, at, default)
+    }
+
+    /// The wasm build plugin `manifest` with the component `component`.
+    plugin: fn(self, manifest: String, component: String, *, at: SourceLocation{#caller}) BuildError! {
+        __build_plugin(self, at, manifest, component)
+    }
+}
+
+/// The plan `b.plan` returns, which `graph` projects.
+BuildPlan: struct {
+    priv session: Int,
+    priv id: Int,
+}
+
+/// A target one of `Build`'s `add_` methods declared.
+BuildTarget: struct {
+    priv session: Int,
+    priv id: Int,
+}
+
+/// A toolchain `b.toolchain` declared.
+BuildToolchain: struct {
+    priv session: Int,
+    priv id: Int,
+}
+
+/// A probe `b.probe` declared.
+BuildProbe: struct {
+    priv session: Int,
+    priv id: Int,
+}
+
+/// A signing identity `b.signing` declared.
+BuildSigningIdentity: struct {
+    priv session: Int,
+    priv id: Int,
+}
+
+/// A step `b.run` or `b.action` declared. Its calls build the step's command
+/// line in order: a file call declares the file and passes its path, after
+/// `flag` in the same argument.
+BuildStepHandle: struct {
+    priv session: Int,
+    priv id: Int,
+
+    /// Declares the file at `path` as one the step reads and passes its path.
+    input: fn(self, path: String, flag: String{""}, *, at: SourceLocation{#caller}) Never! {
+        __build_step_input(self, at, path, flag)
+    }
+
+    /// Declares the file at `path` as one the step makes and passes its path;
+    /// `kept: true` keeps the file in git.
+    output: fn(self, path: String, flag: String{""}, kept: Bool{false}, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_step_output(self, at, path, flag, kept)
+    }
+
+    /// Passes `file` and runs the step after the one that makes it.
+    file: fn(self, file: BuildFile, flag: String{""}, *, at: SourceLocation{#caller}) Never! {
+        __build_step_file(self, at, file, flag)
+    }
+
+    /// Passes the literal `text`.
+    arg: fn(self, text: String, *, at: SourceLocation{#caller}) Never! {
+        __build_step_arg(self, at, text)
+    }
+
+    /// Declares the file at `path` as one the step reads, passing nothing.
+    reads: fn(self, path: String, *, at: SourceLocation{#caller}) Never! {
+        __build_step_reads(self, at, path)
+    }
+
+    /// Declares the file at `path` as one the step makes, passing nothing.
+    writes: fn(self, path: String, kept: Bool{false}, *, at: SourceLocation{#caller}) Never! {
+        __build_step_writes(self, at, path, kept)
+    }
+
+    /// Bounds how long the step may run, 1ms or more.
+    timeout: fn(self, limit: Duration, *, at: SourceLocation{#caller}) Never! {
+        __build_step_timeout(self, at, limit.ns)
+    }
+
+    /// Runs the step on `toolchain`.
+    toolchain: fn(self, toolchain: BuildToolchain, *, at: SourceLocation{#caller}) Never! {
+        __build_step_toolchain(self, at, toolchain)
+    }
+
+    /// Signs what the step makes with `identity`.
+    sign: fn(self, identity: BuildSigningIdentity, *, at: SourceLocation{#caller}) Never! {
+        __build_step_sign(self, at, identity)
+    }
+}
+
+/// A file or folder a step reads, runs or makes.
+BuildFile: struct {
+    priv session: Int,
+    priv id: Int,
+
+    /// The package-relative path of a made, host-built, copied or folder file.
+    path: fn(self, *, at: SourceLocation{#caller}) -> String Never! {
+        __build_file_path(self, at)
+    }
+
+    /// The file at `path` in a `b.dependency(name)` package.
+    file: fn(self, path: String, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_file_file(self, at, path)
+    }
+
+    /// The folder at `path` in a `b.dependency(name)` package.
+    folder: fn(self, path: String, *, at: SourceLocation{#caller}) -> BuildFile Never! {
+        __build_file_folder(self, at, path)
+    }
+}
+
+#Import(jet.build, symbol: "Build.add_executable")
+__build_add_executable: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_library")
+__build_add_library: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_test")
+__build_add_test: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_asset_bundle")
+__build_add_asset_bundle: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_doc")
+__build_add_doc: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_install")
+__build_add_install: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_package")
+__build_add_package: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.add_publish")
+__build_add_publish: fn(b: Build, at: SourceLocation, name: String, sources: [String], actions: [BuildStepHandle], deps: [BuildTarget], probes: [BuildProbe], toolchain: BuildToolchain?, signing: BuildSigningIdentity?) -> BuildTarget BuildError!
+
+#Import(jet.build, symbol: "Build.toolchain")
+__build_toolchain: fn(b: Build, at: SourceLocation, name: String, target: String, host: String, sdk: String?, linker: String?, sysroot: String?) -> BuildToolchain BuildError!
+
+#Import(jet.build, symbol: "Build.signing")
+__build_signing: fn(b: Build, at: SourceLocation, name: String, label: String) -> BuildSigningIdentity BuildError!
+
+#Import(jet.build, symbol: "Build.probe")
+__build_probe: fn(b: Build, at: SourceLocation, name: String, kind: String, value: String, code: String?, reproducibility: String?, toolchain: BuildToolchain?) -> BuildProbe BuildError!
+
+#Import(jet.build, symbol: "Build.run")
+__build_run: fn(b: Build, at: SourceLocation, name: String, tool: BuildFile, effects: [String]) -> BuildStepHandle BuildError!
+
+#Import(jet.build, symbol: "Build.action")
+__build_action: fn(b: Build, at: SourceLocation, step: BuildAction) -> BuildStepHandle BuildError!
+
+#Import(jet.build, symbol: "Build.found")
+__build_found: fn(b: Build, at: SourceLocation, probe: BuildProbe) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.host")
+__build_host: fn(b: Build, at: SourceLocation, target: BuildTarget) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.image")
+__build_image: fn(b: Build, at: SourceLocation, target: BuildTarget) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.jet")
+__build_jet: fn(b: Build, at: SourceLocation) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.jet_built_from")
+__build_jet_built_from: fn(b: Build, at: SourceLocation, target: BuildTarget) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.source_key")
+__build_source_key: fn(b: Build, at: SourceLocation) -> String Never!
+
+#Import(jet.build, symbol: "Build.dependency")
+__build_dependency: fn(b: Build, at: SourceLocation, name: String) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.folder")
+__build_folder: fn(b: Build, at: SourceLocation, path: String) -> BuildFile Never!
+
+#Import(jet.build, symbol: "Build.error")
+__build_error: fn(b: Build, at: SourceLocation, span: SourceSpan, code: String, what: String, why: String, fix: String) Never!
+
+#Import(jet.build, symbol: "Build.default")
+__build_default: fn(b: Build, at: SourceLocation, target: BuildTarget) Never!
+
+#Import(jet.build, symbol: "Build.compiler")
+__build_compiler: fn(b: Build, at: SourceLocation, target: BuildTarget) -> Compiler Never!
+
+#Import(jet.build, symbol: "Build.args")
+__build_args: fn(b: Build, at: SourceLocation) -> [String] Never!
+
+#Import(jet.build, symbol: "Build.plan")
+__build_plan: fn(b: Build, at: SourceLocation, default: BuildTarget?) -> BuildPlan BuildError!
+
+#Import(jet.build, symbol: "Build.plugin")
+__build_plugin: fn(b: Build, at: SourceLocation, manifest: String, component: String) BuildError!
+
+#Import(jet.build, symbol: "BuildStepHandle.input")
+__build_step_input: fn(step: BuildStepHandle, at: SourceLocation, path: String, flag: String) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.output")
+__build_step_output: fn(step: BuildStepHandle, at: SourceLocation, path: String, flag: String, kept: Bool) -> BuildFile Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.file")
+__build_step_file: fn(step: BuildStepHandle, at: SourceLocation, file: BuildFile, flag: String) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.arg")
+__build_step_arg: fn(step: BuildStepHandle, at: SourceLocation, text: String) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.reads")
+__build_step_reads: fn(step: BuildStepHandle, at: SourceLocation, path: String) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.writes")
+__build_step_writes: fn(step: BuildStepHandle, at: SourceLocation, path: String, kept: Bool) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.timeout")
+__build_step_timeout: fn(step: BuildStepHandle, at: SourceLocation, ns: Int) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.toolchain")
+__build_step_toolchain: fn(step: BuildStepHandle, at: SourceLocation, toolchain: BuildToolchain) Never!
+
+#Import(jet.build, symbol: "BuildStepHandle.sign")
+__build_step_sign: fn(step: BuildStepHandle, at: SourceLocation, identity: BuildSigningIdentity) Never!
+
+#Import(jet.build, symbol: "BuildFile.path")
+__build_file_path: fn(file: BuildFile, at: SourceLocation) -> String Never!
+
+#Import(jet.build, symbol: "BuildFile.file")
+__build_file_file: fn(file: BuildFile, at: SourceLocation, path: String) -> BuildFile Never!
+
+#Import(jet.build, symbol: "BuildFile.folder")
+__build_file_folder: fn(file: BuildFile, at: SourceLocation, path: String) -> BuildFile Never!
+
 /// The checked graph of `plan`, as the build host projects it. Only build and
 /// compile-time code hold a BuildPlan, and only there does the host answer.
 #Import(jet.build, symbol: "BuildPlan.graph")
