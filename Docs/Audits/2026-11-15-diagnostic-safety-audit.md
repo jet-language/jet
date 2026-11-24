@@ -82,8 +82,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0166 | DuplicateTypestate | Compiler/JetSema/Source/Sema/Registration/StateFacts.jet:222 | no opt-in picks between two states of one name |
 | E0167 | TypestateMemberConflict | Compiler/JetSema/Source/Sema/Registration/StateFacts.jet:287 | no opt-in picks between a state and a member |
 | E0168 | DuplicateStateSection | Compiler/JetParser/Source/Parser/Items.jet:366 | no opt-in merges two state sets |
-| E0171 | DynMethodAsField | Compiler/JetSema/Source/Sema/Calls/Data.jet:79 | call the method |
-| E0173 | DynCondition | Compiler/JetSema/Source/Sema/Calls/Data.jet:83 | Jet has no implicit truthiness; compare the value |
+| E0171 | DynMethodAsField | Compiler/JetSema/Source/Sema/Calls/Data.jet:78 | call the method |
+| E0173 | DynCondition | Compiler/JetSema/Source/Sema/Calls/Data.jet:82 | Jet has no implicit truthiness; compare the value |
 | E0174 | TypestateMoveWithoutArrow | Compiler/JetSema/Source/Sema/Registration/StateFacts.jet:407 | add the arrow to the state list |
 | E0180 | RequiredContractNotTrue | Compiler/JetSema/Source/Sema/PreludeRows.jet:328 | the callee's contract is its own requirement |
 | E0211 | CopyNotSupported | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:335 | a function, trait value or opaque type has no copy to run |
@@ -94,14 +94,14 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0301 | ImplOnBuiltinType | Compiler/JetSema/Source/Sema/CheckProgram.jet:1351 | an operator hook belongs to the package that declares an operand type |
 | E0302 | UnknownField | Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:485 | no opt-in reaches a field the type does not declare |
 | E0303 | InvalidConstructionField | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:750 | a value is built from exactly its declared fields |
-| E0304 | UnknownEnumCase | Compiler/JetSema/Source/Sema/Calls/Data.jet:1170 | an enum holds only its declared variants |
+| E0304 | UnknownEnumCase | Compiler/JetSema/Source/Sema/Calls/Data.jet:1169 | an enum holds only its declared variants |
 | E0305 | PatternTypeMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:210 | an explicit conversion reaches the program; nothing reinterprets the value |
 | E0306 | PatternBindingCountMismatch | Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:214 | the pattern binds exactly the parts the value has |
 | E0307 | NonExhaustiveDispatch | Compiler/JetSema/Source/Sema/Coverage.jet:489 | an `else` arm covers the remaining values explicitly |
 | E0308 | UntypedNone | Compiler/JetSema/Source/Sema/Calls/Dev.jet:48 | a type context gives `None` its type |
 | E0310 | OptionalWhereValueExpected | Compiler/JetSema/Source/Sema/Diagnostics.jet:566 | `??`, `?` or a branch handles the None case |
 | E0311 | UnknownMethod | Compiler/JetSema/Source/Sema/Calls/Dev.jet:21 | no opt-in calls a method the receiver does not have |
-| E0312 | EqualityNotSupported | Compiler/JetSema/Source/Sema/Calls/Data.jet:771 | compare the fields, or give the type an equality |
+| E0312 | EqualityNotSupported | Compiler/JetSema/Source/Sema/Calls/Data.jet:770 | compare the fields, or give the type an equality |
 | E0313 | DestructureShapeMismatch | Compiler/JetSema/Source/Sema/Patterns.jet:1004 | the target takes the value's shape |
 | E0314 | NumberFamilySize | Compiler/JetSema/Source/Sema/TypeRelations.jet:1446 | only the standard sizes exist; a range type such as `Int(0..127)` names a narrower set of values |
 | E0315 | ListPatternLengthMismatch | Compiler/JetSema/Source/Sema/Statements.jet:4183 | the pattern takes the list's length |
@@ -158,7 +158,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0502 | InvalidMapKeyType | Compiler/JetSema/Source/Sema/Comparability.jet:957 | a map key is an eligible scalar, enum, tuple or struct |
 | E0503 | StringIndex | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:1297 | the text methods walk characters or bytes |
 | E0504 | MixedCollectionLiteral | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:346 | no opt-in gives one collection two element types |
-| E0505 | InvalidIndexType | Compiler/JetSema/Source/Sema/Calls/Data.jet:129 | a collection is indexed with its own index or key type |
+| E0505 | InvalidIndexType | Compiler/JetSema/Source/Sema/Calls/Data.jet:128 | a collection is indexed with its own index or key type |
 | E0506 | UnhashableSetElement | Compiler/JetSema/Source/Sema/Calls/Static.jet:971 | a set holds hashable types |
 | E0507 | CollectionChangedWhileRead | Compiler/JetSema/Source/Sema/Statements.jet:3009 | collect the changes and apply them after the loop |
 | E0509 | DeferLeavesItsBlock | Compiler/JetSema/Source/Sema/Statements.jet:7938 | choose the exit in the block itself |
@@ -190,7 +190,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0629 | ModuleAsValue | Compiler/JetSema/Source/Sema/Diagnostics.jet:297 | a module is not a value |
 | E0633 | IrreversibleNotAFact | Compiler/JetParser/Source/Parser/Declarations/Effects.jet:131 | the body is an effect fact |
 | E0634 | EffectCaseWithPayload | Compiler/JetParser/Source/Parser/Declarations/Effects.jet:207 | effect family cases carry no payload |
-| E0635 | SuiteNameNotLiteral | Compiler/JetSema/Source/Sema/Calls/Data.jet:964 | the suite name is a literal |
+| E0635 | SuiteNameNotLiteral | Compiler/JetSema/Source/Sema/Calls/Data.jet:963 | the suite name is a literal |
 | E0636 | TypeAsValue | Compiler/JetSema/Source/Sema/Diagnostics.jet:303 | a type is not a value |
 | E0638 | NestedFnFailureMismatch | Compiler/JetSema/Source/Sema/Diagnostics.jet:658 | wrap the held functions in the form the destination needs |
 | E0640 | CompileTimeReadsRuntimeValue | Compiler/JetSema/Source/Sema/Diagnostics.jet:499 | compile-time code reads compile-time values |
@@ -545,7 +545,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:907 | the domain is an error type |
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:919 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:923 | one route per pair |
-| E2420 | UnknownAnalyticsColumn | Compiler/JetSema/Source/Sema/Calls/Data.jet:1795 | the column names a row field |
+| E2420 | UnknownAnalyticsColumn | Compiler/JetSema/Source/Sema/Calls/Data.jet:1695 | the column names a row field |
 | E2421 | PrivateFailureMemberExposed | Compiler/JetSema/Source/Sema/FailureLaw.jet:1728 | the member is public, or the contract does not expose it |
 | E2422 | NeverAsValue | Compiler/JetSema/Source/Sema/FailureLaw.jet:1320 | `Never` appears only as a return type |
 | E2423 | NeverFunctionReachesEnd | Compiler/JetSema/Source/Sema/FailureLaw.jet:1938 | every path diverges |
@@ -555,7 +555,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2427 | CallerSiteMisplaced | Compiler/JetSema/Source/Sema/Expressions.jet:5193 | `#caller` is a parameter default or sits in an `#Expand` macro |
 | E2474 | FormActionInputMismatch | Compiler/JetSema/Source/Sema/Calls/HTTP.jet:303 | the action accepts the form's type |
 | E2475 | UnknownTableColumn | Compiler/JetSema/Source/Sema/Calls/Direct.jet:2330 | the column names a row field |
-| E2476 | LiveQueryNotTrackable | Compiler/JetSema/Source/Sema/Calls/Data.jet:396 | the query reads a `data.track` source |
+| E2476 | LiveQueryNotTrackable | Compiler/JetSema/Source/Sema/Calls/Data.jet:395 | the query reads a `data.track` source |
 | E2477 | ScopedQueryOutsideScope | Core/DB/DB.jet:2990 | the table is reached through the store or a scope over it |
 | E2501 | FileHandleDirectionMismatch | Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet:579 | open the file in the direction used |
 | E2502 | LineStreamOutsideLoop | Compiler/JetSema/Source/Sema/Statements.jet:6280 | iterate the stream in the loop |
