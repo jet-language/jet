@@ -9,7 +9,7 @@
 // JetFoundation Facts/BodyCodecRows.jet.
 use jet_foundation.[BodyCodecIn, BodyCodecOut, Diagnostic, DiagnosticBuildError, DiagnosticCallRewrite, DiagnosticCause, DiagnosticCryptoMisuseReason, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorJourneyFrame, DiagnosticErrorSpan, DiagnosticFixApplicability, DiagnosticFixSafety, DiagnosticLabel, DiagnosticMoment, DiagnosticNoFixReason, DiagnosticNoFixReasonKind, DiagnosticOrigin, DiagnosticStructured, FnBody, SharedLifetime, SymbolKind, SymbolLocalKeys, TEffectFacts, TargetDMAOperation, TargetDMAOperationFact, TargetDMAOwner, TargetHardwareUnresolvedReference, TargetHardwareUse, TargetInterruptHandlerFact, TargetRegisterAccessFact, TargetRegisterOperation, TextEdit, Type, body_codec_get_bodyexpr, body_codec_get_bool, body_codec_get_count, body_codec_get_expr, body_codec_get_fnbody, body_codec_get_int, body_codec_get_list_int, body_codec_get_list_string, body_codec_get_list_tcapture, body_codec_get_list_tcomptimevalue, body_codec_get_list_tgenericparam, body_codec_get_list_type, body_codec_get_moduleid, body_codec_get_opt_coremarkerapplication, body_codec_get_opt_int, body_codec_get_opt_list_effectrowentry, body_codec_get_opt_span, body_codec_get_opt_string, body_codec_get_opt_symbolid, body_codec_get_opt_type, body_codec_get_registerwidth, body_codec_get_sharedlifetime, body_codec_get_span, body_codec_get_string, body_codec_get_symbolid, body_codec_get_symbollocalkeys, body_codec_get_tag, body_codec_get_tcomptimevalue, body_codec_get_teffectfacts, body_codec_get_tfunckind, body_codec_get_type, body_codec_put_bodyexpr, body_codec_put_bool, body_codec_put_count, body_codec_put_expr, body_codec_put_fnbody, body_codec_put_int, body_codec_put_list_int, body_codec_put_list_string, body_codec_put_list_tcapture, body_codec_put_list_tcomptimevalue, body_codec_put_list_tgenericparam, body_codec_put_list_type, body_codec_put_moduleid, body_codec_put_opt_coremarkerapplication, body_codec_put_opt_int, body_codec_put_opt_list_effectrowentry, body_codec_put_opt_span, body_codec_put_opt_string, body_codec_put_opt_symbolid, body_codec_put_opt_type, body_codec_put_registerwidth, body_codec_put_sharedlifetime, body_codec_put_span, body_codec_put_string, body_codec_put_symbolid, body_codec_put_symbollocalkeys, body_codec_put_tag, body_codec_put_tcomptimevalue, body_codec_put_teffectfacts, body_codec_put_tfunckind, body_codec_put_type]
 
-body_codec_put_opt_semafunctionresult: fn(out: &BodyCodecOut, value: SemaFunctionResult?) Never! {
+body_codec_put_opt_semafunctionresult: fn(out: ^BodyCodecOut, value: SemaFunctionResult?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semafunctionresult(out, inner)
@@ -18,62 +18,62 @@ body_codec_put_opt_semafunctionresult: fn(out: &BodyCodecOut, value: SemaFunctio
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semafunctionresult: fn(bytes: [U8], input: &BodyCodecIn) -> SemaFunctionResult? Never! {
+body_codec_get_opt_semafunctionresult: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFunctionResult? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semafunctionresult(bytes, input))
     }
     None
 }
 
-body_codec_put_list_diagnostic: fn(out: &BodyCodecOut, values: [Diagnostic]) Never! {
+body_codec_put_list_diagnostic: fn(out: ^BodyCodecOut, values: [Diagnostic]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnostic(out, value)
 }
 
-body_codec_get_list_diagnostic: fn(bytes: [U8], input: &BodyCodecIn) -> [Diagnostic] Never! {
+body_codec_get_list_diagnostic: fn(bytes: [U8], input: ^BodyCodecIn) -> [Diagnostic] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [Diagnostic]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnostic(bytes, input))
     values
 }
 
-body_codec_put_list_semacallsitefact: fn(out: &BodyCodecOut, values: [SemaCallSiteFact]) Never! {
+body_codec_put_list_semacallsitefact: fn(out: ^BodyCodecOut, values: [SemaCallSiteFact]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacallsitefact(out, value)
 }
 
-body_codec_get_list_semacallsitefact: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaCallSiteFact] Never! {
+body_codec_get_list_semacallsitefact: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaCallSiteFact] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaCallSiteFact]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacallsitefact(bytes, input))
     values
 }
 
-body_codec_put_list_semacomptimerequest: fn(out: &BodyCodecOut, values: [SemaComptimeRequest]) Never! {
+body_codec_put_list_semacomptimerequest: fn(out: ^BodyCodecOut, values: [SemaComptimeRequest]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacomptimerequest(out, value)
 }
 
-body_codec_get_list_semacomptimerequest: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaComptimeRequest] Never! {
+body_codec_get_list_semacomptimerequest: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaComptimeRequest] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaComptimeRequest]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacomptimerequest(bytes, input))
     values
 }
 
-body_codec_put_list_semanamereferencefact: fn(out: &BodyCodecOut, values: [SemaNameReferenceFact]) Never! {
+body_codec_put_list_semanamereferencefact: fn(out: ^BodyCodecOut, values: [SemaNameReferenceFact]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semanamereferencefact(out, value)
 }
 
-body_codec_get_list_semanamereferencefact: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaNameReferenceFact] Never! {
+body_codec_get_list_semanamereferencefact: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaNameReferenceFact] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaNameReferenceFact]{}
     loop _ in 0..<count -> values.push(body_codec_get_semanamereferencefact(bytes, input))
     values
 }
 
-body_codec_put_opt_semamethodinput: fn(out: &BodyCodecOut, value: SemaMethodInput?) Never! {
+body_codec_put_opt_semamethodinput: fn(out: ^BodyCodecOut, value: SemaMethodInput?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semamethodinput(out, inner)
@@ -82,12 +82,12 @@ body_codec_put_opt_semamethodinput: fn(out: &BodyCodecOut, value: SemaMethodInpu
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semamethodinput: fn(bytes: [U8], input: &BodyCodecIn) -> SemaMethodInput? Never! {
+body_codec_get_opt_semamethodinput: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaMethodInput? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_semamethodinput(bytes, input))
     None
 }
 
-body_codec_put_semaparallelbody: fn(out: &BodyCodecOut, value: SemaParallelBody) Never! {
+body_codec_put_semaparallelbody: fn(out: ^BodyCodecOut, value: SemaParallelBody) Never! {
     body_codec_put_int(out, value.job_index)
     body_codec_put_opt_semafunctionresult(out, value.checked)
     body_codec_put_list_diagnostic(out, value.diagnostics)
@@ -102,7 +102,7 @@ body_codec_put_semaparallelbody: fn(out: &BodyCodecOut, value: SemaParallelBody)
     body_codec_put_list_string(out, value.derive_demand)
 }
 
-body_codec_get_semaparallelbody: fn(bytes: [U8], input: &BodyCodecIn) -> SemaParallelBody Never! {
+body_codec_get_semaparallelbody: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaParallelBody Never! {
     f0: body_codec_get_int(bytes, input)
     f1: body_codec_get_opt_semafunctionresult(bytes, input)
     f2: body_codec_get_list_diagnostic(bytes, input)
@@ -118,7 +118,7 @@ body_codec_get_semaparallelbody: fn(bytes: [U8], input: &BodyCodecIn) -> SemaPar
     SemaParallelBody{job_index: f0, checked: f1, diagnostics: f2, call_facts: f3, comptime_requests: f4, name_references: f5, method_input: f6, wanted_hooks: f7, memory_position: f8, memory_known: f9, codec_demand: f10, derive_demand: f11}
 }
 
-body_codec_put_opt_fnbody: fn(out: &BodyCodecOut, value: FnBody?) Never! {
+body_codec_put_opt_fnbody: fn(out: ^BodyCodecOut, value: FnBody?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_fnbody(out, inner)
@@ -127,36 +127,36 @@ body_codec_put_opt_fnbody: fn(out: &BodyCodecOut, value: FnBody?) Never! {
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_fnbody: fn(bytes: [U8], input: &BodyCodecIn) -> FnBody? Never! {
+body_codec_get_opt_fnbody: fn(bytes: [U8], input: ^BodyCodecIn) -> FnBody? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_fnbody(bytes, input))
     None
 }
 
-body_codec_put_list_semacopyevent: fn(out: &BodyCodecOut, values: [SemaCopyEvent]) Never! {
+body_codec_put_list_semacopyevent: fn(out: ^BodyCodecOut, values: [SemaCopyEvent]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacopyevent(out, value)
 }
 
-body_codec_get_list_semacopyevent: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaCopyEvent] Never! {
+body_codec_get_list_semacopyevent: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaCopyEvent] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaCopyEvent]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacopyevent(bytes, input))
     values
 }
 
-body_codec_put_list_semacomptimebodysource: fn(out: &BodyCodecOut, values: [SemaComptimeBodySource]) Never! {
+body_codec_put_list_semacomptimebodysource: fn(out: ^BodyCodecOut, values: [SemaComptimeBodySource]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacomptimebodysource(out, value)
 }
 
-body_codec_get_list_semacomptimebodysource: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaComptimeBodySource] Never! {
+body_codec_get_list_semacomptimebodysource: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaComptimeBodySource] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaComptimeBodySource]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacomptimebodysource(bytes, input))
     values
 }
 
-body_codec_put_opt_semafunctionfailurefacts: fn(out: &BodyCodecOut, value: SemaFunctionFailureFacts?) Never! {
+body_codec_put_opt_semafunctionfailurefacts: fn(out: ^BodyCodecOut, value: SemaFunctionFailureFacts?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semafunctionfailurefacts(out, inner)
@@ -165,26 +165,26 @@ body_codec_put_opt_semafunctionfailurefacts: fn(out: &BodyCodecOut, value: SemaF
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semafunctionfailurefacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaFunctionFailureFacts? Never! {
+body_codec_get_opt_semafunctionfailurefacts: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFunctionFailureFacts? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semafunctionfailurefacts(bytes, input))
     }
     None
 }
 
-body_codec_put_list_semapreludeconversiondemand: fn(out: &BodyCodecOut, values: [SemaPreludeConversionDemand]) Never! {
+body_codec_put_list_semapreludeconversiondemand: fn(out: ^BodyCodecOut, values: [SemaPreludeConversionDemand]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semapreludeconversiondemand(out, value)
 }
 
-body_codec_get_list_semapreludeconversiondemand: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaPreludeConversionDemand] Never! {
+body_codec_get_list_semapreludeconversiondemand: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaPreludeConversionDemand] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaPreludeConversionDemand]{}
     loop _ in 0..<count -> values.push(body_codec_get_semapreludeconversiondemand(bytes, input))
     values
 }
 
-body_codec_put_opt_list_semapreludeconversiondemand: fn(out: &BodyCodecOut, value: [SemaPreludeConversionDemand]?) Never! {
+body_codec_put_opt_list_semapreludeconversiondemand: fn(out: ^BodyCodecOut, value: [SemaPreludeConversionDemand]?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_list_semapreludeconversiondemand(out, inner)
@@ -193,14 +193,14 @@ body_codec_put_opt_list_semapreludeconversiondemand: fn(out: &BodyCodecOut, valu
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_list_semapreludeconversiondemand: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaPreludeConversionDemand]? Never! {
+body_codec_get_opt_list_semapreludeconversiondemand: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaPreludeConversionDemand]? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_list_semapreludeconversiondemand(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_symbollocalkeys: fn(out: &BodyCodecOut, value: SymbolLocalKeys?) Never! {
+body_codec_put_opt_symbollocalkeys: fn(out: ^BodyCodecOut, value: SymbolLocalKeys?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_symbollocalkeys(out, inner)
@@ -209,24 +209,24 @@ body_codec_put_opt_symbollocalkeys: fn(out: &BodyCodecOut, value: SymbolLocalKey
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_symbollocalkeys: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolLocalKeys? Never! {
+body_codec_get_opt_symbollocalkeys: fn(bytes: [U8], input: ^BodyCodecIn) -> SymbolLocalKeys? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_symbollocalkeys(bytes, input))
     None
 }
 
-body_codec_put_list_semaevalprobeanswer: fn(out: &BodyCodecOut, values: [SemaEvalProbeAnswer]) Never! {
+body_codec_put_list_semaevalprobeanswer: fn(out: ^BodyCodecOut, values: [SemaEvalProbeAnswer]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semaevalprobeanswer(out, value)
 }
 
-body_codec_get_list_semaevalprobeanswer: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaEvalProbeAnswer] Never! {
+body_codec_get_list_semaevalprobeanswer: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaEvalProbeAnswer] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaEvalProbeAnswer]{}
     loop _ in 0..<count -> values.push(body_codec_get_semaevalprobeanswer(bytes, input))
     values
 }
 
-body_codec_put_semafunctionresult: fn(out: &BodyCodecOut, value: SemaFunctionResult) Never! {
+body_codec_put_semafunctionresult: fn(out: ^BodyCodecOut, value: SemaFunctionResult) Never! {
     body_codec_put_opt_fnbody(out, value.value)
     body_codec_put_bool(out, value.complete)
     body_codec_put_bool(out, value.exact_int_reachable)
@@ -241,7 +241,7 @@ body_codec_put_semafunctionresult: fn(out: &BodyCodecOut, value: SemaFunctionRes
     body_codec_put_list_semaevalprobeanswer(out, value.eval_answers)
 }
 
-body_codec_get_semafunctionresult: fn(bytes: [U8], input: &BodyCodecIn) -> SemaFunctionResult Never! {
+body_codec_get_semafunctionresult: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFunctionResult Never! {
     f0: body_codec_get_opt_fnbody(bytes, input)
     f1: body_codec_get_bool(bytes, input)
     f2: body_codec_get_bool(bytes, input)
@@ -257,18 +257,18 @@ body_codec_get_semafunctionresult: fn(bytes: [U8], input: &BodyCodecIn) -> SemaF
     SemaFunctionResult{value: f0, complete: f1, exact_int_reachable: f2, copy_events: f3, hardware_use: f4, comptime_body_sources: f5, compute_facts: f6, failure: f7, incomplete_reasons: f8, prelude_demands: f9, failed_locals: f10, eval_answers: f11}
 }
 
-body_codec_put_semacopyevent: fn(out: &BodyCodecOut, value: SemaCopyEvent) Never! {
+body_codec_put_semacopyevent: fn(out: ^BodyCodecOut, value: SemaCopyEvent) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_semacopyfacts(out, value.facts)
 }
 
-body_codec_get_semacopyevent: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyEvent Never! {
+body_codec_get_semacopyevent: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCopyEvent Never! {
     f0: body_codec_get_span(bytes, input)
     f1: body_codec_get_semacopyfacts(bytes, input)
     SemaCopyEvent{span: f0, facts: f1}
 }
 
-body_codec_put_semacopyfacts: fn(out: &BodyCodecOut, value: SemaCopyFacts) Never! {
+body_codec_put_semacopyfacts: fn(out: ^BodyCodecOut, value: SemaCopyFacts) Never! {
     body_codec_put_type(out, value.source)
     body_codec_put_type(out, value.target)
     body_codec_put_semacopyintent(out, value.intent)
@@ -285,7 +285,7 @@ body_codec_put_semacopyfacts: fn(out: &BodyCodecOut, value: SemaCopyFacts) Never
     body_codec_put_bool(out, value.complete)
 }
 
-body_codec_get_semacopyfacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyFacts Never! {
+body_codec_get_semacopyfacts: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCopyFacts Never! {
     f0: body_codec_get_type(bytes, input)
     f1: body_codec_get_type(bytes, input)
     f2: body_codec_get_semacopyintent(bytes, input)
@@ -303,7 +303,7 @@ body_codec_get_semacopyfacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyFa
     SemaCopyFacts{source: f0, target: f1, intent: f2, lowering: f3, materializes_view: f4, observable_clock: f5, memory: f6, resource: f7, holds_resource: f8, dynamic_loan: f9, copyable: f10, cloneable: f11, accepted: f12, complete: f13}
 }
 
-body_codec_put_semacopyintent: fn(out: &BodyCodecOut, value: SemaCopyIntent) Never! {
+body_codec_put_semacopyintent: fn(out: ^BodyCodecOut, value: SemaCopyIntent) Never! {
     if value == {
         .Explicit -> { body_codec_put_tag(out, 0) }
         .Clone -> { body_codec_put_tag(out, 1) }
@@ -311,7 +311,7 @@ body_codec_put_semacopyintent: fn(out: &BodyCodecOut, value: SemaCopyIntent) Nev
     }
 }
 
-body_codec_get_semacopyintent: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyIntent Never! {
+body_codec_get_semacopyintent: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCopyIntent Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> SemaCopyIntent.Clone
@@ -320,7 +320,7 @@ body_codec_get_semacopyintent: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyI
     }
 }
 
-body_codec_put_semacopylowering: fn(out: &BodyCodecOut, value: SemaCopyLowering) Never! {
+body_codec_put_semacopylowering: fn(out: ^BodyCodecOut, value: SemaCopyLowering) Never! {
     if value == {
         .ExplicitCopy -> { body_codec_put_tag(out, 0) }
         .Clone -> { body_codec_put_tag(out, 1) }
@@ -328,7 +328,7 @@ body_codec_put_semacopylowering: fn(out: &BodyCodecOut, value: SemaCopyLowering)
     }
 }
 
-body_codec_get_semacopylowering: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyLowering Never! {
+body_codec_get_semacopylowering: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCopyLowering Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> SemaCopyLowering.Clone
@@ -337,7 +337,7 @@ body_codec_get_semacopylowering: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCop
     }
 }
 
-body_codec_put_semacopymemorykind: fn(out: &BodyCodecOut, value: SemaCopyMemoryKind) Never! {
+body_codec_put_semacopymemorykind: fn(out: ^BodyCodecOut, value: SemaCopyMemoryKind) Never! {
     if value == {
         .NoEvent -> { body_codec_put_tag(out, 0) }
         .Allocation -> { body_codec_put_tag(out, 1) }
@@ -345,7 +345,7 @@ body_codec_put_semacopymemorykind: fn(out: &BodyCodecOut, value: SemaCopyMemoryK
     }
 }
 
-body_codec_get_semacopymemorykind: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCopyMemoryKind Never! {
+body_codec_get_semacopymemorykind: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCopyMemoryKind Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> SemaCopyMemoryKind.Allocation
@@ -354,48 +354,48 @@ body_codec_get_semacopymemorykind: fn(bytes: [U8], input: &BodyCodecIn) -> SemaC
     }
 }
 
-body_codec_put_list_targetregisteraccessfact: fn(out: &BodyCodecOut, values: [TargetRegisterAccessFact]) Never! {
+body_codec_put_list_targetregisteraccessfact: fn(out: ^BodyCodecOut, values: [TargetRegisterAccessFact]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_targetregisteraccessfact(out, value)
 }
 
-body_codec_get_list_targetregisteraccessfact: fn(bytes: [U8], input: &BodyCodecIn) -> [TargetRegisterAccessFact] Never! {
+body_codec_get_list_targetregisteraccessfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetRegisterAccessFact] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [TargetRegisterAccessFact]{}
     loop _ in 0..<count -> values.push(body_codec_get_targetregisteraccessfact(bytes, input))
     values
 }
 
-body_codec_put_list_targetinterrupthandlerfact: fn(out: &BodyCodecOut, values: [TargetInterruptHandlerFact]) Never! {
+body_codec_put_list_targetinterrupthandlerfact: fn(out: ^BodyCodecOut, values: [TargetInterruptHandlerFact]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_targetinterrupthandlerfact(out, value)
 }
 
-body_codec_get_list_targetinterrupthandlerfact: fn(bytes: [U8], input: &BodyCodecIn) -> [TargetInterruptHandlerFact] Never! {
+body_codec_get_list_targetinterrupthandlerfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetInterruptHandlerFact] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [TargetInterruptHandlerFact]{}
     loop _ in 0..<count -> values.push(body_codec_get_targetinterrupthandlerfact(bytes, input))
     values
 }
 
-body_codec_put_list_targetdmaoperationfact: fn(out: &BodyCodecOut, values: [TargetDMAOperationFact]) Never! {
+body_codec_put_list_targetdmaoperationfact: fn(out: ^BodyCodecOut, values: [TargetDMAOperationFact]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_targetdmaoperationfact(out, value)
 }
 
-body_codec_get_list_targetdmaoperationfact: fn(bytes: [U8], input: &BodyCodecIn) -> [TargetDMAOperationFact] Never! {
+body_codec_get_list_targetdmaoperationfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetDMAOperationFact] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [TargetDMAOperationFact]{}
     loop _ in 0..<count -> values.push(body_codec_get_targetdmaoperationfact(bytes, input))
     values
 }
 
-body_codec_put_list_targethardwareunresolvedreference: fn(out: &BodyCodecOut, values: [TargetHardwareUnresolvedReference]) Never! {
+body_codec_put_list_targethardwareunresolvedreference: fn(out: ^BodyCodecOut, values: [TargetHardwareUnresolvedReference]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_targethardwareunresolvedreference(out, value)
 }
 
-body_codec_get_list_targethardwareunresolvedreference: fn(bytes: [U8], input: &BodyCodecIn) -> [TargetHardwareUnresolvedReference] Never! {
+body_codec_get_list_targethardwareunresolvedreference: fn(bytes: [U8], input: ^BodyCodecIn) -> [TargetHardwareUnresolvedReference] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [TargetHardwareUnresolvedReference]{}
     loop _ in 0..<count {
@@ -404,14 +404,14 @@ body_codec_get_list_targethardwareunresolvedreference: fn(bytes: [U8], input: &B
     values
 }
 
-body_codec_put_targethardwareuse: fn(out: &BodyCodecOut, value: TargetHardwareUse) Never! {
+body_codec_put_targethardwareuse: fn(out: ^BodyCodecOut, value: TargetHardwareUse) Never! {
     body_codec_put_list_targetregisteraccessfact(out, value.register_accesses)
     body_codec_put_list_targetinterrupthandlerfact(out, value.interrupt_handlers)
     body_codec_put_list_targetdmaoperationfact(out, value.dma_operations)
     body_codec_put_list_targethardwareunresolvedreference(out, value.unresolved_references)
 }
 
-body_codec_get_targethardwareuse: fn(bytes: [U8], input: &BodyCodecIn) -> TargetHardwareUse Never! {
+body_codec_get_targethardwareuse: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetHardwareUse Never! {
     f0: body_codec_get_list_targetregisteraccessfact(bytes, input)
     f1: body_codec_get_list_targetinterrupthandlerfact(bytes, input)
     f2: body_codec_get_list_targetdmaoperationfact(bytes, input)
@@ -419,14 +419,14 @@ body_codec_get_targethardwareuse: fn(bytes: [U8], input: &BodyCodecIn) -> Target
     TargetHardwareUse{register_accesses: f0, interrupt_handlers: f1, dma_operations: f2, unresolved_references: f3}
 }
 
-body_codec_put_targetregisteraccessfact: fn(out: &BodyCodecOut, value: TargetRegisterAccessFact) Never! {
+body_codec_put_targetregisteraccessfact: fn(out: ^BodyCodecOut, value: TargetRegisterAccessFact) Never! {
     body_codec_put_string(out, value.block)
     body_codec_put_string(out, value.register)
     body_codec_put_targetregisteroperation(out, value.operation)
     body_codec_put_registerwidth(out, value.width)
 }
 
-body_codec_get_targetregisteraccessfact: fn(bytes: [U8], input: &BodyCodecIn) -> TargetRegisterAccessFact Never! {
+body_codec_get_targetregisteraccessfact: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetRegisterAccessFact Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_targetregisteroperation(bytes, input)
@@ -434,14 +434,14 @@ body_codec_get_targetregisteraccessfact: fn(bytes: [U8], input: &BodyCodecIn) ->
     TargetRegisterAccessFact{block: f0, register: f1, operation: f2, width: f3}
 }
 
-body_codec_put_targetregisteroperation: fn(out: &BodyCodecOut, value: TargetRegisterOperation) Never! {
+body_codec_put_targetregisteroperation: fn(out: ^BodyCodecOut, value: TargetRegisterOperation) Never! {
     if value == {
         .Read -> { body_codec_put_tag(out, 0) }
         .Write -> body_codec_put_tag(out, 1)
     }
 }
 
-body_codec_get_targetregisteroperation: fn(bytes: [U8], input: &BodyCodecIn) -> TargetRegisterOperation Never! {
+body_codec_get_targetregisteroperation: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetRegisterOperation Never! {
     position: body_codec_get_tag(bytes, input, 2, 0)
     if position == {
         1 -> TargetRegisterOperation.Write
@@ -449,7 +449,7 @@ body_codec_get_targetregisteroperation: fn(bytes: [U8], input: &BodyCodecIn) -> 
     }
 }
 
-body_codec_put_targetinterrupthandlerfact: fn(out: &BodyCodecOut, value: TargetInterruptHandlerFact) Never! {
+body_codec_put_targetinterrupthandlerfact: fn(out: ^BodyCodecOut, value: TargetInterruptHandlerFact) Never! {
     body_codec_put_string(out, value.interrupt)
     body_codec_put_string(out, value.handler)
     body_codec_put_list_string(out, value.effects)
@@ -457,7 +457,7 @@ body_codec_put_targetinterrupthandlerfact: fn(out: &BodyCodecOut, value: TargetI
     body_codec_put_bool(out, value.bounded)
 }
 
-body_codec_get_targetinterrupthandlerfact: fn(bytes: [U8], input: &BodyCodecIn) -> TargetInterruptHandlerFact Never! {
+body_codec_get_targetinterrupthandlerfact: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetInterruptHandlerFact Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_list_string(bytes, input)
@@ -466,14 +466,14 @@ body_codec_get_targetinterrupthandlerfact: fn(bytes: [U8], input: &BodyCodecIn) 
     TargetInterruptHandlerFact{interrupt: f0, handler: f1, effects: f2, forbidden_effects: f3, bounded: f4}
 }
 
-body_codec_put_targetdmaoperationfact: fn(out: &BodyCodecOut, value: TargetDMAOperationFact) Never! {
+body_codec_put_targetdmaoperationfact: fn(out: ^BodyCodecOut, value: TargetDMAOperationFact) Never! {
     body_codec_put_string(out, value.channel)
     body_codec_put_string(out, value.buffer)
     body_codec_put_targetdmaoperation(out, value.operation)
     body_codec_put_targetdmaowner(out, value.owner)
 }
 
-body_codec_get_targetdmaoperationfact: fn(bytes: [U8], input: &BodyCodecIn) -> TargetDMAOperationFact Never! {
+body_codec_get_targetdmaoperationfact: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetDMAOperationFact Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_targetdmaoperation(bytes, input)
@@ -481,7 +481,7 @@ body_codec_get_targetdmaoperationfact: fn(bytes: [U8], input: &BodyCodecIn) -> T
     TargetDMAOperationFact{channel: f0, buffer: f1, operation: f2, owner: f3}
 }
 
-body_codec_put_targetdmaoperation: fn(out: &BodyCodecOut, value: TargetDMAOperation) Never! {
+body_codec_put_targetdmaoperation: fn(out: ^BodyCodecOut, value: TargetDMAOperation) Never! {
     if value == {
         .Start -> { body_codec_put_tag(out, 0) }
         .Wait -> { body_codec_put_tag(out, 1) }
@@ -489,7 +489,7 @@ body_codec_put_targetdmaoperation: fn(out: &BodyCodecOut, value: TargetDMAOperat
     }
 }
 
-body_codec_get_targetdmaoperation: fn(bytes: [U8], input: &BodyCodecIn) -> TargetDMAOperation Never! {
+body_codec_get_targetdmaoperation: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetDMAOperation Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> TargetDMAOperation.Wait
@@ -498,14 +498,14 @@ body_codec_get_targetdmaoperation: fn(bytes: [U8], input: &BodyCodecIn) -> Targe
     }
 }
 
-body_codec_put_targetdmaowner: fn(out: &BodyCodecOut, value: TargetDMAOwner) Never! {
+body_codec_put_targetdmaowner: fn(out: ^BodyCodecOut, value: TargetDMAOwner) Never! {
     if value == {
         .CPU -> { body_codec_put_tag(out, 0) }
         .Device -> body_codec_put_tag(out, 1)
     }
 }
 
-body_codec_get_targetdmaowner: fn(bytes: [U8], input: &BodyCodecIn) -> TargetDMAOwner Never! {
+body_codec_get_targetdmaowner: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetDMAOwner Never! {
     position: body_codec_get_tag(bytes, input, 2, 0)
     if position == {
         1 -> TargetDMAOwner.Device
@@ -513,7 +513,7 @@ body_codec_get_targetdmaowner: fn(bytes: [U8], input: &BodyCodecIn) -> TargetDMA
     }
 }
 
-body_codec_put_targethardwareunresolvedreference: fn(out: &BodyCodecOut, value: TargetHardwareUnresolvedReference) Never! {
+body_codec_put_targethardwareunresolvedreference: fn(out: ^BodyCodecOut, value: TargetHardwareUnresolvedReference) Never! {
     if value == {
         .RegisterBlock(p0) -> {
             body_codec_put_tag(out, 0)
@@ -535,7 +535,7 @@ body_codec_put_targethardwareunresolvedreference: fn(out: &BodyCodecOut, value: 
     }
 }
 
-body_codec_get_targethardwareunresolvedreference: fn(bytes: [U8], input: &BodyCodecIn) -> TargetHardwareUnresolvedReference Never! {
+body_codec_get_targethardwareunresolvedreference: fn(bytes: [U8], input: ^BodyCodecIn) -> TargetHardwareUnresolvedReference Never! {
     position: body_codec_get_tag(bytes, input, 4, 0)
     if position == {
         1 -> {
@@ -558,19 +558,19 @@ body_codec_get_targethardwareunresolvedreference: fn(bytes: [U8], input: &BodyCo
     }
 }
 
-body_codec_put_list_semacomptimepreparedlocal: fn(out: &BodyCodecOut, values: [SemaComptimePreparedLocal]) Never! {
+body_codec_put_list_semacomptimepreparedlocal: fn(out: ^BodyCodecOut, values: [SemaComptimePreparedLocal]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacomptimepreparedlocal(out, value)
 }
 
-body_codec_get_list_semacomptimepreparedlocal: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaComptimePreparedLocal] Never! {
+body_codec_get_list_semacomptimepreparedlocal: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaComptimePreparedLocal] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaComptimePreparedLocal]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacomptimepreparedlocal(bytes, input))
     values
 }
 
-body_codec_put_opt_semacomptimerulesite: fn(out: &BodyCodecOut, value: SemaComptimeRuleSite?) Never! {
+body_codec_put_opt_semacomptimerulesite: fn(out: ^BodyCodecOut, value: SemaComptimeRuleSite?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semacomptimerulesite(out, inner)
@@ -579,14 +579,14 @@ body_codec_put_opt_semacomptimerulesite: fn(out: &BodyCodecOut, value: SemaCompt
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semacomptimerulesite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeRuleSite? Never! {
+body_codec_get_opt_semacomptimerulesite: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComptimeRuleSite? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semacomptimerulesite(bytes, input))
     }
     None
 }
 
-body_codec_put_semacomptimebodysource: fn(out: &BodyCodecOut, value: SemaComptimeBodySource) Never! {
+body_codec_put_semacomptimebodysource: fn(out: ^BodyCodecOut, value: SemaComptimeBodySource) Never! {
     body_codec_put_moduleid(out, value.module_identity)
     body_codec_put_string(out, value.function_key)
     body_codec_put_string(out, value.source_file)
@@ -606,7 +606,7 @@ body_codec_put_semacomptimebodysource: fn(out: &BodyCodecOut, value: SemaComptim
     body_codec_put_bool(out, value.rule_held)
 }
 
-body_codec_get_semacomptimebodysource: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeBodySource Never! {
+body_codec_get_semacomptimebodysource: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComptimeBodySource Never! {
     f0: body_codec_get_moduleid(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_string(bytes, input)
@@ -627,14 +627,14 @@ body_codec_get_semacomptimebodysource: fn(bytes: [U8], input: &BodyCodecIn) -> S
     SemaComptimeBodySource{module_identity: f0, function_key: f1, source_file: f2, key: f3, destination_key: f4, name: f5, expression: f6, expected_type: f7, span: f8, site_span: f9, prepared: f10, impure: f11, runtime_locals: f12, local_value: f13, local_binding: f14, rule: f15, rule_held: f16}
 }
 
-body_codec_put_semacomptimepreparedlocal: fn(out: &BodyCodecOut, value: SemaComptimePreparedLocal) Never! {
+body_codec_put_semacomptimepreparedlocal: fn(out: ^BodyCodecOut, value: SemaComptimePreparedLocal) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_type(out, value.ty)
     body_codec_put_tcomptimevalue(out, value.value)
     body_codec_put_span(out, value.span)
 }
 
-body_codec_get_semacomptimepreparedlocal: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimePreparedLocal Never! {
+body_codec_get_semacomptimepreparedlocal: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComptimePreparedLocal Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_type(bytes, input)
     f2: body_codec_get_tcomptimevalue(bytes, input)
@@ -642,14 +642,14 @@ body_codec_get_semacomptimepreparedlocal: fn(bytes: [U8], input: &BodyCodecIn) -
     SemaComptimePreparedLocal{name: f0, ty: f1, value: f2, span: f3}
 }
 
-body_codec_put_semacomptimerulesite: fn(out: &BodyCodecOut, value: SemaComptimeRuleSite) Never! {
+body_codec_put_semacomptimerulesite: fn(out: ^BodyCodecOut, value: SemaComptimeRuleSite) Never! {
     body_codec_put_moduleid(out, value.module_identity)
     body_codec_put_string(out, value.marker)
     body_codec_put_tcomptimevalue(out, value.value)
     body_codec_put_semacallruleheard(out, value.call)
 }
 
-body_codec_get_semacomptimerulesite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeRuleSite Never! {
+body_codec_get_semacomptimerulesite: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComptimeRuleSite Never! {
     f0: body_codec_get_moduleid(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_tcomptimevalue(bytes, input)
@@ -657,7 +657,7 @@ body_codec_get_semacomptimerulesite: fn(bytes: [U8], input: &BodyCodecIn) -> Sem
     SemaComptimeRuleSite{module_identity: f0, marker: f1, value: f2, call: f3}
 }
 
-body_codec_put_semacallruleheard: fn(out: &BodyCodecOut, value: SemaCallRuleHeard) Never! {
+body_codec_put_semacallruleheard: fn(out: ^BodyCodecOut, value: SemaCallRuleHeard) Never! {
     body_codec_put_list_int(out, value.words)
     body_codec_put_list_string(out, value.texts)
     body_codec_put_list_tcomptimevalue(out, value.types)
@@ -665,7 +665,7 @@ body_codec_put_semacallruleheard: fn(out: &BodyCodecOut, value: SemaCallRuleHear
     body_codec_put_list_tcomptimevalue(out, value.functions)
 }
 
-body_codec_get_semacallruleheard: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallRuleHeard Never! {
+body_codec_get_semacallruleheard: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCallRuleHeard Never! {
     f0: body_codec_get_list_int(bytes, input)
     f1: body_codec_get_list_string(bytes, input)
     f2: body_codec_get_list_tcomptimevalue(bytes, input)
@@ -674,55 +674,55 @@ body_codec_get_semacallruleheard: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCa
     SemaCallRuleHeard{words: f0, texts: f1, types: f2, values: f3, functions: f4}
 }
 
-body_codec_put_list_semacomputecallfact: fn(out: &BodyCodecOut, values: [SemaComputeCallFact]) Never! {
+body_codec_put_list_semacomputecallfact: fn(out: ^BodyCodecOut, values: [SemaComputeCallFact]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacomputecallfact(out, value)
 }
 
-body_codec_get_list_semacomputecallfact: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaComputeCallFact] Never! {
+body_codec_get_list_semacomputecallfact: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaComputeCallFact] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaComputeCallFact]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacomputecallfact(bytes, input))
     values
 }
 
-body_codec_put_list_semaautodiffobligation: fn(out: &BodyCodecOut, values: [SemaAutodiffObligation]) Never! {
+body_codec_put_list_semaautodiffobligation: fn(out: ^BodyCodecOut, values: [SemaAutodiffObligation]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semaautodiffobligation(out, value)
 }
 
-body_codec_get_list_semaautodiffobligation: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaAutodiffObligation] Never! {
+body_codec_get_list_semaautodiffobligation: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaAutodiffObligation] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaAutodiffObligation]{}
     loop _ in 0..<count -> values.push(body_codec_get_semaautodiffobligation(bytes, input))
     values
 }
 
-body_codec_put_list_semagenericcrossing: fn(out: &BodyCodecOut, values: [SemaGenericCrossing]) Never! {
+body_codec_put_list_semagenericcrossing: fn(out: ^BodyCodecOut, values: [SemaGenericCrossing]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semagenericcrossing(out, value)
 }
 
-body_codec_get_list_semagenericcrossing: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaGenericCrossing] Never! {
+body_codec_get_list_semagenericcrossing: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaGenericCrossing] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaGenericCrossing]{}
     loop _ in 0..<count -> values.push(body_codec_get_semagenericcrossing(bytes, input))
     values
 }
 
-body_codec_put_list_semagenericcall: fn(out: &BodyCodecOut, values: [SemaGenericCall]) Never! {
+body_codec_put_list_semagenericcall: fn(out: ^BodyCodecOut, values: [SemaGenericCall]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semagenericcall(out, value)
 }
 
-body_codec_get_list_semagenericcall: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaGenericCall] Never! {
+body_codec_get_list_semagenericcall: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaGenericCall] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaGenericCall]{}
     loop _ in 0..<count -> values.push(body_codec_get_semagenericcall(bytes, input))
     values
 }
 
-body_codec_put_semacomputefunctionfacts: fn(out: &BodyCodecOut, value: SemaComputeFunctionFacts) Never! {
+body_codec_put_semacomputefunctionfacts: fn(out: ^BodyCodecOut, value: SemaComputeFunctionFacts) Never! {
     body_codec_put_string(out, value.function_key)
     body_codec_put_list_semacomputecallfact(out, value.compute_calls)
     body_codec_put_list_semaautodiffobligation(out, value.autodiff_obligations)
@@ -732,7 +732,7 @@ body_codec_put_semacomputefunctionfacts: fn(out: &BodyCodecOut, value: SemaCompu
     body_codec_put_list_semagenericcall(out, value.generic_calls)
 }
 
-body_codec_get_semacomputefunctionfacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComputeFunctionFacts Never! {
+body_codec_get_semacomputefunctionfacts: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComputeFunctionFacts Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_list_semacomputecallfact(bytes, input)
     f2: body_codec_get_list_semaautodiffobligation(bytes, input)
@@ -743,31 +743,31 @@ body_codec_get_semacomputefunctionfacts: fn(bytes: [U8], input: &BodyCodecIn) ->
     SemaComputeFunctionFacts{function_key: f0, compute_calls: f1, autodiff_obligations: f2, autodiff_safe_panic: f3, autodiff_unsafe_panic: f4, generic_crossings: f5, generic_calls: f6}
 }
 
-body_codec_put_semacomputecallfact: fn(out: &BodyCodecOut, value: SemaComputeCallFact) Never! {
+body_codec_put_semacomputecallfact: fn(out: ^BodyCodecOut, value: SemaComputeCallFact) Never! {
     body_codec_put_string(out, value.method)
     body_codec_put_span(out, value.span)
 }
 
-body_codec_get_semacomputecallfact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComputeCallFact Never! {
+body_codec_get_semacomputecallfact: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComputeCallFact Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_span(bytes, input)
     SemaComputeCallFact{method: f0, span: f1}
 }
 
-body_codec_put_semaautodiffobligation: fn(out: &BodyCodecOut, value: SemaAutodiffObligation) Never! {
+body_codec_put_semaautodiffobligation: fn(out: ^BodyCodecOut, value: SemaAutodiffObligation) Never! {
     body_codec_put_string(out, value.method)
     body_codec_put_string(out, value.target)
     body_codec_put_span(out, value.span)
 }
 
-body_codec_get_semaautodiffobligation: fn(bytes: [U8], input: &BodyCodecIn) -> SemaAutodiffObligation Never! {
+body_codec_get_semaautodiffobligation: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaAutodiffObligation Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_span(bytes, input)
     SemaAutodiffObligation{method: f0, target: f1, span: f2}
 }
 
-body_codec_put_semagenericcrossing: fn(out: &BodyCodecOut, value: SemaGenericCrossing) Never! {
+body_codec_put_semagenericcrossing: fn(out: ^BodyCodecOut, value: SemaGenericCrossing) Never! {
     body_codec_put_string(out, value.param)
     body_codec_put_semasendcrossing(out, value.crossing)
     body_codec_put_bool(out, value.whole)
@@ -775,7 +775,7 @@ body_codec_put_semagenericcrossing: fn(out: &BodyCodecOut, value: SemaGenericCro
     body_codec_put_bool(out, value.captured)
 }
 
-body_codec_get_semagenericcrossing: fn(bytes: [U8], input: &BodyCodecIn) -> SemaGenericCrossing Never! {
+body_codec_get_semagenericcrossing: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaGenericCrossing Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_semasendcrossing(bytes, input)
     f2: body_codec_get_bool(bytes, input)
@@ -784,7 +784,7 @@ body_codec_get_semagenericcrossing: fn(bytes: [U8], input: &BodyCodecIn) -> Sema
     SemaGenericCrossing{param: f0, crossing: f1, whole: f2, moved: f3, captured: f4}
 }
 
-body_codec_put_semasendcrossing: fn(out: &BodyCodecOut, value: SemaSendCrossing) Never! {
+body_codec_put_semasendcrossing: fn(out: ^BodyCodecOut, value: SemaSendCrossing) Never! {
     if value == {
         .TaskCapture -> { body_codec_put_tag(out, 0) }
         .TaskResult -> { body_codec_put_tag(out, 1) }
@@ -798,7 +798,7 @@ body_codec_put_semasendcrossing: fn(out: &BodyCodecOut, value: SemaSendCrossing)
     }
 }
 
-body_codec_get_semasendcrossing: fn(bytes: [U8], input: &BodyCodecIn) -> SemaSendCrossing Never! {
+body_codec_get_semasendcrossing: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaSendCrossing Never! {
     position: body_codec_get_tag(bytes, input, 9, 0)
     if position == {
         1 -> SemaSendCrossing.TaskResult
@@ -813,26 +813,26 @@ body_codec_get_semasendcrossing: fn(bytes: [U8], input: &BodyCodecIn) -> SemaSen
     }
 }
 
-body_codec_put_list_semagenericcallargument: fn(out: &BodyCodecOut, values: [SemaGenericCallArgument]) Never! {
+body_codec_put_list_semagenericcallargument: fn(out: ^BodyCodecOut, values: [SemaGenericCallArgument]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semagenericcallargument(out, value)
 }
 
-body_codec_get_list_semagenericcallargument: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaGenericCallArgument] Never! {
+body_codec_get_list_semagenericcallargument: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaGenericCallArgument] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaGenericCallArgument]{}
     loop _ in 0..<count -> values.push(body_codec_get_semagenericcallargument(bytes, input))
     values
 }
 
-body_codec_put_semagenericcall: fn(out: &BodyCodecOut, value: SemaGenericCall) Never! {
+body_codec_put_semagenericcall: fn(out: ^BodyCodecOut, value: SemaGenericCall) Never! {
     body_codec_put_string(out, value.callee)
     body_codec_put_string(out, value.name)
     body_codec_put_span(out, value.span)
     body_codec_put_list_semagenericcallargument(out, value.arguments)
 }
 
-body_codec_get_semagenericcall: fn(bytes: [U8], input: &BodyCodecIn) -> SemaGenericCall Never! {
+body_codec_get_semagenericcall: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaGenericCall Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_span(bytes, input)
@@ -840,7 +840,7 @@ body_codec_get_semagenericcall: fn(bytes: [U8], input: &BodyCodecIn) -> SemaGene
     SemaGenericCall{callee: f0, name: f1, span: f2, arguments: f3}
 }
 
-body_codec_put_opt_semasendabilityproblem: fn(out: &BodyCodecOut, value: SemaSendabilityProblem?) Never! {
+body_codec_put_opt_semasendabilityproblem: fn(out: ^BodyCodecOut, value: SemaSendabilityProblem?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semasendabilityproblem(out, inner)
@@ -849,26 +849,26 @@ body_codec_put_opt_semasendabilityproblem: fn(out: &BodyCodecOut, value: SemaSen
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semasendabilityproblem: fn(bytes: [U8], input: &BodyCodecIn) -> SemaSendabilityProblem? Never! {
+body_codec_get_opt_semasendabilityproblem: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaSendabilityProblem? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semasendabilityproblem(bytes, input))
     }
     None
 }
 
-body_codec_put_list_semacrossinggenericreach: fn(out: &BodyCodecOut, values: [SemaCrossingGenericReach]) Never! {
+body_codec_put_list_semacrossinggenericreach: fn(out: ^BodyCodecOut, values: [SemaCrossingGenericReach]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semacrossinggenericreach(out, value)
 }
 
-body_codec_get_list_semacrossinggenericreach: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaCrossingGenericReach] Never! {
+body_codec_get_list_semacrossinggenericreach: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaCrossingGenericReach] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaCrossingGenericReach]{}
     loop _ in 0..<count -> values.push(body_codec_get_semacrossinggenericreach(bytes, input))
     values
 }
 
-body_codec_put_semagenericcallargument: fn(out: &BodyCodecOut, value: SemaGenericCallArgument) Never! {
+body_codec_put_semagenericcallargument: fn(out: ^BodyCodecOut, value: SemaGenericCallArgument) Never! {
     body_codec_put_string(out, value.param)
     body_codec_put_type(out, value.ty)
     body_codec_put_opt_semasendabilityproblem(out, value.given)
@@ -878,7 +878,7 @@ body_codec_put_semagenericcallargument: fn(out: &BodyCodecOut, value: SemaGeneri
     body_codec_put_list_semacrossinggenericreach(out, value.reaches)
 }
 
-body_codec_get_semagenericcallargument: fn(bytes: [U8], input: &BodyCodecIn) -> SemaGenericCallArgument Never! {
+body_codec_get_semagenericcallargument: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaGenericCallArgument Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_type(bytes, input)
     f2: body_codec_get_opt_semasendabilityproblem(bytes, input)
@@ -889,20 +889,20 @@ body_codec_get_semagenericcallargument: fn(bytes: [U8], input: &BodyCodecIn) -> 
     SemaGenericCallArgument{param: f0, ty: f1, given: f2, kept: f3, strict: f4, cloneable: f5, reaches: f6}
 }
 
-body_codec_put_semasendabilityproblem: fn(out: &BodyCodecOut, value: SemaSendabilityProblem) Never! {
+body_codec_put_semasendabilityproblem: fn(out: ^BodyCodecOut, value: SemaSendabilityProblem) Never! {
     body_codec_put_opt_string(out, value.root)
     body_codec_put_list_string(out, value.path)
     body_codec_put_semasendproblemkind(out, value.kind)
 }
 
-body_codec_get_semasendabilityproblem: fn(bytes: [U8], input: &BodyCodecIn) -> SemaSendabilityProblem Never! {
+body_codec_get_semasendabilityproblem: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaSendabilityProblem Never! {
     f0: body_codec_get_opt_string(bytes, input)
     f1: body_codec_get_list_string(bytes, input)
     f2: body_codec_get_semasendproblemkind(bytes, input)
     SemaSendabilityProblem{root: f0, path: f1, kind: f2}
 }
 
-body_codec_put_semasendproblemkind: fn(out: &BodyCodecOut, value: SemaSendProblemKind) Never! {
+body_codec_put_semasendproblemkind: fn(out: ^BodyCodecOut, value: SemaSendProblemKind) Never! {
     if value == {
         .ClosureNeedsTake -> { body_codec_put_tag(out, 0) }
         .ClosureCaptures -> { body_codec_put_tag(out, 1) }
@@ -928,7 +928,7 @@ body_codec_put_semasendproblemkind: fn(out: &BodyCodecOut, value: SemaSendProble
     }
 }
 
-body_codec_get_semasendproblemkind: fn(bytes: [U8], input: &BodyCodecIn) -> SemaSendProblemKind Never! {
+body_codec_get_semasendproblemkind: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaSendProblemKind Never! {
     position: body_codec_get_tag(bytes, input, 9, 0)
     if position == {
         1 -> SemaSendProblemKind.ClosureCaptures
@@ -955,30 +955,30 @@ body_codec_get_semasendproblemkind: fn(bytes: [U8], input: &BodyCodecIn) -> Sema
     }
 }
 
-body_codec_put_semacrossinggenericreach: fn(out: &BodyCodecOut, value: SemaCrossingGenericReach) Never! {
+body_codec_put_semacrossinggenericreach: fn(out: ^BodyCodecOut, value: SemaCrossingGenericReach) Never! {
     body_codec_put_string(out, value.param)
     body_codec_put_bool(out, value.whole)
 }
 
-body_codec_get_semacrossinggenericreach: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCrossingGenericReach Never! {
+body_codec_get_semacrossinggenericreach: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCrossingGenericReach Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_bool(bytes, input)
     SemaCrossingGenericReach{param: f0, whole: f1}
 }
 
-body_codec_put_list_semafailurecase: fn(out: &BodyCodecOut, values: [SemaFailureCase]) Never! {
+body_codec_put_list_semafailurecase: fn(out: ^BodyCodecOut, values: [SemaFailureCase]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semafailurecase(out, value)
 }
 
-body_codec_get_list_semafailurecase: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaFailureCase] Never! {
+body_codec_get_list_semafailurecase: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaFailureCase] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaFailureCase]{}
     loop _ in 0..<count -> values.push(body_codec_get_semafailurecase(bytes, input))
     values
 }
 
-body_codec_put_semafunctionfailurefacts: fn(out: &BodyCodecOut, value: SemaFunctionFailureFacts) Never! {
+body_codec_put_semafunctionfailurefacts: fn(out: ^BodyCodecOut, value: SemaFunctionFailureFacts) Never! {
     body_codec_put_string(out, value.function_key)
     body_codec_put_bool(out, value.direct)
     body_codec_put_list_string(out, value.edges)
@@ -988,7 +988,7 @@ body_codec_put_semafunctionfailurefacts: fn(out: &BodyCodecOut, value: SemaFunct
     body_codec_put_bool(out, value.union_general)
 }
 
-body_codec_get_semafunctionfailurefacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaFunctionFailureFacts Never! {
+body_codec_get_semafunctionfailurefacts: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFunctionFailureFacts Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_bool(bytes, input)
     f2: body_codec_get_list_string(bytes, input)
@@ -999,58 +999,58 @@ body_codec_get_semafunctionfailurefacts: fn(bytes: [U8], input: &BodyCodecIn) ->
     SemaFunctionFailureFacts{function_key: f0, direct: f1, edges: f2, union_members: f3, union_cases: f4, union_edges: f5, union_general: f6}
 }
 
-body_codec_put_list_semafailurecasefield: fn(out: &BodyCodecOut, values: [SemaFailureCaseField]) Never! {
+body_codec_put_list_semafailurecasefield: fn(out: ^BodyCodecOut, values: [SemaFailureCaseField]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_semafailurecasefield(out, value)
 }
 
-body_codec_get_list_semafailurecasefield: fn(bytes: [U8], input: &BodyCodecIn) -> [SemaFailureCaseField] Never! {
+body_codec_get_list_semafailurecasefield: fn(bytes: [U8], input: ^BodyCodecIn) -> [SemaFailureCaseField] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [SemaFailureCaseField]{}
     loop _ in 0..<count -> values.push(body_codec_get_semafailurecasefield(bytes, input))
     values
 }
 
-body_codec_put_semafailurecase: fn(out: &BodyCodecOut, value: SemaFailureCase) Never! {
+body_codec_put_semafailurecase: fn(out: ^BodyCodecOut, value: SemaFailureCase) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_list_semafailurecasefield(out, value.payload)
     body_codec_put_span(out, value.span)
 }
 
-body_codec_get_semafailurecase: fn(bytes: [U8], input: &BodyCodecIn) -> SemaFailureCase Never! {
+body_codec_get_semafailurecase: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFailureCase Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_list_semafailurecasefield(bytes, input)
     f2: body_codec_get_span(bytes, input)
     SemaFailureCase{name: f0, payload: f1, span: f2}
 }
 
-body_codec_put_semafailurecasefield: fn(out: &BodyCodecOut, value: SemaFailureCaseField) Never! {
+body_codec_put_semafailurecasefield: fn(out: ^BodyCodecOut, value: SemaFailureCaseField) Never! {
     body_codec_put_opt_string(out, value.label)
     body_codec_put_type(out, value.ty)
     body_codec_put_span(out, value.span)
 }
 
-body_codec_get_semafailurecasefield: fn(bytes: [U8], input: &BodyCodecIn) -> SemaFailureCaseField Never! {
+body_codec_get_semafailurecasefield: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaFailureCaseField Never! {
     f0: body_codec_get_opt_string(bytes, input)
     f1: body_codec_get_type(bytes, input)
     f2: body_codec_get_span(bytes, input)
     SemaFailureCaseField{label: f0, ty: f1, span: f2}
 }
 
-body_codec_put_semapreludeconversiondemand: fn(out: &BodyCodecOut, value: SemaPreludeConversionDemand) Never! {
+body_codec_put_semapreludeconversiondemand: fn(out: ^BodyCodecOut, value: SemaPreludeConversionDemand) Never! {
     body_codec_put_string(out, value.key)
     body_codec_put_type(out, value.source)
     body_codec_put_span(out, value.site)
 }
 
-body_codec_get_semapreludeconversiondemand: fn(bytes: [U8], input: &BodyCodecIn) -> SemaPreludeConversionDemand Never! {
+body_codec_get_semapreludeconversiondemand: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaPreludeConversionDemand Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_type(bytes, input)
     f2: body_codec_get_span(bytes, input)
     SemaPreludeConversionDemand{key: f0, source: f1, site: f2}
 }
 
-body_codec_put_semaevalprobeanswer: fn(out: &BodyCodecOut, value: SemaEvalProbeAnswer) Never! {
+body_codec_put_semaevalprobeanswer: fn(out: ^BodyCodecOut, value: SemaEvalProbeAnswer) Never! {
     body_codec_put_int(out, value.probe)
     body_codec_put_int(out, value.expression)
     body_codec_put_string(out, value.function)
@@ -1064,7 +1064,7 @@ body_codec_put_semaevalprobeanswer: fn(out: &BodyCodecOut, value: SemaEvalProbeA
     body_codec_put_bool(out, value.lent)
 }
 
-body_codec_get_semaevalprobeanswer: fn(bytes: [U8], input: &BodyCodecIn) -> SemaEvalProbeAnswer Never! {
+body_codec_get_semaevalprobeanswer: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaEvalProbeAnswer Never! {
     f0: body_codec_get_int(bytes, input)
     f1: body_codec_get_int(bytes, input)
     f2: body_codec_get_string(bytes, input)
@@ -1079,7 +1079,7 @@ body_codec_get_semaevalprobeanswer: fn(bytes: [U8], input: &BodyCodecIn) -> Sema
     SemaEvalProbeAnswer{probe: f0, expression: f1, function: f2, exact: f3, span: f4, complete: f5, value_type: f6, captures: f7, refusals: f8, effects: f9, lent: f10}
 }
 
-body_codec_put_opt_diagnosticorigin: fn(out: &BodyCodecOut, value: DiagnosticOrigin?) Never! {
+body_codec_put_opt_diagnosticorigin: fn(out: ^BodyCodecOut, value: DiagnosticOrigin?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticorigin(out, inner)
@@ -1088,38 +1088,38 @@ body_codec_put_opt_diagnosticorigin: fn(out: &BodyCodecOut, value: DiagnosticOri
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticorigin: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticOrigin? Never! {
+body_codec_get_opt_diagnosticorigin: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticOrigin? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticorigin(bytes, input))
     }
     None
 }
 
-body_codec_put_list_diagnosticcause: fn(out: &BodyCodecOut, values: [DiagnosticCause]) Never! {
+body_codec_put_list_diagnosticcause: fn(out: ^BodyCodecOut, values: [DiagnosticCause]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticcause(out, value)
 }
 
-body_codec_get_list_diagnosticcause: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticCause] Never! {
+body_codec_get_list_diagnosticcause: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticCause] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticCause]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticcause(bytes, input))
     values
 }
 
-body_codec_put_list_diagnosticlabel: fn(out: &BodyCodecOut, values: [DiagnosticLabel]) Never! {
+body_codec_put_list_diagnosticlabel: fn(out: ^BodyCodecOut, values: [DiagnosticLabel]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticlabel(out, value)
 }
 
-body_codec_get_list_diagnosticlabel: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticLabel] Never! {
+body_codec_get_list_diagnosticlabel: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticLabel] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticLabel]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticlabel(bytes, input))
     values
 }
 
-body_codec_put_opt_textedit: fn(out: &BodyCodecOut, value: TextEdit?) Never! {
+body_codec_put_opt_textedit: fn(out: ^BodyCodecOut, value: TextEdit?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_textedit(out, inner)
@@ -1128,24 +1128,24 @@ body_codec_put_opt_textedit: fn(out: &BodyCodecOut, value: TextEdit?) Never! {
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_textedit: fn(bytes: [U8], input: &BodyCodecIn) -> TextEdit? Never! {
+body_codec_get_opt_textedit: fn(bytes: [U8], input: ^BodyCodecIn) -> TextEdit? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_textedit(bytes, input))
     None
 }
 
-body_codec_put_list_textedit: fn(out: &BodyCodecOut, values: [TextEdit]) Never! {
+body_codec_put_list_textedit: fn(out: ^BodyCodecOut, values: [TextEdit]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_textedit(out, value)
 }
 
-body_codec_get_list_textedit: fn(bytes: [U8], input: &BodyCodecIn) -> [TextEdit] Never! {
+body_codec_get_list_textedit: fn(bytes: [U8], input: ^BodyCodecIn) -> [TextEdit] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [TextEdit]{}
     loop _ in 0..<count -> values.push(body_codec_get_textedit(bytes, input))
     values
 }
 
-body_codec_put_opt_diagnosticcallrewrite: fn(out: &BodyCodecOut, value: DiagnosticCallRewrite?) Never! {
+body_codec_put_opt_diagnosticcallrewrite: fn(out: ^BodyCodecOut, value: DiagnosticCallRewrite?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticcallrewrite(out, inner)
@@ -1154,14 +1154,14 @@ body_codec_put_opt_diagnosticcallrewrite: fn(out: &BodyCodecOut, value: Diagnost
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticcallrewrite: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticCallRewrite? Never! {
+body_codec_get_opt_diagnosticcallrewrite: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticCallRewrite? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticcallrewrite(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_diagnosticfixapplicability: fn(out: &BodyCodecOut, value: DiagnosticFixApplicability?) Never! {
+body_codec_put_opt_diagnosticfixapplicability: fn(out: ^BodyCodecOut, value: DiagnosticFixApplicability?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticfixapplicability(out, inner)
@@ -1170,14 +1170,14 @@ body_codec_put_opt_diagnosticfixapplicability: fn(out: &BodyCodecOut, value: Dia
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticfixapplicability: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticFixApplicability? Never! {
+body_codec_get_opt_diagnosticfixapplicability: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticFixApplicability? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticfixapplicability(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_diagnosticfixsafety: fn(out: &BodyCodecOut, value: DiagnosticFixSafety?) Never! {
+body_codec_put_opt_diagnosticfixsafety: fn(out: ^BodyCodecOut, value: DiagnosticFixSafety?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticfixsafety(out, inner)
@@ -1186,14 +1186,14 @@ body_codec_put_opt_diagnosticfixsafety: fn(out: &BodyCodecOut, value: Diagnostic
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticfixsafety: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticFixSafety? Never! {
+body_codec_get_opt_diagnosticfixsafety: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticFixSafety? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticfixsafety(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_diagnosticnofixreason: fn(out: &BodyCodecOut, value: DiagnosticNoFixReason?) Never! {
+body_codec_put_opt_diagnosticnofixreason: fn(out: ^BodyCodecOut, value: DiagnosticNoFixReason?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticnofixreason(out, inner)
@@ -1202,14 +1202,14 @@ body_codec_put_opt_diagnosticnofixreason: fn(out: &BodyCodecOut, value: Diagnost
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticnofixreason: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticNoFixReason? Never! {
+body_codec_get_opt_diagnosticnofixreason: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticNoFixReason? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticnofixreason(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_diagnosticstructured: fn(out: &BodyCodecOut, value: DiagnosticStructured?) Never! {
+body_codec_put_opt_diagnosticstructured: fn(out: ^BodyCodecOut, value: DiagnosticStructured?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticstructured(out, inner)
@@ -1218,14 +1218,14 @@ body_codec_put_opt_diagnosticstructured: fn(out: &BodyCodecOut, value: Diagnosti
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticstructured: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticStructured? Never! {
+body_codec_get_opt_diagnosticstructured: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticStructured? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticstructured(bytes, input))
     }
     None
 }
 
-body_codec_put_diagnostic: fn(out: &BodyCodecOut, value: Diagnostic) Never! {
+body_codec_put_diagnostic: fn(out: ^BodyCodecOut, value: Diagnostic) Never! {
     body_codec_put_diagnosticmoment(out, value.moment)
     body_codec_put_int(out, value.severity)
     body_codec_put_string(out, value.code)
@@ -1254,7 +1254,7 @@ body_codec_put_diagnostic: fn(out: &BodyCodecOut, value: Diagnostic) Never! {
     body_codec_put_opt_int(out, value.outside_signal)
 }
 
-body_codec_get_diagnostic: fn(bytes: [U8], input: &BodyCodecIn) -> Diagnostic Never! {
+body_codec_get_diagnostic: fn(bytes: [U8], input: ^BodyCodecIn) -> Diagnostic Never! {
     f0: body_codec_get_diagnosticmoment(bytes, input)
     f1: body_codec_get_int(bytes, input)
     f2: body_codec_get_string(bytes, input)
@@ -1284,7 +1284,7 @@ body_codec_get_diagnostic: fn(bytes: [U8], input: &BodyCodecIn) -> Diagnostic Ne
     Diagnostic{moment: f0, severity: f1, code: f2, span: f3, source_path: f4, source_offset: f5, source_start: f6, origin: f7, cause: f8, labels: f9, what: f10, why: f11, fix: f12, edit: f13, fix_edits: f14, fix_calls: f15, applicability: f16, safety: f17, no_fix_reason: f18, detail: f19, structured: f20, denial_kind: f21, call_chain: f22, scope_chain: f23, nearest_granting_scope: f24, outside_signal: f25}
 }
 
-body_codec_put_diagnosticmoment: fn(out: &BodyCodecOut, value: DiagnosticMoment) Never! {
+body_codec_put_diagnosticmoment: fn(out: ^BodyCodecOut, value: DiagnosticMoment) Never! {
     if value == {
         .Compile -> { body_codec_put_tag(out, 0) }
         .Run -> { body_codec_put_tag(out, 1) }
@@ -1293,7 +1293,7 @@ body_codec_put_diagnosticmoment: fn(out: &BodyCodecOut, value: DiagnosticMoment)
     }
 }
 
-body_codec_get_diagnosticmoment: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticMoment Never! {
+body_codec_get_diagnosticmoment: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticMoment Never! {
     position: body_codec_get_tag(bytes, input, 4, 0)
     if position == {
         1 -> DiagnosticMoment.Run
@@ -1303,14 +1303,14 @@ body_codec_get_diagnosticmoment: fn(bytes: [U8], input: &BodyCodecIn) -> Diagnos
     }
 }
 
-body_codec_put_diagnosticorigin: fn(out: &BodyCodecOut, value: DiagnosticOrigin) Never! {
+body_codec_put_diagnosticorigin: fn(out: ^BodyCodecOut, value: DiagnosticOrigin) Never! {
     body_codec_put_string(out, value.display)
     body_codec_put_string(out, value.path)
     body_codec_put_string(out, value.source)
     body_codec_put_string(out, value.revision)
 }
 
-body_codec_get_diagnosticorigin: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticOrigin Never! {
+body_codec_get_diagnosticorigin: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticOrigin Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_string(bytes, input)
@@ -1318,62 +1318,62 @@ body_codec_get_diagnosticorigin: fn(bytes: [U8], input: &BodyCodecIn) -> Diagnos
     DiagnosticOrigin{display: f0, path: f1, source: f2, revision: f3}
 }
 
-body_codec_put_diagnosticcause: fn(out: &BodyCodecOut, value: DiagnosticCause) Never! {
+body_codec_put_diagnosticcause: fn(out: ^BodyCodecOut, value: DiagnosticCause) Never! {
     body_codec_put_string(out, value.code)
     body_codec_put_opt_span(out, value.span)
     body_codec_put_opt_diagnosticorigin(out, value.origin)
 }
 
-body_codec_get_diagnosticcause: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticCause Never! {
+body_codec_get_diagnosticcause: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticCause Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_opt_span(bytes, input)
     f2: body_codec_get_opt_diagnosticorigin(bytes, input)
     DiagnosticCause{code: f0, span: f1, origin: f2}
 }
 
-body_codec_put_diagnosticlabel: fn(out: &BodyCodecOut, value: DiagnosticLabel) Never! {
+body_codec_put_diagnosticlabel: fn(out: ^BodyCodecOut, value: DiagnosticLabel) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_string(out, value.message)
 }
 
-body_codec_get_diagnosticlabel: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticLabel Never! {
+body_codec_get_diagnosticlabel: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticLabel Never! {
     f0: body_codec_get_span(bytes, input)
     f1: body_codec_get_string(bytes, input)
     DiagnosticLabel{span: f0, message: f1}
 }
 
-body_codec_put_textedit: fn(out: &BodyCodecOut, value: TextEdit) Never! {
+body_codec_put_textedit: fn(out: ^BodyCodecOut, value: TextEdit) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_string(out, value.new_text)
     body_codec_put_opt_string(out, value.path)
 }
 
-body_codec_get_textedit: fn(bytes: [U8], input: &BodyCodecIn) -> TextEdit Never! {
+body_codec_get_textedit: fn(bytes: [U8], input: ^BodyCodecIn) -> TextEdit Never! {
     f0: body_codec_get_span(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_opt_string(bytes, input)
     TextEdit{span: f0, new_text: f1, path: f2}
 }
 
-body_codec_put_diagnosticcallrewrite: fn(out: &BodyCodecOut, value: DiagnosticCallRewrite) Never! {
+body_codec_put_diagnosticcallrewrite: fn(out: ^BodyCodecOut, value: DiagnosticCallRewrite) Never! {
     body_codec_put_symbolid(out, value.symbol)
     body_codec_put_string(out, value.method)
 }
 
-body_codec_get_diagnosticcallrewrite: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticCallRewrite Never! {
+body_codec_get_diagnosticcallrewrite: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticCallRewrite Never! {
     f0: body_codec_get_symbolid(bytes, input)
     f1: body_codec_get_string(bytes, input)
     DiagnosticCallRewrite{symbol: f0, method: f1}
 }
 
-body_codec_put_diagnosticfixapplicability: fn(out: &BodyCodecOut, value: DiagnosticFixApplicability) Never! {
+body_codec_put_diagnosticfixapplicability: fn(out: ^BodyCodecOut, value: DiagnosticFixApplicability) Never! {
     if value == {
         .Safe -> { body_codec_put_tag(out, 0) }
         .Suggested -> body_codec_put_tag(out, 1)
     }
 }
 
-body_codec_get_diagnosticfixapplicability: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticFixApplicability Never! {
+body_codec_get_diagnosticfixapplicability: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticFixApplicability Never! {
     position: body_codec_get_tag(bytes, input, 2, 0)
     if position == {
         1 -> DiagnosticFixApplicability.Suggested
@@ -1381,7 +1381,7 @@ body_codec_get_diagnosticfixapplicability: fn(bytes: [U8], input: &BodyCodecIn) 
     }
 }
 
-body_codec_put_diagnosticfixsafety: fn(out: &BodyCodecOut, value: DiagnosticFixSafety) Never! {
+body_codec_put_diagnosticfixsafety: fn(out: ^BodyCodecOut, value: DiagnosticFixSafety) Never! {
     if value == {
         .Formatting -> { body_codec_put_tag(out, 0) }
         .BehaviorPreserving -> { body_codec_put_tag(out, 1) }
@@ -1391,7 +1391,7 @@ body_codec_put_diagnosticfixsafety: fn(out: &BodyCodecOut, value: DiagnosticFixS
     }
 }
 
-body_codec_get_diagnosticfixsafety: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticFixSafety Never! {
+body_codec_get_diagnosticfixsafety: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticFixSafety Never! {
     position: body_codec_get_tag(bytes, input, 5, 0)
     if position == {
         1 -> DiagnosticFixSafety.BehaviorPreserving
@@ -1402,18 +1402,18 @@ body_codec_get_diagnosticfixsafety: fn(bytes: [U8], input: &BodyCodecIn) -> Diag
     }
 }
 
-body_codec_put_diagnosticnofixreason: fn(out: &BodyCodecOut, value: DiagnosticNoFixReason) Never! {
+body_codec_put_diagnosticnofixreason: fn(out: ^BodyCodecOut, value: DiagnosticNoFixReason) Never! {
     body_codec_put_diagnosticnofixreasonkind(out, value.kind)
     body_codec_put_string(out, value.next)
 }
 
-body_codec_get_diagnosticnofixreason: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticNoFixReason Never! {
+body_codec_get_diagnosticnofixreason: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticNoFixReason Never! {
     f0: body_codec_get_diagnosticnofixreasonkind(bytes, input)
     f1: body_codec_get_string(bytes, input)
     DiagnosticNoFixReason{kind: f0, next: f1}
 }
 
-body_codec_put_diagnosticnofixreasonkind: fn(out: &BodyCodecOut, value: DiagnosticNoFixReasonKind) Never! {
+body_codec_put_diagnosticnofixreasonkind: fn(out: ^BodyCodecOut, value: DiagnosticNoFixReasonKind) Never! {
     if value == {
         .Behavior -> { body_codec_put_tag(out, 0) }
         .Design -> { body_codec_put_tag(out, 1) }
@@ -1421,7 +1421,7 @@ body_codec_put_diagnosticnofixreasonkind: fn(out: &BodyCodecOut, value: Diagnost
     }
 }
 
-body_codec_get_diagnosticnofixreasonkind: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticNoFixReasonKind Never! {
+body_codec_get_diagnosticnofixreasonkind: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticNoFixReasonKind Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> DiagnosticNoFixReasonKind.Design
@@ -1430,7 +1430,7 @@ body_codec_get_diagnosticnofixreasonkind: fn(bytes: [U8], input: &BodyCodecIn) -
     }
 }
 
-body_codec_put_diagnosticstructured: fn(out: &BodyCodecOut, value: DiagnosticStructured) Never! {
+body_codec_put_diagnosticstructured: fn(out: ^BodyCodecOut, value: DiagnosticStructured) Never! {
     if value == {
         .SuggestedEdits(p0) -> {
             body_codec_put_tag(out, 0)
@@ -1454,7 +1454,7 @@ body_codec_put_diagnosticstructured: fn(out: &BodyCodecOut, value: DiagnosticStr
     }
 }
 
-body_codec_get_diagnosticstructured: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticStructured Never! {
+body_codec_get_diagnosticstructured: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticStructured Never! {
     position: body_codec_get_tag(bytes, input, 4, 0)
     if position == {
         1 -> {
@@ -1479,7 +1479,7 @@ body_codec_get_diagnosticstructured: fn(bytes: [U8], input: &BodyCodecIn) -> Dia
     }
 }
 
-body_codec_put_diagnosticcryptomisusereason: fn(out: &BodyCodecOut, value: DiagnosticCryptoMisuseReason) Never! {
+body_codec_put_diagnosticcryptomisusereason: fn(out: ^BodyCodecOut, value: DiagnosticCryptoMisuseReason) Never! {
     if value == {
         .InvalidLength -> { body_codec_put_tag(out, 0) }
         .NonceLength -> { body_codec_put_tag(out, 1) }
@@ -1495,7 +1495,7 @@ body_codec_put_diagnosticcryptomisusereason: fn(out: &BodyCodecOut, value: Diagn
     }
 }
 
-body_codec_get_diagnosticcryptomisusereason: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticCryptoMisuseReason Never! {
+body_codec_get_diagnosticcryptomisusereason: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticCryptoMisuseReason Never! {
     position: body_codec_get_tag(bytes, input, 11, 0)
     if position == {
         1 -> DiagnosticCryptoMisuseReason.NonceLength
@@ -1512,55 +1512,55 @@ body_codec_get_diagnosticcryptomisusereason: fn(bytes: [U8], input: &BodyCodecIn
     }
 }
 
-body_codec_put_list_diagnosticbuilderror: fn(out: &BodyCodecOut, values: [DiagnosticBuildError]) Never! {
+body_codec_put_list_diagnosticbuilderror: fn(out: ^BodyCodecOut, values: [DiagnosticBuildError]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticbuilderror(out, value)
 }
 
-body_codec_get_list_diagnosticbuilderror: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticBuildError] Never! {
+body_codec_get_list_diagnosticbuilderror: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticBuildError] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticBuildError]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticbuilderror(bytes, input))
     values
 }
 
-body_codec_put_list_diagnosticerrorcontextframe: fn(out: &BodyCodecOut, values: [DiagnosticErrorContextFrame]) Never! {
+body_codec_put_list_diagnosticerrorcontextframe: fn(out: ^BodyCodecOut, values: [DiagnosticErrorContextFrame]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticerrorcontextframe(out, value)
 }
 
-body_codec_get_list_diagnosticerrorcontextframe: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticErrorContextFrame] Never! {
+body_codec_get_list_diagnosticerrorcontextframe: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticErrorContextFrame] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticErrorContextFrame]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticerrorcontextframe(bytes, input))
     values
 }
 
-body_codec_put_list_diagnosticerrorjourneyframe: fn(out: &BodyCodecOut, values: [DiagnosticErrorJourneyFrame]) Never! {
+body_codec_put_list_diagnosticerrorjourneyframe: fn(out: ^BodyCodecOut, values: [DiagnosticErrorJourneyFrame]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticerrorjourneyframe(out, value)
 }
 
-body_codec_get_list_diagnosticerrorjourneyframe: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticErrorJourneyFrame] Never! {
+body_codec_get_list_diagnosticerrorjourneyframe: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticErrorJourneyFrame] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticErrorJourneyFrame]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticerrorjourneyframe(bytes, input))
     values
 }
 
-body_codec_put_list_diagnosticerrorconversion: fn(out: &BodyCodecOut, values: [DiagnosticErrorConversion]) Never! {
+body_codec_put_list_diagnosticerrorconversion: fn(out: ^BodyCodecOut, values: [DiagnosticErrorConversion]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticerrorconversion(out, value)
 }
 
-body_codec_get_list_diagnosticerrorconversion: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticErrorConversion] Never! {
+body_codec_get_list_diagnosticerrorconversion: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticErrorConversion] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticErrorConversion]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticerrorconversion(bytes, input))
     values
 }
 
-body_codec_put_opt_diagnosticerrordetails: fn(out: &BodyCodecOut, value: DiagnosticErrorDetails?) Never! {
+body_codec_put_opt_diagnosticerrordetails: fn(out: ^BodyCodecOut, value: DiagnosticErrorDetails?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticerrordetails(out, inner)
@@ -1569,14 +1569,14 @@ body_codec_put_opt_diagnosticerrordetails: fn(out: &BodyCodecOut, value: Diagnos
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticerrordetails: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorDetails? Never! {
+body_codec_get_opt_diagnosticerrordetails: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorDetails? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticerrordetails(bytes, input))
     }
     None
 }
 
-body_codec_put_diagnosticbuilderror: fn(out: &BodyCodecOut, value: DiagnosticBuildError) Never! {
+body_codec_put_diagnosticbuilderror: fn(out: ^BodyCodecOut, value: DiagnosticBuildError) Never! {
     body_codec_put_opt_string(out, value.code)
     body_codec_put_string(out, value.message)
     body_codec_put_opt_string(out, value.typed_identity)
@@ -1587,7 +1587,7 @@ body_codec_put_diagnosticbuilderror: fn(out: &BodyCodecOut, value: DiagnosticBui
     body_codec_put_opt_diagnosticerrordetails(out, value.details)
 }
 
-body_codec_get_diagnosticbuilderror: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticBuildError Never! {
+body_codec_get_diagnosticbuilderror: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticBuildError Never! {
     f0: body_codec_get_opt_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_opt_string(bytes, input)
@@ -1599,20 +1599,20 @@ body_codec_get_diagnosticbuilderror: fn(bytes: [U8], input: &BodyCodecIn) -> Dia
     DiagnosticBuildError{code: f0, message: f1, typed_identity: f2, causes: f3, context_frames: f4, source_journey: f5, conversion_history: f6, details: f7}
 }
 
-body_codec_put_diagnosticerrorcontextframe: fn(out: &BodyCodecOut, value: DiagnosticErrorContextFrame) Never! {
+body_codec_put_diagnosticerrorcontextframe: fn(out: ^BodyCodecOut, value: DiagnosticErrorContextFrame) Never! {
     body_codec_put_string(out, value.text)
     body_codec_put_string(out, value.file)
     body_codec_put_int(out, value.line)
 }
 
-body_codec_get_diagnosticerrorcontextframe: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorContextFrame Never! {
+body_codec_get_diagnosticerrorcontextframe: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorContextFrame Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_int(bytes, input)
     DiagnosticErrorContextFrame{text: f0, file: f1, line: f2}
 }
 
-body_codec_put_diagnosticerrorjourneyframe: fn(out: &BodyCodecOut, value: DiagnosticErrorJourneyFrame) Never! {
+body_codec_put_diagnosticerrorjourneyframe: fn(out: ^BodyCodecOut, value: DiagnosticErrorJourneyFrame) Never! {
     body_codec_put_string(out, value.fn_name)
     body_codec_put_string(out, value.file)
     body_codec_put_int(out, value.line)
@@ -1620,7 +1620,7 @@ body_codec_put_diagnosticerrorjourneyframe: fn(out: &BodyCodecOut, value: Diagno
     body_codec_put_int(out, value.hops)
 }
 
-body_codec_get_diagnosticerrorjourneyframe: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorJourneyFrame Never! {
+body_codec_get_diagnosticerrorjourneyframe: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorJourneyFrame Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_int(bytes, input)
@@ -1629,30 +1629,30 @@ body_codec_get_diagnosticerrorjourneyframe: fn(bytes: [U8], input: &BodyCodecIn)
     DiagnosticErrorJourneyFrame{fn_name: f0, file: f1, line: f2, note: f3, hops: f4}
 }
 
-body_codec_put_diagnosticerrorconversion: fn(out: &BodyCodecOut, value: DiagnosticErrorConversion) Never! {
+body_codec_put_diagnosticerrorconversion: fn(out: ^BodyCodecOut, value: DiagnosticErrorConversion) Never! {
     body_codec_put_string(out, value.source)
     body_codec_put_string(out, value.target)
 }
 
-body_codec_get_diagnosticerrorconversion: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorConversion Never! {
+body_codec_get_diagnosticerrorconversion: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorConversion Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     DiagnosticErrorConversion{source: f0, target: f1}
 }
 
-body_codec_put_list_diagnosticerrorfield: fn(out: &BodyCodecOut, values: [DiagnosticErrorField]) Never! {
+body_codec_put_list_diagnosticerrorfield: fn(out: ^BodyCodecOut, values: [DiagnosticErrorField]) Never! {
     body_codec_put_count(out, values.len())
     loop value in values -> body_codec_put_diagnosticerrorfield(out, value)
 }
 
-body_codec_get_list_diagnosticerrorfield: fn(bytes: [U8], input: &BodyCodecIn) -> [DiagnosticErrorField] Never! {
+body_codec_get_list_diagnosticerrorfield: fn(bytes: [U8], input: ^BodyCodecIn) -> [DiagnosticErrorField] Never! {
     count: body_codec_get_count(bytes, input, 1)
     values := [DiagnosticErrorField]{}
     loop _ in 0..<count -> values.push(body_codec_get_diagnosticerrorfield(bytes, input))
     values
 }
 
-body_codec_put_opt_diagnosticerrorspan: fn(out: &BodyCodecOut, value: DiagnosticErrorSpan?) Never! {
+body_codec_put_opt_diagnosticerrorspan: fn(out: ^BodyCodecOut, value: DiagnosticErrorSpan?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_diagnosticerrorspan(out, inner)
@@ -1661,49 +1661,49 @@ body_codec_put_opt_diagnosticerrorspan: fn(out: &BodyCodecOut, value: Diagnostic
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_diagnosticerrorspan: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorSpan? Never! {
+body_codec_get_opt_diagnosticerrorspan: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorSpan? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_diagnosticerrorspan(bytes, input))
     }
     None
 }
 
-body_codec_put_diagnosticerrordetails: fn(out: &BodyCodecOut, value: DiagnosticErrorDetails) Never! {
+body_codec_put_diagnosticerrordetails: fn(out: ^BodyCodecOut, value: DiagnosticErrorDetails) Never! {
     body_codec_put_string(out, value.variant)
     body_codec_put_list_diagnosticerrorfield(out, value.fields)
     body_codec_put_opt_diagnosticerrorspan(out, value.source_span)
 }
 
-body_codec_get_diagnosticerrordetails: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorDetails Never! {
+body_codec_get_diagnosticerrordetails: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorDetails Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_list_diagnosticerrorfield(bytes, input)
     f2: body_codec_get_opt_diagnosticerrorspan(bytes, input)
     DiagnosticErrorDetails{variant: f0, fields: f1, source_span: f2}
 }
 
-body_codec_put_diagnosticerrorfield: fn(out: &BodyCodecOut, value: DiagnosticErrorField) Never! {
+body_codec_put_diagnosticerrorfield: fn(out: ^BodyCodecOut, value: DiagnosticErrorField) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_string(out, value.value)
 }
 
-body_codec_get_diagnosticerrorfield: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorField Never! {
+body_codec_get_diagnosticerrorfield: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorField Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     DiagnosticErrorField{name: f0, value: f1}
 }
 
-body_codec_put_diagnosticerrorspan: fn(out: &BodyCodecOut, value: DiagnosticErrorSpan) Never! {
+body_codec_put_diagnosticerrorspan: fn(out: ^BodyCodecOut, value: DiagnosticErrorSpan) Never! {
     body_codec_put_int(out, value.start)
     body_codec_put_int(out, value.end)
 }
 
-body_codec_get_diagnosticerrorspan: fn(bytes: [U8], input: &BodyCodecIn) -> DiagnosticErrorSpan Never! {
+body_codec_get_diagnosticerrorspan: fn(bytes: [U8], input: ^BodyCodecIn) -> DiagnosticErrorSpan Never! {
     f0: body_codec_get_int(bytes, input)
     f1: body_codec_get_int(bytes, input)
     DiagnosticErrorSpan{start: f0, end: f1}
 }
 
-body_codec_put_opt_semacallsitedetail: fn(out: &BodyCodecOut, value: SemaCallSiteDetail?) Never! {
+body_codec_put_opt_semacallsitedetail: fn(out: ^BodyCodecOut, value: SemaCallSiteDetail?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semacallsitedetail(out, inner)
@@ -1712,14 +1712,14 @@ body_codec_put_opt_semacallsitedetail: fn(out: &BodyCodecOut, value: SemaCallSit
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semacallsitedetail: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteDetail? Never! {
+body_codec_get_opt_semacallsitedetail: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCallSiteDetail? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semacallsitedetail(bytes, input))
     }
     None
 }
 
-body_codec_put_semacallsitefact: fn(out: &BodyCodecOut, value: SemaCallSiteFact) Never! {
+body_codec_put_semacallsitefact: fn(out: ^BodyCodecOut, value: SemaCallSiteFact) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_string(out, value.caller_key)
     body_codec_put_opt_symbolid(out, value.callee)
@@ -1730,7 +1730,7 @@ body_codec_put_semacallsitefact: fn(out: &BodyCodecOut, value: SemaCallSiteFact)
     body_codec_put_opt_semacallsitedetail(out, value.detail)
 }
 
-body_codec_get_semacallsitefact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteFact Never! {
+body_codec_get_semacallsitefact: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCallSiteFact Never! {
     f0: body_codec_get_span(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_opt_symbolid(bytes, input)
@@ -1742,7 +1742,7 @@ body_codec_get_semacallsitefact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCal
     SemaCallSiteFact{span: f0, caller_key: f1, callee: f2, facts: f3, discarded: f4, discarded_if_infallible: f5, compile_time: f6, detail: f7}
 }
 
-body_codec_put_opt_teffectfacts: fn(out: &BodyCodecOut, value: TEffectFacts?) Never! {
+body_codec_put_opt_teffectfacts: fn(out: ^BodyCodecOut, value: TEffectFacts?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_teffectfacts(out, inner)
@@ -1751,23 +1751,23 @@ body_codec_put_opt_teffectfacts: fn(out: &BodyCodecOut, value: TEffectFacts?) Ne
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_teffectfacts: fn(bytes: [U8], input: &BodyCodecIn) -> TEffectFacts? Never! {
+body_codec_get_opt_teffectfacts: fn(bytes: [U8], input: ^BodyCodecIn) -> TEffectFacts? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_teffectfacts(bytes, input))
     None
 }
 
-body_codec_put_semacallsitefacts: fn(out: &BodyCodecOut, value: SemaCallSiteFacts) Never! {
+body_codec_put_semacallsitefacts: fn(out: ^BodyCodecOut, value: SemaCallSiteFacts) Never! {
     body_codec_put_opt_list_effectrowentry(out, value.effect_bound)
     body_codec_put_opt_teffectfacts(out, value.local_lambda)
 }
 
-body_codec_get_semacallsitefacts: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteFacts Never! {
+body_codec_get_semacallsitefacts: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCallSiteFacts Never! {
     f0: body_codec_get_opt_list_effectrowentry(bytes, input)
     f1: body_codec_get_opt_teffectfacts(bytes, input)
     SemaCallSiteFacts{effect_bound: f0, local_lambda: f1}
 }
 
-body_codec_put_opt_semaforeigncapability: fn(out: &BodyCodecOut, value: SemaForeignCapability?) Never! {
+body_codec_put_opt_semaforeigncapability: fn(out: ^BodyCodecOut, value: SemaForeignCapability?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semaforeigncapability(out, inner)
@@ -1776,14 +1776,14 @@ body_codec_put_opt_semaforeigncapability: fn(out: &BodyCodecOut, value: SemaFore
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semaforeigncapability: fn(bytes: [U8], input: &BodyCodecIn) -> SemaForeignCapability? Never! {
+body_codec_get_opt_semaforeigncapability: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaForeignCapability? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semaforeigncapability(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_semaholeheaderfix: fn(out: &BodyCodecOut, value: SemaHoleHeaderFix?) Never! {
+body_codec_put_opt_semaholeheaderfix: fn(out: ^BodyCodecOut, value: SemaHoleHeaderFix?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semaholeheaderfix(out, inner)
@@ -1792,14 +1792,14 @@ body_codec_put_opt_semaholeheaderfix: fn(out: &BodyCodecOut, value: SemaHoleHead
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semaholeheaderfix: fn(bytes: [U8], input: &BodyCodecIn) -> SemaHoleHeaderFix? Never! {
+body_codec_get_opt_semaholeheaderfix: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaHoleHeaderFix? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semaholeheaderfix(bytes, input))
     }
     None
 }
 
-body_codec_put_opt_sharedlifetime: fn(out: &BodyCodecOut, value: SharedLifetime?) Never! {
+body_codec_put_opt_sharedlifetime: fn(out: ^BodyCodecOut, value: SharedLifetime?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_sharedlifetime(out, inner)
@@ -1808,12 +1808,12 @@ body_codec_put_opt_sharedlifetime: fn(out: &BodyCodecOut, value: SharedLifetime?
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_sharedlifetime: fn(bytes: [U8], input: &BodyCodecIn) -> SharedLifetime? Never! {
+body_codec_get_opt_sharedlifetime: fn(bytes: [U8], input: ^BodyCodecIn) -> SharedLifetime? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_sharedlifetime(bytes, input))
     None
 }
 
-body_codec_put_opt_semaoperatorsite: fn(out: &BodyCodecOut, value: SemaOperatorSite?) Never! {
+body_codec_put_opt_semaoperatorsite: fn(out: ^BodyCodecOut, value: SemaOperatorSite?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semaoperatorsite(out, inner)
@@ -1822,14 +1822,14 @@ body_codec_put_opt_semaoperatorsite: fn(out: &BodyCodecOut, value: SemaOperatorS
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semaoperatorsite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaOperatorSite? Never! {
+body_codec_get_opt_semaoperatorsite: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaOperatorSite? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semaoperatorsite(bytes, input))
     }
     None
 }
 
-body_codec_put_semacallsitedetail: fn(out: &BodyCodecOut, value: SemaCallSiteDetail) Never! {
+body_codec_put_semacallsitedetail: fn(out: ^BodyCodecOut, value: SemaCallSiteDetail) Never! {
     body_codec_put_opt_string(out, value.foreign_effect_root)
     body_codec_put_bool(out, value.foreign_opaque)
     body_codec_put_opt_string(out, value.unsafe_foreign_name)
@@ -1847,7 +1847,7 @@ body_codec_put_semacallsitedetail: fn(out: &BodyCodecOut, value: SemaCallSiteDet
     body_codec_put_opt_semaoperatorsite(out, value.operator)
 }
 
-body_codec_get_semacallsitedetail: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCallSiteDetail Never! {
+body_codec_get_semacallsitedetail: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCallSiteDetail Never! {
     f0: body_codec_get_opt_string(bytes, input)
     f1: body_codec_get_bool(bytes, input)
     f2: body_codec_get_opt_string(bytes, input)
@@ -1866,38 +1866,38 @@ body_codec_get_semacallsitedetail: fn(bytes: [U8], input: &BodyCodecIn) -> SemaC
     SemaCallSiteDetail{foreign_effect_root: f0, foreign_opaque: f1, unsafe_foreign_name: f2, audited_operation: f3, foreign_capability: f4, lifecycle: f5, replacement_hidden: f6, lifecycle_inline: f7, hole_header: f8, shared_lifetime: f9, shared_member: f10, shared_source: f11, intrinsic_api: f12, runtime_export: f13, operator: f14}
 }
 
-body_codec_put_semaforeigncapability: fn(out: &BodyCodecOut, value: SemaForeignCapability) Never! {
+body_codec_put_semaforeigncapability: fn(out: ^BodyCodecOut, value: SemaForeignCapability) Never! {
     body_codec_put_string(out, value.name)
     body_codec_put_string(out, value.sigil)
 }
 
-body_codec_get_semaforeigncapability: fn(bytes: [U8], input: &BodyCodecIn) -> SemaForeignCapability Never! {
+body_codec_get_semaforeigncapability: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaForeignCapability Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_string(bytes, input)
     SemaForeignCapability{name: f0, sigil: f1}
 }
 
-body_codec_put_semaholeheaderfix: fn(out: &BodyCodecOut, value: SemaHoleHeaderFix) Never! {
+body_codec_put_semaholeheaderfix: fn(out: ^BodyCodecOut, value: SemaHoleHeaderFix) Never! {
     body_codec_put_string(out, value.fix)
     body_codec_put_list_textedit(out, value.edits)
     body_codec_put_bool(out, value.reported)
 }
 
-body_codec_get_semaholeheaderfix: fn(bytes: [U8], input: &BodyCodecIn) -> SemaHoleHeaderFix Never! {
+body_codec_get_semaholeheaderfix: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaHoleHeaderFix Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_list_textedit(bytes, input)
     f2: body_codec_get_bool(bytes, input)
     SemaHoleHeaderFix{fix: f0, edits: f1, reported: f2}
 }
 
-body_codec_put_semaoperatorsite: fn(out: &BodyCodecOut, value: SemaOperatorSite) Never! {
+body_codec_put_semaoperatorsite: fn(out: ^BodyCodecOut, value: SemaOperatorSite) Never! {
     body_codec_put_bool(out, value.negated)
     body_codec_put_span(out, value.receiver)
     body_codec_put_span(out, value.argument)
     body_codec_put_bool(out, value.bare)
 }
 
-body_codec_get_semaoperatorsite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaOperatorSite Never! {
+body_codec_get_semaoperatorsite: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaOperatorSite Never! {
     f0: body_codec_get_bool(bytes, input)
     f1: body_codec_get_span(bytes, input)
     f2: body_codec_get_span(bytes, input)
@@ -1905,7 +1905,7 @@ body_codec_get_semaoperatorsite: fn(bytes: [U8], input: &BodyCodecIn) -> SemaOpe
     SemaOperatorSite{negated: f0, receiver: f1, argument: f2, bare: f3}
 }
 
-body_codec_put_opt_semacheckedtextevaluation: fn(out: &BodyCodecOut, value: SemaCheckedTextEvaluation?) Never! {
+body_codec_put_opt_semacheckedtextevaluation: fn(out: ^BodyCodecOut, value: SemaCheckedTextEvaluation?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_semacheckedtextevaluation(out, inner)
@@ -1914,14 +1914,14 @@ body_codec_put_opt_semacheckedtextevaluation: fn(out: &BodyCodecOut, value: Sema
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_semacheckedtextevaluation: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCheckedTextEvaluation? Never! {
+body_codec_get_opt_semacheckedtextevaluation: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCheckedTextEvaluation? Never! {
     if body_codec_get_bool(bytes, input) {
         return Val(body_codec_get_semacheckedtextevaluation(bytes, input))
     }
     None
 }
 
-body_codec_put_semacomptimerequest: fn(out: &BodyCodecOut, value: SemaComptimeRequest) Never! {
+body_codec_put_semacomptimerequest: fn(out: ^BodyCodecOut, value: SemaComptimeRequest) Never! {
     body_codec_put_string(out, value.callee_key)
     body_codec_put_moduleid(out, value.module_identity)
     body_codec_put_list_tcomptimevalue(out, value.args)
@@ -1929,7 +1929,7 @@ body_codec_put_semacomptimerequest: fn(out: &BodyCodecOut, value: SemaComptimeRe
     body_codec_put_opt_semacheckedtextevaluation(out, value.checked_text)
 }
 
-body_codec_get_semacomptimerequest: fn(bytes: [U8], input: &BodyCodecIn) -> SemaComptimeRequest Never! {
+body_codec_get_semacomptimerequest: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaComptimeRequest Never! {
     f0: body_codec_get_string(bytes, input)
     f1: body_codec_get_moduleid(bytes, input)
     f2: body_codec_get_list_tcomptimevalue(bytes, input)
@@ -1938,7 +1938,7 @@ body_codec_get_semacomptimerequest: fn(bytes: [U8], input: &BodyCodecIn) -> Sema
     SemaComptimeRequest{callee_key: f0, module_identity: f1, args: f2, span: f3, checked_text: f4}
 }
 
-body_codec_put_semacheckedtextevaluation: fn(out: &BodyCodecOut, value: SemaCheckedTextEvaluation) Never! {
+body_codec_put_semacheckedtextevaluation: fn(out: ^BodyCodecOut, value: SemaCheckedTextEvaluation) Never! {
     body_codec_put_moduleid(out, value.module_identity)
     body_codec_put_string(out, value.key)
     body_codec_put_string(out, value.type_name)
@@ -1955,7 +1955,7 @@ body_codec_put_semacheckedtextevaluation: fn(out: &BodyCodecOut, value: SemaChec
     body_codec_put_string(out, value.fix)
 }
 
-body_codec_get_semacheckedtextevaluation: fn(bytes: [U8], input: &BodyCodecIn) -> SemaCheckedTextEvaluation Never! {
+body_codec_get_semacheckedtextevaluation: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaCheckedTextEvaluation Never! {
     f0: body_codec_get_moduleid(bytes, input)
     f1: body_codec_get_string(bytes, input)
     f2: body_codec_get_string(bytes, input)
@@ -1973,7 +1973,7 @@ body_codec_get_semacheckedtextevaluation: fn(bytes: [U8], input: &BodyCodecIn) -
     SemaCheckedTextEvaluation{module_identity: f0, key: f1, type_name: f2, source_file: f3, source_expression: f4, expression: f5, ty: f6, hardware_use: f7, reachable_function_keys: f8, dependencies: f9, span: f10, code: f11, what: f12, fix: f13}
 }
 
-body_codec_put_opt_symbolkind: fn(out: &BodyCodecOut, value: SymbolKind?) Never! {
+body_codec_put_opt_symbolkind: fn(out: ^BodyCodecOut, value: SymbolKind?) Never! {
     if value == .Val(inner) {
         body_codec_put_bool(out, true)
         body_codec_put_symbolkind(out, inner)
@@ -1982,19 +1982,19 @@ body_codec_put_opt_symbolkind: fn(out: &BodyCodecOut, value: SymbolKind?) Never!
     body_codec_put_bool(out, false)
 }
 
-body_codec_get_opt_symbolkind: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolKind? Never! {
+body_codec_get_opt_symbolkind: fn(bytes: [U8], input: ^BodyCodecIn) -> SymbolKind? Never! {
     if body_codec_get_bool(bytes, input) -> return Val(body_codec_get_symbolkind(bytes, input))
     None
 }
 
-body_codec_put_semanamereferencefact: fn(out: &BodyCodecOut, value: SemaNameReferenceFact) Never! {
+body_codec_put_semanamereferencefact: fn(out: ^BodyCodecOut, value: SemaNameReferenceFact) Never! {
     body_codec_put_span(out, value.span)
     body_codec_put_semanamereferent(out, value.symbol)
     body_codec_put_opt_symbolkind(out, value.kind)
     body_codec_put_string(out, value.body)
 }
 
-body_codec_get_semanamereferencefact: fn(bytes: [U8], input: &BodyCodecIn) -> SemaNameReferenceFact Never! {
+body_codec_get_semanamereferencefact: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaNameReferenceFact Never! {
     f0: body_codec_get_span(bytes, input)
     f1: body_codec_get_semanamereferent(bytes, input)
     f2: body_codec_get_opt_symbolkind(bytes, input)
@@ -2002,7 +2002,7 @@ body_codec_get_semanamereferencefact: fn(bytes: [U8], input: &BodyCodecIn) -> Se
     SemaNameReferenceFact{span: f0, symbol: f1, kind: f2, body: f3}
 }
 
-body_codec_put_semanamereferent: fn(out: &BodyCodecOut, value: SemaNameReferent) Never! {
+body_codec_put_semanamereferent: fn(out: ^BodyCodecOut, value: SemaNameReferent) Never! {
     body_codec_put_symbolid(out, value.id)
     body_codec_put_symbolkind(out, value.kind)
     body_codec_put_string(out, value.name)
@@ -2011,7 +2011,7 @@ body_codec_put_semanamereferent: fn(out: &BodyCodecOut, value: SemaNameReferent)
     body_codec_put_span(out, value.span)
 }
 
-body_codec_get_semanamereferent: fn(bytes: [U8], input: &BodyCodecIn) -> SemaNameReferent Never! {
+body_codec_get_semanamereferent: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaNameReferent Never! {
     f0: body_codec_get_symbolid(bytes, input)
     f1: body_codec_get_symbolkind(bytes, input)
     f2: body_codec_get_string(bytes, input)
@@ -2021,7 +2021,7 @@ body_codec_get_semanamereferent: fn(bytes: [U8], input: &BodyCodecIn) -> SemaNam
     SemaNameReferent{id: f0, kind: f1, name: f2, module_identity: f3, owner: f4, span: f5}
 }
 
-body_codec_put_symbolkind: fn(out: &BodyCodecOut, value: SymbolKind) Never! {
+body_codec_put_symbolkind: fn(out: ^BodyCodecOut, value: SymbolKind) Never! {
     if value == {
         .Module -> { body_codec_put_tag(out, 0) }
         .Function -> { body_codec_put_tag(out, 1) }
@@ -2039,7 +2039,7 @@ body_codec_put_symbolkind: fn(out: &BodyCodecOut, value: SymbolKind) Never! {
     }
 }
 
-body_codec_get_symbolkind: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolKind Never! {
+body_codec_get_symbolkind: fn(bytes: [U8], input: ^BodyCodecIn) -> SymbolKind Never! {
     position: body_codec_get_tag(bytes, input, 13, 0)
     if position == {
         1 -> SymbolKind.Function
@@ -2058,7 +2058,7 @@ body_codec_get_symbolkind: fn(bytes: [U8], input: &BodyCodecIn) -> SymbolKind Ne
     }
 }
 
-body_codec_put_semamethodinput: fn(out: &BodyCodecOut, value: SemaMethodInput) Never! {
+body_codec_put_semamethodinput: fn(out: ^BodyCodecOut, value: SemaMethodInput) Never! {
     body_codec_put_semabodyjob(out, value.job)
     body_codec_put_opt_int(out, value.memory_position)
     body_codec_put_list_diagnostic(out, value.diagnostics)
@@ -2070,7 +2070,7 @@ body_codec_put_semamethodinput: fn(out: &BodyCodecOut, value: SemaMethodInput) N
     body_codec_put_bool(out, value.owner_generic_complete)
 }
 
-body_codec_get_semamethodinput: fn(bytes: [U8], input: &BodyCodecIn) -> SemaMethodInput Never! {
+body_codec_get_semamethodinput: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaMethodInput Never! {
     f0: body_codec_get_semabodyjob(bytes, input)
     f1: body_codec_get_opt_int(bytes, input)
     f2: body_codec_get_list_diagnostic(bytes, input)
@@ -2083,7 +2083,7 @@ body_codec_get_semamethodinput: fn(bytes: [U8], input: &BodyCodecIn) -> SemaMeth
     SemaMethodInput{job: f0, memory_position: f1, diagnostics: f2, generic_params: f3, normalized_owner_type: f4, function_kind: f5, memory_found: f6, memory_complete: f7, owner_generic_complete: f8}
 }
 
-body_codec_put_semabodyjob: fn(out: &BodyCodecOut, value: SemaBodyJob) Never! {
+body_codec_put_semabodyjob: fn(out: ^BodyCodecOut, value: SemaBodyJob) Never! {
     if value == {
         .TopLevel(p0) -> {
             body_codec_put_tag(out, 0)
@@ -2104,7 +2104,7 @@ body_codec_put_semabodyjob: fn(out: &BodyCodecOut, value: SemaBodyJob) Never! {
     }
 }
 
-body_codec_get_semabodyjob: fn(bytes: [U8], input: &BodyCodecIn) -> SemaBodyJob Never! {
+body_codec_get_semabodyjob: fn(bytes: [U8], input: ^BodyCodecIn) -> SemaBodyJob Never! {
     position: body_codec_get_tag(bytes, input, 3, 0)
     if position == {
         1 -> {
