@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6997,
-    "rev": 113775,
+    "rev": 113780,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58508,7 +58508,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-24T09:02:46.641Z",
+      "updated": "2026-11-24T10:04:14.768Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 34
     },
@@ -67490,11 +67490,11 @@
         {
           "n": 11,
           "text": "An index opens over unsaved editor overlays (old Entry.jet:23-96, Open.jet:146-185). Proof: `jet test Compiler --profile cases --filter Semindex/open_over_overlays`. (was #6630 c4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:46.505Z"
+          "evidence": "dev e2b97e8535 (tests-only on 491390130f). On tip21 (built from 491390130f, same compiler source as e2b97e8535): jet test Compiler --profile cases --filter Semindex/open_over_overlays -> PASS 1, FAIL 0.",
+          "at": "2026-11-24T09:45:35.358Z"
         },
         {
           "n": 12,
@@ -67535,20 +67535,20 @@
         {
           "n": 16,
           "text": "A search by effect returns the functions that hold that authority. Proof: `jet test Compiler --profile cases --filter Semindex/search_by_effect`. (was #6630 c17)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:49.733Z"
+          "evidence": "dev e2b97e8535 (tests-only on 491390130f). On tip21 (built from 491390130f, same compiler source as e2b97e8535): jet test Compiler --profile cases --filter Semindex/search_by_effect -> PASS 1, FAIL 0.",
+          "at": "2026-11-24T09:45:36.522Z"
         },
         {
           "n": 17,
           "text": "A search by input/output example returns candidates and shows why each matched. Proof: `jet test Compiler --profile cases --filter Semindex/search_by_example`. (was #6630 c18)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:50.707Z"
+          "evidence": "dev e2b97e8535 (tests-only on 491390130f). On tip21 (built from 491390130f, same compiler source as e2b97e8535): jet test Compiler --profile cases --filter Semindex/search_by_example -> PASS 1, FAIL 0.",
+          "at": "2026-11-24T09:45:37.930Z"
         },
         {
           "n": 18,
@@ -67568,7 +67568,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:43.573Z",
-      "updated": "2026-11-24T06:34:19.003Z",
+      "updated": "2026-11-24T09:45:37.930Z",
       "updatedBy": "Orchestrator",
       "criteriaLastN": 18
     },
@@ -137211,6 +137211,565 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-24T08:54:42.193Z"
+    },
+    {
+      "id": "D-RULE-ACROSS1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "How a library's build-time check compares one call with the calls made before it, and points at both",
+      "situation": "A route table is the list a web server keeps of which address goes to which handler. If you add the same address twice, for example `GET /users/:id` and then `GET /users/:login`, the second one can never answer. Today the compiler itself catches this while building and shows two places: the second registration as the error, and the first marked 'first registered here'. That check lives inside the compiler because a library's build-time check (a call rule) sees one call at a time and points at one place. So a package router cannot give the same error. You are asked how a call rule can relate a call to the earlier calls on the same table, and how its error can point at a second place. We recommend that a rule names the key of the row each call adds, the compiler pairs equal keys on one table, and `reject` may mark one more place with a label.",
+      "gist": "How does a call rule relate a call to earlier calls on the same table, and point at both?",
+      "lesson": "Linters that find duplicates name both sites. Roslyn analyzers report with extra locations, Go analyzers with related positions, and rustc labels the earlier span 'previous definition here'. Most keep a map while they walk the code, so finding a duplicate costs one lookup per call. A checker that sees one call at a time and one span cannot say 'this clashes with that'.",
+      "explainer": "Picture a clerk who stamps registration forms one at a time and forgets each form once it is stamped. So two forms for the same address both get through, and only the head office (the compiler) notices.\n\nOption A has the clerk write one label on each form, such as 'GET /users/:'. The office files the forms by table and label, and hands the clerk the older form whenever a label repeats. Option B hands the clerk every older form for that table each time. Option C makes him read the whole pile at once. Option D gives him a notebook he keeps himself. Option E stops checking at the counter, and the office fails when it opens. Option F leaves the job with the head office.",
+      "story": "Ana writes a small API. She registers `router.get(\"/users/:id\", show_user)` and, ten lines later, `router.get(\"/users/:login\", find_user)`. Both match `/users/anything`, so the second can never answer. She should see the error at the second call while building, with the first call underlined as 'first registered here'. Ben writes his own router package and wants the same error for his users, through the same rule mechanism Core uses.",
+      "inWild": "// rustc: error[E0428]: the name `x` is defined multiple times\n//   --> previous definition of the value `x` here   (a second labeled span)\n// Roslyn: Diagnostic.Create(rule, location, additionalLocations: new[] { first })\n// Go analysis: pass.Report(analysis.Diagnostic{Pos: p, Related: []analysis.RelatedInformation{{Pos: first}}})\n// Go net/http (1.22+): Handle panics: pattern \"GET /users/{login}\" ... conflicts with pattern \"GET /users/{id}\" ... registered at main.go:12\n// axum: Router::route panics on an overlapping method route, at startup",
+      "detail": "What E2804 needs, per its six UI snapshots (listed in checkInstructions).\n\n(1) Two registrations on one table: the same binding, the same builder chain, or the App's convention files and marked methods. (2) The same method and route shape (`:id` and `:login` are one shape), known while building. (3) The error at the later registration and a labeled second span at the earlier. The labels are 'first registered here' on a binding, and 'the other registration, by `builder`', '… `/x/:id` by `builder`' or '… by `dir/file.jet`' on a chain. The what line names the convention file a row comes from.\n\nWhere route rows and their pairing live today. `sema_http_route_table_record` (HTTPRouting.jet:1416-1427) keys a table by the receiver's root binding, method and shape. Its store is `SemaHTTPRouteIndex` in the check context (Scopes.jet:891, 1780-1791, 1809, 1957, 2052, 2177). `sema_app_check_route_registrations` and its helpers (Methods.jet:1501-1598, 1669-1683, 1689-1693) pair the rows of one App builder chain. `app.mount(value)` sends each marked method through the router path at its marker (HTTPMount.jet:747).\n\nRun time checks again: `mux_register` (Core/HTTP/Server.jet:368-377) stops with E2804 and the other row's file and line. `jet explain --routes` builds its own list of rows (JetCLI WebGraph.jet:689-923) but pairs nothing. The E2804 text has three copies: Prelude's `AmbiguousRoute` (Diagnostics.jet:23257, no file variant), sema's `sema_http_route_duplicate` (HTTPRouting.jet:458) and Server.jet:372.\n\nToday's pairing is wrong in four ways (probes p1, p2 and p4, on tip 21). It refuses a valid program three ways. Two exclusive `if` arms pair, as do two different routers in one struct (`pair.api`, `pair.admin`) and a binding reassigned to a new router. The chain uses a wider overlap test than the binding and the run time. So `web.app().get(\"/:a/b\", h).get(\"/a/:b\", g)` is refused, while the same two calls on a binding build and run.\n\nWhat a rule has (spec.md:124-154, CheckRules.jet). `check: fn(self, call: CompilerCall)` runs at each call of a marked function or method, or each method call on a marked type. CompilerCall holds `caller`, `callee`, `module`, `span`, `name`, `args` and `receiver` (CoreRecordRows.jet:250-263). `reject(finding, at: part)` gives one CompilerRejection with one `span` (:264-269), and an `.Error` rejection replaces the call's own errors. Staged calls run in one batch per rule per pass, across bodies (CheckRules.jet:725-790).\n\nNo route rule is on dev yet. Core's `StaticRoutes` rule (E2808) is the submission land/6851-c3-static-routes-e2808-r2 for batch 23. Its r1 failed batch 21 because rules did not run in a module with other errors. Every E2804 snapshot has another error in its module, so that fix and rule-order-r2 come first.\n\nThis ballot covers E2804 only. D-RULE-REWRITE1's review left it in sema under every option (its finding F9). It does not decide how a route's contract is attached (D-RULE-REWRITE1) or how a body's calls are read (D-RULE-BODYFACTS1).",
+      "options": [
+        {
+          "key": "A",
+          "name": "A row key the compiler pairs",
+          "detail": "A rule may add `row: fn(self, call: CompilerCall) -> String?`: the key of the row this call adds to its receiver's table, or None. Its `check` then takes a second parameter, `first: CompilerCall?`: the earliest earlier call on the same table with an equal key. The compiler pairs keys with one map, so the rule holds no list and no memory. `reject` gains `also:` and `label:`. Core's route rule writes the key as the method and route shape. A package router writes the same two members.",
+          "technical": "New: the `row` member of `impl Marker` and the shape `check: fn(self, call: CompilerCall, first: CompilerCall?)`. E0907 accepts that shape only beside `row`, and `row` only beside it.\n\nSame table. Two receivers are the same place: one binding and field path (`pair.api`), with no assignment to that place between them, or one builder chain. A binding made from a chain (`app: web.app().get(…)`) joins that chain. The earlier call must also sit in the later call's block or a block around it, so both always run. Calls in two `if` arms, or one in a loop and one after it, are not paired. That removes today's three wrong refusals (p1).\n\nOrder is the order the compiler meets the calls. A stand-in (below) takes the place of its `.routes` or `.mount` call, not of the marker or file it points at.\n\nHow it runs. The rule's batch gets one more list, each call's table. It runs `row` per call, keeps one map from table and key to the first call, and runs `check` with that call or None. That is one String and one map step per call, O(n). Keys of calls answered in an earlier pass stay with their answers, so a later pass pairs with them.\n\n`reject(finding, at: part, also: other, label: text)`. `at:` and `also:` name the call, its name or an argument of `call` or of `first`. CompilerRejection gains `also: SourceSpan?` and `label: String`. A finding with `also:` is a clash between two calls that are each fine. So it is reported beside the call's own errors, not instead of them (p5). That narrows D-CORE-CHECK1=A's rule that a rejection replaces the call's checks, for two-call findings only.\n\nStand-ins. `.routes(from: dir)` is heard as written, then once per convention file as the `page(path, view)` it stands for, at the `.routes` name. `app.mount(value)` is heard once per marked route method as its verb call, at the marker. CompilerCall gains `source: String?`, the convention file a stand-in comes from. A stand-in's site key includes its registering call, so mounting one struct twice keeps two rows (p2).\n\nWhat moves. Prelude's `AmbiguousRoute` gains `source: String{\"\"}` and becomes E2804's one build text. One public rule marker, `#StaticRoutes`, is carried by `HTTPRouter` and by `App`, and a package router may carry it too. It replaces the binding table, its index and the App pairing. It uses the run time's test, equal route shapes (Server.jet:369-371), so a chain and a binding agree (p4).\n\nThe rule tells a chain from a binding by spans. On a chain, the later call's receiver span holds the earlier call, or both rows come from one `.routes` call. So it picks today's labels. When the earlier row is a convention file and the later a builder call, it reports at `first` (today's order).\n\nKept: the convention file walk (`sema_app_expand_route_root`, which also gives E2806), the run-time check and the `--routes` report.\n\nGates on #6851: the StaticRoutes landing with its rule-pass and order fixes, and c22's rule cost.",
+          "code": "// Ana's program (the same in every option)\nrun: fn() {\n    router: http.router()\n    router.get(\"/users/:id\", show_user)\n    router.get(\"/users/:login\", find_user)   // E2804 here; the line above is labeled\n}\n\n// PROPOSED, Core/HTTP/HTTP.jet: the rule HTTPRouter, App and package routers carry\nStaticRoutes: struct {\n    impl Marker {\n        sites: [.Type],\n\n        // The row this call adds to its table: method and route shape.\n        row: fn(self, call: CompilerCall) -> String? {\n            if route_row(call) == .Val(row) -> return Val(\"{row.method} {row.shape}\")\n            None\n        }\n\n        check: fn(self, call: CompilerCall, first: CompilerCall?) {\n            // … the E2808 check stays here …\n            if first == .Val(other) && route_row(call) == .Val(row) {\n                reject(AmbiguousRoute{method: row.method, pattern: row.pattern, source: call.source ?? \"\"}, at: call.name, also: other.name, label: route_label(call, other))\n            }\n        }\n    }\n}\n// route_row: the call's method, written pattern and shape (`GET`, `/users/:`), when known while building.\n// route_label: 'first registered here' on a binding; on a chain, 'the other registration, by …'."
+        },
+        {
+          "key": "B",
+          "name": "Every earlier call on the same table",
+          "detail": "`check` may take `earlier: [CompilerCall]`: every call this rule heard before this one on the same table, in order. The rule loops over them and decides itself which ones clash. `reject` gains `also:` and `label:`, and 'same table', the stand-ins and the moves are as in A.",
+          "technical": "New: the shape `check: fn(self, call: CompilerCall, earlier: [CompilerCall])` and A's `also:` and `label:`. There is no `row` member.\n\nIts strength is reach. A rule can test any relation between two calls, not only equal keys, such as an overlap test or 'no route after `serve()`'. Nothing in Sema/Calls needs that today: E2804 is the only check that labels a second call (`diagnostic_with_label` has one caller there), and equal shapes decide it.\n\nIts cost is quadratic. With n calls on one table, call k gets k-1 calls, so the batch hands over n(n-1)/2 calls. That is 124,750 for 500 routes. A rule-heard call costs about 0.19 ms on this host today (p3, 1,600 to 3,200 calls). If a list item costs a tenth of that, 500 routes add about 2.4 s [INFERENCE]. The rule then compares each pair, so its own work grows the same way. D-CORE-CHECK1=A's budget is 1 µs per heard call.",
+          "code": "// PROPOSED, Core/HTTP/HTTP.jet\ncheck: fn(self, call: CompilerCall, earlier: [CompilerCall]) {\n    if route_row(call) == .Val(row) {\n        loop first in earlier {\n            if route_row(first) == .Val(other) && other.method == row.method && other.shape == row.shape {\n                reject(AmbiguousRoute{method: row.method, pattern: row.pattern, source: call.source ?? \"\"}, at: call.name, also: first.name, label: route_label(call, first))\n            }\n        }\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "A whole-body rule: `check_all`",
+          "detail": "A marker may declare `check_all: fn(self, calls: [CompilerCall]) -> [CompilerRejection?]` instead of `check`. It runs once per function body with every call it hears there, in order, and answers each call by position. It finds the pairs itself, with its own map. Each CompilerArg gains `place`, which binding or chain a value comes from, so the rule can group calls by table. `reject` gains `also:` and `label:`.",
+          "technical": "New: the `check_all` member, `CompilerArg.place: CompilerPlace?` with `CompilerPlace: enum { Binding(name: String, declared: SourceSpan), Chain(start: SourceSpan) }`, and A's `also:` and `label:`. This is Go's analyzers and Roslyn's compilation-start actions: one pass over a unit, one map, O(n).\n\nAnswering by position keeps one answer per call, so no new verb is needed. But a rule builds each answer itself instead of with `reject`, so the body differs from every other rule's.\n\nThe rule must also decide 'same table' itself. `place` does not say whether one call always runs before another, whether the binding was reassigned, or which field path the receiver took. So each rule would repeat, or get wrong, what A computes once in the compiler (today's three wrong refusals, p1). Each fact it needs becomes more public record.",
+          "code": "// PROPOSED, Core/HTTP/HTTP.jet\ncheck_all: fn(self, calls: [CompilerCall]) -> [CompilerRejection?] {\n    seen := [String: Int]{}\n    loop call in calls -> {\n        key: \"{call.receiver?.place} {route_key(call)}\"\n        if seen.get(key) == .Val(index) -> Val(clash(call, calls[index])) else -> { seen.insert(key, position(call)); None }\n    }\n}"
+        },
+        {
+          "key": "D",
+          "name": "A notebook the rule keeps: rule memory",
+          "detail": "`check` may take a third parameter, `memory: &[String: SourceSpan]`, a map the compiler keeps for this rule across one function body. The rule writes a key such as `\"router GET /users/:\"` and finds the earlier span when the same key comes again. CompilerArg gains C's `place` so the key can name the table. `reject` gains `also:` and `label:`.",
+          "technical": "New: the `memory` parameter, `CompilerArg.place` (as in C) and A's `also:` and `label:`. This is ESLint's closure and a Clippy lint pass's own fields: O(n), and familiar.\n\nA call's answer then depends on state outside its inputs. The batch must run every call of a body in one pass, in order. A call staged in a later pass needs the memory rebuilt from calls already answered. Any reuse of an answer by its inputs is unsound, as Rust warns for state shared between procedural macro runs.\n\nThe key is the rule's own text, so the rule decides 'same table' alone, as in C. The label can quote only what the rule stored. A span alone cannot give 'the other registration, `/x/:id` by `builder`', so the memory must hold more than a span.",
+          "code": "// PROPOSED\ncheck: fn(self, call: CompilerCall, memory: &[String: SourceSpan]) {\n    if route_row(call) == .Val(row) {\n        key: \"{call.receiver?.place} {row.method} {row.shape}\"\n        if memory.get(key) == .Val(first) {\n            reject(AmbiguousRoute{method: row.method, pattern: row.pattern, source: \"\"}, at: call.name, also: first, label: \"first registered here\")\n        }\n        memory.insert(key, call.name.span)\n    }\n}"
+        },
+        {
+          "key": "E",
+          "name": "Check only when the program runs",
+          "detail": "Delete the build-time E2804. Registering the second route stops the program at run time, as it already does for routes the build cannot see (`mux_register`, Core/HTTP/Server.jet:368). The stop names both places as file:line text. Rules stay as they are. Go's ServeMux, axum and Rocket work this way.",
+          "technical": "Deleted: the binding table and its index, the App pairing, and sema's E2804 text. The six UI snapshots become run tests. `jet check` and editors no longer show the error. It appears on the first `jet run` or `jet test` that builds the table, and a table built only on a rare path may ship. The second place is a file:line in the message, not an underlined span. Nothing new is added to rules, and today's wrong refusals (p1, p4) go with the check.",
+          "code": "// Ana's program builds. `jet run` then stops at the second registration:\n// Error: Jet.AmbiguousRoute: Two routes both match `GET /users/:login`; the other is `/users/:id` at main.jet:4.\n//   --> main.jet:5 in run"
+        },
+        {
+          "key": "F",
+          "name": "Keep the check in the compiler (today)",
+          "detail": "The compiler keeps its E2804 sites. Rules stay as they are. Core keeps a check a package cannot write.",
+          "technical": "The case at its strongest. The check is exact for its six snapshots. It pairs builder rows, convention files and marked methods in the table's order and costs one map per body. Its three wrong refusals and the chain's wider test (p1, p4) can be fixed in sema, with A's 'same table' facts.\n\nCosts: HTTPRouting.jet and the App pairing keep route knowledge. Card #6851 c3 deletes HTTPRouting.jet whole, so c3 cannot close. Its goal, that Core use only what packages can use, is not met for routes. A package router (Ben) cannot give E2804 while building.",
+          "code": "// sema keeps, HTTPRouting.jet:1420\nkey: \"{scopes.bindings[binding_index].key}|{wire}|{sema_app_route_shape(pattern)}\"\nif sema_check_context_http_route_record(context, key, span) == .Val(first) {\n    diagnostics.push(sema_http_route_duplicate(wire, pattern, span, \"\", first, \"first registered here\"))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C# (Roslyn)",
+          "note": "An analyzer registers a start action per compilation, keeps a concurrent map, and reports per operation. `Diagnostic.Create` takes `additionalLocations`, a second place to show. That is C's or D's state with A's second place.",
+          "code": "context.RegisterCompilationStartAction(start => {\n    var seen = new ConcurrentDictionary<string, Location>();\n    start.RegisterOperationAction(op => { … Diagnostic.Create(rule, loc, additionalLocations: new[] { first }) … }, OperationKind.Invocation);\n});"
+        },
+        {
+          "lang": "Go (go/analysis)",
+          "note": "An analyzer's `run` sees one whole package at once, keeps its own maps, and reports with `Related` positions. That is C's whole-unit shape. Facts carry results across packages.",
+          "code": "func run(pass *analysis.Pass) (any, error) {\n    seen := map[string]token.Pos{}\n    // … walk pass.Files …\n    pass.Report(analysis.Diagnostic{Pos: p, Message: \"duplicate route\", Related: []analysis.RelatedInformation{{Pos: seen[key], Message: \"first registered here\"}}})\n    return nil, nil\n}"
+        },
+        {
+          "lang": "JavaScript (ESLint)",
+          "note": "A rule's `create` returns visitors that share variables in a closure, so it remembers earlier nodes in the file. That is D's notebook. A report has one location.",
+          "code": "create(context) {\n  const seen = new Map();\n  return { CallExpression(node) { if (seen.has(key)) context.report({ node, message }); seen.set(key, node); } };\n}"
+        },
+        {
+          "lang": "Rust (rustc, Clippy)",
+          "note": "The compiler labels the earlier span: 'previous definition of the value `x` here'. A Clippy late lint pass keeps fields across the crate and adds the second span with `span_note`. A procedural macro sees one item, so `#[get(\"/a\")]` routers find clashes at launch (Rocket).",
+          "code": "error[E0428]: the name `x` is defined multiple times\n  |     fn x() {}\n  |     -------- previous definition of the value `x` here\n  |     fn x() {}\n  |     ^^^^^^^^ `x` redefined here"
+        },
+        {
+          "lang": "Go (net/http), axum",
+          "note": "Go 1.22's ServeMux panics when a pattern conflicts and names where the other was registered; axum's `Router::route` panics on an overlapping route. Both check at start-up only, which is E.",
+          "code": "mux.HandleFunc(\"GET /users/{id}\", show)\nmux.HandleFunc(\"GET /users/{login}\", find) // panic: … conflicts with pattern \"GET /users/{id}\" (registered at main.go:12)"
+        },
+        {
+          "lang": "TypeScript (Hono)",
+          "note": "A Hono app's type grows with each chained `.get()`, so a type-level check could refuse a repeated path along a chain. Calls on a binding lose that type, so Ana's case is out of reach. Hono itself does not check.",
+          "code": "const app = new Hono().get(\"/users/:id\", show).get(\"/users/:login\", find) // typed chain\napp.get(\"/users/:id\", other) // a statement: the chain's type is not extended"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps all six E2804 snapshots and lets one rule in Core replace the compiler's pairing. The same rule is open to package routers. The compiler does the part every rule would get wrong alone: which calls share a table and always both run. So today's three wrong refusals and the chain's wider test go.\n\nEach call still gets one answer from what it is handed: the call and at most one earlier call. So batching stays, and pairing costs one map step per call. B hands over every earlier call, which is quadratic. C and D make each rule rebuild 'same table' and keep its own state. E loses the build-time error. F keeps Core's privilege and c3 open.",
+        "gains": [
+          "E2804's six snapshots hold, both places included, and the binding table, its index and the App pairing go.",
+          "A package router gives the same error the same way (Ben).",
+          "Programs refused today by mistake build: exclusive `if` arms, two routers in one struct, a reassigned binding, and chain pairs the run accepts (p1, p4).",
+          "`also:` and `label:` serve any rule that relates two places, not only routes."
+        ],
+        "losses": [
+          {
+            "loss": "A rule gains a `row` member and a second `check` shape.",
+            "mitigation": "Both are optional and come together; the one-parameter `check` stays the beginner path, and E0907's message lists both shapes."
+          },
+          {
+            "loss": "Only relations an equal key expresses can be paired.",
+            "mitigation": "E2804, the only two-call check in Sema/Calls, is one. B's list can be added later, beside A, if a check needs another relation."
+          },
+          {
+            "loss": "Convention files and marked methods are heard as the calls they stand for, so other rules on App hear them too.",
+            "mitigation": "Those rows are registrations in every other sense (`jet explain --routes` lists them). Each stand-in carries the `.routes` or marker span and its `source`, so findings land where today's do."
+          },
+          {
+            "loss": "A pair split across functions, an alias (`other: router`), a parameter, a generic receiver or one call in a loop is not seen while building.",
+            "mitigation": "That is today's limit too, and run time E2804 names both places (Server.jet:372). A binding made from a chain is now paired with it, a case today misses."
+          },
+          {
+            "loss": "A two-call finding keeps the call's own errors, a narrow exception to D-CORE-CHECK1=A's one error per call.",
+            "mitigation": "The call is valid alone; replacing its errors would hide a typo in the handler until the duplicate is fixed (p5)."
+          },
+          {
+            "loss": "Every method call on `App` becomes a rule-heard call, at c22's per-call cost.",
+            "mitigation": "An app makes tens of such calls, and `HTTPRouter` calls are already heard once StaticRoutes lands."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every call gets every earlier call, so 500 routes hand over 124,750 calls and the rule compares each pair, against a 1 µs budget per call."
+          },
+          {
+            "key": "C",
+            "reason": "Each rule rebuilds 'same table' from new public place records and answers by position, so rules differ from every other rule and repeat today's mistakes."
+          },
+          {
+            "key": "D",
+            "reason": "Answers depend on state outside the call, so passes must replay it, and the rule still decides 'same table' alone."
+          },
+          {
+            "key": "E",
+            "reason": "The error moves from `jet check` and the editor to the first run, and the second place becomes text instead of an underline."
+          },
+          {
+            "key": "F",
+            "reason": "Route knowledge stays in the compiler, c3 cannot close, and package routers cannot give the error."
+          }
+        ],
+        "tradeoff": "One optional rule member and two `reject` labels, for an exact E2804 written in Core, open to packages, at one map step per call."
+      },
+      "hybrid": "B can join A later, as a second `check` shape, if a check needs a relation no equal key expresses. Nothing in Sema/Calls does today.",
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: AcrossReview. The adversarial review attacked the recommendation. Probes on tip 21 found three wrong refusals and a chain-only overlap test, and the drafted list was quadratic, so a keyed form now leads as A and the list is B."
+      },
+      "checkInstructions": "Check HTTPRouting.jet `sema_http_route_duplicate` (:454-462) and `sema_http_route_table_record` (:1416-1427) with its callers (:1230-1240, Methods.jet:1969-1973). Check Scopes.jet `SemaHTTPRouteIndex` and `sema_check_context_http_route_record` (:1780-1791) and the context copies (:891, :1809, :1957, :2052, :2177). Check Methods.jet `sema_app_check_route_registrations`, `sema_app_route_conflict`, `sema_app_route_duplicate` and `sema_app_chain_registrations` (:1501-1598). Check `sema_app_routes_overlap` (:1669-1683) and `sema_call_app_route_registrations` (:1689).\n\nCheck Core/HTTP/Server.jet `mux_register` (:368-377), HTTPMount.jet's marked-method routing (:747), Prelude/Diagnostics.jet `AmbiguousRoute` (:23257) and JetCLI WebGraph.jet's route rows (:689-923). Check the CompilerCall, CompilerArg and CompilerRejection rows in JetFoundation Registry/CoreRecordRows.jet (:250-269). Check the `check` shape in JetParser Declarations/Markers.jet `parser_parse_marker_check` (:156-181), and JetSema Calls/CheckRules.jet: staging (:181-207) and batches (:725-790).\n\nThe snapshots are Tests/UI/http_route_ambiguous_overlap, http_route_custom_method, http_route_mixed_duplicate, web_app_page_handler_clash, web_app_route_collision and web_app_routes_same_words. The probes are $JET_SCRATCH_ROOT/AcrossReview/p1-p5 (tip 21 compiler). The StaticRoutes submission is $JET_SCRATCH_ROOT/tmp/orch/land/6851-c3-static-routes-e2808-r2.",
+      "surface": {
+        "gist": "How does a rule relate a call to earlier calls on one table, and point at both?",
+        "lesson": "A checker that sees one call and one span cannot say 'this clashes with that'.",
+        "trio": {
+          "current": {
+            "note": "The compiler pairs routes by binding and labels the first.",
+            "code": "if sema_check_context_http_route_record(context, key, span) == .Val(first) {\n    diagnostics.push(sema_http_route_duplicate(wire, pattern, span, \"\", first, \"first registered here\"))\n}"
+          },
+          "wild": {
+            "lang": "Rust (rustc)",
+            "note": "Duplicate errors label the earlier place.",
+            "code": "-------- previous definition of the value `x` here"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Row key the compiler pairs",
+            "gist": "A rule names each call's row key; `check` gets the earlier call with that key.",
+            "gains": [
+              "All six snapshots hold.",
+              "One map step per call."
+            ],
+            "losses": [
+              "Pairs equal keys only."
+            ],
+            "proposed": {
+              "code": "row: fn(self, call: CompilerCall) -> String? { … }\ncheck: fn(self, call: CompilerCall, first: CompilerCall?) { … reject(…, at: call.name, also: other.name, label: \"first registered here\") }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Every earlier call",
+            "gist": "`check` gets all earlier calls on the table.",
+            "gains": [
+              "Any relation between calls."
+            ],
+            "losses": [
+              "Quadratic in calls per table."
+            ],
+            "proposed": {
+              "code": "check: fn(self, call: CompilerCall, earlier: [CompilerCall]) { … }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Whole-body `check_all`",
+            "gist": "The rule reads a body's calls at once.",
+            "gains": [
+              "Like Go and Roslyn analyzers."
+            ],
+            "losses": [
+              "Each rule decides 'same table' itself."
+            ],
+            "proposed": {
+              "code": "check_all: fn(self, calls: [CompilerCall]) -> [CompilerRejection?] { … }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Rule memory",
+            "gist": "The rule keeps a map across a body's calls.",
+            "gains": [
+              "Familiar from ESLint."
+            ],
+            "losses": [
+              "Answers depend on hidden state."
+            ],
+            "proposed": {
+              "code": "check: fn(self, call: CompilerCall, memory: &[String: SourceSpan]) { … }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Run time only",
+            "gist": "The second registration stops the program.",
+            "gains": [
+              "No new rule surface."
+            ],
+            "losses": [
+              "No build-time error."
+            ],
+            "proposed": {
+              "code": "// jet run: Error: Jet.AmbiguousRoute … the other is `/users/:id` at main.jet:4."
+            }
+          },
+          {
+            "key": "F",
+            "name": "Keep it in the compiler",
+            "gist": "Today's compiler sites stay.",
+            "gains": [
+              "Exact and done."
+            ],
+            "losses": [
+              "Packages cannot give the error."
+            ],
+            "proposed": {
+              "code": "sema_http_route_table_record(receiver, wire, pattern, span, scopes, context, diagnostics)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Exact snapshots, one Core rule open to packages, and the compiler decides which calls share a table.",
+          "gains": [
+            "The compiler's route pairing goes.",
+            "Packages get the same error.",
+            "Today's wrong refusals build."
+          ],
+          "losses": [
+            {
+              "loss": "A `row` member and a second `check` shape.",
+              "mitigation": "Both optional; the one-parameter `check` stays."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Quadratic cost."
+            },
+            {
+              "key": "C",
+              "reason": "Each rule rebuilds 'same table'."
+            },
+            {
+              "key": "D",
+              "reason": "Hidden state."
+            },
+            {
+              "key": "E",
+              "reason": "No build-time error."
+            },
+            {
+              "key": "F",
+              "reason": "Keeps Core's privilege."
+            }
+          ],
+          "tradeoff": "One optional member and two labels, for E2804 in Core."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "AcrossReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T10:04:13.845Z"
+    },
+    {
+      "id": "D-FORM-FIELD1",
+      "cardId": "c0e6znz4",
+      "group": "language",
+      "title": "How a typed web form's `.validate(.carrier, on: .Blur, with: check)` names a field of its model without help from the compiler",
+      "situation": "A typed web form is a form built from a struct: `web.form(ShipForm, action: submit)` gives one input per field. A program attaches a check to one field by naming it: `.validate(.carrier, on: .Blur, with: check_carrier)`. That spelling is already approved. Today the compiler turns `.carrier` into the text \"carrier\" before the library sees it. Nobody checks that name, so a typo such as `.carier` builds and runs, and the form shows `carier:invalid` forever. A library cannot write such a method, because nothing in the language says what `.carrier` means as an argument. You are asked what type that argument has, so the library can declare the form's methods itself and a typo fails the build. We recommend a small field-reference type, filled in from the form's model.",
+      "gist": "What type does `.carrier` have in `form.validate(.carrier, on: .Blur, with: check)`, so Core can declare the method and a typo fails the build?",
+      "lesson": "Languages that let a library name a field without a string give it a typed reference: Swift key paths (`\\.carrier`), Kotlin property references (`ShipForm::carrier`), C# expression trees (`x => x.Carrier`). Each is checked against the type, so a misspelled field is a build error, and the library can still read the field's name.",
+      "explainer": "Think of a paper form with labeled boxes, and a clerk who checks one box when you leave it. Today you tell the clerk which box by writing its label on a sticky note. The head office (the compiler) copies the note over, and nobody checks the spelling. A note saying 'carier' points at no box, so the clerk marks it wrong forever.\n\nOption A gives the clerk a pointer that can only be made from a real box on this form. Option B prints a menu of the form's boxes and you tick one. Option C hands the clerk a tiny instruction, 'read the carrier box', and the office works out which box it means. Option D keeps the head office copying notes, but has it check the spelling. Option E drops the dot and has you write the label as plain text.",
+      "story": "Mia builds a shipping page. She writes `typed_form.validate(.carrier, on: .Blur, with: check_carrier).render()`. On a tired day she types `.carier`. Today the page builds and the field always shows as invalid, with no message saying why. She should get a build error at `.carier` that lists `id`, `carrier` and `tracking`. Leo writes his own form library and wants the same field selector for his forms, without compiler help.",
+      "inWild": "// Swift: key paths are typed field references; a typo is a build error.\nform.validate(\\.carrier, on: .blur, with: checkCarrier)   // KeyPath<ShipForm, String>\n// Kotlin: property references carry the name and type.\nform.validate(ShipForm::carrier, on = Blur, with = ::checkCarrier)   // KProperty1<ShipForm, String>\n// C#: an expression tree the library reads (FluentValidation).\nRuleFor(x => x.Carrier).NotEmpty();\n// TypeScript (react-hook-form): the name is a string checked against the model's keys.\nregister(\"carrier\")   // Path<ShipForm>",
+      "detail": "The program every option keeps is in Examples/Apps/Web/JetWeb/run.jet (:41-46, :154-161, :258-260).\n\n`#[Codable, Web.Form] ShipForm: struct { id: Int, carrier: String, tracking: String }`, then `web.form(ShipForm, action: submit_ship_order)`, `.validate(.carrier, on: .Blur, with: check_carrier)` and `.render()`. Before that, three `set(\"id\", …)` calls fill the form.\n\nWhat happens today. `sema_call_try_web_form_method` (Sema/Calls/HTTP.jet:469) takes over every method on `WebFormTyped`, a type the compiler owns. `sema_web_form_method_member` (:439-464) maps 14 method names to free functions in Core/Web/Forms.jet. For `validate` it binds the labels, and `sema_web_form_field_selector` (:566-590) turns `.carrier`, or `.Carrier`, into the String \"carrier\". `typed_validate_field` (Forms.jet:376-394) loops over the fields looking for it.\n\nThe typo. When no field matches, the loop does nothing, so `.render()` gives `carier:invalid` (probe f1). `.Carrier` does the same. The sibling methods already refuse an unknown name when run. `set(\"carier\", …)` returns `WebFormError.Missing` (f1), as do `blur`, `focus` and `set_async_validator`. Only `validate` is silent, and fixing that needs no ballot.\n\nWhy no private typing works. The no-argument `validate()` is a second method under the same name, mapped to `typed_validate` (:368), with a different result. Jet has no overloading. The form's type does not carry its model (Forms.jet:96-100), so nothing at the `validate` call can check `.carrier` against `ShipForm`.\n\nOther leading-dot field names. `devtools.publish(field: .selected, value: v)` lowers its selector the same way and checks it against the package's `#DevPanel` state (Sema/Calls/Devtools.jet:40-75). A marker body's `layout[.field]` is checked against the reflected type and reports Jet.UnknownField (Tests/UI/layout_unknown_selector). Elsewhere a lower-case `.name` means the subject shorthand, only where a one-argument function is expected (D-SUBJECT-CALL1=A). Inside a loop with no binding it means the loop's item, before any expected type (D-LOOP-SUBJECT1=A).\n\nHand-built forms. `forms.typed(input, action)` builds a typed form from any field list, and `input_exclude`, `input_group` and `input_rename` change that list (Forms.jet:247-302). Such a form has no model the build can check.\n\nThe `web.form` field derivation from `#Web.Form` is D-RULE-REWRITE1's matter, not this ballot's.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`FieldRef<Model, T>`: a typed field reference the form's model fills in",
+          "detail": "Prelude gains `FieldRef<Model, T>`, a reference to one field of `Model` whose type is `T`. Where a `FieldRef<ShipForm, _>` is expected, `.carrier` means ShipForm's `carrier` field, and a name ShipForm lacks is a build error at the dot. `web.form(ShipForm, …)` gives a `WebFormTyped<ShipForm>`, so the form knows its model. Core declares the form's methods as ordinary methods. `validate`, `set`, `blur` and `focus` all take the field this way, so a form names its fields one way.",
+          "technical": "New: `FieldRef<Model, T>: struct { priv name: String }` in core.prelude, read through a `name()` method. Like Prelude's `Type` (Prelude.jet:168), only the compiler builds one, so no text becomes a `FieldRef`. One typing rule: where the expected type is `FieldRef<M, T>`, a bare `.name` checks `name` against M's stored fields visible at the call. It unifies `T` with the field's type. A computed field is refused, because `web.form` skips it (HTTP.jet:360).\n\nThis adds a context to D-SUBJECT-CALL1=A, which today sends every non-function context to the full lambda. D-LOOP-SUBJECT1=A's order stays: inside a loop with no binding, `.carrier` still reads the loop's item. So `loop ships -> form.validate(.carrier, …)`, which builds today (f3), is refused. The error says to name the loop binding.\n\nAn unknown name reports Jet.UnknownField at the selector, as `layout[.field]` does, listing M's fields. A longer chain (`.carrier.trim()`), a payload or an upper-case `.Carrier` is refused. Completion after the dot must list M's fields. A helper generic over the model takes a `FieldRef` from its caller, since `.carrier` needs a known model.\n\n`WebFormTyped` gains the type parameter `Model`, as do the three records that hold a form (Forms.jet:114-128). `web.form` fills it, so nobody writes it. `forms.typed<Model>(input, action)` names it for a hand-built form. Its fields may differ from the model's, so `validate` also refuses an unknown name when run, with `WebFormError.Missing`. Its result becomes `WebFormValidationChain<Model> (E | WebFormError)!`, as `set_async_validator` has today.\n\nThe no-argument `validate()` method goes, so `validate` has one meaning. Nothing outside Core's conformance corpus calls it, `submit()` validates the whole form (Forms.jet:402), and `forms.typed_validate(form)` stays. The check still gets the field's text value, as the wire carries it.\n\nDeleted: the whole method intercept, `sema_call_try_web_form_method` with `sema_web_form_method_member`, the selector helpers and their label binding (HTTP.jet:439-590). Also `WebFormTyped`'s compiler-owned type entry (Registration/Items.jet:2370) goes. The `WebFormTyped` rows in WebCoreSignatures.jet (:15, :60-72) gain the model.\n\nKept: devtools' selector, whose call has no state type to fill a `FieldRef` from, and Core's table, which names columns by text (a later user of `FieldRef`).",
+          "code": "// Mia's program\ntyped_form: web.form(ShipForm, action: submit_ship_order)   // WebFormTyped<ShipForm>\ntyped_form.set(.carrier, ship_data.carrier) ?? panic(\"typed carrier value\")   // was set(\"carrier\", …)\nmarkup: typed_form\n    .validate(.carrier, on: .Blur, with: check_carrier)\n    .render()\n\n// The typo is a build error at the selector:\n//   typed_form.validate(.carier, on: .Blur, with: check_carrier)\n//                       ^^^^^^^ `ShipForm` has no field `carier`; its fields are `id`, `carrier`, `tracking`\n\n// PROPOSED, Core/Web/Forms.jet\nWebFormTyped: struct<Model> {\n    form: WebForm,\n    action: String,\n    input: WebFormInput,\n\n    validate: fn<T, E>(self, field: FieldRef<Model, T>, on: WebFormValidationTiming, with: fn(String) E!) -> WebFormValidationChain<Model> (E | WebFormError)! {\n        typed_validate_field(self, field.name(), on, with)\n    }\n\n    set: fn<T>(&self, field: FieldRef<Model, T>, value: String) WebFormError! { typed_set(self, field.name(), value) }\n}"
+        },
+        {
+          "key": "B",
+          "name": "`#Web.Form` derives a field enum for each model",
+          "detail": "The `#Web.Form` marker generates an enum of the model's fields, `ShipFormField { Id, Carrier, Tracking }`. `validate`, `set`, `blur` and `focus` take that enum, and the form's type names it, `WebFormTyped<ShipFormField>`. Enum cases are upper-case, so the selector is spelled `.Carrier`, a change from the approved `.carrier`. A typo is the ordinary 'no such case' build error.",
+          "technical": "New: an `expand` on `Web.Form` that writes the enum beside the model, and a generic `WebFormTyped<F>`. The enum is a real declaration, so it appears in docs, hover and `jet explain`. A field named `id` and one named `Id` would give the same case. Keeping `.carrier` lower-case instead needs a new rule letting a lower-case leading-dot name be an enum case when the expected type is an enum. That changes how every lower-case `.name` reads, since today it is always a member chain.\n\nNo typing rule is added, and D-SUBJECT-CALL1=A is untouched. Inside a loop with no binding, `.Carrier` is an enum case, so f3's program still builds. The no-argument `validate()` goes as in A, and hand-built forms are handled as in A. Devtools keeps its own intercept. Leo can write the same expand for his forms. Diesel's per-table column types are this shape in Rust.",
+          "code": "// Mia writes (spelling changes)\ntyped_form.validate(.Carrier, on: .Blur, with: check_carrier).render()\n\n// GENERATED by #Web.Form beside ShipForm\nShipFormField: enum {\n    Id,\n    Carrier,\n    Tracking,\n}\n\n// Typo: `.Carier` is 'ShipFormField has no case `Carier`'."
+        },
+        {
+          "key": "C",
+          "name": "The selector is a one-line function, and the build reads its field",
+          "detail": "Jet already reads `.carrier` as a small function `fn(s: ShipForm) -> s.carrier` wherever a one-argument function is expected, as in `users.map(.name)`. `validate` takes such a function. A typo is the ordinary 'no field' error inside it. The library still needs the field's name for the form's state. So a build-time parameter, computed from the function's body at each call, supplies it.",
+          "technical": "Needs D-RULE-REWRITE1's option A: a parameter default `#run` per call, reading earlier parameters. It also needs a lambda argument heard as FunctionInfo (c30) and a body fact saying 'this function reads field `carrier`' (D-RULE-BODYFACTS1). None of these exist today.\n\nThe declaration would read `validate: fn<T, E>(self, field: fn(Model) -> T, name: String{#run field_read(field.reflect())}, on: …, with: …)`. A selector that is not a plain field read, such as `.carrier.trim()`, has no name and is refused at the call. No typing rule is added, but D-LOOP-SUBJECT1=A still makes `.carrier` the loop's item inside a loop with no binding (f3). The form must still know its model, and the no-argument `validate()` goes as in A. Elm's `.carrier` accessor functions are this shape.",
+          "code": "// Mia's spelling holds\ntyped_form.validate(.carrier, on: .Blur, with: check_carrier).render()\n\n// PROPOSED, Core/Web/Forms.jet (needs D-RULE-REWRITE1 A, c30 and D-RULE-BODYFACTS1)\nvalidate: fn<T, E>(self, field: fn(Model) -> T, name: String{#run field_read(field.reflect())}, on: WebFormValidationTiming, with: fn(String) E!) -> WebFormValidationChain<Model> (E | WebFormError)! {\n    typed_validate_field(self, name, on, with)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep the compiler's lowering, and have it check the name",
+          "detail": "The form's type names its model, `WebFormTyped<ShipForm>`, as in A. The compiler keeps turning `.carrier` into text, and now checks the name against the model's fields. A typo becomes a build error, and nothing else changes in what users write. This is the smallest change that catches the typo while building. Core keeps methods a library cannot declare, so Leo cannot offer the same selector.",
+          "technical": "`sema_web_form_field_selector` (HTTP.jet:566-590) reads the receiver's model argument and checks the name, with A's error. That is about 20 lines plus the generic `WebFormTyped<Model>` and its registry rows. The intercept, the label binding and the 14-method map stay (HTTP.jet:439-590).\n\nThe intercept reads the written selector before any typing, so D-SUBJECT-CALL1=A and D-LOOP-SUBJECT1=A are untouched, and f3's program still builds. `validate()` with no arguments may stay. Card #6851's goal, that Core use only what packages can use, is not met for forms.",
+          "code": "// Mia's program, unchanged; the compiler still rewrites the call to\n//   core.web.forms.typed_validate_field(typed_form, \"carrier\", .Blur, check_carrier)\n// and now refuses `.carier` while building, from WebFormTyped<ShipForm>."
+        },
+        {
+          "key": "E",
+          "name": "Name the field with text: `validate(\"carrier\", …)`",
+          "detail": "`validate` takes the field's name as a String, like `set(\"carrier\", …)` already does. Core declares it as an ordinary method with no new type. This replaces the approved `.carrier` spelling. A typo is caught when the program runs, where Core now reports it instead of the silent `carier:invalid`.",
+          "technical": "`validate: fn<E>(self, field: String, on: WebFormValidationTiming, with: fn(String) E!) -> WebFormValidationChain (E | WebFormError)!`, with the no-argument `validate()` gone as in A. The loop refuses an unknown name with `WebFormError.Missing`.\n\nA call rule could catch the typo while building only if the form's type named its model and a rule could read that model's fields. A rule sees the receiver as a TypeId, which holds only `identity`, `name` and `signature` (CoreRecordRows.jet:616-618). So that needs both A's type change and a new reflection read. TypeScript's `Path<ShipForm>` checks such text through literal-string types, which Jet does not have. It reopens D-DX-FORM1's ratified spelling.",
+          "code": "// Mia writes (spelling changes)\ntyped_form.validate(\"carrier\", on: .Blur, with: check_carrier).render()\n\n// Typo: builds; when run, Core reports\n//   web form has no field `carier`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "A key path `\\ShipForm.carrier` is a typed value `KeyPath<ShipForm, String>`. Where the root is known, `\\.carrier` is enough. A misspelled field is a build error. That is A's shape, with Jet's existing leading dot in place of the backslash.",
+          "code": "func validate<T>(_ field: KeyPath<ShipForm, T>, on: Timing, with: (String) throws -> Void)\nform.validate(\\.carrier, on: .blur, with: checkCarrier)"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "A property reference `ShipForm::carrier` is a `KProperty1<ShipForm, String>` and carries `.name`. Libraries such as Exposed and Ktor validation use it to name a field without a string.",
+          "code": "fun <T> validate(field: KProperty1<ShipForm, T>, on: Timing, with: (String) -> Unit)\nform.validate(ShipForm::carrier, on = Timing.Blur, with = ::checkCarrier)"
+        },
+        {
+          "lang": "C# (FluentValidation, nameof)",
+          "note": "`RuleFor(x => x.Carrier)` takes an expression tree, and the library reads the member name from it when run, which is C's shape. `nameof(ShipForm.Carrier)` is text the build checks, a narrower E.",
+          "code": "RuleFor(x => x.Carrier).NotEmpty().WithMessage(\"carrier required\");\nform.Validate(nameof(ShipForm.Carrier), Timing.Blur, CheckCarrier);"
+        },
+        {
+          "lang": "TypeScript (react-hook-form)",
+          "note": "`register(\"carrier\")` takes a string, but its type is `Path<ShipForm>`, the union of the model's keys. A typo is a build error. That is E with checking only a type system of literal strings can give.",
+          "code": "const { register } = useForm<ShipForm>();\n<input {...register(\"carier\")} />   // error: not assignable to Path<ShipForm>"
+        },
+        {
+          "lang": "Elm, Rust (Diesel)",
+          "note": "Elm's `.carrier` is an accessor function, so a form library still needs a separate name: C's gap. Diesel generates one column type per table field, B's shape with lower-case names in their own module.",
+          "code": "-- Elm\nList.map .carrier ships\n// Rust, Diesel: generated by table!\nships.filter(ships::carrier.eq(\"Parcel\"))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps Mia's approved spelling and turns the silent typo into a build error that lists the real fields. Core declares the form's methods like any methods, and Leo's library can take the same parameter. It adds one small Prelude type and one typing rule beside the subject shorthand.\n\nThe form's model moves into its type, the only place a check at the call can find it. B changes the spelling and generates a type per model. C waits on three pending mechanisms. D is smaller but keeps Core's privilege. E reopens the approved spelling and catches typos only when run.",
+        "gains": [
+          "`.carier` fails the build at the selector, listing `id`, `carrier` and `tracking`.",
+          "The typed-form intercept leaves the compiler whole (HTTP.jet:439-590), and the form names a field one way in every method.",
+          "A package's form or table library declares the same `FieldRef` parameter.",
+          "`T` is known at the call, so a later typed validator (`with: fn(T) E!`) needs no new mechanism."
+        ],
+        "losses": [
+          {
+            "loss": "One new Prelude type and one typing rule for a leading-dot name, a new context beside D-SUBJECT-CALL1=A's.",
+            "mitigation": "Users never write `FieldRef`; they write `.carrier` as today. The rule applies only where a `FieldRef` is expected, as the subject shorthand applies only where a function is expected."
+          },
+          {
+            "loss": "Inside a loop with no binding, `.carrier` reads the loop's item, so a selector there is refused (f3).",
+            "mitigation": "D-LOOP-SUBJECT1=A keeps one meaning for `.name` in such a loop; the error says to name the binding (`loop ship in ships`)."
+          },
+          {
+            "loss": "The typed form's type gains its model: `WebFormTyped<ShipForm>`.",
+            "mitigation": "`web.form(ShipForm, …)` infers it, so only hover and explicit annotations show it. A hand-built form names its model once, at `forms.typed<Model>`."
+          },
+          {
+            "loss": "`set(\"carrier\", v)`, `blur` and `focus` take `.carrier` too, and the no-argument `validate()` method goes.",
+            "mitigation": "One way to name a field on a form. Three `set` lines in JetWeb change; nothing calls `validate()`, and `submit()` still validates the whole form."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It changes `.carrier` to `.Carrier` or changes what every lower-case `.name` means, and generates a public enum per model."
+          },
+          {
+            "key": "C",
+            "reason": "It needs D-RULE-REWRITE1 A, lambda FunctionInfo and body facts first, and refuses any selector that is not a plain field read."
+          },
+          {
+            "key": "D",
+            "reason": "It is the smallest fix, but Core keeps 14 methods no library can declare, and Leo cannot offer the selector."
+          },
+          {
+            "key": "E",
+            "reason": "It reopens the approved spelling and finds a typo only when the program runs."
+          }
+        ],
+        "tradeoff": "One small field-reference type and a visible model on the form's type, for the approved spelling, a build-time typo error and no compiler intercept."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: AcrossReview. The adversarial review attacked the recommendation. Probes on tip 21 showed A refused a selector in a loop with no binding, so A now names that and its D-SUBJECT-CALL1 change, covers every field method and drops `validate()`."
+      },
+      "checkInstructions": "Check Sema/Calls/HTTP.jet `sema_web_form_method_member` (:439-464) and `sema_call_try_web_form_method` (:469-529). Check `sema_web_form_field_selector` and `sema_web_form_selector_name` (:561-590), and the computed-field skip in `sema_call_http_web_form` (:360). Check Core/Web/Forms.jet `WebFormTyped` and the records holding it (:96-128), and the hand-built inputs (:247-308). Check `typed_set_async_validator` (:314-333), `typed_validate` (:368), `typed_validate_field` (:376-394) and `typed_validation_render` (:396-399).\n\nCheck Registration/Items.jet (:2370) and JetFoundation Registry/WebCoreSignatures.jet (:15, :60-72). Check the example in Examples/Apps/Web/JetWeb/run.jet (:41-46, :154-161, :258-260). Check the subject shorthand in Sema/Expressions.jet (:8197-8256). Check the loop item order in syntax-decisions.md (D-LOOP-SUBJECT1, D-SUBJECT-CALL1). Check Sema/Calls/Devtools.jet (:35-75) and Tests/UI/layout_unknown_selector.\n\nThe probes are $JET_SCRATCH_ROOT/AcrossReview/f1-f4 (tip 21 compiler). Line numbers are dev 2a09ee0e42.",
+      "surface": {
+        "gist": "What type does `.carrier` have in `form.validate(.carrier, …)`?",
+        "lesson": "Typed field references catch a misspelled field while building and still give the library its name.",
+        "trio": {
+          "current": {
+            "note": "The compiler turns `.carrier` into text, unchecked; a typo renders `carier:invalid`.",
+            "code": "if argument.expr == .Field(base, member, member_span, _) {\n    if !sema_expr_is_bare_subject(base) -> return None\n    return Val(sema_web_form_selector_name(member, member_span, argument))\n}"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "A key path is a typed field reference.",
+            "code": "form.validate(\\.carrier, on: .blur, with: checkCarrier)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`FieldRef<Model, T>`",
+            "gist": "`.carrier` fills a typed field reference; the form knows its model.",
+            "gains": [
+              "Spelling kept; typo fails the build.",
+              "Packages declare the same parameter."
+            ],
+            "losses": [
+              "One Prelude type and one typing rule."
+            ],
+            "proposed": {
+              "code": "validate: fn<T, E>(self, field: FieldRef<Model, T>, on: WebFormValidationTiming, with: fn(String) E!) -> WebFormValidationChain<Model> (E | WebFormError)!"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Derived field enum",
+            "gist": "`#Web.Form` generates `ShipFormField`; the selector is `.Carrier`.",
+            "gains": [
+              "Typo fails the build."
+            ],
+            "losses": [
+              "Spelling changes; a public enum per model."
+            ],
+            "proposed": {
+              "code": "typed_form.validate(.Carrier, on: .Blur, with: check_carrier)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Function selector + build-time name",
+            "gist": "`.carrier` is the existing shorthand function; the build reads its field.",
+            "gains": [
+              "No new type."
+            ],
+            "losses": [
+              "Waits on three pending mechanisms."
+            ],
+            "proposed": {
+              "code": "validate: fn<T, E>(self, field: fn(Model) -> T, name: String{#run field_read(field.reflect())}, …)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Compiler keeps it, checks the name",
+            "gist": "Today's lowering, checked against the form's visible model.",
+            "gains": [
+              "Smallest build-time fix."
+            ],
+            "losses": [
+              "Core keeps its privilege."
+            ],
+            "proposed": {
+              "code": "// sema_web_form_field_selector checks the name against WebFormTyped<ShipForm>"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Text name",
+            "gist": "`validate(\"carrier\", …)`, like `set`.",
+            "gains": [
+              "No new type."
+            ],
+            "losses": [
+              "Spelling changes; typo found only at run time."
+            ],
+            "proposed": {
+              "code": "typed_form.validate(\"carrier\", on: .Blur, with: check_carrier)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Approved spelling, build-time typo error, no compiler intercept.",
+          "gains": [
+            "Typo fails the build.",
+            "The intercept leaves the compiler."
+          ],
+          "losses": [
+            {
+              "loss": "One Prelude type and a visible model on the form.",
+              "mitigation": "Users write `.carrier`; the model is inferred from `web.form`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Spelling changes."
+            },
+            {
+              "key": "C",
+              "reason": "Waits on three mechanisms."
+            },
+            {
+              "key": "D",
+              "reason": "Keeps Core's privilege."
+            },
+            {
+              "key": "E",
+              "reason": "Typo found only when run."
+            }
+          ],
+          "tradeoff": "One field-reference type, for a checked selector in Core."
+        }
+      },
+      "draftedBy": "Orchestrator",
+      "reviewedBy": "AcrossReview",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-24T10:04:14.768Z"
     }
   ],
   "questions": [
@@ -139557,6 +140116,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-24T10:04:14.768Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-FORM-FIELD1",
+      "note": "How a typed web form's `.validate(.carrier, on: .Blur, with: check)` names a field of its model without help from the compiler"
+    },
+    {
+      "at": "2026-11-24T10:04:13.846Z",
+      "by": "Orchestrator",
+      "action": "decision.add",
+      "ref": "D-RULE-ACROSS1",
+      "note": "How a library's build-time check compares one call with the calls made before it, and points at both"
+    },
+    {
+      "at": "2026-11-24T09:45:37.930Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-24T09:45:36.523Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-24T09:45:35.358Z",
+      "by": "Orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ozqnbt",
+      "note": "#11"
+    },
     {
       "at": "2026-11-24T09:22:39.469Z",
       "by": "Orchestrator",
