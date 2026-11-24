@@ -1756,103 +1756,6 @@ sema_expr_geometry_space: fn(ty: Type) -> Type? {
     None
 }
 
-sema_expr_geometry_dynamic: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, _) -> return sema_geometry_nominal_leaf(name) == "Point2" || sema_geometry_nominal_leaf(name) == "Delta2"
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
-}
-
-sema_expr_geometry_scalar: fn(ty: Type) -> Type Never! {
-    if ty == {
-        .Apply(_, args) -> {
-            if args.len() > 0 -> return args[0] else -> Type.Float
-        }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
-            Type.Float
-        }
-    }
-}
-
-sema_expr_geometry_generic: fn(name: String, source: Type) -> Type Never! {
-    Type.Apply{name: name, args: [Type]{sema_expr_geometry_scalar(source), sema_expr_geometry_space(source) ?? Type.Named{name: "Unknown"}}}
-}
-
-sema_expr_geometry_result: fn(op: BinOp, lhs: Type, rhs: Type) -> Type? {
-    result: sema_expr_geometry_result_inner(op, lhs, rhs) ?? return None
-    source: if sema_geometry_nominal_leaf(sema_expr_geometry_name(lhs)) != sema_expr_geometry_name(lhs) -> lhs else -> rhs
-    if result == (Type.Named{name: "__GeometrySpaceMismatch"}) || result == (Type.Named{name: "__GeometryUnsupported"}) {
-        return Val(result)
-    }
-    Val(sema_geometry_restore_owner(result, source))
-}
-
-sema_expr_geometry_result_inner: fn(op: BinOp, lhs: Type, rhs: Type) -> Type? {
-    left_point := sema_expr_geometry_is_point(lhs)
-    right_point := sema_expr_geometry_is_point(rhs)
-    left_delta := sema_expr_geometry_is_delta(lhs)
-    right_delta := sema_expr_geometry_is_delta(rhs)
-    if !(left_point || right_point || left_delta || right_delta) -> return None
-    left_space: sema_expr_geometry_space(lhs) ?? Type.Named{name: "Unknown"}
-    right_space: sema_expr_geometry_space(rhs) ?? Type.Named{name: "Unknown"}
-    if !type_identity_equal(left_space, right_space) {
-        return Val(Type.Named{name: "__GeometrySpaceMismatch"})
-    }
-    dynamic := sema_expr_geometry_dynamic(lhs) || sema_expr_geometry_dynamic(rhs)
-    result := Type?{None}
-    if {
-        op == BinOp.Add -> {
-            if {
-                left_point && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
-                }
-                left_delta && right_point -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", rhs) else -> rhs)
-                }
-                left_delta && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
-                }
-            }
-        }
-        op == BinOp.Sub -> {
-            if {
-                left_point && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Point2", lhs) else -> lhs)
-                }
-                left_point && right_point -> {
-                    if {
-                        dynamic -> { result = Val(sema_expr_geometry_generic("Delta2", lhs)) }
-                        else -> {
-                            point_leaf: sema_geometry_nominal_leaf(sema_expr_geometry_name(lhs))
-                            point_name: if point_leaf == "ScreenPoint" -> "ScreenDelta" else if point_leaf == "WorldPoint" -> "WorldDelta" else if point_leaf == "ViewPoint" -> "ViewDelta" else if point_leaf == "CameraPoint" -> "CameraDelta" else if point_leaf == "DevicePoint" -> "DeviceDelta" else -> ""
-                            if point_name != "" -> result = Val(Type.Named{name: point_name})
-                        }
-                    }
-                }
-                left_delta && right_delta -> {
-                    result = Val(if dynamic -> sema_expr_geometry_generic("Delta2", lhs) else -> lhs)
-                }
-            }
-        }
-        op == BinOp.Eq || op == BinOp.Ne -> {
-            if (left_point && right_point) || (left_delta && right_delta) -> result = Val(Type.Bool)
-        }
-    }
-    result_value: result ?? return Val(Type.Named{name: "__GeometryUnsupported"})
-    if dynamic && result_value != Type.Bool {
-        return Val(Type.Result{ok: result_value, err: Type.Named{name: "TransformError"}})
-    }
-    Val(result_value)
-}
-
-sema_expr_geometry_name: fn(ty: Type) -> String Never! {
-    if ty == {
-        .Named(name) -> return name
-        .Apply(name, _) -> return name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return type_name(ty)
-    }
-}
-
 sema_expr_geometry_diagnostic: fn(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
     expected := type_name(sema_expr_geometry_space(lhs) ?? lhs)
     actual := type_name(sema_expr_geometry_space(rhs) ?? rhs)
@@ -1863,36 +1766,22 @@ sema_expr_geometry_diagnostic: fn(op: BinOp, lhs: Type, rhs: Type, span: Span, d
     diagnostics.push(sema_error("E2520", span, "`{sema_expr_binary_name(op)}` needs `{expected}` space, got `{actual}`.", "Coordinate-space tags are ordinary type facts; combining different spaces would make a numerically valid result mean the wrong thing.", "Use a `{expected}` point or displacement, or convert it with a checked transform."))
 }
 
+// Core declares every point and displacement operator (`impl Add`,
+// `impl Sub`), and the operator hooks take each pair it declares before this
+// runs. A point or displacement pair that reaches here has no hook: `==` and
+// `!=` between two points or two displacements of one space compare them,
+// and anything else names the coordinate spaces (E2520).
 sema_expr_check_geometry_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_expr_geometry_is_point(lhs.ty) && !sema_expr_geometry_is_delta(lhs.ty) && !sema_expr_geometry_is_point(rhs.ty) && !sema_expr_geometry_is_delta(rhs.ty) {
-        return None
-    }
-    left_space: sema_expr_geometry_space(lhs.ty) ?? lhs.ty
-    right_space: sema_expr_geometry_space(rhs.ty) ?? rhs.ty
-    if !type_identity_equal(left_space, right_space) {
-        sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
-        return None
-    }
-    result: sema_expr_geometry_result(op, lhs.ty, rhs.ty) ?? {
-        sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
-        return None
-    }
-    if result == (Type.Named{name: "__GeometryUnsupported"}) {
-        sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
-        return None
-    }
-    if result == (Type.Named{name: "__GeometrySpaceMismatch"}) -> return None
-    if op == BinOp.Eq || op == BinOp.Ne {
-        test_op := TBinaryOp.Eq
-        if op == BinOp.Ne -> test_op = TBinaryOp.Ne
-        value := sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span)
-        return Val(value)
-    }
-    if op == BinOp.Add || op == BinOp.Sub {
-        function := "add"
-        if op == BinOp.Sub -> function = "sub"
-        value := sema_tree_node(result, TExprKind.MathBuiltin{type_name: sema_expr_geometry_name(lhs.ty), function: function, args: [TExpr]{lhs, rhs}}, span)
-        return Val(value)
+    left_point: sema_expr_geometry_is_point(lhs.ty)
+    right_point: sema_expr_geometry_is_point(rhs.ty)
+    left_delta: sema_expr_geometry_is_delta(lhs.ty)
+    right_delta: sema_expr_geometry_is_delta(rhs.ty)
+    if !left_point && !left_delta && !right_point && !right_delta -> return None
+    same_kind: (left_point && right_point) || (left_delta && right_delta)
+    same_space: type_identity_equal(sema_expr_geometry_space(lhs.ty) ?? lhs.ty, sema_expr_geometry_space(rhs.ty) ?? rhs.ty)
+    if (op == BinOp.Eq || op == BinOp.Ne) && same_kind && same_space {
+        test_op: if op == BinOp.Ne -> TBinaryOp.Ne else -> TBinaryOp.Eq
+        return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, diagnostics)
     None
@@ -8460,14 +8349,15 @@ sema_check_expression_with_lambda_escapes: fn(expr: Expr, expected: Type?, envir
     checked
 }
 
-#Test("Source coordinates preserve the existing same-space binary oracle") {
+#Test("Source coordinates keep their coordinate space") {
     point: Type.Named{name: "<corelib>/core.math.ScreenPoint"}
     delta: Type.Named{name: "<corelib>/core.math.ScreenDelta"}
     world: Type.Named{name: "<corelib>/core.math.WorldDelta"}
     assert(sema_expr_geometry_is_point(point))
+    assert(sema_expr_geometry_is_delta(delta))
     assert_eq(sema_expr_geometry_space(point), Val(Type.Named{name: "Screen"}))
-    assert_eq(sema_expr_geometry_result(BinOp.Add, point, delta), Val(point))
-    assert_eq(sema_expr_geometry_result(BinOp.Add, point, world), Val(Type.Named{name: "__GeometrySpaceMismatch"}))
+    assert_eq(sema_expr_geometry_space(delta), sema_expr_geometry_space(point))
+    assert_eq(sema_expr_geometry_space(world), Val(Type.Named{name: "World"}))
     assert(!sema_expr_geometry_is_point(Type.Named{name: "user.ScreenPoint"}))
 }
 
