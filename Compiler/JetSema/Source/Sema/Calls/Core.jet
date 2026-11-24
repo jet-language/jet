@@ -321,12 +321,6 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
         if sema_call_core_module_identity(environment, program, source_name) != Val(module_identity) {
             return None
         }
-        // `core.http.client.request` is checked by its Core row (: a `URL` or
-        // String target, sema_call_http_transport), and that checked row then
-        // executes the source `request` declaration.
-        if !registered_source_target && source_name == "core.http.client" && member == "request" {
-            return None
-        }
         if sema_call_core_typed_decode_module(source_name) && member == "decode" && type_args.len() != 0 {
             return None
         }
@@ -1752,8 +1746,6 @@ sema_call_core_shared_success: fn(ty: Type) -> Type? Never! {
 }
 
 sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    web_openapi := sema_call_http_web_openapi_mux(target, qualified_name, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    if web_openapi.handled -> return web_openapi.value
     call_args := args
     if sema_call_devtools_is_publish(target, environment, program) {
         call_args = sema_call_devtools_publish_args(args, span, environment, program, diagnostics) ?? return None
