@@ -2605,14 +2605,10 @@ sema_comptime_owner_generic_params: fn(environment: SemaScopeEnvironment, progra
     [TGenericParam]{}
 }
 
-// `memory_plan` is the graph's memory plan, built once by the caller: known-
-// time values only type constants, never the functions the plan annotates.
-// The caller keeps the run's checked functions and reuses a complete one
-// instead of calling this again.
-// `comptime_scopes` are the run's module scopes (sema_comptime_scopes_init),
-// lent to every item and function check of the run.
-sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: ModuleID, function_key: String) -> SemaComptimeFunctionResult {
-    unresolved := SemaComptimeFunctionResult{
+// The result of a comptime function check that could not run, with `reason`
+// as its one incomplete reason.
+sema_comptime_function_unresolved: fn(module_identity: ModuleID, function_key: String, reason: String) -> SemaComptimeFunctionResult Never! {
+    SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
         function: None,
@@ -2628,8 +2624,18 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
         exact_int_reachable: false,
         copy_events: [SemaCopyEvent]{},
         complete: false,
-        incomplete_reasons: [String]{"`{function_key}` has no registered comptime function source in module `{module_text(graph.module_table, module_identity)}`"},
+        incomplete_reasons: [String]{reason},
     }
+}
+
+// `memory_plan` is the graph's memory plan, built once by the caller: known-
+// time values only type constants, never the functions the plan annotates.
+// The caller keeps the run's checked functions and reuses a complete one
+// instead of calling this again.
+// `comptime_scopes` are the run's module scopes (sema_comptime_scopes_init),
+// lent to every item and function check of the run.
+sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^SemaScopeEnvironment, program: SemaProgramTables, comptime_scopes: ^SemaComptimeScopes, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: ModuleID, function_key: String) -> SemaComptimeFunctionResult {
+    unresolved := sema_comptime_function_unresolved(module_identity, function_key, "`{function_key}` has no registered comptime function source in module `{module_text(graph.module_table, module_identity)}`")
     source: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
     if source.declaration.inline_foreign != None || sema_function_is_guest_import(source.declaration) {
         unresolved.incomplete_reasons = [String]{}
@@ -2681,24 +2687,9 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: ^Sem
             diagnostics.push(diagnostic.copy())
         }
         sema_attach_diagnostic_source_locations(diagnostics, 0, environment.source_segments)
-        return SemaComptimeFunctionResult{
-            module_identity: module_identity,
-            function_key: function_key,
-            function: None,
-            waiting_dependencies: [String]{},
-            calls: [SemaComptimeRequest]{},
-            reachable_function_keys: [String]{},
-            call_facts: [SemaCallSiteFact]{},
-            hardware_use: sema_hardware_empty_use(),
-            name_references: [SemaNameReferenceFact]{},
-            comptime_body_sources: [SemaComptimeBodySource]{},
-            compute_facts: sema_compute_facts_empty(function_key),
-            diagnostics: diagnostics,
-            exact_int_reachable: false,
-            copy_events: [SemaCopyEvent]{},
-            complete: false,
-            incomplete_reasons: [String]{"the scope of module `{module_text(graph.module_table, module_identity)}` could not be applied"},
-        }
+        failed := sema_comptime_function_unresolved(module_identity, function_key, "the scope of module `{module_text(graph.module_table, module_identity)}` could not be applied")
+        failed.diagnostics = diagnostics
+        return failed
     }
     call_facts := [SemaCallSiteFact]{}
     calls := [SemaComptimeRequest]{}
@@ -4581,24 +4572,13 @@ sema_check_item_kind_label: fn(item: Item) -> String Never! {
     }
 }
 
-// One immutable pass graph is moved into the existing environment owner.
-// Compute the borrowed graph facts before the handoff, never from a copied graph.
-sema_check_pass_environment: fn(graph: ^^SemaRegistrationGraph, checked_types: [TTypeDef], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
-    fixed_length_write_params := sema_fixed_length_write_params_in_graph(graph)
-    tables := sema_program_tables_init(Val(graph.move()), checked_types)
-    sema_check_pass_environment_from(tables, fixed_length_write_params, body_values)
-}
-
-// The pass environment over `tables`, whose graph `fixed_length_write_params`
-// was computed from.
-sema_check_pass_environment_from: fn(tables: ^^SemaProgramTables, fixed_length_write_params: ^^[String], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
+// The environment of a pass over `program`, whose tables keep the pass's one
+// graph and its checked-type indexes; `fixed_length_write_params` were
+// computed from that graph. The pass reads fields of every registered struct,
+// not only its checked types, so it never skips the computed-field lookup.
+sema_check_pass_environment: fn(program: ^SemaProgramTables, fixed_length_write_params: ^^[String], body_values: ^^SemaComptimeBodyValues) -> SemaScopeEnvironment Never! {
+    program.has_computed_fields = true
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
-    environment.registration_graph = tables.registration_graph.move()
-    environment.checked_types = tables.checked_types.move()
-    environment.checked_type_names = tables.checked_type_names.move()
-    environment.checked_type_name_rows = tables.checked_type_name_rows.move()
-    environment.boxed_edges = tables.boxed_edges.move()
-    environment.copy_facts = tables.copy_facts.move()
     // Every module's functions, so the length-preserving fact covers calls
     // into other modules, bundle-wide.
     environment.fixed_length_write_params = fixed_length_write_params.move()

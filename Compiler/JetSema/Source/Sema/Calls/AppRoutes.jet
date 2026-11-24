@@ -272,13 +272,13 @@ sema_call_app_screen: fn(receiver_value: TExpr, args: [CallArg], span: Span, exp
         return rejected
     }
     text: if node -> [Type]{} else -> [Type]{shown}
-    opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return rejected
+    opener: sema_app_screen_callback(sema_app_screen_opener(positional[1].expr, services, states[0], text, found, graph, span), sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 4, span, environment, program, check, diagnostics) ?? return rejected, span, environment, program, scopes, check, diagnostics) ?? return rejected
     query := [Expr]{}
     loop field in found.query -> query.push(sema_app_text(field, span))
     listed: sema_app_strings(query, span)
-    queried: sema_check_expression(listed, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 2, span, environment, program, diagnostics)), environment, program, scopes, check, diagnostics) ?? return rejected
+    queried: sema_check_expression(listed, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 2, span, environment, program, check, diagnostics) ?? return rejected), environment, program, scopes, check, diagnostics) ?? return rejected
     open: signed_in ?? Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}
-    gated: sema_check_expression(open, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 3, span, environment, program, diagnostics)), environment, program, scopes, check, diagnostics) ?? return rejected
+    gated: sema_check_expression(open, Val(sema_app_mux_param_type(receiver_value, SEMA_APP_SCREEN, 3, span, environment, program, check, diagnostics) ?? return rejected), environment, program, scopes, check, diagnostics) ?? return rejected
     _: positional.pop()
     written: positional.pop() ?? {
         check.context.incomplete_reasons.push("`.screen` was checked to have a path")

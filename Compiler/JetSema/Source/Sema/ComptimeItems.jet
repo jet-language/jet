@@ -30,7 +30,6 @@ use jet_foundation.[
     name_find,
     name_intern,
     name_table,
-    name_table_sized,
     Span,
     Symbol,
     SymbolID,
@@ -1276,22 +1275,8 @@ sema_collect_comptime_declarations: fn(graph: ^^SemaRegistrationGraph, package_p
     body_values := sema_comptime_body_values_freeze([SemaComptimeBodyValue]{}, sema_comptime_body_work_new(trace_sink), false)
     facts := sema_pass_facts_new()
     owned := sema_pass_facts(graph, threads, SEMA_PASS_FACT_TABLES, facts)
-    tables := sema_program_tables_with(owned, [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
-    initial_environment := sema_check_pass_environment_from(tables, facts.fixed_length_write_params.move(), body_values)
-    initial_program := SemaProgramTables{
-        registration_graph: initial_environment.registration_graph.move(),
-        checked_types: initial_environment.checked_types.move(),
-        checked_type_names: initial_environment.checked_type_names.move(),
-        checked_type_name_rows: initial_environment.checked_type_name_rows.move(),
-        boxed_edges: initial_environment.boxed_edges.move(),
-        copy_facts: initial_environment.copy_facts.move(),
-    }
-    initial_environment.registration_graph = None
-    initial_environment.checked_types = [TTypeDef]{}
-    initial_environment.checked_type_names = name_table_sized(2)
-    initial_environment.checked_type_name_rows = [[Int]]{}
-    initial_environment.boxed_edges = [U32:[String]]{}
-    initial_environment.copy_facts = sema_copy_facts_table_empty()
+    initial_program := sema_program_tables_with(owned, [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
+    initial_environment: sema_check_pass_environment(initial_program, facts.fixed_length_write_params.move(), body_values)
     module_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     // A declaration check reads no memory plan.
     sema_check_shared_fill(module_state, initial_environment, initial_program, sema_function_memory_plan_new())
@@ -1634,26 +1619,14 @@ sema_comptime_staged_constant_rows: fn(resolved_graph: SemaRegistrationGraph, va
     rows
 }
 
-// The one environment of a staging run: it owns `graph` (moved in, never
-// copied here) with `values` applied, and every comptime item and function
-// check re-targets it (sema_scope_environment_enter_comptime_module) instead of
-// copying the graph. The caller applies each later value to its graph in
-// place. `graph_facts` are the boxed edges and copy facts of `graph` with
-// `values` applied, or None: the declaration pass's
-// (SemaComptimeDeclarationStage.graph_facts) come with no values, and a
-// finalization's carried ones with the values its graph already holds.
-sema_comptime_environment: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], graph_facts: ^^SemaComptimeGraphFacts?, trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
-    resolved := graph.move()
-    trail := sema_graph_trail_init()
-    sema_comptime_graph_apply_values(resolved, values, trail)
-    tables := sema_comptime_environment_tables(resolved, graph_facts)
+// The one environment of a staging run over `program`
+// (sema_comptime_environment_tables): every comptime item and function check
+// re-targets it (sema_scope_environment_enter_comptime_module) instead of
+// copying the graph. The run reads fields of every registered struct, so it
+// never skips the computed-field lookup.
+sema_comptime_environment: fn(program: ^SemaProgramTables, values: [SemaComptimeItemValue], trace_sink: CompilerTraceSink?) -> SemaScopeEnvironment Never! {
+    program.has_computed_fields = true
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
-    environment.registration_graph = tables.registration_graph.move()
-    environment.checked_types = tables.checked_types.move()
-    environment.checked_type_names = tables.checked_type_names.move()
-    environment.checked_type_name_rows = tables.checked_type_name_rows.move()
-    environment.boxed_edges = tables.boxed_edges.move()
-    environment.copy_facts = tables.copy_facts.move()
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes: if work == .Val(_) -> true else -> false
     environment.comptime_body_publication = sema_comptime_body_values_freeze(sema_comptime_body_values_from_items(values), work, count_key_bytes)
@@ -1661,9 +1634,18 @@ sema_comptime_environment: fn(graph: ^^SemaRegistrationGraph, values: [SemaCompt
     environment.move()
 }
 
-sema_comptime_environment_tables: fn(graph: ^^SemaRegistrationGraph, graph_facts: ^^SemaComptimeGraphFacts?) -> SemaProgramTables Never! {
-    facts := graph_facts.move() ?? return sema_program_tables_init(Val(graph.move()), [TTypeDef]{})
-    sema_program_tables_with(Val(graph.move()), [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
+// The program tables of a staging run: they own `graph` (moved in, never
+// copied here) with `values` applied. The caller applies each later value to
+// their graph in place. `graph_facts` are the boxed edges and copy facts of
+// `graph` with `values` applied, or None: the declaration pass's
+// (SemaComptimeDeclarationStage.graph_facts) come with no values, and a
+// finalization's carried ones with the values its graph already holds.
+sema_comptime_environment_tables: fn(graph: ^^SemaRegistrationGraph, values: [SemaComptimeItemValue], graph_facts: ^^SemaComptimeGraphFacts?) -> SemaProgramTables Never! {
+    resolved := graph.move()
+    trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(resolved, values, trail)
+    facts := graph_facts.move() ?? return sema_program_tables_init(Val(resolved.move()), [TTypeDef]{})
+    sema_program_tables_with(Val(resolved.move()), [TTypeDef]{}, facts.boxed_edges.move(), facts.copy_facts.move())
 }
 
 // Only the staging producer lands rows from its authenticated item frontier.

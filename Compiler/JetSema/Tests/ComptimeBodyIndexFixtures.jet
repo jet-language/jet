@@ -39,6 +39,7 @@ use {
         sema_comptime_body_values_replace,
         sema_comptime_body_values_truncate,
         sema_comptime_environment,
+        sema_comptime_environment_tables,
         sema_comptime_graph_apply_values,
         sema_comptime_key_row,
         sema_comptime_module_slot,
@@ -404,9 +405,8 @@ body_index_publication_lifecycle: fn() {
     available := sema_comptime_available_constants(graph, [SemaComptimeItemValue]{initial})
     sites: sema_comptime_value_sites(graph)
     trail := sema_graph_trail_init()
-    environment := sema_comptime_environment(graph, [SemaComptimeItemValue]{initial}, None, None)
-    program := sema_program_tables_init(environment.registration_graph.move(), [TTypeDef]{})
-    environment.registration_graph = None
+    program := sema_comptime_environment_tables(graph, [SemaComptimeItemValue]{initial}, None)
+    environment := sema_comptime_environment(program, [SemaComptimeItemValue]{initial}, None)
     empty := sema_comptime_body_values_prefix(environment.comptime_body_publication, 0)
     body_index_require(sema_scope_environment_enter_comptime_module(environment, program, body_index_module("mod.one"), empty), "an item check retargets the registered module")
     context := sema_check_context_init()

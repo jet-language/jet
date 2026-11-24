@@ -816,7 +816,7 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     if on_graph && access == "SignedIn" {
         return sema_call_http_mux_source_call(mux, member, [TCallArg]{path, calls, window}, span, None, environment, program, scopes, check, diagnostics).value
     }
-    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, member, 1, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
+    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, member, 1, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics) ?? return None
     if on_graph || access == "SignedIn" {
         return sema_call_http_mux_source_call(mux, member, [TCallArg]{path, answer, calls, window}, span, None, environment, program, scopes, check, diagnostics).value
     }
@@ -880,17 +880,17 @@ sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, metho
     service_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(service, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: service}}, span: span, id: AST_NODE_GENERATED}, span))
     // The call's arguments hold the file at the Upload's position.
     at_value: Expr.Int{value: upload_at - 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
-    at_checked: sema_check_expression(at_value, Val(sema_app_mux_param_type(mux, "__remote_upload", 2, span, environment, program, diagnostics)), environment, program, scopes, check, diagnostics) ?? return None
+    at_checked: sema_check_expression(at_value, Val(sema_app_mux_param_type(mux, "__remote_upload", 2, span, environment, program, check, diagnostics) ?? return None), environment, program, scopes, check, diagnostics) ?? return None
     at_arg: sema_call_http_static_tree_arg(at_checked, sema_http_mount_arg(at_value, span))
     signed_value: Expr.Bool{value: access == "SignedIn", span: span, id: AST_NODE_GENERATED}
-    signed_checked: sema_check_expression(signed_value, Val(sema_app_mux_param_type(mux, "__remote_upload", 3, span, environment, program, diagnostics)), environment, program, scopes, check, diagnostics) ?? return None
+    signed_checked: sema_check_expression(signed_value, Val(sema_app_mux_param_type(mux, "__remote_upload", 3, span, environment, program, check, diagnostics) ?? return None), environment, program, scopes, check, diagnostics) ?? return None
     signed_arg: sema_call_http_static_tree_arg(signed_checked, sema_http_mount_arg(signed_value, span))
     // The app module's own steps of the file: staging, ending the request,
     // serving a kept blob (core.app's `FileJob.run`).
     files_name: "__jet_http_upload_files_{span.start}"
     run: Expr.MethodCall{receiver: sema_app_remote_ident(files_name, span), method: "run", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
-    files: sema_app_mount_callback(files_name, [Stmt]{Stmt.Expr{expr: Expr.Ok{value: run, span: span, id: AST_NODE_GENERATED}}}, sema_app_mux_param_type(mux, "__remote_upload", 5, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
-    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__remote_upload", 6, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
+    files: sema_app_mount_callback(files_name, [Stmt]{Stmt.Expr{expr: Expr.Ok{value: run, span: span, id: AST_NODE_GENERATED}}}, sema_app_mux_param_type(mux, "__remote_upload", 5, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics) ?? return None
+    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__remote_upload", 6, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics) ?? return None
     limit := sema_app_endpoint_limit(marker, environment, program, scopes, check, diagnostics) ?? return None
     window: limit.pop() ?? {
         check.context.incomplete_reasons.push("an endpoint limit has no window")
@@ -987,10 +987,10 @@ sema_app_mount_webhook: fn(mux: TExpr, value_name: String, service: String, meth
         return None
     }
     key: sema_app_webhook_key(mux, value_name, methods[key_method_at], method, method_module, path_params, address, span, environment, program, scopes, check, diagnostics) ?? return None
-    signature: sema_app_marker_checked(marker, signature_at, sema_app_mux_param_type(mux, "__webhook", 1, span, environment, program, diagnostics), environment, program, scopes, check, diagnostics) ?? return None
+    signature: sema_app_marker_checked(marker, signature_at, sema_app_mux_param_type(mux, "__webhook", 1, span, environment, program, check, diagnostics) ?? return None, environment, program, scopes, check, diagnostics) ?? return None
     path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
     params: sema_call_http_static_tree_arg(sema_call_http_core_string(joined, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: joined}}, span: span, id: AST_NODE_GENERATED}, span))
-    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__webhook", 4, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
+    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__webhook", 4, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics) ?? return None
     sema_call_http_mux_source_call(mux, "__webhook", [TCallArg]{path, signature, params, key, answer}, span, None, environment, program, scopes, check, diagnostics).value
 }
 
@@ -1023,7 +1023,7 @@ sema_app_mount_schedule: fn(mux: TExpr, value_name: String, service: String, met
     cron_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(cron, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: cron}}, span: span, id: AST_NODE_GENERATED}, span))
     args_name: "__jet_http_schedule_args_{span.start}"
     statements: sema_app_job_statements(args_name, value_name, method, method_module, span, graph, environment)
-    run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__every", 2, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
+    run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__every", 2, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics) ?? return None
     sema_call_http_mux_source_call(mux, "__every", [TCallArg]{name_arg, cron_arg, run}, span, None, environment, program, scopes, check, diagnostics).value
 }
 
@@ -1057,11 +1057,11 @@ sema_app_mount_job: fn(mux: TExpr, value_name: String, service: String, method: 
     name: "{module_text(graph.module_table, method_module)}.{service}.{method.name}"
     name_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(name, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: name}}, span: span, id: AST_NODE_GENERATED}, span))
     retries: sema_app_job_retries(marker)
-    retries_checked: sema_check_expression(retries, Val(sema_app_mux_param_type(mux, "__job", 1, span, environment, program, diagnostics)), environment, program, scopes, check, diagnostics) ?? return None
+    retries_checked: sema_check_expression(retries, Val(sema_app_mux_param_type(mux, "__job", 1, span, environment, program, check, diagnostics) ?? return None), environment, program, scopes, check, diagnostics) ?? return None
     retries_arg: sema_call_http_static_tree_arg(retries_checked, sema_http_mount_arg(retries, expr_span(retries)))
     args_name: "__jet_http_job_args_{span.start}"
     statements: sema_app_job_statements(args_name, value_name, method, method_module, span, graph, environment)
-    run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__job", 2, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics) ?? return None
+    run: sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__job", 2, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics) ?? return None
     sema_call_http_mux_source_call(mux, "__job", [TCallArg]{name_arg, retries_arg, run}, span, None, environment, program, scopes, check, diagnostics).value
 }
 
@@ -1150,17 +1150,34 @@ sema_app_webhook_key: fn(mux: TExpr, value_name: String, key_method: Func, metho
     }
     call: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: key_method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
     statements.push(Stmt.Expr{expr: Expr.Ok{value: call, span: span, id: AST_NODE_GENERATED}})
-    sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__webhook", 3, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics)
+    sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__webhook", 3, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics)
 }
 
-// The type of parameter `index` of the App's registration method `name`.
-sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: ^[Diagnostic]) -> Type {
-    graph: program.registration_graph ?? panic("an App registration has no registration graph")
+// The type of parameter `index` of the App's registration method `name`;
+// None, with the reason on `check`, when the App surface does not declare it.
+sema_app_mux_param_type: fn(mux: TExpr, name: String, index: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, check: ^SemaBodyCheck, diagnostics: ^[Diagnostic]) -> Type? {
+    graph: program.registration_graph ?? {
+        check.context.incomplete_reasons.push("an App registration has no registration graph")
+        return None
+    }
     candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, name, [Type]{}, [Type]{}, span, environment, program, diagnostics)
-    candidate: candidates.pop() ?? panic("App.{name} is not registered")
-    params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("App.{name} has no parameter list")
-    declared: params[index].ty ?? panic("App.{name}'s parameter {index} has no type")
-    sema_call_resolved_type(declared, environment, program)
+    candidate: candidates.pop() ?? {
+        check.context.incomplete_reasons.push("App.{name} is not registered")
+        return None
+    }
+    params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? {
+        check.context.incomplete_reasons.push("App.{name} has no parameter list")
+        return None
+    }
+    if index >= params.len() {
+        check.context.incomplete_reasons.push("App.{name} has no parameter {index}")
+        return None
+    }
+    declared: params[index].ty ?? {
+        check.context.incomplete_reasons.push("App.{name}'s parameter {index} has no type")
+        return None
+    }
+    Val(sema_call_resolved_type(declared, environment, program))
 }
 
 // The checked callback, of type `answer_type`, that runs the mounted value
@@ -1245,7 +1262,7 @@ sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, me
     }
     invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: check_method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
     sema_app_mount_reply(args_name, statements, invocation, sema_type_resolve_declared(graph, check_method.return_type ?? Type.Named{name: "Unit"}, method_module), span)
-    sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__remote_upload", 4, span, environment, program, diagnostics), span, environment, program, scopes, check, diagnostics)
+    sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__remote_upload", 4, span, environment, program, check, diagnostics) ?? return None, span, environment, program, scopes, check, diagnostics)
 }
 
 // The lambda of one parameter `args_name` running `statements`, checked as

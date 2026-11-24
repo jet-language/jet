@@ -1335,16 +1335,10 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
                 }
             }
             if unresolved && !generic_names.contains(name) {
-                declared := false
-                if environment.registration_graph == .Val(graph) {
-                    declared = sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None
-                }
-                if !declared {
-                    diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment), sema_call_source_word_span(environment, program, span, name)))
-                }
+                diagnostics.push(sema_unknown_type_name(name, span, [String]{}, sema_call_source_word_span(environment, program, span, name)))
             }
             if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) {
-                diagnostics.push(sema_unknown_type_name(name, span, sema_failure_declared_type_names(environment), sema_call_source_word_span(environment, program, span, name)))
+                diagnostics.push(sema_unknown_type_name(name, span, [String]{}, sema_call_source_word_span(environment, program, span, name)))
             }
         }
         // An alias can hide a second optional layer: `Maybe<Int>?` where
@@ -1560,13 +1554,6 @@ sema_type_declared_names: fn(graph: SemaRegistrationGraph, caller: Int) -> [Stri
     loop nominal in graph.modules[caller].nominals -> nominal.symbol.name.copy()
 }
 
-sema_failure_declared_type_names: fn(environment: SemaScopeEnvironment) -> [String] {
-    if environment.registration_graph == .Val(graph) {
-        return sema_type_declared_names(graph, sema_scope_caller_row(environment, graph))
-    }
-    [String]{}
-}
-
 // E0119 twice for `Name<…>` where `Name` names nothing: the missing type,
 // then the type arguments it cannot take. A word-cased acronym head
 // (`Id<Node>`) gets the one E0358 instead.
@@ -1580,13 +1567,9 @@ sema_unknown_generic_type_name: fn(name: String, span: Span, diagnostics: ^[Diag
 }
 
 // Whether signature type name `name` names nothing (#6294), judged on the
-// pass's registration graph: the program tables carry it in the module check,
-// the environment in the comptime passes.
+// pass's registration graph, which the program tables carry.
 sema_failure_written_name_unknown: fn(name: String, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if program.registration_graph == .Val(graph) {
-        return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
-    }
-    if environment.registration_graph == .Val(graph) {
         return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
     }
     false

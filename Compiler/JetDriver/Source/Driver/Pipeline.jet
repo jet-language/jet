@@ -62,6 +62,7 @@ use {
         BudgetSpec,
         sema_budget_located_specs_graph,
         sema_check_comptime_function,
+        sema_comptime_function_unresolved,
         SemaComptimeFailureClosure,
         sema_comptime_failure_closure_add,
         sema_comptime_failure_closure_settle,
@@ -94,6 +95,7 @@ use {
         sema_comptime_key_set_pair,
         sema_comptime_dependency_cycle_diagnostic,
         sema_comptime_environment,
+        sema_comptime_environment_tables,
         sema_comptime_environment_publish_body_values,
         sema_comptime_fold_in,
         sema_comptime_local_value_failure,
@@ -1671,8 +1673,10 @@ jet_driver_comptime_check_fn_with_program: fn(
     module_identity: ModuleID,
     function_key: String,
 ) -> SemaComptimeFunctionResult {
-    graph: program.registration_graph ?? panic("the staged comptime environment lost its registration graph")
-    sema_check_comptime_function(graph, environment, program, comptime_scopes, available, memory_plan, values, module_identity, function_key)
+    if program.registration_graph == .Val(graph) {
+        return sema_check_comptime_function(graph, environment, program, comptime_scopes, available, memory_plan, values, module_identity, function_key)
+    }
+    sema_comptime_function_unresolved(module_identity, function_key, "`{function_key}` was checked in a comptime environment with no registration graph")
 }
 
 jet_driver_comptime_memory_plan_ensure: fn(program: SemaProgramTables, threads: CompilerThreads, memory_plan: ^[SemaFunctionMemoryPlan]) Never! {
@@ -2728,14 +2732,18 @@ jet_driver_comptime_item_value: fn(interner: Interner, source: SemaComptimeItemS
     }
 }
 
+// The tables' interner (sema_comptime_fold_in): the graph's, else the graphless
+// fallback, else an empty one.
 jet_driver_comptime_item_value_in: fn(program: SemaProgramTables, source: SemaComptimeItemSource, value: TComptimeValue, expression: BodyExpr) -> SemaComptimeItemValue Never! {
-    graph: program.registration_graph ?? panic("the staged comptime environment lost its registration graph")
-    jet_driver_comptime_item_value(graph.interner, source, value, expression)
+    if program.registration_graph == .Val(graph) -> return jet_driver_comptime_item_value(graph.interner, source, value, expression)
+    if program.interner == .Val(fallback) -> return jet_driver_comptime_item_value(fallback, source, value, expression)
+    jet_driver_comptime_item_value(interner_empty(), source, value, expression)
 }
 
 jet_driver_comptime_expr_type_in: fn(program: SemaProgramTables, expression: BodyExpr) -> Type Never! {
-    graph: program.registration_graph ?? panic("the staged comptime environment lost its registration graph")
-    body_type(graph.interner, expression.tree, expression.root)
+    if program.registration_graph == .Val(graph) -> return body_type(graph.interner, expression.tree, expression.root)
+    if program.interner == .Val(fallback) -> return body_type(fallback, expression.tree, expression.root)
+    body_type(interner_empty(), expression.tree, expression.root)
 }
 
 // A module-level `NAME: expr` or `name := expr` (not `#Persist`) whose value
@@ -3592,25 +3600,8 @@ jet_driver_run_comptime_carried: fn(
     // place rather than rebuilding it per item, and counted into the run's
     // available constant keys.
     trail := sema_graph_trail_init()
-    environment := sema_comptime_environment(staged, initial_values, graph_facts, request.trace_sink)
-    // Retained initialization builds the indexes once. Transfer those owned
-    // rows into the program carrier used beside the retargeted environment.
-    program := SemaProgramTables{
-        registration_graph: environment.registration_graph.move(),
-        checked_types: environment.checked_types.move(),
-        checked_type_names: environment.checked_type_names.move(),
-        checked_type_name_rows: environment.checked_type_name_rows.move(),
-        boxed_edges: environment.boxed_edges.move(),
-        copy_facts: environment.copy_facts.move(),
-    }
-    // The program now owns these tables. Restore the environment's ordinary
-    // empty table fields before retargeting its still-owned module metadata.
-    environment.registration_graph = None
-    environment.checked_types = [TTypeDef]{}
-    environment.checked_type_names = name_table_sized(2)
-    environment.checked_type_name_rows = [[Int]]{}
-    environment.boxed_edges = [U32:[String]]{}
-    environment.copy_facts = sema_copy_facts_table_empty()
+    program := sema_comptime_environment_tables(staged, initial_values, graph_facts)
+    environment: sema_comptime_environment(program, initial_values, request.trace_sink)
     // The run sets `sites` once it has items to check.
     staging := carried_staging.pop() ?? JetDriverComptimeStaging{staged: false, program: Shared{[IRProgram]{}}, landed: 0, declared: [SemaGraphModuleResult]{}, sites: sema_comptime_value_sites_empty()}
     staging.declared = declared.move()

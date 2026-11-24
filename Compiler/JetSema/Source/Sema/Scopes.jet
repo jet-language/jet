@@ -767,10 +767,9 @@ SemaComptimeBodyWorkOperation: enum {
     OwnedRowReturned,
 }
 
-// Scope-local facts serve the program-table callers; retained-graph checks
-// also keep their owning graph and its checked-type indexes here.
+// Scope-local facts serve the program-table callers; the registration graph
+// lives in the program tables, never here.
 SemaScopeEnvironment: struct {
-    registration_graph: SemaRegistrationGraph?{None},
     module_identity: ModuleID,
     // The registration row of `module_identity` when module entry set it
     // (sema_scope_caller_row checks it still is), -1 otherwise.
@@ -820,13 +819,9 @@ SemaScopeEnvironment: struct {
 // (sema_target_no_os_reach_check): a reached OS module is E3301 at the
 // program's call that leads to it, and a body the program never reaches is
 // never refused. User bodies consume the selected machine fact, never a host
-// OS guess. A function body is checked with the graph in the program tables;
-// the scope environment holds it only between passes.
+// OS guess. A function body is checked with the graph in the program tables.
 sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        return graph.target_machine.no_os && environment.package_identity == graph.package_identity
-    }
-    if environment.registration_graph == .Val(graph) {
         return graph.target_machine.no_os && environment.package_identity == graph.package_identity
     }
     false
@@ -1578,7 +1573,6 @@ sema_program_tables_with: fn(graph: ^^SemaRegistrationGraph?, checked_types: [TT
 
 sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
-        registration_graph: None,
         module_identity: module_identity,
         package_identity: package_identity,
         module_name: module_name,

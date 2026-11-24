@@ -1,7 +1,7 @@
 // 2: E0910 diff, independent of I/O. None is the status command's deliberately
 // empty advisory registry; builds supply the canonical populated scope
 // environment after type registration.
-use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, name_table_sized, owned_trait_conversion, type_name, TTypeDef]
+use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, owned_trait_conversion, type_name, TTypeDef]
 
 sema_schema_published: fn(definition: StructDef) -> Bool Never! { definition.is_published_schema }
 
@@ -300,22 +300,9 @@ sema_check_schema_migration_graph: fn(registration: ^^SemaRegistrationGraph, che
     loop module_row in checked.modules {
         loop definition in module_row.declarations.type_defs -> types.push(definition.copy())
     }
-    scope := sema_check_pass_environment(registration, types, SemaComptimeBodyValues{})
-    program := SemaProgramTables{
-        registration_graph: scope.registration_graph.move(),
-        checked_types: scope.checked_types.move(),
-        checked_type_names: scope.checked_type_names.move(),
-        checked_type_name_rows: scope.checked_type_name_rows.move(),
-        boxed_edges: scope.boxed_edges.move(),
-        copy_facts: scope.copy_facts.move(),
-    }
-    scope.registration_graph = None
-    scope.checked_types = [TTypeDef]{}
-    scope.checked_type_names = name_table_sized(2)
-    scope.checked_type_name_rows = [[Int]]{}
-    scope.boxed_edges = [U32:[String]]{}
-    scope.copy_facts = sema_copy_facts_table_empty()
-    environment := Val(scope.move())
+    fixed_length_write_params: sema_fixed_length_write_params_in_graph(registration)
+    program := sema_program_tables_init(Val(registration.move()), types)
+    environment := Val(sema_check_pass_environment(program, fixed_length_write_params, SemaComptimeBodyValues{}))
     diagnostics := [Diagnostic]{}
     loop module_index in 0..<module_count {
         sema_schema_enter_registered_module(environment, program, module_index)

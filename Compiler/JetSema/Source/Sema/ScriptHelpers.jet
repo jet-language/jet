@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `^` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Interner, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, TypeKind, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_tree_remap_types, body_type_id, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, delta_has_rows, diagnostic_with_label, interner_empty, interner_merge_delta, module_text, name_table_sized, symbol_is_local, symbol_key_text, symbol_local_keys_text, type_kind]
+use jet_foundation.[AST_NODE_GENERATED, ASTTables, AccessConvention, BodyTree, DIAGNOSTIC_ERROR, DeclID, Diagnostic, Expr, ExprNode, FnBody, Func, Interner, Item, ModuleID, Span, Symbol, SymbolKind, TEffectSpan, TFuncKind, TLocal, TTypeDef, TypeKind, Type, ast_expr, ast_visit_body, body_node, body_stmt, body_tree_remap_types, body_type_id, checked_builtin_mutates_receiver, compiler_transfer_rows, decl_table_add, decl_table_index, delta_has_rows, diagnostic_with_label, interner_empty, interner_merge_delta, module_text, symbol_is_local, symbol_key_text, symbol_local_keys_text, type_kind]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -78,21 +78,9 @@ sema_script_probe_over: fn(graph: ^^SemaRegistrationGraph, modules: ^[SemaGraphM
     loop row in 0..<modules.len() {
         compiler_transfer_rows<TTypeDef>(types, modules[row].declarations.type_defs)
     }
-    environment := sema_check_pass_environment(graph, types, SemaComptimeBodyValues{})
-    program := SemaProgramTables{
-        registration_graph: environment.registration_graph.move(),
-        checked_types: environment.checked_types.move(),
-        checked_type_names: environment.checked_type_names.move(),
-        checked_type_name_rows: environment.checked_type_name_rows.move(),
-        boxed_edges: environment.boxed_edges.move(),
-        copy_facts: environment.copy_facts.move(),
-    }
-    environment.registration_graph = None
-    environment.checked_types = [TTypeDef]{}
-    environment.checked_type_names = name_table_sized(2)
-    environment.checked_type_name_rows = [[Int]]{}
-    environment.boxed_edges = [U32:[String]]{}
-    environment.copy_facts = sema_copy_facts_table_empty()
+    fixed_length_write_params: sema_fixed_length_write_params_in_graph(graph)
+    program := sema_program_tables_init(Val(graph.move()), types)
+    environment := sema_check_pass_environment(program, fixed_length_write_params, SemaComptimeBodyValues{})
     scopes := sema_check_module_summary_scope_init(environment, program, module_index)
     sema_scope_environment_enter_module(environment, program, module_index, SemaComptimeBodyValues{})
     Val(SemaScriptProbe{module_index: module_index, environment: environment, program: program, scopes: scopes})
