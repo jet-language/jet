@@ -131,11 +131,13 @@ vocabulary](vocabulary.md).
   TypeId; `_` when the argument's own check fails), `value`, the
   `function` it names (None) and its `span`. `value` is the Dyn the
   argument's `encode()` returns when the build knows the argument (a
-  literal or a constant, a struct, enum case or list literal of known
-  parts): a Bool, an Int or fixed-width integer, a Float or F32, a Char or
-  a String, a list of these, and a struct or enum whose Encode is the
-  derived one with no codec option, its fields plain values and its cases
-  without payload or with one value. Any other argument's `value` is None
+  literal, a module constant, also one that names another constant, or a
+  struct, enum case or list literal of known parts): a Bool, an Int or
+  fixed-width integer, a Float or F32, a Char or a String, a list of these,
+  and a struct or enum whose Encode is the derived one with no codec option,
+  its fields plain values and its cases without payload or with one value.
+  A `Path{…}` literal has no Encode and is heard as the Text of its path.
+  Any other argument's `value` is None
   (an optional field, a byte list, a generic type, a written codec, a
   value only the run knows). The call's `span` runs from its name to its
   last argument.

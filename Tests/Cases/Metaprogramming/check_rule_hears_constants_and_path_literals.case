@@ -1,0 +1,13 @@
+# A marker's `check` rule hears a module constant argument as the value the
+# build knows, also through a constant that names another constant, and a
+# `Path{…}` literal as its path text. A value the run computes stays None.
+fixture: CheckRuleHearsConstantsAndPathLiterals.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # every argument is heard as the rule expects
+stderr: !~ "known.Unheard" # no argument is heard as None
+step: jet run main.jet
+exit: 0
+stdout: = "41\n" # the rule only reads; the call runs as written
