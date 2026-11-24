@@ -89,9 +89,9 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `\|>` | pipe step: the expression after it runs on the value from the line above, which it reads as `<>`; each step is a hidden one-step binding |
 | `<>` | the value of the nearest enclosing `\|>` step, legal only inside a step, which must read it at least once; in an `if` table header, the hole each arm's candidate fills |
 | `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `^^T` or `^^self` |
-| `^^T / &&self` | take mark in a signature, and `task ^^name` for a task capture; `^T` / `^self` is the write mark; calls stay unmarked |
+| `^^T / ^^self` | take mark in a signature, and `task ^^name` for a task capture; `^T` / `^self` is the write mark; calls stay unmarked |
 | `fn(^T) / fn(^^T)` | a function type marks a written input `^` and a taken one `^^`, as a declaration does (`action: fn(^Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`) |
-| `^self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
+| `^self.field / ^self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
 | `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax |

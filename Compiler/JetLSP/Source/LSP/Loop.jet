@@ -241,7 +241,7 @@ lsp_serve_message: fn(server: ^LSPServer, queued: LSPQueued, input: ^LSPInput, s
             }
             lsp_read_more(input)
             if lsp_cancel_queued(input, id) {
-                return lsp_write_message(stdout, lsp_error_response(id, -32800, "the request was cancelled"))
+                return lsp_write_message(stdout, lsp_error_response(id, -32800, "the request was canceled"))
             }
             if method == "initialize" -> server.initialized = true
             lsp_flush_dirty(server, input, stdout) ?? return Err(err)
