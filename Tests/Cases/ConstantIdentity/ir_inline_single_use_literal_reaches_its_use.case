@@ -1,0 +1,32 @@
+# At O1 and O2 an immutable binding of a literal read once is inlined into its
+# use: after the passes the call reads the literal's own constant slot, and
+# no instruction copies the literal into the binding's slot or reads that
+# slot. The binding's slot stays in the function's slot table only as the
+# debugger's variable `x`, located as that constant (IRFunction.binds,
+# X64Select.jet ir_x64_variables); it has no frame place and no code. Before
+# the passes (the slot IR O0 compiles) the literal moves into `x` and the
+# call reads `x`.
+fixture: IrInlineSingleUseLiteral.fixture
+env: NO_COLOR=1
+step: jet emit --ir main.jet --fn run
+exit: 0
+stdout: ~ "s1 local x: Int" # O0 keeps the binding's slot
+stdout: ~ "move s1 <- 0 " # the literal moves into x
+stdout: ~ "main.jet.f" # and the call reads x
+step o1: jet inspect decisions -O1 main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O1:" # -O1 runs the O1 passes
+stdout: count "move s1 <- 0 " = 1 # the literal moves into x only before the passes
+stdout: count "(s1) ; " = 1 # only the call before the passes reads x
+stdout: ~ "call s2 <- 1 0 1 (s0) ; " # after them the call reads the literal's slot
+step o2: jet inspect decisions --release main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # --release runs the O2 passes
+stdout: count "move s1 <- 0 " = 1 # the literal moves into x only before the passes
+stdout: count "(s1) ; " = 1 # only the call before the passes reads x
+stdout: ~ "call s2 <- 1 0 1 (s0) ; " # after them the call reads the literal's slot
+step run: jet run --release main.jet
+exit: 0
+stdout: = "832040\n"

@@ -1,0 +1,11 @@
+// `x` is an immutable binding of a literal, read once, as the argument of a
+// call the optimizer keeps (a recursive function is never inlined).
+f: fn(n: Int) -> Int {
+    if n <= 1 -> return n
+    f(n - 1) + f(n - 2)
+}
+
+run: fn() {
+    x: 30
+    print(f(x))
+}
