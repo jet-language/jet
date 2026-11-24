@@ -942,7 +942,8 @@ build_session_unchecked_option: fn(name: String, value: String, pinned: Bool, st
 build_session_package_dir: fn(package: String) -> String {
     parts: package.split(":").to_list()
     if parts.len() >= 3 && parts[0] == "package" && (Int.parse(parts[1]) ?? -1) == parts[2].len() {
-        return parts[2].copy()
+        start: parts[0].len() + parts[1].len() + 2
+        return package.slice(start, start + parts[2].len())
     }
     package.copy()
 }
@@ -1186,13 +1187,16 @@ build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionVa
     loop index in 1..<bytes.len() {
         if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> reserved = false
     }
-    diagnostic := BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: start, end: end, file: file.copy()}
-    if reserved {
-        diagnostic = BuildSessionDiagnostic{code: "E3530", what: "build rule code `{code}` is reserved", why: "codes beginning with E or W followed only by digits belong to the compiler", fix: "use a project prefix such as `ORG01`", start: start, end: end, file: file}
-    } else if code.trim() == "" || what.trim() == "" || why.trim() == "" || fix.trim() == "" {
-        diagnostic = build_session_diag(state, "build rule errors require non-empty code, what, why, and fix")
+    if !reserved && (code.trim() == "" || what.trim() == "" || why.trim() == "" || fix.trim() == "") {
+        refused: build_session_diag(state, "build rule errors require non-empty code, what, why, and fix")
+        state.diagnostics.push(refused)
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
-    state.diagnostics.push(diagnostic)
+    if reserved {
+        state.diagnostics.push(BuildSessionDiagnostic{code: "E3530", what: "build rule code `{code}` is reserved", why: "codes beginning with E or W followed only by digits belong to the compiler", fix: "use a project prefix such as `ORG01`", start: start, end: end, file: file})
+    } else {
+        state.diagnostics.push(BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: start, end: end, file: file})
+    }
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 

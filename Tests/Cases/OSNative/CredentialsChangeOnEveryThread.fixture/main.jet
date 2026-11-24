@@ -13,7 +13,7 @@ package: {
 use {
     sys: core.sys
     files: core.files
-    tasks: core.tasks
+    time: core.time
 }
 
 SOCKET: "/var/run/nscd/socket"
@@ -68,7 +68,7 @@ run: fn() {
     waited := 0
     loop !files.exists(SOCKET) {
         if waited >= 1000 -> panic("no nscd socket at {SOCKET}")
-        tasks.sleep(10)
+        time.sleep(10ms)
         waited += 1
     }
     first: task spin(40000000)

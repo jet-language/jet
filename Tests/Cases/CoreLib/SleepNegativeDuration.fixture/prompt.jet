@@ -1,0 +1,12 @@
+// A negative sleep parks for no time: the program sleeps a minute into the
+// past and one nanosecond into the past, and stops if that took a second.
+use time: core.time
+
+run: fn() {
+    watch: time.start()
+    time.sleep(time.duration_ms(-60000))
+    time.sleep(time.duration_ns(-1))
+    waited: time.elapsed(watch).ns
+    if waited >= 1000000000 -> panic("negative sleeps took {waited} ns")
+    print("a negative sleep returns at once")
+}

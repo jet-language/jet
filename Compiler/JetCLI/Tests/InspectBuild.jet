@@ -9,6 +9,7 @@ use {
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USER_ERROR,
         JetDriverAuthorizedSourceFile,
+        JetDriverCoreSource,
         JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot,
         JetDriverBuildQueryResult,
@@ -289,7 +290,7 @@ inspect_build_stopped_codes: fn(ran: [Diagnostic]) -> [String] Never! {
     response := jet_driver_build_query_stopped(request, staged, reports, true, false, held)
     query := response.query.move()
     inspect_build_require(!query.complete && query.internal_problem == None, "a stopped build is a failed query, not an internal problem")
-    loop reported in query.diagnostics -> reported.code.copy()
+    loop reported in query.diagnostics.move() -> reported.code
 }
 
 // A build cut short midway, past its step limit or ended from outside jet (a
@@ -450,17 +451,13 @@ inspect_build_runtime_dir: fn() -> String {
 // keeps going without it, and a handler that panics stops both with its
 // own report, worded as compile-time code that stopped the build.
 #Test("inspect_build a check reports what the build's call watches raised") {
-    core: if jet_cli_core_sources("/inspect-build/main.jet") == {
-        .Loaded(sources) -> sources
-        .Missing(what, _) -> panic("the compiler under test has no Core: {what}")
-    }
     watched: "Loud: struct {{\n    impl Diagnostic {{\n        code: \"app.Loud\",\n        tier: .Tidy,\n\n        what: fn(self) -> String {{ \"loud call\" }}\n\n        why: fn(self) -> String {{ \"quiet\" }}\n\n        fix: fn(self) -> String {{ \"hush\" }}\n    }}\n}}\n\nbuild: fn(b: Build) {{\n    app: b.add_executable(\"app\", [\"main.jet\"], [])\n    meta: b.compiler(app)\n    meta.events(watch: .Calls{{to: print}}, fn(event) {{\n        if event == .Checked(.Call(c)) -> HANDLER\n    }})\n    b.default(app)\n}}\n\nrun: fn() {{ print(1) }}\n"
     shapes: [String]{"meta.report(Loud{{}}, at: c)", "panic(\"the watch refused\")"}
     modes: [JetDriverCompileMode]{JetDriverCompileMode.Check, JetDriverCompileMode.Program}
     rows := [String]{}
     loop handler in shapes {
         loop mode in modes {
-            request := jet_cli_driver_request(inspect_build_request().authorized_sources, core.copy(), Val(1), mode)
+            request := jet_cli_driver_request(inspect_build_request().authorized_sources, inspect_build_core(), Val(1), mode)
             request.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
             request.authorized_sources.roots[0].files[0].source = watched.replace("HANDLER", handler)
             generated: jet_cli_generated_request(request)
@@ -478,4 +475,13 @@ inspect_build_runtime_dir: fn() -> String {
             "false|E3010|`the watch refused`|{stop_why}",
         },
     )
+}
+
+// The Core sources the compiler under test loads, listed afresh for each
+// request that owns them (each body is read when a compile first needs it).
+inspect_build_core: fn() -> [JetDriverCoreSource] Never! {
+    if jet_cli_core_sources("/inspect-build/main.jet") == {
+        .Loaded(sources) -> sources
+        .Missing(what, _) -> panic("the compiler under test has no Core: {what}")
+    }
 }

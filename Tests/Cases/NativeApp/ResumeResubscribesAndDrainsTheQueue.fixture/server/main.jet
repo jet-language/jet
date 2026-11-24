@@ -8,7 +8,7 @@ use {
     files: core.files
     net: core.net
     sys: core.sys
-    tasks: core.tasks
+    time: core.time
     web: core.web
 }
 
@@ -40,7 +40,7 @@ run: fn() {
     files.write("server.up", "") ?? panic("write server.up: {err}")
     loop _ in 0..<12000 {
         if files.exists("asleep") -> break
-        tasks.sleep(10)
+        time.sleep(10ms)
     }
     served: web.app().mount("/api", Board{})
     server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen: {err}")

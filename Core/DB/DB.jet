@@ -2854,7 +2854,7 @@ priv db_kept_stale: fn(store: Store, key: String) {
     assert(replies.find("/api/board [4]") == None)
     assert(replies.keep("/api/board [1]", "{{\"ok\":1}}", 600000, 60000))
     assert(replies.find("/api/board [1]") == None)
-    core.tasks.sleep(2)
+    time.sleep(2ms)
     assert(replies.keep("/api/board [1]", "{{\"ok\":2}}", 600000, 0))
     assert_eq((replies.find("/api/board [1]") ?? panic("the reply after the write is kept")).reply, "{{\"ok\":2}}")
     assert(store.close())
@@ -2903,7 +2903,7 @@ priv db_jobs_kept: fn(store: Store) -> String {
     assert_eq(call_count(counts), 2)
     loop _ in 0..<1000 {
         if call_count(counts) == 20 && db_jobs_kept(store) == "1: 1 {{\"err\":\"no\"}}" -> break
-        core.tasks.sleep(10)
+        time.sleep(10ms)
     }
     assert_eq(call_count(counts), 20)
     assert_eq(db_jobs_kept(store), "1: 1 {{\"err\":\"no\"}}")
@@ -3138,7 +3138,7 @@ priv db_live_bump: fn(held: &DBState, table: String) Never! {
 // the file starts it again.
 priv db_live_poll: fn(path: String) Never! {
     loop {
-        core.tasks.sleep(LIVE_POLL_MS)
+        time.sleep(time.duration_ms(LIVE_POLL_MS))
         written: db_live_polled(path) ?? return
         loop table in written -> app.__live_invalidate_all(live_source(table))
     }

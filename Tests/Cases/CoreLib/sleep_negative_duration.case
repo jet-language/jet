@@ -1,0 +1,14 @@
+# `time.sleep` with a negative Duration behaves as core-library.md states: it
+# parks for no time and still checks the wait boundary, so a deadline already
+# in force stops the program at the negative sleep.
+fixture: SleepNegativeDuration.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step prompt: jet run -A prompt.jet
+exit: 0
+stdout: = "a negative sleep returns at once\n"
+stderr: empty
+step deadline: jet run -A deadline.jet
+exit: nonzero
+stdout: empty
+stderr: ~ "deadline exceeded while waiting in time sleep" # the deadline is seen at the negative sleep

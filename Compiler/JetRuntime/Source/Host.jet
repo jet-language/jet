@@ -2,8 +2,9 @@
 // blocks on files/pipes. stderr is unbuffered and drains stdout first.
 // All state is protected by the same lock, including the cached TTY fact.
 // The runtime object's init/fini arrays own startup and normal-exit draining.
-// Layout: lock @0, stdout length @8, TTY @16, ioctl scratch @32,
-// HOST_STDOUT_BYTES stdout bytes @128. The mapping is process-lifetime
+// Layout: lock @0, stdout length @8, TTY @16, a print line's elision @24,
+// ioctl scratch @32, HOST_STDOUT_BYTES stdout bytes @128, then the number
+// formatting workspace (HOST_FORMAT_SCRATCH). The mapping is process-lifetime
 // runtime metadata.
 host_root := I64{0}
 
@@ -11,8 +12,13 @@ host_root := I64{0}
 // terminal at each LF (host_stdout_write).
 HOST_STDOUT_BYTES: I64{65536}
 
-// The host root's mapping: its words, then the buffer at 128, in whole
-// pages.
+// Where a print holding the output lock formats a Float's shortest digits
+// (Display.jet display_scratch): its DISPLAY_SCRATCH_BYTES follow the
+// buffer.
+HOST_FORMAT_SCRATCH: I64{65664}
+
+// The host root's mapping: its words, the buffer at 128 and the formatting
+// workspace, in whole pages.
 HOST_ROOT_BYTES: I64{69632}
 
 // runtime-init: 1 when host_root
@@ -149,9 +155,7 @@ host_stdout_flush_locked: fn() -> I64 {
 }
 
 // Bytes are borrowed, never copied into an intermediate String/line
-// allocation. They go into the HOST_STDOUT_BYTES buffer a run at a time (a
-// word copy): a full buffer is written out, and on a terminal so is each run
-// that ends in an LF (line buffering). The output lock is elided while one
+// allocation (host_stdout_put_locked). The output lock is elided while one
 // thread runs (Sync.jet sync_sole_enter). Each write is a sync event of a
 // recording or replay (RecordReplay.jet), logged under the lock.
 host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
@@ -162,9 +166,21 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     ticket: replay_take(REPLAY_PRINT, I64{0})
     replay_output_check(ticket, REPLAY_PRINT, bytes, length, line)
     sole: sync_sole_enter(host_root)
+    failure := host_stdout_put_locked(bytes, length)
+    if (failure == I64{0} && line) { failure = host_stdout_line_end_locked() }
+    if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
+    replay_output_log(REPLAY_PRINT, bytes, length, line)
+    sync_sole_exit(host_root, sole)
+    replay_give(ticket)
+    failure
+}
+
+// Caller holds the output lock and lends `length` bytes. They go into the
+// HOST_STDOUT_BYTES buffer a run at a time (a word copy): a full buffer is
+// written out, and on a terminal so is each run that ends in an LF (line
+// buffering). 0, or the failure of the write that dropped the rest.
+host_stdout_put_locked: fn(bytes: I64, length: I64) -> I64 {
     failure := I64{0}
-    // The caller lends `length` bytes; the output lock owns the destination
-    // buffer.
     index := I64{0}
     pending := rt_text_word(wrapping(host_root + I64{8}))
     tty: rt_text_word(wrapping(host_root + I64{16})) != I64{0}
@@ -184,35 +200,53 @@ host_stdout_write: fn(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
         if (pending == HOST_STDOUT_BYTES || ends_line) {
             rt_text_store(wrapping(host_root + I64{8}), pending)
             failure = host_stdout_flush_locked()
-            if (failure != I64{0}) { break }
+            if (failure != I64{0}) { return failure }
             pending = rt_text_word(wrapping(host_root + I64{8}))
         }
     }
-    // print's LF joins the same pass: a full buffer is written out
-    // first, and the LF flushes on a terminal or when it fills the buffer.
-    if (failure == I64{0} && line) {
-        if (pending == HOST_STDOUT_BYTES) {
-            rt_text_store(wrapping(host_root + I64{8}), pending)
-            failure = host_stdout_flush_locked()
-            pending = rt_text_word(wrapping(host_root + I64{8}))
-        }
-        if (failure == I64{0}) {
-            rt_text_put(wrapping(host_root + I64{128} + pending), I64{10})
-            pending = wrapping(pending + I64{1})
-            if (pending == HOST_STDOUT_BYTES || tty) {
-                rt_text_store(wrapping(host_root + I64{8}), pending)
-                failure = host_stdout_flush_locked()
-                pending = rt_text_word(wrapping(host_root + I64{8}))
-            }
-        }
+    rt_text_store(wrapping(host_root + I64{8}), pending)
+    I64{0}
+}
+
+// Caller holds the output lock: print's LF. A full buffer is written out
+// first, and the LF flushes on a terminal or when it fills the buffer.
+host_stdout_line_end_locked: fn() -> I64 {
+    failure := I64{0}
+    pending := rt_text_word(wrapping(host_root + I64{8}))
+    if (pending == HOST_STDOUT_BYTES) {
+        failure = host_stdout_flush_locked()
+        if (failure != I64{0}) { return failure }
+        pending = rt_text_word(wrapping(host_root + I64{8}))
     }
-    if (failure == I64{0}) { rt_text_store(wrapping(host_root + I64{8}), pending) }
-    if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
-    replay_output_log(REPLAY_PRINT, bytes, length, line)
-    sync_sole_exit(host_root, sole)
-    replay_give(ticket)
+    rt_text_put(wrapping(host_root + I64{128} + pending), I64{10})
+    pending = wrapping(pending + I64{1})
+    rt_text_store(wrapping(host_root + I64{8}), pending)
+    if (pending == HOST_STDOUT_BYTES || rt_text_word(wrapping(host_root + I64{16})) != I64{0}) {
+        failure = host_stdout_flush_locked()
+    }
     failure
 }
+
+// Caller holds the output lock: where `count` (at most HOST_STDOUT_BYTES)
+// more bytes, none an LF, go in the buffer, a full buffer written out first;
+// 0 when that write failed and the bytes are dropped.
+// host_stdout_commit_locked then publishes them.
+host_stdout_reserve_locked: fn(count: I64) -> I64 {
+    pending := rt_text_word(wrapping(host_root + I64{8}))
+    if (wrapping(pending + count) > HOST_STDOUT_BYTES) {
+        if (host_stdout_flush_locked() != I64{0}) { return I64{0} }
+        pending = rt_text_word(wrapping(host_root + I64{8}))
+    }
+    wrapping(host_root + I64{128} + pending)
+}
+
+host_stdout_commit_locked: fn(count: I64) {
+    rt_text_store(wrapping(host_root + I64{8}), wrapping(rt_text_word(wrapping(host_root + I64{8})) + count))
+}
+
+// Display.jet display_scratch's workspace while a print holds the output
+// lock.
+host_format_scratch: fn() -> I64 { wrapping(host_root + HOST_FORMAT_SCRATCH) }
 
 host_stderr_write: fn(bytes: I64, length: I64) -> I64 {
     ticket: replay_take(REPLAY_EPRINT, I64{0})
@@ -327,4 +361,40 @@ host_print_capture_install: fn(code: I64) {
     // `value` is a borrowed E4 JetCText header; stdout copies its bytes before
     // returning.
     _ := host_stdout_write(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), true, flush != U8{0})
+}
+
+// The text sink of the stdout buffer itself (Text.jet rt_sink_append): a
+// builder is a nonzero aligned address, so 1 is never one.
+HOST_STDOUT_SINK: I64{1}
+
+// A print whose line is pieces, a String literal's parts or one number
+// (JetIR BuildExpr.jet ir_print), writes them straight into the stdout
+// buffer: this takes the output lock and answers HOST_STDOUT_SINK, each
+// piece is a builder push into it (Text.jet, Display.jet) and
+// jet_term_stdout_line_end ends the line and lets the lock go. The caller
+// runs nothing else in between: every piece's value is ready first. A
+// debugger evaluation's direct output, a test's print capture and a
+// recording or replay, which take the line whole, get a fresh builder
+// instead, which jet_term_stdout_line_end prints as
+// jet_term_write_stdout_line does.
+#Export(c) jet_term_stdout_line_begin: fn() -> I64 {
+    if (host_stdout_direct != I64{0} || host_print_capture_code != I64{0} || replay_mode != REPLAY_OFF) {
+        return rt_text_builder_with_capacity(I64{0})
+    }
+    sole: sync_sole_enter(host_root)
+    rt_text_store(wrapping(host_root + I64{24}), if sole -> I64{1} else -> I64{0})
+    HOST_STDOUT_SINK
+}
+
+// `flush` 1 writes the buffer out after the line's LF. A builder line is
+// printed and dropped, unless building it failed (its stop pending).
+#Export(c) jet_term_stdout_line_end: fn(sink: I64, flush: U8) {
+    if (sink != HOST_STDOUT_SINK) {
+        if (sink == I64{0}) { return }
+        if (scheduler_stop_pending() == I64{0}) { jet_term_write_stdout_line(sink, flush) }
+        jet_rt_string_drop(sink)
+        return
+    }
+    if (host_stdout_line_end_locked() == I64{0} && flush != U8{0}) { _ := host_stdout_flush_locked() }
+    sync_sole_exit(host_root, rt_text_word(wrapping(host_root + I64{24})) != I64{0})
 }

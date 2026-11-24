@@ -1325,14 +1325,48 @@ rt_text_into: fn(value: I64, carrier: I64) -> I64 {
 }
 
 #Export(c) jet_rt_string_builder_push: fn(target: I64, value: I64) {
-    rt_text_append(target, rt_text_data(value), rt_text_len(value))
+    rt_sink_append(target, rt_text_data(value), rt_text_len(value))
 }
 
 // Pushes `len` bytes the caller guarantees are UTF-8: a compiled program's
 // literal (JetIR Build.jet ir_static_text interns a String's bytes) or a
 // String's own data.
 #Export(c) jet_rt_string_builder_push_static: fn(target: I64, ptr: I64, len: I64) {
-    rt_text_append(target, ptr, len)
+    rt_sink_append(target, ptr, len)
+}
+
+// A text sink: what a builder push writes into. A fresh builder, or
+// HOST_STDOUT_SINK: the stdout buffer itself, while a print holds the output
+// lock (Host.jet jet_term_stdout_line_begin). 0, a builder whose allocation
+// failed with its stop pending, takes nothing.
+rt_sink_append: fn(sink: I64, ptr: I64, len: I64) {
+    if (sink == HOST_STDOUT_SINK) {
+        _ := host_stdout_put_locked(ptr, len)
+        return
+    }
+    if (sink == I64{0}) { return }
+    rt_text_append(sink, ptr, len)
+}
+
+// Where `count` more bytes go in `sink`, written in place before
+// rt_sink_commit publishes them; 0 when they are dropped (the builder's
+// growth failed, its stop pending, or the stdout write that made room
+// failed, as a failed print drops its rest).
+rt_sink_reserve: fn(sink: I64, count: I64) -> I64 {
+    if (sink == HOST_STDOUT_SINK) { return host_stdout_reserve_locked(count) }
+    if (sink == I64{0}) { return I64{0} }
+    used: rt_text_len(sink)
+    data: rt_text_reserve_extra(sink, rt_text_data(sink), used, count)
+    if (data == I64{0}) { return I64{0} }
+    wrapping(data + used)
+}
+
+rt_sink_commit: fn(sink: I64, count: I64) {
+    if (sink == HOST_STDOUT_SINK) {
+        host_stdout_commit_locked(count)
+        return
+    }
+    rt_text_store(wrapping(sink + I64{8}), rt_text_len(sink) + count)
 }
 
 #Export(c) jet_rt_string_builder_finish: fn(target: I64) -> I64 { target }

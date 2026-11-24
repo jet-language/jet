@@ -942,7 +942,7 @@ priv remote_send_as: fn(address: String, method: String, body: String, key: Stri
     if bearer != "" -> headers.push(http.Header{name: "authorization", value: "Bearer {bearer}"})
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
-        if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
+        if sends > 0 -> time.sleep(time.duration_ms(REMOTE_RESEND_MS * sends))
         reply: remote_send_once("{address}/{method}", headers, body)
         if reply.status == 0 {
             lost = reply.text
@@ -4393,7 +4393,7 @@ priv app_graph_backgrounds: fn() -> [AppBackground] Never! {
 priv app_background_run: fn(every_ns: Int, work: Shared<AppBackgroundRun>) -[Time.Wait]> Never! {
     every_ms: if every_ns < 1000000 -> 1 else -> every_ns /% 1000000
     loop {
-        tasks.sleep(every_ms)
+        time.sleep(time.duration_ms(every_ms))
         held: work.guard_read()
         app_background_once(held.value.run)
     }
@@ -8666,7 +8666,7 @@ priv(package) jobs: module {
             return
         }
         end: rt.clock_mono_ns() + wait_ms * 1000000
-        loop jobs_busy() && rt.clock_mono_ns() < end -> tasks.sleep(10)
+        loop jobs_busy() && rt.clock_mono_ns() < end -> time.sleep(10ms)
         jobs_leave()
     }
 }
@@ -8775,7 +8775,7 @@ priv jobs_tend: fn() Never! {
     loop {
         ticks: jobs_ticks() ?? return
         loop tick in ticks -> jobs_tick(tick)
-        tasks.sleep(JOB_TICK_MS)
+        time.sleep(time.duration_ms(JOB_TICK_MS))
     }
 }
 
@@ -8886,7 +8886,7 @@ priv job_run: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?, runs: I
             _: kept.value.failed(key, failures, failure, until)
         }
         if last -> break
-        tasks.sleep(job_backoff_ms(failures))
+        time.sleep(time.duration_ms(job_backoff_ms(failures)))
     }
     if outbox == .Val(store) -> jobs_running(jobs_store_name(store), key, false)
 }
@@ -8980,7 +8980,7 @@ priv schedule_run: fn(name: String, line: CronLine, run: fn(RemoteArgs) -> Strin
         loop {
             wait_ms: next * 60000 - time.unix_ns() /% 1000000
             if wait_ms <= 0 -> break
-            tasks.sleep(wait_ms)
+            time.sleep(time.duration_ms(wait_ms))
         }
         schedule_tick(name, next, run)
         due = next
@@ -9375,7 +9375,7 @@ priv jobs_seen: fn(seen: Shared<[String]>) -> [String] Never! {
     assert(transactions.end(committed, true))
     loop _ in 0..<1000 {
         if jobs_seen(seen).len() >= 6 -> break
-        tasks.sleep(10)
+        time.sleep(10ms)
     }
     log := jobs_seen(seen)
     log.sort()

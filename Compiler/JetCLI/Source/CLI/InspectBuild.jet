@@ -272,14 +272,15 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
                 // A `.Tidy` finding a package lint raised (`meta.report`)
                 // fails `jet build`; a run, a dev session or a test keeps
                 // going.
-                // copy: `query` is passed whole to report the findings.
-                query.diagnostics = query.tidy.copy()
+                // `query` is passed whole to report the findings, which
+                // stand as its diagnostics.
+                query.diagnostics = query.tidy.move()
+                query.tidy = [Diagnostic]{}
                 refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
             } else if query.plan == .Val(plan) {
                 if jet_cli_settings_package(snapshot) == .Val(package) {
                     recorded: jet_cli_record_build_contributions(plan, package, response.request, color)
-                    // copy: `refusal` is a payload view of `recorded`.
-                    if recorded == .Val(refusal) -> refused = Val(refusal.copy())
+                    if recorded.move() == .Val(refusal) -> refused = Val(refusal)
                 }
                 selection = Val(build_plan_selection(plan))
                 execution = Val(build_plan_execution(plan))
@@ -396,16 +397,14 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     // so one that drifts from its lock row is put back.
     before: if locked -> jet_cli_action_outputs_snapshot(root, produced) else -> [JetCLIActionOutput]{}
     shadowed: jet_cli_generated_shadow(file, root, generated, color)
-    // copy: `shadowed` is a payload view of the check's result.
-    if shadowed == .Val(refusal) -> return refusal.copy()
+    if shadowed.move() == .Val(refusal) -> return refusal
     // Under `write_generated: on` every generated source is written; a
     // module a step reads is that step's input, promised to it, so it is
     // written before any step runs whatever the option says (JetBuildSession
     // Schedule.jet).
     write_all: build_options_value(selected_options, "write_generated") == "on"
     unwritten: jet_cli_generated_write(file, root, generated, graph, write_all, color)
-    // copy: `unwritten` is a payload view of the write's result.
-    if unwritten == .Val(refusal) -> return refusal.copy()
+    if unwritten.move() == .Val(refusal) -> return refusal
     built: jet_cli_build_run_graph(graph, projected, generated, settings, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     // Each action output is locked beside what `build: fn` generated and
@@ -926,7 +925,16 @@ jet_cli_generated_request: fn(owned_request: &&JetDriverCompileRequest) -> JetCL
     query: response.query.move()
     folded := response.request.move()
     if query.internal_problem != None -> return {request: folded.move(), reports: [Diagnostic]{}}
-    if !query.complete -> return {request: folded.move(), reports: query.build_reports.move()}
+    if !query.complete {
+        // The build's own reports, after the compile's (build_reports_from).
+        own := [Diagnostic]{}
+        if query.build_reports_from >= 0 {
+            loop (index, report) in query.diagnostics.move() {
+                if index >= query.build_reports_from -> own.push(report)
+            }
+        }
+        return {request: folded.move(), reports: own}
+    }
     folded.generated_modules = query.generated.move()
     reports: if folded.mode == JetDriverCompileMode.Check -> query.tidy.move() else -> [Diagnostic]{}
     {request: folded.move(), reports: reports}
