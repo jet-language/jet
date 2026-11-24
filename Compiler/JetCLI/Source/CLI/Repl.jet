@@ -65,6 +65,9 @@ JET_CLI_REPL_INTERRUPTED: "Interrupted. External effects already performed were 
 // The label `jet eval <expression>` renders problems under.
 JET_CLI_REPL_EVAL_LABEL: "<eval>"
 
+// The shown text of a binding whose type has no `Display`.
+JET_CLI_REPL_UNSHOWN: "(a value with no Display)"
+
 // One live binding: its checked type and the text its value displays as.
 JetCLIReplBinding: struct {
     name: String,
@@ -901,20 +904,34 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [St
     bindings := [JetCLIReplReport]{}
     loop report in fresh -> bindings.push(report.copy())
     loop report in live -> bindings.push(report.copy())
-    // An echo `;` doesn't suppress shows its value first. A Unit value
-    // (`print(...)`) has no `Display` and nothing to show: when only the value
-    // lines fail, the turn is built again without the echo's, and an echo of
-    // another type keeps the first build's problems.
+    // An echo `;` doesn't suppress shows its value first, then each binding's.
     echoed := echo && !suppress
     reports := [JetCLIReplReport]{}
     if echoed -> reports.push(JetCLIReplReport{name: echo_name, ty: None, mutable: false})
     loop report in bindings -> reports.push(report.copy())
     program: jet_cli_repl_source(session, "", "", true, true, statement, reports)
     built := jet_cli_repl_build(session, program, program.statements_at + prefix.count_bytes(), true)
+    // A binding whose type has no `Display` (`cell := Shared{...}`) still
+    // binds: when only the value lines fail, the turn is built again showing
+    // only the echo, and each binding keeps its type with no shown text.
+    unshown := false
+    if built == .Failed(_, only_reports) -> unshown = only_reports && bindings.len() > 0
+    if unshown {
+        echo_only := [JetCLIReplReport]{}
+        if echoed -> echo_only.push(JetCLIReplReport{name: echo_name, ty: None, mutable: false})
+        quiet: jet_cli_repl_source(session, "", "", true, true, statement, echo_only)
+        rebuilt: jet_cli_repl_build(session, quiet, quiet.statements_at + prefix.count_bytes(), true)
+        if rebuilt == .Failed(_, only_echo) -> unshown = only_echo
+        if unshown -> built = rebuilt
+    }
+    shown_bindings: if unshown -> [JetCLIReplReport]{} else -> bindings
+    // A Unit value (`print(...)`) has no `Display` and nothing to show: when
+    // only the value lines fail, the turn is built again without the echo's,
+    // and an echo of another type keeps the earlier build's problems.
     retry := false
     if built == .Failed(_, only_reports) -> retry = echoed && only_reports
     if retry {
-        bare: jet_cli_repl_source(session, "", "", true, true, statement, bindings)
+        bare: jet_cli_repl_source(session, "", "", true, true, statement, shown_bindings)
         rebuilt := jet_cli_repl_build(session, bare, bare.statements_at + prefix.count_bytes(), true)
         unit := true
         if rebuilt == .Checked(binary, locals) {
@@ -933,10 +950,14 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [St
             echo_ty: if echoed -> jet_cli_repl_local_type(locals, echo_name) else -> Type?{None}
             shown := [JetCLIReplReport]{}
             if echoed -> shown.push(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false})
+            // Under `unshown` this turn's bindings keep their types and no
+            // shown text; otherwise each one's value line follows the echo's.
+            unshown_bindings := [JetCLIReplReport]{}
             loop report in fresh {
-                shown.push(JetCLIReplReport{name: report.name, ty: jet_cli_repl_local_type(locals, report.name), mutable: report.mutable})
+                typed: JetCLIReplReport{name: report.name, ty: jet_cli_repl_local_type(locals, report.name), mutable: report.mutable}
+                if unshown { unshown_bindings.push(typed) } else { shown.push(typed) }
             }
-            loop report in live -> shown.push(report.copy())
+            if unshown { unshown_bindings.extend(live) } else { shown.extend(live) }
             outcome: jet_cli_repl_run_child(session, binary)
             if outcome == {
                 .Interrupted -> return JetCLIReplTurnResult.Interrupted
@@ -954,6 +975,7 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, tables: ASTTables, body: [St
                         }
                         jet_cli_repl_bind(session, report, value.shown)
                     }
+                    loop report in unshown_bindings -> jet_cli_repl_bind(session, report, JET_CLI_REPL_UNSHOWN)
                     kept := [JetCLIReplBinding]{}
                     loop binding in session.bindings {
                         if !moved.contains(binding.name) -> kept.push(binding.copy())
@@ -1371,7 +1393,9 @@ jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions,
 }
 
 // `jet repl ...`: console forms are not built; the first positional is the
-// preload file. The authority and deep-check flags hold for the session.
+// preload file. The authority and deep-check flags hold for the session; a
+// flag the registry does not give `repl` is refused, so a misspelled `--deny`
+// never leaves the session with authority it was meant to drop.
 jet_cli_repl_plan: fn(jet_argv: [String], args: [String], color: Bool) -> JetCLIPlan Never! {
     console := false
     loop argument in jet_argv {
@@ -1384,6 +1408,7 @@ jet_cli_repl_plan: fn(jet_argv: [String], args: [String], color: Bool) -> JetCLI
         }
     }
     if console -> return jet_cli_not_ported("repl --console", color)
+    if jet_cli_check_flags(jet_argv, "repl", color) == .Val(refusal) -> return refusal
     project: jet_cli_option_value(jet_argv, "--project")
     preload: if args.len() > 1 -> Val(args[1]) else -> String?{None}
     deep_checks := DeepChecks{}

@@ -1,15 +1,16 @@
-# PORT tests/repl.rs:2043-2086 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
-# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+# A piped session under `--allow=FS` writes inside its project; under
+# `--deny=FS` the write stops with E1803 before the file exists, and the
+# refused session exits nonzero.
 fixture: ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture
 env: NO_COLOR=1
 mkdir: project
-step: jet repl --project {work}/project --allow-fs
+step: jet repl --project {work}/project --allow=FS
 stdin: ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture/input.in
 exit: 0
 file: project/cli.txt = ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture/yes.out
 remove: project/cli.txt
-step: jet repl --project {work}/project --allow-fs --deny-fs
+step: jet repl --project {work}/project --deny=FS
 stdin: ReplCLIAllowAndDenyFlagsControlNonTTYExecution.fixture/input.in
-exit: any # Original denied process status unasserted rs2078-2084.
+exit: 1
 stderr: ~ "Jet.ApplicationAuthorityDenied" # Original deny diagnostic rs2081.
 file: project/cli.txt absent

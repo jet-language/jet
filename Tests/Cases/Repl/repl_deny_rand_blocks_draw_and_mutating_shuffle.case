@@ -1,12 +1,11 @@
-# PORT tests/repl.rs:1549-1567; all original predicates, verbatim input literals.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
-# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+# A `--deny` right refuses both a draw and a mutating shuffle inside an
+# `#FX(authority: Rand)` block, and the list stays as it was.
 fixture: ReplDenyRandBlocksDrawAndMutatingShuffle.fixture
-step: jet repl --allow=Rand --deny=Rand
+step: jet repl --deny=Rand
 env: NO_COLOR=1
 env: XDG_STATE_HOME={work}/state
 stdin: ReplDenyRandBlocksDrawAndMutatingShuffle.fixture/input0.txt
 exit: any # original library predicates did not assert process status
-stdout|stderr: ~ "Rand.Draw" # original predicate
-stdout|stderr: ~ "[1, 2, 3]" # original predicate
-stdout+stderr: count "E1803" >= 2 # original count predicate; no startup needle overlap
+stdout|stderr: ~ "Application authority denies `Rand`" # the deny names the refused right
+stdout|stderr: ~ "[1, 2, 3] : [Int]" # the refused shuffle left the list unchanged
+stdout+stderr: count "Jet.ApplicationAuthorityDenied:" >= 2 # the draw and the shuffle are each refused

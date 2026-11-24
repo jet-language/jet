@@ -1,0 +1,8 @@
+# A flag the registry does not give `jet repl` is refused before the session
+# starts, so a misspelled deny never leaves the session with the authority it
+# was meant to drop.
+step: jet repl --deny-fs
+env: NO_COLOR=1
+exit: 2
+stderr: ~ "`--deny-fs` isn't a flag jet understands" # the refusal names the flag
+stdout: !~ "Interactive REPL" # no session starts
