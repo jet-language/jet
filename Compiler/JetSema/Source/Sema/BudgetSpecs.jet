@@ -14,6 +14,7 @@ use jet_foundation.[
     ModuleDecl,
     PERF_BUDGET_METRICS,
     PERF_BUDGET_PERCENTILES,
+    PERF_BUDGET_PROFILES,
     PERF_BUDGET_TARGET_CLASSES,
     SCOPE_TEST_MEASURE,
     Span,
@@ -861,20 +862,20 @@ sema_budget_target_selector: fn(name: String, expr: Expr) -> String BudgetSpecEr
     Err(sema_budget_fail(sema_budget_invalid(name, "target applicability contains a non-target selector", "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`", expr_span(expr))))
 }
 
-BUDGET_BUILT_IN_PROFILES: [String]{"dev", "release", "small", "test", "bench"}
-
 sema_budget_profile_selector: fn(name: String, expr: Expr) -> String BudgetSpecError! {
     selector_error: sema_budget_fail(sema_budget_invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr_span(expr)))
+    // Every PERF_BUDGET_PROFILES member but `Named` is a built-in profile.
     if expr == .EnumLit(_, variant, _, args, _, _, _) {
-        if (variant == "Dev" || variant == "Release" || variant == "Small" || variant == "Test" || variant == "Bench") && args.len() == 0 {
+        if variant != "Named" && PERF_BUDGET_PROFILES.contains(variant) && args.len() == 0 {
             return Ok(variant)
         }
         if variant == "Named" && args.len() == 1 {
             value: sema_budget_arg_value(args[0])
             profile: sema_budget_string_value(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "named profile selector requires constant quoted text", "write `.Named(\"lowercase_snake_case\")`", expr_span(value))))
+            lower: sema_budget_ascii_lower(profile)
             built_in := false
-            loop item in BUDGET_BUILT_IN_PROFILES {
-                if sema_budget_ascii_lower(profile) == item -> built_in = true
+            loop item in PERF_BUDGET_PROFILES {
+                if item != "Named" && lower == sema_budget_ascii_lower(item) -> built_in = true
             }
             if !sema_budget_snake_case(profile) || built_in {
                 return Err(sema_budget_fail(sema_budget_invalid(name, "`{profile}` is not a legal named profile", "use a declared lowercase_snake_case profile distinct from built-ins", expr_span(value))))
