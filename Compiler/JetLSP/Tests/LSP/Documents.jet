@@ -32,6 +32,16 @@ lsp_test_doc_text: fn(state: LSPDiagnosticState, uri: String) -> String Never! {
     assert_eq(lsp_update_document(server.diagnostic_state, Val(missing), is_open: true), None)
 }
 
+#Test("a document opened in another language is not kept or checked") {
+    state := lsp_diagnostic_state()
+    html: lsp_test_json("{{\"textDocument\":{{\"uri\":\"file:///w/panel.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"<p>🙂</p>\"}}}}")
+    assert_eq(lsp_update_document(state, Val(html), is_open: true), None)
+    assert(!state.docs.has_key("file:///w/panel.html"), "the html document is not kept")
+    assert_eq(lsp_test_change(state, "file:///w/panel.html", 2, "[{{\"text\":\"<p></p>\"}}]"), None)
+    jet: lsp_test_json("{{\"textDocument\":{{\"uri\":\"file:///w/a.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"x: 1\"}}}}")
+    assert_eq(lsp_update_document(state, Val(jet), is_open: true), Val("file:///w/a.jet"))
+}
+
 #Test("didChange applies its edits in order and advances the version") {
     state := lsp_diagnostic_state()
     uri: "file:///w/a.jet"

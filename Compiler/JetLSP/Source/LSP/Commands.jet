@@ -1,7 +1,7 @@
 // Code lenses and the commands `workspace/executeCommand` runs.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span, foundation_json_integer, foundation_json_quote]
+    jet_foundation.[DerivationRecord, Span, derivation_record_json, foundation_json_integer, foundation_json_quote]
     jet_impact.[ImpactReport]
 }
 
@@ -11,6 +11,12 @@ LSP_IMPACT_DEPTH: 3
 LSP_IMPACT_MAX_DEPTH: 64
 
 LSP_IMPACT_USAGE: "jet.impact expects arguments [uri, symbol, depth?]"
+
+LSP_REASONING_USAGE: "jet.reasoning expects arguments [uri, selection?, expanded?]"
+
+// How many derivations a `jet.reasoning` summary shows; an expanded
+// projection shows them all.
+LSP_REASONING_SUMMARY_RECORDS: 50
 
 // A lens on the document's `run: fn` entry runs the file (`jet.runFile`),
 // and one on each `#Test` runs its tests (`jet.testFile`). Each lens spans
@@ -42,12 +48,19 @@ lsp_text_value: fn(value: Dyn) -> String? Never! {
     None
 }
 
+// The commands `workspace/executeCommand` runs: `jet.impact` and
+// `jet.reasoning`.
+lsp_execute_command_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    command: lsp_text_member(params ?? Dyn.Null, "command") ?? return lsp_error_response(id, -32602, "executeCommand names no command")
+    if command == "jet.reasoning" -> return lsp_reasoning_response(server, params, id)
+    if command != "jet.impact" -> return lsp_error_response(id, -32602, "unknown command: {command}")
+    lsp_impact_response(server, params, id)
+}
+
 // `jet.impact` with arguments [uri, symbol, depth?] answers the impact
 // report over the open document's checked index: the symbol's references,
 // call sites, and its callers and callees to that depth.
-lsp_execute_command_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
-    command: lsp_text_member(params ?? Dyn.Null, "command") ?? return lsp_error_response(id, -32602, "executeCommand names no command")
-    if command != "jet.impact" -> return lsp_error_response(id, -32602, "unknown command: {command}")
+lsp_impact_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     arguments: if (lsp_param(params, "arguments") ?? return lsp_error_response(id, -32602, LSP_IMPACT_USAGE)) == {
         .Array(rows) -> rows
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
@@ -66,4 +79,83 @@ lsp_execute_command_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     view: lsp_view_of(server, uri) ?? return lsp_error_response(id, -32602, "{uri} is not open")
     index: view.checked.index ?? return lsp_error_response(id, -32603, "{uri} has no checked index")
     lsp_response(id, ImpactReport.analyze(index, symbol, depth).to_json())
+}
+
+// `jet.reasoning` with arguments [uri, selection?, expanded?] answers the
+// `jet.reasoning/v1` projection of the open document's checked derivations:
+// every record, or only those whose subject is `selection`, each sorted into
+// one lens. A summary (`expanded` false) shows the first
+// LSP_REASONING_SUMMARY_RECORDS and says when it cut the rest.
+lsp_reasoning_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    arguments: if (lsp_param(params, "arguments") ?? return lsp_error_response(id, -32602, LSP_REASONING_USAGE)) == {
+        .Array(rows) -> rows
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return lsp_error_response(id, -32602, LSP_REASONING_USAGE)
+        }
+    }
+    if arguments.len() < 1 -> return lsp_error_response(id, -32602, LSP_REASONING_USAGE)
+    uri: lsp_text_value(arguments[0]) ?? return lsp_error_response(id, -32602, LSP_REASONING_USAGE)
+    selection: if arguments.len() > 1 -> lsp_text_value(arguments[1]) ?? "" else -> ""
+    expanded: arguments.len() > 2 && arguments[2] == Dyn.Bool(true)
+    view: lsp_view_of(server, uri) ?? return lsp_error_response(id, -32602, "{uri} is not open")
+    index: view.checked.index ?? return lsp_error_response(id, -32603, "{uri} has no checked index")
+    records := [String]{}
+    lens_rows := [String:[String]]{}
+    selected := 0
+    loop record in index.derivations.records {
+        if selection != "" && record.subject != selection -> next
+        selected += 1
+        if !expanded && records.len() == LSP_REASONING_SUMMARY_RECORDS -> next
+        records.push(derivation_record_json(record))
+        lens: lsp_reasoning_lens(record)
+        rows := lens_rows.get(lens) ?? [String]{}
+        rows.push(foundation_json_quote(record.id))
+        lens_rows[lens] = rows
+    }
+    lenses: loop name in lsp_reasoning_lens_names() -> {
+        rows: lens_rows.get(name) ?? [String]{}
+        "{{\"name\":{foundation_json_quote(name)},\"records\":[{rows.join(",")}]}}"
+    }
+    shown: if selection == "" -> "all" else -> selection
+    limits: "{{\"records\":{selected},\"records_truncated\":{records.len() < selected},\"expanded\":{expanded}}}"
+    lsp_response(id, "{{\"kind\":\"jet.reasoning/v1\",\"source\":{foundation_json_quote(uri)},\"selection\":{foundation_json_quote(shown)},\"records\":[{records.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{limits}}}")
+}
+
+// One reasoning lens and the words in a derivation that place it there.
+LSPReasoningLens: struct {
+    name: String,
+    needles: [String],
+}
+
+lsp_reasoning_lenses: fn() -> [LSPReasoningLens] Never! {
+    [LSPReasoningLens]{
+        LSPReasoningLens{name: "value", needles: [String]{"value", "observed"}},
+        LSPReasoningLens{name: "ownership", needles: [String]{"owner", "ownership", "lifetime", "borrow"}},
+        LSPReasoningLens{name: "state", needles: [String]{"state", "transition"}},
+        LSPReasoningLens{name: "effects", needles: [String]{"effect", "event", "callback", "task"}},
+        LSPReasoningLens{name: "dependencies", needles: [String]{"depend", "premise", "input"}},
+        LSPReasoningLens{name: "impact", needles: [String]{"impact", "changed", "change"}},
+        LSPReasoningLens{name: "optimization", needles: [String]{"optim", "copy", "cost", "vector"}},
+        LSPReasoningLens{name: "counterexamples", needles: [String]{"counterexample", "witness"}},
+    }
+}
+
+// Every lens name in display order, `relationships` last.
+lsp_reasoning_lens_names: fn() -> [String] Never! {
+    names := [String]{}
+    loop lens in lsp_reasoning_lenses() -> names.push(lens.name)
+    names.push("relationships")
+    names
+}
+
+// The lens of a derivation: the first whose words its subject, claim, rule or
+// producer contains, else `relationships`.
+lsp_reasoning_lens: fn(record: DerivationRecord) -> String Never! {
+    text: "{record.subject} {record.claim} {record.rule} {record.producer}".to_lower()
+    loop lens in lsp_reasoning_lenses() {
+        loop needle in lens.needles {
+            if text.contains(needle) -> return lens.name
+        }
+    }
+    "relationships"
 }

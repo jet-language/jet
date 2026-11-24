@@ -2,7 +2,7 @@
 // `initialize` advertises: each one names a method the server answers.
 use {
     core.encoding.[Dyn]
-    jet_lsp.[lsp_error_response, lsp_member, lsp_parse_rpc_message, lsp_response]
+    jet_lsp.[lsp_error_response, lsp_member, lsp_parse_rpc_message, lsp_refused_id, lsp_response]
 }
 
 lsp_test_rpc_error: fn(body: String) -> Int Never! {
@@ -25,6 +25,19 @@ lsp_test_rpc_error: fn(body: String) -> Int Never! {
     assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"exit\"}}"), -32600)
     assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"id\":true,\"method\":\"exit\"}}"), -32600)
     assert_eq(lsp_test_rpc_error("{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":3}}"), -32600)
+    shutdown: lsp_parse_rpc_message("{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\",\"params\":null}}") ?? panic("null params read as no params")
+    assert_eq(lsp_test_int(shutdown, "id"), 4)
+}
+
+lsp_test_refusal: fn(body: String) -> String Never! {
+    lsp_error_response(lsp_refused_id(body), -32600, "Invalid Request")
+}
+
+#Test("a refused message is answered under its id when the id is readable") {
+    assert_eq(lsp_test_refusal("{{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"exit\",\"params\":3}}"), "{{\"jsonrpc\":\"2.0\",\"id\":9,\"error\":{{\"code\":-32600,\"message\":\"Invalid Request\"}}}}")
+    assert_eq(lsp_test_refusal("{{\"jsonrpc\":\"2.0\",\"id\":\"q\",\"method\":\"exit\",\"params\":3}}"), "{{\"jsonrpc\":\"2.0\",\"id\":\"q\",\"error\":{{\"code\":-32600,\"message\":\"Invalid Request\"}}}}")
+    assert_eq(lsp_test_refusal("{{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"exit\"}}"), "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32600,\"message\":\"Invalid Request\"}}}}")
+    assert_eq(lsp_test_refusal("{{"), "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32600,\"message\":\"Invalid Request\"}}}}")
 }
 
 #Test("responses echo the request id") {

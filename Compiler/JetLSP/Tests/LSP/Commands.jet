@@ -86,3 +86,32 @@ lsp_test_impact_params: fn(arguments: String) -> String Never! {
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_impact_params("[{uri},\"add\",\"deep\"]")), -32602)
     assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_impact_params("[\"file:///w/closed.jet\",\"add\"]")), -32602)
 }
+
+lsp_test_reasoning_params: fn(arguments: String) -> String Never! {
+    "{{\"command\":\"jet.reasoning\",\"arguments\":{arguments}}}"
+}
+
+#Test("jet.reasoning answers the reasoning projection of the open document") {
+    server := lsp_test_main_server()
+    uri: foundation_json_quote(LSP_TEST_MAIN_URI)
+    result: lsp_test_result(server, "workspace/executeCommand", lsp_test_reasoning_params("[{uri},\"\",true]"))
+    assert_eq(lsp_test_text(result, "kind"), "jet.reasoning/v1")
+    assert_eq(lsp_test_text(result, "selection"), "all")
+    records: lsp_test_rows(lsp_test_field(result, "records"))
+    assert(records.len() > 0, "the checked definitions have derivations")
+    limits: lsp_test_field(result, "limits")
+    assert_eq(lsp_test_int(limits, "records"), records.len())
+    assert(lsp_test_field(limits, "records_truncated") == Dyn.Bool(false), "an expanded projection is whole")
+    lenses: lsp_test_rows(lsp_test_field(result, "lenses"))
+    assert_eq(lenses.len(), 9)
+    assert_eq(lsp_test_text(lenses[8], "name"), "relationships")
+    filed := 0
+    loop lens in lenses -> filed += lsp_test_rows(lsp_test_field(lens, "records")).len()
+    assert_eq(filed, records.len())
+    subject: lsp_test_text(records[0], "subject")
+    chosen: lsp_test_result(server, "workspace/executeCommand", lsp_test_reasoning_params("[{uri},{foundation_json_quote(subject)}]"))
+    assert_eq(lsp_test_text(chosen, "selection"), subject)
+    loop record in lsp_test_rows(lsp_test_field(chosen, "records")) -> assert_eq(lsp_test_text(record, "subject"), subject)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_reasoning_params("[]")), -32602)
+    assert_eq(lsp_test_error_code(server, "workspace/executeCommand", lsp_test_reasoning_params("[\"file:///w/closed.jet\"]")), -32602)
+}

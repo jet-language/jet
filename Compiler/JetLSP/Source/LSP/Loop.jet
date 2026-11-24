@@ -3,7 +3,6 @@
 // order; before each one, the documents edited since their last publication
 // are checked and republished, so a request reads current diagnostics.
 use {
-    core.encoding.[Dyn]
     lsp_loop_term: core.term
     jet_foundation.[foundation_byte_text]
 }
@@ -72,7 +71,7 @@ lsp_serve_message: fn(server: &LSPServer, text: String, stdout: &lsp_loop_term.S
     message: if lsp_parse_rpc_message(text) == {
         .Ok(value) -> value
         .Err(problem) -> {
-            return lsp_write_message(stdout, lsp_error_response(Dyn.Null, problem.code, problem.message))
+            return lsp_write_message(stdout, lsp_error_response(lsp_refused_id(text), problem.code, problem.message))
         }
     }
     method: lsp_text_member(message, "method") ?? return

@@ -1,0 +1,19 @@
+# A document opened as `html` is not Jet: the server publishes no Jet
+# diagnostics for it and answers no Jet facts about it, while a Jet document
+# opened beside it is checked as usual.
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\",\"languageId\":\"html\",\"version\":1,\"text\":\"<p>🙂 hello</p>\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"run: fn() { print(1) }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/panel.html\"},\"position\":{\"line\":0,\"character\":3}}}"
+recv lsp collect until ndjson $[?id=2] #>= 1
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/panel.html"] #= 0 # the html document is never published
+json: stdout ndjson $[?method="textDocument/publishDiagnostics"][?params.uri="file://{work}/main.jet"] #= 1 # the Jet document is
+json: stdout ndjson $[?id=2][0].result = null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0
