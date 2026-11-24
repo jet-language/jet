@@ -398,8 +398,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:312 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:867 | `mem.Heap` or a counting allocator over it with a valid cap |
 | E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3770 | the file is readable and writable |
-| E1227 | EngineProtocolMismatch | Compiler/JetCLI/Source/CLI/InspectB.jet:684 | `jet` and its engines come from one toolchain |
-| E1228 | MissingEngine | Compiler/JetCLI/Source/CLI/InspectB.jet:665 | install the engine with the toolchain |
+| E1227 | EngineProtocolMismatch | Compiler/JetCLI/Source/CLI/InspectB.jet:685 | `jet` and its engines come from one toolchain |
+| E1228 | MissingEngine | Compiler/JetCLI/Source/CLI/InspectB.jet:666 | install the engine with the toolchain |
 | E1230 | AmbiguousWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:20 | a longer path or an `@source` names one member |
 | E1231 | UnknownWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:25 | the ref names a member in `workspace.jet` |
 | E1232 | MonorepoFetchFailed | Jetpack/Provider/Source/Core/Realized.jet:146 | the source is reachable and the subtree exists |
@@ -648,7 +648,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3220 | NoInlineForeignBinder | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1623 | `c`, `cpp` or `asm` |
 | E3222 | InlineForeignBuildFailed | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1639 | the foreign code or signature is fixed |
 | E3223 | AsmOperandMismatch | Compiler/JetSema/Source/Sema/InlineAssembly.jet:22 | operands match the signature |
-| E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1004 | build for Windows |
+| E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1005 | build for Windows |
 | E3261 | InvalidCImportBody | Compiler/JetParser/Source/Parser/Items.jet:1647 | name the C symbol with `= symbol` |
 | E3301 | OsApiOnNoOsTarget | Compiler/JetSema/Source/Sema/Calls/Core.jet:736 | use `core`-level APIs |
 | E3302 | UnknownTarget | Compiler/JetCLI/Source/CLI/Doctor.jet:348 | a supported target |
