@@ -81,7 +81,7 @@ sema_type_value_of: fn(ty: Type, value_type: Type, span: Span, environment: Sema
 // at `V = Rock` lowers as `Type{Rock}` does.
 sema_type_value_path: fn(ty: Type, span: Span, graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, context: &SemaCheckContext) -> TExpr {
     if !sema_ownership_type_mentions_generic(ty, environment.generic_params) {
-        path: type_name(sema_comptime_reflection_qualified_type(graph, sema_scope_caller_row(environment, graph), ty))
+        path: type_name(sema_comptime_reflection_named_type(graph, sema_scope_caller_row(environment, graph), ty, qualified: true))
         return sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: path}}}, span)
     }
     sema_node(context, Type.String, NodeKind.TypePath{ty: ty}, span)

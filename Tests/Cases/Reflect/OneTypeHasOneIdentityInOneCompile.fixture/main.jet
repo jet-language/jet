@@ -1,0 +1,54 @@
+// One type has one identity in one compile: inline module `geo`'s `Point`
+// reflected as a field type, as a generic argument, through a specialized
+// field and directly names the same TypeId, never a generated name.
+geo: module {
+    Point: struct {
+        x: Int,
+    }
+
+    Inner: struct {
+        p: Point,
+    }
+
+    INNER_FIELD: #run field_identity(Inner.reflect())
+
+    OWN: #run Point.reflect().identity.identity
+}
+
+Pair: struct<A, B> {
+    first: A,
+    second: B,
+}
+
+Outer: struct {
+    point: geo.Point,
+}
+
+field_identity: fn(info: TypeInfo) -> String {
+    info.fields[0].type.identity
+}
+
+field_name: fn(info: TypeInfo) -> String {
+    info.fields[0].type.name
+}
+
+FIELD: #run field_identity(Outer.reflect())
+
+ARGUMENT: #run Pair<geo.Point, Int>.reflect().generic_bindings[0].type.identity
+
+SPECIALIZED: #run field_identity(Pair<geo.Point, Int>.reflect())
+
+FIELD_NAME: #run field_name(Outer.reflect())
+
+ARGUMENT_NAME: #run Pair<geo.Point, Int>.reflect().generic_bindings[0].type.name
+
+run: fn() {
+    print("field {FIELD}")
+    print("inner field {geo.INNER_FIELD}")
+    print("argument {ARGUMENT}")
+    print("specialized {SPECIALIZED}")
+    print("own {geo.OWN}")
+    print("same {FIELD == ARGUMENT && ARGUMENT == SPECIALIZED && SPECIALIZED == geo.OWN && geo.OWN == geo.INNER_FIELD}")
+    print("field name {FIELD_NAME}")
+    print("argument name {ARGUMENT_NAME}")
+}

@@ -1945,10 +1945,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
             }
             .Const(definition) -> {
                 mapped := definition.copy()
-                mapped.value = sema_inline_rewrite_expr(visible, definition.value)
-                mapped.ty = sema_inline_rewrite_optional_type(visible, definition.ty)
-                mapped.markers = sema_inline_rewrite_markers(visible, definition.markers)
-                mapped.meta = sema_inline_rewrite_meta(visible, definition.meta)
+                sema_inline_rewrite_const(visible, mapped)
                 kept_rewritten.push(Item.Const{value: mapped})
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
@@ -2037,10 +2034,20 @@ sema_inline_private_type_span: fn(item: Item) -> Span? Never! {
     None
 }
 
+// `constant` with its value, declared type, markers and meta attribute
+// naming the member types and modules `rewrite` maps.
+sema_inline_rewrite_const: fn(rewrite: &SemaInlineRewrite, constant: &ConstDef) Never! {
+    constant.value = sema_inline_rewrite_expr(rewrite, constant.value)
+    constant.ty = sema_inline_rewrite_optional_type(rewrite, constant.ty)
+    constant.markers = sema_inline_rewrite_markers(rewrite, constant.markers)
+    constant.meta = sema_inline_rewrite_meta(rewrite, constant.meta)
+}
+
 // Rust `rewrite_exported_inline_types`: member types reach every function of
 // the enclosing file (and its inline modules) by their qualified name. The
-// file's own structs, enums and tests name them the same way, so a field
-// `stream: transport.BodyStream` holds the hoisted member type.
+// file's own structs, enums, constants and tests name them the same way, so a
+// field `stream: transport.BodyStream` holds the hoisted member type and a
+// top-level `#run geo.Inner.reflect()` reflects it.
 sema_inline_rewrite_exported: fn(items: &&[Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
     mapped := [Item]{}
     loop item in items.move() {
@@ -2066,6 +2073,11 @@ sema_inline_rewrite_exported: fn(items: &&[Item], rewrite: &SemaInlineRewrite) -
                 }
                 updated.methods = sema_inline_rewrite_funcs(rewrite, updated.methods)
                 mapped.push(Item.Impl{value: updated})
+            }
+            .Const(definition) -> {
+                updated := definition.move()
+                sema_inline_rewrite_const(rewrite, updated)
+                mapped.push(Item.Const{value: updated})
             }
             // A module's own bodies may name its `priv` member types.
             .CodeModule(definition) -> {
@@ -2101,7 +2113,7 @@ sema_inline_rewrite_exported: fn(items: &&[Item], rewrite: &SemaInlineRewrite) -
                 updated.base = sema_inline_rewrite_type(rewrite, updated.base)
                 mapped.push(Item.Distinct{value: updated})
             }
-            .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+            .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
                 mapped.push(item)
             }
         }
