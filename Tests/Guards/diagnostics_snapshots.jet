@@ -190,6 +190,24 @@ ds_part: fn(line: String, label: String) -> Bool {
     assert_eq(failures.join("\n"), "")
 }
 
+// A raise site that breaks its generated row's contract (a retired code, an
+// edit the row does not authorize or grade) still reports, with a
+// `Registry contract:` note (diagnostic_registry_contract_broken). No
+// snapshot may hold one: a fixture that reaches it fails its UI comparison,
+// and blessing that output fails here, so a broken contract never lands.
+#Test("no_report_snapshot_holds_a_registry_contract_note") {
+    guards_enter_root()
+    held := [String]{}
+    loop path in ds_report_fixture_snapshot_paths() {
+        if !ds_files.exists(path) -> next
+        lines: dc_read(path).split("\n").to_list()
+        loop (index, line) in lines {
+            if line.trim().starts_with("Registry contract: ") -> held.push("{path}:{index + 1}")
+        }
+    }
+    assert_eq(held.join("\n"), "")
+}
+
 // every UI, lint and report fixture
 // keeps its expected snapshot, unless the accepted-failing ledger owns it.
 #Test("every_report_fixture_has_a_snapshot_file") {

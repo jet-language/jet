@@ -519,9 +519,6 @@ diagnostic_registry_project_row: fn(diagnostic: ^^Diagnostic, row: DiagnosticReg
 // (diagnostic_display_identities), with clashes judged over the whole message.
 diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row: diagnostic_registry_row_of(code)
-    if row.status == DiagnosticRegistryStatus.Retired {
-        panic("diagnostic `{code}` is retired and is never reported")
-    }
     clashes: diagnostic_identity_clashes("{what}\n{why}\n{fix}".bytes())
     diagnostic: Diagnostic{
         moment: row.moment,
@@ -532,7 +529,27 @@ diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: Strin
         why: diagnostic_sentence_case_line(diagnostic_display_identities(why, clashes)),
         fix: diagnostic_sentence_case_line(diagnostic_display_identities(fix, clashes)),
     }
-    diagnostic_registry_project_row(diagnostic, row)
+    projected: diagnostic_registry_project_row(diagnostic, row)
+    if row.status == DiagnosticRegistryStatus.Retired {
+        return diagnostic_registry_contract_broken(projected, "is retired and is never reported")
+    }
+    projected
+}
+
+// The prefix of the note a diagnostic carries when its raise site broke the
+// contract of its generated registry row: a retired code, or an edit the row
+// does not authorize or grade. The report keeps its prose without that edit
+// and the note renders after it, so a broken contract still reaches the
+// user, and the diagnostics snapshot guard fails on any snapshot holding it.
+DIAGNOSTIC_REGISTRY_CONTRACT: "Registry contract: "
+
+// `diagnostic` with the registry-contract note that its code `reason`
+// (`is retired and is never reported`), before any detail it carries.
+diagnostic_registry_contract_broken: fn(diagnostic: ^^Diagnostic, reason: String) -> Diagnostic Never! {
+    updated := diagnostic
+    note: " {DIAGNOSTIC_REGISTRY_CONTRACT}`{updated.code}` {reason}"
+    updated.detail = if updated.detail == .Val(detail) -> Val("{note}\n{detail}") else -> Val(note)
+    updated
 }
 
 // Dynamic Source edits are authorized and graded by the generated row. This
@@ -542,11 +559,11 @@ diagnostic_registry_with_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> D
     updated := diagnostic
     row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
-        panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+        return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a registry no-fix reason")
     }
-    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
+    fix: row.structured_fix ?? return diagnostic_registry_contract_broken(updated, "has no registry-owned edit channel")
     if !diagnostic_registry_is_source_edit(fix) {
-        panic("updated `{updated.code}` has no Source edit registry channel")
+        return diagnostic_registry_contract_broken(updated, "has no Source edit registry channel")
     }
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
@@ -579,14 +596,14 @@ diagnostic_registry_with_edit_grade: fn(diagnostic: ^^Diagnostic, edit: TextEdit
     updated := diagnostic
     row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
-        panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+        return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a registry no-fix reason")
     }
-    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
+    fix: row.structured_fix ?? return diagnostic_registry_contract_broken(updated, "has no registry-owned edit channel")
     if !diagnostic_registry_is_source_edit(fix) {
-        panic("updated `{updated.code}` has no Source edit registry channel")
+        return diagnostic_registry_contract_broken(updated, "has no Source edit registry channel")
     }
     if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) {
-        panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
+        return diagnostic_registry_contract_broken(updated, "has a safe edit without an auto-applicable safety grade")
     }
     updated.edit = Val(edit)
     updated.applicability = Val(applicability)
@@ -598,11 +615,11 @@ diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: Tex
     updated := diagnostic
     row: diagnostic_registry_row_of(updated.code)
     if updated.no_fix_reason != None || row.no_fix_reason != None {
-        panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
+        return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a registry no-fix reason")
     }
-    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
+    fix: row.structured_fix ?? return diagnostic_registry_contract_broken(updated, "has no registry-owned generated edit channel")
     if !diagnostic_registry_is_generated_edit(fix) {
-        panic("updated `{updated.code}` has no generated structured edit registry channel")
+        return diagnostic_registry_contract_broken(updated, "has no generated structured edit registry channel")
     }
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
@@ -612,10 +629,10 @@ diagnostic_registry_with_structured_edit: fn(diagnostic: ^^Diagnostic, edit: Tex
 
 diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
+    if updated.edit != None -> return diagnostic_registry_contract_broken(updated, "already carries an edit")
     row: diagnostic_registry_row_of(updated.code)
     if row.no_fix_reason == None {
-        panic("updated `{updated.code}` has no explanatory row reason to replace")
+        return diagnostic_registry_contract_broken(updated, "has no explanatory row reason to replace")
     }
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Suggested)
@@ -630,7 +647,7 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^^Diagnostic,
 // fixes; the row's no-fix reason covers only the other sources of the error.
 diagnostic_registry_with_migration_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
+    if updated.edit != None -> return diagnostic_registry_contract_broken(updated, "already carries an edit")
     _: diagnostic_registry_row_of(updated.code)
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Safe)
@@ -642,10 +659,10 @@ diagnostic_registry_with_migration_edit: fn(diagnostic: ^^Diagnostic, edit: Text
 diagnostic_registry_with_alternative_edit: fn(diagnostic: ^^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None {
-        panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
+        return diagnostic_registry_contract_broken(updated, "cannot carry an edit and a no-fix reason")
     }
     if updated.edit == None || updated.applicability == None || updated.safety == None {
-        panic("updated `{updated.code}` needs a graded primary edit before an alternative")
+        return diagnostic_registry_contract_broken(updated, "needs a graded primary edit before an alternative")
     }
     if updated.structured == None {
         updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{edit}})
@@ -659,6 +676,6 @@ diagnostic_registry_with_alternative_edit: fn(diagnostic: ^^Diagnostic, edit: Te
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated
         }
-        .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> panic("updated `{updated.code}` cannot carry source edit alternatives with another structured payload")
+        .CryptoMisuse(_, _, _, _) | .BuildError(_) | .RuntimeHostFault(_) -> diagnostic_registry_contract_broken(updated, "cannot carry source edit alternatives with another structured payload")
     }
 }
