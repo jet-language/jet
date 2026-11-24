@@ -1,0 +1,119 @@
+use fq_files: core.files
+
+// One reader of the fact stores (D-META-REG2=A): `core.compiler.query` is the
+// one public fact query, over the three stores of D-LEDGER1 and no fourth,
+// and `jet inspect facts` is that very query, not a second reader. The
+// registry's rows reach a query only through `compiler.schema()`, the one
+// caller of SchemaFacts.jet's reader, and only `query` builds the rows it
+// returns. A second reader of either, anywhere a tool, the compiler or Core
+// could run it, fails here.
+FQ_ROOTS: [String]{"Compiler", "Core", "Tools", "Jetpack"}
+
+FQ_SKIPPED: [String]{"target", "node_modules"}
+
+// The registry's schema reader and its digest, and the one place each may
+// be called: the definition's file and the driver's `compiler.schema()`.
+FQ_SCHEMA_READERS: [String]{"schema_fact_rows(", "schema_fact_digest("}
+
+FQ_SCHEMA_HOMES: [String]{
+    "Compiler/JetFoundation/Source/Registry/SchemaFacts.jet",
+    "Compiler/JetDriver/Source/Driver/ComptimeCompiler.jet",
+}
+
+// The row builders behind `query`, private to core.compiler.
+FQ_ROW_BUILDERS: [String]{"program_fact(", "run_fact(", "fact_kind_refusal("}
+
+FQ_QUERY_HOME: "Core/Compiler/Compiler.jet"
+
+FQ_CLI: "Compiler/JetCLI/Source/CLI/InspectFacts.jet"
+
+// The stores, as FactSource's variants and as `--store` spells them.
+FQ_STORES: [String]{"Schema", "Program", "Run"}
+
+// This guard spells what it refuses.
+FQ_GUARD: "Tests/Guards/fact_query_one_reader.jet"
+
+// Every call of a reader in `readers` under `path` outside `homes`, as
+// `path:line: reader`. Symbolic links, hidden entries and build output are
+// skipped, and so are files that are not Jet.
+fq_calls: fn(path: String, readers: [String], homes: [String], out: &[String]) -[FS]> {
+    if fq_files.is_symlink(path) -> return
+    if fq_files.is_dir(path) {
+        loop child in (fq_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || FQ_SKIPPED.contains(child.name) -> next
+            fq_calls(child.path, readers, homes, out)
+        }
+        return
+    }
+    if !path.ends_with(".jet") || path == FQ_GUARD || homes.contains(path) -> return
+    text: fq_files.read(path) ?? return
+    loop (index, line) in text.lines() {
+        loop reader in readers {
+            if fq_called(line, reader) -> out.push("{path}:{index + 1}: {reader}")
+        }
+    }
+}
+
+// Whether `line` calls `reader` (`name(`) as a whole name, outside a `//`
+// comment: `my_schema_fact_rows(` is another function.
+fq_called: fn(line: String, reader: String) -[]> Bool {
+    code: line.split("//").to_list()[0]
+    parts: code.split(reader).to_list()
+    loop index in 0..<(parts.len() - 1) {
+        before: parts[index].bytes()
+        if before.len() == 0 -> return true
+        last: Int{before[before.len() - 1]}
+        if !(last == 95 || (last >= 48 && last <= 57) || (last >= 65 && last <= 90) || (last >= 97 && last <= 122)) -> return true
+    }
+    false
+}
+
+// The variants of the enum `name` in `text`, in order: the words that open
+// its body's lines up to the closing brace.
+fq_variants: fn(text: String, name: String) -[]> [String] {
+    variants := [String]{}
+    inside := false
+    loop line in text.lines() {
+        if !inside {
+            if line == ("{name}: enum {{") -> inside = true
+            next
+        }
+        if line == "}}" -> break
+        trimmed: line.trim()
+        if trimmed == "" || trimmed.starts_with("//") -> next
+        variants.push(trimmed.split("(").to_list()[0].copy())
+    }
+    variants
+}
+
+#Test("fact_query_one_reader") {
+    guards_enter_root()
+    found := [String]{}
+    loop root in FQ_ROOTS {
+        assert(fq_files.exists(root), "the root {root} must exist")
+        fq_calls(root, FQ_SCHEMA_READERS, FQ_SCHEMA_HOMES, found)
+        fq_calls(root, FQ_ROW_BUILDERS, [String]{FQ_QUERY_HOME}, found)
+    }
+    assert_eq(found.join("\n"), "")
+
+    // One public query over the three stores, and no fourth store.
+    core: fq_files.read(FQ_QUERY_HOME) ?? panic("read {FQ_QUERY_HOME}: {err}")
+    queries: core.lines().filter(fn(line) { line.starts_with("query: fn(") })
+    assert_eq(queries.len(), 1)
+    assert_eq(fq_variants(core, "FactSource"), FQ_STORES)
+    assert_eq(fq_variants(core, "Fact"), FQ_STORES)
+
+    // `jet inspect facts` answers each store with that very query.
+    cli: fq_files.read(FQ_CLI) ?? panic("read {FQ_CLI}: {err}")
+    loop store in FQ_STORES {
+        assert(cli.contains("compiler.query(compiler.FactSource.{store}"), "{FQ_CLI} must render `--store={store.lower()}` through `compiler.query`")
+    }
+    assert(cli.contains(`JET_CLI_FACT_STORES: [String]{"schema", "program", "run"}`), "{FQ_CLI} must name exactly the three stores")
+
+    // The matcher sees whole names outside comments only.
+    assert(fq_called("    rows: schema_fact_rows()", "schema_fact_rows("))
+    assert(!fq_called("    rows: my_schema_fact_rows()", "schema_fact_rows("))
+    assert(!fq_called("    // schema_fact_rows() reads the registry", "schema_fact_rows("))
+    assert(fq_called("x(run_fact(kind))", "run_fact("))
+    assert_eq(fq_variants("Fact: enum {{\n    Schema(fact: SchemaFact),\n    // note\n    Run(fact: RunFact),\n}}\n", "Fact"), [String]{"Schema", "Run"})
+}

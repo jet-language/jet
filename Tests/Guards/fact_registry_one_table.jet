@@ -1,0 +1,92 @@
+use frt_files: core.files
+
+// One registration table (D-META-REG1=A): marker rules, knowledge planes,
+// rights and build facts are rows of JetFoundation's REGISTRATION_ROWS, told
+// apart by what each attaches to. A module constant anywhere else that holds
+// marker rule rows or fact plane rows (a literal of either row type, or a
+// `#run` of a reader of either Prelude text or a projection of the table) is
+// a second registration table, and fails here.
+FRT_ROOTS: [String]{"Compiler", "Core", "Tools", "Jetpack"}
+
+FRT_SKIPPED: [String]{"target", "node_modules"}
+
+FRT_HOME: "Compiler/JetFoundation/Source/Registry/RegistrationFacts.jet"
+
+// The one constant, as its home spells it.
+FRT_TABLE: "REGISTRATION_ROWS: #run registration_read(MARKER_SOURCE, FACT_SOURCE)"
+
+// What a second table's initializer would spell: a row-list literal, a
+// reader of a Prelude registration text, or a projection of the table.
+FRT_TABLE_SPELLINGS: [String]{
+    "[TAppliedRule]{{",
+    "[RegistrationFactRow]{{",
+    "[RegistrationRow]{{",
+    "marker_source_read(",
+    "fact_source_read(",
+    "registration_read(",
+    "registration_marker_rules(",
+    "registration_fact_rows(",
+}
+
+// This guard spells what it refuses.
+FRT_GUARD: "Tests/Guards/fact_registry_one_table.jet"
+
+// Whether `line` opens a module constant: an uppercase name at column 0
+// followed by `: `.
+frt_constant: fn(line: String) -[]> Bool {
+    bytes: line.bytes()
+    if bytes.len() == 0 -> return false
+    first: Int{bytes[0]}
+    if first < 65 || first > 90 -> return false
+    name: line.split(": ").to_list()[0]
+    if name.len() == line.len() -> return false
+    loop byte in name.bytes() {
+        code: Int{byte}
+        if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90)) -> return false
+    }
+    true
+}
+
+// Every module constant under `path` whose line spells a registration table,
+// as `path:line`, except the one table in its home. Symbolic links, hidden
+// entries and build output are skipped, and so are files that are not Jet.
+frt_tables: fn(path: String, out: &[String]) -[FS]> {
+    if frt_files.is_symlink(path) -> return
+    if frt_files.is_dir(path) {
+        loop child in (frt_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || FRT_SKIPPED.contains(child.name) -> next
+            frt_tables(child.path, out)
+        }
+        return
+    }
+    if !path.ends_with(".jet") || path == FRT_GUARD -> return
+    text: frt_files.read(path) ?? return
+    loop (index, line) in text.lines() {
+        if !frt_constant(line) -> next
+        if path == FRT_HOME && line == FRT_TABLE -> next
+        loop spelling in FRT_TABLE_SPELLINGS {
+            if line.contains(spelling) {
+                out.push("{path}:{index + 1}: {line.split(": ").to_list()[0]}")
+                break
+            }
+        }
+    }
+}
+
+#Test("fact_registry_one_table") {
+    guards_enter_root()
+    home: frt_files.read(FRT_HOME) ?? panic("read {FRT_HOME}: {err}")
+    assert(home.lines().contains(FRT_TABLE), "{FRT_HOME} must hold the one registration table")
+    found := [String]{}
+    loop root in FRT_ROOTS {
+        assert(frt_files.exists(root), "the root {root} must exist")
+        frt_tables(root, found)
+    }
+    assert_eq(found.join("\n"), "")
+
+    // The matcher sees module constants only.
+    assert(frt_constant("MARKER_RULES: #run marker_source_read(MARKER_SOURCE)"))
+    assert(!frt_constant("    rules: marker_source_read(MARKER_SOURCE)"))
+    assert(!frt_constant("registration_read: fn(markers: String, facts: String) -> [RegistrationRow] Never! {{"))
+    assert(!frt_constant("// MARKER_RULES: a comment"))
+}

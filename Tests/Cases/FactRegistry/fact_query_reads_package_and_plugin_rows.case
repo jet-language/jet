@@ -1,0 +1,29 @@
+# The one fact query covers every store D-META-REG2 names, and no fourth: the
+# schema store is the toolchain's registry, and the program store is the
+# checked package with every plugin package it uses. A package that never
+# spells `program` or `compiler` is still read whole: the command is the
+# reader. Its own marker, a Prelude marker and a plugin package's marker are
+# rows of the same answer, each with its stable identity.
+fixture: FactQueryReadsPackageAndPluginRows.fixture
+env: NO_COLOR=1
+step: jet inspect facts --store=program --kind=marker main.jet
+exit: 0
+stdout: ~ "program source main.jet revision " # the header names the package source and its revision
+stdout: ~ ", kind marker: 3 facts, complete" # every marker the package's types carry
+stdout: ~ "Audit.Audited  main.Order  main.Order#marker:Audit.Audited" # the plugin package's marker
+stdout: ~ "Reviewed  main.Order  main.Order#marker:Reviewed" # the package's own marker
+stdout: ~ "Comparable  main.OrderID  main.OrderID#marker:Comparable" # a Prelude marker
+stderr: empty
+step: jet inspect facts --store=program --kind=marker main.jet --json
+exit: 0
+stdout: ~ "\"store\":\"program\"" # the same answer, as the inspect.facts document
+stdout: ~ "main.Order#marker:Audit.Audited" # with the same identities
+stderr: empty
+step: jet inspect facts --store=schema --kind=marker
+exit: 0
+stdout: ~ "schema snapshot " # the registry's store
+stdout: ~ " facts, complete" # the registry answers whole
+stderr: empty
+step: jet inspect facts --store=plugin --kind=marker
+exit: nonzero
+stderr: ~ "`--store=plugin` names no fact store; the stores are schema, program, run" # no fourth store

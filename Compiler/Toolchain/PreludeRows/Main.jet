@@ -1,15 +1,16 @@
 // The parsed rows of the Prelude texts the compiler carries (the marker
-// declarations and their applied-rule rows, the value tags, the derive
-// providers and the words their templates spell, the original error
-// declarations and the unit catalog), written as Jet literals into
-// JetSema/Source/Sema/PreludeRows.jet, so neither a compile nor the compiler's
-// own build parses those texts. Each row is what its JetSema reader returns
-// for the text Toolchain/PreludeSources.jet copied
-// (sema_marker_module_prelude_decls, sema_marker_module_prelude_rules,
-// sema_marker_module_prelude_tags, sema_derive_builtin_providers,
-// sema_registration_derive_words, sema_registration_original_error_program,
-// sema_units_catalog_read), spelled field by field after the AST declarations
-// JetFoundation/Source holds.
+// declarations, the value tags, the derive providers and the words their
+// templates spell, the original error declarations and the unit catalog),
+// written as Jet literals into JetSema/Source/Sema/PreludeRows.jet, so neither
+// a compile nor the compiler's own build parses those texts. The marker
+// rules' applied-rule rows are not here: they are rows of the one
+// registration table (JetFoundation REGISTRATION_ROWS). Each row is what its
+// JetSema reader returns for the text Toolchain/PreludeSources.jet copied
+// (sema_marker_module_prelude_decls, sema_marker_module_prelude_tags,
+// sema_derive_builtin_providers, sema_registration_derive_words,
+// sema_registration_original_error_program, sema_units_catalog_read),
+// spelled field by field after the AST declarations JetFoundation/Source
+// holds.
 // JetParser's Tests/PreludeBuildRows.jet holds each constant to its reader,
 // and this tool's --check, one of the ratchets every commit keeps
 // (Tools/Agent/Land.jet RATCHETS), fails on a stale row, so an edited Prelude
@@ -26,7 +27,6 @@ use {
     jet_sema.[
         sema_derive_builtin_providers,
         sema_marker_module_prelude_decls,
-        sema_marker_module_prelude_rules,
         sema_marker_module_prelude_tags,
         sema_registration_derive_words,
         sema_registration_original_error_program,
@@ -356,7 +356,6 @@ rows_constants: fn() -> [RowsConstant] Never! {
     marker_decls: sema_marker_module_prelude_decls()
     [RowsConstant]{
         RowsConstant{name: "SEMA_PRELUDE_MARKER_DECLS", ty: list_type("MarkerDecl"), value: marker_decls.encode()},
-        RowsConstant{name: "SEMA_PRELUDE_MARKER_RULES", ty: list_type("TAppliedRule"), value: sema_marker_module_prelude_rules(marker_decls).encode()},
         RowsConstant{name: "SEMA_PRELUDE_TAGS", ty: list_type("TagDef"), value: sema_marker_module_prelude_tags().encode()},
         RowsConstant{name: "SEMA_PRELUDE_DERIVE_PROVIDERS", ty: list_type("MarkerDecl"), value: sema_derive_builtin_providers().encode()},
         RowsConstant{name: "SEMA_PRELUDE_DERIVE_WORDS", ty: Type.List{element: Type.String}, value: sema_registration_derive_words().encode()},

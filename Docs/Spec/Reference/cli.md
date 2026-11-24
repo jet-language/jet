@@ -1557,7 +1557,13 @@ class gives it, and its marker rows every marker of `Compiler/Prelude/Markers.je
 and `Compiler/Prelude/Traits.jet`; `Tools/Agent/SyntaxDictionaryRows.jet` and
 `Tools/Agent/OwnedTraitRows.jet` generate those rows, whose `--check` fails when
 they drift, and only their meanings are written by hand, on the row. A generated
-row with no written meaning explains itself plainly (``The marker `#Unsafe`.``).
+row with no written meaning explains itself plainly, and a marker row adds the
+sites its registration row attaches it at (``The marker `#Unsafe`. It attaches
+at: Function, Method, Block, Operation.``). Marker rules, knowledge planes,
+rights and build facts are rows of one registration table, told apart by what
+each attaches to: `jet explain Taint` answers ``attaches to a value.``,
+`jet explain Rights` ``attaches to a scope.`` and `jet explain Build.OS`
+``attaches to the build.``.
 A token can have several position-dependent meanings, examples, consequences,
 and related diagnostic codes. Lookup ignores ASCII case; `--verbose` adds the
 registry name and decision only in text mode. Unknown syntax-like queries

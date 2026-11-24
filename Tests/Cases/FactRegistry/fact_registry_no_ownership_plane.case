@@ -1,0 +1,26 @@
+# The borrow checker is a prover, never a fact plane (D-FACT-OWN1=A): the
+# registry has no ownership row. What the prover establishes reaches the
+# registry only as the read-only planes it publishes (movedness,
+# send-safety, view provenance), and the ownership sigils stay `&` and `&&`.
+env: NO_COLOR=1
+step: jet inspect facts --store=schema --kind=read
+exit: 0
+stdout: ~ ", kind read: " # the registry's read rows
+stdout: ~ " facts, complete" # the whole registry answered
+stdout: !~ "Ownership" # no ownership plane
+stdout: !~ "$ownership" # no ownership read
+stdout: !~ "$borrow" # no borrow read
+stdout: ~ "$movedness  Movedness" # the prover publishes movedness
+stdout: ~ "$sendability  Sendability" # the prover publishes send-safety
+stdout: ~ "$view_provenance  ViewProvenance" # the prover publishes view provenance
+stderr: empty
+step: jet inspect facts --store=schema --kind=marker
+exit: 0
+stdout: ~ " facts, complete" # the whole marker table answered
+stdout: !~ "Ownership" # no ownership marker row
+stdout: !~ "Borrow" # no borrow marker row
+stderr: empty
+step: jet inspect reserved
+exit: 0
+stdout: ~ "&          borrow for write" # the write-borrow sigil as ratified
+stdout: ~ "&&         take ownership" # the take sigil as ratified
