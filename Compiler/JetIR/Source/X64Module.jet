@@ -2339,7 +2339,7 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
 // Int's row.
 #Test("A Shared handle's debug type reaches its value through its cell's payload word") {
     m := ir_module_new()
-    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int_row: ir_scalar_type_row(m, Type.Int)
     handle: Type.Shared{inner: Type.Int}
     handle_tid: ir_module_intern_tid(m, handle)
     row: ir_intern_type(m, ir_type_name(handle), ir_owned_layout(IRTypeKind.Pointer, handle_tid, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone"))
@@ -2426,8 +2426,8 @@ ir_x64_member_name: fn(name: String) -> String? Never! {
 #Test("a fast O0 module's tail call is a jump") {
     m := ir_module_new()
     m.fast_o0 = true
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    bool_row: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    bool_row: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     acc: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "acc"), 1)

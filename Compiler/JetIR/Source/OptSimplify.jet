@@ -1626,8 +1626,8 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 #Test("A floored quotient times its power-of-two divisor is the dividend masked") {
     loop level in 1..<3 {
         m := ir_module_new()
-        exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        exact: ir_scalar_type_row(m, Type.Int)
+        flag: ir_scalar_type_row(m, Type.Bool)
         g := ir_function_new("even", "test:even.jet.even", "", "even.jet", 1)
         x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         g.result = flag
@@ -1666,7 +1666,7 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 // of d into e goes (c changes under it), and x is bound to p.
 #Test("A bind follows its slot's replacement only to a slot written once") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     f := ir_function_new("pick", "test:pick.jet.pick", "", "pick.jet", 1)
     p: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
     a: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "a"), 2)
@@ -1696,7 +1696,7 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 #Test("A Float value computed again from the same operands is the first one") {
     loop level in 1..<3 {
         m := ir_module_new()
-        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        float: ir_scalar_type_row(m, Type.Float)
         g := ir_function_new("hyp", "test:hyp.jet.hyp", "", "hyp.jet", 1)
         x: ir_slot(g, float, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         y: ir_slot(g, float, IRSlotKind.Param, ir_intern_name(m, "y"), 1)
@@ -1741,8 +1741,8 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 #Test("A short-circuit Bool read only by a branch becomes branches on its operands") {
     loop level in 1..<3 {
         m := ir_module_new()
-        exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        exact: ir_scalar_type_row(m, Type.Int)
+        flag: ir_scalar_type_row(m, Type.Bool)
         g := ir_function_new("pick", "test:pick.jet.pick", "", "pick.jet", 1)
         p: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
         q: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "q"), 1)
@@ -1795,8 +1795,8 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 #Test("Every link of a short-circuit chain becomes a branch on its operand") {
     loop level in 1..<3 {
         m := ir_module_new()
-        exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        exact: ir_scalar_type_row(m, Type.Int)
+        flag: ir_scalar_type_row(m, Type.Bool)
         g := ir_function_new("any", "test:any.jet.any", "", "any.jet", 1)
         p: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
         q: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "q"), 1)
@@ -1847,7 +1847,7 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 #Test("An address sum moves to just before the access it addresses") {
     loop level in 1..<3 {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         g := ir_function_new("copy", "test:copy.jet.copy", "", "copy.jet", 1)
         p: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
         q: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "q"), 1)
@@ -1898,7 +1898,7 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 #Test("A pointer step moves to just before the access it addresses") {
     loop level in 1..<3 {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         pointer_row: ir_pointer_row(m)
         g := ir_function_new("step", "test:step.jet.step", "", "step.jet", 1)
         p: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
@@ -1947,8 +1947,8 @@ ir_opt_unwrap: fn(f: ^IRFunction) -> Int Never! {
 // function (an emission log's `sites` row names it).
 #Test("A fused compare keeps the inline site of the compare it replaces") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("run", "test:run.jet.run", "", "run.jet", 1)
     diff: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "diff"), 1)
     f.result = flag

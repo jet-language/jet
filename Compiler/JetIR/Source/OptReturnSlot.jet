@@ -515,8 +515,8 @@ ir_opt_slot_emit: fn(v: ^IRFunction, f: IRFunction, k: Int, map: [Int]) Never! {
 // `forward`, run gets the box through pass(x) = make(x), which returns it.
 ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     res_tid: ir_module_intern_tid(m, Type.Named{name: "Res"})
     res: ir_intern_type(m, "Res", ir_layout(IRTypeKind.Pointer, res_tid, 8, 8, IRClass.Pointer, false, 64, ""))
     boxed: ir_mark_box(m, res)
@@ -606,7 +606,7 @@ ir_opt_slot_test_calls: fn(m: IRModule, name: String) -> Int Never! {
 // returns make's box instead.
 ir_opt_slot_test_wide: fn(users: Int, leak: Bool) -> IRModule Never! {
     m := ir_opt_slot_test_module(false, 16)
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     boxed: m.functions[0].result
     loop k in 0..<users {
         f := ir_opt_slot_test_use(m, word, boxed, k, leak && k == users - 1)
@@ -651,8 +651,8 @@ ir_opt_slot_test_use: fn(m: ^IRModule, word: Int, boxed: Int, k: Int, leaks: Boo
 // ir_box_hand_over), then ends the box. The struct's type has drop `glue`.
 ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     quad_tid: ir_module_intern_tid(m, Type.Named{name: "Quad"})
     quad: ir_intern_type(m, "Quad", ir_layout(IRTypeKind.Aggregate, quad_tid, 32, 8, IRClass.Memory, false, 0, glue))
     res_tid: ir_module_intern_tid(m, Type.Named{name: "QuadRes"})

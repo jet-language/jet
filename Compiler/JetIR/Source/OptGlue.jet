@@ -91,9 +91,9 @@ ir_opt_glue_drops: fn(f: ^IRFunction, m: IRModule, keys: [String]) Never! {
 // Drop outside a loop stays a Drop.
 #Test("A Drop through light glue is inlined outside a loop too") {
     m := ir_module_new()
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    text: ir_type_row(m, Type.String) ?? panic("no String row")
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    int: ir_scalar_type_row(m, Type.Int)
+    text: ir_scalar_type_row(m, Type.String)
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     assert_eq(m.types[text].drop, "jet_rt_string_drop")
     zone_tid: ir_module_intern_tid(m, Type.Named{name: "Zone"})
     zone: ir_intern_type(m, "Zone", ir_layout(IRTypeKind.Aggregate, zone_tid, 16, 8, IRClass.Memory, false, 0, "#drop<Zone>"))

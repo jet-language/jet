@@ -391,8 +391,8 @@ ir_opt_strength: fn(m: IRModule, f: ^IRFunction) -> Int Never! {
 
 #Test("Strength reduction replaces base + i * 24 inside a counted loop with ptr += 24") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no Word row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("stride24", "test:strength.jet.stride24", "", "strength.jet", 1)
     base: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "base"), 1)
     n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)

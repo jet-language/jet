@@ -711,8 +711,8 @@ ir_opt_put_uniques: fn(f: ^IRFunction, by_callee: [[Int]], params: [Int], helper
 // through the struct, 3 only stores another field.
 ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     canvas_tid: ir_module_intern_tid(m, Type.Named{name: "Canvas"})
     canvas_row: ir_intern_type(m, "Canvas", ir_layout(IRTypeKind.Aggregate, canvas_tid, 56, 8, IRClass.Memory, false, 0, ""))
     list_tid: ir_module_intern_tid(m, Type.Named{name: "[I64]"})
@@ -785,7 +785,7 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
 // fill after ir_opt_unique_to_callers.
 ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     list_tid: ir_module_intern_tid(m, Type.Named{name: "[I64]"})
     list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Memory, false, 0, ""))
     main := ir_function_new("main", "test:main.jet.main", "", "main.jet", 1)

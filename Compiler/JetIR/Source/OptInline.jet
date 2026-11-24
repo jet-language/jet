@@ -760,8 +760,8 @@ ir_opt_emit_mapped: fn(f: ^IRFunction, callee: IRFunction, k: Int, map: [Int], l
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    int: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("f", "test:cost.jet.f", "", "cost.jet", 1)
     n: ir_slot(f, int, IRSlotKind.Param, -1, 1)
     f.result = int
@@ -796,8 +796,8 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    int: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("g", "test:quiet.jet.g", "", "quiet.jet", 1)
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
@@ -842,8 +842,8 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     m := ir_module_new()
     poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
     name_column_set(m.name_rows_keys, m.name_rows, IR_STOP_POLL_KEY, poll)
-    text: ir_type_row(m, Type.String) ?? panic("no String row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    text: ir_scalar_type_row(m, Type.String)
+    flag: ir_scalar_type_row(m, Type.Bool)
     zone_tid: ir_module_intern_tid(m, Type.Named{name: "Zone"})
     zone: ir_intern_type(m, "Zone", ir_layout(IRTypeKind.Aggregate, zone_tid, 8, 8, IRClass.Memory, false, 0, "#drop<Zone>"))
     glue := ir_hashed_function("drop", "#drop<Zone>", "jet_ir_drop_", "", 0)
@@ -899,7 +899,7 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
 
 #Test("Every marked call is inlined, each marked callee first; a cycle of marked calls stays a call") {
     m := ir_module_new()
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int: ir_scalar_type_row(m, Type.Int)
     g := ir_function_new("g", "test:marked.jet.g", "", "marked.jet", 1)
     g.inline_always = true
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
@@ -1046,7 +1046,7 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 
 #Test("A last-owner routine is never marked, and a marked caller of it is still inlined") {
     m := ir_module_new()
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int: ir_scalar_type_row(m, Type.Int)
     // Made as BuildOwn.jet makes every last-owner routine: one shared copy
     // the drop sites call, unmarked.
     last := ir_hashed_function(IR_LAST_OWNER, "#box.last<test>", "jet_ir_last_", "", 0)
@@ -1074,7 +1074,7 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 // parameter itself when None) is located.
 ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
     m := ir_module_new()
-    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    int: ir_scalar_type_row(m, Type.Int)
     g := ir_function_new("g", "test:kernel.jet.g", "", "kernel.jet", 1)
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
@@ -1105,7 +1105,7 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
 #Test("An inlined body's parameter and folded locals are located in its inline site") {
     loop level in 1..<3 {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
         g := ir_function_new("bump", "test:bump.jet.bump", "", "bump.jet", 1)
         by: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "by"), 1)
         g.result = word
@@ -1161,8 +1161,8 @@ ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
 #Test("An inlined parameter bound to a variable written again is located only in its site") {
     loop level in 1..<3 {
         m := ir_module_new()
-        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+        truth: ir_scalar_type_row(m, Type.Bool)
         g := ir_function_new("square", "test:sum.jet.square", "", "sum.jet", 1)
         i: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
         g.result = word

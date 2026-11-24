@@ -3922,8 +3922,8 @@ ir_x64_patch_function_in: fn(m: IRModule, fast: IRX64FastModule, row: Int, poll:
 #Test("copy-and-patch O0 stencils compile arithmetic, control flow, and folded constants cleanly") {
     m := ir_module_new()
     m.fast_o0 = true
-    i64_row: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    bool_row: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    i64_row: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    bool_row: ir_scalar_type_row(m, Type.Bool)
     f := ir_function_new("sum", "test:patch.jet.sum", "", "patch.jet", 1)
     a: ir_slot(f, i64_row, IRSlotKind.Param, ir_intern_name(m, "a"), 1)
     b: ir_slot(f, i64_row, IRSlotKind.Param, ir_intern_name(m, "b"), 1)

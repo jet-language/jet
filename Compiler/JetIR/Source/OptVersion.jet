@@ -1320,8 +1320,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // 3x + 1 and t + 1 stay inline and wrap, with no overflow test.
 #Test("A guarded loop's arithmetic on its guarded Ints wraps") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("steps", "test:steps.jet.steps", "", "steps.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     g.result = exact
@@ -1375,8 +1375,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // the guarded loop of steps(x), nor the counted loop of count(n).
 #Test("A versioned loop is not versioned again") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("steps", "test:steps.jet.steps", "", "steps.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     g.result = exact
@@ -1438,8 +1438,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // once before the loop with n and p, so no pass tests it and x + p wraps.
 #Test("A stepped index is guarded once, before its loop") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
@@ -1489,8 +1489,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // wraps.
 #Test("An index stepped up to a List's length is guarded once, before its loop") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     list_tid: ir_module_intern_tid(m, Type.List{element: Type.Int})
     list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
     holder_tid: ir_module_intern_tid(m, Type.Named{name: "Holder"})
@@ -1554,8 +1554,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // most 2^60 and wraps. The total, written by the loop, keeps its test.
 #Test("A loop's Mul factors are guarded to the product width") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("rows", "test:rows.jet.rows", "", "rows.jet", 1)
     i: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
@@ -1604,8 +1604,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // was keeps both tests and the overflow test.
 #Test("A range Loop's stepped index is guarded once, before its loop") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("walk", "test:walk.jet.walk", "", "walk.jet", 1)
     x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
@@ -1661,9 +1661,9 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // zero IntBig and both `total += delta` and `m += 3` wrap.
 #Test("A bounded U8 accumulator in a strided loop has no per-iteration IntBig guard") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    byte_row: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? panic("no U8 row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
+    byte_row: ir_scalar_type_row(m, Type.IntN{signed: false, bits: 8})
     word: ir_word_row(m)
     g := ir_function_new("stride_accum", "test:stride.jet.stride_accum", "", "stride.jet", 1)
     ptr: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)
@@ -1724,10 +1724,10 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // bounded by a List length proves `count` inline in OptRange without any IntBig guard.
 #Test("A conditional +1 accumulator bounded by a List length wraps without IntBig") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     byte_ty: Type.IntN{signed: false, bits: 8}
-    byte_row: ir_type_row(m, byte_ty) ?? panic("no U8 row")
+    byte_row: ir_scalar_type_row(m, byte_ty)
     word: ir_word_row(m)
     list_tid: ir_module_intern_tid(m, Type.List{element: byte_ty})
     list: ir_intern_type(m, "test [U8]", ir_layout(IRTypeKind.Aggregate, list_tid, 24, 8, IRClass.Pointer, false, 64, ""))
@@ -1792,8 +1792,8 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
 // loaded from memory, so OptVersion reverts to the plain unversioned loop.
 #Test("A loop whose loaded operand prevents wrapping is not unprofitably versioned") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     word: ir_word_row(m)
     g := ir_function_new("load_accum", "test:load.jet.load_accum", "", "load.jet", 1)
     ptr: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "ptr"), 1)

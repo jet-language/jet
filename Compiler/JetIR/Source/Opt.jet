@@ -2109,8 +2109,8 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // carrying the arm, and IR Lint finds nothing after any pass.
 #Test("A counted loop whose only inner loop sits in an exit arm is versioned") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     stop: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "stop"), 1)
@@ -2159,8 +2159,8 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // changes (the test of i and its branch stay, no Simplify folds them).
 #Test("O0 marks a bounded counter's step and leaves the rest of the body") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
@@ -2224,8 +2224,8 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // of the compacted function gives.
 #Test("Compacting with facts leaves the facts a refill gives") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
@@ -2267,8 +2267,8 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // correction toward zero.
 #Test("the inline Int facts mark a division of a nonnegative dividend IR_OVERFLOW_NONNEG") {
     m := ir_module_new()
-    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    exact: ir_scalar_type_row(m, Type.Int)
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
     one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
@@ -2312,8 +2312,8 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // steps by 1 stay inside I64 and wrap, the step by 2 keeps its test.
 #Test("A word step by 1 toward a value it is compared past wraps") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
+    flag: ir_scalar_type_row(m, Type.Bool)
     g := ir_function_new("count", "test:count.jet.count", "", "count.jet", 1)
     n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
@@ -2358,7 +2358,7 @@ ir_opt_tarjan_visit: fn(t: ^OptTarjan, calls: OptCalls, root: Int, work: ^[Int],
 // it), callback (its address is taken) and run (no direct caller) are not.
 #Test("Cold functions are the CLI parser and what only cold functions call") {
     m := ir_module_new()
-    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    word: ir_scalar_type_row(m, Type.IntN{signed: true, bits: 64})
     parse := ir_function_new("__jet_cli_parse", "test:cli.jet.__jet_cli_parse", "", "cli.jet", 1)
     address: ir_slot(parse, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(parse, IROp.FunctionAddress, address, 5, -1, -1, 1)
