@@ -25,7 +25,7 @@ Zed:
   later **Rebuild** inside Zed produces the same parser. The script also
   mirrors the grammar into the local git repository `grammar-repo/` that
   `extension.toml` names, and removes `grammars/jet/` so Zed can clone it.
-- `extension.wasm` is prebuilt from [`WasmSrc`](wasm-src/) for
+- `extension.wasm` is prebuilt from [`WasmSrc`](WasmSrc/) for
   `wasm32-wasip2`. Zed only compiles Rust when `Cargo.toml` sits in the
   extension root, which fails for nix-only toolchains, and it loads a present
   `extension.wasm` on its own.
