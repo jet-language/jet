@@ -2370,7 +2370,7 @@ state_publish: fn(path: String, temporary: String, bytes: [U8], label: String) S
         }
         .Ok(_) -> {}
     }
-    if core.service.__host_rename(temporary, path) == {
+    if service_files_rt.atomic_rename(temporary, path) == {
         .Err(error) -> {
             service_remove(temporary).drop("the temporary is removed best-effort")
             Err(state_error("cannot publish service {label}: {error}"))
