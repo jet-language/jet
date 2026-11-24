@@ -7,7 +7,7 @@
 use {
     jet_driver.[JetDriverSourceDocument, JetDriverToolStageItem]
     jet_foundation.[Span]
-    jet_semindex.[semindex_declared, semindex_imports]
+    jet_semindex.[SemCall, semindex_ambient_print, semindex_declared, semindex_imports]
     jet_lsp.[LSPChecked, LSPChecker, LSPServer, lsp_server]
 }
 
@@ -110,4 +110,33 @@ lsp_print_signature: fn(server: &LSPServer, line: Int, character: Int) -> [Strin
     imported: lsp_print_hover(server, 3, 5)
     assert(imported.contains("print: fn(text: String)"), "the Core contract")
     assert(imported.contains("Declared in `core.term` as `core.term.print`."), "Core's declaration")
+}
+
+// The declaration the index's call record names for the call whose name
+// starts at `start`.
+lsp_print_call_declaration: fn(calls: [SemCall], start: Int) -> String {
+    loop call in calls {
+        if call.span.start == start -> return call.declaration ?? "none"
+    }
+    "no call"
+}
+
+#Test("print_hover_signature_call_record_agree") {
+    server := lsp_print_server(LSP_PRINT_SOURCE)
+    checked: LSPPrintChecker{}.check("/w/main.jet", [JetDriverSourceDocument]{JetDriverSourceDocument{path: "/w/main.jet", source: LSP_PRINT_SOURCE}})
+    index: checked.index ?? panic("the fixture check builds an index")
+    // `print` starts at byte 31, `term.print`'s `print` at byte 56.
+    ambient: semindex_ambient_print()
+    assert_eq(lsp_print_call_declaration(index.calls, 31), ambient.def.identity)
+    core := ""
+    loop declared in checked.declared {
+        if declared.def.qualified_name == "core.term.print" -> core = "{declared.def.identity}"
+    }
+    assert_eq(core, "declared:core.term.print")
+    assert_eq(lsp_print_call_declaration(index.calls, 56), core)
+    // Hover and signature help show the contract of the same two declarations.
+    assert(lsp_print_hover(server, 3, 5).contains("Declared in `{ambient.def.module_path}` as `{ambient.def.qualified_name}`."), "hover names the ambient print the call record names")
+    assert(lsp_print_signature(server, 3, 14)[0].contains(ambient.symbol.signature), "signature help shows its declared contract")
+    assert(lsp_print_hover(server, 4, 10).contains("Declared in `core.term` as `core.term.print`."), "hover names the Core print the call record names")
+    assert_eq(lsp_print_signature(server, 4, 16)[1], "text: String")
 }

@@ -131,11 +131,16 @@ SemRef: struct {
     fact: SemCompilerFact?,
 }
 
+// One call. `callee` is the name the call writes; `declaration` is the
+// identity of the declaration it names, when the index knows it: a checked
+// definition's identity, or `declared:{qualified name}` for a Core function
+// an import binds and for the ambient `print` (see Declared.jet).
 SemCall: struct {
     caller: String,
     callee: String,
     module_path: String,
     span: Span,
+    declaration: String?{None},
 }
 
 // `kind` is `field`, `variant`, or `method`; `origin` is `type_body`,
