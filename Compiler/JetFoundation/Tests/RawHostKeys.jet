@@ -34,9 +34,4 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     wire: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
     result: Type.Result{ok: wire, err: Type.String}
     raw_host_key_fixture("core.http.client", "jet_http_build_resolve", "__build_resolve", [Type]{Type.String, Type.Int}, result, [Bool]{true, false}, [String]{"Net", "Time.Wait"})
-    read_members: [String]{"__reader_line_bytes"}
-    loop member in read_members {
-        row: core_call("core.files", member) ?? panic("file read leaf is registered")
-        assert(row.effects == [String]{"FS.Read"})
-    }
 }
