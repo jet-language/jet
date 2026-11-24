@@ -544,14 +544,6 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             else -> None
         }
         "core.plugin" -> Val("Exec")
-        // A web page's scene is the browser's, so core.ui's leaves use
-        // `Browser`, but for the three the window host shares with the page:
-        // a native window routes a click, a drop or typing to its slot's
-        // handler through them, as the page does.
-        "core.ui" -> if member == {
-            "__change" | "__click" | "__drop" -> None
-            else -> Val("Browser")
-        }
         "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
         "core.crypto.vault" -> if member == {
             "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")

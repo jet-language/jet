@@ -76,10 +76,10 @@ ui_web_scene_fresh := I64{0}
     #Unsafe("a web page's module runs on one thread") { ui_web_attached = I64{1} }
 }
 
-// core.ui.__web_attached: whether a web page attached.
+// jet.runtime.ui.web_attached: whether a web page attached.
 #Export(c) jet_ui_web_attached: fn() -> Bool { ui_web_attached != I64{0} }
 
-// core.ui.__web_scene: keeps a copy of the borrowed scene as the latest.
+// jet.runtime.ui.web_scene: keeps a copy of the borrowed scene as the latest.
 #Export(c) jet_ui_web_scene: fn(text: I64) {
     scene: jet_rt_string_clone(text)
     if (ui_web_scene != I64{0}) { jet_rt_string_drop(ui_web_scene) }
@@ -162,7 +162,7 @@ ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
     jet_int_owned_from_i64(id)
 }
 
-// core.ui.__click, and a web host's click on a scene element: runs the
+// jet.runtime.ui.click, and a web host's click on a scene element: runs the
 // handler click slot `id` keeps, as the reactive runtime runs an effect body
 // (invoke(env, out) with no result slot). The slot is read under the host
 // lock, as any task may be registering one; the handler runs after it. An
@@ -224,7 +224,7 @@ ui_web_text_take: fn() -> I64 {
     ui_drop_run(id, kind, text)
 }
 
-// core.ui.__drop: a native window's drop of one item on a text input, as
+// jet.runtime.ui.drop: a native window's drop of one item on a text input, as
 // jet_ui_web_drop, over a copy of the borrowed text.
 #Export(c) jet_ui_drop: fn(id: I64, kind: I64, text: I64) {
     ui_drop_run(id, kind, jet_rt_string_clone(text))
@@ -261,7 +261,7 @@ ui_drop_run: fn(id: I64, kind: I64, text: I64) {
     ui_change_run(id, text)
 }
 
-// core.ui.__change: a native window's typing in a text input, as
+// jet.runtime.ui.change: a native window's typing in a text input, as
 // jet_ui_web_change, over a copy of the borrowed text.
 #Export(c) jet_ui_change: fn(id: I64, text: I64) { ui_change_run(id, jet_rt_string_clone(text)) }
 
