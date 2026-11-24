@@ -7993,7 +7993,7 @@ file in a `Tests/` tree. The ratchet refuses either.
     {
       "package": "Tests",
       "file": "Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet",
-      "line": 35,
+      "line": 40,
       "column": 5,
       "reason": "the exit callback has no captured state"
     },
@@ -12939,7 +12939,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Tests | Tests/Cases/Context/ContextScratchBlockRewindsAndMovesWhatLeaves.fixture/scratch.jet | 18:5 | "only reads the address of an item the caller keeps alive" |
 | Tests | Tests/Cases/ControlAndData/ExplicitExitUnmappedKeeps101OnEveryTier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
 | Tests | Tests/Cases/ControlAndData/ExplicitProcessExitCleanupGoldenMatchesAllExecutionTiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
-| Tests | Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet | 35:5 | "the exit callback has no captured state" |
+| Tests | Tests/Cases/ControlAndData/ProcessExitLeavesHeapToKernelAfterUserCleanup.fixture/main.jet | 40:5 | "the exit callback has no captured state" |
 | Tests | Tests/Cases/CoreCryptoArgon2ID/Argon2IDParallelLanesMatchRfcVectorAcrossTiers/Input/run.jet | 8:5 | "fixed Argon2id parallel-lane known-answer vector" |
 | Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 16:5 | "the caller's block holds the bytes and stays unused while the adopted region and its blocks live" |
 | Tests | Tests/Cases/CoreLib/CoreMemRegionsHandOutBlocksAndAWindowChecksItsIndex.fixture/main.jet | 43:5 | "the shelf's blocks were claimed from regions that are closed, and nothing reads them again" |
