@@ -59,7 +59,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$` | config-surface environment read `$NAME`; program source has no `$` words |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
-| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), and the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features` |
+| `#build` | compiler build-fact value: `#build.target.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`), the targeted machine's `#build.target.triple`, `.target.layout.pointer_bits`, `.target.layout.word_bits`, `.target.layout.cache_line` and `.target.cpu_features`, and the machine running the build's `#build.host.os` (`Linux`, `MacOS` or `Windows`) and `#build.host.arch` (`x86_64`, `aarch64`); a Core call made while building asks the machine running the build, as `#build.host.*` reads it, while build outputs follow the target |
 | `#package` | package site value: `#package.name`, `.version` |
 | `#phase` | compiler `Phase` value, filled in for each compiled copy |
 | `#program` | compiler authorized checked-program fact value |

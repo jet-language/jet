@@ -415,7 +415,8 @@ jet_driver_fact_error_diagnostic: fn(error: FactError) -> Diagnostic Never! {
 // manifest; a manifest-less source takes its name from the entry file
 // (`<source>`). A fact nobody writes takes the compiler's value
 // (`<default>`); the target machine supplies the OS and cache line
-// (`<target>`); the lock's `[build.stamp]` supplies the stamp; `--profile`
+// (`<target>`) and the machine running the build its own OS and architecture
+// (`<host>`); the lock's `[build.stamp]` supplies the stamp; `--profile`
 // is the command-line writer of the profile.
 jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, load: JetDriverLoadResult, package: Int?, request: JetDriverCompileRequest) -> [FactContribution] Never! {
     manifest: if package == .Val(at) && load.packages[at].manifest_path != None -> Val(jet_driver_manifest_label(load.packages[at])) else -> String?{None}
@@ -443,6 +444,8 @@ jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, load: JetD
         "Build.Stamp.Toolchain" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.stamp_toolchain}, jet_driver_stamp_source(stamped, "toolchain"))}
         "Build.Stamp.At" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.stamp_at}, jet_driver_stamp_source(stamped, "at"))}
         "Build.Cpu.CacheLine" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Int{value: COMPILER_BUILD_CPU_CACHE_LINE_GENERIC}, "<target>")}
+        "Build.Host.OS" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.host_os}, "<host>")}
+        "Build.Host.Arch" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.host_arch}, "<host>")}
         else -> return [FactContribution]{}
     }
 }

@@ -23,6 +23,7 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
         .LintAllow -> "lint_allow"
         .CheckRemoval -> "check_removal"
         .LinkOverride -> "link_override"
+        .HostFacts -> "host_facts"
         .ScopedGC -> "gc"
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
@@ -53,6 +54,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
         "lint_allow" -> Val(PolicyKey.LintAllow)
         "check_removal" -> Val(PolicyKey.CheckRemoval)
         "link_override" -> Val(PolicyKey.LinkOverride)
+        "host_facts" -> Val(PolicyKey.HostFacts)
         "gc" -> Val(PolicyKey.ScopedGC)
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
@@ -67,7 +69,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
         .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes | .Failures | .Runtime -> false
-        .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride -> true
+        .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride | .HostFacts -> true
     }
 }
 
@@ -211,6 +213,7 @@ POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.LintAllow, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.CheckRemoval, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.LinkOverride, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    {key: PolicyKey.HostFacts, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.ScopedGC, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Override},
     {key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
@@ -308,6 +311,7 @@ policy_key_debug_text: fn(key: PolicyKey) -> String Never! {
         .LintAllow -> "LintAllow"
         .CheckRemoval -> "CheckRemoval"
         .LinkOverride -> "LinkOverride"
+        .HostFacts -> "HostFacts"
         .ScopedGC -> "ScopedGc"
         .ExplicitUnits -> "ExplicitUnits"
         .Copies -> "Copies"

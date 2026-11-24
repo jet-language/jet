@@ -1,0 +1,14 @@
+// `#build.host.*` names the machine running the build and `#build.target.*`
+// the machine the build is for. Built natively both name the same machine;
+// `jet build --target web` keeps the host and names the Web target. A Core
+// call made while building acts on the machine running the build, so
+// `PREP_OS` names the host's OS whatever the target.
+use core.sys
+
+PREP_OS: #run sys.name()
+
+run: fn() {
+    print("host {#build.host.os} {#build.host.arch}")
+    print("target {#build.target.os}")
+    print("prep call {PREP_OS}")
+}

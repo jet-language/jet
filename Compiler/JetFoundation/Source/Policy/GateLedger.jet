@@ -17,12 +17,14 @@ GateKind: enum {
     LintAllow,
     CheckRemoval,
     LinkOverride,
+    HostFacts,
 }
 
 // A build option value that removes a runtime memory-safety check
 // (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
 // The `link_args` build option: native link inputs
 // the program's own declarations don't name.
+// A `#build.host.*` read: the build reads the machine running it.
 
 gate_kind_policy_key: fn(kind: GateKind) -> PolicyKey Never! {
     if kind == {
@@ -42,6 +44,7 @@ gate_kind_policy_key: fn(kind: GateKind) -> PolicyKey Never! {
         .LintAllow -> PolicyKey.LintAllow
         .CheckRemoval -> PolicyKey.CheckRemoval
         .LinkOverride -> PolicyKey.LinkOverride
+        .HostFacts -> PolicyKey.HostFacts
     }
 }
 
@@ -65,13 +68,14 @@ gate_kind_parse: fn(value: String) -> GateKind? Never! {
         "lint_allow" -> Val(GateKind.LintAllow)
         "check_removal" -> Val(GateKind.CheckRemoval)
         "link_override" -> Val(GateKind.LinkOverride)
+        "host" | "host_facts" -> Val(GateKind.HostFacts)
         else -> None
     }
 }
 
 gate_kind_is_security: fn(kind: GateKind) -> Bool Never! {
     if kind == {
-        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic | .CheckRemoval | .LinkOverride -> true
+        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic | .CheckRemoval | .LinkOverride | .HostFacts -> true
         .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow -> false
     }
 }
@@ -94,6 +98,7 @@ gate_kind_order: fn(kind: GateKind) -> Int Never! {
         .Structure -> 13
         .LintAllow -> 14
         .LinkOverride -> 15
+        .HostFacts -> 16
     }
 }
 

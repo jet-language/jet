@@ -891,6 +891,16 @@ jet_driver_host_os_key: fn(value: String) -> String Never! {
     ""
 }
 
+// The value a `#build.host.*` read folds to: the running machine's OS as
+// `#build.target.os` spells one (`Linux`), or its architecture (`x86_64`);
+// "" when the host names neither.
+jet_driver_host_fact_value: fn(request: JetDriverCompileRequest, path: String) -> String Never! {
+    if path == "#build.host.arch" -> return request.host_facts.host_arch ?? ""
+    if path != "#build.host.os" -> return ""
+    raw_os: request.host_facts.active_os ?? return ""
+    if target_os_parse(raw_os) == .Val(running) -> target_os_name(running) else -> ""
+}
+
 // The build snapshot sema folds `#package.*` and `build.*` from (Rust
 // `seed_build_facts_from_stamp`). A manifest package names itself; the
 // manifest-less rung uses the entry file stem and version `0.0.0`. The stamp is
@@ -945,6 +955,8 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         stamp_dirty: stamp_dirty,
         stamp_toolchain: toolchain,
         stamp_at: stamp_at,
+        host_os: jet_driver_host_fact_value(request, "#build.host.os"),
+        host_arch: jet_driver_host_fact_value(request, "#build.host.arch"),
         artifact_build: request.artifact_build,
         settings: settings.move(),
         package_settings: package_settings.move(),

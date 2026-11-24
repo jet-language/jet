@@ -190,8 +190,9 @@ jet_driver_build_generated_handoffs: fn(row: BuildSessionGeneratedModule) -> Str
 // BuildGraph it built, then `kept`: the digest of each kept output's bytes
 // as the build left them, then `generated`: each module `build: fn` made, as
 // the plan's rows say it, jet_driver_build_generated_json, then `settings`:
-// each package's resolved settings and their writers) and
-// `.jet/build/times.json` (its BuildTimes).
+// each package's resolved settings and their writers, then `host_reads`:
+// each `#build.host.*` read of a package's sources and the value it read)
+// and `.jet/build/times.json` (its BuildTimes).
 jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], generated: [BuildSessionGeneratedModule], settings: [JetDriverBuildPackageSettings]) -> String Never! {
     targets: loop target in graph.targets -> "{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)},\"plugin\":{jet_driver_build_id(target.plugin)}}}"
     actions: loop action in graph.actions -> jet_driver_build_action_json(action)
@@ -207,12 +208,16 @@ jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], g
     held: loop row in kept -> "{{\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.digest)}}}"
     made: loop row in generated -> jet_driver_build_generated_json(row)
     resolved := [String]{}
+    reads := [String]{}
     loop package in settings {
         loop row in package.settings {
             resolved.push(jet_driver_build_setting_json(package.package, row))
         }
+        loop read in package.host_reads {
+            reads.push("{{\"package\":{foundation_json_quote(package.package)},\"file\":{foundation_json_quote(read.file)},\"line\":{read.line},\"fact\":{foundation_json_quote(read.fact)},\"value\":{foundation_json_quote(read.value)}}}")
+        }
     }
-    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}],\"settings\":[{resolved.join(",")}]}}\n"
+    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}],\"settings\":[{resolved.join(",")}],\"host_reads\":[{reads.join(",")}]}}\n"
 }
 
 jet_driver_build_action_json: fn(action: BuildGraphAction) -> String Never! {
@@ -228,11 +233,22 @@ JetDriverBuildKept: struct {
     digest: String,
 }
 
-// One loaded package's resolved settings as the receipt records them. Not a
+// One loaded package's resolved settings and the reads of the machine
+// running the build its sources make, as the receipt records them. Not a
 // core.build field: a receipt row only.
 JetDriverBuildPackageSettings: struct {
     package: String,
     settings: [JetDriverBuildSetting],
+    host_reads: [JetDriverBuildHostRead]{[JetDriverBuildHostRead]{}},
+}
+
+// One `#build.host.*` read: the source that wrote it (`file`, from the
+// entry root, and its `line`), the fact and the value the build read.
+JetDriverBuildHostRead: struct {
+    file: String,
+    line: Int,
+    fact: String,
+    value: String,
 }
 
 // One resolved setting: every writer of its chain

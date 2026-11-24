@@ -337,7 +337,13 @@ sema_gate_expression_value: fn(source: String, expression: Expr, ledger: &GateLe
         .RawOf(_, span, _) -> {
             gate_ledger_push(ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, ".raw", None, "typed fact extracted as a raw value", "recorded"))
         }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+        // `#build.host.os`: the build reads the machine running it.
+        .Field(base, member, span, _) -> {
+            if sema_fact_build_rooted(base) && sema_fact_path_text(base, member) == .Val(path) && path.starts_with("#build.host.") {
+                gate_ledger_push(ledger, gate_source_entry(GateKind.HostFacts, "build", "expression", source, span, path, None, "read of the machine running the build", "recorded"))
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
 }
 
@@ -511,6 +517,25 @@ sema_gate_source_policy_diagnostics: fn(modules: [SemaGateModule]) -> [GateDiagn
         sema_gate_items(row.source, row.program.tables, row.program.items, ledger, context)
     }
     sema_gate_policy_diagnostics(ledger, modules, -1)
+}
+
+// Each `#build.host.*` read written in `program`, in source order: the
+// `host_facts` gates the ledger records for it.
+sema_gate_host_reads: fn(source: String, program: Program) -> [GateEntry] Never! {
+    context: Shared{SemaGateContext{checked_text_types: name_table_sized(2), unsafe_gates: [UnsafeGateInspection]{}}}
+    ledger := GateLedger{}
+    sema_gate_statements(source, program.tables, program.script_body, ledger, context)
+    sema_gate_items(source, program.tables, program.items, ledger, context)
+    reads := [GateEntry]{}
+    loop entry in ledger.rows.move() {
+        if entry.kind == GateKind.HostFacts -> reads.push(entry)
+    }
+    reads.sort_by(fn(left, right) { sema_gate_start(left) <=> sema_gate_start(right) })
+    reads
+}
+
+sema_gate_start: fn(entry: GateEntry) -> Int Never! {
+    if entry.span == .Val(span) -> span.start else -> 0
 }
 
 sema_gate_module_forbids: fn(row: SemaGateModule) -> Bool Never! {

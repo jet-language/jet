@@ -1,0 +1,27 @@
+# The cross leg of Examples/Metaprogramming/BuildTime/HostAndTargetFacts:
+# `#build.host.*` reads the machine running the build and `#build.target.*`
+# the machine the build is for, so its web build made on Linux x86-64 reads
+# the Linux host beside the Web target. A Core call made while building asks
+# the machine running the build, so the prep `sys.name()` answers `linux` in
+# the web build too, and a build action reads the same facts as prep code.
+fixture: BuildHostFactsSitBesideTheTargetFacts.fixture
+copy: {root}/Examples/Metaprogramming/BuildTime/HostAndTargetFacts.jet main.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+requires: os-name:linux
+requires: arch:x86_64
+step: jet run main.jet
+exit: 0
+stdout: = ../../../Examples/Metaprogramming/BuildTime/HostAndTargetFacts.out
+when tool bwrap
+step: jet build action.jet --allow=Exec,FS
+exit: 0
+file: facts.txt = "host Linux x86_64 target Linux" # the build action read the facts
+end when
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node .jet/build/app.js
+exit: 0
+stdout: = "host Linux x86_64\ntarget Web\nprep call linux\n" # the host stays Linux while the target is Web
+end when

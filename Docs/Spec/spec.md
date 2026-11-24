@@ -1357,6 +1357,18 @@ closed set, so an `else` arm is E0641. The subject must be `#build.target.os`
 (E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants, each named once
 (E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
 
+`#build.target.*` always names the machine the build is for. The machine
+running the build is `#build.host.os` (`Linux`, `MacOS` or `Windows`) and
+`#build.host.arch` (`x86_64`, `aarch64`), read the same way by a `#run` value,
+a `build: fn` and a build action's arguments; a Linux x86-64 web build reads
+`Linux`, `x86_64` and `Web`. A Core call made while building acts on the
+machine running it: `sys.name()` in a `#run` value answers the build machine's
+OS and `files.list_dir` reads its disk. Build outputs (`b.add_executable`,
+`b.add_install`, `b.action` outputs) follow the target, and Core never reads
+`#build.host.*` (E0302). The host facts enter the package's cache key, so a
+build on another machine never reuses a prepared value
+(D-BUILD-TOOLCHAIN1).
+
 Inside an `@` binding, `embed_file`, `embed_bytes`, and `find` are the only
 sanctioned build-time file operations. Their path, hash, and purity rules are
 defined in the compile-time section above.
@@ -3518,7 +3530,8 @@ Every deliberate gate uses the same organization → package → module →
 function → block tightening ladder. The policy keys are `unsafe`, `impure`,
 `nondeterministic`, `dependency_grant`, `build_flag`, `session_flag`,
 `trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`, `state_transition`,
-`precision_demotion`, `structure`, `lint_allow`, `check_removal`, and `link_override`. The first three retain
+`precision_demotion`, `structure`, `lint_allow`, `check_removal`, `link_override`,
+and `host_facts`. The first three retain
 their existing modes; every added key accepts `.GateOnly` (the default) or
 `.Forbid`. An organization's `.Forbid` cannot be widened by a package
 `.GateOnly` or a command-line allowance. Refusal reports the gate kind, its
@@ -3543,6 +3556,16 @@ before their writer publishes state; invocation choices are checked before
 dispatch. An ordinary deliberate `jet update jet` is not a forced pin.
 See [`Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet`](../../Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet).
 (D-GATE-LAW1=A)
+
+Each `#build.host.os` or `#build.host.arch` read is a `host_facts` gate at the
+reading expression: `jet inspect gates` lists it, and a package or
+organization `policy: { host_facts: .Forbid }` refuses it with E3415 at its
+line, so a package can keep its build from depending on the machine running
+it. `jet build` of a package also records each read in
+`.jet/build/receipt.json` (`host_reads`: the source, its line, the fact and
+the value read) and adds `host:<fact>=<value>` to the reading source's check
+node, so the receipt of a build on another machine names other keys
+(D-BUILD-TOOLCHAIN1).
 
 
 ### Explicit pointer casts

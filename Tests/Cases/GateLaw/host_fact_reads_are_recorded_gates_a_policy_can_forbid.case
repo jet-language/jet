@@ -1,0 +1,36 @@
+# Each `#build.host.*` read is a `host_facts` gate at the reading expression:
+# `jet inspect gates` lists it, `jet build` records the source, line, fact and
+# value in the receipt's `host_reads` and keys the reading source's check node
+# by it, and a package `policy: { host_facts: .Forbid }` refuses the read with
+# E3415 at its line.
+fixture: HostFactReadsAreRecordedGatesAPolicyCanForbid.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+requires: os-name:linux
+requires: arch:x86_64
+step: jet inspect gates --json main.jet
+cwd: app
+exit: 0
+json: stdout doc $.gates.entries[?kind="host_facts"] #= 2 # one gate per read
+json: stdout doc $.gates.entries[?kind="host_facts"][?subject="#build.host.os"] #= 1
+json: stdout doc $.gates.entries[?kind="host_facts"][?subject="#build.host.arch"] #= 1
+step: jet build
+cwd: app
+exit: 0
+json: file app/.jet/build/receipt.json doc $.host_reads #= 2 # every read is recorded
+json: file app/.jet/build/receipt.json doc $.host_reads[?fact="#build.host.os"][0].file = "main.jet"
+json: file app/.jet/build/receipt.json doc $.host_reads[?fact="#build.host.os"][0].line = 6 # the reading line
+json: file app/.jet/build/receipt.json doc $.host_reads[?fact="#build.host.os"][0].value = "Linux"
+json: file app/.jet/build/receipt.json doc $.host_reads[?fact="#build.host.os"][0].package = "app"
+json: file app/.jet/build/receipt.json doc $.host_reads[?fact="#build.host.arch"][0].line = 8
+json: file app/.jet/build/receipt.json doc $.host_reads[?fact="#build.host.arch"][0].value = "x86_64"
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="main.jet"][0].input_digests[?name="host:#build.host.os=Linux"][0].digest = "b0a37b18a2e00890af326a4665f07cea067c28e28e8e771c1b13dc41291a5208" # SHA-256 of `#build.host.os=Linux`
+json: file app/.jet/build/receipt.json doc $.nodes[?kind="check"][?subject="main.jet"][0].input_digests[?name="host:#build.host.arch=x86_64"] #= 1 # the key follows the machine
+step: {work}/app/.jet/build/app
+exit: 0
+stdout: = "Linux x86_64\n"
+step: jet check main.jet
+cwd: forbid
+exit: 1
+stderr: ~ "Error: Jet.GateDeniedByPolicy: The `host_facts` gate at" # the package policy refuses the read
+stderr: ~ "main.jet:2:11" # at the reading line

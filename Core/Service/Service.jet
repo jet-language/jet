@@ -1657,7 +1657,7 @@ state_store: fn(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
         .Err(.NotFound(_)) -> {}
         .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
     }
-    windows: StatePathPlatform{}.windows()
+    windows: state_path_windows()
     parent := state_parent_lex(path, windows)
     loop {
         ancestor: parent ?? break
@@ -1750,19 +1750,10 @@ stat_cause: fn(error: IOError) -> String Never! {
     context.cause ?? "{error}"
 }
 
-// Select path grammar at compile time, not through an Env capability.
-StatePathPlatform: struct {
-    windows: fn(self) -> Bool Never! {
-        #if #build.target.os == {
-            .Linux -> { return false }
-            .MacOS -> { return false }
-            .Windows -> { return true }
-            .Web -> { return false }
-            .Wasm -> { return false }
-            .Freestanding -> { return false }
-        }
-    }
-}
+// The path grammar of the machine running the call: a state path names a
+// file on the disk this call reads, so a call made while building follows the
+// machine running the build, never the build's target.
+state_path_windows: fn() -> Bool Never! { core.files.__path_windows() }
 
 StatePathPrefix: struct {
     length: Int,
@@ -2043,7 +2034,7 @@ state_validate_path: fn(path: String) ServiceError! {
         .Err(.NotFound(_)) -> {}
         .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
     }
-    windows: StatePathPlatform{}.windows()
+    windows: state_path_windows()
     parent := state_parent_lex(path, windows)
     loop {
         ancestor: parent ?? break
@@ -2105,7 +2096,7 @@ state_write_unlocked: fn(authority: TreeStateAuthority, adapter: TreeStateAdapte
 }
 
 state_create_parent: fn(path: String, label: String) ServiceError! {
-    parent: state_parent_lex(path, StatePathPlatform{}.windows()) ?? return Ok()
+    parent: state_parent_lex(path, state_path_windows()) ?? return Ok()
     if parent == "" -> return Ok()
     if service_create_dirs(parent) == {
         .Err(error) -> { Err(state_error("cannot create service {label} directory: {error}")) }

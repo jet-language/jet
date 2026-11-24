@@ -2,7 +2,7 @@
 // The host supplies owning package policies and external lock/trust/build facts;
 // no CLI reader re-scans source text to discover an unsafe operation.
 use {
-    jet_foundation.[GateLedger, Diagnostic, Item, Program, ast_program, compiler_transfer_rows, diagnostic_with_source_path, gate_ledger_sort]
+    jet_foundation.[GateLedger, Diagnostic, Item, Program, Stmt, ast_program, compiler_transfer_rows, diagnostic_with_source_path, gate_ledger_sort]
     jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, SemaUnitMap, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_gate_source_policy_diagnostics, sema_unsafe_inspect, sema_unsafe_unit_map]
 }
 
@@ -117,7 +117,8 @@ jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompil
 // refusals name as the gate's site; each diagnostic is reported against the
 // unit's own path. A composed runtime unit's row also maps its sources, so
 // the memory kernel rule reads each operation's own file. Each program's
-// items move into its row for the read and back after it.
+// items and script statements move into its row for the read and back after
+// it.
 jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
     modules := [SemaGateModule]{}
     owners := [Int]{}
@@ -138,6 +139,7 @@ jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLo
         unit_paths[physical] = source
         program := ast_program()
         compiler_transfer_rows<Item>(program.items, load.modules[index].program.items)
+        compiler_transfer_rows<Stmt>(program.script_body, load.modules[index].program.script_body)
         program.policy_declarations = load.modules[index].program.policy_declarations.copy()
         program.rule_facts = load.modules[index].program.rule_facts.copy()
         program.no_prelude = load.modules[index].program.no_prelude
@@ -154,6 +156,7 @@ jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLo
     refusals: sema_gate_source_policy_diagnostics(modules)
     loop position in 0..<owners.len() {
         compiler_transfer_rows<Item>(load.modules[owners[position]].program.items, modules[position].program.items)
+        compiler_transfer_rows<Stmt>(load.modules[owners[position]].program.script_body, modules[position].program.script_body)
     }
     loop entry in inspection.diagnostics {
         load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
