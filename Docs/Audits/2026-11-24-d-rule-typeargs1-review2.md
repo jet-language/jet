@@ -42,7 +42,7 @@ I searched dev for every record, TypeId maker, reader, tier and tool that holds 
 - **F5, missing readers/tools.** Repair: the LSP, Canvas, SemIndexJSON and JetSemIndex sites are named in the ballot's reader list.
 - **F6, identity unsound today.** Repair: `identity` is printed from the row and names the declared type's package and path, so it decodes back to one row. Trait payload keys keep hashing the checker key, so they are unchanged.
 - **F7, Dyn reader.** Repair: the claim is removed from the ballot.
-- **F8, cited paths didn't resolve.** `$JET_SCRATCH_ROOT` is `$JET_SCRATCH_ROOT`, so the design and probes live under `$JET_SCRATCH_ROOT/tmp/...`. Repaired in `detail` and `checkInstructions`.
+- **F8, cited paths didn't resolve.** The cited paths now use `$JET_SCRATCH_ROOT`, so the design and probes live under `$JET_SCRATCH_ROOT/tmp/...`. Repaired in `detail` and `checkInstructions`.
 - **F9, cost comparison not like for like.** The old "0.3-0.5 µs to spell one today" timed a single `type_name`. Today's maker prints twice, through `type_name(qualified)` and `type_name(unqualified)`. Measured below, A's maker cost is about the same as today's, not 2-3 times more. Repaired in `detail`, `losses` and `tradeoff`.
 - **Edge (new).** Handles are minted only from the merged compile interner. A worker's delta ids are remapped at `interner_merge` before any record holds them. A table id is unique within a process (LSP and `jet dev` run many compiles), and only `identity` text leaves a compile.
 
@@ -126,3 +126,20 @@ I copied `$JET_SCRATCH_ROOT/tmp/TypeIDSlice3/probe-typetable/{plain,rule,table,t
 - Ballot (edited): `$JET_SCRATCH_ROOT/tmp/orch/ballots/D-RULE-TYPEARGS1.json`
 - This audit: `$JET_SCRATCH_ROOT/tmp/orch/land/2026-11-24-d-rule-typeargs1-review2.md`
 - Probes: `$JET_SCRATCH_ROOT/tmp/TypeArgsReview2/{identity,probe-typetable,dev/Tools/ProbeIntern,intern-*.out}`
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+|finding|disposition|target or reason|
+|---|---|---|
+|F1 interner keyed by spelling|card|#6851 (the cutover interns the resolved type)|
+|F2 name is a fact of the spelling|card|#6851 (named loss on the ballot)|
+|F3 fn build tier|card|#6851 (per-snapshot frozen table)|
+|F4 missing makers|card|#6851 (cutover inventory)|
+|F5 missing readers and tools|card|#6851 (cutover inventory; JetSemIndex and LSP also wait on #6793)|
+|F6 identity unsound today|card|#6851 (c23 one identity per type, c24 geo.Inner.reflect in #run)|
+|F7 Dyn reader|no-action|the claim was removed from the ballot text; nothing to build|
+|F8 cited paths|no-action|the ballot's paths were corrected in place; nothing to build|
+|F9 cost comparison|card|#6851 (corrected numbers on the ballot; batch shipping cost still to measure)|
+|Open gaps 1-4|card|#6851|
+<!-- /audit-dispositions -->

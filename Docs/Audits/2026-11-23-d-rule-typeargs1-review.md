@@ -302,3 +302,18 @@ The repaired ballot fixes each one and validates.
 5. The host route timings were taken under a load average near 50.
    - If they fail: C's gap shrinks, but even the floor of 5.49 µs per
      round trip is over the budget.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+|finding|disposition|target or reason|
+|---|---|---|
+|S1 rule reads type arguments with no round trip|card|#6851 (superseded by the interned-table redraft; see the 2026-11-24 second review)|
+|S2 one meaning everywhere|card|#6851|
+|S3 A within the 1 µs budget|card|#6851 (c22 measures rule dispatch at about 46.5 µs per heard call)|
+|S4 C costs twenty times the budget|card|#6851|
+|S5 the fact moves rather than doubles|card|#6851 (the redraft's cutover inventory)|
+|S6 B is the wrong middle|card|#6851|
+|Missing option D|card|#6851 (D is on the ballot)|
+|Open gaps|card|#6851 (answered or carried by the second review)|
+<!-- /audit-dispositions -->
